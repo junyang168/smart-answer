@@ -1,7 +1,7 @@
 from langchain.output_parsers import PydanticOutputParser
-from smart_answer_junyang168.LLM.TogetherAdapter import TogetherAdapter
-from smart_answer_junyang168.LLM.LangchainAdapter import LangchainAdapter
-from smart_answer_junyang168.LLM.gptqAdapter import GPTQAdapter
+from smart_answer_core.LLM.TogetherAdapter import TogetherAdapter
+from smart_answer_core.LLM.LangchainAdapter import LangchainAdapter
+from smart_answer_core.LLM.gptqAdapter import GPTQAdapter
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -12,6 +12,7 @@ class LLMWrapper:
         LangchainAdapter(),
         GPTQAdapter()
     ]
+    
     def __init__(self, llm = None) -> None:
         if not llm :
             llm = os.environ.get("LLM") 

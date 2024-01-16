@@ -100,7 +100,7 @@ def run_dml(sql,params: tuple = None, is_proc=False, connection_string = None):
     conn.close()
 
 
-from smart_answer_junyang168.LLM.LLMWrapper import LLMWrapper
+from smart_answer_core.LLM.LLMWrapper import LLMWrapper
 
 def ask_llm( prompt_template : str, output_type = None,  **kwargs ):
     llm = LLMWrapper()

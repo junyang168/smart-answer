@@ -1,5 +1,5 @@
-from smart_answer_junyang168.base_tool import base_tool
-from smart_answer_junyang168.tool_example import tool_example
+from smart_answer_core.base_tool import base_tool
+from smart_answer_core.tool_example import tool_example
 from datetime import date
 
 class LifeCycleTool(base_tool):

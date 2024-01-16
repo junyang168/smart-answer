@@ -1,6 +1,6 @@
 
-from smart_answer_junyang168.base_tool import base_tool
-import smart_answer_junyang168.util as util
+from smart_answer_core.base_tool import base_tool
+import smart_answer_core.util as util
 
 from langchain.pydantic_v1 import BaseModel, Field, validator
 

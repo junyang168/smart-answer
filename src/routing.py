@@ -1,6 +1,6 @@
-from  smart_answer_junyang168.base_tool import base_tool
-from smart_answer_junyang168.tool_selector import tool_selector
-from smart_answer_junyang168.tool_example import tool_example
+from  smart_answer_core.base_tool import base_tool
+from smart_answer_core.tool_selector import tool_selector
+from smart_answer_core.tool_example import tool_example
 
 class LifeCycleTool(base_tool):
     name = "VMWare production version and life cycle dates"
@@ -49,6 +49,12 @@ class KB_DocTool(base_tool):
         ]
 
 tools = [LifeCycleTool(), InterOperabilityTool(), KB_DocTool()]
+
+
+import os
+os.environ["LLM"]  = "GPT"
+os.environ["OPENAI_API_KEY"] = "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"
+
 selector = tool_selector(tools)
 questions = [ "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
                 "Which version of NSX is not compatible with Vmware HCX?",

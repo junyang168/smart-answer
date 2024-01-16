@@ -1,4 +1,4 @@
-from smart_answer_junyang168.LLM.LLMAdapter import LLMAdapter
+from smart_answer_core.LLM.LLMAdapter import LLMAdapter
 import together
 from dotenv import load_dotenv
 load_dotenv()

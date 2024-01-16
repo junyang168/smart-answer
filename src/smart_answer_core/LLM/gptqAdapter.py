@@ -1,5 +1,5 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-from smart_answer_junyang168.LLM.LLMAdapter import LLMAdapter
+from smart_answer_core.LLM.LLMAdapter import LLMAdapter
 import re
 
 class GPTQAdapter(LLMAdapter):

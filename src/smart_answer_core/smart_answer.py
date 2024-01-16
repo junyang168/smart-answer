@@ -1,6 +1,6 @@
 
-from smart_answer_junyang168.tool_selector import tool_selector
-import smart_answer_junyang168.util as util
+from smart_answer_core.tool_selector import tool_selector
+import smart_answer_core.util as util
 
 class SmartAnswer:
     prompt_template = """Answer the question at the end using the following pieces of context. If there is not enough information in the context to answer the question, just say that you don't know, don't try to make up an answer.

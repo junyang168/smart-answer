@@ -1,6 +1,6 @@
 import requests
 import json
-import smart_answer_junyang168.util as util
+import smart_answer_core.util as util
 
 ## Loading Environment Variables
 from dotenv import load_dotenv
@@ -8,7 +8,7 @@ load_dotenv()
 import os
 
 
-from smart_answer_junyang168.logger import logger
+from smart_answer_core.logger import logger
 import re
 
 def get_product_name_version( product_release:str): 
