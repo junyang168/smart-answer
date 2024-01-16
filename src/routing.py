@@ -53,7 +53,7 @@ tools = [LifeCycleTool(), InterOperabilityTool(), KB_DocTool()]
 
 import os
 os.environ["LLM"]  = "GPT"
-os.environ["OPENAI_API_KEY"] = "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"
+os.environ["OPENAI_API_KEY"] = "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"
 
 selector = tool_selector(tools)
 questions = [ "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",

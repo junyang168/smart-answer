@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 
-CONNECTION_STRING =  os.environ.get("CONNECTION_STRING") 
 
 __embedding_model =  os.environ.get("EMBEDDING_MODEL") 
 
