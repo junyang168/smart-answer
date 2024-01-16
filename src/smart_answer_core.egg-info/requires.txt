@@ -1,8 +1,0 @@
-openai
-langchain
-
-[dev]
-check-manifest
-
-[test]
-coverage

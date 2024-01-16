@@ -1,3 +1,0 @@
-qa
-routing
-smart_answer_core
