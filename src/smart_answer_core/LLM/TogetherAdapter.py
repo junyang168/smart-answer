@@ -24,11 +24,11 @@ class TogetherAdapter(LLMAdapter):
         output = together.Complete.create(
         prompt = f"<human>:{user_prompt}<bot>:", 
         model = self.model, 
-        max_tokens = 256,
+        max_tokens = 512,
         temperature = 0.1,
-        top_k = 60,
-        top_p = 0.6,
-        repetition_penalty = 1.1,
+        top_k = 50,
+        top_p = 0.7,
+        repetition_penalty = 1,
         stop = ['<human>', '\n\n']
         )
         return output['output']['choices'][0]['text']

@@ -13,7 +13,7 @@ from smart_answer_core.logger import logger
 
 
 import pandas as pd
-import smart_answer_core.tools.common as util
+import smart_answer_core.util as util
 #import product_embedding as util
 
 
@@ -27,11 +27,14 @@ class InterOperabilityTool(base_tool):
             2. `Aria,ESXi 5.0` would be the input if you wanted to know the versions of Aria that support VMware ESXi 5.0. 
     """
   
-    def __init__(self, connection_string) -> None:        
+    def __init__(self, connection_string = None) -> None:        
         super().__init__()
-        self.connection_string = connection_string
+        if  connection_string:
+            self.connection_string = connection_string
+        else:
+            self.connection_string =  os.environ.get("CONNECTION_STRING") 
 
-    def get_few_shots(self,):
+    def get_few_shots(self):
         return [
             tool_example("Is vSAN  compatible with vCenter?",'vSAN, vCenter' )
         ]

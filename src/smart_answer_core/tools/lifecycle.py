@@ -14,7 +14,7 @@ import sqlalchemy
 from smart_answer_core.logger import logger
 
 
-import smart_answer_core.tools.common as util
+import smart_answer_core.util as util
 from datetime import date
 
 
@@ -28,9 +28,12 @@ class LifeCycleTool(base_tool):
         The question below is about support dates, general availability date and end of technical guidance date of VMware product versions
      """
     
-    def __init__(self, connection_string) -> None:        
+    def __init__(self, connection_string = None) -> None:        
         super().__init__()
-        self.connection_string = connection_string
+        if  connection_string:
+            self.connection_string = connection_string
+        else:
+            self.connection_string =  os.environ.get("CONNECTION_STRING") 
 
     def get_few_shots(self):
         return [

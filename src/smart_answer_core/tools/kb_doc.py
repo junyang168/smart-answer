@@ -28,9 +28,12 @@ class KB_DocTool(base_tool):
       The input to this tool should be a comma separated list of string of length two, representing VMware product release and the topics of the question.
       """
     
-    def __init__(self, connection_string) -> None:
+    def __init__(self, connection_string = None) -> None:        
         super().__init__()
-        self.connection_string = connection_string
+        if  connection_string:
+            self.connection_string = connection_string
+        else:
+            self.connection_string =  os.environ.get("CONNECTION_STRING") 
 
     def get_few_shots(self):
         return [
