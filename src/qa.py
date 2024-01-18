@@ -1,5 +1,6 @@
 import os
-os.environ["LLM"]  = "mistralai/Mixtral-8x7B-Instruct-v0.1"
+#os.environ["LLM"]  = "mistralai/Mixtral-8x7B-Instruct-v0.1"
+os.environ["LLM"]  = 'teknium/OpenHermes-2p5-Mistral-7B'
 #os.environ["OPENAI_API_KEY"] = "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"
 os.environ["OPENAI_API_KEY"] = "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"
 os.environ["EMBEDDING_MODEL"] = "BGE"
@@ -25,9 +26,10 @@ tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CO
 sa = SmartAnswer(tools)
 questions = [ 
         "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
-#        "Which version of NSX is not compatible with Vmware HCX?",
-#                "How do I configure vGPUs on esxi 8?" 
-#                "what is the limit of Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
+        "Which version of NSX is not compatible with Vmware HCX?",
+        "How do I configure vGPUs on esxi 8?", 
+        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
+#            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
              ]
 for question in questions:
     answer = sa.get_smart_answer(question)
