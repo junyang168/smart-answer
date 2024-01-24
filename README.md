@@ -5,7 +5,9 @@ Generative AI's adoption in enterprise faces seveal challenge. One major challen
 
 Smart Answer, a production-ready enterprise Question and Answer (Q&A) chatbot is designed to provide accurate answers by sourcing knowledge from multiple enterprise applications. It integrates quickly with these applications, speeding up its deployment. Smart Answer operates on both public and smaller, open-source LLMs that can be hosted in-house on consumer-grade hardware, ensuring data security and privacy.
 
+# Solution Design
 Smart Answer is based on Retrieval Augmented Generation, a popular architecture of Generative AI. It emulates the human process of selecting and using IT tools to answer queries to routes queries to the most suitable 'tool' or application, retrieves relevant data, and generates answers. The system also includes optimizations for enhancing answer precision. The chatbot presents answers to users along with links to data sources for reference.
+[Please refer to the technical overview for solution architecture and design detail](https://medium.com/@junyang168/smart-answer-turning-enterprise-applications-into-ai-powered-chatbot-4b1aabce6c9d)
 
 # Usage
 
