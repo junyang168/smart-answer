@@ -10,6 +10,8 @@ Smart Answer is based on Retrieval Augmented Generation, a popular architecture 
 [Please refer to the technical overview for solution architecture and design detail](https://medium.com/@junyang168/smart-answer-turning-enterprise-applications-into-ai-powered-chatbot-4b1aabce6c9d)
 
 # Usage
+Plesae refer to the following Jupyter Notebooks 
+* [Overview and Routing](https://github.com/junyang168/smart-answer/blob/main/routing.ipynb)  
 
 # Contributing
 We welcome contributions to Smart Answers. If you are interested in contributing, please contact us for more information.
