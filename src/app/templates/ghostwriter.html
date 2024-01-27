@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>
+		Smart Answer
+	</title>
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.6.5/flowbite.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.6.5/flowbite.min.js"></script>
+
+	<style>
+		* {
+			box-sizing: border-box;
+		}
+
+		/* CSS property for header section */
+		.header {
+			background-color: white;
+			padding: 15px;
+			text-align: left;
+		}
+
+		/* CSS property for navigation menu */
+		.nav_menu {
+			overflow: hidden;
+			background-color: #333;
+		}
+
+		.nav_menu a {
+			float: left;
+			display: block;
+			color: white;
+			text-align: center;
+			padding: 14px 16px;
+			text-decoration: none;
+		}
+
+		.nav_menu a:hover {
+			background-color: white;
+			color: green;
+		}
+            .column {
+                float: left;
+                width: 50%;
+                padding: 15px;
+            }
+
+        /* Clear floats after the columns */
+        .row::after {
+        content: "";
+        display: table;
+        clear: both;
+        }
+
+		h2 {
+			color: black;
+			text-align: left;
+		}
+
+        #kb {
+            width: 100%;
+        }
+
+		/* Media query to set website layout 
+			according to screen size */
+		@media screen and (max-width:600px) {
+
+			.columnA,
+			.columnC {
+				width: 50%;
+			}
+		}
+
+		@media screen and (max-width:400px) {
+
+			.columnA,
+			.columnC {
+				width: 100%;
+			}
+		}
+
+        .bottom {
+            padding-bottom: 5px;
+            background-color: white;
+        }
+
+        .container {
+            height: 600px;
+        }
+
+        .upper {
+            margin-bottom: auto;
+            height: 600px;
+        }
+
+        .footer {
+            padding: 15px;
+            text-align: left;
+        }      
+        #tempbtn {
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;   
+            background-color: grey;                        
+        }  
+
+
+
+        #loader {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: 120px;
+  height: 120px;
+  margin: -76px 0 0 -76px;
+  border: 16px solid #f3f3f3;
+  border-radius: 50%;
+  border-top: 16px solid #3498db;
+  -webkit-animation: spin 2s linear infinite;
+  animation: spin 2s linear infinite;
+}
+
+@-webkit-keyframes spin {
+  0% { -webkit-transform: rotate(0deg); }
+  100% { -webkit-transform: rotate(360deg); }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Add animation to "page content" */
+.animate-bottom {
+  position: relative;
+  -webkit-animation-name: animatebottom;
+  -webkit-animation-duration: 1s;
+  animation-name: animatebottom;
+  animation-duration: 1s
+}
+
+@-webkit-keyframes animatebottom {
+  from { bottom:-100px; opacity:0 } 
+  to { bottom:0px; opacity:1 }
+}
+
+@keyframes animatebottom { 
+  from{ bottom:-100px; opacity:0 } 
+  to{ bottom:0; opacity:1 }
+}
+
+#myDiv {
+  display: none;
+  text-align: center;
+}
+
+
+
+	</style>
+</head>
+
+<body>
+
+	<!-- header of website layout -->
+	<div class="header">
+		<h2 style="color:black;font-size:150%">
+			Ghostwriter
+		</h2>
+	</div>
+
+    <div id="loader"></div>
+
+	<!-- Content section of website layout -->
+	<div class="row">
+
+		<div class="column">
+            <div class="container">
+                <div class="upper" id="upperid">
+                    <span class="downwarning">Type your message in box below.</span>
+                </div>
+
+                <div class="bottom">
+                    <form id="userinputform" style="display:flex">
+
+                    <textarea id="userinput" rows="1" cols="60"
+                    class="block mx-4 p-2.5 w-full text-sm text-gray-900 bg-white rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500"
+                    placeholder="Your message..." required></textarea>
+                    <button type="submit"
+                        class="inline-flex justify-center p-2 text-blue-600 rounded-full cursor-pointer hover:bg-blue-100 dark:text-blue-500 dark:hover:bg-gray-600"
+                        id="sendbtn">
+                        <svg aria-hidden="true" class="w-6 h-6 rotate-90" fill="currentColor" viewBox="0 0 20 20"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z">
+                            </path>
+                        </svg>
+                        <span class="sr-only">Send message</span>
+                    </button>
+                </form>
+                </div>
+
+            </div>
+
+		</div>
+
+		<div class="column">
+            <h2>Prompt Template</h2>
+            <p>
+                <form id="prompt_template_form">
+
+                <textarea id="prompt_template" rows="20" cols="80" ></textarea>
+                <button type="submit" id="tempbtn">Update Template</button>
+                </form>
+
+            </p>
+		</div>
+        </div>
+
+	</div>
+
+
+    <div class="footer">
+        <h2>Knowledge-base Article</h2>
+        <p>
+            <textarea id="kb" rows="20" cols="200" ></textarea>
+        </p>
+
+    </div>
+</body>
+
+
+<script>
+
+    window.addEventListener("load", (event) => {
+        page_loaded();
+    });
+
+    const page_loaded = async () => {
+        let upperdiv = document.getElementById('upperid')
+        let prompt_template = document.getElementById('prompt_template')
+
+        const response = await fetch("/ghostwriter", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ get_history:true, get_prompt_template:true, user_message: "" })
+        });
+        let json = await response.json();
+
+        if (json.response) {
+            let message = json.response                
+            message = message.toString()
+            upperdiv.innerHTML = upperdiv.innerHTML + `<div class="message">
+            <div class="appmessagediv">
+                <div class="appmessage" id="temp">
+                    ${message}
+                </div>
+            </div>
+        </div>`
+        }
+
+        if (json.prompt_template) {
+            prompt_template.value = json.prompt_template
+
+        }
+        document.getElementById("loader").style.display = "none";
+
+    }
+
+
+    document.getElementById("prompt_template_form").addEventListener("submit", function (event) {
+        event.preventDefault();
+        update_prompt_template();
+    });
+
+    const update_prompt_template = async () => {
+        let prompt_template = document.getElementById('prompt_template')
+
+        const response = await fetch("/ghostwriter/prompt_template", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ template: prompt_template.value })
+        });
+        let json = await response.json();
+
+        if (json.response) {
+        }
+
+        alert('templdate update successful')
+
+
+    }
+
+        
+
+    // for scrolling messages
+    function scrollToBottom() {
+        var div = document.getElementById("upperid");
+        div.scrollTop = div.scrollHeight;
+    }
+    scrollToBottom()
+
+    document.getElementById("userinputform").addEventListener("submit", function (event) {
+        event.preventDefault();
+        formsubmitted();
+    });
+
+    // sending request to python server
+    const formsubmitted = async () => {
+        let userinput = document.getElementById('userinput').value
+        let sendbtn = document.getElementById('sendbtn')
+        let userinputarea = document.getElementById('userinput')
+        let upperdiv = document.getElementById('upperid')
+       
+
+        upperdiv.innerHTML = upperdiv.innerHTML + `<div class="message">
+            <div class="usermessagediv">
+                    <div class="usermessage">
+                       Support Agent: ${userinput}
+                    </div>
+            </div>
+        </div>`
+        sendbtn.disabled = true
+        userinputarea.disabled = true
+        scrollToBottom()
+        document.getElementById('userinput').value = ""
+        document.getElementById('userinput').placeholder = "Wait . . ."
+
+        const response = await fetch("/ghostwriter", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({   user_message: userinput })
+
+
+        });
+        let json = await response.json();
+
+        document.getElementById('userinput').placeholder = "Your message..."
+
+
+        if (json.response) {
+            let message = json.response                
+            message = message.toString()
+//            let kb = json.kb
+//            kb = kb.toString()
+//            document.getElementById('kb').innerHTML = kb
+            
+  
+            upperdiv.innerHTML = upperdiv.innerHTML + `<div class="message">
+            <div class="appmessagediv">
+                <div class="appmessage" id="temp">
+                    ${message}
+                </div>
+            </div>
+        </div>`
+            let temp = document.getElementById('temp')
+            let index = 0
+            function displayNextLetter() {
+                scrollToBottom()
+                if (index < message.length) {
+                    temp.innerHTML = temp.innerHTML + message[index];
+                    index++;
+                    setTimeout(displayNextLetter, 30);
+                } else {
+                    temp.removeAttribute('id')
+                    sendbtn.disabled = false
+                    userinputarea.disabled = false
+                }
+            }
+//                displayNextLetter()
+            scrollToBottom()
+
+        }
+        else {
+            let message = json.message
+            upperdiv.innerHTML = upperdiv.innerHTML +
+                `<div class="message">
+            <div class="appmessagediv">
+                <div class="appmessage"  style="border: 1px solid red;">
+                  ${message}
+
+                </div>
+            </div>
+        </div>`
+            sendbtn.disabled = false
+            userinputarea.disabled = false
+        }
+
+        scrollToBottom()
+
+
+    } 
+</script>
+</html>
+
+

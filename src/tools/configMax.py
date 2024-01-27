@@ -31,7 +31,13 @@ class ConfigMaxTool(base_tool):
         Can I run 40GB RAM on a VM?
         """
         
-    attribute_embeddings = {}
+
+    def get_few_shots(self):
+        return [
+            tool_example("what is limit of vCPU per RDS host for Horizon 2306",'Horizon 2306, limit of vCPU per RDS host' )
+        ]
+
+
     
     threshold = 0.2
 
@@ -41,14 +47,7 @@ class ConfigMaxTool(base_tool):
             self.connection_string = connection_string
         else:
             self.connection_string =  os.environ.get("CONNECTION_STRING") 
-
-    def get_few_shots(self):
-        return [
-            tool_example("what is limit of vCPU per RDS host for Horizon 2306",'Horizon 2306, limit of vCPU per RDS host' )
-        ]
-
-
-        
+     
 
     def __get_config_max(self, metric, product_release = None):
 

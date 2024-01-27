@@ -25,10 +25,11 @@ from tools.configMax import ConfigMaxTool
 tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
 sa = SmartAnswer(tools)
 questions = [ 
-        "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
-        "Which version of NSX is not compatible with Vmware HCX?",
-        "How do I configure vGPUs on esxi 8?", 
-        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
+    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "
+#        "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
+#        "Which version of NSX is not compatible with Vmware HCX?",
+#        "How do I configure vGPUs on esxi 8?", 
+#        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
 #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
              ]
 for question in questions:
