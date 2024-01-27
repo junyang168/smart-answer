@@ -46,9 +46,14 @@ class GhostwriterService:
 
     def __init__(self, sid) -> None:
         self.sid = sid
-        self.chatMemory = ChatMemory(sid, CONNECTION_STRING) 
+        self.chatMemory = ChatMemory(sid= sid, message_window=20, connection_string= CONNECTION_STRING) 
         self.chatMemory.set_roles(human_role='Support Agent',ai_role='Technical Writer')
-        with open('prompt_template.json', 'r') as f:
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.prompte_path = os.path.join(current_dir + '/../app', 'prompt_template.json')
+
+        with open(self.prompte_path, 'r') as f:
             temp = json.load(f)
             self.ghost_writer_template = temp["template"]
 
@@ -69,7 +74,7 @@ class GhostwriterService:
 
     def set_prompt_template(self, prompt_template):
         self.ghost_writer_template = prompt_template
-        with open('prompt_template.json', 'w') as f:
+        with open(self.prompte_path, 'w') as f:
             json.dump({"template":self.ghost_writer_template}, f)        
 
 

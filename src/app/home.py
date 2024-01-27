@@ -15,6 +15,7 @@ app.secret_key = 'BAD_SECRET_KEY'
 
 import sys
 import os 
+from dotenv import load_dotenv
 
 # Get the current script's directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +98,9 @@ def ghost_writer():
 
 
 if __name__ == '__main__':
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    dotenv_path = os.path.join(current_dir, '.env')
+    load_dotenv(dotenv_path)
     pt = os.environ.get("PORT") 
     use_ssl = os.environ.get("SSL")
     if use_ssl == 'True':

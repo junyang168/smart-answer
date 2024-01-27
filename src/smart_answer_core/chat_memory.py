@@ -16,13 +16,13 @@ Standalone question:"""
     user_role = "Question"
     ai_role = "Answewr"        
 
-    def __init__(self, sid = None, connection_string = None) -> None:  
+    def __init__(self,  sid = None, message_window = 3, connection_string = None) -> None:  
         self.memory = None      
         self.connection_string = connection_string
         if sid:
             self.memory = ConversationBufferWindowMemory(
                     memory_key='chat_history',
-                    k=3,
+                    k= message_window,
                     chat_memory = PostgresChatMessageHistory(sid, self.connection_string),
                     return_messages=True
 
