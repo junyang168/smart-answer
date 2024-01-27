@@ -1,0 +1,13 @@
+[Unit]
+Description=Smart Answer Service
+After=network.target
+
+[Service]
+User=junyang   
+Group=genai
+WorkingDirectory=/home/junyang/app/smart-answer
+ExecStart=//home/junyang/venv/bin/python /home/junyang/app/smart-answer/src/app/home.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
