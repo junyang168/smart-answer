@@ -1,28 +1,39 @@
 body {
-    font-family: Arial, sans-serif;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     margin: 0;
     padding: 0;
 }
 
-header .banner {
-    background-image: url('sa-bg.jpg'); /* Replace with your banner image URL */
-    background-size: 100% 100%;;
-    color: white;
-    text-align: right;
-    padding: 140px 140px;
+
+header .banner_left {
+    float: left;
 }
 
+header .banner_right {
+    background-image: url('sa-bg-right.jpg'); /* Replace with your banner image URL */
+    background-size: 100% 100px;
+    color: white;
+    text-align: left;
+    float: left;
+    border: 0 px;
+    width: 1000px;
+    height: 405 px;
+}
+
+
 h1 {
-    font-size: 72pt;
-    font-weight: bold;
+    font-size: 60pt;
+    font-weight: 800;
     left: 300px;
 }
 
 
 header .banner p {
-    font-size: 32pt;
-    font-weight: bold;
+    font-size: 24pt;
+}
 
+.anc {
+    margin-left: 50px;
 }
 
 nav {
