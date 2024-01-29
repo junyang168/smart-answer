@@ -13,7 +13,7 @@ header {
 
 .banner-right  {
     background-image: url('sa-bg-right.jpg'); /* Replace with your banner image URL */
-    background-size: 100% 405px; /* Cover the entire div */
+    background-size: 100% 395px; /* Cover the entire div */
     color: white; /* Example text color */
     flex-grow: 1; /* Take the remaining space */
     display: flex;
