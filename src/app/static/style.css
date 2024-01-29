@@ -4,31 +4,35 @@ body {
     padding: 0;
 }
 
-
-header .banner_left {
-    float: left;
+header {
+    display: flex;
+    align-items: stretch;
+    background-color: #f2f2f2; /* Example background color */
+    padding: 20px;
 }
 
-header .banner_right {
+.banner-right  {
     background-image: url('sa-bg-right.jpg'); /* Replace with your banner image URL */
-    background-size: 100% 100px;
-    color: white;
-    text-align: left;
-    float: left;
-    border: 0 px;
-    width: 1000px;
-    height: 405 px;
+    background-size: 100% 405px; /* Cover the entire div */
+    color: white; /* Example text color */
+    flex-grow: 1; /* Take the remaining space */
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* Vertically center the content */
+    align-items: left; /* Horizontally center the content */
+    padding-left: 200px;
+    padding-right: 100px;
 }
 
 
-h1 {
+.banner-right h1 {
     font-size: 60pt;
     font-weight: 800;
     left: 300px;
 }
 
 
-header .banner p {
+.banner-right p {
     font-size: 24pt;
 }
 
