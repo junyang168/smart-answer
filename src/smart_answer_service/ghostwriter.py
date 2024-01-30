@@ -2,10 +2,6 @@ import os
 #os.environ["LLM"]  = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 #os.environ["LLM"]  = 'teknium/OpenHermes-2p5-Mistral-7B'
 #os.environ["OPENAI_API_KEY"] = "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"
-os.environ["LLM"]  = 'GPT'
-os.environ["OPENAI_API_KEY"] = "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"
-os.environ["EMBEDDING_MODEL"] = "BGE"
-os.environ["USE_GPU"] = "False"
 
 from smart_answer_core.chat_memory import ChatMemory
 from smart_answer_core.util import ask_llm
