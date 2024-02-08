@@ -82,17 +82,21 @@
 		}
 
         .bottom {
+            margin-top: 15px;
+            margin-bottom: 15px;
             padding-bottom: 5px;
             background-color: white;
         }
 
         .container {
-            height: 600px;
+            height: 650px;
         }
 
         .upper {
             margin-bottom: auto;
             height: 600px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
         }
 
         .footer {
@@ -368,6 +372,11 @@
         </div>`
             let temp = document.getElementById('temp')
             let index = 0
+
+            temp.removeAttribute('id')
+            sendbtn.disabled = false
+            userinputarea.disabled = false
+
             function displayNextLetter() {
                 scrollToBottom()
                 if (index < message.length) {

@@ -1,7 +1,6 @@
 from smart_answer_core.LLM.LLMAdapter import LLMAdapter
 from langchain import LLMChain
-from langchain.chat_models import AzureChatOpenAI
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 import langchain.chains.retrieval_qa.prompt as qa
 from langchain.prompts.chat import (
     ChatPromptTemplate,
@@ -10,17 +9,28 @@ from langchain.prompts.chat import (
     MessagesPlaceholder
 )
 import langchain.agents.conversational_chat.prompt as ap
+from dotenv import load_dotenv
+load_dotenv()
 import os
 
 class LangchainAdapter(LLMAdapter):
     system_message = ap.PREFIX
 
     def __init__(self) -> None:
-         super().__init__()
+        super().__init__()
+        self.api_url  = os.environ.get("LLM_API_URL") 
+        self.api_key = os.environ.get("LLM_API_KEY") 
+        if not self.api_key:
+             self.api_key = "na"
+
+         
 
 
-    def support_model(self, name):
-        return name == "GPT"
+    def supports(self, provider):
+        return provider == "Langchain"
+    
+    def set_model(self,model):
+         self.model = model
     
 
 
@@ -38,11 +48,11 @@ class LangchainAdapter(LLMAdapter):
 
 #        llm = AzureChatOpenAI(temperature = 0.0, deployment_name= 'gpt35turbo-16k')
         
-        api_key = os.environ.get("OPENAI_API_KEY") 
-
-        llm = ChatOpenAI(temperature=0,model_name="gpt-4-0613", openai_api_key = api_key)
+        if self.api_url:
+            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
+        else:
+            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key)
 
         chain = LLMChain(llm=llm, prompt = chat_prompt)
 
         return chain.run(inputs)
-

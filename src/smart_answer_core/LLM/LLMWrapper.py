@@ -1,7 +1,6 @@
 from langchain.output_parsers import PydanticOutputParser
 from smart_answer_core.LLM.TogetherAdapter import TogetherAdapter
 from smart_answer_core.LLM.LangchainAdapter import LangchainAdapter
-from smart_answer_core.LLM.gptqAdapter import GPTQAdapter
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -9,14 +8,20 @@ import os
 class LLMWrapper:
     llm_adpaters = [
         TogetherAdapter(),
-        LangchainAdapter(),
-        GPTQAdapter()
+        LangchainAdapter()
     ]
     
-    def __init__(self, llm = None) -> None:
-        if not llm :
-            llm = os.environ.get("LLM") 
-        self.__llmadapter =  [ a for a in self.llm_adpaters if a.support_model(llm) ][0] 
+    def __init__(self, provider = None, model = None) -> None:
+        if not provider:
+            provider  = os.environ.get("LLM_PROVIDER") 
+        if not model:
+            model  = os.environ.get("LLM_MODEL") 
+
+        self.__llmadapter =  [ a for a in self.llm_adpaters if a.supports(provider) ][0] 
+        self.__llmadapter.set_model(model)
+
+
+
     
     # Function to check parentheses
     def check(self, myStr):

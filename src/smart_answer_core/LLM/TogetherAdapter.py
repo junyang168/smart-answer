@@ -14,9 +14,11 @@ class TogetherAdapter(LLMAdapter):
         self.model = llm
 
 
-    def support_model(self, name):
-        self.model = name
-        return name in ['mistralai/Mixtral-8x7B-Instruct-v0.1','teknium/OpenHermes-2p5-Mistral-7B']
+    def supports(self, provider):
+        return provider == "Together"
+
+    def set_model(self,model):
+         self.model = model
     
     
     def askLLM(self,  user_prompt_template : str, inputs : dict):
