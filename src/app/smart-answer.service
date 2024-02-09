@@ -1,0 +1,10 @@
+[Unit]
+Description=Gunicorn instance to serve Smart Answer
+After=network.target
+
+[Service]
+User=junyang
+Group=www-data
+WorkingDirectory=/home/junyang/app/smart-answer/src/app
+Environment="PATH=/home/junyang/lcv/bin"
+ExecStart=/home/junyang/lcv/bin/gunicorn --workers 3 --bind unix:/home/junyang/app/smart-answer/src/app/smart-answer.sock -m 007 wsgi:app
