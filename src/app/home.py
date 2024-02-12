@@ -13,7 +13,7 @@ sys.path.append(parent_dir)
 from smart_answer_service.ghostwriter import GhostwriterService
 from smart_answer_service.smart_answer_service import smart_answer_service
 
-from smart_answer_core import logger
+from smart_answer_core.logger import logger
 
 class Chat(Resource):
      def post(self):
