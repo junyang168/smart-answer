@@ -7,9 +7,6 @@ from smart_answer_core.chat_memory import ChatMemory
 from smart_answer_core.util import ask_llm
 import json
 
-CONNECTION_STRING="postgresql://postgres:airocks$123@192.168.242.24:5432/postgres"
-os.environ["CONNECTION_STRING"] = CONNECTION_STRING
-
 
 class GhostwriterService:
 
@@ -41,6 +38,7 @@ class GhostwriterService:
     """
 
     def __init__(self, sid) -> None:
+        CONNECTION_STRING = os.environ["CONNECTION_STRING"]
         self.sid = sid
         self.chatMemory = ChatMemory(sid= sid, message_window=20, connection_string= CONNECTION_STRING) 
         self.chatMemory.set_roles(human_role='Support Agent',ai_role='Technical Writer')
