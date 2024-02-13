@@ -1,3 +1,12 @@
+import sys
+import os 
+from dotenv import load_dotenv
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+
 from  smart_answer_core.base_tool import base_tool
 from smart_answer_core.smart_answer import SmartAnswer 
 from smart_answer_core.tool_example import tool_example
@@ -19,15 +28,20 @@ class smart_answer_service:
 
 
 if __name__ == '__main__':
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        dotenv_path = os.path.join(parent_dir, '/app/.env')
+        load_dotenv(dotenv_path)
+
         questions = [ 
         #    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "
-                "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
+        #        "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
         #        "Which version of NSX is not compatible with Vmware HCX?",
         #        "How do I configure vGPUs on esxi 8?", 
-        #        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
+                "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
         #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
                 ]
         for question in questions:
-                sa = smart_answer_service(question)
-                answer = sa.get_smart_answer(question)
+                sa = smart_answer_service()
+                answer = sa.get_answer(question)
                 print(answer[0])
