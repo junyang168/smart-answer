@@ -9,7 +9,7 @@ def __init_model():
     if __embedding_model != 'BGE':
         return None
     
-    from langchain.embeddings import HuggingFaceBgeEmbeddings
+    from langchain_community.embeddings import HuggingFaceBgeEmbeddings
     model_name = "BAAI/bge-large-en-v1.5"
     encode_kwargs = {'normalize_embeddings': True} # set True to compute cosine similarity
 

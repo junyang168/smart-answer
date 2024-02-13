@@ -1,4 +1,4 @@
-from langchain import LLMChain
+from langchain.chains import LLMChain
 from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.memory import PostgresChatMessageHistory
 from smart_answer_core.util import ask_llm

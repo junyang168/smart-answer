@@ -1,6 +1,6 @@
 from smart_answer_core.LLM.LLMAdapter import LLMAdapter
 from langchain import LLMChain
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 import langchain.chains.retrieval_qa.prompt as qa
 from langchain.prompts.chat import (
     ChatPromptTemplate,
