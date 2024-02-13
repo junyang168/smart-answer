@@ -44,7 +44,7 @@ class SmartAnswer:
             question_prefix = result.get("prefix") 
             if not question_prefix: 
                 question_prefix = ""
-            answer =self.__get_answer( question_prefix + question, result, tool)
+            answer =self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)
 
