@@ -61,7 +61,8 @@ def calculate_embedding(inputs):
 import psycopg2
 def execute_sql(sql,params: tuple = None, return_column_names = False, connection_string = None):
     if not connection_string:
-        connection_string = CONNECTION_STRING
+        connection_string = os.environ["CONNECTION_STRING"]
+
 
     conn = psycopg2.connect(connection_string)
     cur = conn.cursor()
