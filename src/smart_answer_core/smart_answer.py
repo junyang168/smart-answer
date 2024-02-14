@@ -1,9 +1,11 @@
 
 from smart_answer_core.tool_selector import tool_selector
 import smart_answer_core.util as util
+import smart_answer_core.expand_acronyms as ea
 
 class SmartAnswer:
-    prompt_template = """Answer the question at the end using the following pieces of context. If there is not enough information in the context to answer the question, just say that you don't know, don't try to make up an answer.
+    prompt_template = """Answer the question at the end using the following pieces of context. 
+    If there is not enough information in the context to answer the question, explain why the question can not be answered with the context. don't try to make up an answer.
     Format response in markdown.
     {context}
 
@@ -29,9 +31,9 @@ class SmartAnswer:
         if not question:
           return ("", None, None, None )
 
-#        expanded, expanded_question =  util.expand_acronyms(question)
-#        if expanded:
-#            question = expanded_question
+        expanded, expanded_question =  ea.expand_acronyms(question)
+        if expanded:
+            question = expanded_question
 
 #        chatMemory = ChatMemory(sid) 
 #        question = chatMemory.add_question(question, isFollowUp )      
