@@ -109,6 +109,8 @@ class InterOperabilityTool(base_tool):
     
     def _get_product_and_version(self, products):
         arr_product = products.split(',')
+        if len(arr_product) < 2:
+            return { "content": "Need information about 2 products" }
         pid2, p2, r2 = self._get_product_id( arr_product[0] )
         pid1, p1, r1 = self._get_product_id(arr_product[1])
         response = None
@@ -143,6 +145,8 @@ class InterOperabilityTool(base_tool):
         
         p1_info = result.get("p1_info")
         p2_info = result.get("p2_info")
+        if not p2_info:
+            return "unable to get second product information " 
         pid1 = p1_info[0]
         pid2 = p2_info[0]
         p1 = p1_info[1]

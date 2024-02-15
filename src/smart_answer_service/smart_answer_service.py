@@ -34,8 +34,9 @@ if __name__ == '__main__':
         load_dotenv(dotenv_path)
 
         questions = [ 
+                "When Gemstone/S 64-bit 2.4 will release ?"
         #    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "
-                "till when technical guidance active for product AppDefense Plugin 2.0 for Platinum Edition ?",
+        #        "till when technical guidance active for product AppDefense Plugin 2.0 for Platinum Edition ?",
         #        "Which version of NSX is not compatible with Vmware HCX?",
         #        "How do I configure vGPUs on esxi 8?", 
         #        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
