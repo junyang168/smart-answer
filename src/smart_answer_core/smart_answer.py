@@ -31,9 +31,9 @@ class SmartAnswer:
         if not question:
           return ("", None, None, None )
 
-        expanded, expanded_question =  ea.expand_acronyms(question)
-        if expanded:
-            question = expanded_question
+#        expanded, expanded_question =  ea.expand_acronyms(question)
+#        if expanded:
+#            question = expanded_question
 
 #        chatMemory = ChatMemory(sid) 
 #        question = chatMemory.add_question(question, isFollowUp )      
@@ -43,10 +43,13 @@ class SmartAnswer:
         if tool:
             result = tool.retrieve(args, question)
             context_content, reference = self.__get_content_reference(result)
-            question_prefix = result.get("prefix") 
-            if not question_prefix: 
-                question_prefix = ""
-            answer =self.__get_answer( question_prefix + question, context_content, tool)
+            if isinstance(result, str):
+                answer = result
+            else:
+                question_prefix = result.get("prefix") 
+                if not question_prefix: 
+                    question_prefix = ""
+                answer =self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)
 
