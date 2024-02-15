@@ -35,12 +35,12 @@ if __name__ == '__main__':
 
         questions = [ 
         #    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "
-        #        "How many days are left until ESXi version 5.1 reaches the end of technical guidance?",
+                "How many days are left until ESXi version 5.5 reaches the end of technical guidance?",
         #        "Which version of NSX is not compatible with Vmware HCX?",
         #        "How do I configure vGPUs on esxi 8?", 
         #        "How many Virtual CPUs per virtual machine (Virtual SMP) for vcenter 8.0"
         #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
-                "FSDisk: 301: Issue of delete blocks failed"
+        #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
         for question in questions:
                 sa = smart_answer_service()

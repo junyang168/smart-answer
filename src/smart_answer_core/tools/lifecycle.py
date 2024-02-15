@@ -78,9 +78,12 @@ class LifeCycleTool(base_tool):
 
             ds = util.execute_sql(sql, connection_string=self.connection_string) 
             if len(ds)  ==  0:
-                self.return_direct = True
-                return "unable to find life cycle date for " + product_release
+                continue
             ds_all.extend(ds)
+            
+        if len(ds_all) == 0:
+            self.return_direct = True
+            return "unable to find life cycle date for " + product_release
         
         response = util.print_result(ds_all, ["","version","End of Support Date","General Availability Date ","End of Technical Guidance Date"])
 
