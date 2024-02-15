@@ -48,10 +48,11 @@ class LangchainAdapter(LLMAdapter):
 
 #        llm = AzureChatOpenAI(temperature = 0.0, deployment_name= 'gpt35turbo-16k')
         
-        if self.api_url:
-            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
+        if self.model.startswith('openai/'):  
+            model_name = self.model[len('openai/'):]          
+            llm = ChatOpenAI(temperature=0,model_name= model_name)
         else:
-            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key)
+            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
 
         chain = LLMChain(llm=llm, prompt = chat_prompt)
 
