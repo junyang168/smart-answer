@@ -40,7 +40,7 @@ class acconym_expansion(object):
         
         for token in tokens:
             key = token.text.upper()
-            if token.is_oov and not token.is_stop and key in acronym_dict:
+            if token.is_oov and not token.is_stop and key in self.acronym_dict:
                 # If the token is an acronym, replace it with its expansion
                 expanded = True
                 expanded_text.append(f"{self.acronym_dict[token.text.upper()]}({token.text})")
