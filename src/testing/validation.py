@@ -29,7 +29,7 @@ from smart_answer_service import smart_answer_service
 import os
 import pandas as pd
 
-df = pd.read_excel(current_dir + "/GenAI_Test_Re.xlsx")
+df = pd.read_excel(current_dir + "/GenAI_Test_Result.xlsx")
 
 restart = input('Start?[Y/N]')
 if restart == 'Y':
