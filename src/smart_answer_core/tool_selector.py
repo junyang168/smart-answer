@@ -26,6 +26,8 @@ class tool_selector:
 
     def __init__(self, tools) -> None:
         self.tools = tools
+        self.fallback_tool = [t for t in tools if t.is_fallback_tool()][0]
+
 
     def _create_prompt(self,tools):            
             tool_names = "\n".join(
@@ -47,7 +49,9 @@ class tool_selector:
         ts = [t  for t in tools if t.name.lower() == resp.tool.lower() ]
         if len(ts) > 0: 
             tool = ts[0]
-        return tool, resp.tool_input
+            return tool, resp.tool_input
+        else:
+            return self.get_fallback_tool(), None
      
 
     def select_tool(self, question :str):
@@ -57,6 +61,9 @@ class tool_selector:
         inputs["question"] = question
         resp =  util.ask_llm(chat_prompt, ToolSelectorResponse, **inputs)
         return self._get_tool_input(self.tools, resp)
+    
+    def get_fallback_tool(self):
+        return self.fallback_tool
 
 
 if __name__ == '__main__':

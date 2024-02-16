@@ -34,7 +34,11 @@ if __name__ == '__main__':
         load_dotenv(dotenv_path)
 
         questions = [ 
-                "What is RDS Host Maximums"
+                "What is the latest BIOS version for the Dell PowerEdge R740?"
+        #        "what all advanced configuration options  for Esxi ?"
+        #        "what is in-kernel distributed logical routing system for NSX"
+        #        "what all supported releases for ESXi for model ASMB-816"
+        #        "What is RDS Host Maximums"
         #        "what is the Limit applicable to PVSCSI only. Any combination of disk or VMDirectPath SCSI target."
         #        "When Gemstone/S 64-bit 2.4 will release ?"
         #    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "

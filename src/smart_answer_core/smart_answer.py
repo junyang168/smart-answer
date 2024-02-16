@@ -15,8 +15,6 @@ class SmartAnswer:
 
     def __init__(self, tools) -> None:
         self.selector = tool_selector(tools)
-        self.fallback_tool = [t for t in tools if t.is_fallback_tool()][0]
-        pass
 
 
     def __get_answer(self,question, context, tool ):
@@ -49,7 +47,7 @@ class SmartAnswer:
         if tool:
             result = tool.retrieve(args, question)
             if not result:
-                result = self.fallback_tool.retrieve(args, question)
+                result = self.selector.get_fallback_tool().retrieve(args, question)
 
             context_content, reference = self.__get_content_reference(result)
 
