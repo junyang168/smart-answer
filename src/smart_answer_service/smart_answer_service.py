@@ -34,6 +34,7 @@ if __name__ == '__main__':
         load_dotenv(dotenv_path)
 
         questions = [ 
+        #        "How should I react to an abusive customer?"
                 "What is the latest BIOS version for the Dell PowerEdge R740?"
         #        "what all advanced configuration options  for Esxi ?"
         #        "what is in-kernel distributed logical routing system for NSX"

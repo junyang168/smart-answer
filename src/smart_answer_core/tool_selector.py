@@ -11,7 +11,7 @@ class ToolSelectorResponse(BaseModel):
 class tool_selector:
 
     prompt_template = """
-        Choose the best tool listed below to answer user’s question.
+        Choose the best tool listed below to answer user’s question. Respond with NA if none of the following tools can answer the question.
         {tool_names}
 
         RESPONSE FORMAT INSTRUCTIONS
