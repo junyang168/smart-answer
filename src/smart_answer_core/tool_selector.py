@@ -44,7 +44,7 @@ class tool_selector:
             return  self.prompt_template, {"tool_names":tool_names, "tool_few_shots":few_shots  }
 
     def _get_tool_input(self, tools, resp):
-        ts = [t  for t in tools if t.name == resp.tool ]
+        ts = [t  for t in tools if t.name.lower() == resp.tool.lower() ]
         if len(ts) > 0: 
             tool = ts[0]
         return tool, resp.tool_input
