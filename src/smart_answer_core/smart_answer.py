@@ -58,7 +58,7 @@ class SmartAnswer:
             else:
                 question_prefix = ""
                 if result:
-                    question_prefix = result.get("prefix") 
+                    question_prefix = result.get("prefix", default = "") 
                 answer = self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)
