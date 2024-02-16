@@ -24,6 +24,9 @@ class SmartAnswer:
         return util.ask_llm(prompt_template, output_type=None, question = question, context=context )
 
     def __get_content_reference(self, result):
+        if not result:
+            return None, None
+        
         if isinstance(result, str) :
             return result, None
         else:
@@ -49,12 +52,13 @@ class SmartAnswer:
                 result = self.fallback_tool.retrieve(args, question)
 
             context_content, reference = self.__get_content_reference(result)
+
             if isinstance(result, str):
                 answer = result
             else:
-                question_prefix = result.get("prefix") 
-                if not question_prefix: 
-                    question_prefix = ""
+                question_prefix = ""
+                if result:
+                    question_prefix = result.get("prefix") 
                 answer = self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)

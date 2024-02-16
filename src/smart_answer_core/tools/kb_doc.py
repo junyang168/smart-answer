@@ -77,6 +77,9 @@ class KB_DocTool(base_tool):
         
         relevant_docs = self.get_relevant_docs(question)
 
+        if len(relevant_docs) == 0:
+            return None
+
 #        if self.__hasConfigMax(relevant_docs):
 #             cfgTool = ConfigMaxTool()
 #             return cfgTool._run(args, question )
