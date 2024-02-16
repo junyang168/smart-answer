@@ -47,7 +47,7 @@ class KB_DocTool(base_tool):
     def _get_context(self, docs):        
         return {
                 "content": '\n'.join( [ f'Document {i+1}:\n{d["content"]}' for i, d in enumerate( docs[:3] ) ]),
-                "reference": [ { "title": d["metadata"].get("title"), "link":d["metadata"]["url"]}  for d in docs  ]
+                "reference": [ { "title": d["metadata"].get("title"), "link":d["metadata"].get("url")}  for d in docs  ]
             }
 
     def _filter_by_product(self, doc, products ):
