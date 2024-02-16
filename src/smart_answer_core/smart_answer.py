@@ -1,7 +1,7 @@
 
 from smart_answer_core.tool_selector import tool_selector
 import smart_answer_core.util as util
-import smart_answer_core.expand_acronyms as ea
+from smart_answer_core.expand_acronyms import acconym_expansion
 
 class SmartAnswer:
     prompt_template = """Answer the question at the end using the following pieces of context. 
@@ -30,10 +30,11 @@ class SmartAnswer:
     def get_smart_answer(self, question, sid = None,isFollowUp = False, context_only = False):         
         if not question:
           return ("", None, None, None )
-
-#        expanded, expanded_question =  ea.expand_acronyms(question)
-#        if expanded:
-#            question = expanded_question
+        
+        ae = acconym_expansion()
+        expanded, expanded_question = ae.expand_acronyms(question)
+        if expanded:
+            question = expanded_question
 
 #        chatMemory = ChatMemory(sid) 
 #        question = chatMemory.add_question(question, isFollowUp )      

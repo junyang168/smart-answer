@@ -34,7 +34,8 @@ if __name__ == '__main__':
         load_dotenv(dotenv_path)
 
         questions = [ 
-                "When Gemstone/S 64-bit 2.4 will release ?"
+                "what is the Limit applicable to PVSCSI only. Any combination of disk or VMDirectPath SCSI target."
+        #        "When Gemstone/S 64-bit 2.4 will release ?"
         #    "what is the maximum number of dfw(Distributed Firewall) rules in nsx-t 4.1? "
         #        "till when technical guidance active for product AppDefense Plugin 2.0 for Platinum Edition ?",
         #        "Which version of NSX is not compatible with Vmware HCX?",
