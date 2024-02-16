@@ -90,7 +90,7 @@ class ConfigMaxTool(base_tool):
             sql = f"""
                 SELECT distinct pr.release_name as release, x.header, x.attribute_name, x.value,  emb.embedding <=> %s score, pr2.release_name as product_name, x.category_id 
                 FROM 
-                    product_attribute_embedding emb join config_max_attribute_value x on (x.attribute_name || ' of ' || x.header = emb.attribute_name)
+                    content_embedding emb join config_max_attribute_value x on emb.source='ConfigMax' and  ('cfgmax-' || x.attribute_name || '-' || x.header = emb.content_id)
                     join product_release pr on pr.pid = x.pid and x.rid = pr.id 
                     join product_release pr2 on pr2.pid = pr.pid and pr2.app='ConfigMax'
                 where 
