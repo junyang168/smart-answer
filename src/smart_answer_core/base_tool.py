@@ -11,4 +11,7 @@ class base_tool:
 
     def get_answer_prompt_template(self, prompt_template, context):
         return prompt_template
+    
+    def is_fallback_tool(self):
+        return False
 

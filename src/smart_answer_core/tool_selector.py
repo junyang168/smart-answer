@@ -57,9 +57,6 @@ class tool_selector:
         inputs["question"] = question
         resp =  util.ask_llm(chat_prompt, ToolSelectorResponse, **inputs)
         return self._get_tool_input(self.tools, resp)
- 
-    def select_next_tool(self, tool, context_content):
-        return None
 
 
 if __name__ == '__main__':

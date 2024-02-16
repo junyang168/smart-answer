@@ -28,6 +28,9 @@ class KB_DocTool(base_tool):
       The input to this tool should be a comma separated list of string of length two, representing VMware product release and the topics of the question.
       """
     
+    def is_fallback_tool(self):
+        return True
+
     def __init__(self, connection_string = None) -> None:        
         super().__init__()
         if  connection_string:

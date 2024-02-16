@@ -15,6 +15,8 @@ class SmartAnswer:
 
     def __init__(self, tools) -> None:
         self.selector = tool_selector(tools)
+        self.fallback_tool = [t for t in tools if t.is_fallback_tool()][0]
+        pass
 
 
     def __get_answer(self,question, context, tool ):
@@ -43,6 +45,9 @@ class SmartAnswer:
         answer = None
         if tool:
             result = tool.retrieve(args, question)
+            if not result:
+                result = self.fallback_tool.retrieve(args, question)
+
             context_content, reference = self.__get_content_reference(result)
             if isinstance(result, str):
                 answer = result
@@ -50,7 +55,7 @@ class SmartAnswer:
                 question_prefix = result.get("prefix") 
                 if not question_prefix: 
                     question_prefix = ""
-                answer =self.__get_answer( question_prefix + question, context_content, tool)
+                answer = self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)
 
