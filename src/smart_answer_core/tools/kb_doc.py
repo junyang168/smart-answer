@@ -96,7 +96,7 @@ class KB_DocTool(base_tool):
         return context
     
     def _rereank(self, question, context):        
-        result = util.ask_llm(self._get_reranking_prompt_template(),question=question, context=context)
+        result = util.ask_llm(self._get_reranking_prompt_template(),question=question, context=context.get('content'))
         if not result:
             return None            
         ranks = [ l for l in  result.split('\n') if len(l.strip()) > 0 ]
@@ -104,6 +104,8 @@ class KB_DocTool(base_tool):
         if len(ranks) == 0:
             return None
         doc_title = ranks[0].split(',')[0].split(':')
+        if len(doc_title) < 2:
+            return None 
         top_doc_idx =  doc_title[1].strip()
         if not top_doc_idx.isdigit():
             return None
