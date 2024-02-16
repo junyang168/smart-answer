@@ -73,7 +73,6 @@ class KB_DocTool(base_tool):
         
         logger.info( self.name + " " + question)
 
-        params = args.split(',')
         
         relevant_docs = self.get_relevant_docs(question)
 
