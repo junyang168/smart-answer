@@ -51,7 +51,7 @@ class ConfigMaxTool(base_tool):
 
     def __get_config_max(self, metric, product_release = None):
 
-        attr_embedding = util.calculate_embedding( [metric] )[0]
+        attr_embedding = util.calculate_embedding( metric )
 
         if product_release:    
             product_name, version =  util.get_product_name_version(product_release)

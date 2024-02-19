@@ -1,61 +1,41 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
+from embedding_client import Client
+from embedding_client.models import EmbeddingRequest, EmbeddingResponse
+from  embedding_client.api.default.embed_embed_post import sync
+
+
 
 
 __embedding_model =  os.environ.get("EMBEDDING_MODEL") 
 
-def __init_model():
-    if __embedding_model != 'BGE':
-        return None
-    
-    from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-    model_name = "BAAI/bge-large-en-v1.5"
-    encode_kwargs = {'normalize_embeddings': True} # set True to compute cosine similarity
-
-    import torch
-    use_gpu =  os.environ.get("USE_GPU") 
-
-    print(f"use gpu: {use_gpu}")
-
-    if use_gpu == 'True' and torch.cuda.is_available():
-        print(f"cuda available: {torch.cuda.is_available()}")
-        model_kwargs = {'device': 'cuda'}
-    else:
-        model_kwargs = {'device': 'cpu'}
-        print("use CPU for embedding")
-
-    model = HuggingFaceBgeEmbeddings(
-        model_name=model_name,
-        model_kwargs=model_kwargs,
-        encode_kwargs=encode_kwargs,
-        query_instruction="Represent this sentence for searching relevant passages:"
-    )
-    model.query_instruction = "Represent this sentence for searching relevant passages:"
-    return model
-
-__model = __init_model()
-
+__embedding_api_url = os.environ.get("EMBEDDING_API_URL") 
 
 import numpy as np
-def __create_bge_embeddings(inputs):
-    return [ np.array( __model.embed_query(inp) )for inp in inputs ]
+
+def __create_bge_embeddings(text):
+    
+    client = Client(base_url=__embedding_api_url)
+
+    Req = EmbeddingRequest(text=text)
+
+    resp = sync(client=client,body=Req)
+
+    return  np.array( resp.embeddings ) 
 
 
 import openai
-def __calculate_openai_embedding(inputs):
-    output = []
-    for inp in inputs:
-        response =  openai.Embedding.create( input = inp, engine="ada-embedding")
-        output.append( np.array( response['data'][0]['embedding'] ) )
-    return output
+def __calculate_openai_embedding(text):
+    response =  openai.Embedding.create( input = inp, engine="ada-embedding")
+    return np.array( response['data'][0]['embedding'] ) 
 
 
-def calculate_embedding(inputs):
+def calculate_embedding(text):
     if __embedding_model == 'BGE':
-        return __create_bge_embeddings(inputs)
+        return __create_bge_embeddings(text)
     else:
-        return __calculate_openai_embedding(inputs)
+        return __calculate_openai_embedding(text)
 
 
 import psycopg2

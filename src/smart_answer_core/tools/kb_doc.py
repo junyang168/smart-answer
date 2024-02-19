@@ -112,7 +112,7 @@ class KB_DocTool(base_tool):
 
 
     def search_similar_content(self, query):
-        emb = util.calculate_embedding([query])[0]
+        emb = util.calculate_embedding(query)
         conn = psycopg2.connect(self.connection_string)
         register_vector(conn)
         cur = conn.cursor()
