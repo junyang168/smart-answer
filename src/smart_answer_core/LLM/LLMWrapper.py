@@ -1,4 +1,4 @@
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import JsonOutputParser
 from smart_answer_core.LLM.TogetherAdapter import TogetherAdapter
 from smart_answer_core.LLM.LangchainAdapter import LangchainAdapter
 from dotenv import load_dotenv
@@ -40,13 +40,13 @@ class LLMWrapper:
         return None
     
         
-    def askLLM(self, user_prompt_template, inputs, output_type ):
+    def askLLM(self, user_prompt_template, inputs, format = None ):
         inputs = dict(inputs)
-        if output_type:
-            parser = PydanticOutputParser(pydantic_object=output_type)           
+        if format == 'Json':
+            parser = JsonOutputParser()          
             inputs["format_instructions"]  = parser.get_format_instructions() 
         out = self.__llmadapter.askLLM(user_prompt_template, inputs)
-        if output_type:
+        if format == 'Json':
             out2 = self.check(out)
             return parser.parse(out2)
         else:

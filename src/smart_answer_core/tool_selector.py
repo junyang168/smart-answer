@@ -4,9 +4,6 @@ import smart_answer_core.util as util
 
 from langchain.pydantic_v1 import BaseModel, Field, validator
 
-class ToolSelectorResponse(BaseModel):
-    tool: str = Field(description="Name of the tool ")
-    tool_input: str = Field(description="input parameter to the tool")
 
 class tool_selector:
 
@@ -46,10 +43,10 @@ class tool_selector:
             return  self.prompt_template, {"tool_names":tool_names, "tool_few_shots":few_shots  }
 
     def _get_tool_input(self, tools, resp):
-        ts = [t  for t in tools if t.name.lower() == resp.tool.lower() ]
+        ts = [t  for t in tools if t.name.lower() == resp.get('tool','').lower() ]
         if len(ts) > 0: 
             tool = ts[0]
-            return tool, resp.tool_input
+            return tool, resp.get('tool_input')
         else:
             return self.get_fallback_tool(), None
      
@@ -59,7 +56,7 @@ class tool_selector:
         chat_prompt, inputs = self._create_prompt(self.tools)
 
         inputs["question"] = question
-        resp =  util.ask_llm(chat_prompt, ToolSelectorResponse, **inputs)
+        resp =  util.ask_llm(chat_prompt, format='Json' , **inputs)
         return self._get_tool_input(self.tools, resp)
     
     def get_fallback_tool(self):

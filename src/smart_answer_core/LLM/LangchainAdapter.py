@@ -1,5 +1,4 @@
 from smart_answer_core.LLM.LLMAdapter import LLMAdapter
-from langchain import LLMChain
 from langchain_openai import ChatOpenAI
 import langchain.chains.retrieval_qa.prompt as qa
 from langchain.prompts.chat import (
@@ -8,6 +7,7 @@ from langchain.prompts.chat import (
     HumanMessagePromptTemplate,
     MessagesPlaceholder
 )
+from langchain_core.output_parsers import JsonOutputParser
 import langchain.agents.conversational_chat.prompt as ap
 from dotenv import load_dotenv
 load_dotenv()
@@ -52,8 +52,9 @@ class LangchainAdapter(LLMAdapter):
             model_name = self.model[len('openai/'):]          
             llm = ChatOpenAI(temperature=0,model_name= model_name)
         else:
-            llm = ChatOpenAI(temperature=0,model_name= self.model , openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
+            llm = ChatOpenAI(temperature=0,model_name= self.model, openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
 
-        chain = LLMChain(llm=llm, prompt = chat_prompt)
+        chain = chat_prompt | llm
 
-        return chain.run(inputs)
+        out =  chain.invoke(inputs)
+        return out.content

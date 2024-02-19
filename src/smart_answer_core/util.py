@@ -82,9 +82,9 @@ def run_dml(sql,params: tuple = None, is_proc=False, connection_string = None):
 
 from smart_answer_core.LLM.LLMWrapper import LLMWrapper
 
-def ask_llm( prompt_template : str, output_type = None,  **kwargs ):
+def ask_llm( prompt_template : str, format = None,  **kwargs ):
     llm = LLMWrapper()
-    return llm.askLLM(prompt_template, kwargs, output_type)
+    return llm.askLLM(prompt_template, kwargs, format)
 
 
 
