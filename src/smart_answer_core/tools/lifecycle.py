@@ -1,4 +1,6 @@
 from smart_answer_core.base_tool import base_tool
+from smart_answer_core.base_tool import RetrievalResult
+from smart_answer_core.base_tool import Reference
 from smart_answer_core.tool_example import tool_example
 
 import requests
@@ -87,7 +89,7 @@ class LifeCycleTool(base_tool):
         
         response = util.print_result(ds_all, ["","version","End of Support Date","General Availability Date ","End of Technical Guidance Date"])
 
-
-        return { "content": response, "prefix": f"Today is {date.today().strftime('%Y-%m-%d')}.\n", 
-                "reference": [ {"title":"Product Life Cycle Matrix", "link":"https://lifecycle.vmware.com/"}] }
-    
+        return RetrievalResult(
+            content=response,
+            prefix=f"Today is {date.today().strftime('%Y-%m-%d')}.\n",
+            references=[  Reference(Title="Product Life Cycle Matrix", Link="https://lifecycle.vmware.com/") ] )

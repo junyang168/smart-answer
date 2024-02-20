@@ -7,7 +7,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 
-from  smart_answer_core.base_tool import base_tool
+from smart_answer_core.base_tool import base_tool
 from smart_answer_core.smart_answer import SmartAnswer 
 from smart_answer_core.tool_example import tool_example
 
@@ -17,24 +17,58 @@ from tools.interoperability import InterOperabilityTool
 from tools.configMax import ConfigMaxTool
 import os
 
-class smart_answer_service:
-        def __init__(self) -> None:
-                CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-                self.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
 
-        def get_answer(self, question: str, sid = None, isFollowup = False ):
-                sa = SmartAnswer(self.tools)
-                return sa.get_smart_answer(question,sid )
+from typing import List
+
+from fastapi import Depends, FastAPI
+from pydantic import BaseModel
+import smart_answer_service as sas
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from smart_answer_core.base_tool import Reference
+
+class SmartAnswerResponse(BaseModel):
+    answer: str
+    references: List[Reference] = None
+    tool: str = None
+
+class SmartAnswerRequest(BaseModel):
+    question: str
 
 
-if __name__ == '__main__':
+@app.post("/get_answer", response_model=SmartAnswerResponse)
+def get_answer(request: SmartAnswerRequest):
+        CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+        tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
+        sa = SmartAnswer(tools)
+        answer, context_content, tool, references  = sa.get_smart_answer(request.question, None)
+        resp = SmartAnswerResponse(answer=answer, references=references)
+        return resp
+
+
+import uvicorn
+if __name__ == "__main__":
+        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
         dotenv_path = os.path.join(parent_dir, '/app/.env')
         load_dotenv(dotenv_path)
 
         questions = [ 
-                "If I want to setup a MSCS with physical nodes should I use cluster in a box?"
+        #      "when will ESXi 7 go out of support"
+        #        "If I want to setup a MSCS with physical nodes should I use cluster in a box?"
         #        "How should I react to an abusive customer?"
         #        "What is the latest BIOS version for the Dell PowerEdge R740?"
         #        "what all advanced configuration options  for Esxi ?"
@@ -52,6 +86,6 @@ if __name__ == '__main__':
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
         for question in questions:
-                sa = smart_answer_service()
-                answer = sa.get_answer(question)
-                print(answer[0])
+                req = SmartAnswerRequest(question=question)
+                resp = get_answer(req)
+                print(resp)

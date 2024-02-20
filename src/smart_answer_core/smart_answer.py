@@ -28,7 +28,7 @@ class SmartAnswer:
         if isinstance(result, str) :
             return result, None
         else:
-            return result.get('content'), result.get('reference')
+            return result.content, result.references
 
     def get_smart_answer(self, question, sid = None,isFollowUp = False, context_only = False):         
         if not question:
@@ -56,7 +56,7 @@ class SmartAnswer:
             else:
                 question_prefix = ""
                 if result:
-                    question_prefix = result.get("prefix",  "") 
+                    question_prefix = result.prefix 
                 answer = self.__get_answer( question_prefix + question, context_content, tool)
 #        if answer:
 #            chatMemory.add_answer(answer)

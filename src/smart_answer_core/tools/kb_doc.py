@@ -1,5 +1,8 @@
 from smart_answer_core.base_tool import base_tool
 from smart_answer_core.tool_example import tool_example
+from smart_answer_core.base_tool import RetrievalResult
+from smart_answer_core.base_tool import Reference
+
 
 ## Loading Environment Variables
 from dotenv import load_dotenv
@@ -20,6 +23,7 @@ import smart_answer_core.util as util
 #from tools.configMax import ConfigMaxTool
 from pgvector.psycopg2 import register_vector
 
+from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 
 class KB_DocTool(base_tool):
     name = "VMWare Knowledge Base"
@@ -45,10 +49,10 @@ class KB_DocTool(base_tool):
             
 
     def _get_context(self, docs):        
-        return {
-                "content": '\n'.join( [ f'Document {i+1}:\n{d["content"]}' for i, d in enumerate( docs[:3] ) ]),
-                "reference": [ { "title": d["metadata"].get("title"), "link":d["metadata"].get("url")}  for d in docs  ]
-            }
+        return RetrievalResult(
+                content = '\n'.join( [ f'Document {i+1}:\n{d["content"]}' for i, d in enumerate( docs[:3] ) ]), 
+                references= [  Reference(Title=  d["metadata"].get("title"), Link= d["metadata"].get("url"))  for d in docs  ]
+        )
 
     def _filter_by_product(self, doc, products ):
         if len(products) == 0:
@@ -69,7 +73,7 @@ class KB_DocTool(base_tool):
                 return True
         return False
                 
-    def retrieve(self, args :str, question : str):
+    def retrieve(self, args :str, question : str) -> RetrievalResult:
         
         logger.info( self.name + " " + question)
 
@@ -85,19 +89,20 @@ class KB_DocTool(base_tool):
 
         context = self._get_context(relevant_docs)
 
-        top_doc = self._rereank(question,context)
+        top_doc = self._grade(question,context)
         if top_doc is not None:
-            context['content'] = relevant_docs[top_doc].get('content')
+            context.content = relevant_docs[top_doc].get('content')
 
 
 #        if len( response ) > 0 and respCfgMax and respCfgMax.get('maxScore') > response[0].get('score'):
 #            return respCfgMax        
         return context
     
-    def _rereank(self, question, context):        
-        result = util.ask_llm(self._get_reranking_prompt_template(),question=question, context=context.get('content'))
+    def _grade(self, question, context):        
+        result = util.ask_llm(self._get_reranking_prompt_template(),question=question, context=context.content)
         if not result:
-            return None            
+            return None   
+        
         ranks = [ l for l in  result.split('\n') if len(l.strip()) > 0 ]
         print(ranks)
         if len(ranks) == 0:
