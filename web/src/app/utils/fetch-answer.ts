@@ -43,7 +43,8 @@ export const fetchAnswer = async (
         dateLastCrawled: '',
         cachedPageUrl: '',
         language: 'en',
-        isNavigational: true      
+        isNavigational: true,
+        isFamilyFriendly: false     
         }
     sources.push(src)
   }
