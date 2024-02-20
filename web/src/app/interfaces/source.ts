@@ -1,19 +1,19 @@
 export interface Source {
-  id?: string;
+  id: string;
   name: string;
   url: string;
-  isFamilyFriendly?: boolean;
+  isFamilyFriendly: boolean;
   displayUrl: string;
-  snippet?: string;
-  deepLinks?: { snippet: string; name: string; url: string }[];
-  dateLastCrawled?: string;
-  cachedPageUrl?: string;
-  language?: string;
-  primaryImageOfPage?: {
+  snippet: string;
+  deepLinks: { snippet: string; name: string; url: string }[];
+  dateLastCrawled: string;
+  cachedPageUrl: string;
+  language: string;
+  primaryImageOfPage: {
     thumbnailUrl: string;
     width: number;
     height: number;
     imageId: string;
   };
-  isNavigational?: boolean;
+  isNavigational: boolean;
 }

@@ -37,7 +37,15 @@ export const fetchAnswer = async (
   onMarkdown(result.answer)
   let sources : Source[] = [] 
   for( var ref of result.references) {
-    const src : Source = { name: ref.Title, displayUrl : ref.Link, url: ref.Link}
+    const src : Source = { id: ref.Link, name: ref.Title, displayUrl : ref.Link, url: ref.Link,
+        snippet:"",
+        deepLinks: [],
+        dateLastCrawled: '',
+        cachedPageUrl: '',
+        language: 'en',
+        primaryImageOfPage: {},
+        isNavigational: true      
+        }
     sources.push(src)
   }
   onSources(sources)
