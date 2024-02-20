@@ -44,8 +44,14 @@ export const fetchAnswer = async (
         cachedPageUrl: '',
         language: 'en',
         isNavigational: true,
-        isFamilyFriendly: false     
-        }
+        isFamilyFriendly: false,
+        primaryImageOfPage: {
+            thumbnailUrl: '',
+            width: 10,
+            height: 10,
+            imageId: ''
+          }        
+    }
     sources.push(src)
   }
   onSources(sources)

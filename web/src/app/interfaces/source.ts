@@ -9,7 +9,7 @@ export interface Source {
   dateLastCrawled: string;
   cachedPageUrl: string;
   language: string;
-  primaryImageOfPage?: {
+  primaryImageOfPage: {
     thumbnailUrl: string;
     width: number;
     height: number;
