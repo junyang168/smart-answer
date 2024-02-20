@@ -8,10 +8,6 @@ from smart_answer_core.base_tool import Reference
 from dotenv import load_dotenv
 import psycopg2
 
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores.pgvector import PGVector
-from langchain.vectorstores.pgvector import DistanceStrategy
-import json
 from smart_answer_core.logger import logger
 import numpy as np
 import time
@@ -22,8 +18,6 @@ import smart_answer_core.util as util
 
 #from tools.configMax import ConfigMaxTool
 from pgvector.psycopg2 import register_vector
-
-from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 
 class KB_DocTool(base_tool):
     name = "VMWare Knowledge Base"

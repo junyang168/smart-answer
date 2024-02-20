@@ -15,7 +15,7 @@ export default (phase, { defaultConfig }) => {
         async rewrites() {
           return [
             {
-              source: "/query",
+              source: "/get_answer",
               destination: "http://localhost:50000/get_answer" // Proxy to Backend
             },
             // {

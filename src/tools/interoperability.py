@@ -15,6 +15,8 @@ from smart_answer_core.logger import logger
 import pandas as pd
 import smart_answer_core.util as util
 #import product_embedding as util
+from smart_answer_core.base_tool import RetrievalResult
+from smart_answer_core.base_tool import Reference
 
 
 class InterOperabilityTool(base_tool):
@@ -102,10 +104,11 @@ class InterOperabilityTool(base_tool):
 
 
     def _get_link(self,pid1, pid2) :
-        return [ { "title":"VMWare Interoperability Matrix", "link":f"https://interopmatrix.vmware.com/Interoperability?col={pid1}&row={pid2}&isHidePatch=false&isHideGenSupported=false&isHideTechSupported=false&isHideCompatible=false&isHideNTCompatible=false&isHideIncompatible=false&isHideNotSupported=true&isCollection=false" } ]
+        return [ Reference(Title = "VMWare Interoperability Matrix", Link = f"https://interopmatrix.vmware.com/Interoperability?col={pid1}&row={pid2}&isHidePatch=false&isHideGenSupported=false&isHideTechSupported=false&isHideCompatible=false&isHideNTCompatible=false&isHideIncompatible=false&isHideNotSupported=true&isCollection=false" ) ]
 
     def _get_not_compatible_message(self, p1, p2, pid1, pid2):
-        return {"content": f"{p1} and {p2} are not compatible. please refer to the VMWare interoperability matrix for more detail ", "reference": self._get_link(pid1,pid2) }
+        return RetrievalResult( content =  f"{p1} and {p2} are not compatible. please refer to the VMWare interoperability matrix for more detail ",
+                                references = self._get_link(pid1,pid2) )
     
     def _get_product_and_version(self, products):
         arr_product = products.split(',')
@@ -133,7 +136,7 @@ class InterOperabilityTool(base_tool):
         return { "p1_info": (pid1,p1, r1, arr_product[0]), "p2_info":(pid2,p2, r2, arr_product[1]), "response": response}
 
 
-    def retrieve(self, products : str,question : str):
+    def retrieve(self, products : str,question : str) ->RetrievalResult:
 
         logger.info( self.name + " " + products)
 
@@ -211,7 +214,7 @@ class InterOperabilityTool(base_tool):
             
             if len(txt_arr_comp) > 0:
                 txt =  f"{p1} {','.join(com_p1_ver)} are compatible with {p2} {','.join(com_p2_ver)} "  
-                return  { "content":txt, "reference": self._get_link(pid1,pid2) } 
+                return  RetrievalResult(content=txt, references = self._get_link(pid1,pid2) ) 
             else: 
                 txt = self._get_not_compatible_message(p1_info[3],p2_info[3],pid1,pid2)
         else:

@@ -17,7 +17,7 @@ export const fetchAnswer = async (
   let uint8Array = new Uint8Array();
   let chunks = "";
   let sourcesEmitted = false;
-  const response = await fetch('http://localhost:50000/get_answer', {
+  const response = await fetch('/get_answer', {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

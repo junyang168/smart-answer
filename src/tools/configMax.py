@@ -1,6 +1,9 @@
 from smart_answer_core.base_tool import base_tool
 from smart_answer_core.tool_example import tool_example
 
+from smart_answer_core.base_tool import RetrievalResult
+from smart_answer_core.base_tool import Reference
+
 
 ## Loading Environment Variables
 from dotenv import load_dotenv
@@ -107,7 +110,7 @@ class ConfigMaxTool(base_tool):
 
         return ds        
 
-    def retrieve(self, params : str, question ):
+    def retrieve(self, params : str, question: str ) -> RetrievalResult:
 
         logger.info( self.name + " " + params)
 
@@ -134,8 +137,8 @@ class ConfigMaxTool(base_tool):
                 # release - 0, product_name = 5, category_id = 6
                 config_max_params.add((v[5],v[0],v[6]))
                 txt += f"- {v[2]} of {v[1]} for {v[0]} is {v[3]} \n"
-            ref_array = [ {"title": f"Configuration Maximums for {t[1]}", "link":f"https://configmax.esp.vmware.com/guest?vmwareproduct={t[0]}&release={t[1]}&categories={t[2]})"} for t in config_max_params  ]          
-            return { "content":txt, "reference": ref_array[:3] , "maxScore" : maxScore}
+            ref_array = [ Reference(Title =  f"Configuration Maximums for {t[1]}", Link = f"https://configmax.esp.vmware.com/guest?vmwareproduct={t[0]}&release={t[1]}&categories={t[2]})") for t in config_max_params  ]          
+            return RetrievalResult(content=txt, references= ref_array[:3] )
         else:
             return None
 
