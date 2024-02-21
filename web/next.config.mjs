@@ -12,7 +12,7 @@ export default (phase, { defaultConfig }) => {
       };
     } else {
       return {
-/*        
+        
         async rewrites() {
           return [
             {
@@ -29,7 +29,7 @@ export default (phase, { defaultConfig }) => {
               }
           ];
         }
-*/        
+        
       };
     }
   }

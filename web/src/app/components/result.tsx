@@ -34,7 +34,6 @@ export const Result: FC<{ query: string; rid: string }> = ({ query, rid }) => {
     <div className="flex flex-col gap-8">
       <Answer markdown={markdown} sources={sources}></Answer>
       <Sources sources={sources}></Sources>
-      <Relates relates={relates}></Relates>
       {error && (
         <div className="absolute inset-4 flex items-center justify-center bg-white/40 backdrop-blur-sm">
           <div className="p-4 bg-white shadow-2xl rounded text-blue-500 font-medium flex gap-4">
