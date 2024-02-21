@@ -13,7 +13,7 @@ export default function Home() {
           <Search></Search>
         <div className="flex gap-2 flex-wrap justify-center">
           <PresetQuery query="When will ESXi 7 go out of support?"></PresetQuery>
-          <PresetQuery query="Why do we only see one side of the moon?"></PresetQuery>
+          <PresetQuery query="What are the steps to configure GPUs on esxi 8?"></PresetQuery>
         </div>
         <Footer></Footer>
       </div>
