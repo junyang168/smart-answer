@@ -24,8 +24,6 @@ class DemoTool(base_tool):
         return True
             
     def retrieve(self, args :str, question : str) -> RetrievalResult:
-        print(args)
-        print(question)
 
         # Open the file in read mode ('r')
         with open('/Users/junyang/app/smart-answer/web/public/china_telecom_kb.txt', 'r') as file:
