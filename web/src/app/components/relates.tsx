@@ -18,7 +18,7 @@ export const Relates: FC<{ relates: Relate[] | null }> = ({ relates }) => {
           {relates !== null ? (
             relates.length > 0 ? (
               relates.map(({ question }) => (
-                <PresetQuery key={question} query={question}></PresetQuery>
+                <PresetQuery key={question} org_id="" query={question}></PresetQuery>
               ))
             ) : (
               <div className="text-sm">No related questions.</div>

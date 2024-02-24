@@ -5,8 +5,10 @@ import { PresetQuery } from "@/app/components/preset-query";
 import { Search } from "@/app/components/search";
 import React from "react";
 import { useSearchParams } from "next/navigation";
+import { Suspense } from 'react'
 
-export default function Home() {
+
+function HomeComp() {
   const searchParams = useSearchParams();
   const org_id = decodeURIComponent(searchParams.get("o") || "");
 
@@ -23,4 +25,14 @@ export default function Home() {
       </div>
     </div>
   );
+}
+
+
+export default function Home() {
+  return (
+    // You could have a loading skeleton as the `fallback` too
+    <Suspense fallback={<>Loading...</>}>
+      <HomeComp />
+    </Suspense>
+  )  
 }
