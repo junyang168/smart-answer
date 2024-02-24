@@ -24,9 +24,10 @@ class DemoTool(base_tool):
         return True
             
     def retrieve(self, args :str, question : str) -> RetrievalResult:
+        kb_file = os.environ["DEMO_KB_FILE"]
 
         # Open the file in read mode ('r')
-        with open('/Users/junyang/app/smart-answer/web/public/china_telecom_kb.txt', 'r') as file:
+        with open(kb_file , 'r') as file:
             # Read the entire file
             content = file.read()
             ref = Reference(Title='China Telecom Tech Support', Link='https://smart-answer.ai/china_telecom_kb.txt')
