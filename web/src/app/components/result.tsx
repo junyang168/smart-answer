@@ -8,18 +8,21 @@ import { fetchAnswer } from "@/app/utils/fetch-answer";
 import { Annoyed } from "lucide-react";
 import { FC, useEffect, useState } from "react";
 
-export const Result: FC<{ query: string; rid: string }> = ({ query, rid }) => {
+export const Result: FC<{org_id:string, query: string; rid: string }> = ({ org_id, query, rid }) => {
   const [sources, setSources] = useState<Source[]>([]);
   const [markdown, setMarkdown] = useState<string>("");
   const [relates, setRelates] = useState<Relate[] | null>(null);
   const [error, setError] = useState<number | null>(null);
-  console.log('16: ', query, rid)
+
+  console.log('16: ', query, rid, org_id)
   
   useEffect(() => {
+    console.log('org_id ', org_id)
     const controller = new AbortController();
     void fetchAnswer(
       controller,
       query,
+      org_id,
       rid,
       setSources,
       setMarkdown,

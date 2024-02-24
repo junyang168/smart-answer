@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { useRouter } from "next/navigation";
 import React, { FC, useState } from "react";
 
-export const Search: FC = () => {
+export const Search: FC<{org_id:string}> = ({org_id}) => {
   const [value, setValue] = useState("");
   const router = useRouter();
   return (
@@ -14,7 +14,7 @@ export const Search: FC = () => {
         e.preventDefault();
         if (value) {
           setValue("");
-          router.push(getSearchUrl(encodeURIComponent(value), nanoid()));
+          router.push(getSearchUrl(org_id, encodeURIComponent(value), nanoid()));
         }
       }}
     >

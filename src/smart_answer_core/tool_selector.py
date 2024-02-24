@@ -53,6 +53,9 @@ class tool_selector:
 
     def select_tool(self, question :str):
 
+        if len(self.tools) == 1:
+            return self.tools[0], None
+
         chat_prompt, inputs = self._create_prompt(self.tools)
 
         inputs["question"] = question

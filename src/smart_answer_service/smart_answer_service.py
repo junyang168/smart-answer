@@ -15,6 +15,7 @@ from smart_answer_core.tools.lifecycle import LifeCycleTool
 from smart_answer_core.tools.kb_doc import KB_DocTool
 from tools.interoperability import InterOperabilityTool
 from tools.configMax import ConfigMaxTool
+from tools.demo_tool import DemoTool
 import os
 
 
@@ -44,13 +45,17 @@ class SmartAnswerResponse(BaseModel):
     tool: str = None
 
 class SmartAnswerRequest(BaseModel):
+    org_id:str = None
     question: str
 
 
 @app.post("/get_answer", response_model=SmartAnswerResponse)
 def get_answer(request: SmartAnswerRequest):
         CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-        tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
+        if request.org_id == 'test':
+            tools = [DemoTool()]
+        else:
+            tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
         sa = SmartAnswer(tools)
         answer, context_content, tool, references  = sa.get_smart_answer(request.question, None)
         resp = SmartAnswerResponse(answer=answer, references=references)
@@ -67,6 +72,9 @@ if __name__ == "__main__":
         load_dotenv(dotenv_path)
 
         questions = [ 
+        #      "你们云产品怎么收费的"
+        #      "What are the steps to configure GPUs on esxi 8?"
+        #      "How to deploy vRSLCM to a VCF 3.x WLD that is using VLAN backed networks?"
         #      "when will ESXi 7 go out of support"
         #        "If I want to setup a MSCS with physical nodes should I use cluster in a box?"
         #        "How should I react to an abusive customer?"
@@ -86,6 +94,6 @@ if __name__ == "__main__":
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
         for question in questions:
-                req = SmartAnswerRequest(question=question)
+                req = SmartAnswerRequest(question=question, org_id='test')
                 resp = get_answer(req)
                 print(resp)

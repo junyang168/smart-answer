@@ -7,6 +7,7 @@ const RELATED_SPLIT = "__RELATED_QUESTIONS__";
 export const fetchAnswer = async (
   controller: AbortController,
   query: string,
+  org: string,
   search_uuid: string,
   onSources: (value: Source[]) => void,
   onMarkdown: (value: string) => void,
@@ -17,7 +18,15 @@ export const fetchAnswer = async (
   let uint8Array = new Uint8Array();
   let chunks = "";
   let sourcesEmitted = false;
-  const response = await fetch('/get_answer', {
+
+  const env = process.env.NODE_ENV;
+  let api_url = ""
+  if( env != 'production') {
+    api_url = 'http://localhost:50000'
+  }
+  api_url = api_url + '/get_answer'
+
+  const response = await fetch(api_url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -25,6 +34,7 @@ export const fetchAnswer = async (
     },
     signal: controller.signal,
     body: JSON.stringify({
+      org_id:org,
       question:query
     }),
   });
