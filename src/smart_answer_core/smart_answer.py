@@ -2,6 +2,7 @@
 from smart_answer_core.tool_selector import tool_selector
 import smart_answer_core.util as util
 from smart_answer_core.expand_acronyms import acconym_expansion
+from smart_answer_core.chat_memory import ChatMemory
 
 class SmartAnswer:
     prompt_template = """Answer the question at the end using the following pieces of context. 
@@ -39,8 +40,8 @@ class SmartAnswer:
         if expanded:
             question = expanded_question
 
-#        chatMemory = ChatMemory(sid) 
-#        question = chatMemory.add_question(question, isFollowUp )      
+        chatMemory = ChatMemory(sid) 
+        question = chatMemory.add_question(question, isFollowUp )      
 
         tool, args = self.selector.select_tool(question)
         answer = None
@@ -58,8 +59,8 @@ class SmartAnswer:
                 if result:
                     question_prefix = result.prefix 
                 answer = self.__get_answer( question_prefix + question, context_content, tool)
-#        if answer:
-#            chatMemory.add_answer(answer)
+        if answer:
+            chatMemory.add_answer(answer)
 
         return (answer, context_content, tool.name, reference )
 

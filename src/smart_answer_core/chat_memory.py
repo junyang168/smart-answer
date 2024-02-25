@@ -3,6 +3,7 @@ from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.memory import PostgresChatMessageHistory
 from smart_answer_core.util import ask_llm
 from langchain.schema.messages import HumanMessage
+import os
 
 
 class ChatMemory: 
@@ -13,12 +14,15 @@ Follow Up Input: {question}
 Standalone question:"""
 
 
-    user_role = "Question"
+    human_role = "Question"
     ai_role = "Answewr"        
 
     def __init__(self,  sid = None, message_window = 3, connection_string = None) -> None:  
         self.memory = None      
-        self.connection_string = connection_string
+        if  connection_string:
+            self.connection_string = connection_string
+        else:
+            self.connection_string =  os.environ.get("CONNECTION_STRING") 
         if sid:
             self.memory = ConversationBufferWindowMemory(
                     memory_key='chat_history',

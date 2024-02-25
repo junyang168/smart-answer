@@ -47,6 +47,8 @@ class SmartAnswerResponse(BaseModel):
 class SmartAnswerRequest(BaseModel):
     org_id:str = None
     question: str
+    sid:str = None
+    is_followup:bool = False
 
 
 @app.post("/get_answer", response_model=SmartAnswerResponse)
@@ -57,14 +59,15 @@ def get_answer(request: SmartAnswerRequest):
         else:
             tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
         sa = SmartAnswer(tools)
-        answer, context_content, tool, references  = sa.get_smart_answer(request.question, None)
+        answer, context_content, tool, references  = sa.get_smart_answer(request.question, sid=request.sid, isFollowUp=request.is_followup)
         resp = SmartAnswerResponse(answer=answer, references=references)
         return resp
 
 
 import uvicorn
 if __name__ == "__main__":
-        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+
+      #  uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
@@ -72,7 +75,8 @@ if __name__ == "__main__":
         load_dotenv(dotenv_path)
 
         questions = [ 
-        #      "你们云产品怎么收费的"
+        #      "我的服务器宕机了，怎么办"
+                "重启也没用"
         #      "What are the steps to configure GPUs on esxi 8?"
         #      "How to deploy vRSLCM to a VCF 3.x WLD that is using VLAN backed networks?"
         #      "when will ESXi 7 go out of support"
@@ -94,6 +98,6 @@ if __name__ == "__main__":
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
         for question in questions:
-                req = SmartAnswerRequest(question=question, org_id='test')
+                req = SmartAnswerRequest(question=question, org_id='test', sid='sss1', is_followup=True)
                 resp = get_answer(req)
                 print(resp)
