@@ -11,7 +11,7 @@ export const Logo: FC = () => {
         Smart Answer
       </div>
       <div className="transform scale-75 origin-left border items-center rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium text-zinc-600">
-        beta
+        alpha
       </div>
     </div>
   );
