@@ -4,8 +4,7 @@ import Link from "next/link";
 import React, { FC, useMemo } from "react";
 
 export const PresetQuery: FC<{org_id:string, query: string }> = ({org_id, query }) => {
-  const rid = useMemo(() => nanoid(), [query]);
-
+  const rid = nanoid()
   return (
     <Link
       prefetch={false}

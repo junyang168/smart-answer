@@ -35,7 +35,8 @@ export const fetchAnswer = async (
     signal: controller.signal,
     body: JSON.stringify({
       org_id:org,
-      question:query
+      question:query,
+      sid:search_uuid
     }),
   });
   if (response.status !== 200) {

@@ -35,6 +35,8 @@ class SmartAnswer:
         if not question:
           return ("", None, None, None )
         
+        isFollowUp = sid and len(sid) > 0
+        
         ae = acconym_expansion()
         expanded, expanded_question = ae.expand_acronyms(question)
         if expanded:

@@ -4,12 +4,16 @@ import { Search } from "@/app/components/search";
 import { Title } from "@/app/components/title";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from 'react'
+import React, { useState } from "react";
+import { nanoid } from "nanoid";
 
 function SearchBar() {
   const searchParams = useSearchParams();
   const query = decodeURIComponent(searchParams.get("q") || "");
   const org_id = decodeURIComponent(searchParams.get("o") || "");
   const rid = decodeURIComponent(searchParams.get("rid") || "");
+//  const [rid, setRid] = useState(nanoid());
+
   console.log('------------------------------------------------------------------10: ', rid, query, org_id);
   return (
 
@@ -23,7 +27,7 @@ function SearchBar() {
         <div className="h-80 pointer-events-none w-full rounded-b-2xl backdrop-filter absolute bottom-0 bg-gradient-to-b from-transparent to-white [mask-image:linear-gradient(to_top,white,transparent)]"></div>
         <div className="absolute z-10 flex items-center justify-center bottom-6 px-4 md:px-8 w-full">
           <div className="w-full">
-              <Search org_id={org_id} />
+              <Search org_id={org_id} rid={rid} followup="true" />
           </div>
         </div>
       </div>
