@@ -18,9 +18,9 @@ class SmartAnswer:
         self.selector = tool_selector(tools)
 
 
-    def __get_answer(self,question, context, tool ):
+    def __get_answer(self, question:str, sid:str, context, tool ):
         prompt_template = tool.get_answer_prompt_template(self.prompt_template, context)
-        return util.ask_llm(prompt_template, output_type=None, question = question, context=context )
+        return util.ask_llm(prompt_template, output_type= None, sid=sid, question = question, context=context )
 
     def __get_content_reference(self, result):
         if not result:
@@ -42,8 +42,8 @@ class SmartAnswer:
         if expanded:
             question = expanded_question
 
-        chatMemory = ChatMemory(sid) 
-        question = chatMemory.add_question(question, isFollowUp )      
+#        chatMemory = ChatMemory(sid) 
+#        question = chatMemory.add_question(question, isFollowUp )      
 
         tool, args = self.selector.select_tool(question)
         answer = None
@@ -60,9 +60,9 @@ class SmartAnswer:
                 question_prefix = ""
                 if result:
                     question_prefix = result.prefix 
-                answer = self.__get_answer( question_prefix + question, context_content, tool)
-        if answer:
-            chatMemory.add_answer(answer)
+                answer = self.__get_answer( question_prefix + question, sid, context_content, tool)
+#        if answer:
+#            chatMemory.add_answer(answer)
 
         return (answer, context_content, tool.name, reference )
 
