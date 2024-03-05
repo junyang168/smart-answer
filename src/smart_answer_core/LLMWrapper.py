@@ -74,16 +74,16 @@ class LLMWrapper:
 
         runnable = chat_prompt | llm
 
-        if sid : 
-            with_message_history = RunnableWithMessageHistory(
-                runnable,
-                get_session_history,
-                input_messages_key="question",
-                history_messages_key='history'
-            )
-            out =  with_message_history.invoke(inputs, config={"configurable": {"session_id": sid}})
-        else:
-            out = runnable.invoke(inputs)
+#        if sid : 
+#            with_message_history = RunnableWithMessageHistory(
+#                runnable,
+#                get_session_history,
+#                input_messages_key="question",
+#                history_messages_key='history'
+#            )
+#            out =  with_message_history.invoke(inputs, config={"configurable": {"session_id": sid}})
+#        else:
+        out = runnable.invoke(inputs)
 
         if format == 'Json':
             out2 = self.check(out.content)

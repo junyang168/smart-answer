@@ -3,6 +3,23 @@ from smart_answer_core.tool_selector import tool_selector
 import smart_answer_core.util as util
 from smart_answer_core.expand_acronyms import acconym_expansion
 from smart_answer_core.chat_memory import ChatMemory
+from pydantic import BaseModel
+from typing import List
+from smart_answer_core.base_tool import Reference
+from langchain.schema.messages import HumanMessage
+
+
+class HistoryEntry(BaseModel):
+    Role: str
+    Message: str
+
+class SmartAnswerResponse(BaseModel):
+    answer: str
+    references: List[Reference] 
+    tool: str 
+    new_question: str
+    chat_history : List[HistoryEntry] 
+
 
 class SmartAnswer:
     prompt_template = """Answer the question at the end using the following pieces of context. 
@@ -18,9 +35,9 @@ class SmartAnswer:
         self.selector = tool_selector(tools)
 
 
-    def __get_answer(self, question:str, sid:str, context, tool ):
+    def __get_answer(self, question:str, sid:str, context, tool, history ):
         prompt_template = tool.get_answer_prompt_template(self.prompt_template, context)
-        return util.ask_llm(prompt_template, output_type= None, sid=sid, question = question, context=context )
+        return util.ask_llm(prompt_template, output_type= None, sid=sid, question = question, context=context, history = history )
 
     def __get_content_reference(self, result):
         if not result:
@@ -30,20 +47,32 @@ class SmartAnswer:
             return result, None
         else:
             return result.content, result.references
+    
+    def __is_duplicate_question(self, chat_history, question:str) -> bool :
+        return len( chat_history ) >= 2 and chat_history[-2].content == question
 
-    def get_smart_answer(self, question, sid = None,isFollowUp = False, context_only = False):         
+    def __format_chat_history(self, chat_history):
+        return [ HistoryEntry(Role= "human" if isinstance(msg, HumanMessage) else "ai", Message= msg.content) for msg in  chat_history ]
+
+    def get_smart_answer(self, question : str, sid :str = None,isFollowUp : bool = False, context_only:bool = False) -> SmartAnswerResponse:         
         if not question:
           return ("", None, None, None )
         
         isFollowUp = sid and len(sid) > 0
+
+        chatMemory = ChatMemory(sid) 
+        chat_history = chatMemory.get_chat_history()
+        if self.__is_duplicate_question(chat_history,question):
+            answer = chat_history[-1].content
+            return SmartAnswerResponse(answer=answer, references=None, tool=None, new_question=question,
+                                    chat_history= self.__format_chat_history(chat_history) )    
         
         ae = acconym_expansion()
         expanded, expanded_question = ae.expand_acronyms(question)
         if expanded:
             question = expanded_question
 
-#        chatMemory = ChatMemory(sid) 
-#        question = chatMemory.add_question(question, isFollowUp )      
+        question = chatMemory.add_question(question, isFollowUp )      
 
         tool, args = self.selector.select_tool(question)
         answer = None
@@ -60,11 +89,12 @@ class SmartAnswer:
                 question_prefix = ""
                 if result:
                     question_prefix = result.prefix 
-                answer = self.__get_answer( question_prefix + question, sid, context_content, tool)
-#        if answer:
-#            chatMemory.add_answer(answer)
+                answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)
+        if answer:
+            chatMemory.add_answer(answer)
 
-        return (answer, context_content, tool.name, reference )
+        return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question,
+                                   chat_history= self.__format_chat_history(chat_history))    
 
 if __name__ == '__main__':
 

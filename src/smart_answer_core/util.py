@@ -80,7 +80,7 @@ def run_dml(sql,params: tuple = None, is_proc=False, connection_string = None):
     conn.close()
 
 
-from smart_answer_core.LLM.LLMWrapper import LLMWrapper
+from smart_answer_core.LLMWrapper import LLMWrapper
 
 def ask_llm( prompt_template : str, format = None, sid = None,  **kwargs ):
     llm = LLMWrapper()

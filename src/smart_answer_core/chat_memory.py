@@ -14,8 +14,8 @@ Follow Up Input: {question}
 Standalone question:"""
 
 
-    human_role = "Question"
-    ai_role = "Answewr"        
+    human_role = "human"
+    ai_role = "ai"        
 
     def __init__(self,  sid = None, message_window = 3, connection_string = None) -> None:  
         self.memory = None      
@@ -63,5 +63,4 @@ Standalone question:"""
 
     def get_chat_history(self):
         ch_list =  self.memory.load_memory_variables({}).get('chat_history')
-        chat_history = '\n'.join([ ( self.human_role if isinstance(msg, HumanMessage) else self.ai_role) + ": " + msg.content for msg in  ch_list ] )
-        return chat_history
+        return ch_list
