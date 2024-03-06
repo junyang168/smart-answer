@@ -19,6 +19,7 @@ class SmartAnswerResponse(BaseModel):
     tool: str 
     new_question: str
     chat_history : List[HistoryEntry] 
+    duplicate_question : bool
 
 
 class SmartAnswer:
@@ -33,7 +34,6 @@ class SmartAnswer:
 
     def __init__(self, tools) -> None:
         self.selector = tool_selector(tools)
-
 
     def __get_answer(self, question:str, sid:str, context, tool, history ):
         prompt_template = tool.get_answer_prompt_template(self.prompt_template, context)
@@ -64,7 +64,8 @@ class SmartAnswer:
         chat_history = chatMemory.get_chat_history()
         if self.__is_duplicate_question(chat_history,question):
             answer = chat_history[-1].content
-            return SmartAnswerResponse(answer=answer, references=[], tool="", new_question=question,
+            chat_history.pop()
+            return SmartAnswerResponse(answer=answer, references=[], tool="DemoTool", new_question=question, duplicate_question=True,
                                     chat_history= self.__format_chat_history(chat_history) )    
         
         ae = acconym_expansion()
@@ -93,7 +94,7 @@ class SmartAnswer:
         if answer:
             chatMemory.add_answer(answer)
 
-        return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question,
+        return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,
                                    chat_history= self.__format_chat_history(chat_history))    
 
 if __name__ == '__main__':

@@ -73,13 +73,14 @@ export const fetchAnswer = async (
   onSources(sources)
 
   let history : IChatItemProps[] = [] 
-  result.chat_history.push({Role:'human', Message:query})
+  if( !result.duplicate_question )
+    result.chat_history.push({Role:'human', Message:query})
   for( var chat_item of result.chat_history) {
     const chat_entry : IChatItemProps = { 
       id : '1',
       avatar: chat_item.Role == 'ai' ? '/lightbulb.png': '/person.png',
 //      title: 'Kursat',
-      subtitle: chat_item.Message,
+      title: chat_item.Message,
 //      date: new Date(),
 //      unread: 3,           
     }
