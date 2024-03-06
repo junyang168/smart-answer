@@ -64,7 +64,7 @@ class SmartAnswer:
         chat_history = chatMemory.get_chat_history()
         if self.__is_duplicate_question(chat_history,question):
             answer = chat_history[-1].content
-            return SmartAnswerResponse(answer=answer, references=None, tool=None, new_question=question,
+            return SmartAnswerResponse(answer=answer, references=[], tool="", new_question=question,
                                     chat_history= self.__format_chat_history(chat_history) )    
         
         ae = acconym_expansion()
