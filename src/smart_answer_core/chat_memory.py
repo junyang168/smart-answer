@@ -62,5 +62,6 @@ Standalone question:"""
         self.memory.chat_memory.add_ai_message(message)
 
     def get_chat_history(self):
-        ch_list =  self.memory.load_memory_variables({}).get('chat_history')
-        return ch_list
+        if( self.memory):
+            return self.memory.load_memory_variables({}).get('chat_history')
+        return []

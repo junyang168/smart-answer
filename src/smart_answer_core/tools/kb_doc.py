@@ -18,6 +18,7 @@ import smart_answer_core.util as util
 
 #from tools.configMax import ConfigMaxTool
 from pgvector.psycopg2 import register_vector
+import os
 
 class KB_DocTool(base_tool):
     name = "VMWare Knowledge Base"

@@ -34,7 +34,7 @@ class DemoTool(base_tool):
             for column in df.columns:
                 content += f"{column}: {row[column]} \t"
             content += "\n"
-        ref = Reference(Title='China Telecom Tech Support', Link='https://smart-answer.ai/china_telecom_kb.txt')
+        ref = Reference(Title='China Telecom Tech Support', Link='https://smart-answer.ai/China-Telecom.xlsx')
         ret = RetrievalResult(content=content,references=[ref])
         return ret
     
