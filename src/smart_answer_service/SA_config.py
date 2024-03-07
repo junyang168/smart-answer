@@ -22,7 +22,7 @@ class SmartAnswer_Config:
     llm_config : LLMConfig
 
 def load_config() -> dict[str, LLMConfig]: 
-    file_name = os.getcwd() + '/config.json'
+    file_name = os.environ['CONFIG_FILE'] 
     with open(file_name) as cfg_file:
         cfg_data = json.load(cfg_file)
         llm_config = {}
