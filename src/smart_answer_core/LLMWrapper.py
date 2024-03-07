@@ -6,7 +6,8 @@ from langchain_core.prompts import (
     HumanMessagePromptTemplate,
     MessagesPlaceholder
 )
-from langchain_core.runnables.history import RunnableWithMessageHistory
+
+#from langchain_core.runnables.history import RunnableWithMessageHistory
 
 from langchain_core.output_parsers import JsonOutputParser
 import langchain.agents.conversational_chat.prompt as ap
@@ -15,24 +16,26 @@ load_dotenv()
 import os
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain.memory import PostgresChatMessageHistory
+from pydantic import BaseModel
 
-store = {}
+#store = {}
+#def get_session_history(session_id:str) -> BaseChatMessageHistory:
+#    if session_id not in store:
+#        store[session_id] = PostgresChatMessageHistory(session_id,  os.environ.get("CONNECTION_STRING") )
+#    return store[session_id]
 
-def get_session_history(session_id:str) -> BaseChatMessageHistory:
-    if session_id not in store:
-        store[session_id] = PostgresChatMessageHistory(session_id,  os.environ.get("CONNECTION_STRING") )
-    return store[session_id]
-
+class LLMConfig(BaseModel):
+    api_url :str
+    api_key :str
+    model :str
 
 class LLMWrapper:
 
-    def __init__(self, model = None) -> None:
-        self.api_url  = os.environ.get("LLM_API_URL") 
-        self.api_key = os.environ.get("LLM_API_KEY") 
-        if not self.api_key:
-             self.api_key = "na"
-        if not model:
-            self.model  = os.environ.get("LLM_MODEL") 
+    def __init__(self, cfg : LLMConfig = None) -> None:
+        if cfg :
+            self.__config = cfg
+        else:
+            self.__config = LLMConfig(api_key=os.environ['LLM_API_KEY'], api_url=os.environ['LLM_API_URL'], model=os.environ['LLM_MODEL'])
 
 
     def _create_prompt(self,user_prompt_template :str, sid :str):   
@@ -66,11 +69,11 @@ class LLMWrapper:
 
         chat_prompt = self._create_prompt(user_prompt_template, sid )
         
-        if self.model.startswith('openai/'):  
-            model_name = self.model[len('openai/'):]          
+        if self.__config.model.startswith('openai/'):  
+            model_name = self.__config.model[len('openai/'):]          
             llm = ChatOpenAI(temperature=0,model_name= model_name)
         else:
-            llm = ChatOpenAI(temperature=0,model_name= self.model, openai_api_key = self.api_key, openai_api_base= self.api_url, streaming=False, max_tokens=1000)
+            llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_tokens=1000)
 
         runnable = chat_prompt | llm
 

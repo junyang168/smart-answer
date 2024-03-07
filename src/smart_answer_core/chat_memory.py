@@ -3,6 +3,7 @@ from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.memory import PostgresChatMessageHistory
 from smart_answer_core.util import ask_llm
 from langchain.schema.messages import HumanMessage
+from smart_answer_core.LLMWrapper import LLMConfig
 import os
 
 
@@ -17,8 +18,9 @@ Standalone question:"""
     human_role = "human"
     ai_role = "ai"        
 
-    def __init__(self,  sid = None, message_window = 3, connection_string = None) -> None:  
-        self.memory = None      
+    def __init__(self, llm_cfg : LLMConfig, sid = None, message_window = 3, connection_string = None) -> None:  
+        self.memory = None    
+        self.llm_cfg = llm_cfg  
         if  connection_string:
             self.connection_string = connection_string
         else:
@@ -33,7 +35,7 @@ Standalone question:"""
         )
 
     def _create_standalone_question(self,chat_history, question):
-        out = ask_llm(self.CONDENSE_QUESTION_PROMPT,output_type=None,chat_history = chat_history, question = question)
+        out = ask_llm(self.llm_cfg, self.CONDENSE_QUESTION_PROMPT,output_type=None,chat_history = chat_history, question = question)
         return out
     
     def add_question(self, question, isFollowUp = False):

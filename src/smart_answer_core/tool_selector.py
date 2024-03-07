@@ -3,7 +3,8 @@ from smart_answer_core.base_tool import base_tool
 import smart_answer_core.util as util
 
 from langchain.pydantic_v1 import BaseModel, Field, validator
-
+from typing import List
+from smart_answer_core.LLMWrapper import LLMConfig
 
 class tool_selector:
 
@@ -21,9 +22,10 @@ class tool_selector:
         Answer 
     """
 
-    def __init__(self, tools) -> None:
+    def __init__(self, tools : List[base_tool], llm_cfg : LLMConfig ) -> None:
         self.tools = tools
         self.fallback_tool = [t for t in tools if t.is_fallback_tool()][0]
+        self.llm_cfg = llm_cfg
 
 
     def _create_prompt(self,tools):            
@@ -59,7 +61,7 @@ class tool_selector:
         chat_prompt, inputs = self._create_prompt(self.tools)
 
         inputs["question"] = question
-        resp =  util.ask_llm(chat_prompt, format='Json' , **inputs)
+        resp =  util.ask_llm(self.llm_cfg, chat_prompt, format='Json' , **inputs)
         return self._get_tool_input(self.tools, resp)
     
     def get_fallback_tool(self):

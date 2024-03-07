@@ -7,7 +7,9 @@ from pydantic import BaseModel
 from typing import List
 from smart_answer_core.base_tool import Reference
 from langchain.schema.messages import HumanMessage
-
+from smart_answer_core.LLMWrapper import LLMConfig
+from smart_answer_core.base_tool import base_tool
+from typing import List
 
 class HistoryEntry(BaseModel):
     Role: str
@@ -32,12 +34,13 @@ class SmartAnswer:
     Helpful Answer:"""
 
 
-    def __init__(self, tools) -> None:
-        self.selector = tool_selector(tools)
+    def __init__(self, tools : List[base_tool], llm_cfg : LLMConfig = None ) -> None:
+        self.selector = tool_selector(tools, llm_cfg)
+        self.llm_cfg = llm_cfg
 
     def __get_answer(self, question:str, sid:str, context, tool, history ):
         prompt_template = tool.get_answer_prompt_template(self.prompt_template, context)
-        return util.ask_llm(prompt_template, output_type= None, sid=sid, question = question, context=context, history = history )
+        return util.ask_llm(self.llm_cfg, prompt_template, output_type= None, sid=sid, question = question, context=context, history = history )
 
     def __get_content_reference(self, result):
         if not result:
@@ -60,7 +63,7 @@ class SmartAnswer:
         
         isFollowUp = sid and len(sid) > 0
 
-        chatMemory = ChatMemory(sid) 
+        chatMemory = ChatMemory(self.llm_cfg, sid) 
         chat_history = chatMemory.get_chat_history()
         if self.__is_duplicate_question(chat_history,question):
             answer = chat_history[-1].content

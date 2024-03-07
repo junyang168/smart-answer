@@ -1,0 +1,16 @@
+{
+
+"test" : {	
+"LLM_MODEL" : "Qwen/Qwen1.5-72B-Chat", 
+"LLM_API_URL" : "https://api.together.xyz",
+"LLM_API_KEY" :"95ff1832749b6f85200b78384ac0961081363674d2620c6a62f772298876b89c"
+},
+        
+"default" : {	
+        "LLM_MODEL" : "teknium/OpenHermes-2p5-Mistral-7B", 
+        "LLM_API_URL" : "https://api.together.xyz",
+        "LLM_API_KEY" :"95ff1832749b6f85200b78384ac0961081363674d2620c6a62f772298876b89c"
+        }        
+
+}
+

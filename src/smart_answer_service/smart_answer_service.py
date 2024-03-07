@@ -9,11 +9,6 @@ sys.path.append(parent_dir)
 
 from pydantic import BaseModel
 from smart_answer_core.smart_answer import SmartAnswer 
-from smart_answer_core.tools.lifecycle import LifeCycleTool
-from smart_answer_core.tools.kb_doc import KB_DocTool
-from tools.interoperability import InterOperabilityTool
-from tools.configMax import ConfigMaxTool
-from tools.demo_tool import DemoTool
 from smart_answer_core.smart_answer import SmartAnswerResponse
 
 from fastapi import Depends, FastAPI
@@ -31,6 +26,7 @@ app.add_middleware(
 )
 
 
+import SA_config
 
 class SmartAnswerRequest(BaseModel):
     org_id:str = None
@@ -40,20 +36,18 @@ class SmartAnswerRequest(BaseModel):
 
 @app.post("/get_answer", response_model=SmartAnswerResponse)
 def get_answer(request: SmartAnswerRequest):
-        if request.org_id == 'test':
-            tools = [DemoTool()]
-        else:
-            CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-            tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING), ConfigMaxTool()]
-        sa = SmartAnswer(tools)
+        org_id = request.org_id if request.org_id else "default"
+        cfg = SA_config.configuration[ org_id ]
+        sa = SmartAnswer(cfg.tools,cfg.llm_config)
         resp = sa.get_smart_answer(request.question, sid=request.sid)        
         return resp
 
 
 import uvicorn
 if __name__ == "__main__":
+        
 
-        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
@@ -61,6 +55,7 @@ if __name__ == "__main__":
         load_dotenv(dotenv_path)
 
         questions = [ 
+              "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
         #      "What are the steps to configure GPUs on esxi 8?"
@@ -83,7 +78,12 @@ if __name__ == "__main__":
         #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
-        for question in questions:
-                req = SmartAnswerRequest(question=question, org_id='test', sid='sss114', is_followup=True)
+        org_id = None
+        sid = None
+        for question in questions:                
+                if org_id:
+                    req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=True)
+                else:
+                    req = SmartAnswerRequest(question=question)  
                 resp = get_answer(req)
                 print(resp)

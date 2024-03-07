@@ -15,6 +15,8 @@ from datetime import datetime
 from datetime import timezone 
 from operator import itemgetter
 import smart_answer_core.util as util
+from smart_answer_core.LLMWrapper import LLMConfig
+import copy
 
 #from tools.configMax import ConfigMaxTool
 from pgvector.psycopg2 import register_vector
@@ -30,12 +32,13 @@ class KB_DocTool(base_tool):
     def is_fallback_tool(self):
         return True
 
-    def __init__(self, connection_string = None) -> None:        
+    def __init__(self, connection_string = None, llm_cfg : LLMConfig = None) -> None:        
         super().__init__()
         if  connection_string:
             self.connection_string = connection_string
         else:
             self.connection_string =  os.environ.get("CONNECTION_STRING") 
+        self.llm_cfg = llm_cfg
 
     def get_few_shots(self):
         return [
@@ -94,20 +97,21 @@ class KB_DocTool(base_tool):
         return context
     
     def _grade(self, question, context):        
-        result = util.ask_llm(self._get_reranking_prompt_template(),question=question, context=context.content)
+#        cfg = LLMConfig(api_url='https://api.together.xyz', api_key='95ff1832749b6f85200b78384ac0961081363674d2620c6a62f772298876b89c', model='mistralai/Mixtral-8x7B-Instruct-v0.1')
+        result = util.ask_llm(self.llm_cfg, self._get_reranking_prompt_template(),question=question, context=context.content)
         if not result:
             return None   
         
         ranks = [ l for l in  result.split('\n') if len(l.strip()) > 0 ]
         print(ranks)
         if len(ranks) == 0:
-            return None
+            return 0
         doc_title = ranks[0].split(',')[0].split(':')
         if len(doc_title) < 2:
-            return None 
+            return 0 
         top_doc_idx =  doc_title[1].strip()
         if not top_doc_idx.isdigit():
-            return None
+            return 0
         return int(top_doc_idx) - 1
 
 

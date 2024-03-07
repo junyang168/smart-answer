@@ -4,6 +4,7 @@ import os
 from embedding_client import Client
 from embedding_client.models import EmbeddingRequest, EmbeddingResponse
 from  embedding_client.api.default.embed_embed_post import sync
+from smart_answer_core.LLMWrapper import LLMConfig
 
 
 
@@ -82,8 +83,8 @@ def run_dml(sql,params: tuple = None, is_proc=False, connection_string = None):
 
 from smart_answer_core.LLMWrapper import LLMWrapper
 
-def ask_llm( prompt_template : str, format = None, sid = None,  **kwargs ):
-    llm = LLMWrapper()
+def ask_llm( llm_cfg : LLMConfig,  prompt_template : str, format = None, sid = None,  **kwargs ):
+    llm = LLMWrapper(llm_cfg)
     return llm.askLLM(prompt_template, format, sid, kwargs)
 
 
