@@ -71,7 +71,7 @@ class LLMWrapper:
         
         if self.__config.model.startswith('openai/'):  
             model_name = self.__config.model[len('openai/'):]          
-            llm = ChatOpenAI(temperature=0,model_name= model_name)
+            llm = ChatOpenAI(temperature=0,model_name= model_name,openai_api_key = self.__config.api_key )
         else:
             llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_tokens=1000)
 

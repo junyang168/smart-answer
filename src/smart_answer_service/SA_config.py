@@ -16,6 +16,7 @@ from smart_answer_core.tools.kb_doc import KB_DocTool
 from tools.interoperability import InterOperabilityTool
 from tools.configMax import ConfigMaxTool
 from tools.demo_tool import DemoTool
+from tools.demo_followup import DemoFollowupTool
 
 class SmartAnswer_Config:
     tools : list[base_tool]
@@ -28,13 +29,18 @@ def load_config() -> dict[str, LLMConfig]:
         llm_config = {}
         for cfg_name, cfg in cfg_data.items():
             config = SmartAnswer_Config()
-            config.llm_config = LLMConfig(api_url=cfg['LLM_API_URL'],api_key=cfg['LLM_API_KEY'],model= cfg['LLM_MODEL'])
+            config.llm_config = LLMConfig(
+                api_url=cfg.get('LLM_API_URL',""),
+                api_key=cfg.get('LLM_API_KEY',""),
+                model= cfg.get('LLM_MODEL',""))
             llm_config[cfg_name] = config
-            if cfg_name == 'test':
-                config.tools =  [DemoTool()]
-            else:
+            if cfg_name == 'default':
                 CONNECTION_STRING = os.environ["CONNECTION_STRING"]
                 config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
+            elif cfg_name == 'test':
+                config.tools =  [DemoTool()]
+            else:
+                config.tools =  [DemoFollowupTool()]
 
         return llm_config
 

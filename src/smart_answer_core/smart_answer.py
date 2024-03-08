@@ -94,6 +94,7 @@ class SmartAnswer:
                 if result:
                     question_prefix = result.prefix 
                 answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)
+                
         if answer:
             chatMemory.add_answer(answer)
 

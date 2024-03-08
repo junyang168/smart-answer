@@ -42,12 +42,11 @@ def get_answer(request: SmartAnswerRequest):
         resp = sa.get_smart_answer(request.question, sid=request.sid)        
         return resp
 
-
 import uvicorn
 if __name__ == "__main__":
         
 
-#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
+        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
@@ -55,7 +54,7 @@ if __name__ == "__main__":
         load_dotenv(dotenv_path)
 
         questions = [ 
-              "root directory is full on vcenter"
+        #      "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
         #      "What are the steps to configure GPUs on esxi 8?"
@@ -78,8 +77,8 @@ if __name__ == "__main__":
         #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
-        org_id = None
-        sid = None
+        org_id = "default"
+        sid = "ml1234900x"
         for question in questions:                
                 if org_id:
                     req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=True)
