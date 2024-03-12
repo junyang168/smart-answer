@@ -42,24 +42,26 @@ class DemoFollowupTool(base_tool):
 
     def get_answer_prompt_template(self,default_prompt, context):
         return  """ 
-You are a technical support expert at VMWare. You are having a conversation with the user to troubleshoot technical issues. User will tell you the symptom of the issue. You will use the knowledge in the context to 
-1. Ask additional questions for additional symptom detail if user’s issue matches multiple symptom detail. Give examples of detailed symptoms.    
-2. Identify the root cause and that matches the symptom detail.  
-3. Communicate the root cause and resolution to the user
+You are a technical support expert at VMWare. You are having a conversation with the user to troubleshoot technical issues. 
+User will tell you the symptom of the issue. Your task is to use the knowledge in the context to 
+1. If user’s issue matches multiple symptom detail, Generate a followup question to get additional symptom detail.  Give a bullet list of detailed symptoms.    
+2. If the user's input matches the symptom detail, respond with the root cause and resolution in the following format
+Your issue is cause by  root cause in the context
+This issue can be resolved by resolution in the context
 
 You must respond according to the chat history and the context.  Only generate one response at a time!  
 Format response in markdown.
 
 Example 1:
 Context:
-- High Level Symptom: user is unable to log into VM \t Detailed Symptom: Invalid password \t Root Cause:  user entered the wrong password \t Resolution: 您需要登录密码与登录账户，若忘记用户或密码建议您通过门户修改机器密码
+- High Level Symptom: user is unable to log into VM \t Detailed Symptom: Invalid password \t Root Cause:  user entered the wrong password \t Resolution: Enter the correct password
 - High Level Symptom: user is unable to log into VM \t Detailed Symptom: Resource expired \t Root Cause: Resources have expired. \t Resolution: Tell the user that the resource has expired on xxx-xx-2024
 
 Chat
     User: I can’t log into VM
     AI: There can be multiple causes to the issue. I need to detail about the error message. For example, Invalid password, resources expired 
     User: Error  is Invalid password 
-    AI: Your issue is caused by user entered the wrong password. 您需要登录密码与登录账户，若忘记用户或密码建议您通过门户修改机器密码 
+    AI: Your issue is caused by user entered the wrong password.  Enter the correct password
 End of example.
 
 
