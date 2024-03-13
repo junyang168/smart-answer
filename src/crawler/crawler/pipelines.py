@@ -12,20 +12,25 @@ import json
 class SavePipeline:
 
     def open_spider(self, spider):
-        CONNECTION_STRING = "postgresql://postgres:airocks$123@192.168.242.24:5432/postgres"
-        self.conn = psycopg.connect(CONNECTION_STRING)
+        self.CONNECTION_STRING = "postgresql://postgres:airocks$123@192.168.242.24:5432/postgres"
+        self.conn = psycopg.connect(self.CONNECTION_STRING)
         
 
     def process_item(self, item, spider):
         ai = ItemAdapter(item)
-        cur = self.conn.cursor()
+        try:
+            cur = self.conn.cursor()
+        except Exception as err:
+            self.conn = psycopg.connect(self.CONNECTION_STRING)
+            cur = self.conn.cursor()
+ 
         sql = """
             insert into ingestion_content(id, source, lastmod, content_raw,content, metadata ) 
             values( %s, %s, %s, %s,%s, %s) 
-            on conflict( id ) do update set lastmod = excluded.lastmod, content_raw = excluded.content_raw, metadata = excluded.metadata 
+            on conflict( id ) do update set source=excluded.source, lastmod = excluded.lastmod, content_raw = excluded.content_raw, metadata = excluded.metadata 
         """
         try:
-            cur.execute(sql, (ai['url'],'KB2', ai['lastmod'], ai['content_raw'] , ai['content'], ai['meta']) )
+            cur.execute(sql, (ai['url'],ai['source'], ai['lastmod'], ai['content_raw'] , ai['content'], ai['meta']) )
             self.conn.commit()
         except Exception as err:
             print(err)

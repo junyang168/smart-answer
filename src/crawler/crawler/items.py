@@ -7,6 +7,7 @@ import scrapy
 
 
 class CrawlerItem(scrapy.Item):
+    source = scrapy.Field()
     meta = scrapy.Field()
     url = scrapy.Field()
     content = scrapy.Field()
