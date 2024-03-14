@@ -8,10 +8,10 @@ class BlogSpider(EnhancedSitemapSpider):
 
     def __get_lastmod(self, response ):
         ent = self.docs.get(response.url)
-        if ent:
+        if ent and ent[0]:
             return ent[0]
         else:
-            return ""
+            return response.xpath("//meta[@property='article:published_time']/@content").get()
 
 
     def parse(self, response):
