@@ -9,6 +9,8 @@ import sys
 from ..items import CrawlerItem
 from crawler.spiders.enhanced_sitemap_spider import EnhancedSitemapSpider
 from datetime import datetime
+import jsonpath_ng
+import json
 
 class DocSpider(EnhancedSitemapSpider):
     name = 'Doc'
@@ -18,13 +20,6 @@ class DocSpider(EnhancedSitemapSpider):
     sitemap_rules = [(r'/en/.+\.html', 'parse_en_html')]
     sitemap_index_filters = ['_en_']
 
-    def sitemap_filter2(self, entries):
-        if entries.type == "sitemapindex":
-            for entry in entries:
-                if entry['loc'].find('_en_') >=0 :
-                    yield entry
-        else:
-            super().sitemap_filter(entries)
 
     def __get_lastmod(self, response ):
         ent = self.docs.get(response.url)
@@ -33,6 +28,8 @@ class DocSpider(EnhancedSitemapSpider):
         else:
             dt = datetime.strptime(response.xpath("//meta[@name='last modified']/@content").get(), '%d/%m/%Y %H:%M:%S')
             return dt.strftime("%Y-%m-%d")
+        
+    
 
 
     def parse_en_html(self, response):

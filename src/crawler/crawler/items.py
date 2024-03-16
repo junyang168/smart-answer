@@ -13,3 +13,4 @@ class CrawlerItem(scrapy.Item):
     content = scrapy.Field()
     lastmod = scrapy.Field()
     content_raw = scrapy.Field()
+    content_type = scrapy.Field()
