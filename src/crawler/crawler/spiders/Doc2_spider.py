@@ -23,21 +23,23 @@ class Doc2Spider(Spider):
 #        self.new_method()
         self.start_urls = ['https://docs.vmware.com/en/VMware-vSphere/index.html']
 
-    def new_method(self):
+
+
+    def parse_product_list(self, response):
+        products =  json.loads(response.text)
+
+
+
+    def start_requests(self) :
         url = "https://docs.vmware.com/search/get-all-products"
 
         # The JSON data you want to post
-        data = {
+        request_body = json.dumps( {
             "includes": ["product", "url"],
             "language": "en",
             "target": "prod"
-        }
-        response = requests.post(url, json=data)
-        products =  response.json
-        product_urls = []
-        for c, prods in products.items():
-            for p in prods:
-                product_urls.append(p['url'])
+        } )
+        yield Request(url, method="POST", body=request_body, headers={'Content-Type': 'application/x-www-form-urlencoded'},callback=self.parse_product_list )
 
  
     def __load_sitemap(self):
@@ -75,6 +77,7 @@ class Doc2Spider(Spider):
 
         return [ url for url in urls if url and ( url[0] == '/' or url.startswith('https://docs.vmware.com')) and url.endswith('.html') ]
     
+
     def parse_toc(self, response):
         self.docs[response.url] = '2024-03-15'
         item = CrawlerItem()
@@ -89,46 +92,47 @@ class Doc2Spider(Spider):
         for link in links:
             url = 'https://docs.vmware.com' + link if link[0] =='/' else link
             if not self.docs.get(url):
-                self.docs[url] = '2024-03-15'
                 yield response.follow(link, self.parse)
-        yield item
+#        yield item
 
 
     def parse(self, response):
-        item = CrawlerItem()
-        item['url'] = response.url
-        item['source'] = self.name
-        article = response.xpath("//article")
-        parent_id = ''
-        if article:
-            body = article.xpath('div')
-            if body:
-                body = body.get()
-                parent_link = article.xpath("//div[@class='parentlink']//a/@href").get()
-                if parent_link:
-                    parent_id = parent_link.replace('.html','') 
-            else:
-                body = article.get()
-        else:
-            article = response.xpath("//div[contains(@class,'article-wrapper')]")
-            if article:
-                body = article.get()
-        
-        if article:
-            item['meta'] = {
-                'title' : response.xpath("//meta[@name='title']/@content").get(),
-                'document_id' : response.xpath("//meta[@name='guid']/@content").get(),
-                'product_versions' : response.xpath("//meta[@name='product']/@content").get(),
-                'parent_id' : parent_id
-            }
-            item['content_raw'] = [{ 'article': body }] 
+        if not self.docs.get(response.url):
+            item = CrawlerItem()
+            item['url'] = response.url
+            item['source'] = self.name
             item['lastmod'] = self.__get_lastmod(response) 
             self.docs[item['url']] = item['lastmod']
-            yield item
-        else:
-            pass     
+
+            article = response.xpath("//article")
+            parent_id = ''
+            if article:
+                body = article.xpath('div')
+                if body:
+                    body = body.get()
+                    parent_link = article.xpath("//div[@class='parentlink']//a/@href").get()
+                    if parent_link:
+                        parent_id = parent_link.replace('.html','') 
+                else:
+                    body = article.get()
+            else:
+                article = response.xpath("//div[contains(@class,'article-wrapper')]")
+                if article:
+                    body = article.get()
+            
+            if article:
+                item['meta'] = {
+                    'title' : response.xpath("//meta[@name='title']/@content").get(),
+                    'document_id' : response.xpath("//meta[@name='guid']/@content").get(),
+                    'product_versions' : response.xpath("//meta[@name='product']/@content").get(),
+                    'parent_id' : parent_id
+                }
+                item['content_raw'] = [{ 'article': body }] 
+                yield item
+            else:
+                pass     
         
-        toc_url = response.url[: item['url'].rfind('/')] + '/toc.json'
+        toc_url = response.url[: response.url.rfind('/')] + '/toc.json'
 
         toc = self.docs.get(toc_url)
         if not toc:   

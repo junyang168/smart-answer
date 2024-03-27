@@ -17,10 +17,9 @@ class MarkdownPipeline:
         content_raw = adapter.get('content_raw')
         content = {}
         if content_raw:
-            if adapter['content_type'] != 'toc':
-                for sec in content_raw:
-                    for sec_name, sec_value in sec.items():
-                        content[sec_name] = mf.markdownify(sec_value)
+            for sec in content_raw:
+                for sec_name, sec_value in sec.items():
+                    content[sec_name] = mf.markdownify(sec_value)
             try:
                 adapter['content'] = json.dumps(content)
                 adapter['content_raw'] = json.dumps(content_raw)

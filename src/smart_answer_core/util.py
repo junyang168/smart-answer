@@ -1,43 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os
-from embedding_client import Client
-from embedding_client.models import EmbeddingRequest, EmbeddingResponse
-from  embedding_client.api.default.embed_embed_post import sync
 from smart_answer_core.LLMWrapper import LLMConfig
-
-
-
-
-__embedding_model =  os.environ.get("EMBEDDING_MODEL") 
-
-__embedding_api_url = os.environ.get("EMBEDDING_API_URL") 
-
-import numpy as np
-
-def __create_bge_embeddings(text):
-    
-    client = Client(base_url=__embedding_api_url)
-
-    Req = EmbeddingRequest(text=text)
-
-    resp = sync(client=client,body=Req)
-
-    return  np.array( resp.embeddings ) 
-
-
-import openai
-def __calculate_openai_embedding(text):
-    response =  openai.Embedding.create( input = inp, engine="ada-embedding")
-    return np.array( response['data'][0]['embedding'] ) 
-
-
-def calculate_embedding(text):
-    if __embedding_model == 'BGE':
-        return __create_bge_embeddings(text)
-    else:
-        return __calculate_openai_embedding(text)
-
 
 import psycopg2
 def execute_sql(sql,params: tuple = None, return_column_names = False, connection_string = None):

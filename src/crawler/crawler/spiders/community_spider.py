@@ -7,7 +7,6 @@ from datetime import datetime, timezone, timedelta
 
 class CommunitySpider(Spider):
     name = 'Community'
-    sitemap_urls = ["https://communities.vmware.com/sitemap.xml"]
     allowed_domains = ["communities.vmware.com"]
 
     def __get_lastmod(self, response ):
@@ -20,7 +19,7 @@ class CommunitySpider(Spider):
     def start_requests(self):
         self.CONNECTION_STRING = "postgresql://postgres:airocks$123@192.168.242.24:5432/postgres"
 
-        sql = f"select id, lastmod from ingestion_content where source='CommunityPost' "
+        sql = f"select id, lastmod from ingestion_content ic where source='CommunityPost' and not exists ( select 1 from ingestion_content ic2 where ic2.id = substring(ic.id,1, POSITION('#' in ic.id) -1) and ic2.source='Community' )"
         conn = psycopg.connect(self.CONNECTION_STRING)
         cur = conn.cursor()
         cur.execute(sql)
