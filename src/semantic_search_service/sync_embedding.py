@@ -10,7 +10,7 @@ import json
 from kb_extractor import kb_extractor
 from embed_content_extractor import embed_content_extractor
 from model import get_model, FeedPassage
-
+from tqdm import tqdm
 
 
 
@@ -41,7 +41,7 @@ class semantic_search_feeder:
                 from ingestion_content ic 
                 where 
                 source='KB2'
-                limit 100
+                limit 1000
         """
         cur.execute(sql)
         ds = cur.fetchall()
@@ -59,7 +59,8 @@ class semantic_search_feeder:
     def process_content(self):
         ds = self.get_content_to_embed()
         emb_ds = []
-        for r in ds:
+        for i in tqdm( range(len(ds)) ):
+            r = ds[i]
             id = r[0]
             source = r[1]
             content = json.loads(r[3])
@@ -82,6 +83,8 @@ class semantic_search_feeder:
                     )
             if len(emb_ds) > 5:
                 get_model().feed_data(emb_ds)
+#                from time import sleep
+#                sleep(0.1)
                 emb_ds.clear()
 
 
