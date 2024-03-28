@@ -41,7 +41,6 @@ class semantic_search_feeder:
                 from ingestion_content ic 
                 where 
                 source='KB2'
-                limit 1000
         """
         cur.execute(sql)
         ds = cur.fetchall()
@@ -81,7 +80,7 @@ class semantic_search_feeder:
                         last_updated=md.get('last_updated')
                     )
                     )
-            if len(emb_ds) > 5:
+            if len(emb_ds) > 20:
                 get_model().feed_data(emb_ds)
 #                from time import sleep
 #                sleep(0.1)
