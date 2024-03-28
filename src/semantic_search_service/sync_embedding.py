@@ -57,6 +57,7 @@ class semantic_search_feeder:
 
     def process_content(self):
         ds = self.get_content_to_embed()
+        print(f'sync {len(ds)} documents to vespa')
         emb_ds = []
         for i in tqdm( range(len(ds)) ):
             r = ds[i]
