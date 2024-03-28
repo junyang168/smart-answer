@@ -41,9 +41,7 @@ class semantic_search_feeder:
             select ic.id, ic.source, ic.metadata , ic."content" 
                 from ingestion_content ic 
                 where 
-                source='KB2'
-                and id='https://kb.vmware.com/s/article/2144493?lang=ja'
-                limit 1000
+                source='KB2' and not exists( select 1 from semantic_search_feed sf where sf.content_id = ic.id )
         """
         cur.execute(sql)
         ds = cur.fetchall()
