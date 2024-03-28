@@ -87,7 +87,7 @@ class Model:
             }
         )
         if response.is_successful():
-            return [ QueryResult(id=h.get('id'), relevance_score = h.get('relevance'), text= h['fields'].get('text'), content_id= h['fields'].get('content_id'))  for h in response.hits if h.get('relevance') > 0.6]
+            return [ QueryResult(id=h.get('id'), relevance_score = h.get('relevance'), text= h['fields'].get('text'), content_id= h['fields'].get('content_id'))  for h in response.hits if h.get('relevance') > 0.5]
         else:
             raise Exception(response.get_json())
 
