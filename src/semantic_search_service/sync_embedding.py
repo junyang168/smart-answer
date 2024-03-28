@@ -81,7 +81,7 @@ class semantic_search_feeder:
                         last_updated=md.get('last_updated')
                     )
                     )
-            if len(emb_ds) > 20:
+            if len(emb_ds) > 5:
                 get_model().feed_data(emb_ds)
 #                from time import sleep
 #                sleep(0.1)
