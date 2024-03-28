@@ -65,6 +65,8 @@ class Model:
         return embeddings
 
     def create_embedding(self, passages, embeddings):
+        if len(passages) == 0:
+            return
         res = self.model.encode(passages, return_dense=True, return_sparse=True, return_colbert_vecs=True)
         embeddings["dense_vecs"].extend(res["dense_vecs"])
         embeddings["lexical_weights"].extend(res["lexical_weights"])
