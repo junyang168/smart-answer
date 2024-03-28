@@ -3,7 +3,7 @@ import os
 import torch
 
 from vespa.application import Vespa
-from vespa.io import VespaQueryResponse
+from vespa.io import VespaQueryResponse    
 from vespa.exceptions import VespaError
 from vespa.deployment import VespaDocker
 from vespa.package import Schema, Document, Field, FieldSet
@@ -12,19 +12,18 @@ from vespa.package import RankProfile, Function,  FirstPhaseRanking
 from vespa.io import VespaResponse
 from vespa.io import VespaQueryResponse
 import json
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
+import psycopg
 
-def callback(response:VespaResponse, id:str):
-    if not response.is_successful():
-        print(f"Error when feeding document {id}: {response.get_json()}")
 
 class FeedPassage(BaseModel):
     id:str
     content_id:str
     text:str
-    last_updated:str
-    language: str | None
+    last_updated:Optional[str] = None
+    language: Optional[str] = None
+    status: Optional[str] = None
 
 class QueryResult(BaseModel):
     id:str
@@ -33,8 +32,10 @@ class QueryResult(BaseModel):
     text: str
 
 
-
 class Model:
+    CONNECTION_STRING = ""
+    syn_records = []
+
     def __init__(self):
         use_gpu =  os.environ.get("USE_GPU") 
         print(f"use gpu: {use_gpu}")
@@ -44,10 +45,42 @@ class Model:
 
 
     def embed(self,passages : List[str]):
-        return self.model.encode(passages, return_dense=True, return_sparse=True, return_colbert_vecs=True)
+        total_len = 0
+        i = 0
+        idx = 0
+        embeddings = {
+            "lexical_weights":[],
+            "dense_vecs":[],
+            "colbert_vecs":[]
+
+        }
+        while i < len(passages):
+            total_len +=  len( passages[i] )
+            if total_len > 8000:
+                self.create_embedding(passages[idx: i], embeddings)
+                idx = i
+                total_len = len( passages[i] )
+            i += 1
+        self.create_embedding(passages[idx:], embeddings)
+        return embeddings
+
+    def create_embedding(self, passages, embeddings):
+        res = self.model.encode(passages, return_dense=True, return_sparse=True, return_colbert_vecs=True)
+        embeddings["dense_vecs"].extend(res["dense_vecs"])
+        embeddings["lexical_weights"].extend(res["lexical_weights"])
+        embeddings["colbert_vecs"].extend(res["colbert_vecs"])
 
 
-    def feed_data(self, passages : List[FeedPassage]):
+
+
+    def feed_callback(self, response:VespaResponse, id:str):
+        for pa in ( p  for p in self.feed_passages if p.id == id):
+            if not response.is_successful():
+                pa.status = response.get_json()
+
+
+    def feed(self, passages : List[FeedPassage]):
+        self.feed_passages = passages
         passage_embeddings = self.embed( [ p.text for p in passages ])
         feed_data = []
         for i in range(len(passages)):
@@ -67,7 +100,10 @@ class Model:
                 }
             )
 
-        response: VespaResponse = self.app.feed_iterable(feed_data, schema='sa', callback=callback)
+        response: VespaResponse = self.app.feed_iterable(feed_data, schema='sa', callback=self.feed_callback)
+        return self.feed_passages
+
+
 
     def search(self, query:str) -> List[QueryResult]:
         query_embeddings = self.embed([query])
@@ -86,6 +122,8 @@ class Model:
                 **query_fields
             }
         )
+
+
         if response.is_successful():
             return [ QueryResult(id=h.get('id'), relevance_score = h.get('relevance'), text= h['fields'].get('text'), content_id= h['fields'].get('content_id'))  for h in response.hits if h.get('relevance') > 0.5]
         else:

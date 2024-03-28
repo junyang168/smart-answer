@@ -30,6 +30,7 @@ class semantic_search_feeder:
 
     def __init__(self) -> None:
         self.CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+        get_model().CONNECTION_STRING = self.CONNECTION_STRING
 
 
 
@@ -41,6 +42,8 @@ class semantic_search_feeder:
                 from ingestion_content ic 
                 where 
                 source='KB2'
+                and id='https://kb.vmware.com/s/article/2144493?lang=ja'
+                limit 1000
         """
         cur.execute(sql)
         ds = cur.fetchall()
@@ -82,11 +85,24 @@ class semantic_search_feeder:
                     )
                     )
             if len(emb_ds) > 5:
-                get_model().feed_data(emb_ds)
-#                from time import sleep
-#                sleep(0.1)
+                feed_result = get_model().feed(emb_ds)
+                self.update_feed_status(feed_result)
                 emb_ds.clear()
 
+    def update_feed_status(self, feed_passages):
+        ds = [ (p.id, p.content_id, p.last_updated, p.status) for p in feed_passages ]
+        with psycopg.connect(self.CONNECTION_STRING) as conn:
+            with conn.cursor() as cur:
+                sql = """
+                    insert into semantic_search_feed(chunk_id,content_id, last_updated, status, updated_time) 
+                    values( %s, %s, %s, %s, now()) 
+                    on conflict( chunk_id ) do update set content_id=excluded.content_id, status = excluded.status, last_updated = excluded.last_updated, updated_time = now()  
+                """
+                try:
+                    cur.executemany(sql, ds )
+                    conn.commit()
+                except Exception as err:
+                    print(err)
 
 if __name__ == '__main__':
     feeder = semantic_search_feeder()
