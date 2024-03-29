@@ -1,0 +1,73 @@
+schema sa {
+    document sa {
+        field id type string {
+            indexing: summary
+        }
+        field content_id type string {
+            indexing: attribute
+        }
+        field source type string {
+            indexing: attribute
+        }
+        field language type string {
+            indexing: attribute
+        }
+        field last_updated type string {
+            indexing: attribute
+        }
+        field text type string {
+            indexing: summary | index
+            index: enable-bm25
+        }
+        field lexical_rep type tensor<bfloat16>(t{}) {
+            indexing: summary | attribute
+        }
+        field dense_rep type tensor<bfloat16>(x[1024]) {
+            indexing: summary | attribute
+            attribute {
+                distance-metric: angular
+            }
+        }
+        field colbert_rep type tensor<bfloat16>(t{}, x[1024]) {
+            indexing: summary | attribute
+        }
+    }
+    fieldset default {
+        fields: text
+    }
+    rank-profile m3hybrid {
+        inputs {
+            query(q_dense) tensor<bfloat16>(x[1024])             
+            query(q_lexical) tensor<bfloat16>(t{})             
+            query(q_colbert) tensor<bfloat16>(qt{}, x[1024])             
+            query(q_len_colbert) float             
+        
+        }
+        function dense() {
+            expression {
+                cosine_similarity(query(q_dense), attribute(dense_rep),x)
+            }
+        }
+        function lexical() {
+            expression {
+                sum(query(q_lexical) * attribute(lexical_rep))
+            }
+        }
+        function max_sim() {
+            expression {
+                sum(reduce(sum(query(q_colbert) * attribute(colbert_rep) , x),max, t),qt)/query(q_len_colbert)
+            }
+        }
+        first-phase {
+            expression {
+                0.4*dense + 0.2*lexical +  0.4*max_sim
+            }
+        }
+        match-features {
+            dense
+            lexical
+            max_sim
+            bm25(text)
+        }
+    }
+}

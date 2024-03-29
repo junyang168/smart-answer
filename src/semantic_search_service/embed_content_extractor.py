@@ -8,6 +8,7 @@ class embed_content_extractor:
     def get_metadata(self, meta:dict, content:dict) -> dict:
         pass
 
+
     def split_markdown(self, markdown_document):
         if len(markdown_document) < 6000:
             return [markdown_document]

@@ -37,9 +37,9 @@ class kb_extractor(embed_content_extractor):
          chunk = ''
          chunk += self.add_secion(content,'Purpose')
          chunk += self.add_secion(content,'Symptoms')
-         if chunk:
-            chunk = common_content + chunk
-            chunks.append(chunk)
+#         if chunk:
+         chunk = common_content + chunk
+         chunks.append(chunk)
 
          chunk = ''
          chunk += self.add_secion(content,'Cause')
@@ -49,7 +49,7 @@ class kb_extractor(embed_content_extractor):
          chunk += self.add_secion(content,'Resolution')
          if chunk:
             md_chunks = [common_content + c for c in self.split_markdown(chunk) ]
-            chunks.extend(md_chunks)
+#            chunks.extend(md_chunks)
             
          return chunks
 
