@@ -9,7 +9,8 @@ import json
 
 from kb_extractor import kb_extractor
 from embed_content_extractor import embed_content_extractor
-from semantic_search_service.vespa_service import get_service, FeedPassage
+import semantic_search_service
+
 from tqdm import tqdm
 
 
@@ -30,7 +31,7 @@ class semantic_search_feeder:
 
     def __init__(self) -> None:
         self.CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-        get_service().CONNECTION_STRING = self.CONNECTION_STRING
+        self.semanticSearch = semantic_search_service.SemanticSearchService(load_data = False)
 
 
     def load_jsonl(self, input_path) -> list:
@@ -50,6 +51,7 @@ class semantic_search_feeder:
             select ic.id, ic.source, ic.metadata , ic."content" 
                 from ingestion_content ic 
                 where source='KB2'
+--                and ic.metadata->>'lastModifiedDate' like '2023-05-2%'
 --                and not exists(select 1 from semantic_search_feed ssf where ssf.content_id = ic.id)
         """
         cur.execute(sql)
@@ -63,14 +65,12 @@ class semantic_search_feeder:
             if ext.get_source() == source:
                 return ext
         return None
-
+    
+    def reset(self):
+        self.semanticSearch.reset_vector_store()
 
     def process_content(self):
         ds = self.get_content_to_embed()
-
-        vespa_ids = self.load_jsonl('ids.jsonl')
-        ids = { line['id'][len('id:sa:sa::'):].replace('https:/','https://') : 1 for line in vespa_ids }
-
         print(f'sync {len(ds)} documents to vespa')
         emb_ds = []
         for j in tqdm( range(len(ds)) ):
@@ -80,9 +80,6 @@ class semantic_search_feeder:
             content = json.loads(r[3])
             meta = r[2]
 
-            if ids.get(id):
-                continue
-
             extractor =  self.get_extractor( source ) 
             if extractor:
                 md = extractor.get_metadata(meta, content)
@@ -91,7 +88,7 @@ class semantic_search_feeder:
                     rec_id = id
                     if i > 0:
                         rec_id += f'-{i}'
-                    emb_ds.append( FeedPassage(
+                    emb_ds.append( semantic_search_service.FeedPassage(
                         id= rec_id,
                         content_id= id,
                         text= chunks[i],
@@ -99,14 +96,14 @@ class semantic_search_feeder:
                         last_updated=md.get('last_updated')
                     )
                     )
-            if len(emb_ds) > 5:
-                feed_result = get_service().feed(emb_ds)
-                self.update_feed_status(feed_result)
+            if len(emb_ds) > 20:
+                self.semanticSearch.feed(emb_ds, j == (len(ds) - 1 ) )
+#                self.update_feed_status(feed_result)
                 emb_ds.clear()
         if emb_ds:
-            feed_result = get_service().feed(emb_ds)
-            self.update_feed_status(feed_result)
-        
+            self.semanticSearch.feed(emb_ds,persit=True)
+
+#            self.update_feed_status(feed_result)
 
 
     def update_feed_status(self, feed_passages):
@@ -126,5 +123,7 @@ class semantic_search_feeder:
 
 if __name__ == '__main__':
     feeder = semantic_search_feeder()
-    feeder.process_content()
-
+    go = input('are you sure to delete all records[Y/N]')
+    if go == 'Y':
+        feeder.reset()
+        feeder.process_content()
