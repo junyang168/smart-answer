@@ -53,11 +53,6 @@ class VectorStore:
         self.tokens = {}
 
 
-
-
-
-        
-
     def save(self, passage_embeddings:dict):
         for i in range(len(passage_embeddings['dense_vecs'])):
             id = passage_embeddings['ids'][i]
@@ -85,7 +80,8 @@ class VectorStore:
                 bm25_position_X.append(i)
                 bm25_position_Y.append(pos)
                 bm25_value.append(w)                                             
-        bm25_t = torch.tensor([bm25_position_X,bm25_position_Y, bm25_value ])
+        bm25_index_t = torch.tensor([bm25_position_X,bm25_position_Y ])
+        bm25_value_t = torch.tensor(bm25_value)
 
         id_tokens = {
             'ids':  [ d[0] for d in self.dense_bm25_vecs ],
@@ -98,7 +94,8 @@ class VectorStore:
         dense_t = torch.stack( [ d[1] for d in self.dense_bm25_vecs ]  ,dim=0)
 
         self.embedings["dense"] =  dense_t           
-        self.embedings["bm25"] = bm25_t
+        self.embedings["bm25_index"] = bm25_index_t
+        self.embedings["bm25_value"] = bm25_value_t        
 
         save_file(self.embedings, self.tensor_file_name)
 
@@ -111,9 +108,14 @@ class VectorStore:
 
         with safe_open(self.tensor_file_name, framework="pt", device=0) as f:
             self.dense_embeddings = f.get_tensor('dense').cuda()
-            bm25_data = f.get_tensor('bm25')
+            bm25_index = f.get_tensor('bm25_index')
+            bm25_value = f.get_tensor('bm25_value')
+
         sz = (len(self.ids), len(self.tokens))
-        self.bm25_encodings = torch.sparse_coo_tensor(bm25_data[0:2,:], bm25_data[2,:],size=sz).float().cuda()
+        self.bm25_encodings = torch.sparse_coo_tensor(bm25_index, bm25_value).float().cuda()
+        pass
+
+                    
 
         
 #    def compute_lexical_matching_score(self, lexical_weights_1: Dict, lexical_weights_2: Dict):
@@ -132,9 +134,8 @@ class VectorStore:
             if p:
                 q_w[p,0] = w
 
-
         q_t = torch.from_numpy(q_w).cuda()
-        bm25_scores = torch.spmm(self.bm25_encodings, q_t)
+        bm25_scores = torch.sparse.mm(self.bm25_encodings, q_t)
 
         return bm25_scores[:,0].cpu().numpy()
     
@@ -159,20 +160,13 @@ class VectorStore:
         return self.ids[idx]
 
     def retrieve(self, query_embeddings, topN = 1000): 
-    # pass 1
-        
+    # pass 1: tense + bm25
+    
         t_0 = timeit.default_timer()
 
         # dense score
         q_embs = torch.from_numpy(np.array([query_embeddings['dense_vecs'][0]])).cuda()    
         dense_score = torch.matmul(self.dense_embeddings,  q_embs.transpose(0,1) )
-
-        t_1 = timeit.default_timer()
-        elapsed_time = round((t_1 - t_0) , 3)
-        print(f"Dense Score: {elapsed_time} s")
-
-
-
 
         # sparse score
         bm25_score = self.get_bm25_score( query_embeddings['lexical_weights'][0] )
@@ -180,7 +174,6 @@ class VectorStore:
  
         pass1_score = dense_score.squeeze(dim=-1) + torch.from_numpy(bm25_score).cuda()/2.0
         m = torch.sort(pass1_score, descending=True )
-
 
         topN_index = m[1][:topN].cpu().numpy()
 
@@ -197,8 +190,6 @@ class VectorStore:
         q_embs =  query_embeddings['colbert_vecs'][0]   
         colbert_id_score = self.get_colbert_score( q_embs, colbert_id_embs)
 
-
-
         hybrid_scores = [
             HybridScore( id=self.ids[r[0]['idx']], colbert_score=r[1], dense_score=dense_score[r[0]['idx']].item(), bm25_score= bm25_score[r[0]['idx']])
             for r in colbert_id_score ]
@@ -208,7 +199,7 @@ class VectorStore:
 
         t_4 = timeit.default_timer()
         elapsed_time = round((t_4 - t_3) , 3)
-        print(f"colbert: {elapsed_time} s")
+        print(f"pass 2 : {elapsed_time} s")
 
         return hybrid_scores
     

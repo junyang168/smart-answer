@@ -71,9 +71,22 @@ class SemanticSearchService:
         if len(passages) == 0:
             return
         res = self.model.encode(passages, return_dense=True, return_sparse=True, return_colbert_vecs=True)
-        embeddings["dense_vecs"].extend(res["dense_vecs"])
-        embeddings["lexical_weights"].extend(res["lexical_weights"])
-        embeddings["colbert_vecs"].extend(res["colbert_vecs"])
+#        res = self.model.encode(passages, return_dense=False, return_sparse=True, return_colbert_vecs=False)
+
+        if res.get("dense_vecs") is not None:
+            embeddings["dense_vecs"].extend(res.get("dense_vecs"))
+        else:
+            embeddings["dense_vecs"].extend([np.empty(1024) for _ in range(len(passages))])
+
+        if res.get("lexical_weights") is not None:
+            embeddings["lexical_weights"].extend(res.get("lexical_weights"))
+        else:
+            embeddings["lexical_weights"].extend([np.empty(1) for _ in range(len(passages))])
+
+        if res.get("colbert_vecs") is not None:            
+            embeddings["colbert_vecs"].extend(res.get("colbert_vecs"))
+        else:
+            embeddings["colbert_vecs"].extend([np.empty((1,1024)) for _ in range(len(passages))])
 
     def reset_vector_store(self):
         self.vector_store.initialize()
