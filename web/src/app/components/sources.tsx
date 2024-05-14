@@ -8,7 +8,7 @@ const SourceItem: FC<{ source: Source; index: number }> = ({
   source,
   index,
 }) => {
-  const { id, name, url } = source;
+  const { id, snippet, url } = source;
   const domain = new URL(url).hostname;
   return (
     <div
@@ -16,22 +16,8 @@ const SourceItem: FC<{ source: Source; index: number }> = ({
       key={id}
     >
       <a href={url} target="_blank" className="absolute inset-0"></a>
-      <div className="font-medium text-zinc-950 text-ellipsis overflow-hidden whitespace-nowrap break-words">
-        {name}
-      </div>
-      <div className="flex gap-2 items-center">
-        <div className="flex-1 overflow-hidden">
-          <div className="text-ellipsis whitespace-nowrap break-all text-zinc-400 overflow-hidden w-full">
-            {index + 1} - {domain}
-          </div>
-        </div>
-        <div className="flex-none flex items-center">
-          <img
-            className="h-3 w-3"
-            alt={domain}
-            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=${16}`}
-          />
-        </div>
+      <div className="font-medium text-zinc-950 text-ellipsis text-wrap">
+        {index+1}. {snippet}
       </div>
     </div>
   );
@@ -46,7 +32,7 @@ export const Sources: FC<{ sources: Source[] }> = ({ sources }) => {
         </>
       }
       content={
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-1 gap-2">
           {sources.length > 0 ? (
             sources.map((item, index) => (
               <SourceItem

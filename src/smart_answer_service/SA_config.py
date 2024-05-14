@@ -17,6 +17,7 @@ from tools.interoperability import InterOperabilityTool
 from tools.configMax import ConfigMaxTool
 from tools.demo_tool import DemoTool
 from tools.demo_followup import DemoFollowupTool
+from tools.sermon_tool import SermonTool
 
 class SmartAnswer_Config:
     tools : list[base_tool]
@@ -39,6 +40,8 @@ def load_config() -> dict[str, LLMConfig]:
                 config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
             elif cfg_name == 'test':
                 config.tools =  [DemoTool()]
+            elif cfg_name == 'holylogos':
+                config.tools =  [SermonTool()]
             else:
                 config.tools =  [DemoFollowupTool()]
 

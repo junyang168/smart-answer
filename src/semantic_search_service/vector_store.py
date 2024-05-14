@@ -8,12 +8,9 @@ import numpy as np
 import itertools 
 from typing import cast, List, Union, Tuple, Optional, Dict
 import timeit
-import redis
 from safetensors.torch import save_file
 import json
 from safetensors import safe_open
-
-
 
 class HybridScore:
     def __init__(self, id :str , dense_score:float,bm25_score:float,colbert_score:float) -> None:
@@ -42,8 +39,11 @@ class VectorStore:
     def __init__(self, dense_vector_dimension = 1024, load_data = True) -> None:
         self.dense_embeddings = torch.Tensor(0,dense_vector_dimension)
         self.embedings = {}
+        self.base_dir = os.getenv('base_dir')
         if load_data:
             self.load_embeddings()
+
+
 
 
         
@@ -88,7 +88,9 @@ class VectorStore:
             'tokens' : tokens
         }
 
-        with open(self.ids_file_name,'w') as f:
+
+        file_path = os.path.join(self.base_dir, 'vector_store', self.ids_file_name)
+        with open(file_path,'w') as f:
             json.dump(id_tokens, f)
 
         dense_t = torch.stack( [ d[1] for d in self.dense_bm25_vecs ]  ,dim=0)
@@ -100,13 +102,14 @@ class VectorStore:
         save_file(self.embedings, self.tensor_file_name)
 
     def load_embeddings(self):
-
-        with open(self.ids_file_name,'r') as f:
+        file_path = os.path.join(self.base_dir, 'vector_store', self.ids_file_name)
+        with open(file_path,'r') as f:
             id_tokens = json.load(f)
             self.ids = id_tokens['ids']
             self.tokens = id_tokens['tokens']
 
-        with safe_open(self.tensor_file_name, framework="pt", device=0) as f:
+        file_path = os.path.join(self.base_dir, 'vector_store', self.tensor_file_name)
+        with safe_open(file_path, framework="pt", device=0) as f:
             self.dense_embeddings = f.get_tensor('dense').cuda()
             bm25_index = f.get_tensor('bm25_index')
             bm25_value = f.get_tensor('bm25_value')
@@ -208,7 +211,8 @@ class VectorStore:
         t_0 = timeit.default_timer()
 
         colbert_embeddings = []
-        with safe_open(self.tensor_file_name, framework="pt", device=0) as f:
+        file_path = os.path.join(self.base_dir, 'vector_store', self.tensor_file_name)
+        with safe_open(file_path, framework="pt", device=0) as f:
             for idx in topN_index:
                 id = self.ids[idx]
                 col_vecs = f.get_tensor(id)
@@ -219,9 +223,6 @@ class VectorStore:
         print(f"load colbert: {elapsed_time} s")
 
         return np.array(colbert_embeddings) 
-
-
-
 
 if __name__ == '__main__':
     vs = VectorStore()

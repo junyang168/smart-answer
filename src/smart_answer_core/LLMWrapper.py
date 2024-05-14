@@ -1,4 +1,6 @@
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+
 import langchain.chains.retrieval_qa.prompt as qa
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -72,6 +74,9 @@ class LLMWrapper:
         if self.__config.model.startswith('openai/'):  
             model_name = self.__config.model[len('openai/'):]          
             llm = ChatOpenAI(temperature=0,model_name= model_name,openai_api_key = self.__config.api_key )
+        elif self.__config.model.startswith('anthropic/'):
+            model_name = self.__config.model[len('anthropic/'):]          
+            llm = ChatAnthropic(temperature=0,model_name= model_name)
         else:
             llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_tokens=1000)
 

@@ -10,7 +10,7 @@ export const fetchAnswer = async (
   query: string,
   org: string,
   search_uuid: string,
-  onNewQuestion: (value: string) => void,
+  onNewQuestion: (value: string) => void,  
   onChatHistory: (value: IChatItemProps[]) => void,
   onSources: (value: Source[]) => void,
   onMarkdown: (value: string) => void,
@@ -25,7 +25,7 @@ export const fetchAnswer = async (
   const env = process.env.NODE_ENV;
   let api_url = ""
   if( env != 'production') {
-    api_url = 'http://localhost:50000'
+    api_url = 'http://localhost:60000'
   }
   api_url = api_url + '/get_answer'
 
@@ -54,7 +54,7 @@ export const fetchAnswer = async (
   let sources : Source[] = [] 
   for( var ref of result.references) {
     const src : Source = { id: ref.Link, name: ref.Title, displayUrl : ref.Link, url: ref.Link,
-        snippet:"",
+        snippet:ref.Title,
         deepLinks: [],
         dateLastCrawled: '',
         cachedPageUrl: '',

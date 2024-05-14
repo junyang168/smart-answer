@@ -12,7 +12,14 @@ export default (phase, { defaultConfig }) => {
       };
     } else {
       return {
-        
+        images: {
+          remotePatterns: [
+            {
+              protocol: 'https',
+              hostname: '*.googleusercontent.com'
+            },
+          ],
+        },      
         async rewrites() {
           return [
             {

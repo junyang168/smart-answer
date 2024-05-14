@@ -1,10 +1,14 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List,Optional
+
 
 
 class Reference(BaseModel):
-    Title: str
-    Link : str
+    Id : str
+    Title: Optional[str] = None
+    Link : Optional[str] = None
+
+
 
 class RetrievalResult(BaseModel):
     prefix: str  = ""
@@ -28,4 +32,7 @@ class base_tool:
     
     def is_fallback_tool(self):
         return False
+    
+    def parse_answer(self, answer):
+        return answer, None
 

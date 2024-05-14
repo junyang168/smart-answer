@@ -4,7 +4,7 @@ import smart_answer_core.util as util
 from smart_answer_core.expand_acronyms import acconym_expansion
 from smart_answer_core.chat_memory import ChatMemory
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from smart_answer_core.base_tool import Reference
 from langchain.schema.messages import HumanMessage
 from smart_answer_core.LLMWrapper import LLMConfig
@@ -93,9 +93,9 @@ class SmartAnswer:
                 question_prefix = ""
                 if result:
                     question_prefix = result.prefix 
-                answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)
-                
+                answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)                
         if answer:
+            answer, reference = tool.parse_answer(answer)
             chatMemory.add_answer(answer)
 
         return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,

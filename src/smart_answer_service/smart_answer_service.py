@@ -10,6 +10,7 @@ sys.path.append(parent_dir)
 from pydantic import BaseModel
 from smart_answer_core.smart_answer import SmartAnswer 
 from smart_answer_core.smart_answer import SmartAnswerResponse
+from typing import Optional
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +32,7 @@ import SA_config
 class SmartAnswerRequest(BaseModel):
     org_id:str = None
     question: str
-    sid:str = None
+    sid: Optional[str] = None
 
 
 @app.post("/get_answer", response_model=SmartAnswerResponse)
@@ -45,7 +46,6 @@ def get_answer(request: SmartAnswerRequest):
 import uvicorn
 if __name__ == "__main__":
         
-
         uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +54,7 @@ if __name__ == "__main__":
         load_dotenv(dotenv_path)
 
         questions = [ 
+              "基督徒能不能吃祭過偶像的食物？"
         #      "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
@@ -77,11 +78,12 @@ if __name__ == "__main__":
         #            "How many virtual CPUs can I have in a virtual machine in vcenter 8.0"
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
-        org_id = "default"
-        sid = "ml1234900x"
+        org_id = "holylogos"
+#        sid = "ml1234900x"
+        sid = None
         for question in questions:                
                 if org_id:
-                    req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=True)
+                    req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=False)
                 else:
                     req = SmartAnswerRequest(question=question)  
                 resp = get_answer(req)
