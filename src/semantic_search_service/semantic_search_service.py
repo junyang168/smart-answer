@@ -5,21 +5,9 @@ import torch
 from typing import List, Optional
 from pydantic import BaseModel
 from vector_store import VectorStore
+from content_store import ContentStore, HybridScore, FeedPassage
+ 
 import numpy as np
-
-class FeedPassage(BaseModel):
-    id:str
-    content_id: str
-    text:str
-    last_updated:Optional[str] = None
-    language: Optional[str] = None
-    status: Optional[str] = None
-
-class QueryResult(BaseModel):
-    id:str
-    content_id:str 
-    relevance_score:float
-    text: str
 
 class SemanticSearchService:
     syn_records = []
@@ -29,7 +17,8 @@ class SemanticSearchService:
         use_gpu =  use_gpu == 'True' and torch.cuda.is_available()        
         print(f"use gpu: {use_gpu}")
         self.model =  BGEM3FlagModel('BAAI/bge-m3', use_fp16=use_gpu) 
-        self.vector_store = VectorStore(load_data=load_data)         
+        self.vector_store = VectorStore(load_data=load_data)  
+        self.content_store = ContentStore()       
 
     def embed(self,passages : List[str]):
         total_len = 0
@@ -81,27 +70,28 @@ class SemanticSearchService:
         passage_embeddings["ids"] = [ passage.id for passage in passages ]
         
         self.vector_store.save(passage_embeddings)
+        self.content_store.save(passages)
 
     def persist(self):
         self.vector_store.persist() 
+        self.content_store.persist()
 
 
-    def search(self, query:str, topK = 10) -> List[QueryResult]:
+    def search(self, query:str, topK = 10) -> List[HybridScore]:
         query_embeddings = self.model.encode([query], return_dense=True, return_sparse=True, return_colbert_vecs=True)
 
         res = self.vector_store.retrieve(query_embeddings, topN=1000)
-        return res[:topK]
+        res_text =  self.content_store.load_text( res[:topK] )
+        return res_text
 
 
-
-def get_service() -> SemanticSearchService:
-    return SemanticSearchService()
+semantic_service = SemanticSearchService()
 
 
 
 if __name__ == '__main__':
     import timeit
-    svc = get_service()
+    svc = semantic_service
 
     res = svc.search('基督徒能不能吃祭過偶像的食物？')
 

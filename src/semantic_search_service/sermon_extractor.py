@@ -77,7 +77,7 @@ class SermonExtractor(embed_content_extractor):
         file_path =  os.path.join(self.base_dir, 'content_store', item_id + '.json')
 
         if os.path.isfile(file_path):
-            with open(item_id, 'r') as file:
+            with open(file_path, 'r') as file:
                 sections = json.load(file)
         else:
             text = self.get_script(script)

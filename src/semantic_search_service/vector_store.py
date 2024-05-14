@@ -11,21 +11,7 @@ import timeit
 from safetensors.torch import save_file
 import json
 from safetensors import safe_open
-
-class HybridScore:
-    def __init__(self, id :str , dense_score:float,bm25_score:float,colbert_score:float) -> None:
-        self.id = id
-        self.dense_score = dense_score
-        self.bm25_score = bm25_score
-        self.colbert_score = colbert_score
-        self.hybrid_score = 0.6*colbert_score + 0.4*dense_score + 0.2 * bm25_score 
-
-    def __str__(self) -> str:
-        return self.__repr__() 
-
-    def __repr__(self) -> str:
-        return f"Result - id: {self.id} score:{self.hybrid_score} dense:{self.dense_score} bm25:{self.bm25_score} colbert:{self.colbert_score}\n"
-
+from content_store import HybridScore
 
 
 
@@ -99,7 +85,8 @@ class VectorStore:
         self.embedings["bm25_index"] = bm25_index_t
         self.embedings["bm25_value"] = bm25_value_t        
 
-        save_file(self.embedings, self.tensor_file_name)
+        file_path = os.path.join(self.base_dir, 'vector_store', self.tensor_file_name)
+        save_file(self.embedings, file_path)
 
     def load_embeddings(self):
         file_path = os.path.join(self.base_dir, 'vector_store', self.ids_file_name)

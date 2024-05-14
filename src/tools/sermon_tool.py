@@ -31,39 +31,27 @@ class SermonTool(base_tool):
     description = """
       """
     
-
-    def get_sitemap_urls(self):
-        sitemap_url = f"{self.base_url}/public/sitemap"
-        response = requests.get(sitemap_url)
+    def get_relevant_items(self, question)->set:
+        semantic_search_url = f"https://smart-answer.ai/semantic_search/{question}"
+        response = requests.get(semantic_search_url)
         if response.status_code == 200:
-            sitemap_data = response.text
-            urls = self.parse_sitemap(sitemap_data)
-            return urls
+            search_data = response.json()
+            content_items = set([ d['content_id'] for d in search_data if d['hybrid_score'] >= 0.7 ])
+            return content_items
         else:
-            return []
+            return set()
 
-    def parse_sitemap(self, sitemap_data):
-        root = ET.fromstring(sitemap_data)
-        urls = []
-        for url in root.findall('.//{http://www.sitemaps.org/schemas/sitemap/0.9}url'):
-            loc = url.find('{http://www.sitemaps.org/schemas/sitemap/0.9}loc').text
-            urls.append(loc)
-        return urls
 
     def __init__(self):
         self.base_url = os.getenv('SERMON_BASE_URL')
 
-        item_urls = self.get_sitemap_urls()
-        self.sermons = [  self.get_item(url) for url in item_urls ] 
-        for s in self.sermons:
-            s['text'] = self.get_script(s)
-
+    def get_items(self, items):
+       return [self.get_item(item,is_published=True) for item in items]
 
     def is_fallback_tool(self):
         return True
 
-    def get_item(self, url, is_published:bool = False):
-        item_name = url.split('/')[-1]
+    def get_item(self, item_name:str, is_published:bool = False):
         response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}/published")
         if response.status_code == 200:
             sermon_data = response.json()
@@ -78,6 +66,11 @@ class SermonTool(base_tool):
 
     def retrieve(self, args :str, question : str) -> RetrievalResult:
 
+        items = self.get_relevant_items(question)
+        self.sermons = self.get_items(items)
+        for s in self.sermons:
+            s['text'] = self.get_script(s)
+        
         docs =  [f"""<document index="{s.get('metadata').get('item')}">
     <source>{self.base_url}/public/{s.get('metadata').get('item')}</source>
     <document_content>{s['text']}</document_content></document>""" for s in self.sermons]
@@ -162,6 +155,8 @@ if __name__ == "__main__":
 
 
     st = SermonTool()
+
+    docs = st.retrieve(None, "基督徒能不能吃祭過偶像的食物？")
 
     quotes_text = '\n1. 論到祭偶像之物,我們曉得偶像在世上算不得甚麼,也知道神只有一位,再沒有別的神。[1]\n2. 但人不都有這等知識。有人到如今因拜慣了偶像,就以為所吃的是祭偶像之物。他們的良心既然軟弱,也就污穢了。[2]\n3. 其實食物不能叫神看中我們,因為我們不吃也無損,吃也無益。[3]\n4. 只是你們要謹慎,恐怕你們這自由竟成了那軟弱人的絆腳石。[4]\n5. 若有人見你這有知識的,在偶像的廟裡坐席,這人的良心若是軟弱,豈不放膽去吃那祭偶像之物嗎?[5]\n6. 因此,基督為他死的那軟弱弟兄,也就因你的知識沉淪了。[6]\n7. 你們這樣得罪弟兄們,傷了他們軟弱的良心,就是得罪基督。[7]\n'
 

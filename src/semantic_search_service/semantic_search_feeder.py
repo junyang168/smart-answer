@@ -10,6 +10,7 @@ import json
 #from kb_extractor import kb_extractor
 from embed_content_extractor import embed_content_extractor
 import semantic_search_service
+from content_store import FeedPassage, HybridScore
 
 from tqdm import tqdm
 
@@ -83,7 +84,7 @@ class semantic_search_feeder:
                     for i, chunk in enumerate(chunks) :
                         rec_id = f"{item_id}-{i}"
                         if len(emb_ds) < 20:
-                            emb_ds.append( semantic_search_service.FeedPassage(
+                            emb_ds.append( FeedPassage(
                                 id = rec_id,
                                 content_id= item_id,
                                 text= chunk

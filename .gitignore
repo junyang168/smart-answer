@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+content_store/
+vector_store/
+config.json
+
 # C extensions
 *.so
 
