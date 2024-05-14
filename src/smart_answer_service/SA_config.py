@@ -36,8 +36,8 @@ def load_config() -> dict[str, LLMConfig]:
                 model= cfg.get('LLM_MODEL',""))
             llm_config[cfg_name] = config
             if cfg_name == 'default':
-                CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-                config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
+                CONNECTION_STRING = os.getenv("CONNECTION_STRING")
+#                config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
             elif cfg_name == 'test':
                 config.tools =  [DemoTool()]
             elif cfg_name == 'holylogos':
