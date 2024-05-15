@@ -1,10 +1,12 @@
 from langchain.chains import LLMChain
 from langchain.chains.conversation.memory import ConversationBufferWindowMemory
-from langchain.memory import PostgresChatMessageHistory
 from smart_answer_core.util import ask_llm
 from langchain.schema.messages import HumanMessage
 from smart_answer_core.LLMWrapper import LLMConfig
 import os
+from langchain_community.chat_message_histories import SQLChatMessageHistory
+#from langchain.memory import PostgresChatMessageHistory
+
 
 
 class ChatMemory: 
@@ -24,12 +26,15 @@ Standalone question:"""
         if  connection_string:
             self.connection_string = connection_string
         else:
-            self.connection_string =  os.environ.get("CONNECTION_STRING") 
+            self.connection_string =  os.getenv("CONNECTION_STRING") 
         if sid:
+            chat_message_history = SQLChatMessageHistory(
+                session_id=sid, connection_string= self.connection_string
+            )            
             self.memory = ConversationBufferWindowMemory(
                     memory_key='chat_history',
                     k= message_window,
-                    chat_memory = PostgresChatMessageHistory(sid, self.connection_string),
+                    chat_memory = chat_message_history,  #PostgresChatMessageHistory(sid, self.connection_string),
                     return_messages=True
 
         )
