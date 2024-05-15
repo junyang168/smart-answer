@@ -89,23 +89,28 @@ class SmartAnswer:
         if tool:
             result = tool.retrieve(args, question)
             if not result:
-                result = self.selector.get_fallback_tool().retrieve(args, question)
+                fallback_tool = self.selector.get_fallback_tool()
+                if fallback_tool != tool:
+                    result = fallback_tool.retrieve(args, question)
 
-            context_content, reference = self.__get_content_reference(result)
+            if result:
+                context_content, reference = self.__get_content_reference(result)
 
-            if isinstance(result, str):
-                answer = result
-            else:
-                question_prefix = ""
-                if result:
-                    question_prefix = result.prefix 
-                answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)                
+                if isinstance(result, str):
+                    answer = result
+                else:
+                    question_prefix = ""
+                    if result:
+                        question_prefix = result.prefix 
+                    answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)                
         if answer:
             answer, reference = tool.parse_answer(answer)
             chatMemory.add_answer(answer)
-
-        return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,
-                                   chat_history= self.__format_chat_history(chat_history))    
+            return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,
+                                    chat_history= self.__format_chat_history(chat_history))    
+        else:
+            return SmartAnswerResponse(answer="I am sorry, I do not have an answer for you.", references=[], tool="DemoTool", new_question=question, duplicate_question=False,
+                                    chat_history= self.__format_chat_history(chat_history) )
 
 if __name__ == '__main__':
 
