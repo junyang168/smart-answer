@@ -20,6 +20,9 @@
     * Production is under Smart Answer Production
 4. .env.local at the root dir of project, where package.json is located
 
+5. [How To Fix the “React Hook useEffect Has a Missing Dependency” Error](https://kinsta.com/knowledgebase/react-hook-useeffect-has-a-missing-dependency/)
+
+
 ## Environment
 1. Dev
     * Smart-Answer UI: http://localhost:3000 (NextJS)
