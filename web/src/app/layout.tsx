@@ -5,6 +5,11 @@ import { ReactNode } from "react";
 
 const inter = Inter({ subsets: ["latin"] });
 
+import SessionProvider from "./SessionProvider"; //next SessionProvider imported
+import { getServerSession } from "next-auth";
+
+
+
 export const metadata: Metadata = {
   title: "Smart Answer",
   description:
@@ -12,9 +17,14 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const session = getServerSession();
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        <SessionProvider session={session}>
+            {children}
+        </SessionProvider>
+      </body>
     </html>
   );
 }

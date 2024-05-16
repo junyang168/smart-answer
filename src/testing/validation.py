@@ -25,7 +25,7 @@ def validate(question, answer, ground_true):
 
 
 
-from smart_answer_service import smart_answer_service
+from smart_answer_service import smart_answer_api
 import os
 import pandas as pd
 
@@ -47,7 +47,7 @@ for index, row in df.iterrows():
     if isinstance(ground_truth, datetime.datetime) :
         ground_truth = ground_truth. strftime("%m/%d/%Y")
         df.loc[index,'Ground Truth'] = ground_truth
-    sa = smart_answer_service.smart_answer_service()
+    sa = smart_answer_api.smart_answer_service()
     answer, context, tool_name, reference =  sa.get_answer(question)
     df.loc[index,'answer'] = answer
     df.loc[index,'intention'] = tool_name

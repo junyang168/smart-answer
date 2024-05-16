@@ -11,7 +11,7 @@ sys.path.append(parent_dir)
 
 
 from smart_answer_service.ghostwriter import GhostwriterService
-from smart_answer_service.smart_answer_service import smart_answer_service
+from smart_answer_service.smart_answer_api import smart_answer_service
 
 from smart_answer_core.logger import logger
 
