@@ -24,7 +24,7 @@ class SmartAnswer_Config:
     llm_config : LLMConfig
 
 def load_config() -> dict[str, LLMConfig]: 
-    file_name = os.environ['CONFIG_FILE'] 
+    file_name = os.path.join( os.getenv('base_dir'),'config.json')
     with open(file_name) as cfg_file:
         cfg_data = json.load(cfg_file)
         llm_config = {}
@@ -36,8 +36,8 @@ def load_config() -> dict[str, LLMConfig]:
                 model= cfg.get('LLM_MODEL',""))
             llm_config[cfg_name] = config
             if cfg_name == 'default':
-                CONNECTION_STRING = os.environ["CONNECTION_STRING"]
-                config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
+                CONNECTION_STRING = os.getenv("CONNECTION_STRING")
+#                config.tools = [LifeCycleTool(CONNECTION_STRING), InterOperabilityTool(), KB_DocTool(CONNECTION_STRING,config.llm_config), ConfigMaxTool()]
             elif cfg_name == 'test':
                 config.tools =  [DemoTool()]
             elif cfg_name == 'holylogos':

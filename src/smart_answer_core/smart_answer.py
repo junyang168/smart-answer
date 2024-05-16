@@ -1,7 +1,6 @@
 
 from smart_answer_core.tool_selector import tool_selector
 import smart_answer_core.util as util
-from smart_answer_core.expand_acronyms import acconym_expansion
 from smart_answer_core.chat_memory import ChatMemory
 from pydantic import BaseModel
 from typing import List, Optional
@@ -10,6 +9,7 @@ from langchain.schema.messages import HumanMessage
 from smart_answer_core.LLMWrapper import LLMConfig
 from smart_answer_core.base_tool import base_tool
 from typing import List
+import os
 
 class HistoryEntry(BaseModel):
     Role: str
@@ -37,6 +37,12 @@ class SmartAnswer:
     def __init__(self, tools : List[base_tool], llm_cfg : LLMConfig = None ) -> None:
         self.selector = tool_selector(tools, llm_cfg)
         self.llm_cfg = llm_cfg
+        if os.getenv("EXPAND_ACRONYMS") == 'TRUE':
+            from smart_answer_core.expand_acronyms import acconym_expansion
+            self.ae = acconym_expansion()
+        else:
+            self.ae = None
+
 
     def __get_answer(self, question:str, sid:str, context, tool, history ):
         prompt_template = tool.get_answer_prompt_template(self.prompt_template, context)
@@ -71,10 +77,10 @@ class SmartAnswer:
             return SmartAnswerResponse(answer=answer, references=[], tool="DemoTool", new_question=question, duplicate_question=True,
                                     chat_history= self.__format_chat_history(chat_history) )    
         
-        ae = acconym_expansion()
-        expanded, expanded_question = ae.expand_acronyms(question)
-        if expanded:
-            question = expanded_question
+        if self.ae:
+            expanded, expanded_question = self.ae.expand_acronyms(question)
+            if expanded:
+                question = expanded_question
 
         question = chatMemory.add_question(question, isFollowUp )      
 
@@ -83,23 +89,28 @@ class SmartAnswer:
         if tool:
             result = tool.retrieve(args, question)
             if not result:
-                result = self.selector.get_fallback_tool().retrieve(args, question)
+                fallback_tool = self.selector.get_fallback_tool()
+                if fallback_tool != tool:
+                    result = fallback_tool.retrieve(args, question)
 
-            context_content, reference = self.__get_content_reference(result)
+            if result:
+                context_content, reference = self.__get_content_reference(result)
 
-            if isinstance(result, str):
-                answer = result
-            else:
-                question_prefix = ""
-                if result:
-                    question_prefix = result.prefix 
-                answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)                
+                if isinstance(result, str):
+                    answer = result
+                else:
+                    question_prefix = ""
+                    if result:
+                        question_prefix = result.prefix 
+                    answer = self.__get_answer( question_prefix + question, sid, context_content, tool, chat_history)                
         if answer:
             answer, reference = tool.parse_answer(answer)
             chatMemory.add_answer(answer)
-
-        return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,
-                                   chat_history= self.__format_chat_history(chat_history))    
+            return SmartAnswerResponse(answer=answer, references=reference, tool=tool.name, new_question=question, duplicate_question=False,
+                                    chat_history= self.__format_chat_history(chat_history))    
+        else:
+            return SmartAnswerResponse(answer="I am sorry, I do not have an answer for you.", references=[], tool="DemoTool", new_question=question, duplicate_question=False,
+                                    chat_history= self.__format_chat_history(chat_history) )
 
 if __name__ == '__main__':
 

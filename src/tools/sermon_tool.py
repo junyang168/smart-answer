@@ -67,6 +67,9 @@ class SermonTool(base_tool):
     def retrieve(self, args :str, question : str) -> RetrievalResult:
 
         items = self.get_relevant_items(question)
+        if not items:
+            return None
+        
         self.sermons = self.get_items(items)
         for s in self.sermons:
             s['text'] = self.get_script(s)
