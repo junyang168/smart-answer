@@ -44,7 +44,7 @@ export const Result: FC<{org_id:string, query: string; rid: string }> = ({ org_i
     return () => {
       controller.abort();
     };
-  }, [query]);
+  }, [query, org_id, rid]);
   return (
     <div>
       <Title org_id={org_id} query={query}></Title>
