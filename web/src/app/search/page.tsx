@@ -2,15 +2,15 @@
 import { Result } from "@/app/components/result";
 import { Search } from "@/app/components/search";
 import { useSearchParams } from "next/navigation";
-import React, { useState } from "react";
+import React, { Suspense, useState } from "react";
 import { Header } from "@/app/components/header";
 
 
 function SearchBar() {
   const searchParams = useSearchParams();
-  const query = decodeURIComponent(searchParams.get("q") || "");
-  const org_id = decodeURIComponent(searchParams.get("o") || "");
-  const rid = decodeURIComponent(searchParams.get("rid") || "");
+  let query:string = decodeURIComponent(searchParams.get("q") || "");
+  let org_id:string = decodeURIComponent(searchParams.get("o") || "");
+  let rid:string = decodeURIComponent(searchParams.get("rid") || "");
 
   console.log('------------------------------------------------------------------10: ', rid, query, org_id);
   return (
@@ -36,6 +36,8 @@ function SearchBar() {
 
 export default async function SearchPage() {
     return (   
+      <Suspense fallback={<div>Loading...</div>}>
         <SearchBar /> 
+      </Suspense>
     )  
 }

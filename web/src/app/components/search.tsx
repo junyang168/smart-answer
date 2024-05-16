@@ -4,16 +4,18 @@ import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import React, { FC, useState } from "react";
 
-export const Search: FC<{org_id:string, rid:string, followup:string}> = ({org_id,rid, followup}) => {
+export const Search: FC<{org_id:string , rid:string , followup:string}> = ({org_id,rid, followup}) => {
   const [value, setValue] = useState("");
   const router = useRouter();
   const msg = followup == 'true' ? "Ask follow-up question..." : "Ask Smart Answer about ..."
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         if (value) {
           setValue("");
+          
           router.push(getSearchUrl(org_id, encodeURIComponent(value), rid));
         }
       }}

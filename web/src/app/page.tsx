@@ -12,7 +12,7 @@ import { authConfig} from "@/app/utils/auth";
 
 
 async function HomeComp() {
-  const org_id = process.env.ORG_ID;
+  let org_id:string = process.env.ORG_ID || "";
   const session = await getServerSession(authConfig);
   const rid= nanoid()
   if(session) {
