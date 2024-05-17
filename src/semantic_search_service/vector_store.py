@@ -120,7 +120,7 @@ class VectorStore:
 
         q_w = np.zeros((self.bm25_encodings.shape[1],1),dtype=np.float32)
         for t, w in q_weights.items():
-            p = self.tokens[t]
+            p = self.tokens.get(t)
             if p:
                 q_w[p,0] = w
 
