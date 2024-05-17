@@ -4,23 +4,36 @@ import { Source } from "@/app/interfaces/source";
 import { BookText } from "lucide-react";
 import { FC } from "react";
 
+
+
 const SourceItem: FC<{ source: Source; index: number }> = ({
   source,
   index,
 }) => {
   const { id, snippet, url } = source;
-  const domain = new URL(url).hostname;
+  if(url)
+    return (
+      <div
+        className="relative text-xs py-3 px-3 bg-zinc-100 hover:bg-zinc-200 rounded-lg flex flex-col gap-2"
+        key={id}
+      >
+        <a href={url} target="_blank" className="absolute inset-0"></a> 
+        <div className="font-medium text-zinc-950 text-ellipsis text-wrap">
+          {index+1}. {snippet}
+        </div>
+      </div>
+    );
+  else
   return (
     <div
-      className="relative text-xs py-3 px-3 bg-zinc-100 hover:bg-zinc-200 rounded-lg flex flex-col gap-2"
-      key={id}
-    >
-      <a href={url} target="_blank" className="absolute inset-0"></a>
-      <div className="font-medium text-zinc-950 text-ellipsis text-wrap">
-        {index+1}. {snippet}
-      </div>
+    className="relative text-xs py-3 px-3 bg-zinc-100 hover:bg-zinc-200 rounded-lg flex flex-col gap-2"
+    key={id}
+  >
+    <div className="font-medium text-zinc-950 text-ellipsis text-wrap">
+      {index+1}. {snippet}
     </div>
-  );
+  </div>
+  )
 };
 
 export const Sources: FC<{ sources: Source[] }> = ({ sources }) => {

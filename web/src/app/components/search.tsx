@@ -31,6 +31,7 @@ export const Search: FC<{org_id:string , rid:string , followup:string}> = ({org_
           autoFocus
           placeholder={msg}
           className="px-2 pr-6 w-full rounded-md flex-1 outline-none bg-white"
+          size={60}
         />
         <button
           type="submit"

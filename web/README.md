@@ -33,9 +33,13 @@
     * NgInx Proxy:
         Smart Answer UI: https://smart-answer.servehttp.com => http://localhost:3000
         /fetch-anser => localhost:50000
+    * pm2 install: sudo npm install pm2@latest -g
+    * pm2 start: pm2 start npm --name smart_answer  -- run start -- -p 3000
+     
 3. NgInx, SSL, DNS Configuration
     SSL: Let's encrypt
     Proxy: See above
     DNS: NoIP - log in as dallas.holy.logos@gmail.com
     DDUP: https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client-on-ubuntu
+
 
