@@ -40,21 +40,18 @@ def get_answer(request: SmartAnswerRequest):
         org_id = request.org_id if request.org_id else "default"
         cfg = SA_config.configuration[ org_id ]
         sa = SmartAnswer(cfg.tools,cfg.llm_config)
+        request.sid = None
         resp = sa.get_smart_answer(request.question, sid=request.sid)        
         return resp
 
 import uvicorn
 if __name__ == "__main__":
         
-        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
-
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        parent_dir = os.path.dirname(current_dir)
-        dotenv_path = os.path.join(parent_dir, '/app/.env')
-        load_dotenv(dotenv_path)
+#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
 
         questions = [ 
-              "基督徒能不能吃祭過偶像的食物？"
+              "耶穌的空墳墓是事實還是傳說?"
+        #      "基督徒能不能吃祭過偶像的食物？"
         #      "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
