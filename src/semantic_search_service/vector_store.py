@@ -14,6 +14,12 @@ from safetensors import safe_open
 from content_store import HybridScore
 
 
+if torch.backends.mps.is_available():
+    device = torch.device("mps")    
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
 
 class VectorStore:    
     ids_file_name = 'smart_answer_id.json'
@@ -90,20 +96,22 @@ class VectorStore:
 
     def load_embeddings(self):
         file_path = os.path.join(self.base_dir, 'vector_store', self.ids_file_name)
-        with open(file_path,'r') as f:
-            id_tokens = json.load(f)
-            self.ids = id_tokens['ids']
-            self.tokens = id_tokens['tokens']
+        if os.path.exists(file_path):
+            with open(file_path,'r') as f:
+                id_tokens = json.load(f)
+                self.ids = id_tokens['ids']
+                self.tokens = id_tokens['tokens']
 
         file_path = os.path.join(self.base_dir, 'vector_store', self.tensor_file_name)
-        with safe_open(file_path, framework="pt", device=0) as f:
-            self.dense_embeddings = f.get_tensor('dense').cuda()
-            bm25_index = f.get_tensor('bm25_index')
-            bm25_value = f.get_tensor('bm25_value')
 
-        sz = (len(self.ids), len(self.tokens))
-        self.bm25_encodings = torch.sparse_coo_tensor(bm25_index, bm25_value).float().cuda()
-        pass
+        if os.path.exists(file_path):
+            with safe_open(file_path, framework="pt", device='cpu') as f:
+                self.dense_embeddings = f.get_tensor('dense').to(device)
+                bm25_index = f.get_tensor('bm25_index')
+                bm25_value = f.get_tensor('bm25_value')
+
+            sz = (len(self.ids), len(self.tokens))
+            self.bm25_encodings = torch.sparse_coo_tensor(bm25_index, bm25_value).float()
 
                     
 
@@ -124,10 +132,10 @@ class VectorStore:
             if p:
                 q_w[p,0] = w
 
-        q_t = torch.from_numpy(q_w).cuda()
+        q_t = torch.from_numpy(q_w)
         bm25_scores = torch.sparse.mm(self.bm25_encodings, q_t)
 
-        return bm25_scores[:,0].cpu().numpy()
+        return bm25_scores[:,0].to(device)
     
 
     def calculate_colbert_score(self,q_reps, p_reps ):
@@ -138,7 +146,7 @@ class VectorStore:
 
 
     def get_colbert_score(self, q_reps, p_vecs ):
-        q = torch.from_numpy(q_reps).to(torch.float16).cuda() 
+        q = torch.from_numpy(q_reps).to(torch.float16)
         calcFunc = lambda p: self.calculate_colbert_score(q, p['emb'])
         calcAll = np.vectorize(calcFunc )
         colbert_scores = calcAll(p_vecs)
@@ -155,14 +163,14 @@ class VectorStore:
         t_0 = timeit.default_timer()
 
         # dense score
-        q_embs = torch.from_numpy(np.array([query_embeddings['dense_vecs'][0]])).cuda()    
+        q_embs = torch.from_numpy(np.array([query_embeddings['dense_vecs'][0]])).to(device)    
         dense_score = torch.matmul(self.dense_embeddings,  q_embs.transpose(0,1) )
 
         # sparse score
         bm25_score = self.get_bm25_score( query_embeddings['lexical_weights'][0] )
 
  
-        pass1_score = dense_score.squeeze(dim=-1) + torch.from_numpy(bm25_score).cuda()/2.0
+        pass1_score = dense_score.squeeze(dim=-1) + bm25_score/2.0
         m = torch.sort(pass1_score, descending=True )
 
         topN_index = m[1][:topN].cpu().numpy()
@@ -199,7 +207,7 @@ class VectorStore:
 
         colbert_embeddings = []
         file_path = os.path.join(self.base_dir, 'vector_store', self.tensor_file_name)
-        with safe_open(file_path, framework="pt", device=0) as f:
+        with safe_open(file_path, framework="pt", device='cpu') as f:
             for idx in topN_index:
                 id = self.ids[idx]
                 col_vecs = f.get_tensor(id)

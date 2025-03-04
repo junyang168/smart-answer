@@ -32,7 +32,7 @@ class SermonTool(base_tool):
       """
     
     def get_relevant_items(self, question)->set:
-        semantic_search_url = f"https://smart-answer.ai/semantic_search/{question}"
+        semantic_search_url = f"http://localhost:9000/semantic_search/{question}"
         response = requests.get(semantic_search_url)
         if response.status_code == 200:
             search_data = response.json()
@@ -52,7 +52,7 @@ class SermonTool(base_tool):
         return True
 
     def get_item(self, item_name:str, is_published:bool = False):
-        response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}/published")
+        response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}")
         if response.status_code == 200:
             sermon_data = response.json()
             sermon_data['metadata']['item'] = item_name

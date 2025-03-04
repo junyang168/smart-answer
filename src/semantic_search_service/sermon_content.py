@@ -25,7 +25,7 @@ class SermonContent(ContentProvider):
 
     def get_item(self, url, is_published:bool = False):
         item_name = url.split('/')[-1]
-        response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}/published")
+        response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}")
         if response.status_code == 200:
             sermon_data = response.json()
             sermon_data['metadata']['item'] = item_name

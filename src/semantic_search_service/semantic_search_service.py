@@ -13,8 +13,12 @@ class SemanticSearchService:
     syn_records = []
 
     def __init__(self, load_data = True):
-        use_gpu =  os.environ.get("USE_GPU")         
-        use_gpu =  use_gpu == 'True' and torch.cuda.is_available()        
+        use_gpu =  os.environ.get("USE_GPU") 
+        if use_gpu == 'True':        
+            if torch.cuda.is_available():
+                use_gpu = True
+            elif torch.backends.mps.is_available():
+                use_gpu = True      
         print(f"use gpu: {use_gpu}")
         self.model =  BGEM3FlagModel('BAAI/bge-m3', use_fp16=use_gpu) 
         self.vector_store = VectorStore(load_data=load_data)  

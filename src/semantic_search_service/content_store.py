@@ -40,16 +40,19 @@ class ContentStore:
     def __init__(self, loadData = True) -> None:
         self.file_path = os.path.join( os.getenv('base_dir'), 'content_store','content.json')
         self.content = {}
+        self.passages : List[FeedPassage] = []
         if loadData:
             self.load_data()
         else:
             self.passages : List[FeedPassage] = []
-    
+     
     def save(self, passages : List[FeedPassage] ):
         self.passages.extend(passages)
         self.build_index()
 
     def load_data(self):
+        if not os.path.exists(self.file_path):
+            return
         with open(self.file_path, "r") as file:
             self.passages = [ FeedPassage(**p) for p in json.load(file) ]
         self.build_index()
