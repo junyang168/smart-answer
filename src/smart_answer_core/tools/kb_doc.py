@@ -6,7 +6,7 @@ from smart_answer_core.base_tool import Reference
 
 ## Loading Environment Variables
 from dotenv import load_dotenv
-import psycopg2
+import psycopg
 
 from smart_answer_core.logger import logger
 import numpy as np
@@ -19,7 +19,7 @@ from smart_answer_core.LLMWrapper import LLMConfig
 import copy
 
 #from tools.configMax import ConfigMaxTool
-from pgvector.psycopg2 import register_vector
+from pgvector.psycopg import register_vector
 import os
 
 class KB_DocTool(base_tool):
@@ -117,7 +117,7 @@ class KB_DocTool(base_tool):
 
     def search_similar_content(self, query):
         emb = util.calculate_embedding(query)
-        conn = psycopg2.connect(self.connection_string)
+        conn = psycopg.connect(self.connection_string)
         register_vector(conn)
         cur = conn.cursor()
         sql = """

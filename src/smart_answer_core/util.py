@@ -6,13 +6,13 @@ load_dotenv()
 import os
 from smart_answer_core.LLMWrapper import LLMConfig
 
-import psycopg2
+import psycopg
 def execute_sql(sql,params: tuple = None, return_column_names = False, connection_string = None):
     if not connection_string:
         connection_string = os.environ["CONNECTION_STRING"]
 
 
-    conn = psycopg2.connect(connection_string)
+    conn = psycopg.connect(connection_string)
     cur = conn.cursor()
     if params:
         cur.execute(sql,params)
@@ -34,7 +34,7 @@ def run_dml(sql,params: tuple = None, is_proc=False, connection_string = None):
     if not connection_string:
         connection_string = CONNECTION_STRING
 
-    conn = psycopg2.connect(connection_string)
+    conn = psycopg.connect(connection_string)
     cur = conn.cursor()
     if is_proc:
         cur.execute('CALL ' + sql + '();')

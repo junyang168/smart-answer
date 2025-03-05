@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain.memory import PostgresChatMessageHistory
+from langchain_community.chat_message_histories  import PostgresChatMessageHistory
 from pydantic import BaseModel
 
 #store = {}
@@ -78,7 +78,7 @@ class LLMWrapper:
             model_name = self.__config.model[len('anthropic/'):]          
             llm = ChatAnthropic(temperature=0,model_name= model_name)
         else:
-            llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_tokens=1000)
+            llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_completion_tokens=4000)
 
         runnable = chat_prompt | llm
 

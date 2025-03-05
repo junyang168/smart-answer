@@ -12,8 +12,8 @@ from smart_answer_core.logger import logger
 
 
 import pandas as pd
-import psycopg2
-from psycopg2.sql import Identifier, SQL
+import psycopg
+from psycopg.sql import Identifier, SQL
 import pandas as pd
 
 class DemoFollowupTool(base_tool):

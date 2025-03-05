@@ -13,10 +13,10 @@ from smart_answer_core.logger import logger
 
 
 import pandas as pd
-import psycopg2
-from psycopg2.sql import Identifier, SQL
+import psycopg
+from psycopg.sql import Identifier, SQL
 
-from pgvector.psycopg2 import register_vector
+from pgvector.psycopg import register_vector
 import smart_answer_core.util as util
 
 
