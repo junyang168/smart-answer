@@ -23,6 +23,7 @@ import glob
 import os
 import requests
 import xml.etree.ElementTree as ET
+import xml.sax.saxutils as saxutils
 
 
 
@@ -139,9 +140,24 @@ If the question cannot be answered by the document, say so.
             if qs:
                 self.get_quotes_refs(qs, s)
               
+    def encode_xml(self, text: str) -> str:
+        return saxutils.escape(text)
+
+    def process_tags(self,tag, input_str: str) -> str:
+        start_tag = f"<{tag}>"
+        end_tag = f"</{tag}>"
+        start_index = input_str.find(start_tag)
+        end_index = input_str.find(end_tag)
+        
+        if start_index != -1 and end_index != -1:
+            start_index += len(start_tag)
+            think_text = input_str[start_index:end_index]
+            encoded_think_text = self.encode_xml(think_text)
+            return input_str[:start_index] + encoded_think_text + input_str[end_index:]
+        return input_str
 
     def parse_answer(self, answer):
-        root = ET.fromstring("<root>" + answer + "</root>")
+        root = ET.fromstring("<root>" + self.process_tags('think', answer) + "</root>")
         quotes = root.findall('.//quotes/quote')
         answer_node = root.find('.//answer')
 

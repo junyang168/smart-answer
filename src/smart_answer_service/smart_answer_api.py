@@ -47,12 +47,13 @@ def get_answer(request: SmartAnswerRequest):
 import uvicorn
 if __name__ == "__main__":
         
-#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 9100)))
+#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 60000)))
+        exit()
 
         questions = [ 
-              '耶穌的空墳墓的意義在哪?'
+        #      '耶穌的空墳墓的意義在哪?'
         #      "耶穌的空墳墓是事實還是傳說?"
-        #      "基督徒能不能吃祭過偶像的食物？"
+              "基督徒能不能吃祭過偶像的食物？"
         #      "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
