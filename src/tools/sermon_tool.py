@@ -33,8 +33,8 @@ class SermonTool(base_tool):
       """
     
     def get_relevant_items(self, question)->set:
-        semantic_search_url = f"http://localhost:9000/semantic_search/{question}"
-        response = requests.get(semantic_search_url)
+        url = f"{self.semantic_search_url}/semantic_search/{question}"
+        response = requests.get(url)
         if response.status_code == 200:
             search_data = response.json()
             content_items = set([ d['content_id'] for d in search_data if d['hybrid_score'] >= 0.5 ])
@@ -42,9 +42,9 @@ class SermonTool(base_tool):
         else:
             return set()
 
-
     def __init__(self):
         self.base_url = os.getenv('SERMON_BASE_URL')
+        self.semantic_search_url = os.getenv('SEMANTIC_SEARCH_API_URL')
 
     def get_items(self, items):
        return [self.get_item(item,is_published=True) for item in items]
@@ -53,7 +53,7 @@ class SermonTool(base_tool):
         return True
 
     def get_item(self, item_name:str, is_published:bool = False):
-        response = requests.get(f"{self.base_url}/api/final_sermon/junyang168@gmail.com/{item_name}")
+        response = requests.get(f"{self.base_url}/sc_api/final_sermon/junyang168@gmail.com/{item_name}")
         if response.status_code == 200:
             sermon_data = response.json()
             sermon_data['metadata']['item'] = item_name

@@ -45,9 +45,8 @@ def get_answer(request: SmartAnswerRequest):
         return resp
 
 import uvicorn
-if __name__ == "__main__":
-        
-#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 60000)))
+if __name__ == "__main__":        
+        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 60000)))
         exit()
 
         questions = [ 

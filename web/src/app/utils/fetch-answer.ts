@@ -24,9 +24,6 @@ export const fetchAnswer = async (
 
   const env = process.env.NODE_ENV;
   let api_url = ""
-  if( env != 'production') {
-    api_url = 'http://localhost:60000'
-  }
   api_url = api_url + '/get_answer'
 
   const response = await fetch(api_url, {

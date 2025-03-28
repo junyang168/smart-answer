@@ -27,7 +27,6 @@ export const Result: FC<{org_id:string, query: string; rid: string }> = ({ org_i
   console.log('16: ', query, rid, org_id)
   
   useEffect(() => {
-    console.log('org_id ', org_id)
     const controller = new AbortController();
     void fetchAnswer(
       controller,
@@ -48,7 +47,7 @@ export const Result: FC<{org_id:string, query: string; rid: string }> = ({ org_i
   return (
     <div>
       <Title org_id={org_id} query={query}></Title>
-      <ChatList className='chat-list' dataSource={chat_history} id='chat_list_1' lazyLoadingImage="/" />
+      <ChatList  className='chat-list' dataSource={chat_history} id='chat_list_1' lazyLoadingImage="/" />
 
       <div className="flex flex-col gap-8">
         

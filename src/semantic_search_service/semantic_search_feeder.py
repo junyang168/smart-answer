@@ -1,5 +1,4 @@
 import psycopg
-from pgvector.psycopg2 import register_vector
 from dotenv import load_dotenv
 load_dotenv()
 

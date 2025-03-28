@@ -3,7 +3,12 @@ import logging.config
 from logging.handlers import TimedRotatingFileHandler
 import os
 
-timeRotatingLogHandler = TimedRotatingFileHandler("gen-ai.log", when="midnight", backupCount=30)
+log_dir = os.environ.get("LOG_DIR", ".")
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+log_file_path = os.path.join(log_dir, "gen-ai.log")
+
+timeRotatingLogHandler = TimedRotatingFileHandler(log_file_path, when="midnight", backupCount=30)
 timeRotatingLogHandler.suffix = "%Y%m%d"
 
 logger = logging
