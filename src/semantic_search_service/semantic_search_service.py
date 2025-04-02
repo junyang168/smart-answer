@@ -5,9 +5,10 @@ import torch
 from typing import List, Optional
 from pydantic import BaseModel
 from vector_store import VectorStore
-from content_store import ContentStore, HybridScore, FeedPassage
- 
+from content_store import ContentStore, HybridScore, FeedPassage    
+from keypoints_search import keypointSearch
 import numpy as np
+
 
 class SemanticSearchService:
     syn_records = []
@@ -86,18 +87,20 @@ class SemanticSearchService:
 
         res = self.vector_store.retrieve(query_embeddings, topN=1000)
         res_text =  self.content_store.load_text( res[:topK] )
-        return res_text
+        content_items = [ d for d in res_text if d.hybrid_score >= 0.65 ]
+        if len(content_items) == 0:
+            content_items = keypointSearch.search(query)
+
+        return content_items
 
 
 semantic_service = SemanticSearchService()
-
-
 
 if __name__ == '__main__':
     import timeit
     svc = semantic_service
 
-    res = svc.search('基督徒能不能吃祭過偶像的食物？')
+    res = svc.search('基督徒能过万圣节吗？')
 
 
     print(res)

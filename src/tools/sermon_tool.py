@@ -37,7 +37,7 @@ class SermonTool(base_tool):
         response = requests.get(url)
         if response.status_code == 200:
             search_data = response.json()
-            content_items = set([ d['content_id'] for d in search_data if d['hybrid_score'] >= 0.5 ])
+            content_items = set([ d['content_id'] for d in search_data ])
             return content_items
         else:
             return set()

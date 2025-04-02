@@ -40,19 +40,20 @@ def get_answer(request: SmartAnswerRequest):
         org_id = request.org_id if request.org_id else "default"
         cfg = SA_config.configuration[ org_id ]
         sa = SmartAnswer(cfg.tools,cfg.llm_config)
-#        request.sid = None
+        request.sid = None
         resp = sa.get_smart_answer(request.question, sid=request.sid)        
         return resp
 
 import uvicorn
 if __name__ == "__main__":        
-        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 60000)))
-        exit()
+#        uvicorn.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 60000)))
+#        exit()
 
         questions = [ 
+              "基督徒可以庆祝万圣节吗？"
         #      '耶穌的空墳墓的意義在哪?'
         #      "耶穌的空墳墓是事實還是傳說?"
-              "基督徒能不能吃祭過偶像的食物？"
+        #      "基督徒能不能吃祭過偶像的食物？"
         #      "root directory is full on vcenter"
         #      "我的服务器宕机了，怎么办"
         #        "重启也没用"
@@ -78,7 +79,7 @@ if __name__ == "__main__":
                 ]
         org_id = "holylogos"
         sid = "ml1234900x"
-#        sid = None
+        sid = None
         for question in questions:                
                 if org_id:
                     req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=True)

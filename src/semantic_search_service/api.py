@@ -24,6 +24,6 @@ def search(q:str ) -> List[HybridScore]:
 if __name__ == '__main__':
 #    res = search("基督徒能不能吃祭過偶像的食物？")
     pass
-#    import uvicorn
-#    uvicorn.run(app, host="0.0.0.0", port=9000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=9009)
 
