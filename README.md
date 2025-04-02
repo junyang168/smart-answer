@@ -20,3 +20,27 @@ We welcome contributions to Smart Answers. If you are interested in contributing
 Smart Answers is licensed under the Apache 2.0 License.
 
 # Folders and Files
+* production installed at /opt/homebrew/var/www/smart-answer
+* both prod and dev venv at /Users/junyang/app/smart-answer/.venv
+# Semantic Search API
+* port 8000 - dev 8080
+* /Users/junyang/Library/LaunchAgents/com.semantic_search.service.plist
+* launchctl load ~/Library/LaunchAgents/semantic_search.service.plist 
+* launchctl start semantic_search.service
+* launchctl unload ~/Library/LaunchAgents/semantic_search.service.plist
+* launchctl list |grep semantic_search.service
+* uvicorn --reload --host 0.0.0.0  --port 9000 --app-dir /Users/junyang/app/smart-answer/src/semantic_search_service api:app
+# Smart Answer API
+* /Users/junyang/Library/LaunchAgents/com.smart_answer.service.plist
+* launchctl unload ~/Library/LaunchAgents/com.smart_answer.service.plist
+* launchctl start smart_answer.service
+* launchctl load ~/Library/LaunchAgents/com.smart_answer.service.plist
+* uvicorn --reload --host 0.0.0.0  --port 60000 --app-dir /opt/homebrew/var/www/smart-answer/src/smart_answer_service smart_answer_api:app
+# Smart Answer UI
+* production port 60000
+* launchctl unload ~/Library/LaunchAgents/com.sa_app.service.plist
+* launchctl load ~/Library/LaunchAgents/com.sa_app.service.plist 
+* launchctl start sa_app.service
+
+dev port 3003
+

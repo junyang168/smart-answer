@@ -25,14 +25,14 @@
 
 ## Environment
 1. Dev
-    * Smart-Answer UI: http://localhost:3000 (NextJS)
-    * Smart-Answer Service: localhost:60000 (FastAPI)
+    * Smart-Answer UI: http://localhost:3003 (NextJS)
+    * Smart-Answer Service: localhost:60006 (FastAPI)
 2. Production
     * Smart-Answer UI Service: http://localhost:3000(NextJS)
-    * Smart-Answer Service: localhost:50000 (FastAPI)
+    * Smart-Answer Service: localhost:60000 (FastAPI)
     * NgInx Proxy:
-        Smart Answer UI: https://smart-answer.servehttp.com => http://localhost:3000
-        /fetch-anser => localhost:50000
+        Smart Answer UI: https://holylogos.servehttp.com => http://localhost:3000
+        /get-answer => localhost:60000
     * pm2 install: sudo npm install pm2@latest -g
     * pm2 start: pm2 start npm --name smart_answer  -- run start -- -p 3000
      

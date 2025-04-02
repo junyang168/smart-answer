@@ -9,11 +9,14 @@ import { Suspense } from 'react'
 import { nanoid } from "nanoid";
 import { getServerSession } from "next-auth";
 import { authConfig} from "@/app/utils/auth";
+import { Playlist } from "@/app/components/playlist";
 
 
 async function HomeComp() {
   let org_id:string = process.env.ORG_ID || "";
-  const session = await getServerSession(authConfig);
+  let env = process.env.NODE_ENV;
+  const session = env === "production"? await getServerSession(authConfig) : '1234';
+
   const rid= nanoid()
   if(session) {
     return (
@@ -36,7 +39,7 @@ export default function Home() {
   return (
     <div>
       <Header show_signin="true"></Header>
-      <HomeComp />
+      <Playlist />
     </div>
   )  
 }
