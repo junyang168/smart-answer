@@ -30,19 +30,7 @@ export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
         
       return (
         <div className="flex h-screen bg-gray-50">
-    
-          {/* Sidebar */}
-          <div className="w-60 bg-white border-r border-gray-200 flex flex-col h-full overflow-y-auto flex-shrink-0">
-            <div className="p-4 flex items-center gap-2">
-              <Menu className="w-6 h-6" />
-              <div className="flex items-center">
-                <span className="font-bold ml-1"></span>
-              </div>
-            </div>
-    
 
-          </div>
-    
           {/* Main Content */}
           <div className="flex-1 flex flex-col h-full overflow-hidden">
             {/* Header */}

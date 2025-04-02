@@ -15,12 +15,13 @@ import { Playlist } from "@/app/components/playlist";
 async function HomeComp() {
   let org_id:string = process.env.ORG_ID || "";
   let env = process.env.NODE_ENV;
+  
   const session = env === "production"? await getServerSession(authConfig) : '1234';
 
   const rid= nanoid()
   if(session) {
     return (
-          <Playlist org_id={org_id} rid={rid}  ></Playlist>
+      <Playlist org_id={org_id} rid={rid}  ></Playlist>
     )
   }
   else {
