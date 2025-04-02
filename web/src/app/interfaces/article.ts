@@ -4,7 +4,7 @@ export interface Article {
     theme: string;
     title: string;
     snippet: string;
-    deliver_date: Date;
+    deliver_date: string;
     status: string;
     assigned_to_name: string;
 //    duration: string;    
