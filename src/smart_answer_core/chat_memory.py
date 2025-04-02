@@ -48,8 +48,8 @@ Standalone question:"""
             ch_list =  self.memory.load_memory_variables({}).get('chat_history')
             self.memory.chat_memory.add_user_message(question)
             if isFollowUp and ch_list:        
-                chat_history = '\n'.join([ ( self.human_role if isinstance(msg, HumanMessage) else self.ai_role) + ": " + msg.content for msg in  ch_list ] )
-                question = self._create_standalone_question(chat_history, question)
+                question = '\n'.join([ ( self.human_role if isinstance(msg, HumanMessage) else self.ai_role) + ": " + msg.content for msg in  ch_list ] )
+#                question = self._create_standalone_question(chat_history, question)
         return question
 
     

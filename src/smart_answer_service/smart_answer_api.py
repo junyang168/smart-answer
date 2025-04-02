@@ -40,7 +40,7 @@ def get_answer(request: SmartAnswerRequest):
         org_id = request.org_id if request.org_id else "default"
         cfg = SA_config.configuration[ org_id ]
         sa = SmartAnswer(cfg.tools,cfg.llm_config)
-        request.sid = None
+#        request.sid = None
         resp = sa.get_smart_answer(request.question, sid=request.sid)        
         return resp
 
@@ -77,11 +77,11 @@ if __name__ == "__main__":
         #        "FSDisk: 301: Issue of delete blocks failed"
                 ]
         org_id = "holylogos"
-#        sid = "ml1234900x"
-        sid = None
+        sid = "ml1234900x"
+#        sid = None
         for question in questions:                
                 if org_id:
-                    req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=False)
+                    req = SmartAnswerRequest(question=question, org_id=org_id, sid=sid, is_followup=True)
                 else:
                     req = SmartAnswerRequest(question=question)  
                 resp = get_answer(req)
