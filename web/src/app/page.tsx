@@ -20,11 +20,7 @@ async function HomeComp() {
   const rid= nanoid()
   if(session) {
     return (
-        <div className="absolute inset-0 min-h-[500px] flex items-center justify-center">
-          <div className="relative flex flex-col gap-8 px-4 -mt-24">
-              <Search org_id={org_id} rid={rid} followup="false" ></Search>
-          </div>
-        </div>    
+          <Playlist org_id={org_id} rid={rid}  ></Playlist>
     )
   }
   else {
@@ -39,7 +35,7 @@ export default function Home() {
   return (
     <div>
       <Header show_signin="true"></Header>
-      <Playlist />
+      <HomeComp />
     </div>
   )  
 }

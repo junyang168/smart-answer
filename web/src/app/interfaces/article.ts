@@ -7,14 +7,13 @@ export interface Article {
     deliver_date: Date;
     status: string;
     assigned_to_name: string;
-//    duration: string;
-/*    
+//    duration: string;    
     thumbnail: {
       url: string;
       width: number;
       height: number;
       imageId: string;
     };
-*/
+
   }
   

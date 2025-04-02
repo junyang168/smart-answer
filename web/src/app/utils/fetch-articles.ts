@@ -33,6 +33,13 @@ export const fetchArticle = async (
         deliver_date: surmon.deliver_date,
         publishedUrl: "/public/" + surmon.item,
         assigned_to_name: surmon.assigned_to_name,
+        thumbnail: {
+          url: surmon.thumbnail,
+          width: 160,
+          height: 100,
+          imageId: "",
+        },
+
     }
     articles.push(article)
   }  
