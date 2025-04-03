@@ -30,6 +30,8 @@ Smart Answers is licensed under the Apache 2.0 License.
 * launchctl unload ~/Library/LaunchAgents/semantic_search.service.plist
 * launchctl list |grep semantic_search.service
 * uvicorn --reload --host 0.0.0.0  --port 9000 --app-dir /Users/junyang/app/smart-answer/src/semantic_search_service api:app
+* API doc: http://localhost:9000/docs
+* API Endpoint: http://localhost:9000/semantic_search/question
 # Smart Answer API
 * /Users/junyang/Library/LaunchAgents/com.smart_answer.service.plist
 * launchctl unload ~/Library/LaunchAgents/com.smart_answer.service.plist

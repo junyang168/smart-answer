@@ -76,12 +76,12 @@ class SermonTool(base_tool):
             s['text'] = self.get_script(s)
         
         docs =  [f"""<document index="{s.get('metadata').get('item')}">
-    <source>{self.base_url}/public/{s.get('metadata').get('item')}</source>
+    <source>{self.base_url}/article?i={s.get('metadata').get('item')}</source>
     <document_content>{s['text']}</document_content></document>""" for s in self.sermons]
         doc_str = '\n'.join(docs)
         context = f"<documents>{doc_str}</documents>"
 
-        refs = [Reference(Id=s.get('metadata').get('item'), Title=s.get('metadata').get('title'), Link=f"{self.base_url}/public/{s.get('metadata').get('item')}") for s in self.sermons]
+        refs = [Reference(Id=s.get('metadata').get('item'), Title=s.get('metadata').get('title'), Link=f"{self.base_url}/article?i={s.get('metadata').get('item')}") for s in self.sermons]
 
         return RetrievalResult(content=context,references=refs)
     
