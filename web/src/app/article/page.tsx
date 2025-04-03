@@ -45,7 +45,7 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         {/* Article Content */}            
         <div className="p-4"></div>
             {article.paragraphs?.map((paragraph, index) => (
-                <p id={paragraph.index} className="mb-2">
+                <p key={index} id={paragraph.index} className="mb-2">
                     {paragraph.text}
                 </p>
             )) || <p>No content available.</p>}
