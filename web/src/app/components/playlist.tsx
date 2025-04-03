@@ -5,6 +5,7 @@ import { fetchArticle } from "@/app/utils/fetch-articles";
 import { Article } from "../interfaces/article";
 import { getSearchUrl } from "@/app/utils/get-search-url";
 import { useRouter } from "next/navigation";
+import { SearchBox } from "@/app/components/searchbox"
 
 export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
   const [articles, setArticles] = useState<Article[]>([]);
@@ -35,31 +36,7 @@ export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
           <div className="flex-1 flex flex-col h-full overflow-hidden">
             {/* Header */}
             <div className="bg-white p-2 flex items-center justify-between border-b border-gray-200">
-              <div className="flex-1 max-w-3xl mx-auto relative">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (value) {
-                    setValue("");
-                    const url = getSearchUrl(org_id, encodeURIComponent(value), rid)                    
-                    router.push(url);
-                  }
-                }}
-              >
-                <input
-                  type="text"
-                  placeholder="Search or Ask a question..."
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  autoFocus        
-                  className="w-full py-2 px-4 pr-12 bg-gray-100 rounded-full outline-none border border-gray-300"
-                />
-                <div className="absolute right-0 top-0 h-full flex items-center pr-3">
-                  <Search className="w-5 h-5 text-gray-500" />
-                </div>
-                </form>
-                </div>
-
+              <SearchBox org_id={org_id} rid={rid} />
 
               <div className="flex items-center gap-4 ml-4">
                 <button 
@@ -87,7 +64,8 @@ export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
                         className={`flex p-2 border-b border-gray-100 ${index === selectedVideo ? 'bg-gray-100' : 'hover:bg-gray-50'} cursor-pointer`}
                         onClick={() => {
                           setSelectedVideo(index);
-                          window.location.href = article.publishedUrl;
+                          const url = '/article?i=' + article.id + '&o=' + org_id + '&rid=' + rid;                 
+                          router.push(url);
                         }}
                         >
                         <div className="mr-4 text-lg font-medium w-6 text-center"></div>
