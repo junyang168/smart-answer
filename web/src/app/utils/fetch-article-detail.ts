@@ -5,7 +5,7 @@ export const fetchArticleDetail = async (
   onError?: (status: number) => void,
 ) : Promise<ArticleDetail>  => {
 
-    let api_url = 'http://localhost:8008/sc_api/final_sermon/junyang168@gmail.com/' + item
+    let api_url = process.env.ARTICLE_SERVICE_URL + item
     const response = await fetch(api_url);
     if (!response.ok) {
     onError?.(response.status);
