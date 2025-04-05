@@ -77,8 +77,11 @@ class LLMWrapper:
         elif self.__config.model.startswith('anthropic/'):
             model_name = self.__config.model[len('anthropic/'):]          
             llm = ChatAnthropic(temperature=0,model_name= model_name)
+        elif self.__config.model.startswith('deepseek/'):
+            model_name = self.__config.model[len('deepseek/'):] 
+            llm = ChatOpenAI(temperature=1.3,model= model_name, api_key= self.__config.api_key, base_url= self.__config.api_url, streaming=False, max_completion_tokens=4000)         
         else:
-            llm = ChatOpenAI(temperature=0,model_name= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_completion_tokens=4000)
+            llm = ChatOpenAI(temperature=0,model= self.__config.model, openai_api_key = self.__config.api_key, openai_api_base= self.__config.api_url, streaming=False, max_tokens=1000)
 
         runnable = chat_prompt | llm
 
