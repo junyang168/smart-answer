@@ -45,10 +45,10 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+  const sendMessage = async (msg:string) => {
+    if(!msg.trim()) return;
 
-    const userMessage: Message = { content: input, role: 'user' };
+    const userMessage: Message = { content: msg, role: 'user' };
     const thinkMessage: Message = { content: 'thinking...', role: 'assistant' };
     setMessages((prev) => [...prev, userMessage, thinkMessage]);
     const history = [...messages, userMessage];
@@ -83,8 +83,15 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      sendMessage(input);
     }
+  };
+
+
+  const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    const buttonText = e.currentTarget.innerText;
+    sendMessage(buttonText);
   };
 
   return (
@@ -126,6 +133,14 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
               </div>
           ))}
           <div ref={messagesEndRef} />
+        </div>
+        <div className="p-2.5 border-t border-gray-200 flex justify-start">
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors"
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => handleButtonClick(e)}
+          >
+            總結主题
+          </button>
         </div>
         <div className="p-2.5 border-t border-gray-200">
           <textarea
