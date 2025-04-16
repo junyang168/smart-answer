@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "react-showdown": "^2.3.1",
     "showdown": "^2.1.0"
   }
 }
