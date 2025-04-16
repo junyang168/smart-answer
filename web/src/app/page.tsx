@@ -11,7 +11,6 @@ import { getServerSession } from "next-auth";
 import { authConfig} from "@/app/utils/auth";
 import { Playlist } from "@/app/components/playlist";
 
-
 async function HomeComp() {
   let org_id:string = process.env.ORG_ID || "";
   let env = process.env.NODE_ENV;

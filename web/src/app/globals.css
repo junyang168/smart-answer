@@ -13,3 +13,26 @@ select:-webkit-autofill:hover,
 select:-webkit-autofill:focus {
   -webkit-background-clip: text;
 }
+
+
+ol {
+  display: block;
+  list-style-type: decimal; /* Numbers: 1, 2, 3, etc. */
+  margin-top: 1em;
+  margin-bottom: 1em;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 10px; /* Indentation for the list items */
+}
+
+/* Define the animation */
+@keyframes blink {
+  0% { opacity: 1; } /* Text is fully visible */
+  50% { opacity: 0; } /* Text is half-transparent */
+  100% { opacity: 1; } /* Text is fully visible again */
+}
+
+/* Apply the animation to the text */
+.flashing-text {
+  animation: blink 1s infinite; /* Blink animation, 1 second duration, repeat forever */
+}

@@ -2,6 +2,7 @@ import { SearchBox } from "@/app/components/searchbox";
 import React from "react";
 import { fetchArticleDetail } from "@/app/utils/fetch-article-detail";
 import { ArticleDetail } from "../interfaces/article_detail";
+import { CopilotChat  } from "@/app/components/copilot";
 
 
 // Define the expected query parameters
@@ -72,6 +73,8 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         </div>
 
         </div>
+
+        <CopilotChat item_id={item} /> 
 
     </div>
 
