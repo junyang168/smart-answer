@@ -2,8 +2,7 @@
 'use client';
 import React, { FC, useEffect, useState, useRef } from "react";
 import { authConfig} from "@/app/utils/auth";
-import showdown from 'showdown';
-
+import MarkdownView from 'react-showdown';
 import { useSession } from 'next-auth/react';
 
 interface Message {
@@ -72,13 +71,8 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
         })
       });
       const data = await response.json();
-      const markdownToHtml = (markdown: string) => {
-        const converter = new showdown.Converter(); // Using Showdown library for markdown to HTML conversion
-        return converter.makeHtml(markdown);
-      };
-      const html = markdownToHtml(data);
       setMessages((prev) => prev.filter((msg) => msg.content !== 'thinking...'));
-      setMessages((prev) => [...prev, { content: html, role: 'assistant' }]);
+      setMessages((prev) => [...prev, { content: data, role: 'assistant' }]);
 
     } catch (error) {
       setMessages((prev) => [...prev, { content: 'Error occurred', role: 'assistant' }]);
@@ -86,7 +80,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
 
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -127,8 +121,9 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
                 : 'bg-gray-100 mr-[20%]'
               } ${ msg.content === 'thinking...' ? 'animate-pulse' : ''}
               `}
-              dangerouslySetInnerHTML={{ __html: msg.content }}
-            />
+            >
+              <MarkdownView markdown={msg.content } />
+              </div>
           ))}
           <div ref={messagesEndRef} />
         </div>
