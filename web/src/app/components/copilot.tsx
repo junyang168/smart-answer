@@ -19,9 +19,9 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
 
   const { data: session, status } = useSession();
   console.log('Session:', session);
+  let user_id: string | null | undefined = 'junyang168@gmail.com';
   if (session && session.user) {
-//    console.log('User ID:', session.user.email);
-      
+    user_id =  session.user.email;      
   }
 
 
@@ -58,7 +58,6 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     
     // Example with actual API integration (uncomment and modify):
     try {
-      const user_id = 'junyang168@gmail.com'
       const api_prefix = '/sc_api/'
 
       const url = `${api_prefix}chat/${user_id}`;  
