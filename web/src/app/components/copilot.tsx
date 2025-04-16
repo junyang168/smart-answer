@@ -93,6 +93,11 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     sendMessage(buttonText);
   };
 
+  const clearChat = () => {
+    setMessages([]);
+    setInput('');
+  };
+
   return (
     <>
       <button
@@ -134,12 +139,18 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
           <div ref={messagesEndRef} />
         </div>
         <div className="p-2.5 border-t border-gray-200 flex justify-start">
-          <button
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors"
+            <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors mr-2"
             onClick={(e: React.MouseEvent<HTMLButtonElement>) => handleButtonClick(e)}
-          >
+            >
             總結主题
-          </button>
+            </button>          
+            <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors"
+            onClick={() => clearChat()}
+            >
+            清空對話
+            </button>
         </div>
         <div className="p-2.5 border-t border-gray-200">
           <textarea
