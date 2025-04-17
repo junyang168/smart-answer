@@ -50,7 +50,8 @@ export const fetchAnswer = async (
 
   let sources : Source[] = [] 
   for( var ref of result.references) {
-    const src : Source = { id: ref.Link, name: ref.Title, displayUrl : ref.Link, url: ref.Link,
+    const link = `${ref.Link}&s=${encodeURIComponent(ref.Title)}`
+    const src : Source = { id: ref.Link, name: ref.Title, displayUrl : ref.Link, url: link,
         snippet:ref.Title,
         deepLinks: [],
         dateLastCrawled: '',

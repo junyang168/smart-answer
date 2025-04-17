@@ -11,6 +11,7 @@ interface PageProps {
       i?: string; 
       o?: string; 
       rid?: string;
+      s?: string;
     };
   }
 
@@ -18,10 +19,13 @@ export default async function ArticlePage( {searchParams} : PageProps) {
     const org_id = searchParams.o || "";
     const rid = searchParams.rid || "";
     const item :string = searchParams.i || "";
+    const quote :string = searchParams.s || "";
 
-    const article : ArticleDetail =  await fetchArticleDetail(item, (status) => {
+    const article : ArticleDetail =  await fetchArticleDetail(item, quote, (status) => {
         console.log("Error fetching article detail:", status);
     });
+
+    const quote_id = article.quotes?.[0] || null;
 
 
   return (
@@ -62,12 +66,15 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         {/* Article Content */}            
         <div className="p-4"></div>
             {article.paragraphs?.map((paragraph, index) => (
-                <p key={index} id={paragraph.index} className="mb-2">
-                    {paragraph.text}
+                <p 
+                  key={index} 
+                  id={paragraph.index} 
+                  className={`mb-2 ${article.quotes?.includes(paragraph.index) ? "bg-yellow-100" : ""}`}
+                >
+                  {paragraph.text}
                 </p>
             )) || <p>No content available.</p>}
         </div>
-
 
             </div>
         </div>
@@ -75,6 +82,22 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         </div>
 
         <CopilotChat item_id={item} /> 
+
+    {/* Scroll to specific paragraph if quote is provided */}
+    {quote_id && (
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+      document.addEventListener('DOMContentLoaded', function() {
+        const targetElement = document.getElementById('${quote_id}');
+        if (targetElement) {
+          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      });
+          `,
+        }}
+      />
+    )}
 
     </div>
 
