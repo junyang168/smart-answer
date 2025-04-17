@@ -7,7 +7,7 @@ export const fetchArticleDetail = async (
 ) : Promise<ArticleDetail>  => {
 
     let api_url = process.env.ARTICLE_SERVICE_URL + item 
-//    let api_url = 'http://localhost:10008/sc_api/final_sermon/junyang168@gmail.com/' + item
+//    let api_url = 'http://localhost:10009/sc_api/final_sermon/junyang168@gmail.com/' + item
     if(quote) {
         api_url = api_url + "/?quote=" + encodeURIComponent(quote)
     }
@@ -18,13 +18,13 @@ export const fetchArticleDetail = async (
         return {} as ArticleDetail;
     }
     const data =  await response.json()
-    console.log("fetchArticleDetail data", data.quotes)
+    console.log("fetchArticleDetail data", data.metadata.quotes)
     const article : ArticleDetail = {
         id: item,
         title: data.metadata.title,
         theme: data.metadata.theme,
         snippet: data.metadata.summary,
-        quotes: data.quotes,
+        quotes: data.metadata.quotes,
         paragraphs: []
     }
     for (let i = 0; i < data.script.length; i++) {
