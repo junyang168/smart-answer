@@ -5,8 +5,15 @@ import { authConfig} from "@/app/utils/auth";
 import MarkdownView from 'react-showdown';
 import { useSession } from 'next-auth/react';
 
+interface Reference {
+  Id: string;
+  Title: string;
+  Index: string;
+}
+
 interface Message {
   content: string;
+  references?: Reference[];
   role: 'user' | 'assistant';
 }
 
@@ -18,7 +25,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: session, status } = useSession();
-  console.log('Session:', session);
+
   let user_id: string | null | undefined = 'junyang168@gmail.com';
   if (session && session.user) {
     user_id =  session.user.email;      
@@ -27,6 +34,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
 
   // Handle clicks outside to close chat
   useEffect(() => {
+
     function handleClickOutside(event: MouseEvent) {
       if (
         chatFlyoverRef.current &&
@@ -71,7 +79,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
       });
       const data = await response.json();
       setMessages((prev) => prev.filter((msg) => msg.content !== 'thinking...'));
-      setMessages((prev) => [...prev, { content: data, role: 'assistant' }]);
+      setMessages((prev) => [...prev, { content: data.answer , references: data.quotes, role: 'assistant' }]);
 
     } catch (error) {
       setMessages((prev) => [...prev, { content: 'Error occurred', role: 'assistant' }]);
@@ -98,6 +106,33 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     setInput('');
   };
 
+  const highlightReferences = (index: string) => {
+    const idx = index.split('-')
+    const idx_start = idx[0]
+    const idx_end = idx.length > 1 ? idx[1] : idx[0]
+    const eStart = document.getElementById(idx_start);
+    const eEnd = document.getElementById(idx_end);
+    const allParas = eStart?.parentElement?.getElementsByTagName('p')
+
+    if (allParas) {
+      for (let i = 0; i < allParas.length; i++) {
+        allParas[i].classList.remove('bg-yellow-200');
+      }
+    }
+    
+    if (eStart && eEnd) {
+      let current :  HTMLElement | null = eStart;
+      while (current && current !== eEnd) {
+        current.classList.add('bg-yellow-200');
+        current = current.nextElementSibling as HTMLElement | null;
+      }
+      eEnd.classList.add('bg-yellow-200');
+      eStart.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    }
+  }
+
+
   return (
     <>
       <button
@@ -122,7 +157,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
             ×
           </button>
         </div>
-        <div className="flex-1 p-2.5 overflow-y-auto">
+        <div className="flex-1 p-2.5 overflow-y-auto" id='copilot-chat'>
           {messages.map((msg, index) => (
             <div
               key={index}
@@ -134,7 +169,28 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
               `}
             >
               <MarkdownView markdown={msg.content } />
-              </div>
+              {msg.references && (
+                msg.references.map((ref, idx) => (
+                  <p key={idx} className="text-sm text-gray-500">
+                    {idx+1}.
+                    <a 
+                      href={`/${ref.Index}`} 
+                      className="hover:underline" 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        highlightReferences(ref.Index);
+                        }}
+                      >
+                      {ref.Title}
+                    </a>
+                  </p>
+                ))
+              
+              )}
+
+            </div>
           ))}
           <div ref={messagesEndRef} />
         </div>
