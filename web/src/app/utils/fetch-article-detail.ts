@@ -18,13 +18,12 @@ export const fetchArticleDetail = async (
         return {} as ArticleDetail;
     }
     const data =  await response.json()
-    console.log("fetchArticleDetail data", data.metadata.quotes)
+    
     const article : ArticleDetail = {
         id: item,
         title: data.metadata.title,
         theme: data.metadata.theme,
         snippet: data.metadata.summary,
-        quotes: data.metadata.quotes,
         paragraphs: []
     }
     for (let i = 0; i < data.script.length; i++) {

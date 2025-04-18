@@ -25,7 +25,8 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         console.log("Error fetching article detail:", status);
     });
 
-    const quote_id = article.quotes?.[0] || null;
+    const quote_id = null
+
 
 
   return (
@@ -69,7 +70,7 @@ export default async function ArticlePage( {searchParams} : PageProps) {
                 <p 
                   key={index} 
                   id={paragraph.index} 
-                  className={`mb-2 ${article.quotes?.includes(paragraph.index) ? "bg-yellow-100" : ""}`}
+                  className={`mb-2}`}
                 >
                   {paragraph.text}
                 </p>
@@ -88,7 +89,10 @@ export default async function ArticlePage( {searchParams} : PageProps) {
       <script
         dangerouslySetInnerHTML={{
           __html: `
-      document.addEventListener('DOMContentLoaded', function() {
+
+
+      
+          document.addEventListener('DOMContentLoaded', function() {
         const targetElement = document.getElementById('${quote_id}');
         if (targetElement) {
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
