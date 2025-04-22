@@ -3,6 +3,7 @@ import React from "react";
 import { fetchArticleDetail } from "@/app/utils/fetch-article-detail";
 import { ArticleDetail } from "../interfaces/article_detail";
 import { CopilotChat  } from "@/app/components/copilot";
+import { highlightReferences } from "@/app/utils/funcs";
 
 
 // Define the expected query parameters
@@ -92,11 +93,24 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         dangerouslySetInnerHTML={{
           __html: `
           document.addEventListener('DOMContentLoaded', function() {
-        const targetElement = document.getElementById('${index}');
-        if (targetElement) {
-          targetElement.classList.add('bg-yellow-200');
-          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+          var index = '${index}';
+          const idx = index.split('-')
+          const idx_start = idx[0]
+          const idx_end = idx.length > 1 ? idx[1] : idx[0]
+          const eStart = document.getElementById(idx_start);
+          const eEnd = document.getElementById(idx_end);
+          
+          if (eStart && eEnd) {
+            current = eStart;
+            while (current && current != eEnd) {
+              current.classList.add('bg-yellow-200');
+              current = current.nextElementSibling;
+            }
+            eEnd.classList.add('bg-yellow-200');
+            eStart.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+          }
+
       });
           `,
         }}
