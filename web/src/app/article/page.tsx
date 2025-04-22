@@ -12,6 +12,7 @@ interface PageProps {
       o?: string; 
       rid?: string;
       s?: string;
+      d ?: string;
     };
   }
 
@@ -20,6 +21,7 @@ export default async function ArticlePage( {searchParams} : PageProps) {
     const rid = searchParams.rid || "";
     const item :string = searchParams.i || "";
     const quote :string = searchParams.s || "";
+    const index :string = searchParams.d || "";
 
     const article : ArticleDetail =  await fetchArticleDetail(item, quote, (status) => {
         console.log("Error fetching article detail:", status);
@@ -85,16 +87,14 @@ export default async function ArticlePage( {searchParams} : PageProps) {
         <CopilotChat item_id={item} /> 
 
     {/* Scroll to specific paragraph if quote is provided */}
-    {quote_id && (
+    {index && (
       <script
         dangerouslySetInnerHTML={{
           __html: `
-
-
-      
           document.addEventListener('DOMContentLoaded', function() {
-        const targetElement = document.getElementById('${quote_id}');
+        const targetElement = document.getElementById('${index}');
         if (targetElement) {
+          targetElement.classList.add('bg-yellow-200');
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       });

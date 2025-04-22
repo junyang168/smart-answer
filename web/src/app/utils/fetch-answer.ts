@@ -1,31 +1,29 @@
 import { Relate } from "@/app/interfaces/relate";
 import { Source } from "@/app/interfaces/source";
-import { IChatItemProps } from 'react-chat-elements'
+import { chat_entry } from '@/app/interfaces/chat_entry'
 
 const LLM_SPLIT = "__LLM_RESPONSE__";
 const RELATED_SPLIT = "__RELATED_QUESTIONS__";
 
 export const fetchAnswer = async (
   controller: AbortController,
-  query: string,
-  org: string,
-  search_uuid: string,
-  onNewQuestion: (value: string) => void,  
-  onChatHistory: (value: IChatItemProps[]) => void,
+  chat_history: chat_entry[],
   onSources: (value: Source[]) => void,
   onMarkdown: (value: string) => void,
-  onRelates: (value: Relate[]) => void,
   onError?: (status: number) => void,
 ) => {
-  const decoder = new TextDecoder();
-  let uint8Array = new Uint8Array();
-  let chunks = "";
-  let sourcesEmitted = false;
+  let api_url = "/sc_api"
+  api_url = api_url + '/qa/junyang168@gmail.com'
 
-  const env = process.env.NODE_ENV;
-  let api_url = ""
-  api_url = api_url + '/get_answer'
-
+  let history: { role: string; content: string; }[] = []
+  chat_history.forEach((entry) => {
+    if (entry.role === "user" || entry.role === "assistant") {
+      history.push({
+        role: entry.role,
+        content: entry.title,
+      });
+    }
+  });
   const response = await fetch(api_url, {
     method: "POST",
     headers: {
@@ -33,11 +31,7 @@ export const fetchAnswer = async (
       Accept: "*./*",
     },
     signal: controller.signal,
-    body: JSON.stringify({
-      org_id:org,
-      question:query,
-      sid:search_uuid
-    }),
+    body: JSON.stringify( history),
   });
   if (response.status !== 200) {
     onError?.(response.status);
@@ -46,11 +40,10 @@ export const fetchAnswer = async (
 
   const result =  await response.json()
   onMarkdown(result.answer)
-  onNewQuestion(result.new_question)
 
   let sources : Source[] = [] 
-  for( var ref of result.references) {
-    const link = `${ref.Link}&s=${encodeURIComponent(ref.Title)}`
+  for( var ref of result.quotes) {
+    const link = `${ref.Link}&s=${encodeURIComponent(ref.Title)}&d=${encodeURIComponent(ref.Index)}`
     const src : Source = { id: ref.Link, name: ref.Title, displayUrl : ref.Link, url: link,
         snippet:ref.Title,
         deepLinks: [],
@@ -69,22 +62,5 @@ export const fetchAnswer = async (
     sources.push(src)
   }
   onSources(sources)
-
-  let history : IChatItemProps[] = [] 
-  if( !result.duplicate_question )
-    result.chat_history.push({Role:'human', Message:query})
-  for( var chat_item of result.chat_history) {
-    const chat_entry : IChatItemProps = { 
-      id : '1',
-      avatar: chat_item.Role == 'ai' ? '/lightbulb.png': '/person.png',
-//      title: 'Kursat',
-      title: chat_item.Message,
-//      date: new Date(),
-//      unread: 3,           
-    }
-    history.push(chat_entry)
-  }
-  onChatHistory(history)
-
 
 };

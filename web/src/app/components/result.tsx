@@ -7,6 +7,7 @@ import { Sources } from "@/app/components/sources";
 import { Relate } from "@/app/interfaces/relate";
 import { Source } from "@/app/interfaces/source";
 import { fetchAnswer } from "@/app/utils/fetch-answer";
+import { chat_entry } from '@/app/interfaces/chat_entry'
 
 import { Annoyed } from "lucide-react";
 import { FC, useEffect, useState } from "react";
@@ -19,25 +20,23 @@ import { ChatList } from 'react-chat-elements'
 export const Result: FC<{org_id:string, query: string; rid: string }> = ({ org_id, query, rid }) => {
   const [sources, setSources] = useState<Source[]>([]);
   const [markdown, setMarkdown] = useState<string>("");
-  const [new_question, setNewQuestion] = useState<string>("");
   const [chat_history, setChatHistory] = useState<IChatItemProps[]>([]);
-  const [relates, setRelates] = useState<Relate[] | null>(null);
   const [error, setError] = useState<number | null>(null);
 
   console.log('16: ', query, rid, org_id)
+  let history: chat_entry[] = []
+  history.push({
+    role: "user",
+    title: query
+  });
   
   useEffect(() => {
     const controller = new AbortController();
     void fetchAnswer(
       controller,
-      query,      
-      org_id,
-      rid,
-      setNewQuestion,
-      setChatHistory,
+      history,
       setSources,
       setMarkdown,
-      setRelates,
       setError,
     );
     return () => {
