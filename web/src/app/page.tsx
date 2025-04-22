@@ -1,5 +1,4 @@
 import { Footer } from "@/app/components/footer";
-import { Header } from "@/app/components/header";
 import { Logo } from "@/app/components/logo";
 import { PresetQuery } from "@/app/components/preset-query";
 import { Search } from "@/app/components/search";
@@ -34,7 +33,6 @@ async function HomeComp() {
 export default function Home() {
   return (
     <div>
-      <Header show_signin="true"></Header>
       <HomeComp />
     </div>
   )  

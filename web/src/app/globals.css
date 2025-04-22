@@ -15,7 +15,7 @@ select:-webkit-autofill:focus {
 }
 
 
-ol {
+#copilot-chat ol {
   display: block;
   list-style-type: decimal; /* Numbers: 1, 2, 3, etc. */
   margin-top: 1em;

@@ -1,9 +1,7 @@
-import { SearchBox } from "@/app/components/searchbox";
 import React from "react";
 import { fetchArticleDetail } from "@/app/utils/fetch-article-detail";
 import { ArticleDetail } from "../interfaces/article_detail";
 import { CopilotChat  } from "@/app/components/copilot";
-import { highlightReferences } from "@/app/utils/funcs";
 
 
 // Define the expected query parameters
@@ -41,7 +39,7 @@ export default async function ArticlePage( {searchParams} : PageProps) {
       <div className="bg-white p-2 border-b border-gray-200">
   <div className="flex flex-col">
     <h1 className="text-3xl font-bold text-center">{article?.title}</h1>
-    <nav className="flex text-sm text-gray-500 my-2" aria-label="Breadcrumb">
+    <nav className="flex text-sm text-gray-500 my-0" aria-label="Breadcrumb">
       <ol className="inline-flex items-center space-x-1 md:space-x-3">
         <li className="inline-flex items-center">
           <a href="/" className="text-gray-700 hover:text-gray-900 inline-flex items-center">

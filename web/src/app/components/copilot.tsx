@@ -113,7 +113,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     <>
       <button
         id="help-button"
-        className="fixed right-5 top-8 -translate-y-1/2 bg-blue-600 text-white px-5 py-2.5 rounded-md cursor-pointer z-[1000] hover:bg-blue-700 transition-colors"
+        className="fixed right-5 top-20 -translate-y-1/2 bg-blue-600 text-white px-5 py-2.5 rounded-md cursor-pointer z-[1000] hover:bg-blue-700 transition-colors"
         onClick={() => setIsOpen(true)}
       >
         Chat with AI
