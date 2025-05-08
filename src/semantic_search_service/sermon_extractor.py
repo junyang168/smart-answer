@@ -62,7 +62,7 @@ class SermonExtractor(embed_content_extractor):
 #        out = runnable.invoke({'text':text})    
 #        return out.content
         question = """
-        给下面基督教牧師講道加小标题和段落的索引，不要返回講道内容。 回答须遵从以下JSON格式:
+        你是一位資深的基督教神學教授。给下面基督教牧師講道加小标题和段落的索引，不要返回講道内容。 回答须遵从以下JSON格式:
         ```json
         {
             "titles": [

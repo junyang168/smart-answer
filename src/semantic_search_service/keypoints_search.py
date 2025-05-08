@@ -10,6 +10,9 @@ from content_store import  HybridScore
 
 
 class KeypointSearch:
+
+    def get_keypoints(self, kps):
+        return '\n'.join([ k['keypoint'] for k in kps])
     
     def __init__(self):
 
@@ -17,8 +20,8 @@ class KeypointSearch:
         if response.status_code == 200:
             kps = response.json()
             docs =  [
-                f"""<document id="{s.get('id')}" title="{s.get('title')}">
-                {s['content']}
+                f"""<document id="{s.get('id')}" title="{s.get('theme')}">
+                {self.get_keypoints(s['kps'])}
                 </document>""" for s in kps]
             self.keypoints = f"<documents>{docs}</documents>"            
         else:
@@ -77,5 +80,5 @@ keypointSearch = KeypointSearch()
 
 if __name__ == "__main__":
     search = KeypointSearch()
-    res = search.search('基督徒能过万圣节吗？')
+    res = search.search('路加福音耶穌家譜有無跳代？怎麼看出來的？')
     print(res)
