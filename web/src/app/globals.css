@@ -36,3 +36,7 @@ select:-webkit-autofill:focus {
 .flashing-text {
   animation: blink 1s infinite; /* Blink animation, 1 second duration, repeat forever */
 }
+
+details[open] > summary .details-open\:rotate-180 {
+  transform: rotate(180deg);
+}

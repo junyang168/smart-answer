@@ -100,7 +100,7 @@ if __name__ == '__main__':
     import timeit
     svc = semantic_service
 
-    res = svc.search('基督徒能过万圣节吗？')
+    res = svc.search('路加福音耶穌家譜有無跳代？怎麼看出來的？')
 
 
     print(res)

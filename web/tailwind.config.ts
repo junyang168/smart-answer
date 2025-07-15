@@ -8,18 +8,29 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+            sans: ['var(--font-noto-sans-tc)', 'sans-serif'], // For Chinese and general text
+            display: ['var(--font-merriweather)', 'serif'], // For elegant titles
+      },
+      colors: {
+        'praise-gold': '#D4AF37',
+        'graceful-silver': '#C0C0C0',
+        'reverent-black': '#333333',
+        'peaceful-white': '#FAFAFA',
+        blue: {
+          500: "#2F80ED",
+        }
+      },      
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
         "gradient-conic":
           "conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))",
       },
-      colors: {
-        blue: {
-          500: "#2F80ED",
-        },
-      },
     },
   },
-  plugins: [require("@tailwindcss/typography")],
+  plugins: 
+  [
+    require("@tailwindcss/typography"),
+  ],
 };
 export default config;
