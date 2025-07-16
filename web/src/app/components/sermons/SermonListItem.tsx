@@ -25,10 +25,9 @@ export const SermonListItem = ({ sermon }: { sermon: Sermon }) => {
         <h3 className="text-xl font-bold font-display text-gray-800 mb-1">{sermon.title}</h3>
         <p className="text-sm font-semibold text-blue-600 mb-2">{sermon.topic}</p>
         <p className="font-semibold text-gray-600 mb-4">{sermon.scripture}</p>
-        <p className="text-gray-700 text-sm line-clamp-2">{sermon.summary}</p>
+        <p className="text-gray-700 text-sm line-clamp-3">{sermon.summary}</p>
         <div className="mt-4 flex items-center gap-4 text-sm font-bold text-[#8B4513]">
-            <span>觀看錄影 →</span>
-            <span>聆聽錄音 →</span>
+            <span>觀看 →</span>
         </div>
     </Link>
   );
