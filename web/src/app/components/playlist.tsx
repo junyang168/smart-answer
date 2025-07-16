@@ -1,7 +1,7 @@
 "use client";
 import React, { FC, useEffect, useState } from "react";
 import { Search, Menu, Home, Clock, ThumbsUp, Download, History, PlaySquare, Film, Music, User, Bell, Edit } from 'lucide-react';
-import { fetchArticle } from "@/app/utils/fetch-articles";
+//import { fetchArticle } from "@/app/utils/fetch-articles";
 import { Article } from "../interfaces/article";
 import { getSearchUrl } from "@/app/utils/get-search-url";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,7 @@ export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
   const query = "";
   useEffect(() => {
       const controller = new AbortController();
+/*      
       void fetchArticle(
         controller,
         query,      
@@ -23,6 +24,7 @@ export const Playlist: FC<{org_id:string, rid:string }> = ({ org_id, rid}) => {
       return () => {
         controller.abort();
       };
+*/      
     }, [query, org_id]);
     const [selectedVideo, setSelectedVideo] = useState(0);
 

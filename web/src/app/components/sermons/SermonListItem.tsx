@@ -16,7 +16,7 @@ export const SermonListItem = ({ sermon }: { sermon: Sermon }) => {
   return (
     <Link href={`/resources/sermons/${sermon.id}`} className="block bg-white p-6 rounded-lg shadow-sm hover:shadow-lg transition-shadow duration-300 border border-gray-200">
         <div className="flex justify-between items-start mb-2">
-            <p className="text-xs text-gray-500">{sermon.date} • {sermon.speaker}</p>
+            <p className="text-xs text-gray-500">{sermon.date} • {sermon.assigned_to_name}</p>
             {/* 新增的標籤 */}
             <div className="flex gap-2">
                 <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(sermon.status)}`}>{sermon.status}</span>

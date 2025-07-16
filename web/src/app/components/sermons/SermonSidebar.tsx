@@ -12,6 +12,8 @@ interface FacetProps {
   options: string[];
 }
 
+
+
 // 篩選塊組件
 const Facet = ({ title, paramName, options }: FacetProps) => {
   const pathname = usePathname();
@@ -54,18 +56,32 @@ const Facet = ({ title, paramName, options }: FacetProps) => {
   );
 };
 
+// ✅ 定義 props 類型
+interface SermonSidebarProps {
+  options: {
+    books?: string[];
+    topics?: string[];
+    speakers?: string[];
+    years?: string[];
+    statuses?: string[];
+    assignees?: string[];
+  }
+}
+
 // 完整的側邊欄組件
-export const SermonSidebar = () => {
+export const SermonSidebar = ({ options }: SermonSidebarProps) => {
   const pathname = usePathname();
-  // 這些選項應從後端獲取，或在父組件中定義
-  const facets: FacetProps[] = [
-    { title: '聖經書卷', paramName: 'book', options: ["羅馬書", "以弗所書", "出埃及記", "箴言"] },
-    { title: '講道主題', paramName: 'topic', options: ["福音基礎", "家庭系列", "舊約中的基督"] },
-    { title: '講道年份', paramName: 'year', options: ["2025", "2024"] },
-    { title: '講員', paramName: 'speaker', options: ["王守仁 牧師", "李長老", "客座講員"] },
-    { title: '編輯狀態', paramName: 'status', options: ["已發佈", "編輯中", "草稿"] },
-    { title: '認領人', paramName: 'assignee', options: ["張三", "李四", "王五"] },
-  ];
+
+  // ✅ 使用從 props 傳入的動態數據
+  const facets = [
+    { title: '聖經書卷', paramName: 'book', options: options.books || [] },
+    { title: '講道主題', paramName: 'topic', options: options.topics || [] },
+    { title: '講道年份', paramName: 'year', options: options.years?.sort((a,b) => b.localeCompare(a)) || [] },
+    { title: '講員', paramName: 'speaker', options: options.speakers || [] },
+    { title: '編輯狀態', paramName: 'status', options: options.statuses || [] },
+    { title: '認領人', paramName: 'assignee', options: options.assignees || [] },
+  ].filter(f => f.options.length > 0); // 只顯示有選項的篩選器
+
 
   return (
     <aside className="w-full lg:w-64 xl:w-72 lg:pr-8">

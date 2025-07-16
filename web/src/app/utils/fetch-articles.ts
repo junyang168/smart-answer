@@ -1,50 +1,41 @@
-import { Article } from "@/app/interfaces/article";
+import { Sermon } from "@/app/interfaces/article";
 import { SunMedium } from "lucide-react";
 
-export const fetchArticle = async (
-  controller: AbortController,
-  query: string,
-  org: string,
-  onArticles: (value: Article[]) => void,
-  onError?: (status: number) => void,
-) => {
+export const fetchSermons = async () => {
 
   const env = process.env.NODE_ENV;
   let api_url = ""
   api_url = api_url + '/sc_api/sermons/junyang168@gmail.com'
 
-  const response = await fetch(api_url);
+  const response = await fetch(api_url,{ next: { revalidate: 60 } });
   if (!response.ok) {
-    onError?.(response.status);
-    return;
+    console.error("Failed to fetch sermons:", response.status, response.statusText);
+    throw new Error(`Failed to fetch sermons: ${response.status} ${response.statusText}`);
   }
-  const surmons =  await response.json()
-  let articles: Article[] = [] 
+  const sermons =  await response.json()
+  let articles: Sermon[] = [] 
 
-  for( var surmon of surmons) {
-    if(surmon.status !== "published") 
-      continue;
-    const article : Article = {
+  for( var surmon of sermons) {
+//    if(surmon.status !== "published") 
+//      continue;
+    const article : Sermon = {
         id: surmon.item,
         title: surmon.title,
-        theme: surmon.theme,
-        snippet: surmon.summary,
+        summary: surmon.summary,
         status: surmon.status,
-        deliver_date: surmon.deliver_date,
-        publishedUrl: "/public/" + surmon.item,
+        date: surmon.deliver_date,
         assigned_to_name: surmon.assigned_to_name,
-        thumbnail: {
-          url: surmon.thumbnail,
-          width: 160,
-          height: 100,
-          imageId: "",
-        },
-
-    }
+        speaker: '王守仁',
+        scripture: "",
+        book: "",
+        topic: "",
+        videoUrl: "",
+        audioUrl: "",
+        source: "",
+    };
     articles.push(article)
   }  
-  onArticles(articles)
 
-
+  return articles;
 
 };
