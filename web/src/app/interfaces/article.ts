@@ -24,7 +24,7 @@ export interface Sermon {
   date: string;       // e.g., "2024年12月25日"
   scripture : string;
   summary: string;
-  videoUrl ?: string;
+  videoUrl : string | null;
   audioUrl ?: string;
   book : string;       // 聖經書卷
   topic : string;      // 主題/系列

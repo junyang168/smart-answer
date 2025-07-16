@@ -53,8 +53,8 @@ export const SermonDetailView = () => {
             scripture: data.metadata.scripture || '',
             book: data.metadata.book || '',
             topic: data.metadata.topic || '',
-            videoUrl: data.metadata.video_url || '',    
-            audioUrl: data.metadata.audio_url || '',
+            videoUrl:  data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null, 
+            audioUrl:  data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
             source: data.metadata.source || ''
         }
 
@@ -117,9 +117,33 @@ export const SermonDetailView = () => {
         <Breadcrumb links={breadcrumbLinks} />
         <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900 mb-2">{sermon.title}</h1>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} • {sermon.scripture}</p>
-        <div className="aspect-w-16 aspect-h-9 mb-8 shadow-lg rounded-lg overflow-hidden">
-            <iframe src={sermon.videoUrl} title={sermon.title} allowFullScreen className="w-full h-full"></iframe>
+        <div className="mb-8 shadow-lg rounded-lg overflow-hidden bg-gray-100 border">
+          {sermon.videoUrl ? (
+            // --- 如果有視頻，渲染視頻播放器 ---
+            <video
+              key={`${sermon.id}-video`} // 使用唯一的 key
+              controls
+              className="w-full h-auto bg-black"
+            >
+              <source src={sermon.videoUrl} type="video/mp4" />
+              您的瀏覽器不支持 video 標籤。
+            </video>
+          ) : (
+            // --- 如果沒有視頻，渲染音頻播放器作為主播放器 ---
+            <div className="p-8 flex flex-col items-center justify-center text-center bg-gray-50">
+                <h2 className="text-lg font-semibold text-gray-700 mb-4">本篇講道僅提供音頻格式</h2>
+                <audio
+                  key={`${sermon.id}-audio-main`} // 使用唯一的 key
+                  controls
+                  className="w-full max-w-md"
+                >
+                  <source src={sermon.audioUrl} type="audio/mpeg" />
+                  您的瀏覽器不支持 audio 標籤。
+                </audio>
+            </div>
+          )}
         </div>
+
         <article className="prose lg:prose-lg max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{sermon.markdownContent}</ReactMarkdown>
         </article>

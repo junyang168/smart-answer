@@ -29,8 +29,8 @@ export const fetchSermons = async () => {
         scripture: "",
         book: "",
         topic: "",
-        videoUrl: "",
-        audioUrl: "",
+        videoUrl: surmon.type == null || surmon.type != "audio" ? `/web/video/${surmon.id}.mp4` : null,
+        audioUrl: surmon.type === "audio" ? `/web/video/${surmon.id}.mp3` : "",
         source: "",
     };
     articles.push(article)

@@ -1,6 +1,9 @@
 // components/sermons/SermonDetailSidebar.tsx
 import { Sermon } from '@/app/interfaces/article';
 import { Download, Share2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
+import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
+
 
 interface SermonDetailSidebarProps {
   sermon: Sermon;
@@ -28,18 +31,18 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
       </div>
 
       <div className="mt-6">
-        <h3 className="text-xl font-bold font-display mb-4">資源</h3>
-        <div className="space-y-3">
-          <a href={sermon.audioUrl} download className="flex items-center w-full bg-blue-500 text-white p-3 rounded-lg hover:bg-blue-600 transition-colors">
-            <Download className="w-5 h-5 mr-3" />
-            <span>下載音頻 (MP3)</span>
-          </a>
-          <button className="flex items-center w-full bg-gray-600 text-white p-3 rounded-lg hover:bg-gray-700 transition-colors">
-            <Share2 className="w-5 h-5 mr-3" />
-            <span>分享此講道</span>
-          </button>
+        <h3 className="text-xl font-bold font-display mb-4">主要觀點</h3>
+        
+        {/* 
+          使用 'prose' 類來自動應用樣式到 Markdown 渲染的 HTML 上。
+          'prose-sm' 是一個較小的尺寸，非常適合側邊欄。
+          'max-w-none' 用來移除 prose 默認的寬度限制，讓它填滿容器。
+        */}
+        <div className="prose prose-sm max-w-none text-gray-700 bg-gray-50 p-6 rounded-lg">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {sermon.summary}
+          </ReactMarkdown>
         </div>
-      </div>
-    </aside>
+      </div>    </aside>
   );
 };
