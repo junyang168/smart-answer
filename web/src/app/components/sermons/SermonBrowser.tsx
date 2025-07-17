@@ -40,11 +40,38 @@ export const SermonBrowser = () => {
     fetchAllSermons();
   }, []); // 空依賴數組確保只運行一次
 
-  // --- Filtering and Pagination (在客戶端內存中進行) ---
+  // ✅ 1. 在客戶端計算篩選選項及其計數
+  //    使用 useMemo เพื่อ確保只在 allSermons 數據變化時才重新計算
+  const filterOptions = useMemo(() => {
+    if (allSermons.length === 0) return {};
+    
+    const getOptionsWithCounts = (key: keyof Sermon, transform?: (sermon: Sermon) => string) => {
+        const counts = new Map<string, number>();
+        for (const sermon of allSermons) {
+            const value = transform ? transform(sermon) : sermon[key];
+            if (typeof value === 'string' && value) {
+                counts.set(value, (counts.get(value) || 0) + 1);
+            }
+        }
+        return Array.from(counts.entries())
+            .map(([value, count]) => ({ value, count }))
+            .sort((a, b) => a.value.localeCompare(b.value));
+    };
+
+    return {
+        books: getOptionsWithCounts('book'),
+        topics: getOptionsWithCounts('topic'),
+        speakers: getOptionsWithCounts('speaker'),
+        years:[],
+//        years: getOptionsWithCounts('date', s => s.date.substring(0, 4)).sort((a,b) => b.value.localeCompare(a.value)),
+        statuses: getOptionsWithCounts('status'),
+        assignees: getOptionsWithCounts('assigned_to_name'),
+    };
+  }, [allSermons]);
+
+  // ✅ 2. 在客戶端進行篩選和分頁 (保持不變)
   const filteredAndPaginatedData = useMemo(() => {
     let filtered = [...allSermons];
-
-    // 從 URL 中讀取篩選參數
     const q = searchParams.get('q');
     const speaker = searchParams.get('speaker');
     const book = searchParams.get('book');
@@ -53,10 +80,9 @@ export const SermonBrowser = () => {
     const status = searchParams.get('status');
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
-    const limit = 12;
+    const limit = 10;
     
-    // 應用篩選邏輯
-    if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase())); }
+    if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase()) || s.scripture.join(' ').toLowerCase().includes(q.toLowerCase())); }
     if (speaker) { filtered = filtered.filter(s => s.speaker === speaker); }
     if (book) { filtered = filtered.filter(s => s.book === book); }
     if (topic) { filtered = filtered.filter(s => s.topic === topic); }
@@ -74,20 +100,8 @@ export const SermonBrowser = () => {
       hasNextPage: endIndex < totalCount,
       hasPrevPage: startIndex > 0,
     };
-  }, [allSermons, searchParams]); // 僅當數據或篩選參數變化時才重新計算
+  }, [allSermons, searchParams]);
 
-  // --- 動態生成篩選選項 ---
-  const filterOptions = useMemo(() => {
-    const getUniqueOptions = (key: keyof Sermon) => [...new Set(allSermons.map(s => s[key]).filter(Boolean))] as string[];
-    return {
-      books: getUniqueOptions('book'),
-      topics: getUniqueOptions('topic'),
-      speakers: getUniqueOptions('speaker'),
-      years: [],
-      statuses: getUniqueOptions('status'),
-      assignees: getUniqueOptions('assigned_to_name'),
-    };
-  }, [allSermons]);
 
   // --- Render Logic ---
   if (isLoading) {

@@ -62,14 +62,17 @@ export const SermonDetailView = () => {
             source: data.metadata.source || '',
             keypoints: data.metadata.keypoints || '',
             theme: data.metadata.theme || '',
-            core_bible_verses: data.metadata.core_bible_verses || [],
+            core_bible_verses: {},
         }
 
-        if(  data.metadata && data.metadata.core_bible_verse) {
-            data.metadata.core_bible_verse.map((book_verse: BibleVerse ) => {
-                article.scripture.push( `${book_verse.book} ${book_verse.chapter_verse}`);
+        if (data.metadata && data.metadata.core_bible_verse) {
+            data.metadata.core_bible_verse.map((book_verse: BibleVerse) => {
+                const key = `${book_verse.book} ${book_verse.chapter_verse}`;
+                article.scripture.push(key);
+                if (book_verse.text) {
+                    article.core_bible_verses![key] = book_verse.text;
+                }
             });
-
         }
 
 

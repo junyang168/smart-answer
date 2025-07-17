@@ -39,5 +39,5 @@ export interface Sermon {
   markdownContent?: string;   // 可選的 Markdown 內容
   keypoints?: string; // 可選的要點列表
   theme : string; // 主題
-  core_bible_verses ?: BibleVerse[]; // 可選的核心經文列表
+  core_bible_verses ?: { [key: string] : string }; // 可選的核心經文列表
 }

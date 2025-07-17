@@ -3,33 +3,34 @@
 
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 
-// 定義每個篩選塊的屬性
-interface FacetProps {
-  title: string;
-  paramName: string; // URL參數名, e.g., 'book'
-  options: string[];
+// ✅ 定義新的選項類型
+type FacetOption = {
+  value: string;
+  count: number;
 }
 
+// ✅ 更新 FacetProps 以使用新的選項類型
+interface FacetProps {
+  title: string;
+  paramName: string;
+  options: FacetOption[];
+}
 
-
-// 篩選塊組件
 const Facet = ({ title, paramName, options }: FacetProps) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedValue = searchParams.get(paramName);
 
-  // 幫助函數: 創建帶有新篩選參數的URL
   const createQueryString = (name: string, value: string) => {
     const params = new URLSearchParams(searchParams);
     if (value === selectedValue) {
-      // 如果再次點擊已選中的選項，則取消篩選
       params.delete(name);
     } else {
       params.set(name, value);
     }
-    params.set('page', '1'); // 每次篩選都重置到第一頁
+    params.set('page', '1');
     return `${pathname}?${params.toString()}`;
   };
 
@@ -41,13 +42,17 @@ const Facet = ({ title, paramName, options }: FacetProps) => {
           <ChevronDown className="w-5 h-5 transition-transform details-open:rotate-180" />
         </summary>
         <div className="mt-3 space-y-2">
+          {/* ✅ 更新 map 循環以處理新的數據結構 */}
           {options.map((option) => (
             <Link
-              key={option}
-              href={createQueryString(paramName, option)}
-              className={`block text-sm text-gray-700 hover:text-[#D4AF37] ${selectedValue === option ? 'font-bold text-[#D4AF37]' : ''}`}
+              key={option.value}
+              href={createQueryString(paramName, option.value)}
+              className={`flex justify-between items-center text-sm text-gray-700 hover:text-[#D4AF37] ${selectedValue === option.value ? 'font-bold text-[#D4AF37]' : ''}`}
             >
-              {option}
+              <span>{option.value}</span>
+              <span className={`text-xs ${selectedValue === option.value ? 'text-[#D4AF37]' : 'text-gray-400'}`}>
+                {option.count}
+              </span>
             </Link>
           ))}
         </div>
@@ -56,32 +61,30 @@ const Facet = ({ title, paramName, options }: FacetProps) => {
   );
 };
 
-// ✅ 定義 props 類型
+// ✅ 更新 SermonSidebarProps
 interface SermonSidebarProps {
   options: {
-    books?: string[];
-    topics?: string[];
-    speakers?: string[];
-    years?: string[];
-    statuses?: string[];
-    assignees?: string[];
+    books?: FacetOption[];
+    topics?: FacetOption[];
+    speakers?: FacetOption[];
+    years?: FacetOption[];
+    statuses?: FacetOption[];
+    assignees?: FacetOption[];
   }
 }
 
-// 完整的側邊欄組件
 export const SermonSidebar = ({ options }: SermonSidebarProps) => {
+  // ... 組件的其餘部分與之前相同 ...
   const pathname = usePathname();
 
-  // ✅ 使用從 props 傳入的動態數據
   const facets = [
     { title: '聖經書卷', paramName: 'book', options: options.books || [] },
     { title: '講道主題', paramName: 'topic', options: options.topics || [] },
-    { title: '講道年份', paramName: 'year', options: options.years?.sort((a,b) => b.localeCompare(a)) || [] },
+    { title: '講道年份', paramName: 'year', options: options.years || [] },
     { title: '講員', paramName: 'speaker', options: options.speakers || [] },
     { title: '編輯狀態', paramName: 'status', options: options.statuses || [] },
     { title: '認領人', paramName: 'assignee', options: options.assignees || [] },
-  ].filter(f => f.options.length > 0); // 只顯示有選項的篩選器
-
+  ].filter(f => f.options.length > 0);
 
   return (
     <aside className="w-full lg:w-64 xl:w-72 lg:pr-8">
@@ -95,9 +98,3 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
     </aside>
   );
 };
-
-// 添加一個簡單的CSS來處理details圖標的旋轉
-// 在你的 globals.css 文件中添加:
-// details[open] > summary .details-open\:rotate-180 {
-//   transform: rotate(180deg);
-// }

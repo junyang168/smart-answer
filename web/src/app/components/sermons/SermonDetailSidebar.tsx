@@ -1,9 +1,8 @@
 // components/sermons/SermonDetailSidebar.tsx
 import { Sermon } from '@/app/interfaces/article';
-import { Download, Share2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
 import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
-
+import { ScriptureHover } from './ScriptureHover';
 
 interface SermonDetailSidebarProps {
   sermon: Sermon;
@@ -26,12 +25,6 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
           <InfoRow label="主題" value={sermon.theme} />
           {sermon.scripture && sermon.scripture.length > 0 && (
             <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
-              {/* 
-                - flex: 啟用 Flexbox 佈局
-                - justify-between: 將標籤和值推向兩側
-                - items-baseline: 這是實現對齊的關鍵，它會讓flex子項的基線對齊。
-                                  對於單行文本和多行文本的第一行，效果非常好。
-              */}
               
               {/* 左側標籤 */}
               <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">
@@ -39,19 +32,15 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
               </dt>
               
               {/* 右側值列表 */}
-              <dd className="text-sm text-gray-900 text-right ml-4">
-                {/* 
-                  - ml-4: 增加一個左邊距，防止標籤和值在空間不足時擠在一起
-                */}
-                {sermon.scripture.map((line, index) => (
-                  <span key={index} className="block">
-                    {line}
-                  </span>
-                ))}
+              <dd className="flex flex-col items-end ml-4">
+                  {sermon.scripture.map((line, index) => (
+                    <div key={index} className={index < sermon.scripture.length - 1 ? 'mb-1.5' : ''}>
+                      <ScriptureHover key={line} reference={line} text={sermon.core_bible_verses![line]} />
+                    </div>
+                  ))}
               </dd>
             </div>
-          )}          
-    
+          )}
         </dl>
       </div>
 
