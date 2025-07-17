@@ -23,9 +23,35 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
         <h3 className="text-xl font-bold font-display mb-4">講道信息</h3>
         <dl>
           <InfoRow label="认领人" value={sermon.assigned_to_name} />
-          <InfoRow label="主題系列" value={sermon.topic} />
-          <InfoRow label="主要經文" value={sermon.scripture} />
-          <InfoRow label="聖經書卷" value={sermon.book} />
+          <InfoRow label="主題" value={sermon.theme} />
+          {sermon.scripture && sermon.scripture.length > 0 && (
+            <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
+              {/* 
+                - flex: 啟用 Flexbox 佈局
+                - justify-between: 將標籤和值推向兩側
+                - items-baseline: 這是實現對齊的關鍵，它會讓flex子項的基線對齊。
+                                  對於單行文本和多行文本的第一行，效果非常好。
+              */}
+              
+              {/* 左側標籤 */}
+              <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">
+                主要經文
+              </dt>
+              
+              {/* 右側值列表 */}
+              <dd className="text-sm text-gray-900 text-right ml-4">
+                {/* 
+                  - ml-4: 增加一個左邊距，防止標籤和值在空間不足時擠在一起
+                */}
+                {sermon.scripture.map((line, index) => (
+                  <span key={index} className="block">
+                    {line}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          )}          
+    
         </dl>
       </div>
 
@@ -39,9 +65,10 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
         */}
         <div className="prose prose-sm max-w-none text-gray-700 bg-gray-50 p-6 rounded-lg">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {sermon.summary}
+            {sermon.keypoints}
           </ReactMarkdown>
         </div>
-      </div>    </aside>
+      </div>    
+    </aside>
   );
 };

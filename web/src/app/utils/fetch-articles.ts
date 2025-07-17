@@ -26,12 +26,13 @@ export const fetchSermons = async () => {
         date: surmon.deliver_date,
         assigned_to_name: surmon.assigned_to_name,
         speaker: '王守仁',
-        scripture: "",
+        scripture: [],
         book: "",
         topic: "",
         videoUrl: surmon.type == null || surmon.type != "audio" ? `/web/video/${surmon.id}.mp4` : null,
         audioUrl: surmon.type === "audio" ? `/web/video/${surmon.id}.mp3` : "",
         source: "",
+        theme: surmon.theme || '',
     };
     articles.push(article)
   }  

@@ -8,7 +8,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { Sermon} from '@/app/interfaces/article';
+import { BibleVerse} from '@/app/interfaces/article';
+
 import { SermonDetailSidebar } from '@/app/components/sermons/SermonDetailSidebar';
+import { FileText } from 'lucide-react';
 
 export const SermonDetailView = () => {
   // --- State Management ---
@@ -42,6 +45,7 @@ export const SermonDetailView = () => {
         }
 
         const data  = await res.json();
+
         const article : Sermon = {
             id: id,
             title: data.metadata.title,
@@ -49,13 +53,23 @@ export const SermonDetailView = () => {
             status: data.metadata.status,
             date: data.metadata.deliver_date,
             assigned_to_name: data.metadata.assigned_to_name,
-            speaker: data.metadata.speaker || '王守仁 牧師',
-            scripture: data.metadata.scripture || '',
+            speaker: data.metadata.speaker || '王守仁',
+            scripture: [], // 將所有經文合併為一個字符串
             book: data.metadata.book || '',
             topic: data.metadata.topic || '',
             videoUrl:  data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null, 
             audioUrl:  data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
-            source: data.metadata.source || ''
+            source: data.metadata.source || '',
+            keypoints: data.metadata.keypoints || '',
+            theme: data.metadata.theme || '',
+            core_bible_verses: data.metadata.core_bible_verses || [],
+        }
+
+        if(  data.metadata && data.metadata.core_bible_verse) {
+            data.metadata.core_bible_verse.map((book_verse: BibleVerse ) => {
+                article.scripture.push( `${book_verse.book} ${book_verse.chapter_verse}`);
+            });
+
         }
 
 
@@ -116,7 +130,7 @@ export const SermonDetailView = () => {
       <main className="lg:col-span-2">
         <Breadcrumb links={breadcrumbLinks} />
         <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900 mb-2">{sermon.title}</h1>
-        <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} • {sermon.scripture}</p>
+        <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} </p>
         <div className="mb-8 shadow-lg rounded-lg overflow-hidden bg-gray-100 border">
           {sermon.videoUrl ? (
             // --- 如果有視頻，渲染視頻播放器 ---
@@ -143,6 +157,20 @@ export const SermonDetailView = () => {
             </div>
           )}
         </div>
+
+                {/* ✅ 新增的講道摘要區域 */}
+        {sermon.summary && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 mb-8">
+            <div className="flex items-center mb-3">
+              <FileText className="w-6 h-6 text-slate-600 mr-3" />
+              <h2 className="text-xl font-bold font-display text-slate-800">內容摘要</h2>
+            </div>
+            <p className="text-slate-700 leading-relaxed">
+              {sermon.summary}
+            </p>
+          </div>
+        )}
+
 
         <article className="prose lg:prose-lg max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{sermon.markdownContent}</ReactMarkdown>
