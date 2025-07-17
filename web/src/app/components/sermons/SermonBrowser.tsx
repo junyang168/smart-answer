@@ -56,7 +56,7 @@ export const SermonBrowser = () => {
     const limit = 12;
     
     // 應用篩選邏輯
-    if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase()) || s.scripture.toLowerCase().includes(q.toLowerCase())); }
+    if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase())); }
     if (speaker) { filtered = filtered.filter(s => s.speaker === speaker); }
     if (book) { filtered = filtered.filter(s => s.book === book); }
     if (topic) { filtered = filtered.filter(s => s.topic === topic); }
