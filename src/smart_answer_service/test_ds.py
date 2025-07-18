@@ -1,15 +1,15 @@
 import os
 import openai
 
-client = openai.OpenAI(
-  api_key=os.environ.get("TOGETHER_API_KEY"),
-  base_url="https://api.together.xyz/v1",
-)
+#client = openai.OpenAI(
+#  api_key=os.environ.get("TOGETHER_API_KEY"),
+#  base_url="https://api.together.xyz/v1",
+#)
 
 
-#from together import Together
+from together import Together
 
-#client = Together()
+client = Together()
 
 response = client.chat.completions.create(
     model="deepseek-ai/DeepSeek-R1",
@@ -426,10 +426,10 @@ Answer:
     max_tokens=4000,
     temperature=0.6,
     top_p=0.95,
-#    top_k=50,
+    top_k=50,
 #    repetition_penalty=1,
 #    stop=["<｜end▁of▁sentence｜>"],
-#    stream=True
+    stream=False
 )
 
 resp =  response.choices[0].message.content

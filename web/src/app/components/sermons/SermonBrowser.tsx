@@ -40,16 +40,21 @@ export const SermonBrowser = () => {
     fetchAllSermons();
   }, []); // 空依賴數組確保只運行一次
 
-  // ✅ 1. 在客戶端計算篩選選項及其計數
-  //    使用 useMemo เพื่อ確保只在 allSermons 數據變化時才重新計算
+  // ✅ 1. 更新計數邏輯以處理數組
   const filterOptions = useMemo(() => {
     if (allSermons.length === 0) return {};
     
-    const getOptionsWithCounts = (key: keyof Sermon, transform?: (sermon: Sermon) => string) => {
+    const getOptionsWithCounts = (key: keyof Sermon, isArray: boolean = false) => {
         const counts = new Map<string, number>();
         for (const sermon of allSermons) {
-            const value = transform ? transform(sermon) : sermon[key];
-            if (typeof value === 'string' && value) {
+            const value = sermon[key];
+            if (isArray && Array.isArray(value)) {
+                // 如果是數組，遍歷數組中的每一項
+                for (const item of value) {
+                    if (item) counts.set(item, (counts.get(item) || 0) + 1);
+                }
+            } else if (typeof value === 'string' && value) {
+                // 如果是字符串，直接計數
                 counts.set(value, (counts.get(value) || 0) + 1);
             }
         }
@@ -59,11 +64,10 @@ export const SermonBrowser = () => {
     };
 
     return {
-        books: getOptionsWithCounts('book'),
-        topics: getOptionsWithCounts('topic'),
+        books: getOptionsWithCounts('book', true), // 標記 book 為數組
+        topics: getOptionsWithCounts('topic', true), // 標記 topic 為數組
         speakers: getOptionsWithCounts('speaker'),
-        years:[],
-//        years: getOptionsWithCounts('date', s => s.date.substring(0, 4)).sort((a,b) => b.value.localeCompare(a.value)),
+//        years: [...new Set(allSermons.map(s => s.date.substring(0, 4)).filter(Boolean))].map(y => ({value: y, count: allSermons.filter(s => s.date.startsWith(y)).length})).sort((a,b)=>b.value.localeCompare(a.value)),
         statuses: getOptionsWithCounts('status'),
         assignees: getOptionsWithCounts('assigned_to_name'),
     };
@@ -80,12 +84,13 @@ export const SermonBrowser = () => {
     const status = searchParams.get('status');
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
-    const limit = 10;
+    const limit = 12;
+
+    if (book) { filtered = filtered.filter(s => s.book.includes(book)); }
+    if (topic) { filtered = filtered.filter(s => s.topic.includes(topic)); }    
     
     if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase()) || s.scripture.join(' ').toLowerCase().includes(q.toLowerCase())); }
     if (speaker) { filtered = filtered.filter(s => s.speaker === speaker); }
-    if (book) { filtered = filtered.filter(s => s.book === book); }
-    if (topic) { filtered = filtered.filter(s => s.topic === topic); }
     if (year) { filtered = filtered.filter(s => s.date.startsWith(year)); }
     if (status) { filtered = filtered.filter(s => s.status === status); }
     if (assignee) { filtered = filtered.filter(s => s.assigned_to_name === assignee); }

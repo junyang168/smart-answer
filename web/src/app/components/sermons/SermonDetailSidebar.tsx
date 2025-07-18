@@ -15,6 +15,17 @@ const InfoRow = ({ label, value }: { label: string, value: string }) => (
   </div>
 );
 
+const MultiValueRow = ({ label, values }: { label: string, values: string[] }) => (
+    <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
+        <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">{label}</dt>
+        <dd className="flex flex-col items-end ml-4 text-sm text-gray-900">
+            {values.map((value, index) => (
+                <span key={index} className={index < values.length - 1 ? 'mb-1.5' : ''}>{value}</span>
+            ))}
+        </dd>
+    </div>
+);
+
 export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
   return (
     <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
@@ -23,6 +34,7 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
         <dl>
           <InfoRow label="认领人" value={sermon.assigned_to_name} />
           <InfoRow label="主題" value={sermon.theme} />
+
           {sermon.scripture && sermon.scripture.length > 0 && (
             <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
               

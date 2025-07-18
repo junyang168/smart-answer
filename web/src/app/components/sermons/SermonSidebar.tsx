@@ -78,12 +78,10 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
   const pathname = usePathname();
 
   const facets = [
-    { title: '聖經書卷', paramName: 'book', options: options.books || [] },
-    { title: '講道主題', paramName: 'topic', options: options.topics || [] },
-    { title: '講道年份', paramName: 'year', options: options.years || [] },
-    { title: '講員', paramName: 'speaker', options: options.speakers || [] },
     { title: '編輯狀態', paramName: 'status', options: options.statuses || [] },
     { title: '認領人', paramName: 'assignee', options: options.assignees || [] },
+    { title: '講道主題', paramName: 'topic', options: options.topics || [] },
+    { title: '聖經書卷', paramName: 'book', options: options.books || [] },
   ].filter(f => f.options.length > 0);
 
   return (

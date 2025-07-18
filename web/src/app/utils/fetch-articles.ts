@@ -1,5 +1,5 @@
 import { Sermon } from "@/app/interfaces/article";
-import { SunMedium } from "lucide-react";
+import { BibleVerse } from "@/app/interfaces/article";
 
 export const fetchSermons = async () => {
 
@@ -27,8 +27,8 @@ export const fetchSermons = async () => {
         assigned_to_name: surmon.assigned_to_name,
         speaker: '王守仁',
         scripture: [],
-        book: "",
-        topic: "",
+        book:  [...new Set((surmon.core_bible_verse as BibleVerse[]).map((verse: BibleVerse) => verse.book))],
+        topic: [],
         videoUrl: surmon.type == null || surmon.type != "audio" ? `/web/video/${surmon.id}.mp4` : null,
         audioUrl: surmon.type === "audio" ? `/web/video/${surmon.id}.mp3` : "",
         source: "",
