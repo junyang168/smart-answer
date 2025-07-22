@@ -12,21 +12,21 @@ const resourceCardsData = [
   {
     icon: Mic,
     title: '講道中心',
-    description: '聆聽和觀看王守仁牧師及其他講員的深度釋經講道，支持按書卷、日期和系列篩選。',
+    description: '聆聽和觀看王守仁教授及其他講員的深度釋經講道',
     link: '/resources/sermons',
     linkLabel: '進入講道中心',
   },
   {
     icon: BookOpen,
     title: '文章薈萃',
-    description: '閱讀牧者短講、神學專欄和會友見證。從文字中汲取力量與智慧。',
+    description: '閱讀團契弟兄姐妹的分享和見證。',
     link: '/resources/articles',
     linkLabel: '瀏覽所有文章',
   },
   {
     icon: MessageCircleQuestion,
     title: '信仰問答',
-    description: '為您解答關於信仰、聖經和生活的常見疑問，並提供匿名提問信箱。',
+    description: '解答關於信仰、聖經和生活的常見疑問，',
     link: '/resources/qa',
     linkLabel: '尋找答案',
   },
@@ -73,7 +73,7 @@ const ResourcesPage : NextPage = () => {
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold font-display text-gray-800">資源中心</h1>
           <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-            在這裡，您可以找到歷次主日講道的錄音錄影、牧者的深度文章，以及常見信仰問題的解答。願這些資源能成為您屬靈生命成長的助力。
+            在這裡，您可以找到歷次牧者講道的錄音錄影和文字、團契弟兄姐妹們分享的講稿，以及信仰問題的解答。願這些資源能成為您屬靈生命成長的助力。
           </p>
         </div>
 
