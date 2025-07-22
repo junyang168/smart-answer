@@ -41,3 +41,13 @@ export interface Sermon {
   theme : string; // 主題
   core_bible_verses ?: { [key: string] : string }; // 可選的核心經文列表
 }
+
+// ✅ 新增：定義講道系列的類型
+export interface SermonSeries {
+  id: string; // URL友好的ID，例如 "gospel-basics"
+  title: string;
+  summary: string;
+  topics: string[]; // 主題列表
+  keypoints?: string; // 可選的要點列表
+  sermons: Sermon[]; // 包含在此系列中的所有講道
+}
