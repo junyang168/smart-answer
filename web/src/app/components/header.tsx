@@ -40,7 +40,6 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
 
         {/* Desktop Action Buttons */}
         <div className="hidden lg:flex items-center gap-4">
-          <button className="text-sm font-semibold text-gray-600 hover:text-black">EN / 中</button>
           <button className="text-gray-600 hover:text-black">
             <Search size={20} />
           </button>
@@ -67,10 +66,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
             <NavLink href="/resources">資源中心</NavLink>
             <NavLink href="/contact">聯絡我們</NavLink>
             <div className="mt-4 border-t w-full flex justify-center pt-6 gap-6">
-                <button className="text-sm font-semibold text-gray-600 hover:text-black">EN / 中</button>
-                <Link href="/new-here" className="bg-[#D4AF37] text-white font-bold py-2 px-4 rounded-full hover:bg-opacity-90 transition-all">
-                    新朋友?
-                </Link>
+              <AuthButton />
             </div>
           </nav>
         </div>
