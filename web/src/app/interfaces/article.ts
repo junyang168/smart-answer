@@ -24,6 +24,7 @@ export interface BibleVerse {
 
 export interface Sermon {
   id: string;
+  item ?: string; // 文章ID或其他識別符
   title: string;
   speaker: string;
   date: string;       // e.g., "2024年12月25日"
@@ -50,4 +51,5 @@ export interface SermonSeries {
   topics: string[]; // 主題列表
   keypoints?: string; // 可選的要點列表
   sermons: Sermon[]; // 包含在此系列中的所有講道
+
 }
