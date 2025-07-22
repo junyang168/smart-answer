@@ -101,7 +101,7 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
         ✅ 新增：導航到系列頁面的獨立模塊
       */}
       <div className="mt-10 pt-6 border-t border-gray-200">
-        <h2 className="text-xl font-bold mb-4">瀏覽系列</h2>
+        <h2 className="text-xl font-bold mb-4">系列講道</h2>
         <Link
           href="/resources/series"
           className="flex items-center gap-3 p-3 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"

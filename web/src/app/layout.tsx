@@ -5,6 +5,7 @@ import { ReactNode } from "react";
 import Head from 'next/head';
 import { Header } from "@/app/components/header";
 import { Footer } from '@/app/components/footer';
+import { Providers } from '@/app/components/providers/provider'; 
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -41,14 +42,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${notoSansTC.variable} ${merriweather.variable} font-sans flex flex-col min-h-screen bg-gray-50`}>
-        <Header show_signin="True"/>
-        <main className="flex-grow">
-          {/* 'children' will be the content of your page.tsx files */}
-          <SessionProvider>
-              {children}
-          </SessionProvider>
-        </main>
+        <Providers>
+          <Header show_signin="True"/>
+          <main className="flex-grow">
+                {children}
+          </main>
         <Footer />
+        </Providers>
       </body>
     </html>
   );

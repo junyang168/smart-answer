@@ -5,6 +5,7 @@ import { UserProfile, UserProfile_with_signin } from "./user_profile";
 import Image from 'next/image';
 import Link from 'next/link';
 import { Search, Menu, X, ChevronDown } from 'lucide-react';
+import { AuthButton } from '@/app/components/common/AuthButton';
 
 const NavLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
   <Link href={href} className="text-gray-700 hover:text-[#D4AF37] transition-colors duration-300">
@@ -43,9 +44,8 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
           <button className="text-gray-600 hover:text-black">
             <Search size={20} />
           </button>
-          <Link href="/new-here" className="bg-[#D4AF37] text-white font-bold py-2 px-4 rounded-full hover:bg-opacity-90 transition-all">
-            新朋友?
-          </Link>
+
+          <AuthButton />
         </div>
 
         {/* Mobile Menu Button */}
