@@ -24,24 +24,12 @@ const SeriesSection = ({ series }: { series: SermonSeries }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
        {/* 左側：要點和行動按鈕 */}
         <div>
-          <h3 className="font-bold text-lg text-gray-700 mb-3">系列要點</h3>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{series.keypoints}</ReactMarkdown>
           <Link href={`/resources/series/${series.id}`} className="inline-flex items-center justify-center bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-bold">
             <ListMusic className="w-5 h-5 mr-2" />
             <span>進入完整系列 ({series.sermons.length}篇)</span>
           </Link>
         </div>
-        <div>
-          <h3 className="font-bold text-lg text-gray-700 mb-3">系列內容</h3>
-          <div className="space-y-1 border border-gray-200 rounded-md p-3 max-h-60 overflow-y-auto">
-            {series.sermons.map((sermon, index) => (
-              <Link key={sermon.item} href={`/resources/sermons/${sermon.item}`} className="block p-2 rounded-md hover:bg-gray-100">
-                <p className="font-semibold text-gray-800 truncate">{`${index + 1}. ${sermon.title}`}</p>
-                <p className="text-xs text-gray-500">{sermon.summary}</p>
-              </Link>
-            ))}
-          </div>
-        </div>
+
       </div>
     </section>
   );
