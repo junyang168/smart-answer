@@ -3,7 +3,7 @@
 
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Library } from 'lucide-react';
 
 // ✅ 定義新的選項類型
 type FacetOption = {
@@ -16,12 +16,16 @@ interface FacetProps {
   title: string;
   paramName: string;
   options: FacetOption[];
+  defaultOpen?: boolean; // 新增屬性  
 }
 
-const Facet = ({ title, paramName, options }: FacetProps) => {
+const Facet = ({ title, paramName, options,defaultOpen = false }: FacetProps) => {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedValue = searchParams.get(paramName);
+
+  // 如果當前有篩選值被選中，則強制默認展開
+  const isOpen = defaultOpen || !!selectedValue;  
 
   const createQueryString = (name: string, value: string) => {
     const params = new URLSearchParams(searchParams);
@@ -36,7 +40,7 @@ const Facet = ({ title, paramName, options }: FacetProps) => {
 
   return (
     <div className="border-b border-gray-200 py-4">
-      <details open={true}>
+      <details className="group" open={isOpen} key={title + isOpen}>
         <summary className="flex justify-between items-center cursor-pointer font-bold text-gray-800">
           {title}
           <ChevronDown className="w-5 h-5 transition-transform details-open:rotate-180" />
@@ -93,6 +97,19 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
         </Link>
       </div>
       {facets.map(facet => <Facet key={facet.title} {...facet} />)}
+    {/* 
+        ✅ 新增：導航到系列頁面的獨立模塊
+      */}
+      <div className="mt-10 pt-6 border-t border-gray-200">
+        <h2 className="text-xl font-bold mb-4">瀏覽系列</h2>
+        <Link
+          href="/resources/series"
+          className="flex items-center gap-3 p-3 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"
+        >
+          <Library className="w-5 h-5" />
+          <span>查看所有講道系列</span>
+        </Link>
+      </div>      
     </aside>
   );
 };
