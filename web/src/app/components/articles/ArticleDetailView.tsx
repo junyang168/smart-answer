@@ -1,0 +1,111 @@
+// components/articles/ArticleDetailView.tsx
+"use client";
+
+import { useState, useEffect } from 'react';
+import { useParams, notFound } from 'next/navigation';
+import Link from 'next/link';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { BookMarked } from 'lucide-react';
+import { Sermon, SermonSeries } from '@/app/interfaces/article';
+
+export const ArticleDetailView = () => {
+    const [currentArticle, setCurrentArticle] = useState<Sermon | null>(null);
+    const [currentSeries, setCurrentSeries] = useState<SermonSeries | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    const params = useParams();
+    const articleId = decodeURIComponent(Array.isArray(params.articleId) ? params.articleId[0] : params.articleId);
+
+    useEffect(() => {
+        if (!articleId) return;
+
+        const loadArticleData = async () => {
+            setIsLoading(true);
+            try {
+                // 我們仍然需要獲取所有數據，然後在客戶端查找
+                const res = await fetch(`/sc_api/article/${articleId}`)
+                if (!res.ok) {
+                    throw new Error('Failed to fetch article from API');
+                }
+                const article_with_series = await res.json();
+                const foundSeries: SermonSeries = article_with_series.series;
+                article_with_series.series = undefined; // 移除 series 屬性，因為我們只需要文章數據
+                const foundArticle: Sermon = {
+                    id: articleId,
+                    title: article_with_series.title,
+                    summary: article_with_series.summary || '',
+                    date: article_with_series.deliver_date,
+                    speaker: article_with_series.author_name || '',
+                    scripture: [], // 將所有經文合併為一個字符串
+                    book: article_with_series.book || '',
+                    topic: article_with_series.topic || '',
+                    videoUrl:   '',
+                    audioUrl:  '',
+                    source: '',
+                    keypoints: article_with_series.keypoints || '',
+                    theme: article_with_series.theme || '',
+                    core_bible_verses: {},
+                    status: article_with_series.status || '',
+                    assigned_to_name: article_with_series.assigned_to_name || '',
+                    markdownContent: article_with_series.markdownContent || '',
+                }
+
+                if (foundArticle && foundSeries) {
+                    setCurrentArticle(foundArticle);
+                    setCurrentSeries(foundSeries);
+                } else {
+                    throw new Error('404');
+                }
+            } catch (err: any) {
+                setError(err.message || 'An unknown error occurred.');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        loadArticleData();
+    }, [articleId]);
+
+    if (isLoading) return <div className="text-center py-20">正在加載文章內容...</div>;
+    if (error === '404') notFound();
+    if (error) return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;
+    if (!currentArticle || !currentSeries) return null;
+
+    return (
+        <div className="flex flex-col lg:flex-row-reverse gap-8 lg:gap-12">
+            {/* 側邊欄 (完全不變) */}
+            <aside className="lg:w-1/3 lg:sticky lg:top-24 self-start">
+                <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center mb-4">
+                        <BookMarked className="w-6 h-6 mr-3 text-gray-700"/>
+                        <div>
+                            <p className="text-xs text-gray-500">系列</p>
+                            <h3 className="font-bold text-lg">{currentSeries.title}</h3>
+                        </div>
+                    </div>
+                    <ul className="space-y-1">
+                        {currentSeries.articles.map((article, index) => {
+                            const isActive = article.item === currentArticle.id;
+                            return (
+                                <li key={article.item}>
+                                    <Link href={`/resources/articles/${currentSeries.id}/${article.item}`} className={`block p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100 text-blue-800 font-bold' : 'hover:bg-gray-200 text-gray-800'}`}>
+                                        {`${index + 1}. ${article.title}`}
+                                    </Link>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            </aside>
+            <main className="lg:w-2/3">
+                <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{currentArticle.title}</h1>
+                <p className="text-gray-600 my-4 pb-4 border-b">作者: {currentArticle.speaker} | 發布日期: {currentArticle.date}</p>
+                <article className="prose lg:prose-xl max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentArticle.markdownContent}</ReactMarkdown>
+                </article>
+            </main>
+        </div>
+    );
+};
