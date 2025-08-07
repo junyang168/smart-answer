@@ -8,6 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BookMarked } from 'lucide-react';
 import { Sermon, SermonSeries } from '@/app/interfaces/article';
+import { apiToUiSermon, apiToUiSermonSeries} from '@/app/utils/converter';
 
 export const ArticleDetailView = () => {
     const [currentArticle, setCurrentArticle] = useState<Sermon | null>(null);
@@ -30,27 +31,8 @@ export const ArticleDetailView = () => {
                     throw new Error('Failed to fetch article from API');
                 }
                 const article_with_series = await res.json();
-                const foundSeries: SermonSeries = article_with_series.series;
-                article_with_series.series = undefined; // 移除 series 屬性，因為我們只需要文章數據
-                const foundArticle: Sermon = {
-                    id: articleId,
-                    title: article_with_series.title,
-                    summary: article_with_series.summary || '',
-                    date: article_with_series.deliver_date,
-                    speaker: article_with_series.author_name || '',
-                    scripture: [], // 將所有經文合併為一個字符串
-                    book: article_with_series.book || '',
-                    topic: article_with_series.topic || '',
-                    videoUrl:   '',
-                    audioUrl:  '',
-                    source: '',
-                    keypoints: article_with_series.keypoints || '',
-                    theme: article_with_series.theme || '',
-                    core_bible_verses: {},
-                    status: article_with_series.status || '',
-                    assigned_to_name: article_with_series.assigned_to_name || '',
-                    markdownContent: article_with_series.markdownContent || '',
-                }
+                const foundSeries: SermonSeries = apiToUiSermonSeries(article_with_series.series);
+                const foundArticle: Sermon = apiToUiSermon(article_with_series);
 
                 if (foundArticle && foundSeries) {
                     setCurrentArticle(foundArticle);
@@ -86,7 +68,7 @@ export const ArticleDetailView = () => {
                         </div>
                     </div>
                     <ul className="space-y-1">
-                        {currentSeries.articles.map((article, index) => {
+                        {currentSeries.sermons.map((article, index) => {
                             const isActive = article.item === currentArticle.id;
                             return (
                                 <li key={article.item}>

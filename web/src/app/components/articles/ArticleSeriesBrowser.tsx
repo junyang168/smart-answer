@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { SermonSeries, Sermon } from '@/app/interfaces/article'; // 假設這些類型已經定義好
 import ReactMarkdown from 'react-markdown'; 
-import remarkGfm from 'remark-gfm';          
+import remarkGfm from 'remark-gfm';   
+import { apiToUiSermonSeries } from '@/app/utils/converter'; // 假設這是您的轉換函數       
 
 
 
@@ -16,9 +17,9 @@ async function fetchArticlesSeries(): Promise<SermonSeries[]> {
     if (!res.ok) {
         throw new Error('Failed to fetch articles from API');
     }
-    const allSeries: SermonSeries[] = await res.json();
+    const apiSeries: SermonSeries[] = await res.json();
 
-    return allSeries
+    return apiSeries.map(apiToUiSermonSeries);
 
 }
 
@@ -33,13 +34,13 @@ const ArticleSeriesSection = ({ series }: { series: SermonSeries }) => (
         </div>      
       
       <div className="mt-6 border-t border-gray-200 pt-6">
-        <h3 className="font-bold text-lg text-gray-700 mb-3">系列文章 ({series.articles.length}篇)</h3>
+        <h3 className="font-bold text-lg text-gray-700 mb-3">系列文章 ({series.sermons.length}篇)</h3>
         <div className="space-y-3">
-          {series.articles.map((article, index) => (
+          {series.sermons.map((article, index) => (
             <Link key={article.id} href={`/resources/articles/${series.id}/${article.item}`} className="group flex items-center justify-between p-3 rounded-md hover:bg-gray-100 transition-colors">
                 <div>
                     <p className="font-semibold text-gray-800 group-hover:text-blue-600">{`${index + 1}. ${article.title}`}</p>
-                    <p className="text-xs text-gray-500">{article.author_name} • {article.deliver_date}</p>
+                    <p className="text-xs text-gray-500">{article.speaker} • {article.date}</p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-600 transition-transform group-hover:translate-x-1" />
             </Link>
