@@ -77,6 +77,8 @@ export const SermonBrowser = () => {
   const filteredAndPaginatedData = useMemo(() => {
     let filtered = [...allSermons];
     const q = searchParams.get('q');
+    const rawQuery = searchParams.get('q');
+    const query = rawQuery ? decodeURIComponent(rawQuery).toLowerCase() : null;
     const speaker = searchParams.get('speaker');
     const book = searchParams.get('book');
     const topic = searchParams.get('topic');
@@ -85,6 +87,17 @@ export const SermonBrowser = () => {
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
     const limit = 12;
+
+    if (query) {
+      filtered = filtered.filter(sermon => 
+        // 檢查標題是否包含搜索詞
+        sermon.title.toLowerCase().includes(query) ||
+        // 檢查經文數組中是否有任何一條包含搜索詞
+        sermon.scripture.some(ref => ref.toLowerCase().includes(query)) ||
+        // (可選) 檢查摘要是否包含搜索詞
+        sermon.summary.toLowerCase().includes(query)
+      );
+    }
 
     if (book) { filtered = filtered.filter(s => s.book.includes(book)); }
     if (topic) { filtered = filtered.filter(s => s.topic.includes(topic)); }    

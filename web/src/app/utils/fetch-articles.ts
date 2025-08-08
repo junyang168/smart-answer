@@ -21,7 +21,7 @@ export const fetchSermons = async () => {
     const article : Sermon = {
         id: surmon.item,
         title: surmon.title,
-        summary: surmon.summary,
+        summary: surmon.summary || '',
         status: surmon.status,
         date: surmon.deliver_date,
         assigned_to_name: surmon.assigned_to_name,
