@@ -8,6 +8,7 @@ export const apiToUiSermon = (apiSermon: any): Sermon => {
         title: apiSermon.title,
         summary: apiSermon.summary || '',
         date: apiSermon.deliver_date,
+        published_date: apiSermon.published_date ? apiSermon.published_date.split(' ')[0] : '',
         speaker: apiSermon.author_name || '',
         scripture: [], // 將所有經文合併為一個字符串
         book: apiSermon.book || '',
