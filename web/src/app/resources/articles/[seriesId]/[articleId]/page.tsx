@@ -20,7 +20,7 @@ export default function ArticleDetailPage() {
 
     const breadcrumbLinks = [
         { name: '首頁', href: '/' },
-        { name: '資源中心', href: '/resources' },
+        { name: 'AI 輔助查經', href: '/resources' },
         { name: '文章薈萃', href: '/resources/articles' },
         { name: seriesTitle, href: `/resources/articles/${params.seriesId}` }
     ];

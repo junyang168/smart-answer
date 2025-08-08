@@ -34,7 +34,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
           <NavLink href="/about">關於我們</NavLink>
           <NavLink href="/events">聚會與活動</NavLink>
           <NavLink href="/ministries">事工介紹</NavLink>
-          <NavLink href="/resources">資源中心</NavLink>
+          <NavLink href="/resources">AI 輔助查經</NavLink>
           <NavLink href="/contact">聯絡我們</NavLink>
         </nav>
 
@@ -63,7 +63,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
             <NavLink href="/about">關於我們</NavLink>
             <NavLink href="/events">聚會與活動</NavLink>
             <NavLink href="/ministries">事工介紹</NavLink>
-            <NavLink href="/resources">資源中心</NavLink>
+            <NavLink href="/resources">AI 輔助查經</NavLink>
             <NavLink href="/contact">聯絡我們</NavLink>
             <div className="mt-4 border-t w-full flex justify-center pt-6 gap-6">
               <AuthButton />

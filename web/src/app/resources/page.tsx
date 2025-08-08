@@ -9,7 +9,7 @@ const SermonsPageFallback = () => <div className="text-center py-20">正在準�
 export default function ResourcesPage() {
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: '資源中心', href: '/resources' }
+    { name: 'AI 輔助查經', href: '/resources' }
   ];
       
   return (

@@ -146,7 +146,7 @@ export const SermonDetailView = () => {
 
     const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: '資源中心', href: '/resources' },
+    { name: 'AI 輔助查經', href: '/resources' },
     { name: '講道中心', href: '/resources/sermons' },
     { name: sermon.title }, // 當前講道標題，沒有 href
   ];

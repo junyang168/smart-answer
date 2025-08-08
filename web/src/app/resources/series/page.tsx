@@ -9,7 +9,7 @@ const SeriesPageFallback = () => <div className="text-center py-20">正在準備
 export default function AllSeriesPage() {
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: '資源中心', href: '/resources' },
+    { name: 'AI 輔助查經', href: '/resources' },
     { name: '系列講道' },
   ];
 

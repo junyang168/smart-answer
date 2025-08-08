@@ -98,9 +98,9 @@ export const ResourceCenter = () => {
       <div className="container mx-auto px-6 py-12">
         {/* 頁面標題 */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold font-display text-gray-800">資源中心</h1>
+          <h1 className="text-4xl font-bold font-display text-gray-800">AI 輔助查經</h1>
           <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-            在這裡，您可以找到歷次牧者講道的錄音錄影和文字、團契弟兄姐妹們分享的講稿，以及信仰問題的解答。願這些資源能成為您屬靈生命成長的助力。
+            在這裡，您可以找到王教授講道的錄音錄影和經過 AI 轉錄和同工校對過的文字稿、團契弟兄姐妹們分享的講稿，以及信仰問題的解答。
           </p>
         </div>
 

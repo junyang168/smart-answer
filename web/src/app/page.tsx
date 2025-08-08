@@ -29,7 +29,7 @@ const HomePage: NextPage = () => {
               href="/resources" 
               className="bg-[#8B4513] text-white font-bold py-3 px-8 rounded-full hover:bg-opacity-90 transition-all text-lg"
             >
-              探索資源中心
+              探索 AI 輔助查經
             </a>
           </div>
         </div>
