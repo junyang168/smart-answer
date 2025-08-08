@@ -7,9 +7,10 @@ interface FeaturedPostItemProps {
   date?: string;
   link: string;
   isQuestion?: boolean;
+  author?: string;
 }
 
-const FeaturedPostItem = ({ title, category, date, link, isQuestion = false }: FeaturedPostItemProps) => {
+const FeaturedPostItem = ({ title, author,  category, date, link, isQuestion = false }: FeaturedPostItemProps) => {
   return (
     <li className="border-b border-gray-200 py-3 flex items-start gap-2">
       {isQuestion && <span className="text-[#8B4513] font-bold mt-1">❓</span>}
@@ -17,7 +18,9 @@ const FeaturedPostItem = ({ title, category, date, link, isQuestion = false }: F
         <Link href={link} className="text-gray-800 hover:text-[#D4AF37] font-semibold transition-colors">
           {category && <b className="text-gray-600">[{category}]</b>} {title}
         </Link>
-        {date && <p className="text-xs text-gray-500 mt-1">發布於 {date}</p>}
+        <p className="text-sm text-gray-500 mt-1 mb-3">
+        <b>作者:</b> {author} | <b>日期:</b> {date} 
+        </p>
       </div>
     </li>
   );
