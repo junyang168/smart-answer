@@ -54,3 +54,15 @@ export interface SermonSeries {
   sermons: Sermon[]; // 包含在此系列中的所有講道
 
 }
+
+export interface FaithQA {
+  id: string; // 唯一標識符
+  question: string; // 用戶提出的問題
+  shortAnswer: string; // 一個簡潔的、可以直接顯示的答案摘要
+  fullAnswerMarkdown: string; // 完整的、詳細的答案，使用 Markdown 格式
+  category ?: string; // 分類，如 "關於聖經", "關於救恩", "倫理難題"
+  relatedScriptures ?: string[]; // 相關經文引用
+  createdAt : string; // 創建日期
+  isVerified : boolean; // 是否經過教會同工審核和確認
+  related_article:string;
+}
