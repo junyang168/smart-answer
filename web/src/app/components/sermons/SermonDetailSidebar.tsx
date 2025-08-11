@@ -32,7 +32,6 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
       <div className="bg-gray-50 p-6 rounded-lg">
         <h3 className="text-xl font-bold font-display mb-4">講道信息</h3>
         <dl>
-          <InfoRow label="认领人" value={sermon.assigned_to_name} />
           <InfoRow label="主題" value={sermon.theme} />
 
           {sermon.scripture && sermon.scripture.length > 0 && (

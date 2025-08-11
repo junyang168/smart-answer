@@ -157,7 +157,8 @@ export const SermonDetailView = () => {
       <main className="lg:col-span-2">
         <Breadcrumb links={breadcrumbLinks} />
         <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900 mb-2">{sermon.title}</h1>
-        <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} </p>
+        <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
+
         <div className="mb-8 shadow-lg rounded-lg overflow-hidden bg-gray-100 border">
           {sermon.videoUrl ? (
             // --- 如果有視頻，渲染視頻播放器 ---
