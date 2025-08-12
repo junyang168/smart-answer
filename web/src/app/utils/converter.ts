@@ -34,7 +34,7 @@ export const apiToUiSermonSeries = (apiSeries: any): SermonSeries => {
         summary: apiSeries.summary || '',
         topics: apiSeries.topics || [],
         keypoints: apiSeries.keypoints || '',
-        sermons: apiSeries.articles.map((article: any) => apiToUiSermon(article)),
+        sermons: apiSeries.articles ? apiSeries.articles.map((article: any) => apiToUiSermon(article)) :[],
     };
     return uiSeries;
 };

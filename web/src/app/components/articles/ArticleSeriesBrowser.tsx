@@ -37,7 +37,7 @@ const ArticleSeriesSection = ({ series }: { series: SermonSeries }) => (
         <h3 className="font-bold text-lg text-gray-700 mb-3">系列文章 ({series.sermons.length}篇)</h3>
         <div className="space-y-3">
           {series.sermons.map((article, index) => (
-            <Link key={article.id} href={`/resources/articles/${series.id}/${article.item}`} className="group flex items-center justify-between p-3 rounded-md hover:bg-gray-100 transition-colors">
+            <Link key={article.id} href={`/resources/articles/${article.item}?seriesId=${series.id}`} className="group flex items-center justify-between p-3 rounded-md hover:bg-gray-100 transition-colors">
                 <div>
                     <p className="font-semibold text-gray-800 group-hover:text-blue-600">{`${index + 1}. ${article.title}`}</p>
                     <p className="text-xs text-gray-500">{article.speaker} • {article.date}</p>

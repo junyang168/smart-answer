@@ -32,7 +32,7 @@ export const ArticleDetailView = () => {
                     throw new Error('Failed to fetch article from API');
                 }
                 const article_with_series = await res.json();
-                const foundSeries: SermonSeries = apiToUiSermonSeries(article_with_series.series);
+                const foundSeries: SermonSeries =  apiToUiSermonSeries(article_with_series.series);
                 const foundArticle: Sermon = apiToUiSermon(article_with_series);
 
                 if (foundArticle && foundSeries) {
@@ -54,7 +54,7 @@ export const ArticleDetailView = () => {
     if (isLoading) return <div className="text-center py-20">正在加載文章內容...</div>;
     if (error === '404') notFound();
     if (error) return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;
-    if (!currentArticle || !currentSeries) return null;
+    if (!currentArticle) return null;
 
     return (
         <div className="flex flex-col lg:flex-row-reverse gap-8 lg:gap-12">
@@ -64,27 +64,30 @@ export const ArticleDetailView = () => {
                 <SidebarDownload 
                     downloadUrl={`/web/data/article/presentations/${currentArticle.id}.pptx`}
                 />
-                <div className="bg-gray-50 rounded-lg p-4">
-                    <div className="flex items-center mb-4">
-                        <BookMarked className="w-6 h-6 mr-3 text-gray-700"/>
-                        <div>
-                            <p className="text-xs text-gray-500">系列</p>
-                            <h3 className="font-bold text-lg">{currentSeries.title}</h3>
+                { currentSeries && currentSeries.sermons && (
+                    <div className="bg-gray-50 rounded-lg p-4">
+                        <div className="flex items-center mb-4">
+                            <BookMarked className="w-6 h-6 mr-3 text-gray-700"/>
+                            <div>
+                                <p className="text-xs text-gray-500">系列</p>
+                                <h3 className="font-bold text-lg">{currentSeries.title}</h3>
+                            </div>
                         </div>
+                        <ul className="space-y-1">
+                            {currentSeries.sermons.map((article, index) => {
+                                const isActive = article.item === currentArticle.id;
+                                return (
+                                    <li key={article.item}>
+                                        <Link href={`/resources/articles/${article.item}`} className={`block p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100 text-blue-800 font-bold' : 'hover:bg-gray-200 text-gray-800'}`}>
+                                            {`${index + 1}. ${article.title}`}
+                                        </Link>
+                                    </li>
+                                );
+                            })}
+                        </ul>
                     </div>
-                    <ul className="space-y-1">
-                        {currentSeries.sermons.map((article, index) => {
-                            const isActive = article.item === currentArticle.id;
-                            return (
-                                <li key={article.item}>
-                                    <Link href={`/resources/articles/${currentSeries.id}/${article.item}`} className={`block p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100 text-blue-800 font-bold' : 'hover:bg-gray-200 text-gray-800'}`}>
-                                        {`${index + 1}. ${article.title}`}
-                                    </Link>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                </div>
+
+                )}
             </aside>
             <main className="lg:w-2/3">
                 <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{currentArticle.title}</h1>
