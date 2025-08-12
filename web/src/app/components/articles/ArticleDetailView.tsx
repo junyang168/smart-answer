@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { BookMarked } from 'lucide-react';
 import { Sermon, SermonSeries } from '@/app/interfaces/article';
 import { apiToUiSermon, apiToUiSermonSeries} from '@/app/utils/converter';
+import { SidebarDownload } from './SidebarDownload'; // ✅ 引入新的側邊欄下載組件
 
 export const ArticleDetailView = () => {
     const [currentArticle, setCurrentArticle] = useState<Sermon | null>(null);
@@ -59,6 +60,10 @@ export const ArticleDetailView = () => {
         <div className="flex flex-col lg:flex-row-reverse gap-8 lg:gap-12">
             {/* 側邊欄 (完全不變) */}
             <aside className="lg:w-1/3 lg:sticky lg:top-24 self-start">
+                {/* 1. 將下載組件放置在側邊欄頂部 */}
+                <SidebarDownload 
+                    downloadUrl={`/web/data/article/presentations/${currentArticle.id}.pptx`}
+                />
                 <div className="bg-gray-50 rounded-lg p-4">
                     <div className="flex items-center mb-4">
                         <BookMarked className="w-6 h-6 mr-3 text-gray-700"/>
