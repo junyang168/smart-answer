@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight, Film, Mic, PenSquare } from 'lucide-react';
-import { Sermon, ArticleSeries, SermonSeries } from '@/app/interfaces/article'; // 假設類型已定義
+import { Sermon, SermonSeries } from '@/app/interfaces/article'; // 假設類型已定義
 
 // --- 模擬數據獲取 (在真實應用中替換為 API 調用) ---
 async function fetchHomePageData() {
@@ -16,9 +16,9 @@ async function fetchHomePageData() {
             { id: '2', title: '家庭系列 (一): 基督化的家庭', speaker: '李長老', date: '2025-07-13', scripture: ['以弗所書 5:22-33'] },
         ] as Partial<Sermon>[],
         featuredArticleSeries: [
-            { id: 'matthew-24-in-depth', title: '馬太福音24章深入研讀', summary: '詳細解釋“那行毀壞可憎的”以及信徒當如何應對。', articles: [] },
-            { id: 'faith-lessons', title: '信心的功課', summary: '學習亞伯拉罕、摩西等信心偉人的榜樣。', articles: [] },
-        ] as Partial<ArticleSeries>[],
+            { id: 'matthew-24-in-depth', title: '馬太福音24章深入研讀', summary: '詳細解釋“那行毀壞可憎的”以及信徒當如何應對。', sermons: [] },
+            { id: 'faith-lessons', title: '信心的功課', summary: '學習亞伯拉罕、摩西等信心偉人的榜樣。', sermons: [] },
+        ] as Partial<SermonSeries>[],
         featuredSermonSeries: [
              { id: 'gospel-basics', title: '福音基礎', summary: '系統性地學習福音的核心真理。', sermons: [] },
              { id: 'family-series', title: '家庭系列', summary: '探討聖經中關於婚姻、親子關係的教導。', sermons: [] },
@@ -123,7 +123,7 @@ export const HomePageView = () => {
                         <div className="bg-gray-700 p-6 rounded-lg">
                             <h3 className="text-2xl font-bold mb-4 flex items-center gap-3"><PenSquare/> 文章系列</h3>
                              <div className="space-y-3">
-                                {homeData?.featuredArticleSeries.map((series: Partial<ArticleSeries>) => (
+                                {homeData?.featuredArticleSeries.map((series: Partial<SermonSeries>) => (
                                     <Link key={series.id} href={`/resources/articles`} className="block p-3 rounded-md hover:bg-gray-600">
                                         <p className="font-semibold">{series.title}</p>
                                     </Link>
