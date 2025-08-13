@@ -55,10 +55,6 @@ export default function ContactPage() {
                         <Mail className="w-6 h-6 text-blue-600 mt-1 flex-shrink-0"/>
                         <a href={`mailto:${contactInfo.email}`} className="hover:underline">{contactInfo.email}</a>
                     </div>
-                    <div className="flex items-start gap-4">
-                        <Phone className="w-6 h-6 text-blue-600 mt-1 flex-shrink-0"/>
-                        <a href={`tel:${contactInfo.phone}`} className="hover:underline">{contactInfo.phone}</a>
-                    </div>
                 </div>
             </div>
 

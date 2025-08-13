@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Facebook, Youtube } from 'lucide-react';
 
 export const Footer = () => {
   return (
@@ -32,13 +33,30 @@ export const Footer = () => {
           <div>
             <h3 className="text-lg font-bold text-white mb-4">關注我們</h3>
             <div className="flex space-x-4">
-              <a href="#" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className="hover:text-[#D4AF37]">
+              {/* 
+                ✅ 關鍵改動：為 <a> 標籤添加了初始顏色 text-gray-300
+                這會被內部的 <Facebook /> SVG 組件繼承
+              */}
+              <a 
+                href="https://www.facebook.com" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                aria-label="Facebook" 
+                className="text-gray-300 hover:text-white transition-colors"
+              >
+                <Facebook size={24} />
               </a>
-              <a href="#" target="_blank" rel="noopener noreferrer" aria-label="YouTube" className="hover:text-[#D4AF37]">
+              <a 
+                href="https://www.youtube.com" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                aria-label="YouTube" 
+                className="text-gray-300 hover:text-white transition-colors"
+              >
+                <Youtube size={24} />
               </a>
             </div>
-          </div>
-        </div>
+          </div>        </div>
       </div>
       <div className="bg-gray-900 py-4">
         <div className="container mx-auto px-6 text-center text-gray-500 text-sm">
