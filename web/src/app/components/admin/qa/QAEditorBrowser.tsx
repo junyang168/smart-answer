@@ -159,7 +159,7 @@ const handleDelete = async (idToDelete: string) => {
             createdAt: today.toISOString(),
             isVerified: false,
             related_article: '',
-            date_asked
+            date_asked : today.toISOString().split('T')[0], // 'yyyy-mm-dd' 
         };
         setQas([newQA, ...qas]);
         setSelectedId(newId);

@@ -62,6 +62,10 @@ export const QAEditPanel = ({ qa, onSave, onDelete, isSaving }: QAEditPanelProps
                         <input id="category" {...register('category')} className="w-full p-2 border rounded-md" />
                     </div>
                      <div>
+                        <label htmlFor="date_asked" className="block font-medium mb-1">提問日期</label>
+                        <input id="date_asked" {...register('date_asked')} className="w-full p-2 border rounded-md" />
+                    </div>
+                     <div>
                         <label htmlFor="isVerified" className="block font-medium mb-1">狀態</label>
                         <select id="isVerified" {...register('isVerified')} className="w-full p-2 border rounded-md bg-white">
                             <option value="true">已審核發佈</option>

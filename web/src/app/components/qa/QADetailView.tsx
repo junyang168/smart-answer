@@ -68,7 +68,8 @@ export const QADetailView = () => {
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500 mb-8 pb-8 border-b">
                 <div className="flex items-center gap-2">
                     <Tag className="w-4 h-4" />
-                    <span className="font-medium">{qa.category}</span>
+                    <span className="font-medium">{qa.category}</span> |
+                    <span className="font-medium">{qa.date_asked}</span>
                 </div>
 
             </div>
