@@ -69,7 +69,7 @@ export const HomePageView = () => {
                         <h3 className="text-2xl font-bold">主日崇拜</h3>
                         <p className="mt-2 text-xl">每週日上午 11:00 - 12:30</p>
                         <p className="mt-2 text-gray-500">903 W. Parker Road, Plano, TX 75023</p>
-                        <Link href="/new-here" className="mt-6 inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-3 px-6 rounded-lg hover:bg-gray-700">
+                        <Link href="/contact" className="mt-6 inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-3 px-6 rounded-lg hover:bg-gray-700">
                             新朋友指南 <ArrowRight className="w-5 h-5"/>
                         </Link>
                     </div>
@@ -79,58 +79,10 @@ export const HomePageView = () => {
             {/* 3. 異象與使命 */}
             <section className="bg-gray-50 py-16 md:py-20">
                 <div className="container mx-auto px-6 text-center max-w-4xl">
-                     <h2 className="text-3xl font-bold font-display text-gray-800">我們的異象</h2>
+                     <h2 className="text-3xl font-bold font-display text-gray-800">我們的使命</h2>
                      <p className="mt-4 text-xl text-gray-600 italic leading-relaxed">
                         “藉著深度、準確釋經，幫助弟兄姐妹們真明白、遵行、持守聖經真理，並在愛的環境中訓練，造就他們成為主的門徒。”
                      </p>
-                </div>
-            </section>
-
-            {/* 4. 最新講道與文章 */}
-            <section className="py-16 md:py-20">
-                <div className="container mx-auto px-6">
-                    <h2 className="text-3xl font-bold font-display text-center mb-10">最新動態</h2>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-5xl mx-auto">
-                        {/* 最新講道 */}
-                        {homeData?.latestSermons.map((sermon: Partial<Sermon>) => (
-                            <Link key={sermon.id} href={`/resources/sermons/${sermon.id}`} className="block bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow">
-                                <div className="flex items-center text-sm text-gray-500 mb-2"><Mic className="w-4 h-4 mr-2"/> 講道</div>
-                                <h3 className="font-bold text-xl mb-2">{sermon.title}</h3>
-                                <p className="text-gray-600">{sermon.speaker} • {sermon.date}</p>
-                            </Link>
-                        ))}
-                    </div>
-                </div>
-            </section>
-
-            {/* 5. 系列推薦 */}
-            <section className="bg-gray-800 text-white py-16 md:py-20">
-                <div className="container mx-auto px-6">
-                    <h2 className="text-3xl font-bold font-display text-center mb-12">探索我們的系列內容</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-6xl mx-auto">
-                        {/* 講道系列 */}
-                        <div className="bg-gray-700 p-6 rounded-lg">
-                            <h3 className="text-2xl font-bold mb-4 flex items-center gap-3"><Film/> 講道系列</h3>
-                            <div className="space-y-3">
-                                {homeData?.featuredSermonSeries.map((series: Partial<SermonSeries>) => (
-                                    <Link key={series.id} href={`/resources/series/${series.id}`} className="block p-3 rounded-md hover:bg-gray-600">
-                                        <p className="font-semibold">{series.title}</p>
-                                    </Link>
-                                ))}
-                            </div>
-                        </div>
-                        {/* 文章系列 */}
-                        <div className="bg-gray-700 p-6 rounded-lg">
-                            <h3 className="text-2xl font-bold mb-4 flex items-center gap-3"><PenSquare/> 文章系列</h3>
-                             <div className="space-y-3">
-                                {homeData?.featuredArticleSeries.map((series: Partial<SermonSeries>) => (
-                                    <Link key={series.id} href={`/resources/articles`} className="block p-3 rounded-md hover:bg-gray-600">
-                                        <p className="font-semibold">{series.title}</p>
-                                    </Link>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </section>
 
