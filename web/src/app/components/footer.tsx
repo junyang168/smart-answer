@@ -23,8 +23,8 @@ export const Footer = () => {
             <h3 className="text-lg font-bold text-white mb-4">快速連結</h3>
             <ul className="space-y-2">
               <li><Link href="/about" className="hover:text-[#D4AF37]">關於我們</Link></li>
+              <li><Link href="/ministries" className="hover:text-[#D4AF37]">事工介紹</Link></li>
               <li><Link href="/events" className="hover:text-[#D4AF37]">聚會時間</Link></li>
-              <li><Link href="/resources" className="hover:text-[#D4AF37]">AI 輔助查經</Link></li>
               <li><Link href="/giving" className="hover:text-[#D4AF37]">奉獻支持</Link></li>
             </ul>
           </div>
