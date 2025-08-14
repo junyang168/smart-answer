@@ -36,7 +36,7 @@ export default function MinistriesPage() {
         </div>
         <div className="container mx-auto px-6 relative z-10">
           <BrainCircuit className="w-16 h-16 mx-auto mb-4 text-[#D4AF37]" />
-          <h1 className="text-4xl md:text-5xl font-bold font-serif">當科技遇見神學</h1>
+          <h1 className="text-4xl md:text-5xl font-bold">當科技遇見神學</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
             我們致力於使用 AI 人工智能技術，將王守仁教授歷年忠於聖經的深度教導，轉化為造就門徒的寶貴屬靈資源。
           </p>
