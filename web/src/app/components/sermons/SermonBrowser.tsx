@@ -29,6 +29,7 @@ export const SermonBrowser = () => {
       try {
         // ✅ fetch 在瀏覽器中運行，可以使用相對路徑或絕對路徑
         const transformedSermons : Sermon[] = await fetchSermons();
+        transformedSermons.sort((a, b) =>  new Date(a.date).getTime() - new Date(b.date).getTime());
         setAllSermons(transformedSermons);
       } catch (err: any) {
         setError(err.message || 'An unknown error occurred.');
