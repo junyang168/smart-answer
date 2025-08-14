@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import { FaithQA } from '@/app/interfaces/article';
 import { QAListPanel } from '@/app/components/admin/qa/QAListPanel';
 import { QAEditPanel } from '@/app/components/admin/qa/QAEditPanel';
+import { useSession, signIn } from "next-auth/react"; // ✅ 引入 useSession 和 signIn
+import { Lock } from 'lucide-react';
 
 // 模擬 API 獲取函數
 async function fetchAllQAs(): Promise<FaithQA[]> {
@@ -23,6 +25,8 @@ export const QAEditorBrowser = () => {
     const [isDeleting, setIsDeleting] = useState(false); // ✅ 新增：刪除中的狀態
     const [error, setError] = useState<string | null>(null); // ✅ 新增：用於顯示錯誤信息
 
+    const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+   
     useEffect(() => {
         fetchAllQAs().then(data => {
             setQas(data);
@@ -166,6 +170,24 @@ const handleDelete = async (idToDelete: string) => {
     };
 
     const selectedQA = qas.find(q => q.id === selectedId);
+
+    if (status === "unauthenticated") {
+        // 如果用戶未登錄，顯示一個登錄提示界面
+        return (
+        <div className="text-center py-20 bg-gray-50 rounded-lg max-w-lg mx-auto">
+            <Lock className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+            <h2 className="text-2xl font-bold mb-2">需要登錄</h2>
+            <p className="text-gray-600 mb-6">此內容僅對已登錄用戶開放，請先登錄以繼續訪問。</p>
+            <button
+            onClick={() => signIn("google")}
+            className="bg-blue-500 text-white font-semibold py-3 px-6 rounded-full hover:bg-blue-600 text-lg"
+            >
+            使用 Google 登錄
+            </button>
+        </div>
+        );
+    }
+
 
     if (isLoading) return <div className="p-8">正在加載...</div>;
 
