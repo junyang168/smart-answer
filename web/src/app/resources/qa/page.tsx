@@ -21,6 +21,9 @@ export default function QAPage() {
           <p className="mt-4 text-lg text-gray-600 max-w-3xl mx-auto">
             在這裡，您可以與我們的 AI 助教對話，或瀏覽、搜索由教會同工審核過的常見信仰問題解答。
           </p>
+          <p className="mt-2 text-sm text-red-500">
+            AI 助教對話功能尚在開發中，敬請期待！
+          </p>
         </div>
         
         {/* 主要內容將由客戶端組件處理 */}
