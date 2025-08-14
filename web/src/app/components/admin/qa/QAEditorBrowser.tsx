@@ -147,6 +147,8 @@ const handleDelete = async (idToDelete: string) => {
 
     const handleAddNew = () => {
         const newId = `new-${Date.now()}`; // 使用時間戳生成臨時 ID
+        const today = new Date();
+        const date_asked = today.toISOString().split('T')[0]; // 'yyyy-mm-dd'
         const newQA: FaithQA = {
             id: newId,
             question: '新的問題標題',
@@ -154,9 +156,10 @@ const handleDelete = async (idToDelete: string) => {
             fullAnswerMarkdown: '',
             category: '未分類',
             relatedScriptures: [],
-            createdAt: new Date().toISOString(),
+            createdAt: today.toISOString(),
             isVerified: false,
-            related_article: ''
+            related_article: '',
+            date_asked
         };
         setQas([newQA, ...qas]);
         setSelectedId(newId);
