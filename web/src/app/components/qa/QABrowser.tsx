@@ -30,6 +30,7 @@ export const QABrowser = () => {
             setIsLoading(true);
             try {
                 const data = await fetchVerifiedQAs();
+                data.sort((a, b) => new Date(b.date_asked).getTime() - new Date(a.date_asked).getTime());
                 setAllQAs(data);
             } catch (err: any) {
                 setError(err.message);
