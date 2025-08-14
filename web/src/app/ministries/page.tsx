@@ -27,6 +27,7 @@ export default function MinistriesPage() {
 
   return (
     <div className="bg-white">
+      <Breadcrumb links={breadcrumbLinks} />
       {/* 1. 引言 */}
       <section className="relative bg-gray-900 text-white py-20 md:py-32 text-center overflow-hidden">
         <div className="absolute inset-0 opacity-50">
@@ -34,7 +35,6 @@ export default function MinistriesPage() {
             <Image src="/images/ai-background.jpeg" alt="AI Technology" layout="fill" objectFit="cover" />
         </div>
         <div className="container mx-auto px-6 relative z-10">
-          <Breadcrumb links={breadcrumbLinks} />
           <BrainCircuit className="w-16 h-16 mx-auto mb-4 text-[#D4AF37]" />
           <h1 className="text-4xl md:text-5xl font-bold font-serif">當科技遇見神學</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">

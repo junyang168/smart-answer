@@ -23,11 +23,11 @@ export default function AboutPage() {
 
   return (
     <div className="bg-white">
+      <Breadcrumb links={breadcrumbLinks} />
       {/* 1. 引言與核心價值 */}
       <section className="relative bg-gray-800 text-white py-20 md:py-32 text-center">
         <Image src="/images/church-community.jpeg" alt="教會社群" layout="fill" objectFit="cover" className="opacity-30" />
         <div className="container mx-auto px-6 relative z-10">
-          <Breadcrumb links={breadcrumbLinks} />
           <h1 className="text-4xl md:text-5xl font-bold font-serif">關於達拉斯聖道教會</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
             我們是一個相信聖經、傳揚福音、彼此相愛的屬靈大家庭。
