@@ -15,7 +15,7 @@ const pastorProfileData = {
     },
     avatar: "/images/JosephSWang-546w.webp", // 一張更高質量的照片
     contact: [
-        { type: "email", value: "pastor.wang@dallas-hlc.org" },
+        //{ type: "email", value: "pastor.wang@dallas-hlc.org" },
         // { type: "phone", value: "123-456-7890" },
     ],
     sections: [

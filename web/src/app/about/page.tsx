@@ -87,22 +87,6 @@ I believe in God the Father Almighty, maker of heaven and earth. And in Jesus Ch
 
       {/* 5. (可選) 同工團隊 - 這裡先不實現，但可以預留位置 */}
 
-      {/* 6. 常見問題 (FAQ) */}
-      <section className="bg-gray-50 py-16 md:py-20">
-        <div className="container mx-auto px-6 max-w-4xl">
-           <h2 className="text-3xl font-bold font-display text-center mb-12">常見問題</h2>
-           <div className="space-y-4">
-              <details className="p-4 border rounded-lg bg-white">
-                 <summary className="font-semibold cursor-pointer">我第一次來，聚會時應該穿什麼？</summary>
-                 <p className="mt-2 text-gray-600">請穿著您覺得舒適得體的衣物即可，我們沒有嚴格的著裝要求。</p>
-              </details>
-              <details className="p-4 border rounded-lg bg-white">
-                 <summary className="font-semibold cursor-pointer">聚會有兒童看護或兒童主日學嗎？</summary>
-                 <p className="mt-2 text-gray-600">是的，我們在主日崇拜同時段為不同年齡段的兒童預備了有趣的聖經課程和活動。</p>
-              </details>
-           </div>
-        </div>
-      </section>
 
     </div>
   );
