@@ -56,6 +56,7 @@ export const QABrowser = () => {
         
         const facets: FacetDefinition[] = [
             { title: '相关文章', paramName: 'related_article', options: getOptionsWithCounts('related_article') },
+            { title: '分類', paramName: 'category', options: getOptionsWithCounts('category') },
             // 你可以為其他字段（如作者、年份等）添加更多 facet
         ];
 
@@ -98,7 +99,7 @@ export const QABrowser = () => {
                                 <h3 className="font-bold text-lg text-gray-800 mb-2">{qa.question}</h3>
                                 <p className="text-gray-600 text-sm line-clamp-2">{qa.shortAnswer}</p>
                                 <div className="flex items-center justify-between mt-4 text-xs text-gray-400">
-                                    <span>{qa.category}</span>
+                                    <span>{qa.category} | {qa.date_asked}</span>
                                     <span className="flex items-center font-semibold text-blue-600">
                                         查看完整答案 <ChevronRight className="w-4 h-4 ml-1" />
                                     </span>
