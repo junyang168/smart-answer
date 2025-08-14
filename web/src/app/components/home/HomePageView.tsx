@@ -48,7 +48,7 @@ export const HomePageView = () => {
             <section className="relative h-[60vh] md:h-[70vh] flex items-center justify-center text-white text-center bg-gray-800">
                 <Image src="/images/church.jpeg" alt="教會歡迎圖" layout="fill" objectFit="cover" className="opacity-40" />
                 <div className="relative z-10 p-6">
-                    <h1 className="text-4xl md:text-6xl font-bold font-serif !leading-tight">在真理中生根建造</h1>
+                    <h1 className="text-4xl md:text-6xl font-bold !leading-tight">在真理中生根建造</h1>
                     <p className="mt-4 text-lg md:text-xl max-w-2xl">
                         達拉斯聖道教會 (Dallas Holy Logos Church) 歡迎您！
                     </p>

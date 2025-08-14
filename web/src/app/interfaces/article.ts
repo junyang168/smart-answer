@@ -65,4 +65,5 @@ export interface FaithQA {
   createdAt : string; // 創建日期
   isVerified : boolean; // 是否經過教會同工審核和確認
   related_article:string;
+  date_asked: string; // 提問日期
 }

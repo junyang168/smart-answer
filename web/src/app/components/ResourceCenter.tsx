@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { Sermon } from '@/app/interfaces/article';
+import { FaithQA, Sermon } from '@/app/interfaces/article';
 
 
 import ResourceCard from '@/app/components/resources/ResourceCard';
@@ -56,6 +56,7 @@ export const ResourceCenter = () => {
   // --- State Management ---
   const [topSermons, setTopSermons] = useState<Sermon[]>([]);
   const [topArticles, setTopArticles] = useState<any[]>([]);
+  const [topQAs, setTopQAs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +82,15 @@ export const ResourceCenter = () => {
           author: article.author_name || '',
         }));
         setTopArticles(transformedArticles);
+
+        const topQAS = apiData.qas.map((qa: any) => ({
+          title: qa.question,
+          category: '',
+          date : qa.date_asked,
+          link: `/resources/qa/${qa.id}`,
+          author: qa.author_name || '',
+        }));
+        setTopQAs(topQAS);
 
       } catch (err: any) {
         setError(err.message || 'An unknown error occurred.');
@@ -141,7 +151,7 @@ export const ResourceCenter = () => {
                 <div className="bg-white p-6 rounded-lg shadow-sm">
                     <h3 className="text-xl font-bold mb-4">熱點問答</h3>
                     <ul className="list-none p-0">
-                        {featuredQuestionsData.map(post => <FeaturedPostItem key={post.title} {...post} />)}
+                        {topQAs.map(post => <FeaturedPostItem key={post.title} {...post} />)}
                     </ul>
                 </div>
             </div>

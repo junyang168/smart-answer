@@ -1,5 +1,11 @@
 body {
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji",
+    "PMingLiU", /* Windows serif for Traditional Chinese */
+    "MingLiU", /* Windows older serif */
+    "Songti TC", /* macOS serif for Traditional Chinese */
+    "Noto Serif TC",
+    "Source Han Serif TC",
+    serif;
     margin: 0;
     padding: 0;
 }
