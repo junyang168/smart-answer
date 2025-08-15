@@ -28,7 +28,7 @@ export default function AboutPage() {
       <section className="relative bg-gray-800 text-white py-20 md:py-32 text-center">
         <Image src="/images/church-community.jpeg" alt="教會社群" layout="fill" objectFit="cover" className="opacity-30" />
         <div className="container mx-auto px-6 relative z-10">
-          <h1 className="text-4xl md:text-5xl font-bold font-serif">關於達拉斯聖道教會</h1>
+          <h1 className="text-4xl md:text-5xl font-bold">關於達拉斯聖道教會</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
             我們是一個相信聖經、傳揚福音、彼此相愛的屬靈大家庭。
           </p>
@@ -58,7 +58,7 @@ export default function AboutPage() {
                   我信上帝, 全能的父, 創造天地的主。我信我主耶穌基督, 上帝的獨生子;  因聖靈感孕, 由童貞女馬利亞所生, 在本丟彼拉多手下受難, 被釘在十字架上, 受死,埋葬; 降在陰間; 第三天從死人中復活; 升天, 坐在全能父上帝的右邊; 將來必從那裡降臨, 審判活人死人。我信聖靈;我信聖而公之教會; 我信聖徒相通; 我信罪得赦免;我信身體復活; 我信永生。
               </p>
               <p className="mt-4 text-lg text-gray-600 leading-relaxed">
-                Apostles Creed:
+                Apostles Creed: <br/>
 I believe in God the Father Almighty, maker of heaven and earth. And in Jesus Christ, His only Son, our Lord; Who was conceived by the Holy Spirit, Born of the virgin Mary, Suffered under Pontius Pilate, Was crucified, dead and buried. On the third day, He rose again from the dead. He ascended to heaven, And sits at the right hand of God the Father Almighty; From thence He will come to judge the living and the dead. I believe in the Holy Spirit, The holy universal church, The communion of saints, The forgiveness of sins, The resurrection of the body, And the life everlasting.
               </p>
            </div>

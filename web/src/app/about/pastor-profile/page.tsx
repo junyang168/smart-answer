@@ -91,17 +91,6 @@ export default function PastorProfilePage() {
               <div className="mt-6 bg-white p-6 rounded-lg shadow-md">
                 <h1 className="text-2xl font-bold">{pastorProfileData.name}</h1>
                 <p className="text-md text-gray-600 mt-1">{pastorProfileData.title.zh} / {pastorProfileData.title.en}</p>
-                <div className="mt-4 pt-4 border-t space-y-3">
-                  {pastorProfileData.contact.map(item => (
-                    <div key={item.type} className="flex items-center gap-3 text-sm">
-                      {item.type === 'email' && <Mail className="w-5 h-5 text-gray-400"/>}
-                      {item.type === 'phone' && <Phone className="w-5 h-5 text-gray-400"/>}
-                      <a href={item.type === 'email' ? `mailto:${item.value}` : `tel:${item.value}`} className="text-blue-600 hover:underline">
-                        {item.value}
-                      </a>
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           </aside>

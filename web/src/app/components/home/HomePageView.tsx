@@ -63,7 +63,7 @@ export const HomePageView = () => {
                 <div className="container mx-auto px-6 text-center max-w-4xl">
                     <h2 className="text-3xl font-bold font-display text-gray-800">歡迎來到我們的家</h2>
                     <p className="mt-4 text-lg text-gray-600 leading-relaxed">
-                        達拉斯聖道教會是一所華人基督教會。位于達拉斯地區。我們注重正確深度釋經。依靠神的恩典, 達拉斯聖道教會追求藉著深度, 準確釋經, 幫助弟兄姐妹們真明白, 遵行, 持守聖經真理, 並在愛的環境中訓練，造就他們成為主的門徒，以完成主的命令， 使萬民做祂的門徒.
+                        <b>達拉斯聖道教會</b>是一所華人基督教會。位于達拉斯地區。我們注重正確深度釋經。依靠神的恩典, 達拉斯聖道教會追求藉著深度, 準確釋經, 幫助弟兄姐妹們真明白, 遵行, 持守聖經真理, 並在愛的環境中訓練，造就他們成為主的門徒，以完成主的命令， 使萬民做祂的門徒.
                     </p>
                     <div className="mt-10 p-8 border-2 border-dashed border-gray-300 rounded-lg">
                         <h3 className="text-2xl font-bold">主日崇拜</h3>

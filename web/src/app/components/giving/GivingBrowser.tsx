@@ -4,6 +4,8 @@
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { GivingOptionCard } from '@/app/components/giving/GivingOptionCard'; // 我們將創建這個客戶端組件
 import { HandHeart, Landmark, Mail } from 'lucide-react';
+import { useSession, signIn } from "next-auth/react"; // ✅ 引入 useSession 和 signIn
+import { Lock } from 'lucide-react';
 
 // 將奉獻信息結構化
 const givingOptions = [
@@ -32,6 +34,25 @@ export const GivingBrowser = () => {
     { name: '首頁', href: '/' },
     { name: '奉獻支持' },
   ];
+
+  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  if (status === "unauthenticated") {
+      // 如果用戶未登錄，顯示一個登錄提示界面
+      return (
+      <div className="text-center py-20 bg-gray-50 rounded-lg max-w-lg mx-auto">
+          <Lock className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+          <h2 className="text-2xl font-bold mb-2">需要登錄</h2>
+          <p className="text-gray-600 mb-6">此內容僅對已登錄用戶開放，請先登錄以繼續訪問。</p>
+          <button
+          onClick={() => signIn("google")}
+          className="bg-blue-500 text-white font-semibold py-3 px-6 rounded-full hover:bg-blue-600 text-lg"
+          >
+          使用 Google 登錄
+          </button>
+      </div>
+      );
+  }
+
 
   return (
     <div className="bg-gray-50">

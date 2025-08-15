@@ -38,7 +38,11 @@ export default function MinistriesPage() {
           <BrainCircuit className="w-16 h-16 mx-auto mb-4 text-[#D4AF37]" />
           <h1 className="text-4xl md:text-5xl font-bold">當科技遇見神學</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
-            我們致力於使用 AI 人工智能技術，將王守仁教授歷年忠於聖經的深度教導，轉化為造就門徒的寶貴屬靈資源。
+            我們致力於使用 AI 人工智能技術，將
+            <Link href="/about/pastor-profile" >
+              王守仁教授
+            </Link>
+            歷年忠於聖經的深度教導，轉化為造就門徒的寶貴屬靈資源。
           </p>
         </div>
       </section>
@@ -50,7 +54,12 @@ export default function MinistriesPage() {
           {/* 2. 第一步：源頭 */}
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold font-display text-gray-800">第一步：知識的源頭</h2>
-            <p className="mt-2 text-lg text-gray-600">一切都始於王教授數十年來，對神話語深度準確的釋經講道。</p>
+            <p className="mt-2 text-lg text-gray-600">一切都始於
+              <Link href="/about/pastor-profile" className="text-blue-600 underline hover:text-blue-800 transition-colors">
+              王教授
+              </Link>
+              數十年來，對神話語深度準確的釋經講道。
+            </p>
         {/* ✅ 新增：數據指標展示牆 */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center mt-10 pt-10 border-t">
             <div className="flex flex-col">
