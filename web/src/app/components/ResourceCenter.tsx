@@ -9,46 +9,25 @@ import ResourceCard from '@/app/components/resources/ResourceCard';
 import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
 import FeaturedPostItem from '@/app/components/resources/FeaturedPostItem';
 
-import { BookOpen, Mic, MessageCircleQuestion } from 'lucide-react';
+import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight,ChevronRight } from 'lucide-react';
+
 import type { NextPage } from 'next';
 import { apiToUiSermon} from '@/app/utils/converter'
+import { Breadcrumb } from '@/app/components/common/Breadcrumb';
+import Image from 'next/image';
+import Link from 'next/link';
+import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
+import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
+import { useRouter } from 'next/navigation';
 
 // --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
 
-const resourceCardsData = [
-  {
-    icon: Mic,
-    title: '講道中心',
-    description: '聆聽和觀看王守仁教授及其他講員的深度釋經講道',
-    link: '/resources/sermons',
-    linkLabel: '進入講道中心',
-  },
-  {
-    icon: BookOpen,
-    title: '文章薈萃',
-    description: '閱讀團契弟兄姐妹的分享和見證。',
-    link: '/resources/articles',
-    linkLabel: '瀏覽所有文章',
-  },
-  {
-    icon: MessageCircleQuestion,
-    title: '信仰問答',
-    description: '解答關於信仰、聖經和生活的常見疑問，',
-    link: '/resources/qa',
-    linkLabel: '尋找答案',
-  },
-];
+const cardDescriptions = {
+  sermonLibrary: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,
+  communityWisdom: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色，最終形成一篇篇*充滿生命力*的深度文章。`,
+  realLifeQA: `這裡的每一個問題，都源自**弟兄姐妹在團契查經中的真實探討**。我們利用 AI 技術將這些寶貴的討論整理、潤色，形成了一份真實、貼近生活的問答集。`
+};
 
-
-const featuredArticlesData = [
-    { title: '如何在忙碌中保持安息？', category: '牧者短講', date: '2025年7月10日', link: '#'},
-    { title: '一次意外的禱告蒙應允的經歷', category: '生活見證', date: '2025年7月8日', link: '#'},
-];
-
-const featuredQuestionsData = [
-    { title: '聖經中有矛盾的地方嗎？', link: '#', isQuestion: true},
-    { title: '基督徒可以慶祝農曆新年嗎？', link: '#', isQuestion: true},
-]
 
 // --- 頁面組件本身 ---
 
@@ -105,28 +84,81 @@ export const ResourceCenter = () => {
 
   return (
     <div className="bg-gray-50">
-      <div className="container mx-auto px-6 py-12">
-        {/* 頁面標題 */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold font-display text-gray-800">AI 輔助查經</h1>
-          <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-            在這裡，您可以找到王教授講道的錄音錄影和經過 AI 轉錄和同工校對過的文字稿、團契弟兄姐妹們分享的講稿，以及信仰問題的解答。
-          </p>
+      {/* 1. 英雄區 */}
+      <section className="relative bg-gray-900 text-white py-20 md:py-32 text-center overflow-hidden">
+        <Image src="/images/ai-background.jpeg" alt="資源庫背景" layout="fill" objectFit="cover" className="opacity-30" />
+        <div className="container mx-auto px-6 relative z-10">
+          <h1 className="text-4xl md:text-5xl font-bold">探索真理的寶庫</h1>
+      {/* ✅ 添加了与事工相关的介绍 */}
+      <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
+        我們致力於使用 AI 人工智能技術，將資深神學教育家
+        <Link 
+            href="/about/pastor-profile" 
+            target="_blank" 
+            className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
+        >
+            王守仁教授
+        </Link>
+        歷年忠於聖經的深度教導，轉化為您眼前这些可供探索、搜索和學習的寶貴屬靈資源。
+      </p>
+      <div className="mt-8">
+          <Link 
+              href="/ministries" // 链接到事工介绍页面
+              className="inline-block bg-white text-gray-800 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105 shadow-lg"
+          >
+              事工介紹
+          </Link>
+      </div>      
         </div>
+      </section>
 
-        {/* 主要導航卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
-          {resourceCardsData.map((card) => (
-            <ResourceCard
-              key={card.title}
-              icon={card.icon}
-              title={card.title}
-              description={card.description}
-              link={card.link}
-              linkLabel={card.linkLabel}
-            />
-          ))}
-        </div>
+      <section className="bg-gray-50 py-8 md:py-12">
+        <div className="container mx-auto px-6">
+          {/* 4. 第三步：資源應用 */}
+          <div className="text-center mb-16">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
+                <div className="bg-white p-6 rounded-lg border col-span-1 md:col-span-1">
+                    <div className="flex items-center gap-3 mb-3">
+                        <Search className="w-6 h-6 text-blue-500"/>
+                        <h3 className="font-bold text-xl text-gray-800">講道中心</h3>
+                    </div>
+                      <div className="prose prose-sm text-gray-600 flex-grow">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.sermonLibrary}</ReactMarkdown>
+                      </div>
+                      <Link href="/resources/sermons" className="font-semibold text-blue-600 hover:underline text-sm">
+                          前往講道中心體驗 →
+                      </Link>
+                </div>
+                <div className="bg-white p-6 rounded-lg border">
+                    <div className="flex items-center gap-3 mb-3">
+                        <Users className="w-6 h-6 text-blue-500"/>
+                        <h3 className="font-bold text-xl text-gray-800">團契智慧結晶</h3>
+                    </div>
+                      <div className="prose prose-sm text-gray-600 flex-grow">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.communityWisdom}</ReactMarkdown>
+                      </div>
+                      <Link href="/resources/articles" className="font-semibold text-blue-600 hover:underline text-sm">
+                          閱讀團契結晶 →
+                      </Link>
+                </div>
+                <div className="bg-white p-6 rounded-lg border">
+                    <div className="flex items-center gap-3 mb-3">
+                        <MessageCircleQuestion className="w-6 h-6 text-blue-500"/>
+                        <h3 className="font-bold text-xl text-gray-800">真實信仰問答</h3>
+                    </div>
+                      <div className="prose prose-sm text-gray-600 flex-grow">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.realLifeQA}</ReactMarkdown>
+                      </div>
+                    <Link href="/resources/qa" className="font-semibold text-blue-600 hover:underline text-sm">
+                        探索真實問答 →
+                    </Link>
+                </div>
+              </div>
+          </div>
+                  </div>
+      </section>
+
+      <section className="py-8 md:py-12">
 
         {/* 最新講道區 */}
         <div className="mb-16">
@@ -156,10 +188,9 @@ export const ResourceCenter = () => {
                 </div>
             </div>
         </div>
-
-
-
-      </div>
+      
+      </section>
+      
     </div>
   );
 };

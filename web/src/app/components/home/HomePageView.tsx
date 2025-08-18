@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Film, Mic, PenSquare } from 'lucide-react';
+import { ArrowRight, Film, Mic, PenSquare,Search, BrainCircuit } from 'lucide-react';
 import { Sermon, SermonSeries } from '@/app/interfaces/article'; // 假設類型已定義
 
 // --- 模擬數據獲取 (在真實應用中替換為 API 調用) ---
@@ -87,6 +87,49 @@ export const HomePageView = () => {
             </section>
 
 
+           {/* ✅ 新增：“教会事工”介绍版块 */}
+            <section className="bg-white py-16 md:py-20">
+                <div className="container mx-auto px-6">
+                    <div className="grid lg:grid-cols-2 gap-12 items-center">
+                        {/* 左侧图片 */}
+                        <div className="w-full h-80 relative rounded-lg overflow-hidden shadow-lg">
+                            <Image 
+                                src="/images/ai-background.jpeg" // 使用一张象征性的图片
+                                alt="AI 与信仰事工"
+                                layout="fill"
+                                objectFit="cover"
+                            />
+                        </div>
+
+                        {/* 右侧文字 */}
+                        <div>
+                            <h2 className="text-3xl font-bold font-display text-gray-800">科技赋能的独特事工</h2>
+                            <p className="mt-4 text-lg text-gray-600">
+                                我们相信，神赐予的科技可以成为传扬福音、造就门徒的有力工具。
+                            </p>
+                            <p className="mt-2 text-gray-600">
+                                我们致力于使用 AI 技术，将王守仁教授历年忠于圣经的深度教导，转化为一个不断成长的、可供您随时探索的数字资源宝库。
+                            </p>
+                            
+                            <ul className="mt-6 space-y-3">
+                                <li className="flex items-start">
+                                    <Search className="w-5 h-5 text-blue-500 mr-3 mt-1 flex-shrink-0" />
+                                    <span><b>智慧讲道库：</b> 快速搜索历年讲道的每一句话。</span>
+                                </li>
+                                <li className="flex items-start">
+                                    <BrainCircuit className="w-5 h-5 text-blue-500 mr-3 mt-1 flex-shrink-0" />
+                                    <span><b>AI 信仰助教：</b> 随时向基于讲道内容训练的 AI 提问。</span>
+                                </li>
+                            </ul>
+
+                            <Link href="/ministries" className="mt-8 inline-flex items-center gap-2 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors">
+                                了解这项事工的更多细节
+                                <ArrowRight className="w-5 h-5" />
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
              {/* 7. 行動呼籲 */}
             <section className="bg-blue-50 py-16 md:py-20">

@@ -3,9 +3,11 @@ import { Sermon } from '@/app/interfaces/article';
 import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
 import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
 import { ScriptureHover } from './ScriptureHover';
-
+import { SermonKeyPoints } from './SermonKeyPoints'
+import { SermonMediaPlayer } from './SermonMediaPlayer';
 interface SermonDetailSidebarProps {
   sermon: Sermon;
+  authenticated: boolean;
 }
 
 const InfoRow = ({ label, value }: { label: string, value: string }) => (
@@ -26,7 +28,7 @@ const MultiValueRow = ({ label, values }: { label: string, values: string[] }) =
     </div>
 );
 
-export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
+export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSidebarProps) => {
   return (
     <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
       <div className="bg-gray-50 p-6 rounded-lg">
@@ -55,20 +57,8 @@ export const SermonDetailSidebar = ({ sermon }: SermonDetailSidebarProps) => {
         </dl>
       </div>
 
-      <div className="mt-6">
-        <h3 className="text-xl font-bold font-display mb-4">主要觀點</h3>
+      {authenticated && <SermonKeyPoints sermon={sermon} />}
         
-        {/* 
-          使用 'prose' 類來自動應用樣式到 Markdown 渲染的 HTML 上。
-          'prose-sm' 是一個較小的尺寸，非常適合側邊欄。
-          'max-w-none' 用來移除 prose 默認的寬度限制，讓它填滿容器。
-        */}
-        <div className="prose prose-sm max-w-none text-gray-700 bg-gray-50 p-6 rounded-lg">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {sermon.keypoints}
-          </ReactMarkdown>
-        </div>
-      </div>    
     </aside>
   );
 };

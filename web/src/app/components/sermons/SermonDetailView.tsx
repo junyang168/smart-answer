@@ -13,6 +13,8 @@ import { SermonDetailSidebar } from '@/app/components/sermons/SermonDetailSideba
 import { FileText } from 'lucide-react';
 import { useSession, signIn } from "next-auth/react"; // ✅ 引入 useSession 和 signIn
 import { Lock } from 'lucide-react';
+import { SermonMediaPlayer } from '@/app/components/sermons/SermonMediaPlayer';
+import { SermonKeyPoints } from './SermonKeyPoints';
 
 export const SermonDetailView = () => {
 
@@ -31,81 +33,79 @@ export const SermonDetailView = () => {
 
   // --- Data Fetching ---
   useEffect(() => {
-    if (!id) return; // 如果沒有 ID，則不執行任何操作
-    if (status === "authenticated") {
-      const fetchSermon = async () => {
-        setIsLoading(true);
-        setError(null);
-        
-        // ✅ 使用您提供的新 API 端點
-        const apiUrl = `/sc_api/final_sermon/junyang168@gmail.com/${id}`;
+  if (!id) return; // 如果沒有 ID，則不執行任何操作
+    const fetchSermon = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      // ✅ 使用您提供的新 API 端點
+      const apiUrl = `/sc_api/final_sermon/junyang168@gmail.com/${id}`;
 
-        try {
-          const res = await fetch(apiUrl);
-          if (!res.ok) {
-            if (res.status === 404) {
-              // 如果 API 明確返回 404，我們也認為是未找到
-              throw new Error('404');
-            }
-            throw new Error(`API request failed with status ${res.status}`);
+      try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) {
+          if (res.status === 404) {
+            // 如果 API 明確返回 404，我們也認為是未找到
+            throw new Error('404');
           }
-
-          const data  = await res.json();
-
-          const article : Sermon = {
-              id: id,
-              title: data.metadata.title,
-              summary: data.metadata.summary,
-              status: data.metadata.status,
-              date: data.metadata.deliver_date,
-              assigned_to_name: data.metadata.assigned_to_name,
-              speaker: data.metadata.speaker || '王守仁',
-              scripture: [], // 將所有經文合併為一個字符串
-              book: data.metadata.book || '',
-              topic: data.metadata.topic || '',
-              videoUrl:  data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null, 
-              audioUrl:  data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
-              source: data.metadata.source || '',
-              keypoints: data.metadata.keypoints || '',
-              theme: data.metadata.theme || '',
-              core_bible_verses: {},
-          }
-
-          if (data.metadata && data.metadata.core_bible_verse) {
-              data.metadata.core_bible_verse.map((book_verse: BibleVerse) => {
-                  const key = `${book_verse.book} ${book_verse.chapter_verse}`;
-                  article.scripture.push(key);
-                  if (book_verse.text) {
-                      article.core_bible_verses![key] = book_verse.text;
-                  }
-              });
-          }
-
-
-          const paragraphs = [];
-
-          for (let i = 0; i < data.script.length; i++) {
-              paragraphs.push(data.script[i].text);
-          }
-
-          article.markdownContent = paragraphs.join('\n\n');
-
-          setSermon(article);
-
-        } catch (err: any) {
-          if (err.message === '404') {
-            // 將 404 錯誤單獨處理，以便後續可以調用 notFound()
-            setError('404');
-          } else {
-            setError(err.message || 'An unknown error occurred while fetching sermon data.');
-          }
-        } finally {
-          setIsLoading(false);
+          throw new Error(`API request failed with status ${res.status}`);
         }
-      };
 
-      fetchSermon();
-    }
+        const data  = await res.json();
+
+        const article : Sermon = {
+            id: id,
+            title: data.metadata.title,
+            summary: data.metadata.summary,
+            status: data.metadata.status,
+            date: data.metadata.deliver_date,
+            assigned_to_name: data.metadata.assigned_to_name,
+            speaker: data.metadata.speaker || '王守仁',
+            scripture: [], // 將所有經文合併為一個字符串
+            book: data.metadata.book || '',
+            topic: data.metadata.topic || '',
+            videoUrl:  data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null, 
+            audioUrl:  data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
+            source: data.metadata.source || '',
+            keypoints: data.metadata.keypoints || '',
+            theme: data.metadata.theme || '',
+            core_bible_verses: {},
+        }
+
+        if (data.metadata && data.metadata.core_bible_verse) {
+            data.metadata.core_bible_verse.map((book_verse: BibleVerse) => {
+                const key = `${book_verse.book} ${book_verse.chapter_verse}`;
+                article.scripture.push(key);
+                if (book_verse.text) {
+                    article.core_bible_verses![key] = book_verse.text;
+                }
+            });
+        }
+
+
+        const paragraphs = [];
+
+        for (let i = 0; i < data.script.length; i++) {
+            paragraphs.push(data.script[i].text);
+        }
+
+        article.markdownContent = paragraphs.join('\n\n');
+
+        setSermon(article);
+
+      } catch (err: any) {
+        if (err.message === '404') {
+          // 將 404 錯誤單獨處理，以便後續可以調用 notFound()
+          setError('404');
+        } else {
+          setError(err.message || 'An unknown error occurred while fetching sermon data.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSermon();
   }, [id,status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
 
   if (status === "loading" || (isLoading && status === "authenticated")) {
@@ -113,22 +113,6 @@ export const SermonDetailView = () => {
     return <div className="text-center py-20">正在加載...</div>;
   }
   
-  if (status === "unauthenticated") {
-    // 如果用戶未登錄，顯示一個登錄提示界面
-    return (
-      <div className="text-center py-20 bg-gray-50 rounded-lg max-w-lg mx-auto">
-        <Lock className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-        <h2 className="text-2xl font-bold mb-2">需要登錄</h2>
-        <p className="text-gray-600 mb-6">此內容僅對已登錄用戶開放，請先登錄以繼續訪問。</p>
-        <button
-          onClick={() => signIn("google")}
-          className="bg-blue-500 text-white font-semibold py-3 px-6 rounded-full hover:bg-blue-600 text-lg"
-        >
-          使用 Google 登錄
-        </button>
-      </div>
-    );
-  }
 
   if (error === '404') {
     // 調用 notFound() 將會渲染 Next.js 內置的 404 頁面
@@ -159,32 +143,7 @@ export const SermonDetailView = () => {
         <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900 mb-2">{sermon.title}</h1>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
 
-        <div className="mb-8 shadow-lg rounded-lg overflow-hidden bg-gray-100 border">
-          {sermon.videoUrl ? (
-            // --- 如果有視頻，渲染視頻播放器 ---
-            <video
-              key={`${sermon.id}-video`} // 使用唯一的 key
-              controls
-              className="w-full h-auto bg-black"
-            >
-              <source src={sermon.videoUrl} type="video/mp4" />
-              您的瀏覽器不支持 video 標籤。
-            </video>
-          ) : (
-            // --- 如果沒有視頻，渲染音頻播放器作為主播放器 ---
-            <div className="p-8 flex flex-col items-center justify-center text-center bg-gray-50">
-                <h2 className="text-lg font-semibold text-gray-700 mb-4">本篇講道僅提供音頻格式</h2>
-                <audio
-                  key={`${sermon.id}-audio-main`} // 使用唯一的 key
-                  controls
-                  className="w-full max-w-md"
-                >
-                  <source src={sermon.audioUrl} type="audio/mpeg" />
-                  您的瀏覽器不支持 audio 標籤。
-                </audio>
-            </div>
-          )}
-        </div>
+        <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} />
 
                 {/* ✅ 新增的講道摘要區域 */}
         {sermon.summary && (
@@ -200,13 +159,18 @@ export const SermonDetailView = () => {
         )}
 
 
-        <article className="prose lg:prose-lg max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{sermon.markdownContent}</ReactMarkdown>
-        </article>
+        {status === "authenticated" ? (
+          <article className="prose lg:prose-lg max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{sermon.markdownContent}</ReactMarkdown>
+          </article>
+        ) : (
+          <SermonKeyPoints sermon={sermon} />
+        )
+         }
       </main>
 
       {/* 右側邊欄 */}
-      <SermonDetailSidebar sermon={sermon} />
+      <SermonDetailSidebar sermon={sermon} authenticated={status === "authenticated"} />
     </div>
   );
 };

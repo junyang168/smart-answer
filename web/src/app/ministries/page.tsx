@@ -2,7 +2,7 @@
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import Image from 'next/image';
 import Link from 'next/link';
-import { BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, ArrowRight,ChevronRight,Search } from 'lucide-react';
+import { BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, ArrowRight,ChevronRight,Library } from 'lucide-react';
 import ReactMarkdown from 'react-markdown'; // ✅ 引入 ReactMarkdown
 import remarkGfm from 'remark-gfm';          // ✅ 引入 GFM 插件
 
@@ -38,11 +38,15 @@ export default function MinistriesPage() {
           <BrainCircuit className="w-16 h-16 mx-auto mb-4 text-[#D4AF37]" />
           <h1 className="text-4xl md:text-5xl font-bold">當科技遇見神學</h1>
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
-            我們致力於使用 AI 人工智能技術，將
-            <Link href="/about/pastor-profile" >
-              王守仁教授
-            </Link>
-            歷年忠於聖經的深度教導，轉化為造就門徒的寶貴屬靈資源。
+        本教會由資深神學教育家 
+        <Link 
+            href="/about/pastor-profile" 
+            target="_blank" // 在新標籤頁打開，以免中斷用戶瀏覽當前頁面
+            className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
+        >
+            王守仁教授
+        </Link>
+        帶領。我們致力於使用 AI 人工智能技術，將其歷年忠於聖經的深度教導，轉化為造就門徒的寶貴屬靈資源。
           </p>
         </div>
       </section>
@@ -61,7 +65,12 @@ export default function MinistriesPage() {
               數十年來，對神話語深度準確的釋經講道。
             </p>
         {/* ✅ 新增：數據指標展示牆 */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center mt-10 pt-10 border-t">
+        {/* ✅ 新增的引導語 */}
+        <div className="mt-10 pb-10 border-b border-gray-200">
+        <p className="text-center text-lg text-gray-600 mb-8">
+            這個寶庫中現已收集到：
+        </p>        
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 text-center">
             <div className="flex flex-col">
                 <span className="text-4xl md:text-4xl font-bold text-blue-600">{ metrics.sermons }</span>
                 <span className="text-sm font-semibold text-gray-500 mt-2">篇講道</span>
@@ -74,6 +83,7 @@ export default function MinistriesPage() {
                 <span className="text-4xl md:text-4xl font-bold text-blue-600">{ metrics.words }</span>
                 <span className="text-sm font-semibold text-gray-500 mt-2">轉錄文字</span>
             </div>
+        </div>
         </div>
           </div>
 
@@ -99,49 +109,21 @@ export default function MinistriesPage() {
               </div>
           </div>
 
-          {/* 4. 第三步：資源應用 */}
-          <div className="text-center mb-16">
-              <h2 className="text-3xl font-bold font-display text-gray-800">第三步：資源的應用</h2>
-              <p className="mt-2 text-lg text-gray-600">校對後的文稿被轉化為多種形式，服務於個人靈修和團契生活。</p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
-                <div className="bg-white p-6 rounded-lg border col-span-1 md:col-span-1">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Search className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">講道中心</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.sermonLibrary}</ReactMarkdown>
-                      </div>
-                      <Link href="/resources/sermons" className="font-semibold text-blue-600 hover:underline text-sm">
-                          前往講道中心體驗 →
-                      </Link>
-                </div>
-                <div className="bg-white p-6 rounded-lg border">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Users className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">團契智慧結晶</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.communityWisdom}</ReactMarkdown>
-                      </div>
-                      <Link href="/resources/articles" className="font-semibold text-blue-600 hover:underline text-sm">
-                          閱讀團契結晶 →
-                      </Link>
-                </div>
-                <div className="bg-white p-6 rounded-lg border">
-                    <div className="flex items-center gap-3 mb-3">
-                        <MessageCircleQuestion className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">真實信仰問答</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.realLifeQA}</ReactMarkdown>
-                      </div>
-                    <Link href="/resources/qa" className="font-semibold text-blue-600 hover:underline text-sm">
-                        探索真實問答 →
-                    </Link>
-                </div>
-              </div>
-          </div>
+        <div className="text-center mb-16 md:mb-20">
+            <h2 className="text-3xl font-bold font-display text-gray-800">第三步：探索事工成果</h2>
+            <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
+                经过这一系列严谨的流程，最初的音视频讲道被转化为一个<b>内容丰富、可供深度探索的数字资源库</b>，包含了可搜索的讲道、系列文章和真实的信仰问答，全面服务于您的个人灵修和团契生活。
+            </p>
+            <div className="mt-8">
+                <Link 
+                    href="/resources" 
+                    className="inline-flex items-center gap-3 bg-green-600 text-white font-bold py-3 px-8 rounded-full hover:bg-green-700 transition-transform hover:scale-105 shadow-lg"
+                >
+                    <Library className="w-6 h-6" /> {/* 使用 Library 或其他合适的图标 */}
+                    前往AI 查經
+                </Link>
+            </div>
+        </div>
           
           {/* 5. 第四步：互動與探索 */}
           <div className="bg-blue-600 text-white p-8 md:p-12 rounded-2xl text-center">
@@ -150,7 +132,7 @@ export default function MinistriesPage() {
               <p className="mt-4 max-w-2xl mx-auto">
                   我們將所有這些經過審核的知識，用來訓練一個專屬的 AI 問答模型。它能基於王教授的教導，回答您在信仰上的問題。
               </p>
-              <Link href="/resources/qa" className="mt-8 inline-block bg-white text-blue-700 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105">
+              <Link href="/resources/ai-assistant" className="mt-8 inline-block bg-white text-blue-700 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105">
                   立即開始提問
               </Link>
           </div>
