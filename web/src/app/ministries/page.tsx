@@ -126,14 +126,14 @@ export default function MinistriesPage() {
         </div>
           
           {/* 5. 第四步：互動與探索 */}
-          <div className="bg-blue-600 text-white p-8 md:p-12 rounded-2xl text-center">
+          <div className="bg-gray-300 text-white p-8 md:p-12 rounded-2xl text-center">
               <MessageCircleQuestion className="w-12 h-12 mx-auto mb-4"/>
               <h2 className="text-3xl font-bold">第四步：您的 AI 信仰助教</h2>
               <p className="mt-4 max-w-2xl mx-auto">
                   我們將所有這些經過審核的知識，用來訓練一個專屬的 AI 問答模型。它能基於王教授的教導，回答您在信仰上的問題。
               </p>
-              <Link href="/resources/ai-assistant" className="mt-8 inline-block bg-white text-blue-700 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105">
-                  立即開始提問
+              <Link href="#" className="mt-8 inline-block bg-white text-gray-500 font-bold py-3 px-8 rounded-full hover:bg-gray-200 transition-transform hover:scale-105">
+                  立即開始提問 Coming Soon
               </Link>
           </div>
 

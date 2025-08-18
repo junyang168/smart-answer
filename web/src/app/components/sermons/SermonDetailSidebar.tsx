@@ -1,7 +1,5 @@
 // components/sermons/SermonDetailSidebar.tsx
 import { Sermon } from '@/app/interfaces/article';
-import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
-import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
 import { ScriptureHover } from './ScriptureHover';
 import { SermonKeyPoints } from './SermonKeyPoints'
 import { SermonMediaPlayer } from './SermonMediaPlayer';
