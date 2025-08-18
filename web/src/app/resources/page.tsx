@@ -13,7 +13,7 @@ export default function ResourcesPage() {
   ];
       
   return (
-    <div className="container mx-auto px-6 py-12">
+    <div>
       <Breadcrumb links={breadcrumbLinks} />
       
       {/* 

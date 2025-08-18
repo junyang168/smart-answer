@@ -15,7 +15,7 @@ interface BreadcrumbProps {
 
 export const Breadcrumb = ({ links }: BreadcrumbProps) => {
   return (
-    <nav aria-label="Breadcrumb" className="mb-6">
+    <nav aria-label="Breadcrumb" className="mb-2 px-6 py-4">
       <ol className="flex items-center space-x-1 text-sm text-gray-500">
         {links.map((link, index) => (
           <li key={link.name} className="flex items-center">

@@ -22,8 +22,8 @@ export default function ContactPage() {
 
   return (
     <div className="bg-gray-50">
-      <div className="container mx-auto px-6 py-12">
         <Breadcrumb links={breadcrumbLinks} />
+      <div className="container mx-auto px-6 py-12">
         
         {/* 1. 頁面標題與歡迎語 */}
         <div className="text-center mb-12 md:mb-16">
