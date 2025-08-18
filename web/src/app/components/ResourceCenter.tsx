@@ -16,17 +16,35 @@ import { apiToUiSermon} from '@/app/utils/converter'
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import Image from 'next/image';
 import Link from 'next/link';
-import ReactMarkdown from 'react-markdown'; // ✅ 步驟 1: 引入庫
-import remarkGfm from 'remark-gfm';         // ✅ 引入 GFM 插件
 import { useRouter } from 'next/navigation';
 
 // --- 模擬數據 (在真實應用中，這些數據應來自後端) ---
 
-const cardDescriptions = {
-  sermonLibrary: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,
-  communityWisdom: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色，最終形成一篇篇*充滿生命力*的深度文章。`,
-  realLifeQA: `這裡的每一個問題，都源自**弟兄姐妹在團契查經中的真實探討**。我們利用 AI 技術將這些寶貴的討論整理、潤色，形成了一份真實、貼近生活的問答集。`
-};
+
+
+const resourceCardsData = [
+  {
+    icon: Mic,
+    title: '講道中心',
+    description: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,
+    link: '/resources/sermons',
+    linkLabel: '進入講道中心',
+  },
+  {
+    icon: BookOpen,
+    title: '文章薈萃',
+    description: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色，最終形成一篇篇*充滿生命力*的深度文章。`,
+    link: '/resources/articles',
+    linkLabel: '瀏覽所有文章',
+  },
+  {
+    icon: MessageCircleQuestion,
+    title: '信仰問答',
+    description: `這裡的每一個問題，都源自**弟兄姐妹在團契查經中的真實探討**。我們利用 AI 技術將這些寶貴的討論整理、潤色，形成了一份真實、貼近生活的問答集。`,
+    link: '/resources/qa',
+    linkLabel: '尋找答案',
+  },
+];
 
 
 // --- 頁面組件本身 ---
@@ -114,48 +132,19 @@ export const ResourceCenter = () => {
 
       <section className="bg-gray-50 py-8 md:py-12">
         <div className="container mx-auto px-6">
-          {/* 4. 第三步：資源應用 */}
-          <div className="text-center mb-16">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
-                <div className="bg-white p-6 rounded-lg border col-span-1 md:col-span-1">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Search className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">講道中心</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.sermonLibrary}</ReactMarkdown>
-                      </div>
-                      <Link href="/resources/sermons" className="font-semibold text-blue-600 hover:underline text-sm">
-                          前往講道中心體驗 →
-                      </Link>
-                </div>
-                <div className="bg-white p-6 rounded-lg border">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Users className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">團契智慧結晶</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.communityWisdom}</ReactMarkdown>
-                      </div>
-                      <Link href="/resources/articles" className="font-semibold text-blue-600 hover:underline text-sm">
-                          閱讀團契結晶 →
-                      </Link>
-                </div>
-                <div className="bg-white p-6 rounded-lg border">
-                    <div className="flex items-center gap-3 mb-3">
-                        <MessageCircleQuestion className="w-6 h-6 text-blue-500"/>
-                        <h3 className="font-bold text-xl text-gray-800">真實信仰問答</h3>
-                    </div>
-                      <div className="prose prose-sm text-gray-600 flex-grow">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{cardDescriptions.realLifeQA}</ReactMarkdown>
-                      </div>
-                    <Link href="/resources/qa" className="font-semibold text-blue-600 hover:underline text-sm">
-                        探索真實問答 →
-                    </Link>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-8 text-left">
+            {resourceCardsData.map((card) => (
+              <ResourceCard
+                key={card.title}
+                icon={card.icon}
+                title={card.title}
+                description={card.description}
+                link={card.link}
+                linkLabel={card.linkLabel}
+              />
+            ))}
           </div>
-                  </div>
+        </div>
       </section>
 
       <section className="py-8 md:py-12">
@@ -170,18 +159,18 @@ export const ResourceCenter = () => {
 
         {/* 精選文章與問答區 */}
         <div>
-            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">精選文章與問答</h2>
+            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新文章與問答</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 max-w-5xl mx-auto">
                 {/* 文章欄 */}
                 <div className="bg-white p-6 rounded-lg shadow-sm">
-                    <h3 className="text-xl font-bold mb-4">最新文章</h3>
+                    <h3 className="text-xl font-bold mb-4">文章</h3>
                     <ul className="list-none p-0">
                         {topArticles.map(post => <FeaturedPostItem key={post.title} { ... post } />)}
                     </ul>
                 </div>
                 {/* 問答欄 */}
                 <div className="bg-white p-6 rounded-lg shadow-sm">
-                    <h3 className="text-xl font-bold mb-4">熱點問答</h3>
+                    <h3 className="text-xl font-bold mb-4">問答</h3>
                     <ul className="list-none p-0">
                         {topQAs.map(post => <FeaturedPostItem key={post.title} {...post} />)}
                     </ul>
