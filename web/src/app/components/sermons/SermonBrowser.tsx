@@ -10,36 +10,71 @@ import { Sermon } from '@/app/interfaces/article';
 import {SermonSearchBar} from '@/app/components/sermons/SermonSearchBar';
 import {SermonSidebar} from '@/app/components/sermons/SermonSidebar';
 import { fetchSermons } from '@/app/utils/fetch-articles'
+import { BrainCircuit } from 'lucide-react';
 
 
 export const SermonBrowser = () => {
   // --- State Management ---
   const [allSermons, setAllSermons] = useState<Sermon[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
+  const [initialError, setInitialError] = useState<string | null>(null);
+
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResultIds, setSearchResultIds] = useState<string[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const searchParams = useSearchParams();
+  const query = searchParams.get('q') || '';
 
   // --- Data Fetching ---
   useEffect(() => {
     // 這個 useEffect 只在組件首次掛載到瀏覽器時運行一次
     const fetchAllSermons = async () => {
-      setIsLoading(true);
-      setError(null);
+      setIsLoadingInitialData(true);      
       try {
         // ✅ fetch 在瀏覽器中運行，可以使用相對路徑或絕對路徑
         const transformedSermons : Sermon[] = await fetchSermons();
         transformedSermons.sort((a, b) =>  new Date(a.date).getTime() - new Date(b.date).getTime());
         setAllSermons(transformedSermons);
       } catch (err: any) {
-        setError(err.message || 'An unknown error occurred.');
+        setInitialError('无法加载讲道列表，请稍后刷新重试。' + err.message);
       } finally {
-        setIsLoading(false);
+        setIsLoadingInitialData(false);
       }
     };
 
+    console.debug('here')
+
     fetchAllSermons();
   }, []); // 空依賴數組確保只運行一次
+
+  // 逻辑与之前相同，只要有 query 就触发
+  useEffect(() => {
+      if (!query) {
+          setSearchResultIds([]);
+          setIsSearching(false);
+          return;
+      }
+
+      const triggerSearch = async () => {
+          setIsSearching(true);
+          setSearchError(null);
+          try {
+              const response = await fetch(`/sc_api/quick_search/${encodeURIComponent(query)}`);
+              if (!response.ok) throw new Error('AI 搜索服务暂时不可用。');
+              const ids: string[] = await response.json();
+              setSearchResultIds(ids);
+          } catch (err: any) {
+              setSearchError(err.message);
+              setSearchResultIds([]);
+          } finally {
+              setIsSearching(false);
+          }
+      };
+      triggerSearch();
+
+  }, [query]);
+
 
   // ✅ 1. 更新計數邏輯以處理數組
   const filterOptions = useMemo(() => {
@@ -90,20 +125,13 @@ export const SermonBrowser = () => {
     const limit = 12;
 
     if (query) {
-      filtered = filtered.filter(sermon => 
-        // 檢查標題是否包含搜索詞
-        sermon.title.toLowerCase().includes(query) ||
-        // 檢查經文數組中是否有任何一條包含搜索詞
-        sermon.scripture.some(ref => ref.toLowerCase().includes(query)) ||
-        // (可選) 檢查摘要是否包含搜索詞
-        sermon.summary.toLowerCase().includes(query)
-      );
+      const idSet = new Set(searchResultIds);
+      filtered = filtered.filter(sermon => idSet.has(sermon.id));
     }
 
     if (book) { filtered = filtered.filter(s => s.book.includes(book)); }
     if (topic) { filtered = filtered.filter(s => s.topic.includes(topic)); }    
     
-    if (q) { filtered = filtered.filter(s => s.title.toLowerCase().includes(q.toLowerCase()) || s.scripture.join(' ').toLowerCase().includes(q.toLowerCase())); }
     if (speaker) { filtered = filtered.filter(s => s.speaker === speaker); }
     if (year) { filtered = filtered.filter(s => s.date.startsWith(year)); }
     if (status) { filtered = filtered.filter(s => s.status === status); }
@@ -119,17 +147,35 @@ export const SermonBrowser = () => {
       hasNextPage: endIndex < totalCount,
       hasPrevPage: startIndex > 0,
     };
-  }, [allSermons, searchParams]);
+  }, [allSermons, searchParams, searchResultIds, query]);
 
 
   // --- Render Logic ---
-  if (isLoading) {
-    return <div className="text-center py-20">正在從 API 加載講道數據...</div>;
-  }
+    if (isLoadingInitialData) {
+        return <div className="text-center py-20">正在初始化讲道中心...</div>;
+    }
 
-  if (error) {
-    return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;
-  }
+    if (initialError) {
+        return <div className="text-center py-20 text-red-50innerHTML">{initialError}</div>;
+    }
+
+    if(isSearching) {
+      return (
+            // 1. 如果正在搜索，只显示加载状态
+            <div className="text-center p-8 bg-gray-50 rounded-lg">
+                <div className="flex justify-center items-center gap-2">
+                    <BrainCircuit className="w-6 h-6 text-blue-600 animate-pulse" />
+                    <p className="font-semibold text-blue-700">正在进行 AI 搜索...</p>
+                </div>
+            </div>        
+      )
+    }
+
+    if(searchError) {
+      return (
+          <div className="text-center p-8 bg-red-50 text-red-700 rounded-lg">{searchError}</div>
+      );
+    }
 
   const { paginatedSermons, totalCount, hasNextPage, hasPrevPage } = filteredAndPaginatedData;
 
@@ -137,7 +183,7 @@ export const SermonBrowser = () => {
     <div className="flex flex-col lg:flex-row">
       <SermonSidebar options={filterOptions} />
       <main className="flex-1">
-        <SermonSearchBar />
+        <SermonSearchBar isSearching={isSearching} />
         <div className="mb-4 text-sm text-gray-600">
           共找到 <span className="font-bold">{totalCount}</span> 篇講道
         </div>
