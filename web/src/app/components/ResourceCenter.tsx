@@ -150,7 +150,7 @@ export const ResourceCenter = () => {
       <section className="py-8 md:py-12">
 
         {/* 最新講道區 */}
-        <div className="mb-16">
+        <div className="container mx-auto px-6 mb-16">
             <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新講道速覽</h2>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {topSermons.map(sermon => <LatestSermonCard key={sermon.title} sermon={sermon} />)}
@@ -158,7 +158,7 @@ export const ResourceCenter = () => {
         </div>
 
         {/* 精選文章與問答區 */}
-        <div>
+        <div className="container mx-auto px-6 mb-16">
             <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新文章與問答</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 max-w-5xl mx-auto">
                 {/* 文章欄 */}

@@ -19,11 +19,11 @@ const ResourceCard = ({ icon: Icon, title, description, link, linkLabel }: Resou
         <Icon className="w-10 h-10 text-[#8B4513]" />
       </div>
       <h3 className="text-xl font-bold font-display text-gray-800 mb-2">{title}</h3>
-      <p className="text-gray-600 flex-grow mb-4">
+      <div className="text-gray-600 flex-grow mb-4">
         <div className="prose prose-slate max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
         </div>
-      </p>
+      </div>
       <Link href={link} className="mt-auto bg-[#8B4513] text-white font-bold py-2 px-6 rounded-full hover:bg-opacity-90 transition-all self-center">
         {linkLabel}
       </Link>
