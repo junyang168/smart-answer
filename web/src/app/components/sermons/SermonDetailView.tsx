@@ -108,7 +108,7 @@ export const SermonDetailView = () => {
     fetchSermon();
   }, [id,status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
 
-  if (status === "loading" || (isLoading && status === "authenticated")) {
+  if (status === "loading" ) {
     // 顯示加載中的條件：身份驗證中，或者已認證但在獲取數據中
     return <div className="text-center py-20">正在加載...</div>;
   }
