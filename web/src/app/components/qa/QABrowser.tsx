@@ -8,11 +8,13 @@ import { Search, ChevronRight } from 'lucide-react';
 import { FaithQA } from '@/app/interfaces/article'; // 假設您已經定義了 FaithQA 類型
 import { FacetSidebar, FacetDefinition } from '@/app/components/common/FacetSidebar'; 
 import { QASearchBar } from './QASearchBar'; 
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // 模擬 API 獲取函數
 async function fetchVerifiedQAs(): Promise<FaithQA[]> {
     const user_id = 'junyang168@gmail.com'
-    const res = await fetch(`/sc_api/qas/${user_id}`);
+    const res = await fetch(`/sc_api/qas`);
     const data = await res.json();
     return data;
 }
@@ -98,7 +100,9 @@ export const QABrowser = () => {
                         processedData.filteredQAs.map(qa => (
                             <Link key={qa.id} href={`/resources/qa/${qa.id}`} className="block bg-white p-6 rounded-lg shadow-sm hover:shadow-md transition-all border">
                                 <h3 className="font-bold text-lg text-gray-800 mb-2">{qa.question}</h3>
-                                <p className="text-gray-600 text-sm line-clamp-2">{qa.shortAnswer}</p>
+                                <p className="text-gray-600 text-sm line-clamp-2">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{qa.shortAnswer}</ReactMarkdown>
+                                </p>
                                 <div className="flex items-center justify-between mt-4 text-xs text-gray-400">
                                     <span>{qa.category} | {qa.date_asked}</span>
                                     <span className="flex items-center font-semibold text-blue-600">

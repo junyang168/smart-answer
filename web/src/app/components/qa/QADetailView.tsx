@@ -77,7 +77,7 @@ export const QADetailView = () => {
             {/* 簡短答案 */}
             <div className="bg-gray-50 border-l-4 border-blue-500 p-6 mb-10">
                 <p className="text-lg text-gray-700 italic leading-relaxed">
-                    {qa.shortAnswer}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{qa.shortAnswer}</ReactMarkdown>
                 </p>
             </div>
             
