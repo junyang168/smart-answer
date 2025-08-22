@@ -73,7 +73,7 @@ export const RelatedQAs = ({ articleId, articleTitle }: RelatedQAsProps) => {
             {isAdmin && (
                 <div className="mt-8 pt-8 border-t border-gray-200 border-dashed text-center">
                     <Link
-                        href={`/admin/qa?action=new&relatedArticleId=${articleId}&relatedArticleTitle=${encodeURIComponent(articleTitle)}`}
+                        href={`/admin/qa?action=new&relatedArticleId=${articleId}`}
                         className="inline-flex items-center gap-2 bg-green-100 text-green-800 font-semibold py-2 px-4 rounded-lg hover:bg-green-200 transition-colors border border-green-200"
                     >
                         <PlusCircle className="w-5 h-5" />
