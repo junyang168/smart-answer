@@ -11,8 +11,7 @@ import { Lock } from 'lucide-react';
 
 // 模擬 API 獲取函數
 async function fetchAllQAs(): Promise<FaithQA[]> {
-    const user_id = 'junyang168@gmail.com'
-    const res = await fetch(`/sc_api/qas/${user_id}`);
+    const res = await fetch('/sc_api/qas');
     const data = await res.json();
     return data;
 }
