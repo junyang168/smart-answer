@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation'; // ✅ 1. 引入 useSearchParams
 import { FaithQA } from '@/app/interfaces/article';
 import { QAListPanel } from '@/app/components/admin/qa/QAListPanel';
 import { QAEditPanel } from '@/app/components/admin/qa/QAEditPanel';
@@ -25,6 +26,9 @@ export const QAEditorBrowser = () => {
     const [isDeleting, setIsDeleting] = useState(false); // ✅ 新增：刪除中的狀態
     const [error, setError] = useState<string | null>(null); // ✅ 新增：用於顯示錯誤信息
 
+    const searchParams = useSearchParams();
+
+
     const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
    
     useEffect(() => {
@@ -32,10 +36,30 @@ export const QAEditorBrowser = () => {
             setQas(data);
             setIsLoading(false);
             if (data.length > 0) {
-                setSelectedId(data[0].id); // 默認選中第一項
+//                setSelectedId(data[0].id); // 默認選中第一項
             }
         });
     }, []);
+
+    // ✅ 3. 新增一個 useEffect 來處理 URL 參數和初始選中
+    useEffect(() => {
+        // 這個 effect 會在數據加載完成後運行
+        if (isLoading || qas.length === 0) return;
+
+        const action = searchParams.get('action');
+        const relatedArticleId = searchParams.get('relatedArticleId');
+
+        if (action === 'new' && relatedArticleId) {
+            // 如果 URL 指示我們創建一個新的、關聯文章的 QA
+            handleAddNew(relatedArticleId);
+        } else if (selectedId === null) {
+            // 如果沒有 URL 指令，並且沒有任何選中項，則默認選中第一項
+            setSelectedId(qas[0].id);
+        }
+        
+        // 這個 effect 只需要在初始加載後運行一次，
+        // 或者在您希望 URL 變化能觸發新操作時調整依賴項
+    }, [isLoading, qas, searchParams]);    
 
  // ✅ 重寫 handleSave 函數以包含 API 調用
     const handleSave = async (dataToSave: FaithQA) => {
@@ -149,7 +173,7 @@ const handleDelete = async (idToDelete: string) => {
         }
     };
 
-    const handleAddNew = () => {
+    const handleAddNew = (relatedArticleId?: string) => {
         const newId = `new-${Date.now()}`; // 使用時間戳生成臨時 ID
         const today = new Date();
         const date_asked = today.toISOString().split('T')[0]; // 'yyyy-mm-dd'
@@ -162,7 +186,7 @@ const handleDelete = async (idToDelete: string) => {
             relatedScriptures: [],
             createdAt: today.toISOString(),
             isVerified: false,
-            related_article: '',
+            related_article: relatedArticleId || '',
             date_asked : today.toISOString().split('T')[0], // 'yyyy-mm-dd' 
         };
         setQas([newQA, ...qas]);

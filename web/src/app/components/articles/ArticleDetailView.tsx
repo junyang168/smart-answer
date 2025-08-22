@@ -10,6 +10,7 @@ import { BookMarked } from 'lucide-react';
 import { Sermon, SermonSeries } from '@/app/interfaces/article';
 import { apiToUiSermon, apiToUiSermonSeries} from '@/app/utils/converter';
 import { SidebarDownload } from './SidebarDownload'; // ✅ 引入新的側邊欄下載組件
+import { RelatedQAs } from './RelatedQA'; // ✅ 引入新组件
 
 export const ArticleDetailView = () => {
     const [currentArticle, setCurrentArticle] = useState<Sermon | null>(null);
@@ -95,6 +96,11 @@ export const ArticleDetailView = () => {
                 <article className="prose lg:prose-xl max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentArticle.markdownContent}</ReactMarkdown>
                 </article>
+                {/* ✅ 在文章底部渲染新的“相关问答”组件 */}
+                <RelatedQAs 
+                    articleId={currentArticle.id} 
+                    articleTitle={currentArticle.title}
+                />            
             </main>
         </div>
     );
