@@ -2,6 +2,7 @@ import React from 'react';
 import { useState, useEffect } from 'react';
 import { useParams, notFound } from 'next/navigation';
 import { Sermon} from '@/app/interfaces/article';
+import Link from 'next/link';
 
      
 // 在文件頂部或合適位置添加 SermonMediaPlayer 組件
@@ -35,7 +36,17 @@ export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolea
         </div>
     ) : (
     <div className="p-8 flex flex-col items-left justify-center text-left ">
-        <span className="text-lg text-gray-700 mb-4">講道錄音，錄影僅對教會成員和同工開放</span>
+      {sermon.source ? (
+        <Link
+          href={sermon.source}
+          target="_blank"
+          className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
+        >
+          錄音，錄影來源
+        </Link>
+      ) : (
+        <span className="text-lg text-gray-700 mb-4">講道錄音，錄影僅對教會成員和同工開放。如果您是教會成員，請登入以查看內容。如果您對教會有興趣，歡迎聯絡我們。</span>
+        )}
     </div>
     )
 )
