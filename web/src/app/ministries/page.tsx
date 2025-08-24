@@ -13,9 +13,9 @@ const cardDescriptions = {
 };
 
 const metrics = {
-  sermons: "159",
-  storage: "831GB+",
-  words: "172萬字"
+  sermons: "171",
+  storage: "832GB+",
+  words: "187萬字"
 };
 
 
