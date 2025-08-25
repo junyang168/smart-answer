@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm';
 const pastorProfileData = {
     name: "王守仁 Joseph Wang ",
     title: {
-        zh: "牧師／博士／教授",
+        zh: "榮譽牧師／博士／教授",
         en: "The Rev. Dr. Prof. "
     },
     avatar: "/images/JosephSWang-546w.webp", // 一張更高質量的照片

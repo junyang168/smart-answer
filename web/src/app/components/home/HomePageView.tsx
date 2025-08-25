@@ -4,36 +4,24 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Film, Mic, PenSquare,Search, BrainCircuit } from 'lucide-react';
-import { Sermon, SermonSeries } from '@/app/interfaces/article'; // 假設類型已定義
+import { ArrowRight, Film, Mic, PenSquare,Search, BrainCircuit,Users, Church  } from 'lucide-react';
 
 // --- 模擬數據獲取 (在真實應用中替換為 API 調用) ---
 async function fetchHomePageData() {
     // 假設 API 能返回最新的2篇講道、最新的2個文章系列和2個講道系列
-    return {
-        latestSermons: [
-            { id: '1', title: '福音基礎 (一): 什麼是福音?', speaker: '王守仁 牧師', date: '2025-07-20', scripture: ['羅馬書 1:16-17'] },
-            { id: '2', title: '家庭系列 (一): 基督化的家庭', speaker: '李長老', date: '2025-07-13', scripture: ['以弗所書 5:22-33'] },
-        ] as Partial<Sermon>[],
-        featuredArticleSeries: [
-            { id: 'matthew-24-in-depth', title: '馬太福音24章深入研讀', summary: '詳細解釋“那行毀壞可憎的”以及信徒當如何應對。', sermons: [] },
-            { id: 'faith-lessons', title: '信心的功課', summary: '學習亞伯拉罕、摩西等信心偉人的榜樣。', sermons: [] },
-        ] as Partial<SermonSeries>[],
-        featuredSermonSeries: [
-             { id: 'gospel-basics', title: '福音基礎', summary: '系統性地學習福音的核心真理。', sermons: [] },
-             { id: 'family-series', title: '家庭系列', summary: '探討聖經中關於婚姻、親子關係的教導。', sermons: [] },
-        ] as Partial<SermonSeries>[],
-    };
+    const response = await fetch('/sc_api/fellowship');
+    const data = await response.json();
+    return data;
 }
 
 
 export const HomePageView = () => {
-    const [homeData, setHomeData] = useState<any>(null);
+    const [fellowshipData, setFellowshipData] = useState<any>('');
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
         fetchHomePageData().then(data => {
-            setHomeData(data);
+            setFellowshipData(data);
             setIsLoading(false);
         });
     }, []);
@@ -58,20 +46,55 @@ export const HomePageView = () => {
                 </div>
             </section>
 
-            {/* 2. 歡迎與聚會信息 */}
+            {/* 2. 欢迎与核心聚会 */}
             <section className="bg-white py-16 md:py-20">
-                <div className="container mx-auto px-6 text-center max-w-4xl">
-                    <h2 className="text-3xl font-bold font-display text-gray-800">歡迎來到我們的家</h2>
-                    <p className="mt-4 text-lg text-gray-600 leading-relaxed">
-                        <b>達拉斯聖道教會</b>是一所華人基督教會。位于達拉斯地區。我們注重正確深度釋經。依靠神的恩典, 達拉斯聖道教會追求藉著深度, 準確釋經, 幫助弟兄姐妹們真明白, 遵行, 持守聖經真理, 並在愛的環境中訓練，造就他們成為主的門徒，以完成主的命令， 使萬民做祂的門徒.
-                    </p>
-                    <div className="mt-10 p-8 border-2 border-dashed border-gray-300 rounded-lg">
-                        <h3 className="text-2xl font-bold">主日崇拜</h3>
-                        <p className="mt-2 text-xl">每週日上午 11:00 - 12:30</p>
-                        <p className="mt-2 text-gray-500">903 W. Parker Road, Plano, TX 75023</p>
-                        <Link href="/contact" className="mt-6 inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-3 px-6 rounded-lg hover:bg-gray-700">
-                            新朋友指南 <ArrowRight className="w-5 h-5"/>
-                        </Link>
+                <div className="container mx-auto px-6">
+                    <div className="text-center max-w-4xl mx-auto">
+                        <h2 className="text-3xl font-bold font-display text-gray-800">歡迎來到我們的家</h2>
+                        <p className="mt-4 text-lg text-gray-600 leading-relaxed">
+                            <b>達拉斯聖道教會</b>是一所華人基督教會。位于達拉斯地區。我們注重依靠神的恩典,正確深入地理解遵行聖經。無論您是初次到訪還是尋求歸屬，我們都誠摯地邀請您參與我們的核心聚會。
+                        </p>
+                    </div>
+
+                    {/* ✅ 新的并列卡片布局 */}
+                    <div className="mt-12 max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                        {/* 卡片一：主日崇拜 */}
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center flex flex-col">
+                            <div className="mx-auto bg-gray-200 p-4 rounded-full mb-4">
+                                <Church className="w-8 h-8 text-gray-700" />
+                            </div>
+                            <h3 className="text-2xl font-bold">主日崇拜</h3>
+                            <p className="mt-2 text-lg font-semibold">每週日上午 11:00</p>
+                            <p className="text-gray-500 mt-1">903 W. Parker Road, Plano, TX 75023</p>
+                            <p className="mt-4 text-gray-600 flex-grow">
+                                与众圣徒一同敬拜赞美，聆听忠于圣经的深度信息，领受从神而来的恩典与力量。
+                            </p>
+                            <div className="mt-6">
+                                <Link href="/contact" className="inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-2 px-5 rounded-lg hover:bg-gray-700">
+                                    新朋友指南
+                                </Link>
+                            </div>
+                        </div>
+
+                        {/* 卡片二：周末团契 */}
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center flex flex-col">
+                            <div className="mx-auto bg-gray-200 p-4 rounded-full mb-4">
+                                <Users className="w-8 h-8 text-gray-700" />
+                            </div>
+                            <h3 className="text-2xl font-bold">線上团契</h3>
+                            <p className="mt-2 text-lg font-semibold">每兩週一次 晚上 7:30</p>
+                            <p className="text-gray-500 mt-1">下一次團契時間{fellowshipData.date}</p>
+                            <p className="mt-4 text-gray-600 flex-grow">
+                                與弟兄姊妹們在線上深入查经、分享生活、彼此代祷。这里是建立真实关系、经历生命同行的温馨家园。
+                            </p>
+                            <div className="mt-6">
+                                <Link href="/contact" className="inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-2 px-5 rounded-lg hover:bg-gray-700">
+                                    了解团契详情
+                                </Link>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
             </section>

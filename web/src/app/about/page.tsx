@@ -6,8 +6,8 @@ import { Landmark, Users, ScrollText, ChevronRight } from 'lucide-react';
 
 // 我們可以把牧師和團隊的數據定義在這裡或從一個單獨的文件導入
 const pastorInfo = {
-    name: "王守仁 牧師/博士/教授",
-    title: "The Rev. Dr. Prof. Joseph Wang ",
+    name: "王守仁 榮譽牧師/博士/教授",
+    title: "The Rev. Dr. Prof., Pastor Emeritus Joseph Wang ",
     avatar: "/images/JosephSWang-546w.webp", // 假設的路徑
     bioExcerpt: "王守仁牧師／教授在原文釋經上很有造詣。在他教學，講道中，他時常根據聖經原文深度的釋經，說明經文的本意。他也經常從自然科學，心理學，歷史，考古學等提出證據，驗證聖經的真理性，基督福音的確實性。藉此他幫助基督徒和慕道朋友除去對聖經的誤解，疑惑而正確地明白聖經的真理。",
     bioExcerpt_En:"The Reverend Professor Wang is an expert in Biblical exegesis and exposition. In his teachings and sermons, he often explains the Biblical truths in depth on the basis of the original languages of the Bible. He also presents relevant evidences from natural sciences, Psychology, History, Archaeology to support the reliability of the Bible. In this way he helps Christians and seekers to dissolve Biblical difficulties and accurately understand the Biblical messages.",
@@ -67,7 +67,7 @@ I believe in God the Father Almighty, maker of heaven and earth. And in Jesus Ch
       {/* 4. 認識我們的牧師 */}
       <section className="py-16 md:py-20">
         <div className="container mx-auto px-6 max-w-5xl">
-          <h2 className="text-3xl font-bold font-display text-center mb-12">認識我們的牧師</h2>
+          <h2 className="text-3xl font-bold font-display text-center mb-12">創會牧師</h2>
           <div className="bg-white rounded-lg shadow-xl overflow-hidden md:flex">
              <div className="md:w-1/3">
                 <Image src={pastorInfo.avatar} alt={pastorInfo.name} width={400} height={400} className="w-full h-full object-cover"/>
