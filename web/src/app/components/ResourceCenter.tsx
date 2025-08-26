@@ -32,10 +32,10 @@ const resourceCardsData = [
   },
   {
     icon: BookOpen,
-    title: '文章薈萃',
-    description: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色，最終形成一篇篇*充滿生命力*的深度文章。`,
+    title: '團契分享',
+    description: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色成稿。`,
     link: '/resources/articles',
-    linkLabel: '瀏覽所有文章',
+    linkLabel: '瀏覽所有分享',
   },
   {
     icon: MessageCircleQuestion,

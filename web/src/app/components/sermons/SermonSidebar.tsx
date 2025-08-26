@@ -74,6 +74,7 @@ interface SermonSidebarProps {
     years?: FacetOption[];
     statuses?: FacetOption[];
     assignees?: FacetOption[];
+    source?: FacetOption[];
   }
 }
 
@@ -85,6 +86,7 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
     { title: '編輯狀態', paramName: 'status', options: options.statuses || [] },
     { title: '認領人', paramName: 'assignee', options: options.assignees || [] },
     { title: '講道主題', paramName: 'topic', options: options.topics || [] },
+    { title: '講道來源', paramName: 'source', options: options.source || [] },
     { title: '聖經書卷', paramName: 'book', options: options.books || [] },
   ].filter(f => f.options.length > 0);
 

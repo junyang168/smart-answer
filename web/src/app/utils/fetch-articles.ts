@@ -31,7 +31,7 @@ export const fetchSermons = async () => {
         topic: [],
         videoUrl: surmon.type == null || surmon.type != "audio" ? `/web/video/${surmon.id}.mp4` : null,
         audioUrl: surmon.type === "audio" ? `/web/video/${surmon.id}.mp3` : "",
-        source: "",
+        source: surmon.source,
         theme: surmon.theme || '',
     };
     articles.push(article)

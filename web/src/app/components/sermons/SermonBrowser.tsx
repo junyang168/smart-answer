@@ -11,7 +11,7 @@ import {SermonSearchBar} from '@/app/components/sermons/SermonSearchBar';
 import {SermonSidebar} from '@/app/components/sermons/SermonSidebar';
 import { fetchSermons } from '@/app/utils/fetch-articles'
 import { BrainCircuit } from 'lucide-react';
-
+import { useSession } from "next-auth/react";
 
 export const SermonBrowser = () => {
   // --- State Management ---
@@ -25,6 +25,8 @@ export const SermonBrowser = () => {
 
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
+  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  const authenticated = status === 'authenticated';
 
   // --- Data Fetching ---
   useEffect(() => {
@@ -83,7 +85,11 @@ export const SermonBrowser = () => {
     const getOptionsWithCounts = (key: keyof Sermon, isArray: boolean = false) => {
         const counts = new Map<string, number>();
         for (const sermon of allSermons) {
-            const value = sermon[key];
+            let value = sermon[key];
+            if(key == 'source') {
+              value = value ? '公開' : '聖道教會';
+            }
+
             if (isArray && Array.isArray(value)) {
                 // 如果是數組，遍歷數組中的每一項
                 for (const item of value) {
@@ -99,13 +105,15 @@ export const SermonBrowser = () => {
             .sort((a, b) => a.value.localeCompare(b.value));
     };
 
-    return {
+    
+    return  {
         books: getOptionsWithCounts('book', true), // 標記 book 為數組
         topics: getOptionsWithCounts('topic', true), // 標記 topic 為數組
         speakers: getOptionsWithCounts('speaker'),
 //        years: [...new Set(allSermons.map(s => s.date.substring(0, 4)).filter(Boolean))].map(y => ({value: y, count: allSermons.filter(s => s.date.startsWith(y)).length})).sort((a,b)=>b.value.localeCompare(a.value)),
-        statuses: getOptionsWithCounts('status'),
-        assignees: getOptionsWithCounts('assigned_to_name'),
+        statuses: authenticated ? getOptionsWithCounts('status') : [],
+        assignees: authenticated ? getOptionsWithCounts('assigned_to_name') : [],
+        source: getOptionsWithCounts('source')
     };
   }, [allSermons]);
 
@@ -122,6 +130,7 @@ export const SermonBrowser = () => {
     const status = searchParams.get('status');
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
+    const source = searchParams.get('source');
     const limit = 12;
 
     if (query) {
@@ -136,6 +145,7 @@ export const SermonBrowser = () => {
     if (year) { filtered = filtered.filter(s => s.date.startsWith(year)); }
     if (status) { filtered = filtered.filter(s => s.status === status); }
     if (assignee) { filtered = filtered.filter(s => s.assigned_to_name === assignee); }
+    if (source) { filtered = filtered.filter(s => (s.source ? '公開' : '聖道教會') === source); }
 
     const totalCount = filtered.length;
     const startIndex = (page - 1) * limit;

@@ -19,7 +19,7 @@ export default function AllArticleSeriesPage() {
         <Breadcrumb links={breadcrumbLinks} />
         <div className="text-center mb-12">
             <BookText className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <h1 className="text-4xl font-bold font-display text-gray-800">文章薈萃</h1>
+            <h1 className="text-4xl font-bold font-display text-gray-800">團契分享</h1>
             <p className="mt-4 text-lg text-gray-600 max-w-3xl mx-auto">
                 彙集了教會同工團契中的講稿，深入探索信仰的各個層面。
             </p>
