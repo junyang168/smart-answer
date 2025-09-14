@@ -120,7 +120,7 @@ export default function MinistriesPage() {
                     className="inline-flex items-center gap-3 bg-green-600 text-white font-bold py-3 px-8 rounded-full hover:bg-green-700 transition-transform hover:scale-105 shadow-lg"
                 >
                     <Library className="w-6 h-6" /> {/* 使用 Library 或其他合适的图标 */}
-                    前往AI 查經
+                    前往AI輔助查經
                 </Link>
             </div>
         </div>

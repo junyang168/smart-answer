@@ -45,7 +45,7 @@ export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolea
           錄音，錄影來源
         </Link>
       ) : (
-        <span className="text-lg text-gray-700 mb-4">講道錄音，錄影僅對教會成員和同工開放。如果您是教會成員，請登入以查看內容。如果您對教會有興趣，歡迎聯絡我們。</span>
+        <span className="text-lg text-gray-700 mb-4">講道錄音，錄影僅對教會成員和同工開放。如果您是教會成員，請登入以查看內容。如果您對教會有興趣，歡迎聯繫我們。</span>
         )}
     </div>
     )

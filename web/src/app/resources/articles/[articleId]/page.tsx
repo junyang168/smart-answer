@@ -18,7 +18,7 @@ export default function ArticleDetailPage() {
     const breadcrumbLinks = [
         { name: '首頁', href: '/' },
         { name: 'AI 輔助查經', href: '/resources' },
-        { name: '文章薈萃', href: '/resources/articles' }
+        { name: '團契分享', href: '/resources/articles' }
     ];
     const searchParams = useSearchParams();
     const seriesIdFromQuery = searchParams.get('seriesId') as string | undefined;

@@ -58,7 +58,7 @@ export const QABrowser = () => {
         };
         
         const facets: FacetDefinition[] = [
-            { title: '相关文章', paramName: 'related_article', options: getOptionsWithCounts('related_article') },
+            { title: '相关團契分享', paramName: 'related_article', options: getOptionsWithCounts('related_article') },
             { title: '分類', paramName: 'category', options: getOptionsWithCounts('category') },
             // 你可以為其他字段（如作者、年份等）添加更多 facet
         ];

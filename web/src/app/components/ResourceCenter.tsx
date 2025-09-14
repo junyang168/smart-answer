@@ -159,11 +159,11 @@ export const ResourceCenter = () => {
 
         {/* 精選文章與問答區 */}
         <div className="container mx-auto px-6 mb-16">
-            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新文章與問答</h2>
+            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新團契分享與問答</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 max-w-5xl mx-auto">
                 {/* 文章欄 */}
                 <div className="bg-white p-6 rounded-lg shadow-sm">
-                    <h3 className="text-xl font-bold mb-4">文章</h3>
+                    <h3 className="text-xl font-bold mb-4">團契分享</h3>
                     <ul className="list-none p-0">
                         {topArticles.map(post => <FeaturedPostItem key={post.title} { ... post } />)}
                     </ul>
