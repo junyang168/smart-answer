@@ -217,7 +217,7 @@ export const SermonBrowser = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               {paginatedSermons.map((sermon) => (<SermonListItem key={sermon.id} sermon={sermon} />))}
             </div>
-            <PaginationControls hasNextPage={hasNextPage} hasPrevPage={hasPrevPage} />
+            <PaginationControls hasNextPage={hasNextPage} hasPrevPage={hasPrevPage} page_count={Math.ceil(totalCount / 12)} />
           </>
         ) : (
           <div className="text-center py-16 bg-white rounded-lg shadow-sm">

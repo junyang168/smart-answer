@@ -6,9 +6,10 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 interface PaginationControlsProps {
   hasNextPage: boolean;
   hasPrevPage: boolean;
+  page_count: number;
 }
 
-export const PaginationControls = ({ hasNextPage, hasPrevPage }: PaginationControlsProps) => {
+export const PaginationControls = ({ hasNextPage, hasPrevPage, page_count }: PaginationControlsProps) => {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -30,9 +31,9 @@ export const PaginationControls = ({ hasNextPage, hasPrevPage }: PaginationContr
       >
         上一頁
       </button>
-      <span className="font-bold">第 {page} 頁</span>
-      <button 
-        disabled={!hasNextPage} 
+      <span className="font-bold">第 {page} / {page_count} 頁</span>
+      <button
+        disabled={!hasNextPage}
         onClick={() => handlePageChange('next')}
         className="bg-[#8B4513] text-white py-2 px-6 rounded-full disabled:bg-gray-300 disabled:cursor-not-allowed"
       >
