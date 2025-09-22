@@ -58,8 +58,8 @@ export default function MinistriesPage() {
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold font-display text-gray-800">第一步：知識的源頭</h2>
             <p className="mt-2 text-lg text-gray-600">一切都始於
-              <Link href="/about/pastor-profile?from=ministries" className="text-blue-600 underline hover:text-blue-800 transition-colors">
-              王教授
+              <Link href="/about/pastor-profile?from=ministries&from_title=教會事工" className="text-blue-600 underline hover:text-blue-800 transition-colors">
+              王守仁教授
               </Link>
               數十年來，對神話語深度準確的釋經講道。
             </p>

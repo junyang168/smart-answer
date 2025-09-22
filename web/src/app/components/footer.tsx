@@ -15,7 +15,7 @@ export const Footer = () => {
                 ContactUs@Dallas-HLC.org
               </a>
             </p>
-            <p>主日崇拜: 週日上午 11:00</p>
+            <p>主日崇拜: 週日上午 11:00 CST </p>
           </div>
 
           {/* Column 2: Quick Links */}
@@ -37,26 +37,10 @@ export const Footer = () => {
                 ✅ 關鍵改動：為 <a> 標籤添加了初始顏色 text-gray-300
                 這會被內部的 <Facebook /> SVG 組件繼承
               */}
-              <a 
-                href="https://www.facebook.com" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                aria-label="Facebook" 
-                className="text-gray-300 hover:text-white transition-colors"
-              >
-                <Facebook size={24} />
-              </a>
-              <a 
-                href="https://www.youtube.com" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                aria-label="YouTube" 
-                className="text-gray-300 hover:text-white transition-colors"
-              >
-                <Youtube size={24} />
-              </a>
             </div>
-          </div>        </div>
+          </div>       
+          
+           </div>
       </div>
       <div className="bg-gray-900 py-4">
         <div className="container mx-auto px-6 text-center text-gray-500 text-sm">

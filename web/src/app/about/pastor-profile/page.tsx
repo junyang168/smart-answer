@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { Mail, Phone } from 'lucide-react';
 import ReactMarkdown from 'react-markdown'; // 我們將用它來渲染帶有列表格式的內容
 import remarkGfm from 'remark-gfm';
+import { useSearchParams } from 'next/navigation'; 
 
 // ... 將上面的 pastorProfileData 對象粘貼到這裡 ...
 // 假設的數據結構
@@ -40,6 +41,7 @@ const ProfileSection = ({ title, content }: {
     title: { zh: string, en: string }, 
     content: { zh: string, en: string } 
 }) => {
+
     return (
         <section className="mb-10">
             {/* 桌面端雙欄佈局 */}
@@ -63,13 +65,25 @@ const ProfileSection = ({ title, content }: {
     );
 };
 
+// Define the expected query parameters
+interface PageProps {
+    searchParams: {
+      from?: string;
+      from_title?: string;
+    };
+  }
 
-export default function PastorProfilePage() {
+
+export default function PastorProfilePage({ searchParams }: PageProps) {
+  const from = searchParams?.from || 'about';
+  const from_title = searchParams?.from_title || '關於我們';
+
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
-    { name: '關於我們', href: '/about' },
+    { name: from_title, href: '/' + from },
     { name: '牧師簡介' },
   ];
+
 
   return (
     <div className="bg-gray-50">
