@@ -11,11 +11,11 @@ const contactInfo = {
     googleMapsUrl: "https://www.google.com/maps/place/903+W+Parker+Rd,+Plano,+TX+75023",
     worship: {
         title: "主日崇拜",
-        time: "每週日上午 11:00 - 12:30",
+        time: "每週日上午 11:00 - 12:30 CST",
     },
     fellowship: {
         title: "線上團契",
-        time: "每兩週一次，週五晚 7:30 - 9:00",
+        time: "每兩週一次，週五晚 7:30 - 9:00 CST",
         zoomLink: "https://us02web.zoom.us/j/85114274206",
         calendarFile: "https://us02web.zoom.us/meeting/tZEsdu2qqT8oGtJDGuEp1tM9fsTMIaesw9PW/ics?icsToken=DD_pOCWIq2WtI4ZrxQAALAAAAAjnsQG6bxZRXQrIrDHFO9nvHEp2B_EcSuiX5FKx8dYloF8Bb63VXiKrmlzkpDH_Z15yGk3Dwqm97CyVbTAwMDAwMQ" // ✅ 指向我们创建的 .ics 文件
     },    email: "ContactUs@Dallas-HLC.org",

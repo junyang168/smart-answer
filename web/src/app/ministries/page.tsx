@@ -40,8 +40,7 @@ export default function MinistriesPage() {
           <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
         本教會由資深神學教育家 
         <Link 
-            href="/about/pastor-profile" 
-            target="_blank" // 在新標籤頁打開，以免中斷用戶瀏覽當前頁面
+            href="/about/pastor-profile?from=ministries&from_title=教會事工" 
             className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
         >
             王守仁教授
@@ -59,7 +58,7 @@ export default function MinistriesPage() {
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold font-display text-gray-800">第一步：知識的源頭</h2>
             <p className="mt-2 text-lg text-gray-600">一切都始於
-              <Link href="/about/pastor-profile" className="text-blue-600 underline hover:text-blue-800 transition-colors">
+              <Link href="/about/pastor-profile?from=ministries" className="text-blue-600 underline hover:text-blue-800 transition-colors">
               王教授
               </Link>
               數十年來，對神話語深度準確的釋經講道。

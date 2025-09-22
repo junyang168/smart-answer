@@ -65,7 +65,7 @@ export const HomePageView = () => {
                                 <Church className="w-8 h-8 text-gray-700" />
                             </div>
                             <h3 className="text-2xl font-bold">主日崇拜</h3>
-                            <p className="mt-2 text-lg font-semibold">每週日上午 11:00</p>
+                            <p className="mt-2 text-lg font-semibold">每週日上午 11:00 CST</p>
                             <p className="text-gray-500 mt-1">903 W. Parker Road, Plano, TX 75023</p>
                             <p className="mt-4 text-gray-600 flex-grow">
                                 与众圣徒一同敬拜赞美，聆听忠于圣经的深度信息，领受从神而来的恩典与力量。
@@ -83,7 +83,7 @@ export const HomePageView = () => {
                                 <Users className="w-8 h-8 text-gray-700" />
                             </div>
                             <h3 className="text-2xl font-bold">線上团契</h3>
-                            <p className="mt-2 text-lg font-semibold">每兩週一次 晚上 7:30</p>
+                            <p className="mt-2 text-lg font-semibold">每兩週一次 週五晚 7:30 CST</p>
                             <p className="text-gray-500 mt-1">下一次團契時間{fellowshipData.date}</p>
                             <p className="mt-4 text-gray-600 flex-grow">
                                 與弟兄姊妹們在線上深入查经、分享生活、彼此代祷。这里是建立真实关系、经历生命同行的温馨家园。

@@ -10,8 +10,11 @@ import { Sermon } from '@/app/interfaces/article';
 import {SermonSearchBar} from '@/app/components/sermons/SermonSearchBar';
 import {SermonSidebar} from '@/app/components/sermons/SermonSidebar';
 import { fetchSermons } from '@/app/utils/fetch-articles'
+import { getBookOrderIndex } from '@/app/utils/bible-order'; // ✅ 1. 引入我们的排序帮助函数
+
 import { BrainCircuit } from 'lucide-react';
 import { useSession } from "next-auth/react";
+
 
 export const SermonBrowser = () => {
   // --- State Management ---
@@ -100,9 +103,21 @@ export const SermonBrowser = () => {
                 counts.set(value, (counts.get(value) || 0) + 1);
             }
         }
-        return Array.from(counts.entries())
-            .map(([value, count]) => ({ value, count }))
-            .sort((a, b) => a.value.localeCompare(b.value));
+
+        let options = Array.from(counts.entries())
+            .map(([value, count]) => ({ value, count }));
+
+        if (key === 'book') {
+            options.sort((a, b) => {
+                const indexA = getBookOrderIndex(a.value);
+                const indexB = getBookOrderIndex(b.value);
+                return indexA - indexB;
+            });
+        } else {
+            // 其他 facet 仍然按字母/笔画顺序排序
+            options.sort((a, b) => a.value.localeCompare(b.value, 'zh-Hans-CN'));
+        }    
+        return options;
     };
 
     
