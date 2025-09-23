@@ -111,8 +111,7 @@ export const ResourceCenter = () => {
       <p className="mt-4 text-lg md:text-xl max-w-3xl mx-auto">
         我們致力於使用 AI 人工智能技術，將資深神學教育家
         <Link 
-            href="/about/pastor-profile" 
-            target="_blank" 
+            href="/about/pastor-profile?from=resources&from_title=AI 輔助查經" 
             className="text-[#FBBF24] font-semibold underline decoration-yellow-400/70 underline-offset-2 hover:decoration-yellow-400 transition-all mx-1"
         >
             王守仁教授

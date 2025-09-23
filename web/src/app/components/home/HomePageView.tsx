@@ -68,7 +68,7 @@ export const HomePageView = () => {
                             <p className="mt-2 text-lg font-semibold">每週日上午 11:00 CST</p>
                             <p className="text-gray-500 mt-1">903 W. Parker Road, Plano, TX 75023</p>
                             <p className="mt-4 text-gray-600 flex-grow">
-                                与众圣徒一同敬拜赞美，聆听忠于圣经的深度信息，领受从神而来的恩典与力量。
+                                與眾聖徒一同敬拜讚美，聆聽忠於聖經的深度信息，領受從神而來的恩典與力量。
                             </p>
                             <div className="mt-6">
                                 <Link href="/contact" className="inline-flex items-center gap-2 bg-gray-800 text-white font-semibold py-2 px-5 rounded-lg hover:bg-gray-700">

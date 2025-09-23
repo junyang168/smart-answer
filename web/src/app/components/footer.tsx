@@ -5,7 +5,7 @@ export const Footer = () => {
   return (
     <footer className="bg-gray-800 text-gray-300">
       <div className="container mx-auto px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Column 1: Church Info */}
           <div>
             <h3 className="text-lg font-bold text-white mb-4">達拉斯聖道教會</h3>
@@ -29,16 +29,6 @@ export const Footer = () => {
             </ul>
           </div>
 
-          {/* Column 3: Social Media */}
-          <div>
-            <h3 className="text-lg font-bold text-white mb-4">關注我們</h3>
-            <div className="flex space-x-4">
-              {/* 
-                ✅ 關鍵改動：為 <a> 標籤添加了初始顏色 text-gray-300
-                這會被內部的 <Facebook /> SVG 組件繼承
-              */}
-            </div>
-          </div>       
           
            </div>
       </div>
