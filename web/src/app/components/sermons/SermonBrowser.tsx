@@ -12,8 +12,9 @@ import {SermonSidebar} from '@/app/components/sermons/SermonSidebar';
 import { fetchSermons } from '@/app/utils/fetch-articles'
 import { getBookOrderIndex } from '@/app/utils/bible-order'; // ✅ 1. 引入我们的排序帮助函数
 
-import { BrainCircuit } from 'lucide-react';
+import { BrainCircuit, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { useSession } from "next-auth/react";
+import { SermonListRow } from '@/app/components/sermons/SermonListRow';
 
 
 export const SermonBrowser = () => {
@@ -25,6 +26,15 @@ export const SermonBrowser = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchResultIds, setSearchResultIds] = useState<string[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = window.localStorage.getItem('sermonViewMode');
+      if (stored === 'list' || stored === 'card') {
+        return stored;
+      }
+    }
+    return 'card';
+  });
 
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
@@ -52,6 +62,11 @@ export const SermonBrowser = () => {
 
     fetchAllSermons();
   }, []); // 空依賴數組確保只運行一次
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('sermonViewMode', viewMode);
+  }, [viewMode]);
 
   // 逻辑与之前相同，只要有 query 就触发
   useEffect(() => {
@@ -209,14 +224,61 @@ export const SermonBrowser = () => {
       <SermonSidebar options={filterOptions} />
       <main className="flex-1">
         <SermonSearchBar isSearching={isSearching} />
-        <div className="mb-4 text-sm text-gray-600">
-          共找到 <span className="font-bold">{totalCount}</span> 篇講道
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+          <div className="text-sm text-gray-600">
+            共找到 <span className="font-bold">{totalCount}</span> 篇講道
+          </div>
+          <div className="inline-flex self-start overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
+            <button
+              type="button"
+              onClick={() => setViewMode('card')}
+              aria-pressed={viewMode === 'card'}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                viewMode === 'card'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">卡片</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              aria-pressed={viewMode === 'list'}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+                viewMode === 'list'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <ListIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">列表</span>
+            </button>
+          </div>
         </div>
         {paginatedSermons.length > 0 ? (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {paginatedSermons.map((sermon) => (<SermonListItem key={sermon.id} sermon={sermon} />))}
-            </div>
+            {viewMode === 'card' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {paginatedSermons.map((sermon) => (<SermonListItem key={sermon.id} sermon={sermon} />))}
+              </div>
+            ) : (
+              <div>
+                <div className="mb-2 hidden md:grid md:grid-cols-[1.8fr_1fr_1fr_1fr_1fr_1fr_0.8fr] px-4 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <span>標題</span>
+                  <span>發布日期</span>
+                  <span>認領人</span>
+                  <span>認領日期</span>
+                  <span>完成日期</span>
+                  <span>最後更新</span>
+                  <span className="text-right pr-2">狀態</span>
+                </div>
+                <div className="space-y-3">
+                  {paginatedSermons.map((sermon) => (<SermonListRow key={sermon.id} sermon={sermon} />))}
+                </div>
+              </div>
+            )}
             <PaginationControls hasNextPage={hasNextPage} hasPrevPage={hasPrevPage} page_count={Math.ceil(totalCount / 12)} />
           </>
         ) : (

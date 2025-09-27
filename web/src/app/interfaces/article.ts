@@ -29,6 +29,11 @@ export interface Sermon {
   speaker: string;
   date: string;       // e.g., "2024年12月25日"
   published_date ?: string; // 可選的發布日期
+  assigned_to_date?: string;
+  completed_date?: string;
+  last_updated?: string;
+  author_name?: string;
+  type?: string | null;
   scripture : string[]; // 經文列表，可能是多個經文
   summary: string;
   videoUrl : string | null;
