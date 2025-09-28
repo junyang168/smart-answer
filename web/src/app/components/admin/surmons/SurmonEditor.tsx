@@ -9,6 +9,7 @@ import "easymde/dist/easymde.min.css";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, BookmarkPlus, Loader2, PlusCircle, RotateCcw, Save, UserPlus, Video } from "lucide-react";
+import type { Options as SimpleMDEOptions } from "easymde";
 
 import {
   SurmonAssignPayload,
@@ -428,10 +429,15 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      setState((prev) => ({
-        ...prev,
-        header: { ...(prev.header ?? {}), title: nextTitle },
-      }));
+      setState((prev) => {
+        if (!prev.header) {
+          return prev;
+        }
+        return {
+          ...prev,
+          header: { ...prev.header, title: nextTitle },
+        };
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "更新標題失敗";
       setTitleSaveError(message);
@@ -461,7 +467,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     [item, saveTitle, state.header?.title]
   );
 
-  const editorToolbar = useMemo(
+  const editorToolbar = useMemo<NonNullable<SimpleMDEOptions["toolbar"]>>(
     () =>
       [
         "heading",
@@ -518,7 +524,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           className: "fa fa-step-forward",
           title: "跳至段落結尾",
         }
-      ] as (string | Record<string, unknown>)[],
+      ] as NonNullable<SimpleMDEOptions["toolbar"]>,
     [handleJumpToEnd, handleJumpToStart, handlePauseMedia, handlePlayMedia, handleSkipBackward, handleSkipForward]
   );
 
