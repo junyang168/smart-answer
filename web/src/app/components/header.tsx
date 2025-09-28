@@ -19,7 +19,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
-    <header className="bg-white/95 backdrop-blur-sm sticky top-0 z-50 shadow-md">
+    <header id="global-site-header" className="bg-white/95 backdrop-blur-sm sticky top-0 z-50 shadow-md">
       <div className="container mx-auto px-6 py-3 flex justify-between items-center">
         {/* Logo and Church Name */}
         <Link href="/" className="flex items-center gap-2">
@@ -39,9 +39,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
 
         {/* Desktop Action Buttons */}
         <div className="hidden lg:flex items-center gap-4">
-          <button className="text-gray-600 hover:text-black">
-            <Search size={20} />
-          </button>
+
 
           <AuthButton />
         </div>
@@ -71,4 +69,3 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
     </header>
   );
 };
-

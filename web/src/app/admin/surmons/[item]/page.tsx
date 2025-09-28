@@ -25,7 +25,7 @@ export default function SurmonEditorPage({ params, searchParams }: PageProps) {
   const viewChanges = toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);
 
   return (
-    <div className="container mx-auto px-6 py-12">
+    <div className="container mx-auto px-6 py-6">
       <Suspense fallback={<EditorFallback />}>
         <SurmonEditor item={item} viewChanges={viewChanges} />
       </Suspense>

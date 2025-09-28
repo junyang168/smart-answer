@@ -97,6 +97,12 @@ export interface SurmonUpdateScriptPayload {
   data: SurmonScriptParagraph[] | unknown;
 }
 
+export interface SurmonUpdateHeaderPayload {
+  user_id: string;
+  item: string;
+  title: string;
+}
+
 export interface SurmonAdminListItem {
   item: string;
   title: string;
