@@ -1,0 +1,45 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Next.js dev server",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--inspect-brk",
+        "${workspaceFolder}/web/node_modules/.bin/next",
+        "dev",
+        "-p",
+        "3003"
+      ],
+      "cwd": "${workspaceFolder}/web",
+      "port": 9229,
+      "console": "integratedTerminal",
+      "env": {
+        "NODE_OPTIONS": "--enable-source-maps"
+      },
+      "skipFiles": [
+        "<node_internals>/**",
+        "${workspaceFolder}/web/node_modules/**"
+      ]
+    },
+    {
+      "name": "Chrome: Next.js",
+      "type": "pwa-chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true
+    },
+    {
+      "name": "Attach to Next.js",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "cwd": "${workspaceFolder}",
+      "protocol": "inspector"
+    }
+  ]
+}

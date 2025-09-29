@@ -775,7 +775,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         ) : null}
         {permissions?.canViewPublished ? (
           <a
-            href={`/article?i=${encodeURIComponent(item)}`}
+            href={`/resources/sermons/${encodeURIComponent(item)}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"

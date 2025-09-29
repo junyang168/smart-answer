@@ -3,6 +3,7 @@
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect } from 'react';
 import { useParams, notFound } from 'next/navigation';
+import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -28,7 +29,6 @@ export const SermonDetailView = () => {
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
   const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
-
 
 
   // --- Data Fetching ---
@@ -140,7 +140,17 @@ export const SermonDetailView = () => {
       {/* 左側主內容區 */}
       <main className="lg:col-span-2">
         <Breadcrumb links={breadcrumbLinks} />
-        <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900 mb-2">{sermon.title}</h1>
+        <div className="mb-3 flex items-center gap-3">
+          <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{sermon.title}</h1>
+          {status === "authenticated" && (
+            <Link
+              href={`/admin/surmons/${encodeURIComponent(id)}`}
+              className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-200 rounded-md bg-blue-50 hover:bg-blue-100"
+            >
+              編輯
+            </Link>
+          )}
+        </div>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
 
         <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} />
