@@ -29,6 +29,7 @@ export const SermonDetailView = () => {
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
   const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  const isEditor = session?.user?.role === "editor"; 
 
 
   // --- Data Fetching ---
@@ -142,7 +143,7 @@ export const SermonDetailView = () => {
         <Breadcrumb links={breadcrumbLinks} />
         <div className="mb-3 flex items-center gap-3">
           <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{sermon.title}</h1>
-          {status === "authenticated" && (
+          {isEditor && (
             <Link
               href={`/admin/surmons/${encodeURIComponent(id)}`}
               className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-200 rounded-md bg-blue-50 hover:bg-blue-100"

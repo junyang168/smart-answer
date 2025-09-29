@@ -18,7 +18,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       /** 用户的角色 */
-      role?: "admin" | "member";
+      role?: "admin" | "editor" | "viewer" | "member";
       /** 内部数据库的用户 ID */
       internalId?: string;
     } & DefaultSession["user"]; // & DefaultSession["user"] 表示合并默认的用户字段 (name, email, image)
