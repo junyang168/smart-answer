@@ -30,6 +30,8 @@ export const SermonDetailView = () => {
 
   const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
   console.log(session?.user)
+  console.log(session?.user?.role )
+  console.log(session?.user?.role === "editor")
   const isEditor = session?.user?.role === "editor"; 
 
 
