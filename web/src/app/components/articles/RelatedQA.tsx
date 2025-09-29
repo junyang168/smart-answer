@@ -23,7 +23,6 @@ export const RelatedQAs = ({ articleId, articleTitle }: RelatedQAsProps) => {
     const [relatedQAs, setRelatedQAs] = useState<FaithQA[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const { data: session } = useSession();
-    console.log(session?.user)
     const isAdmin = session?.user?.role === "admin"; 
 
     useEffect(() => {
