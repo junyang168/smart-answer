@@ -29,6 +29,7 @@ export const SermonDetailView = () => {
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
   const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  console.log(session?.user)
   const isEditor = session?.user?.role === "editor"; 
 
 
