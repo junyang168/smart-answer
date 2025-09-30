@@ -27,7 +27,7 @@ async function loadUsers(): Promise<CachedUser[]> {
     return cachedUsers;
   }
 
-  const configPath = path.join(process.cwd(), "web", "data", "config", "config.json");
+  const configPath = path.join(process.cwd(),  "data", "config", "config.json");
   const fileContent = await fs.readFile(configPath, "utf-8");
   const config = JSON.parse(fileContent) as {
     users?: ConfigUser[];
