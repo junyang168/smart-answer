@@ -3,7 +3,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
+import { Bookmark, ChevronRight } from 'lucide-react';
+
+const buildSeriesAnchorId = (rawId: string) =>
+    `series-${rawId.trim().replace(/\s+/g, '-')}`;
 import { SermonSeries, Sermon } from '@/app/interfaces/article'; // 假設這些類型已經定義好
 import ReactMarkdown from 'react-markdown'; 
 import remarkGfm from 'remark-gfm';   
@@ -25,9 +28,20 @@ async function fetchArticlesSeries(): Promise<SermonSeries[]> {
 
 
 // 文章系列區塊組件 (與之前相同)
-const ArticleSeriesSection = ({ series }: { series: SermonSeries }) => (
-    <section className="bg-white p-6 md:p-8 rounded-xl shadow-lg mb-10 border border-gray-100">
-      <h2 className="text-2xl md:text-3xl font-bold font-display text-gray-800">{series.title}</h2>
+const ArticleSeriesSection = ({ series }: { series: SermonSeries }) => {
+    const sectionId = buildSeriesAnchorId(series.id);
+
+    return (
+    <section id={sectionId} className="bg-white p-6 md:p-8 rounded-xl shadow-lg mb-10 border border-gray-100">
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="text-2xl md:text-3xl font-bold font-display text-gray-800">{series.title}</h2>
+        <a
+          href={`#${sectionId}`}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-400 transition-colors hover:border-blue-200 hover:text-blue-600"
+          aria-label={`書籤 ${series.title}`}
+        >
+        </a>
+      </div>
         {/* 使用 prose 來為 Markdown 內容應用樣式 */}
         <div className="mt-2 text-gray-600 leading-relaxed prose prose-slate max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{series.summary}</ReactMarkdown>
@@ -48,7 +62,8 @@ const ArticleSeriesSection = ({ series }: { series: SermonSeries }) => (
         </div>
       </div>
     </section>
-);
+    );
+};
 
 
 // 主瀏覽器組件
@@ -71,6 +86,29 @@ export const ArticleSeriesBrowser = () => {
         };
         loadData();
     }, []);
+
+    useEffect(() => {
+        if (isLoading || !seriesList.length) {
+            return;
+        }
+
+        const { hash } = window.location;
+        if (!hash) {
+            return;
+        }
+
+        const decodedHash = decodeURIComponent(hash.replace('#', ''));
+        const targetId = decodedHash.startsWith('series-')
+            ? decodedHash
+            : buildSeriesAnchorId(decodedHash);
+
+        const target = document.getElementById(targetId);
+        if (target) {
+            requestAnimationFrame(() => {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+    }, [isLoading, seriesList]);
 
     if (isLoading) return <div className="text-center py-20">正在加載文章系列...</div>;
     if (error) return <div className="text-center py-20 text-red-500">加載失敗: {error}</div>;

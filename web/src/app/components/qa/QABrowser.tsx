@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Search, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { FaithQA } from '@/app/interfaces/article'; // 假設您已經定義了 FaithQA 類型
 import { FacetSidebar, FacetDefinition } from '@/app/components/common/FacetSidebar'; 
 import { QASearchBar } from './QASearchBar'; 
@@ -25,7 +25,7 @@ export const QABrowser = () => {
     const [error, setError] = useState<string | null>(null);
 
     const searchParams = useSearchParams();
-    const query = searchParams.get('q') || '';
+    const paramsKey = searchParams.toString();
 
     useEffect(() => {
         const loadData = async () => {
@@ -65,22 +65,23 @@ export const QABrowser = () => {
 
         // --- 2. 應用 URL 中的篩選條件 ---
         let filtered = [...allQAs];
-        const query = searchParams.get('q');
-        const category = searchParams.get('category');
+        const query = (searchParams.get('q') || '').toLowerCase();
 
         if (query) {
             filtered = filtered.filter(qa =>
                 qa.question.toLowerCase().includes(query.toLowerCase()) ||
-                qa.shortAnswer.toLowerCase().includes(query.toLowerCase())
+                qa.shortAnswer.toLowerCase().includes(query)
             );
         }
-        if (category) {
-            filtered = filtered.filter(qa => qa.category === category);
-        }
+        facets.forEach(({ paramName }) => {
+            const value = searchParams.get(paramName);
+            if (!value) return;
+            filtered = filtered.filter(qa => String(qa[paramName as keyof FaithQA] || '') === value);
+        });
         
         return { filteredQAs: filtered, facets };
 
-    }, [allQAs, searchParams]);
+    }, [allQAs, paramsKey]);
 
     if (isLoading) return <div>正在加載歷史問答...</div>;
     if (error) return <div className="text-red-500">加載失敗: {error}</div>;

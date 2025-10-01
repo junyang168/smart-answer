@@ -58,7 +58,19 @@ export const ArticleDetailView = () => {
     if (!currentArticle) return null;
 
     return (
-        <div className="flex flex-col lg:flex-row-reverse gap-8 lg:gap-12">
+        <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
+            <main className="lg:w-2/3">
+                <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{currentArticle.title}</h1>
+                <p className="text-gray-600 my-4 pb-4 border-b">作者: {currentArticle.speaker} | 發布日期: {currentArticle.date}</p>
+                <article className="prose lg:prose-xl max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentArticle.markdownContent}</ReactMarkdown>
+                </article>
+                {/* ✅ 在文章底部渲染新的“相关问答”组件 */}
+                <RelatedQAs 
+                    articleId={currentArticle.id} 
+                    articleTitle={currentArticle.title}
+                />            
+            </main>
             {/* 側邊欄 (完全不變) */}
             <aside className="lg:w-1/3 lg:sticky lg:top-24 self-start">
                 {/* 1. 將下載組件放置在側邊欄頂部 */}
@@ -90,18 +102,6 @@ export const ArticleDetailView = () => {
 
                 )}
             </aside>
-            <main className="lg:w-2/3">
-                <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{currentArticle.title}</h1>
-                <p className="text-gray-600 my-4 pb-4 border-b">作者: {currentArticle.speaker} | 發布日期: {currentArticle.date}</p>
-                <article className="prose lg:prose-xl max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{currentArticle.markdownContent}</ReactMarkdown>
-                </article>
-                {/* ✅ 在文章底部渲染新的“相关问答”组件 */}
-                <RelatedQAs 
-                    articleId={currentArticle.id} 
-                    articleTitle={currentArticle.title}
-                />            
-            </main>
         </div>
     );
 };

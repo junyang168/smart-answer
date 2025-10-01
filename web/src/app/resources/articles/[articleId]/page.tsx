@@ -12,16 +12,20 @@ const ArticleDetailFallback = () => <div className="text-center py-20">正在準
 export default function ArticleDetailPage() {
     const params = useParams();
     const articleTitle = typeof params.articleId === 'string'
-        ? params.articleId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+        ? decodeURIComponent(params.articleId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()))
         : '文章詳情';
+
+    const searchParams = useSearchParams();
+    const seriesIdFromQuery : string = searchParams.get('seriesId') as string ;
+
 
     const breadcrumbLinks = [
         { name: '首頁', href: '/' },
         { name: 'AI 輔助查經', href: '/resources' },
-        { name: '團契分享', href: '/resources/articles' }
+        { name: '團契分享', href: '/resources/articles' },
+        { name: seriesIdFromQuery, href: `/resources/articles#${seriesIdFromQuery}` },
+        { name: articleTitle, href: '' }
     ];
-    const searchParams = useSearchParams();
-    const seriesIdFromQuery = searchParams.get('seriesId') as string | undefined;
 
     return (
         <div className="bg-white">
