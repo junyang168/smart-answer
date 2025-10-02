@@ -13,6 +13,7 @@ from email.utils import formataddr, parseaddr
 from pathlib import Path
 from typing import Iterable, Optional
 
+from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 
@@ -33,7 +34,11 @@ def _determine_batch_size() -> int:
 
 RECIPIENT_BATCH_SIZE = _determine_batch_size()
 
+load_dotenv()
+
 BASE_DIR = os.getenv("DATA_BASE_DIR")
+if not BASE_DIR:
+    raise RuntimeError("DATA_BASE_DIR environment variable is required")
 
 
 def _is_truthy(value: Optional[str]) -> bool:
