@@ -33,12 +33,26 @@ def _determine_batch_size() -> int:
 
 RECIPIENT_BATCH_SIZE = _determine_batch_size()
 
-BASE_DIR = os.getenv("DATA_BASE_DIR") 
+BASE_DIR = os.getenv("DATA_BASE_DIR")
+
+
+def _is_truthy(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+IS_PRODUCTION = _is_truthy(os.getenv("PRODUCTION"))
+
 FELLOWSHIP_FILE = os.path.join(BASE_DIR , "config", "fellowship.json")
-#RECIPIENTS_FILE = os.path.join(BASE_DIR , "notification", "email_recipients_test.txt")
-RECIPIENTS_FILE = os.path.join(BASE_DIR , "notification", "email_recipients.txt")
+RECIPIENTS_FILE = os.path.join(
+    BASE_DIR,
+    "notification",
+    "email_recipients.txt" if IS_PRODUCTION else "email_recipients_test.txt",
+)
 
 LOG_FILE = os.path.join(BASE_DIR , "notification", "notification.log")
+STATUS_FILE = os.path.join(BASE_DIR , "notification", "last_sent.json")
 
 @dataclass
 class FellowshipEvent:
@@ -134,6 +148,37 @@ def _log_notification(message: str) -> None:
     except Exception:
         # Logging issues should not block email sending
         pass
+
+
+def _load_last_sent_event_date() -> Optional[str]:
+    if not STATUS_FILE:
+        return None
+
+    path = Path(STATUS_FILE)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        last_event = data.get("event_date")
+        if isinstance(last_event, str):
+            return last_event
+    return None
+
+
+def _record_event_sent(event: FellowshipEvent) -> None:
+    if not STATUS_FILE:
+        return
+
+    path = Path(STATUS_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "event_date": event.date.isoformat(),
+        "recorded_at": datetime.now(TIMEZONE).isoformat(),
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
@@ -285,6 +330,7 @@ def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
         _log_notification(
             f"SUCCESS sent fellowship reminder for {event.date.isoformat()} to {total_sent} recipients in {batches_sent} batch(es)"
         )
+        _record_event_sent(event)
 
 
 def compute_send_timestamp(events: list[FellowshipEvent]) -> tuple[FellowshipEvent, datetime]:
@@ -314,6 +360,9 @@ def main() -> None:
     recipients = load_recipients(RECIPIENTS_FILE)
     event, send_at = compute_send_timestamp(events)
 
+    last_sent_event = _load_last_sent_event_date()
+    event_date_iso = event.date.isoformat()
+
     print("Last scheduled fellowship date:", event.date.strftime("%Y-%m-%d"))
     if event.title:
         print("Title:", event.title)
@@ -330,6 +379,9 @@ def main() -> None:
 
     now = datetime.now(TIMEZONE)
     print("Current time:", now.isoformat())
+    if not args.force and last_sent_event == event_date_iso:
+        print("Reminder already sent for this fellowship; exiting without sending.")
+        return
     if not args.force:
         if now < send_at:
             print("Not time yet; exiting without sending.")
