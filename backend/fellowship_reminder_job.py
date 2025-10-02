@@ -264,6 +264,9 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
         "<div>"
         "    <a href=\"Https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1\">Zoom 線上會議</a>"
         "</div>"
+        "<div><br/><br/>"
+        "<a href=\"https://www.dallas-hlc.org/resources/articles\">觀看過往團契分享</a>"
+        "</div>"
     )
     html_body_template = os.getenv("REMINDER_BODY_TEMPLATE_HTML", default_html)
     html_body = html_body_template.format(
