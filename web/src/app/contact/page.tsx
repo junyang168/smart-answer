@@ -19,7 +19,7 @@ const contactInfo = {
         zoomLink: "Https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1",
         calendarFile: "https://us02web.zoom.us/meeting/tZEsdu2qqT8oGtJDGuEp1tM9fsTMIaesw9PW/ics?icsToken=DD_pOCWIq2WtI4ZrxQAALAAAAAjnsQG6bxZRXQrIrDHFO9nvHEp2B_EcSuiX5FKx8dYloF8Bb63VXiKrmlzkpDH_Z15yGk3Dwqm97CyVbTAwMDAwMQ" // ✅ 指向我们创建的 .ics 文件
     },    email: "ContactUs@Dallas-HLC.org",
-    phone: "972-123-4567" // 假設的電話
+    phone: "(469) 443-6330" // Google Voice 
 };
 
 export default function ContactPage() {
@@ -85,6 +85,10 @@ export default function ContactPage() {
                         <div className="flex items-start gap-4">
                             <Mail className="w-6 h-6 text-gray-600 mt-1 flex-shrink-0"/>
                             <a href={`mailto:${contactInfo.email}`} className="hover:underline">{contactInfo.email}</a>
+                        </div>
+                        <div className="flex items-start gap-4">
+                            <Phone className="w-6 h-6 text-gray-600 mt-1 flex-shrink-0"/>
+                            <a href={`tel:${contactInfo.phone}`} className="hover:underline">{contactInfo.phone}</a>
                         </div>
                     </div>
                 </div>
