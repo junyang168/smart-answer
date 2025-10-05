@@ -4,6 +4,7 @@ export interface FullArticleSummary {
   id: string;
   name: string;
   slug: string;
+  subtitle?: string;
   status: FullArticleStatus;
   created_at: string;
   updated_at: string;
@@ -19,6 +20,7 @@ export interface FullArticleDetail extends FullArticleSummary {
 export interface SaveFullArticlePayload {
   id?: string;
   name: string;
+  subtitle?: string;
   scriptMarkdown: string;
   articleMarkdown: string;
   status: FullArticleStatus;

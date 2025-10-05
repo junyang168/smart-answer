@@ -32,7 +32,16 @@ export const authConfig: NextAuthOptions = {
         
         if (internalUser) {
           // 3. 将我们的自定义数据（角色和ID）附加到 JWT token 上
-          token.role = internalUser.role as "admin" | "member";
+          const normalizedRole = internalUser.role?.toLowerCase();
+          if (normalizedRole === "editor") {
+            token.role = "editor";
+          } else if (normalizedRole === "admin") {
+            token.role = "admin";
+          } else if (normalizedRole === "member") {
+            token.role = "member";
+          } else {
+            token.role = undefined;
+          }
           token.internalId = internalUser.internalId;
         }
       }

@@ -87,10 +87,11 @@ export function FullArticleList({ initialArticles }: FullArticleListProps) {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">標題</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">副標題</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">最新狀態</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">使用模型</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">更新時間</th>
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">建立時間</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -110,14 +111,30 @@ export function FullArticleList({ initialArticles }: FullArticleListProps) {
                       {article.name || article.slug}
                     </Link>
                   </td>
+                  <td className="px-4 py-3 text-gray-600">{article.subtitle || "—"}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${badgeClass}`}>
                       {article.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{article.model ?? "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(article.updated_at)}</td>
                   <td className="px-4 py-3 text-gray-600">{formatDate(article.created_at)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <Link
+                        href={`/resources/full_article/${article.id}`}
+                        className="inline-flex items-center rounded-md border border-blue-200 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50"
+                      >
+                        觀看
+                      </Link>
+                      <Link
+                        href={`/admin/full_article/${article.id}`}
+                        className="inline-flex items-center rounded-md border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        編輯
+                      </Link>
+                    </div>
+                  </td>
                 </tr>
               );
             })}

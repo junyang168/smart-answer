@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
@@ -33,6 +34,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   const router = useRouter();
   const [articleId, setArticleId] = useState(initialArticle.id);
   const [name, setName] = useState(initialArticle.name ?? "");
+  const [subtitle, setSubtitle] = useState(initialArticle.subtitle ?? "");
   const [status, setStatus] = useState<FullArticleStatus>(initialArticle.status ?? "draft");
   const [scriptMarkdown, setScriptMarkdown] = useState(initialArticle.scriptMarkdown ?? "");
   const [articleMarkdown, setArticleMarkdown] = useState(initialArticle.articleMarkdown ?? "");
@@ -91,6 +93,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       const payload = {
         id: articleId || undefined,
         name,
+        subtitle,
         status,
         scriptMarkdown,
         articleMarkdown,
@@ -99,6 +102,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       const saved = await saveFullArticle(payload);
       setArticleId(saved.id);
       setName(saved.name);
+      setSubtitle(saved.subtitle ?? "");
       setStatus(saved.status);
       setScriptMarkdown(saved.scriptMarkdown);
       setArticleMarkdown(saved.articleMarkdown);
@@ -155,8 +159,14 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   return (
     <div className="space-y-8">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900">{articleId ? "編輯全文文章" : "建立全文文章"}</h1>
-        <p className="text-gray-600">調整講稿、提示，並維護最終產出的 Markdown 文章。</p>
+        <h1 className="text-3xl font-bold text-gray-900">{articleId ? "编辑讲稿和文章" : "从讲稿生成文章"}</h1>
+        <p className="text-gray-600">講稿、提示，並維護最終生成文章。</p>
+        <Link
+          href="/admin/full_article"
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+        >
+          ← 回到文章列表
+        </Link>
       </header>
 
       {feedback && (
@@ -181,6 +191,16 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
               onChange={(event) => setName(event.target.value)}
               className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="輸入文章名稱"
+            />
+          </label>
+          <label className="flex flex-col md:col-span-2">
+            <span className="text-sm font-medium text-gray-700">副標題</span>
+            <input
+              type="text"
+              value={subtitle}
+              onChange={(event) => setSubtitle(event.target.value)}
+              className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="輸入副標題（選填）"
             />
           </label>
           <label className="flex flex-col">
