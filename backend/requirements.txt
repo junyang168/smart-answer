@@ -1,4 +1,5 @@
 fastapi
+httpx
 google-genai
 python-dotenv
 python-pptx

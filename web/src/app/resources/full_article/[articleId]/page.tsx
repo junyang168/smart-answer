@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { FullArticleDetail } from "@/app/types/full-article";
+import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdown";
 
 async function fetchArticle(articleId: string): Promise<FullArticleDetail | null> {
   const base =
@@ -43,7 +42,7 @@ export default async function FullArticleViewer({
           </p>
         </header>
         <article className="prose prose-lg max-w-none">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{article.articleMarkdown || ""}</ReactMarkdown>
+          <ScriptureMarkdown markdown={article.articleMarkdown || ""} />
         </article>
       </div>
     </div>
