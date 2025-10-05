@@ -13,6 +13,7 @@ class ArticleMetadata(BaseModel):
     id: str
     name: str
     slug: str
+    subtitle: Optional[str] = None
     script_filename: str
     article_filename: str
     created_at: datetime
@@ -26,6 +27,7 @@ class ArticleSummary(BaseModel):
     id: str
     name: str
     slug: str
+    subtitle: Optional[str] = None
     status: ArticleStatus
     updated_at: datetime
     created_at: datetime
@@ -43,6 +45,7 @@ class ArticleDetail(ArticleSummary):
 class SaveArticleRequest(BaseModel):
     id: Optional[str] = None
     name: str
+    subtitle: Optional[str] = None
     script_markdown: str = Field(..., alias="scriptMarkdown")
     article_markdown: str = Field(..., alias="articleMarkdown")
     status: ArticleStatus = "draft"

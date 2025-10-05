@@ -97,6 +97,7 @@ class ArticleRepository:
                 id=entry.id,
                 name=entry.name,
                 slug=entry.slug,
+                subtitle=entry.subtitle,
                 status=entry.status,
                 updated_at=entry.updated_at,
                 created_at=entry.created_at,
@@ -130,6 +131,7 @@ class ArticleRepository:
             id=entry.id,
             name=entry.name,
             slug=entry.slug,
+            subtitle=entry.subtitle,
             status=entry.status,
             created_at=entry.created_at,
             updated_at=entry.updated_at,
@@ -166,12 +168,14 @@ class ArticleRepository:
             if entry.article_filename:
                 previous_article_path = ARTICLES_DIR / entry.article_filename
             entry.name = payload.name
+            entry.subtitle = payload.subtitle
             entry.status = payload.status
             entry.updated_at = now
         else:
             entry = ArticleMetadata(
                 id=str(uuid.uuid4()),
                 name=payload.name,
+                subtitle=payload.subtitle,
                 slug="",
                 script_filename="",
                 article_filename="",
@@ -247,6 +251,7 @@ class ArticleRepository:
             id="",
             name="",
             slug="",
+            subtitle="",
             status="draft",
             created_at=now,
             updated_at=now,
