@@ -3,7 +3,7 @@
 import React, { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import * as HoverCard from "@radix-ui/react-hover-card";
+import { Popover, PopoverTrigger, PopoverContent } from "@/app/components/popover";
 import * as Tabs from "@radix-ui/react-tabs";
 
 type Lang = "zh" | "en" | "el" | "he";
@@ -105,6 +105,17 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
     }
   };
 
+  const handleMouseEnter = () => {
+    setOpen(true);
+    void loadBasic();
+  };
+
+  const handleClick = (event: React.MouseEvent | React.TouchEvent) => {
+    event.preventDefault();
+    setOpen(true);
+    void loadBasic();
+  };
+
   const handleTabChange = (lang: string) => {
     const value = lang as Lang;
     setActiveLang(value);
@@ -116,13 +127,23 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
   const anyContent = Object.values(passages).some(Boolean);
 
   return (
-    <HoverCard.Root open={open} onOpenChange={handleOpenChange}>
-      <HoverCard.Trigger asChild>
-        <a href={href} className="text-blue-600 underline decoration-dotted">
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <a
+          href={href}
+          className="cursor-pointer text-blue-600 underline decoration-dotted"
+          onClick={handleClick}
+          onTouchStart={handleClick}
+          onMouseEnter={handleMouseEnter}
+        >
           {children}
         </a>
-      </HoverCard.Trigger>
-      <HoverCard.Content className="w-[520px] max-w-2xl rounded-md border border-gray-200 bg-white p-4 shadow-lg">
+      </PopoverTrigger>
+      <PopoverContent
+        align="center"
+        sideOffset={8}
+        className="w-[520px] max-w-2xl rounded-md border border-gray-200 bg-white p-4 shadow-lg"
+      >
         {basicLoading && !basicLoaded && <p className="text-sm text-gray-500">載入經文中...</p>}
         {basicError && !basicLoaded && <p className="text-sm text-red-600">{basicError}</p>}
         {anyContent ? (
@@ -180,8 +201,8 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
             <p className="text-xs text-gray-500">目前無法取得經文內容。</p>
           )
         )}
-      </HoverCard.Content>
-    </HoverCard.Root>
+      </PopoverContent>
+    </Popover>
   );
 }
 
