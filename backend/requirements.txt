@@ -1,2 +1,5 @@
+fastapi
+google-genai
 python-dotenv
 python-pptx
+uvicorn
