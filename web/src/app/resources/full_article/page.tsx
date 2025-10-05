@@ -10,7 +10,9 @@ async function fetchArticles(): Promise<FullArticleSummary[]> {
     "http://127.0.0.1:8555";
 
   const url = new URL("/admin/full-articles", base);
-  const response = await fetch(url.toString(), { cache: "no-store" });
+  const response = await fetch(url.toString(), {
+    next: { revalidate: 300 },
+  });
   if (!response.ok) {
     throw new Error(`Failed to load articles (${response.status})`);
   }
