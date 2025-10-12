@@ -104,7 +104,7 @@ export const HomePageView = () => {
                 <div className="container mx-auto px-6 text-center max-w-4xl">
                      <h2 className="text-3xl font-bold font-display text-gray-800">我們的使命</h2>
                      <p className="mt-4 text-xl text-gray-600 italic leading-relaxed">
-                        “藉著深度、準確釋經，幫助弟兄姐妹們真明白、遵行、持守聖經真理，並在愛的環境中訓練，造就他們成為主的門徒。”
+                        “追求深度、準確釋經，幫助弟兄姐妹們真明白、遵行、持守聖經真理，並在愛的環境中訓練，造就他們成為主的門徒。”
                      </p>
                 </div>
             </section>

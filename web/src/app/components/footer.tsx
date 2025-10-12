@@ -15,6 +15,7 @@ export const Footer = () => {
                 ContactUs@Dallas-HLC.org
               </a>
             </p>
+            <p>(469) 443-6330</p>
             <p>主日崇拜: 週日上午 11:00 CST </p>
           </div>
 
