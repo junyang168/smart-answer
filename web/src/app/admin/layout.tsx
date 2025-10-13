@@ -11,7 +11,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     redirect(`/api/auth/signin?callbackUrl=${encodeURIComponent("/admin")}`);
   }
 
-  if (session.user?.role !== "editor") {
+  if (session.user?.role !== "editor" && session.user?.role !== "admin") {
     redirect("/");
   }
 

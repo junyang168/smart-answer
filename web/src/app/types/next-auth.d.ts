@@ -7,7 +7,7 @@ import { JWT } from "next-auth/jwt";
 declare module "next-auth/jwt" {
   interface JWT {
     /** 用户的角色 */
-    role?: "admin" | "editor" | "member";
+    role?: "admin" | "editor" | "admin" | "member";
     /** 内部数据库的用户 ID */
     internalId?: string;
   }
