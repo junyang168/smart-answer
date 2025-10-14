@@ -106,6 +106,7 @@ const SlidePickerModal = ({
                         alt={`Slide ${slide.id}`}
                         width={112}
                         height={64}
+                        unoptimized
                         className="h-full w-full object-cover"
                       />
                     </div>
