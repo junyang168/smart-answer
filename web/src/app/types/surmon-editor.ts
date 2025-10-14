@@ -44,6 +44,19 @@ export interface SurmonScriptResponse {
   script: SurmonScriptParagraph[];
 }
 
+export interface SurmonSlideAsset {
+  /** Unique identifier derived from the slide filename */
+  id: string;
+  /** Relative path to the slide image starting from the slides root */
+  image: string;
+  /** Public URL used to render the slide image */
+  image_url: string;
+  /** Timestamp in seconds, if available, when the slide appears */
+  timestamp_seconds?: number | null;
+  /** Average RGB tuple captured from the slide */
+  average_rgb?: [number, number, number] | null;
+}
+
 export interface SurmonTimelineEntry {
   index: string;
   timestamp: string;

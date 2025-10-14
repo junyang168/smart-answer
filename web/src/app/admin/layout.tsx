@@ -5,6 +5,7 @@ import { AdminHeader } from "@/app/components/admin/AdminHeader";
 import { authConfig } from "@/app/utils/auth";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
+  
   const session = await getServerSession(authConfig);
 
   if (!session) {
