@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, BookmarkPlus, Loader2, RotateCcw, Save, UserPlus, Video } from "lucide-react";
 import type SimpleMDEEditor from "easymde";
 import type { Options as SimpleMDEOptions } from "easymde";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 
 import {
   SurmonAssignPayload,
@@ -37,6 +38,7 @@ interface SlidePickerModalProps {
   onSelect: (slide: SurmonSlideAsset) => void;
   onRetry: () => void;
   onClose: () => void;
+  activeIndex: number | null;
   formatTimestamp: (value: number | null | undefined) => string | null;
 }
 
@@ -48,8 +50,25 @@ const SlidePickerModal = ({
   onSelect,
   onRetry,
   onClose,
+  activeIndex,
   formatTimestamp,
 }: SlidePickerModalProps) => {
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (activeIndex == null) {
+      return;
+    }
+    const handle = virtuosoRef.current;
+    if (!handle) {
+      return;
+    }
+    handle.scrollToIndex({ index: activeIndex, align: "start", behavior: "auto" });
+  }, [open, activeIndex]);
+
   if (!open) {
     return null;
   }
@@ -60,7 +79,7 @@ const SlidePickerModal = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-lg bg-white shadow-xl"
+        className="w-full max-w-4xl rounded-lg bg-white shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
@@ -73,7 +92,7 @@ const SlidePickerModal = ({
             關閉
           </button>
         </div>
-        <div className="max-h-80 overflow-y-auto px-4 py-3">
+        <div className="px-4 py-3">
           {status === "loading" ? (
             <p className="text-xs text-gray-500">正在載入投影片...</p>
           ) : status === "error" ? (
@@ -90,34 +109,46 @@ const SlidePickerModal = ({
           ) : slides.length === 0 ? (
             <p className="text-xs text-gray-500">目前沒有投影片資料。</p>
           ) : (
-            <div className="grid gap-2">
-              {slides.map((slide) => {
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: "60vh" }}
+              data={slides}
+              totalCount={slides.length}
+              initialTopMostItemIndex={activeIndex ?? 0}
+              itemContent={(index, slide) => {
                 const timestamp = formatTimestamp(slide.timestamp_seconds ?? null);
+                const isActive = activeIndex === index;
                 return (
                   <button
-                    key={slide.id}
                     type="button"
                     onClick={() => onSelect(slide)}
-                    className="flex items-center gap-3 rounded-lg border border-transparent bg-gray-50 p-2 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                    className={`w-full rounded-lg border ${
+                      isActive ? "border-blue-300 bg-blue-50" : "border-transparent bg-gray-50"
+                    } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
                   >
-                    <div className="h-16 w-28 overflow-hidden rounded-md border border-gray-200 bg-gray-100">
-                      <Image
-                        src={slide.image_url}
-                        alt={`Slide ${slide.id}`}
-                        width={112}
-                        height={64}
-                        unoptimized
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-xs font-medium text-gray-700">{slide.id}</p>
-                      {timestamp ? <p className="text-[11px] text-gray-500">{timestamp}</p> : null}
+                    <div className="flex gap-4">
+                      <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+                        <Image
+                          src={slide.image_url}
+                          alt={`Slide ${slide.id}`}
+                          width={1000}
+                          height={1000}
+                          unoptimized
+                          className="h-auto w-full object-contain"
+                        />
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <p className="text-sm font-semibold text-gray-700">{slide.id}</p>
+                        {timestamp ? <p className="text-xs text-gray-500">{timestamp}</p> : null}
+                        {slide.extracted_text ? (
+                          <p className="text-xs text-gray-600 line-clamp-4">{slide.extracted_text}</p>
+                        ) : null}
+                      </div>
                     </div>
                   </button>
                 );
-              })}
-            </div>
+              }}
+            />
           )}
         </div>
         <div className="flex justify-end border-t border-gray-200 px-4 py-3">
@@ -449,25 +480,30 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     setOpenSlidePickerIndex(index);
   }, [canEdit]);
 
-  const sortedSlidesForPicker = useMemo(() => {
+  const closestSlideIndex = useMemo(() => {
     if (openSlidePickerIndex == null || slides.length === 0) {
-      return slides;
+      return null;
     }
     const targetStart = paragraphTimingData[openSlidePickerIndex]?.start;
     if (typeof targetStart !== "number" || Number.isNaN(targetStart)) {
-      return slides;
+      return null;
     }
 
-    return [...slides].sort((a, b) => {
-      const aTime = typeof a.timestamp_seconds === "number" ? a.timestamp_seconds : Number.POSITIVE_INFINITY;
-      const bTime = typeof b.timestamp_seconds === "number" ? b.timestamp_seconds : Number.POSITIVE_INFINITY;
-      const aDistance = Math.abs(aTime - targetStart);
-      const bDistance = Math.abs(bTime - targetStart);
-      if (aDistance === bDistance) {
-        return aTime - bTime;
+    let bestIndex: number | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestTime = Number.POSITIVE_INFINITY;
+
+    slides.forEach((slide, index) => {
+      const time = typeof slide.timestamp_seconds === "number" ? slide.timestamp_seconds : Number.POSITIVE_INFINITY;
+      const distance = Math.abs(time - targetStart);
+      if (distance < bestDistance || (distance === bestDistance && time < bestTime)) {
+        bestDistance = distance;
+        bestIndex = index;
+        bestTime = time;
       }
-      return aDistance - bDistance;
     });
+
+    return bestIndex;
   }, [openSlidePickerIndex, paragraphTimingData, slides]);
 
   useEffect(() => {
@@ -1168,7 +1204,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     </div>
     <SlidePickerModal
       open={openSlidePickerIndex != null}
-      slides={sortedSlidesForPicker}
+      slides={slides}
       status={slidesStatus}
       error={slidesError}
       onSelect={(slide) => {
@@ -1178,6 +1214,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       }}
       onRetry={handleSlideRetry}
       onClose={() => setOpenSlidePickerIndex(null)}
+      activeIndex={closestSlideIndex}
       formatTimestamp={formatTimestamp}
     />
     </>
