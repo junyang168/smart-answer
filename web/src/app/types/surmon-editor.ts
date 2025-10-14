@@ -55,6 +55,8 @@ export interface SurmonSlideAsset {
   timestamp_seconds?: number | null;
   /** Average RGB tuple captured from the slide */
   average_rgb?: [number, number, number] | null;
+  /** Optional text extracted from the slide image */
+  extracted_text?: string | null;
 }
 
 export interface SurmonTimelineEntry {
