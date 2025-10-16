@@ -55,7 +55,7 @@ RECIPIENTS_FILE = os.path.join(
     "notification",
     "email_recipients.txt" if IS_PRODUCTION else "email_recipients_test.txt",
 )
-
+print('production environment:', IS_PRODUCTION)
 LOG_FILE = os.path.join(BASE_DIR , "notification", "notification.log")
 STATUS_FILE = os.path.join(BASE_DIR , "notification", "last_sent.json")
 
