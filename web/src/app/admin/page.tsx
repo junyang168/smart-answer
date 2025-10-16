@@ -11,6 +11,11 @@ const cards = [
     description: "維護問答資料庫，整理常見問題與對應解答。",
     href: "/admin/qa",
   },
+  {
+    title: "團契資料管理",
+    description: "維護雙週團契聚會的時間、主題與主領資訊 (僅管理員)。",
+    href: "/admin/fellowship",
+  },
 ];
 
 export default function AdminHomePage() {

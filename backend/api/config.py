@@ -16,8 +16,10 @@ DATA_BASE_PATH: Final[Path] = Path(DATA_BASE_DIR).resolve()
 FULL_ARTICLE_ROOT: Final[Path] = Path(
     os.getenv("FULL_ARTICLE_ROOT", DATA_BASE_PATH / "full_article")
 ).resolve()
+CONFIG_DIR: Final[Path] = DATA_BASE_PATH / "config"
 METADATA_FILE: Final[Path] = FULL_ARTICLE_ROOT / "full_articles.json"
 PROMPT_FILE: Final[Path] = FULL_ARTICLE_ROOT / "full_article_prompt.md"
+FELLOWSHIP_FILE: Final[Path] = CONFIG_DIR / "fellowship.json"
 SCRIPTS_DIR: Final[Path] = FULL_ARTICLE_ROOT / "scripts"
 ARTICLES_DIR: Final[Path] = FULL_ARTICLE_ROOT / "articles"
 

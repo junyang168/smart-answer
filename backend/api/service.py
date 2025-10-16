@@ -8,6 +8,7 @@ from .gemini_client import gemini_client
 from .models import (
     ArticleDetail,
     ArticleSummary,
+    FellowshipEntry,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -106,3 +107,28 @@ def generate_summary(article_id: str) -> GenerateSummaryResponse:
         model="gemini-2.5-pro",
         generatedAt=datetime.now(timezone.utc),
     )
+
+
+def list_fellowships() -> list[FellowshipEntry]:
+    return repository.list_fellowships()
+
+
+def create_fellowship(entry: FellowshipEntry) -> FellowshipEntry:
+    try:
+        return repository.create_fellowship(entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def update_fellowship(date: str, entry: FellowshipEntry) -> FellowshipEntry:
+    try:
+        return repository.update_fellowship(date, entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def delete_fellowship(date: str) -> None:
+    try:
+        repository.delete_fellowship(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

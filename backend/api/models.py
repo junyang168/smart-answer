@@ -94,6 +94,16 @@ class GenerateSummaryResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class FellowshipEntry(BaseModel):
+    date: str
+    host: Optional[str] = None
+    title: Optional[str] = None
+    series: Optional[str] = None
+    sequence: Optional[int] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class PromptResponse(BaseModel):
     prompt_markdown: str = Field(..., alias="promptMarkdown")
 

@@ -199,7 +199,7 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     display_name = name_override or parsed_name
     sender = formataddr((display_name, parsed_email)) if display_name else parsed_email
 
-    subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 ")
+    subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 8:00 - 9:30 CST ")
     details_lines: list[str] = []
     if event.host:
         details_lines.append(f"主持人: {event.host} ")
@@ -257,9 +257,14 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
         "<div style=\"font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;color:#202124;\">"
         "  <p style=\"margin:0 0 16px 0;\">弟兄姊妹们平安，</p>"
         "  <p style=\"margin:0 0 16px 0;\">"
-        "    圣道教会每两周一次的线上团契将于 <strong> {date} </strong>进行。时间是周五晚 7:30 - 9:00 CST。欢迎大家参加。"
+        "    圣道教会每两周一次的团契自本週 <strong> {date} </strong>起將改為線上，線下進行。时间改為周五晚 8:00 - 9:30 CST。欢迎大家参加。<br/>"
         "  </p>"
         "  {details_html}"
+        "</div>"
+        "<div>" 
+        "    <p style=\"margin:0 0 16px 0;\">"
+        "     線下聚會地址是：903 W. Parker Road, Plano, TX 75023"
+        "</p>"
         "</div>"
         "<div>"
         "    <a href=\"Https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1\">Zoom 線上會議</a>"

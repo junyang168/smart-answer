@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from .models import (
     ArticleDetail,
     ArticleSummary,
+    FellowshipEntry,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -18,6 +19,10 @@ from .service import (
     generate_summary,
     get_article,
     get_prompt,
+    list_fellowships,
+    create_fellowship,
+    update_fellowship,
+    delete_fellowship,
     list_articles,
     new_article_template,
     save_article,
@@ -65,3 +70,26 @@ def regenerate_article(article_id: str, payload: GenerateArticleRequest) -> Gene
 @router.post("/{article_id}/summary", response_model=GenerateSummaryResponse)
 def regenerate_summary(article_id: str) -> GenerateSummaryResponse:
     return generate_summary(article_id)
+
+
+fellowship_router = APIRouter(prefix="/admin/fellowships", tags=["fellowships"])
+
+
+@fellowship_router.get("", response_model=list[FellowshipEntry])
+def get_fellowships() -> list[FellowshipEntry]:
+    return list_fellowships()
+
+
+@fellowship_router.post("", response_model=FellowshipEntry)
+def create_fellowship_entry(entry: FellowshipEntry) -> FellowshipEntry:
+    return create_fellowship(entry)
+
+
+@fellowship_router.put("/{date:path}", response_model=FellowshipEntry)
+def update_fellowship_entry(date: str, entry: FellowshipEntry) -> FellowshipEntry:
+    return update_fellowship(date, entry)
+
+
+@fellowship_router.delete("/{date:path}")
+def delete_fellowship_entry(date: str) -> None:
+    delete_fellowship(date)

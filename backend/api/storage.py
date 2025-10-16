@@ -9,6 +9,7 @@ from typing import Iterable, List, Optional
 
 from .config import (
     ARTICLES_DIR,
+    FELLOWSHIP_FILE,
     FULL_ARTICLE_ROOT,
     METADATA_FILE,
     PROMPT_FILE,
@@ -22,6 +23,7 @@ from .models import (
     ArticleType,
     SaveArticleRequest,
     SaveArticleResponse,
+    FellowshipEntry,
 )
 
 
@@ -74,6 +76,9 @@ class ArticleRepository:
         _ensure_directories()
         if not METADATA_FILE.exists():
             METADATA_FILE.write_text("[]", encoding="utf-8")
+        FELLOWSHIP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not FELLOWSHIP_FILE.exists():
+            FELLOWSHIP_FILE.write_text("[]", encoding="utf-8")
 
     # Prompt operations
     def load_prompt(self) -> str:
@@ -296,6 +301,80 @@ class ArticleRepository:
             coreBibleVerses=[],
         )
         return SaveArticleResponse.parse_obj(placeholder.dict(by_alias=True))
+
+
+        repository = ArticleRepository()
+
+    # Fellowship operations
+    def _load_fellowship_entries(self) -> list[FellowshipEntry]:
+        try:
+            raw = json.loads(FELLOWSHIP_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse fellowship.json") from exc
+        entries: list[FellowshipEntry] = []
+        for item in raw:
+            try:
+                entries.append(FellowshipEntry.model_validate(item))
+            except Exception as exc:
+                raise ValueError(f"Invalid fellowship entry: {item}") from exc
+        return entries
+
+    def _save_fellowship_entries(self, entries: list[FellowshipEntry]) -> None:
+        tmp_path = FELLOWSHIP_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps([entry.model_dump() for entry in entries], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(FELLOWSHIP_FILE)
+
+    def list_fellowships(self) -> list[FellowshipEntry]:
+        entries = self._load_fellowship_entries()
+
+        def parse_date(value: str) -> datetime:
+            try:
+                return datetime.strptime(value, "%m/%d/%Y")
+            except Exception:
+                return datetime.min
+
+        return sorted(
+            entries,
+            key=lambda entry: (
+                parse_date(entry.date),
+                entry.sequence if entry.sequence is not None else 0,
+            ),
+            reverse=True,
+        )
+
+
+    def create_fellowship(self, entry: FellowshipEntry) -> FellowshipEntry:
+        entries = self._load_fellowship_entries()
+        if any(existing.date == entry.date for existing in entries):
+            raise ValueError(f"Fellowship date {entry.date} already exists")
+        entries.append(entry)
+        self._save_fellowship_entries(entries)
+        return entry
+
+    def update_fellowship(self, date: str, entry: FellowshipEntry) -> FellowshipEntry:
+        entries = self._load_fellowship_entries()
+        target = None
+        for index, existing in enumerate(entries):
+            if existing.date == date:
+                target = index
+                break
+        if target is None:
+            raise ValueError(f"Fellowship date {date} not found")
+        if entry.date != date and any(e.date == entry.date for e in entries):
+            raise ValueError(f"Fellowship date {entry.date} already exists")
+        entries[target] = entry
+        self._save_fellowship_entries(entries)
+        return entry
+
+    def delete_fellowship(self, date: str) -> None:
+        entries = self._load_fellowship_entries()
+        new_entries = [entry for entry in entries if entry.date != date]
+        if len(new_entries) == len(entries):
+            raise ValueError(f"Fellowship date {date} not found")
+        self._save_fellowship_entries(new_entries)
 
 
 repository = ArticleRepository()
