@@ -14,10 +14,11 @@ const contactInfo = {
         time: "每週日上午 11:00 - 12:30 CST",
     },
     fellowship: {
-        title: "線上團契",
-        time: "每兩週一次，週五晚 7:30 - 9:00 CST",
-        zoomLink: "Https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1",
-        calendarFile: "https://us02web.zoom.us/meeting/tZEsdu2qqT8oGtJDGuEp1tM9fsTMIaesw9PW/ics?icsToken=DD_pOCWIq2WtI4ZrxQAALAAAAAjnsQG6bxZRXQrIrDHFO9nvHEp2B_EcSuiX5FKx8dYloF8Bb63VXiKrmlzkpDH_Z15yGk3Dwqm97CyVbTAwMDAwMQ" // ✅ 指向我们创建的 .ics 文件
+        title: "線上，線下團契",
+        time: "每兩週一次，週五晚 8:00 - 9:30 CST",
+        address: "線下地址： 903 W. Parker Road, Plano, TX 75023",
+        zoomLink: "https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1",
+        calendarFile: "https://us02web.zoom.us/meeting/tZEsdu2qqT8oGtJDGuEp1tM9fsTMIaesw9PW/ics?icsToken=DIyWPSjdSSgoyqWFqQAALAAAAPR9M8v-Wg05bjlrK8AYLAS2cq9R0c5GMHTY1PEMuILPHl9n81UpnE3wiUCKCD352zm17Dme0slKBat-rjAwMDAwMQ" // ✅ 指向我们创建的 .ics 文件
     },    email: "ContactUs@Dallas-HLC.org",
     phone: "(469) 443-6330" // Google Voice 
 };
@@ -66,7 +67,10 @@ export default function ContactPage() {
                             <p className="font-bold">{contactInfo.fellowship.title}</p>
                             <p className="font-semibold">{contactInfo.fellowship.time}</p>
                             <p className="text-sm">
-                                參與方式: <a href={contactInfo.fellowship.zoomLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Zoom 線上會議</a>
+                                {contactInfo.fellowship.address}
+                                <br />
+                                <a href={contactInfo.fellowship.zoomLink} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Zoom 線上會議</a>
+                                
                             </p>
                             {/* 添加到日历按钮 */}
                             <a 

@@ -105,8 +105,8 @@ export function FullArticleList({ initialArticles }: FullArticleListProps) {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">全文文章管理</h1>
-          <p className="text-gray-600 mt-2">管理由 Gemini 產生的完整文章，並可進行人工編輯與審稿。</p>
+          <h1 className="text-3xl font-bold text-gray-900">文章管理</h1>
+          <p className="text-gray-600 mt-2">管理由AI產生的完整文章，並可進行人工編輯與審稿。</p>
         </div>
         <Link
           href="/admin/full_article/new"
