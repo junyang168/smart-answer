@@ -7,6 +7,7 @@ from .models import (
     ArticleSummary,
     GenerateArticleRequest,
     GenerateArticleResponse,
+    GenerateSummaryResponse,
     PromptResponse,
     SaveArticleRequest,
     SaveArticleResponse,
@@ -14,6 +15,7 @@ from .models import (
 )
 from .service import (
     generate_article,
+    generate_summary,
     get_article,
     get_prompt,
     list_articles,
@@ -58,3 +60,8 @@ def create_or_update_article(payload: SaveArticleRequest) -> SaveArticleResponse
 @router.post("/{article_id}/generate", response_model=GenerateArticleResponse)
 def regenerate_article(article_id: str, payload: GenerateArticleRequest) -> GenerateArticleResponse:
     return generate_article(article_id, payload)
+
+
+@router.post("/{article_id}/summary", response_model=GenerateSummaryResponse)
+def regenerate_summary(article_id: str) -> GenerateSummaryResponse:
+    return generate_summary(article_id)

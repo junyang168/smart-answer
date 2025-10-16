@@ -19,6 +19,7 @@ from .models import (
     ArticleMetadata,
     ArticleStatus,
     ArticleSummary,
+    ArticleType,
     SaveArticleRequest,
     SaveArticleResponse,
 )
@@ -102,6 +103,9 @@ class ArticleRepository:
                 updated_at=entry.updated_at,
                 created_at=entry.created_at,
                 model=entry.model,
+                summary_markdown=entry.summary_markdown or "",
+                article_type=entry.article_type,
+                core_bible_verses=entry.core_bible_verses or [],
             )
             for entry in sorted(records, key=lambda e: e.updated_at, reverse=True)
         ]
@@ -139,6 +143,9 @@ class ArticleRepository:
             script_markdown=script_md,
             article_markdown=article_md,
             prompt_markdown=prompt_md,
+            summary_markdown=entry.summary_markdown or "",
+            article_type=entry.article_type,
+            core_bible_verses=entry.core_bible_verses or [],
         )
 
     def _read_markdown(self, path: Path) -> str:
@@ -182,12 +189,18 @@ class ArticleRepository:
                 created_at=now,
                 updated_at=now,
                 status=payload.status,
+                summary_markdown=payload.summary_markdown or "",
+                article_type=payload.article_type,
+                core_bible_verses=[verse for verse in payload.core_bible_verses if verse],
             )
             records.append(entry)
 
         entry.slug = self._determine_slug(payload.name, records, entry.id)
         entry.script_filename = f"{entry.slug}.md"
         entry.article_filename = f"{entry.slug}.md"
+        entry.summary_markdown = payload.summary_markdown if payload.summary_markdown is not None else (entry.summary_markdown or "")
+        entry.article_type = payload.article_type
+        entry.core_bible_verses = [verse for verse in payload.core_bible_verses if verse]
 
         script_path = SCRIPTS_DIR / entry.script_filename
         article_path = ARTICLES_DIR / entry.article_filename
@@ -238,6 +251,25 @@ class ArticleRepository:
         _persist_metadata(records)
         return self._assemble_detail(entry)
 
+    def update_article_summary(
+        self,
+        article_id: str,
+        summary_markdown: str,
+        model_name: Optional[str],
+    ) -> ArticleDetail:
+        records = _load_metadata_models()
+        entry = next((item for item in records if item.id == article_id), None)
+        if not entry:
+            raise ValueError(f"Article {article_id} not found")
+
+        entry.summary_markdown = summary_markdown
+        entry.updated_at = datetime.now(timezone.utc)
+        entry.last_generated_at = entry.updated_at
+        entry.model = model_name or entry.model
+
+        _persist_metadata(records)
+        return self._assemble_detail(entry)
+
     def create_draft(
         self,
         payload: SaveArticleRequest,
@@ -259,6 +291,9 @@ class ArticleRepository:
             scriptMarkdown="",
             articleMarkdown="",
             promptMarkdown=prompt_md,
+            summaryMarkdown="",
+            articleType=None,
+            coreBibleVerses=[],
         )
         return SaveArticleResponse.parse_obj(placeholder.dict(by_alias=True))
 

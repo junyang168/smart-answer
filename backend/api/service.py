@@ -10,6 +10,7 @@ from .models import (
     ArticleSummary,
     GenerateArticleRequest,
     GenerateArticleResponse,
+    GenerateSummaryResponse,
     PromptResponse,
     SaveArticleRequest,
     SaveArticleResponse,
@@ -80,3 +81,28 @@ def update_prompt(prompt_markdown: str) -> PromptResponse:
 
 def new_article_template() -> SaveArticleResponse:
     return repository.get_new_article_template()
+
+
+def generate_summary(article_id: str) -> GenerateSummaryResponse:
+    article = get_article(article_id)
+    article_md = article.article_markdown.strip()
+    if not article_md:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文章內容為空，無法生成摘要")
+
+    prompt = (
+        "請根據以下基督教福音派文章內容撰寫一段約 150 字的摘要，以 Markdown 格式輸出，"
+        "著重於核心論點與應用。\n\n文章內容：\n" + article_md
+    )
+
+    try:
+        summary_markdown = gemini_client.generate(prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    repository.update_article_summary(article_id, summary_markdown, model_name="gemini-2.5-pro")
+
+    return GenerateSummaryResponse(
+        summaryMarkdown=summary_markdown,
+        model="gemini-2.5-pro",
+        generatedAt=datetime.now(timezone.utc),
+    )

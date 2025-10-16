@@ -41,6 +41,14 @@ export default async function FullArticleViewer({
             最近更新：{new Date(article.updated_at).toLocaleString("zh-TW")}
           </p>
         </header>
+        {article.summaryMarkdown && (
+          <section className="mb-10 rounded-lg border border-blue-100 bg-blue-50/60 p-5">
+            <h2 className="text-lg font-semibold text-blue-800 mb-3">摘要</h2>
+            <div className="prose prose-sm max-w-none text-blue-900">
+              <ScriptureMarkdown markdown={article.summaryMarkdown} />
+            </div>
+          </section>
+        )}
         <article className="prose prose-lg max-w-none">
           <ScriptureMarkdown markdown={article.articleMarkdown || ""} />
         </article>

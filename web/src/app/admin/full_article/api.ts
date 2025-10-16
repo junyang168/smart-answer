@@ -3,6 +3,7 @@ import {
   FullArticleSummary,
   SaveFullArticlePayload,
   GenerateArticleResponse,
+  GenerateSummaryResponse,
 } from "@/app/types/full-article";
 
 const API_BASE_PATH = "/api/admin/full-articles";
@@ -83,4 +84,12 @@ export async function updatePrompt(promptMarkdown: string): Promise<string> {
   });
   const data = await parseJson<{ promptMarkdown: string }>(response);
   return data.promptMarkdown;
+}
+
+export async function regenerateSummary(articleId: string): Promise<GenerateSummaryResponse> {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(articleId)}/summary`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  return parseJson(response);
 }

@@ -60,6 +60,21 @@ export default async function FullArticleListingPage() {
                     {article.subtitle && (
                       <p className="mt-1 text-sm text-gray-600">{article.subtitle}</p>
                     )}
+                    {article.summaryMarkdown && (
+                      <article className="prose prose-sm text-gray-700 mt-2">
+                        {article.summaryMarkdown}
+                      </article>
+                    )}
+                    <div className="mt-2 space-y-1 text-xs text-gray-500">
+                      {article.articleType && <p>文章類型：{article.articleType}</p>}
+                      {article.coreBibleVerses && article.coreBibleVerses.length > 0 && (
+                        <p>
+                          核心經文：
+                          {article.coreBibleVerses.slice(0, 3).join("、")}
+                          {article.coreBibleVerses.length > 3 ? "…" : ""}
+                        </p>
+                      )}
+                    </div>
                     <p className="mt-2 text-xs text-gray-500">
                       更新時間：{new Date(article.updated_at).toLocaleString("zh-TW")}
                     </p>

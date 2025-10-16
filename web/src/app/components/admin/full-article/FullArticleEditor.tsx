@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import {
   regenerateFullArticle,
+  regenerateSummary,
   saveFullArticle,
   updatePrompt,
 } from "@/app/admin/full_article/api";
-import { FullArticleDetail, FullArticleStatus } from "@/app/types/full-article";
+import { FullArticleDetail, FullArticleStatus, FullArticleType } from "@/app/types/full-article";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/app/components/ui/tabs";
 
 import "easymde/dist/easymde.min.css";
@@ -30,6 +31,8 @@ const STATUS_LABEL: Record<FullArticleStatus, string> = {
   final: "已定稿",
 };
 
+const ARTICLE_TYPES: FullArticleType[] = ["釋經", "神學觀點", "短文"];
+
 export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   const router = useRouter();
   const [articleId, setArticleId] = useState(initialArticle.id);
@@ -40,9 +43,15 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   const [articleMarkdown, setArticleMarkdown] = useState(initialArticle.articleMarkdown ?? "");
   const [promptMarkdown, setPromptMarkdown] = useState(initialArticle.promptMarkdown ?? "");
   const [promptDirty, setPromptDirty] = useState(false);
+  const [summaryMarkdown, setSummaryMarkdown] = useState(initialArticle.summaryMarkdown ?? "");
+  const [articleType, setArticleType] = useState<FullArticleType | "">(initialArticle.articleType ?? "");
+  const [coreBibleVersesInput, setCoreBibleVersesInput] = useState(
+    (initialArticle.coreBibleVerses ?? []).join("\n"),
+  );
 
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
   const [updatingPrompt, setUpdatingPrompt] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [activeTab, setActiveTab] = useState("article");
@@ -74,6 +83,15 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
     [],
   );
 
+  const summaryEditorOptions = useMemo(
+    () => ({
+      spellChecker: false,
+      status: false,
+      minHeight: "240px",
+    }),
+    [],
+  );
+
   const handlePromptChange = useCallback((value: string) => {
     setPromptMarkdown((prev) => {
       if (prev === value) {
@@ -90,6 +108,10 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
     resetFeedback();
     setSaving(true);
     try {
+      const coreBibleVerses = coreBibleVersesInput
+        .split(/\r?\n/)
+        .map((verse) => verse.trim())
+        .filter((verse) => verse.length > 0);
       const payload = {
         id: articleId || undefined,
         name,
@@ -98,6 +120,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
         scriptMarkdown,
         articleMarkdown,
         promptMarkdown: promptDirty ? promptMarkdown : undefined,
+        summaryMarkdown,
+        articleType: articleType || undefined,
+        coreBibleVerses,
       };
       const saved = await saveFullArticle(payload);
       setArticleId(saved.id);
@@ -107,6 +132,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setScriptMarkdown(saved.scriptMarkdown);
       setArticleMarkdown(saved.articleMarkdown);
       setPromptMarkdown(saved.promptMarkdown);
+      setSummaryMarkdown(saved.summaryMarkdown ?? "");
+      setArticleType(saved.articleType ?? "");
+      setCoreBibleVersesInput((saved.coreBibleVerses ?? []).join("\n"));
       setPromptDirty(false);
       setFeedback({ type: "success", message: "已儲存文章內容" });
       if (!articleId && saved.id) {
@@ -137,6 +165,25 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setFeedback({ type: "error", message });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    resetFeedback();
+    if (!articleId) {
+      setFeedback({ type: "error", message: "請先儲存文章以取得 ID" });
+      return;
+    }
+    setGeneratingSummary(true);
+    try {
+      const result = await regenerateSummary(articleId);
+      setSummaryMarkdown(result.summaryMarkdown);
+      setFeedback({ type: "success", message: "已透過 Gemini 產生摘要" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "生成摘要失敗";
+      setFeedback({ type: "error", message });
+    } finally {
+      setGeneratingSummary(false);
     }
   };
 
@@ -182,7 +229,17 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       )}
 
       <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-4">
-        <div className="grid gap-4 md:grid-cols-[1fr,200px]">
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60"
+          >
+            {saving ? "儲存中..." : "儲存"}
+          </button>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col">
             <span className="text-sm font-medium text-gray-700">文章標題</span>
             <input
@@ -217,17 +274,51 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
               ))}
             </select>
           </label>
+          <label className="flex flex-col">
+            <span className="text-sm font-medium text-gray-700">文章類型</span>
+            <select
+              value={articleType}
+              onChange={(event) => setArticleType(event.target.value as FullArticleType | "")}
+              className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">未指定</option>
+              {ARTICLE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col md:col-span-2">
+            <span className="text-sm font-medium text-gray-700">核心經文 (每行一條)</span>
+            <textarea
+              value={coreBibleVersesInput}
+              onChange={(event) => setCoreBibleVersesInput(event.target.value)}
+              rows={4}
+              className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="例如：\n約翰福音 3:16"
+            />
+          </label>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center px-4 py-2 rounded-md bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60"
-          >
-            {saving ? "儲存中..." : "儲存"}
-          </button>
+        <div className="space-y-3">
+          <span className="text-sm font-medium text-gray-700">摘要</span>
+          <SimpleMDE
+            key="summary-editor"
+            value={summaryMarkdown}
+            onChange={(value) => setSummaryMarkdown(value)}
+            options={summaryEditorOptions}
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleGenerateSummary}
+              disabled={generatingSummary || !articleId}
+              className="inline-flex items-center px-3 py-1.5 rounded-md bg-purple-600 text-white text-sm font-medium hover:bg-purple-700 disabled:opacity-60"
+            >
+              {generatingSummary ? "生成中..." : "生成摘要"}
+            </button>
+          </div>
         </div>
       </section>
 
