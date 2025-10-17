@@ -16,6 +16,11 @@ const cards = [
     description: "維護雙週團契聚會的時間、主題與主領資訊 (僅管理員)。",
     href: "/admin/fellowship",
   },
+  {
+    title: "講道系列管理",
+    description: "建立講道系列、編輯摘要與管理歸屬的講道內容。",
+    href: "/admin/surmon_series",
+  },
 ];
 
 export default function AdminHomePage() {

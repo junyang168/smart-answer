@@ -15,6 +15,7 @@ from .models import (
     PromptResponse,
     SaveArticleRequest,
     SaveArticleResponse,
+    SermonSeries,
 )
 from .storage import repository
 
@@ -130,5 +131,30 @@ def update_fellowship(date: str, entry: FellowshipEntry) -> FellowshipEntry:
 def delete_fellowship(date: str) -> None:
     try:
         repository.delete_fellowship(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def list_sermon_series() -> list[SermonSeries]:
+    return repository.list_sermon_series()
+
+
+def create_sermon_series(series: SermonSeries) -> SermonSeries:
+    try:
+        return repository.create_sermon_series(series)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def update_sermon_series(series_id: str, series: SermonSeries) -> SermonSeries:
+    try:
+        return repository.update_sermon_series(series_id, series)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def delete_sermon_series(series_id: str) -> None:
+    try:
+        repository.delete_sermon_series(series_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

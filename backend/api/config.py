@@ -22,6 +22,7 @@ PROMPT_FILE: Final[Path] = FULL_ARTICLE_ROOT / "full_article_prompt.md"
 FELLOWSHIP_FILE: Final[Path] = CONFIG_DIR / "fellowship.json"
 SCRIPTS_DIR: Final[Path] = FULL_ARTICLE_ROOT / "scripts"
 ARTICLES_DIR: Final[Path] = FULL_ARTICLE_ROOT / "articles"
+SERMON_SERIES_FILE: Final[Path] = CONFIG_DIR / "sermon_series.json"
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
 GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")

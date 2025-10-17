@@ -10,6 +10,7 @@ from .models import (
     GenerateArticleResponse,
     GenerateSummaryResponse,
     PromptResponse,
+    SermonSeries,
     SaveArticleRequest,
     SaveArticleResponse,
     UpdatePromptRequest,
@@ -23,6 +24,10 @@ from .service import (
     create_fellowship,
     update_fellowship,
     delete_fellowship,
+    list_sermon_series,
+    create_sermon_series,
+    update_sermon_series,
+    delete_sermon_series,
     list_articles,
     new_article_template,
     save_article,
@@ -93,3 +98,25 @@ def update_fellowship_entry(date: str, entry: FellowshipEntry) -> FellowshipEntr
 @fellowship_router.delete("/{date:path}")
 def delete_fellowship_entry(date: str) -> None:
     delete_fellowship(date)
+
+surmon_series_router = APIRouter(prefix="/admin/surmon-series", tags=["surmon-series"])
+
+
+@surmon_series_router.get("", response_model=list[SermonSeries])
+def get_sermon_series() -> list[SermonSeries]:
+    return list_sermon_series()
+
+
+@surmon_series_router.post("", response_model=SermonSeries)
+def create_sermon_series_entry(payload: SermonSeries) -> SermonSeries:
+    return create_sermon_series(payload)
+
+
+@surmon_series_router.put("/{series_id}", response_model=SermonSeries)
+def update_sermon_series_entry(series_id: str, payload: SermonSeries) -> SermonSeries:
+    return update_sermon_series(series_id, payload)
+
+
+@surmon_series_router.delete("/{series_id}")
+def delete_sermon_series_entry(series_id: str) -> None:
+    delete_sermon_series(series_id)

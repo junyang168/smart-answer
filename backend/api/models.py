@@ -104,6 +104,17 @@ class FellowshipEntry(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SermonSeries(BaseModel):
+    id: str
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    topics: Optional[str] = None
+    keypoints: Optional[str] = None
+    sermons: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class PromptResponse(BaseModel):
     prompt_markdown: str = Field(..., alias="promptMarkdown")
 

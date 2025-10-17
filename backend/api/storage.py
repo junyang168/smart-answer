@@ -14,6 +14,7 @@ from .config import (
     METADATA_FILE,
     PROMPT_FILE,
     SCRIPTS_DIR,
+    SERMON_SERIES_FILE,
 )
 from .models import (
     ArticleDetail,
@@ -24,6 +25,7 @@ from .models import (
     SaveArticleRequest,
     SaveArticleResponse,
     FellowshipEntry,
+    SermonSeries,
 )
 
 
@@ -79,6 +81,9 @@ class ArticleRepository:
         FELLOWSHIP_FILE.parent.mkdir(parents=True, exist_ok=True)
         if not FELLOWSHIP_FILE.exists():
             FELLOWSHIP_FILE.write_text("[]", encoding="utf-8")
+        SERMON_SERIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not SERMON_SERIES_FILE.exists():
+            SERMON_SERIES_FILE.write_text("[]", encoding="utf-8")
 
     # Prompt operations
     def load_prompt(self) -> str:
@@ -375,6 +380,62 @@ class ArticleRepository:
         if len(new_entries) == len(entries):
             raise ValueError(f"Fellowship date {date} not found")
         self._save_fellowship_entries(new_entries)
+
+
+    # Sermon series operations
+    def _load_sermon_series_entries(self) -> list[SermonSeries]:
+        try:
+            raw = json.loads(SERMON_SERIES_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse sermon_series.json") from exc
+        entries: list[SermonSeries] = []
+        for item in raw:
+            try:
+                entries.append(SermonSeries.model_validate(item))
+            except Exception as exc:
+                raise ValueError(f"Invalid sermon series entry: {item}") from exc
+        return entries
+
+    def _save_sermon_series_entries(self, entries: list[SermonSeries]) -> None:
+        tmp_path = SERMON_SERIES_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps([entry.model_dump() for entry in entries], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(SERMON_SERIES_FILE)
+
+    def list_sermon_series(self) -> list[SermonSeries]:
+        return self._load_sermon_series_entries()
+
+    def create_sermon_series(self, series: SermonSeries) -> SermonSeries:
+        entries = self._load_sermon_series_entries()
+        if any(existing.id == series.id for existing in entries):
+            raise ValueError(f"Sermon series {series.id} already exists")
+        entries.append(series)
+        self._save_sermon_series_entries(entries)
+        return series
+
+    def update_sermon_series(self, series_id: str, series: SermonSeries) -> SermonSeries:
+        entries = self._load_sermon_series_entries()
+        target = None
+        for index, existing in enumerate(entries):
+            if existing.id == series_id:
+                target = index
+                break
+        if target is None:
+            raise ValueError(f"Sermon series {series_id} not found")
+        if series.id != series_id and any(existing.id == series.id for existing in entries):
+            raise ValueError(f"Sermon series {series.id} already exists")
+        entries[target] = series
+        self._save_sermon_series_entries(entries)
+        return series
+
+    def delete_sermon_series(self, series_id: str) -> None:
+        entries = self._load_sermon_series_entries()
+        new_entries = [entry for entry in entries if entry.id != series_id]
+        if len(new_entries) == len(entries):
+            raise ValueError(f"Sermon series {series_id} not found")
+        self._save_sermon_series_entries(new_entries)
 
 
 repository = ArticleRepository()
