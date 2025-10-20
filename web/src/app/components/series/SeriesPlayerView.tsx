@@ -34,7 +34,7 @@ export const SeriesPlayerView = () => {
       setIsLoading(true);
       setError(null);
       try {
-        const res = await fetch('/sc_api/sermon_series');
+        const res = await fetch('/api/sc_api/sermon_series');
         if (!res.ok) {
           throw new Error(`API request failed with status ${res.status}`);
         }

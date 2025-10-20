@@ -67,7 +67,7 @@ export const CopilotChat: FC<{item_id:string }> = ({ item_id} ) => {
     
     // Example with actual API integration (uncomment and modify):
     try {
-      const api_prefix = '/sc_api/'
+      const api_prefix = '/api/sc_api/'
 
       const url = `${api_prefix}chat/${user_id}`;  
       const response = await fetch(url, {

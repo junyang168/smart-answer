@@ -16,7 +16,7 @@ import { apiToUiSermonSeries } from '@/app/utils/converter'; // 假設這是您�
 
 async function fetchArticlesSeries(): Promise<SermonSeries[]> {
     // 假設您的 API 返回的是一個扁平的文章列表
-    const res = await fetch('/sc_api/article_series'); // 假設這是您獲取所有文章的 API 端點
+    const res = await fetch('/api/sc_api/article_series'); // 假設這是您獲取所有文章的 API 端點
     if (!res.ok) {
         throw new Error('Failed to fetch articles from API');
     }

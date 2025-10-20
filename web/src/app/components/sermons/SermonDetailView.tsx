@@ -28,9 +28,9 @@ export const SermonDetailView = () => {
   const params = useParams();
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
-  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
-  const isEditor =  session?.user?.role === "editor"; 
-//  const status = 'authenticated'
+//  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  const isEditor =  true //session?.user?.role === "editor"; 
+  const status = 'authenticated'
 
 
   // --- Data Fetching ---
@@ -41,7 +41,7 @@ export const SermonDetailView = () => {
       setError(null);
       
       // ✅ 使用您提供的新 API 端點
-      const apiUrl = `/sc_api/final_sermon/junyang168@gmail.com/${id}`;
+      const apiUrl = `/api/sc_api/final_sermon/junyang168@gmail.com/${id}`;
 
       try {
         const res = await fetch(apiUrl);

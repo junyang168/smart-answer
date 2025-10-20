@@ -7,7 +7,7 @@ export const fetchArticleDetail = async (
 ) : Promise<ArticleDetail>  => {
 
     let api_url = process.env.ARTICLE_SERVICE_URL + item 
-//    let api_url = 'http://localhost:10009/sc_api/final_sermon/junyang168@gmail.com/' + item
+//    let api_url = 'http://localhost:10009/api/sc_api/final_sermon/junyang168@gmail.com/' + item
     if(quote) {
         api_url = api_url + "/?quote=" + encodeURIComponent(quote)
     }

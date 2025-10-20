@@ -9,7 +9,7 @@ import { ArrowRight, Film, Mic, PenSquare,Search, BrainCircuit,Users, Church  } 
 // --- 模擬數據獲取 (在真實應用中替換為 API 調用) ---
 async function fetchHomePageData() {
     // 假設 API 能返回最新的2篇講道、最新的2個文章系列和2個講道系列
-    const response = await fetch('/sc_api/fellowship');
+    const response = await fetch('/api/sc_api/fellowship');
     const data = await response.json();
     return data;
 }

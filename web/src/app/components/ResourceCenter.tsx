@@ -67,7 +67,7 @@ export const ResourceCenter = () => {
       setError(null);
       try {
         // ✅ fetch 在瀏覽器中運行，可以使用相對路徑或絕對路徑
-        const res = await fetch('sc_api/top_sermon_articles/2');
+        const res = await fetch('/api/sc_api/top_sermon_articles/2');
         const apiData = await res.json();
         const transformedSermons = apiData.sermons.map(apiToUiSermon);
         setTopSermons(transformedSermons);
@@ -182,4 +182,3 @@ export const ResourceCenter = () => {
     </div>
   );
 };
-

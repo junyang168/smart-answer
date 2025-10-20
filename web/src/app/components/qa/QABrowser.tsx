@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm';
 // 模擬 API 獲取函數
 async function fetchVerifiedQAs(): Promise<FaithQA[]> {
     const user_id = 'junyang168@gmail.com'
-    const res = await fetch(`/sc_api/qas`);
+    const res = await fetch(`/api/sc_api/qas`);
     const data = await res.json();
     return data;
 }

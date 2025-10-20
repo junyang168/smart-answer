@@ -11,7 +11,7 @@ import { Lock } from 'lucide-react';
 
 // 模擬 API 獲取函數
 async function fetchAllQAs(): Promise<FaithQA[]> {
-    const res = await fetch('/sc_api/qas');
+    const res = await fetch('/api/sc_api/qas');
     const data = await res.json();
     return data;
 }
@@ -58,7 +58,7 @@ export const QAEditorBrowser = () => {
 
         const isNew = dataToSave.id.startsWith('new-');
         const user_id = 'junyang168@gmail.com'
-        const endpoint = `/sc_api/qas/${user_id}` ;
+        const endpoint = `/api/sc_api/qas/${user_id}` ;
         const method = isNew ? 'POST' : 'PUT';
 
         const payload = dataToSave
@@ -121,7 +121,7 @@ const handleDelete = async (idToDelete: string) => {
         setIsDeleting(true);
         setError(null);
         const user_id = 'junyang168@gmail.com';
-        const endpoint = `/sc_api/qas/${user_id}/${idToDelete}`;
+        const endpoint = `/api/sc_api/qas/${user_id}/${idToDelete}`;
 
         try {
             const response = await fetch(endpoint, {

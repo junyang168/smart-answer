@@ -80,7 +80,7 @@ export const SermonBrowser = () => {
           setIsSearching(true);
           setSearchError(null);
           try {
-              const response = await fetch(`/sc_api/quick_search/${encodeURIComponent(query)}`);
+              const response = await fetch(`/api/sc_api/quick_search/${encodeURIComponent(query)}`);
               if (!response.ok) throw new Error('AI 搜索服务暂时不可用。');
               const ids: string[] = await response.json();
               setSearchResultIds(ids);

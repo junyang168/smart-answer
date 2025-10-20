@@ -26,7 +26,7 @@ import {
 
 const SimpleMDE = dynamic(() => import("react-simplemde-editor"), { ssr: false });
 const SAVE_DELAY = process.env.NODE_ENV === "development" ? 3000 : 10000;
-const API_PREFIX = "/sc_api";
+const API_PREFIX = "/api/sc_api";
 const SLIDES_PREFIX = "/api/slides";
 const MEDIA_PREFIX = "/web/video";
 

@@ -3,9 +3,7 @@ import { BibleVerse } from "@/app/interfaces/article";
 
 export const fetchSermons = async () => {
 
-  const env = process.env.NODE_ENV;
-  let api_url = ""
-  api_url = api_url + '/sc_api/sermons/junyang168@gmail.com'
+  const api_url = '/api/sc_api/sermons/junyang168@gmail.com';
 
   const response = await fetch(api_url,{ next: { revalidate: 60 } });
   if (!response.ok) {

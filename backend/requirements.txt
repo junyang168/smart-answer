@@ -4,3 +4,7 @@ google-genai
 python-dotenv
 python-pptx
 uvicorn
+opencv-python
+jsonlines
+watchdog
+pytz

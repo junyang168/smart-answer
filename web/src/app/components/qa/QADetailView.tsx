@@ -14,7 +14,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 // 模擬 API 獲取函數
 async function fetchQAById(id: string): Promise<FaithQA | null> {
     const user_id = 'junyang168@gmail.com'
-    const res = await fetch(`/sc_api/qas/${user_id}/${id}`);
+    const res = await fetch(`/api/sc_api/qas/${user_id}/${id}`);
     if (!res.ok) {
         if (res.status === 404) return null;
         throw new Error('Failed to fetch QA data');

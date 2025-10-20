@@ -28,7 +28,7 @@ export const ArticleDetailView = () => {
             setIsLoading(true);
             try {
                 // 我們仍然需要獲取所有數據，然後在客戶端查找
-                const res = await fetch(`/sc_api/article/${articleId}`)
+                const res = await fetch(`/api/sc_api/article/${articleId}`)
                 if (!res.ok) {
                     throw new Error('Failed to fetch article from API');
                 }

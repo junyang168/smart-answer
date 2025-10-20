@@ -12,8 +12,7 @@ export const fetchAnswer = async (
   onMarkdown: (value: string) => void,
   onError?: (status: number) => void,
 ) => {
-  let api_url = "/sc_api"
-  api_url = api_url + '/qa/junyang168@gmail.com'
+  const api_url = '/api/sc_api/qa/junyang168@gmail.com';
 
   let history: { role: string; content: string; }[] = []
   chat_history.forEach((entry) => {

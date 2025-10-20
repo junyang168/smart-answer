@@ -38,7 +38,7 @@ export const SurmonAdminList = () => {
     const loadSurmons = async () => {
       setState({ status: "loading", data: [] });
       try {
-        const response = await fetch(`/sc_api/sermons/${encodeURIComponent(userEmail)}`);
+        const response = await fetch(`/api/sc_api/sermons/${encodeURIComponent(userEmail)}`);
         if (!response.ok) {
           throw new Error(`無法載入講道列表：${response.status} ${response.statusText}`);
         }

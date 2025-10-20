@@ -9,7 +9,7 @@ import { FaithQA } from '@/app/interfaces/article'; // 引入 FaithQA 类型
 
 // 模拟 API，获取所有已验证的 Q&A
 async function fetchRelatedQAs(articleId: string): Promise<FaithQA[]> {
-    const res = await fetch(`/sc_api/qas?articleId=${articleId}`);
+    const res = await fetch(`/api/sc_api/qas?articleId=${articleId}`);
     const relatedQAs: FaithQA[] = await res.json();
     return relatedQAs;
 }
