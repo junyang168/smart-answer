@@ -64,6 +64,19 @@ export const SeriesPlayerView = () => {
     if (!series) return null;
     return series.sermons.find(s => s.item === currentSermonId) || series.sermons[0];
   }, [currentSermonId, series]);
+
+  const topics = useMemo(() => {
+    if (!series || !series.topics) {
+      return [] as string[];
+    }
+    if (Array.isArray(series.topics)) {
+      return series.topics;
+    }
+    return series.topics
+      .split(',')
+      .map((topic) => topic.trim())
+      .filter(Boolean);
+  }, [series]);
   
   // --- Render Logic ---
   if (isLoading) {
@@ -88,6 +101,18 @@ export const SeriesPlayerView = () => {
       <div className="mb-8">
         <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
         <p className="mt-2 text-lg text-gray-600">{series.summary}</p>
+        {topics.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {topics.map((topic) => (
+              <span
+                key={topic}
+                className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
+              >
+                #{topic}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
       {/* ✅ 新增：系列要點區域 */}
       {series.keypoints  && (

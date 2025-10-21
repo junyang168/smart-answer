@@ -96,11 +96,15 @@ export function SermonSeriesManager() {
   };
 
   const handleEdit = (entry: SermonSeries) => {
+    const topicsValue = Array.isArray(entry.topics)
+      ? entry.topics.join(", ")
+      : entry.topics ?? "";
+
     setForm({
       id: entry.id,
       title: entry.title ?? "",
       summary: entry.summary ?? "",
-      topics: entry.topics ?? "",
+      topics: topicsValue,
       keypoints: entry.keypoints ?? "",
       sermons: sanitizeSermons(entry.sermons ?? []),
     });
@@ -349,6 +353,14 @@ export function SermonSeriesManager() {
                         >
                           編輯
                         </button>
+                        <a
+                          href={`/resources/series/${encodeURIComponent(entry.id)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1 text-emerald-600 hover:bg-emerald-50"
+                        >
+                          觀看
+                        </a>
                         <button
                           type="button"
                           onClick={() => handleDelete(entry.id)}
