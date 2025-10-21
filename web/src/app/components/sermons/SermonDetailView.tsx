@@ -28,9 +28,14 @@ export const SermonDetailView = () => {
   const params = useParams();
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
-//  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
-  const isEditor =  true //session?.user?.role === "editor"; 
-  const status = 'authenticated'
+  const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
+  let status = sessionStatus;
+  let isEditor = session?.user?.role === "editor";
+
+  if (process.env.NODE_ENV !== 'production') {
+    status = 'authenticated';
+    isEditor = true;
+  }
 
 
   // --- Data Fetching ---
