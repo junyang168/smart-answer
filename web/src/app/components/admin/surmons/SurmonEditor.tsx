@@ -517,11 +517,11 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     loadData().catch(() => {});
   }, [authStatus, loadData, sessionEmail]);
 
-  useEffect(() => {
-    if (state.status === "ready" && canEdit) {
-      loadSlides().catch(() => {});
-    }
-  }, [canEdit, loadSlides, state.status]);
+//  useEffect(() => {
+//    if (state.status === "ready" && canEdit) {
+//      loadSlides().catch(() => {});
+//   }
+//  }, [canEdit, loadSlides, state.status]);
 
   useEffect(() => {
     if (openSlidePickerIndex != null && slidesStatus === "idle") {
