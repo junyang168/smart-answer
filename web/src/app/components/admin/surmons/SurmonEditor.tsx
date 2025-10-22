@@ -653,6 +653,47 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     seekMedia(target);
   }, [seekMedia]);
 
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media) {
+      return;
+    }
+
+    if (editingIndex == null || editingIndex !== selectedIndex) {
+      return;
+    }
+
+    if (selectedEnd == null || Number.isNaN(selectedEnd)) {
+      return;
+    }
+
+    const boundary = selectedEnd;
+    const clampToBoundary = () => {
+      if (media.currentTime >= boundary) {
+        media.pause();
+        media.currentTime = boundary;
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      clampToBoundary();
+    };
+
+    const handleSeeked = () => {
+      clampToBoundary();
+    };
+
+    clampToBoundary();
+
+    media.addEventListener("timeupdate", handleTimeUpdate);
+    media.addEventListener("seeked", handleSeeked);
+
+    return () => {
+      media.removeEventListener("timeupdate", handleTimeUpdate);
+      media.removeEventListener("seeked", handleSeeked);
+    };
+  }, [editingIndex, selectedEnd, selectedIndex]);
+
   const handleJumpToStart = useCallback(() => {
     if (selectedStart == null) return;
     seekMedia(selectedStart);
