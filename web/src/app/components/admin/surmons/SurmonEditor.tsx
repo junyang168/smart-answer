@@ -842,6 +842,17 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     ]
   );
 
+  const editorOptions = useMemo<SimpleMDEOptions>(
+    () => ({
+      autofocus: true,
+      spellChecker: false,
+      status: false,
+      placeholder: "在此編輯講道內容...",
+      toolbar: editorToolbar,
+    }),
+    [editorToolbar]
+  );
+
   const handleStartEditing = useCallback(
     (index: number) => {
       if (!canEdit) return;
@@ -1183,13 +1194,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                                   activeEditorRef.current = instance;
                                   activeEditorIndexRef.current = index;
                                 }}
-                                options={{
-                                  autofocus: true,
-                                  spellChecker: false,
-                                  status: false,
-                                  placeholder: "在此編輯講道內容...",
-                                  toolbar: editorToolbar,
-                                }}
+                                options={editorOptions}
                               />
                             </div>
                           ) : (
