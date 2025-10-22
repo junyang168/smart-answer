@@ -667,6 +667,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const handleSelect = useCallback(
     (index: number) => {
+      const wasSelected = selectedIndex === index;
       setSelectedIndex(index);
       setEditingIndex((current) => {
         if (!canEdit || current == null) {
@@ -675,12 +676,16 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         return index;
       });
 
+      if (wasSelected) {
+        return;
+      }
+
       const start = paragraphTimingData[index]?.start;
       if (typeof start === "number" && !Number.isNaN(start)) {
         seekMedia(start);
       }
     },
-    [canEdit, paragraphTimingData, seekMedia]
+    [canEdit, paragraphTimingData, seekMedia, selectedIndex]
   );
 
   const handleParagraphClick = useCallback(
