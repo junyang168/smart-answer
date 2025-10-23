@@ -12,6 +12,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from backend.api.config import CONFIG_DIR, DATA_BASE_PATH
+from backend.api.gemini_client import gemini_client
 
 from .access_control import AccessControl
 from .copilot import Copilot, ChatMessage, Document
@@ -314,6 +315,74 @@ class SermonManager:
         copilot = Copilot()
         docs = [Document(item=item, document_content=article)]
         return copilot.chat(docs, history)
+
+    def surmon_llm_chat(self, user_id: str, item: str, history: List[ChatMessage]) -> dict:
+        permissions = self.get_sermon_permissions(user_id, item)
+        if not permissions.canRead:
+            return {"answer": "目前沒有權限檢視此講道，請確認登入狀態或請求權限。"}
+
+        if not history:
+            return {"answer": "請提供想詢問的問題。"}
+        
+        metadata = self._sm.get_sermon_metadata(user_id, item)
+        if not metadata:
+            return  {"answer": "sermon not found"}
+
+        sd = ScriptDelta(self.base_folder, item)
+        sermon_detail = sd.get_final_script(False)
+
+        context_lines: List[str] = []
+        total_length = 0
+        max_length = 500000
+        for paragraph in sermon_detail['script']:
+            text = paragraph.get('text') or ""
+            index = paragraph.get('index') or ""
+            if not text:
+                continue
+            line = f"[{index}] {text.strip()}"
+            context_lines.append(line)
+            total_length += len(line)
+            if total_length > max_length:
+                context_lines.append("...（內容節錄）")
+                break
+
+        context = "\n".join(context_lines) if context_lines else "（暫無講道內容）"
+
+        conversation_lines = []
+        for message in history:
+            role = "使用者" if message.role == 'user' else "助理"
+            conversation_lines.append(f"{role}：{message.content.strip()}")
+
+        conversation_text = "\n".join(conversation_lines)
+        last_user_message = next((msg.content.strip() for msg in reversed(history) if msg.role == 'user'), "")
+
+        surmon_title = metadata.title
+#        theme = metadata.get('theme') or ""
+#        deliver_date = metadata.get('deliver_date') or ""
+
+        prompt = (
+            "你是資深的基督教福音派牧師助理，請根據提供的講道內容回答問題，"
+            "並保持語氣溫和、用詞貼近講員原意。必要時可引用講道段落索引"
+            "（例如：[1] 或 [2_3]）。回答請使用繁體中文。\n\n"
+            f"講道標題：{surmon_title}\n"
+            "--- 講道段落（含索引） ---\n"
+            f"{context}\n\n"
+            "--- 對話歷史 ---\n"
+            f"{conversation_text}\n\n"
+            "請重點回答最後一個使用者的提問。如果無法從講道內容找到答案，"
+            "請委婉說明並提供可能的建議。\n"
+            f"最新提問：{last_user_message}"
+        )
+
+        try:
+            answer = gemini_client.generate(prompt).strip()
+        except Exception:
+            return {"answer": "抱歉，助理目前無法取得回應，請稍後再試。"}
+
+        if not answer:
+            answer = "抱歉，無法根據目前的講道內容提供回應。"
+
+        return {"answer": answer}
     
     def summarize(self, title, items:List[str]) -> str:
         doc = ""
