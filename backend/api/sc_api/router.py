@@ -316,6 +316,11 @@ def chat(user_id: str, req: ChatRequest):
     return sermon_manager.chat(user_id, req.item, req.history)
 
 
+@router.post("/surmon_chat/{user_id}")
+def surmon_chat(user_id: str, req: ChatRequest):
+    return sermon_manager.surmon_llm_chat(user_id, req.item, req.history)
+
+
 @router.post("/qa/{user_id}")
 def qa(user_id: str, history: List[ChatMessage]):
     return sermon_manager.qa(user_id, history)
