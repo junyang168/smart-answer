@@ -256,7 +256,7 @@ class SermonManager:
         
         sermon = self._sm.get_sermon_metadata(user_id, item)
         sermon.status = 'published'
-        sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.datetime.now())
+        sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.now())
         self._sm.save_sermon_metadata()
         ScriptDelta(self.base_folder, item).publish(sermon.assigned_to)
         return {"message": "sermon has been published"}
