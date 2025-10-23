@@ -1446,7 +1446,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <aside className="flex flex-col gap-4 self-stretch">
+        <aside className="flex flex-col gap-4 self-stretch min-h-0">
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
             {header?.type === "audio" ? (
               <audio ref={handleMediaRef} controls className="w-full">
@@ -1476,7 +1476,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
               <p className="mt-3 text-sm text-gray-500">最後儲存：{lastSavedAt.toLocaleTimeString()}</p>
             )}
           </header>
-          <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col flex-1 min-h-[28rem]">
+          <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col flex-1 min-h-0 max-h-[70vh] overflow-hidden">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700">講道 AI 助理</h3>
               <span className="text-xs text-gray-400">Beta</span>
