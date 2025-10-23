@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
 import json
 import requests
@@ -131,12 +131,149 @@ class SermonManager:
         sd = ScriptDelta(self.base_folder, item)
         return sd.save_script(user_id, type, item,data)
 
-    def update_sermon_header(self, user_id, item:str, title:str):
+    def update_sermon_header(
+        self,
+        user_id,
+        item: str,
+        title: str,
+        *,
+        summary: Optional[str] = None,
+        keypoints: Optional[str] = None,
+        core_bible_verse: Optional[List[dict]] = None,
+    ):
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canWrite:
             return {"message": "You don't have permission to update this item"}
-        self._sm.update_sermon_metadata(user_id, item, title)
+        self._sm.update_sermon_metadata(
+            user_id,
+            item,
+            title,
+            summary=summary,
+            keypoints=keypoints,
+            core_bible_verse=core_bible_verse,
+        )
+        self._sm.save_sermon_metadata()
         return {}
+
+    def generate_sermon_metadata(
+        self,
+        user_id: str,
+        item: str,
+        paragraphs: Optional[List[object]] = None,
+    ) -> dict:
+        permissions = self.get_sermon_permissions(user_id, item)
+        if not permissions.canWrite:
+            raise PermissionError("You don't have permission to update this item")
+
+        sermon_meta = self._sm.get_sermon_metadata(user_id, item)
+        existing_title = sermon_meta.title if sermon_meta and sermon_meta.title else item
+
+        if paragraphs is None or len(paragraphs) == 0:
+            sd = ScriptDelta(self.base_folder, item)
+            script_payload = sd.get_final_script(False)
+            paragraph_source = script_payload.get('script', [])
+        else:
+            paragraph_source = paragraphs
+
+        compiled_lines: List[str] = []
+        for entry in paragraph_source:
+            text = getattr(entry, 'text', None)
+            if text is None and isinstance(entry, dict):
+                text = entry.get('text')
+            if not text:
+                continue
+            index_value = getattr(entry, 'index', None)
+            if index_value is None and isinstance(entry, dict):
+                index_value = entry.get('index')
+            prefix = f"[{index_value}] " if index_value else ""
+            compiled_lines.append(f"{prefix}{text.strip()}")
+
+        if not compiled_lines:
+            raise ValueError("缺少講道內容，無法產生講道資訊。")
+
+        combined_text = "\n\n".join(compiled_lines).strip()
+        max_chars = 8000
+        if len(combined_text) > max_chars:
+            combined_text = combined_text[:max_chars] + "\n...（內容節錄）"
+
+        prompt = (
+            "你是一位熟悉聖經與講道寫作的華語牧者助理，"
+            "請根據提供的講道內容，總結出新的講道標題、摘要、要點以及核心經文。"
+            "請務必使用繁體中文，並且僅輸出 JSON 字串，符合以下格式：\n"
+            "{\n"
+            '  "title": "...",\n'
+            '  "summary": "...",\n'
+            '  "keypoints": ["..."],\n'
+            '  "core_bible_verse": [\n'
+            '    {"book": "...", "chapter_verse": "...", "text": "..."}\n'
+            "  ]\n"
+            "}\n"
+            "規則：\n"
+            "- title：10-18 個繁體中文字，呼應講道主題。\n"
+            "- summary：少于150字，概括講道重點。\n"
+            "- keypoints：3-5 條，每條 12-24 個字，使用精簡語句。\n"
+            "- core_bible_verse：最多 3 節經文，若判斷不出可回傳空陣列。\n"
+            "- 若缺乏足夠資訊，請以空字串或空陣列表示。\n"
+            "- 不要輸出任何解釋或額外文字。\n\n"
+            f"講道原始標題：{existing_title}\n"
+            "講道內容：\n"
+            f"{combined_text}\n"
+        )
+
+        raw_response = gemini_client.generate(prompt)
+        cleaned_response = raw_response.strip()
+
+        if cleaned_response.startswith("```"):
+            segments = cleaned_response.split("```")
+            cleaned_response = "".join(segment for segment in segments if segment.strip().startswith("{")) or cleaned_response
+
+        if not cleaned_response.strip().startswith("{"):
+            start = cleaned_response.find("{")
+            end = cleaned_response.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned_response = cleaned_response[start : end + 1]
+
+        try:
+            payload = json.loads(cleaned_response)
+        except json.JSONDecodeError as exc:
+            raise ValueError("AI 回傳結果解析失敗，請稍後再試。") from exc
+
+        title = str(payload.get("title") or existing_title).strip()
+        if not title:
+            title = existing_title
+
+        summary = str(payload.get("summary") or "").strip()
+
+        keypoints_field = payload.get("keypoints", [])
+        if isinstance(keypoints_field, list):
+            keypoints_items = [str(item).strip() for item in keypoints_field if str(item).strip()]
+            keypoints = "\n".join(f"- {item}" for item in keypoints_items)
+        else:
+            keypoints = str(keypoints_field or "").strip()
+
+        verses_field = payload.get("core_bible_verse", [])
+        normalized_verses: List[dict] = []
+        if isinstance(verses_field, list):
+            for verse in verses_field:
+                if isinstance(verse, dict):
+                    book = str(verse.get("book") or "").strip()
+                    chapter = str(verse.get("chapter_verse") or "").strip()
+                    text = str(verse.get("text") or "").strip()
+                    if book or chapter or text:
+                        normalized_verses.append({
+                            "book": book,
+                            "chapter_verse": chapter,
+                            "text": text,
+                        })
+                if len(normalized_verses) >= 3:
+                    break
+
+        return {
+            "title": title,
+            "summary": summary,
+            "keypoints": keypoints,
+            "core_bible_verse": normalized_verses,
+        }
 
     def get_sermons(self, user_id:str):
         return self._sm.sermons

@@ -1,5 +1,11 @@
 export type SurmonMediaType = 'audio' | 'video' | null;
 
+export interface SurmonCoreBibleVerse {
+  book?: string;
+  chapter_verse?: string;
+  text?: string;
+}
+
 export interface SurmonEditorHeader {
   /** Media type that determines whether to render an audio or video player */
   type: SurmonMediaType;
@@ -7,6 +13,8 @@ export interface SurmonEditorHeader {
   title?: string;
   /** Summary or intro text */
   summary?: string;
+  /** Key takeaways for the sermon */
+  keypoints?: string;
   /** Speaker name */
   speaker?: string;
   /** Original delivery date */
@@ -15,6 +23,8 @@ export interface SurmonEditorHeader {
   theme?: string;
   /** Content source (internal vs public) */
   source?: string;
+  /** Core bible verses referenced by the sermon */
+  core_bible_verse?: SurmonCoreBibleVerse[];
 }
 
 export type SurmonParagraphType = 'content' | 'comment';
@@ -116,6 +126,22 @@ export interface SurmonUpdateHeaderPayload {
   user_id: string;
   item: string;
   title: string;
+  summary?: string | null;
+  keypoints?: string | null;
+  core_bible_verse?: SurmonCoreBibleVerse[] | null;
+}
+
+export interface SurmonGenerateMetadataPayload {
+  user_id: string;
+  item: string;
+  paragraphs: SurmonScriptParagraph[];
+}
+
+export interface SurmonGenerateMetadataResponse {
+  title: string;
+  summary: string;
+  keypoints: string;
+  core_bible_verse: SurmonCoreBibleVerse[];
 }
 
 export interface SurmonAdminListItem {

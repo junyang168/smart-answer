@@ -16,7 +16,7 @@ import remarkGfm from "remark-gfm";
 import "easymde/dist/easymde.min.css";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BookmarkPlus, Loader2, RotateCcw, Save, UserPlus, Video } from "lucide-react";
+import { AlertTriangle, BookmarkPlus, Loader2, RotateCcw, Save, Sparkles, UserPlus, Video } from "lucide-react";
 import type SimpleMDEEditor from "easymde";
 import type { Options as SimpleMDEOptions } from "easymde";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -28,10 +28,13 @@ import {
   SurmonScriptResponse,
   SurmonUpdateScriptPayload,
   SurmonUpdateHeaderPayload,
+  SurmonGenerateMetadataPayload,
+  SurmonGenerateMetadataResponse,
   SurmonSlideAsset,
   SurmonChatMessage,
   SurmonChatResponse,
   SurmonChatReference,
+  SurmonCoreBibleVerse,
 } from "@/app/types/surmon-editor";
 
 const SimpleMDE = dynamic(() => import("react-simplemde-editor"), { ssr: false });
@@ -251,6 +254,19 @@ interface SurmonEditorState {
   paragraphs: SurmonScriptParagraph[];
 }
 
+interface SurmonBibleVerseDraft {
+  book: string;
+  chapter_verse: string;
+  text: string;
+}
+
+interface SurmonMetadataDraft {
+  title: string;
+  summary: string;
+  keypoints: string;
+  coreBibleVerses: SurmonBibleVerseDraft[];
+}
+
 const FALLBACK_USER_ID = "junyang168@gmail.com";
 
 interface SurmonConversationMessage extends SurmonChatMessage {
@@ -260,6 +276,36 @@ interface SurmonConversationMessage extends SurmonChatMessage {
 
 const ensureSequence = (paragraphs: SurmonScriptParagraph[]) =>
   paragraphs.map((para, index) => ({ ...para, s_index: index }));
+
+const mapHeaderVersesToDrafts = (
+  verses: SurmonCoreBibleVerse[] | undefined
+): SurmonBibleVerseDraft[] =>
+  (verses ?? []).map((verse) => ({
+    book: verse.book ?? "",
+    chapter_verse: verse.chapter_verse ?? "",
+    text: verse.text ?? "",
+  }));
+
+const normalizeVerseDrafts = (verses: SurmonBibleVerseDraft[]): SurmonBibleVerseDraft[] =>
+  verses
+    .map((verse) => ({
+      book: verse.book.trim(),
+      chapter_verse: verse.chapter_verse.trim(),
+      text: verse.text.trim(),
+    }))
+    .filter((verse) => verse.book || verse.chapter_verse || verse.text);
+
+const areVerseDraftsEqual = (a: SurmonBibleVerseDraft[], b: SurmonBibleVerseDraft[]) => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].book !== b[i].book || a[i].chapter_verse !== b[i].chapter_verse || a[i].text !== b[i].text) {
+      return false;
+    }
+  }
+  return true;
+};
 
 const parseTimelineToSeconds = (timeline?: string): number | null => {
   if (!timeline) return null;
@@ -293,9 +339,16 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [bookmarkIndex, setBookmarkIndex] = useState<string | null>(null);
-  const [titleDraft, setTitleDraft] = useState<string>("");
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const [titleSaveError, setTitleSaveError] = useState<string | null>(null);
+  const [metadataDraft, setMetadataDraft] = useState<SurmonMetadataDraft>({
+    title: "",
+    summary: "",
+    keypoints: "",
+    coreBibleVerses: [],
+  });
+  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
+  const [metadataSaveError, setMetadataSaveError] = useState<string | null>(null);
+  const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
+  const [metadataGenerateError, setMetadataGenerateError] = useState<string | null>(null);
   const [slides, setSlides] = useState<SurmonSlideAsset[]>([]);
   const [slidesStatus, setSlidesStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [slidesError, setSlidesError] = useState<string | null>(null);
@@ -306,6 +359,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [chatError, setChatError] = useState<string | null>(null);
   const [highlightedParagraphs, setHighlightedParagraphs] = useState<Set<number>>(() => new Set());
   const [activeHighlightToken, setActiveHighlightToken] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"script" | "metadata">("script");
 
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -344,9 +398,29 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [item]);
 
   useEffect(() => {
-    const nextTitle = state.header?.title ?? item;
-    setTitleDraft((prev) => (prev === nextTitle ? prev : nextTitle));
-  }, [item, state.header?.title]);
+    const header = state.header;
+    const nextTitle = header?.title ?? item;
+    const nextSummary = header?.summary ?? "";
+    const nextKeypoints = header?.keypoints ?? "";
+    const nextVerses = mapHeaderVersesToDrafts(header?.core_bible_verse);
+
+    setMetadataDraft((prev) => {
+      if (
+        prev.title === nextTitle &&
+        prev.summary === nextSummary &&
+        prev.keypoints === nextKeypoints &&
+        areVerseDraftsEqual(prev.coreBibleVerses, nextVerses)
+      ) {
+        return prev;
+      }
+      return {
+        title: nextTitle,
+        summary: nextSummary,
+        keypoints: nextKeypoints,
+        coreBibleVerses: nextVerses,
+      };
+    });
+  }, [item, state.header]);
 
   const selectedParagraph = useMemo(() => {
     if (selectedIndex == null) return null;
@@ -654,8 +728,11 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         header: script.header,
         paragraphs,
       });
-      setTitleSaveError(null);
-      setIsSavingTitle(false);
+      setMetadataSaveError(null);
+      setIsSavingMetadata(false);
+      setMetadataGenerateError(null);
+      setIsGeneratingMetadata(false);
+      setActiveTab("script");
       setEditingIndex(null);
       setSelectedIndex(paragraphs.length > 0 ? 0 : null);
       refreshBookmark();
@@ -1030,31 +1107,103 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   );
 
   const handleTitleChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
-    setTitleSaveError(null);
-    setTitleDraft(event.target.value);
+    setMetadataSaveError(null);
+    setMetadataGenerateError(null);
+    const { value } = event.target;
+    setMetadataDraft((prev) => ({ ...prev, title: value }));
   }, []);
 
-  const saveTitle = useCallback(async () => {
+  const handleSummaryChange = useCallback((event: ReactChangeEvent<HTMLTextAreaElement>) => {
+    setMetadataSaveError(null);
+    setMetadataGenerateError(null);
+    const { value } = event.target;
+    setMetadataDraft((prev) => ({ ...prev, summary: value }));
+  }, []);
+
+  const handleKeypointsChange = useCallback((event: ReactChangeEvent<HTMLTextAreaElement>) => {
+    setMetadataSaveError(null);
+    setMetadataGenerateError(null);
+    const { value } = event.target;
+    setMetadataDraft((prev) => ({ ...prev, keypoints: value }));
+  }, []);
+
+  const handleVerseFieldChange = useCallback(
+    (index: number, field: keyof SurmonBibleVerseDraft) =>
+      (event: ReactChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        const { value } = event.target;
+        setMetadataSaveError(null);
+        setMetadataGenerateError(null);
+        setMetadataDraft((prev) => {
+          const nextVerses = prev.coreBibleVerses.map((verse, verseIndex) =>
+            verseIndex === index ? { ...verse, [field]: value } : verse
+          );
+          return { ...prev, coreBibleVerses: nextVerses };
+        });
+      },
+    []
+  );
+
+  const handleAddVerse = useCallback(() => {
+    setMetadataSaveError(null);
+    setMetadataGenerateError(null);
+    setMetadataDraft((prev) => ({
+      ...prev,
+      coreBibleVerses: [...prev.coreBibleVerses, { book: "", chapter_verse: "", text: "" }],
+    }));
+  }, []);
+
+  const handleRemoveVerse = useCallback((index: number) => {
+    setMetadataSaveError(null);
+    setMetadataGenerateError(null);
+    setMetadataDraft((prev) => {
+      const nextVerses = prev.coreBibleVerses.filter((_, verseIndex) => verseIndex !== index);
+      return { ...prev, coreBibleVerses: nextVerses };
+    });
+  }, []);
+
+  const saveMetadata = useCallback(async () => {
     if (!canEdit || !resolvedUserEmail) {
       return;
     }
-    const currentTitle = state.header?.title ?? item;
-    const nextTitle = titleDraft.trim();
-    if (!nextTitle) {
-      setTitleDraft(currentTitle);
+    const header = state.header;
+    const fallbackTitle = header?.title ?? item;
+    const sanitizedTitle = metadataDraft.title.trim();
+    const titleToPersist = sanitizedTitle || fallbackTitle;
+    if (!sanitizedTitle) {
+      setMetadataDraft((prev) => ({ ...prev, title: fallbackTitle }));
+    }
+
+    const sanitizedSummary = metadataDraft.summary.trim();
+    const sanitizedKeypoints = metadataDraft.keypoints.trim();
+    const sanitizedVerses = normalizeVerseDrafts(metadataDraft.coreBibleVerses);
+
+    const currentTitle = (header?.title ?? item).trim();
+    const currentSummary = (header?.summary ?? "").trim();
+    const currentKeypoints = (header?.keypoints ?? "").trim();
+    const currentVerses = normalizeVerseDrafts(mapHeaderVersesToDrafts(header?.core_bible_verse));
+
+    if (
+      titleToPersist === currentTitle &&
+      sanitizedSummary === currentSummary &&
+      sanitizedKeypoints === currentKeypoints &&
+      areVerseDraftsEqual(sanitizedVerses, currentVerses)
+    ) {
       return;
     }
-    if (nextTitle === currentTitle) {
-      return;
-    }
-    setIsSavingTitle(true);
-    setTitleSaveError(null);
+
+    setIsSavingMetadata(true);
+    setMetadataSaveError(null);
+
+    const payload: SurmonUpdateHeaderPayload = {
+      user_id: resolvedUserEmail,
+      item,
+      title: titleToPersist,
+      summary: sanitizedSummary,
+      keypoints: sanitizedKeypoints,
+      core_bible_verse: sanitizedVerses.length ? sanitizedVerses : [],
+    };
+
     try {
-      const payload: SurmonUpdateHeaderPayload = {
-        user_id: resolvedUserEmail,
-        item,
-        title: nextTitle 
-      };
       await fetchJSON(`${API_PREFIX}/update_header`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1066,37 +1215,135 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         }
         return {
           ...prev,
-          header: { ...prev.header, title: nextTitle },
+          header: {
+            ...prev.header,
+            title: titleToPersist,
+            summary: sanitizedSummary,
+            keypoints: sanitizedKeypoints,
+            core_bible_verse: sanitizedVerses,
+          },
         };
       });
+      setMetadataDraft({
+        title: titleToPersist,
+        summary: sanitizedSummary,
+        keypoints: sanitizedKeypoints,
+        coreBibleVerses: sanitizedVerses,
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "更新標題失敗";
-      setTitleSaveError(message);
-      const fallback = state.header?.title ?? item;
-      setTitleDraft(fallback);
+      const message = error instanceof Error ? error.message : "更新講道資訊失敗";
+      setMetadataSaveError(message);
+      setMetadataDraft((prev) => ({ ...prev, title: fallbackTitle }));
     } finally {
-      setIsSavingTitle(false);
+      setIsSavingMetadata(false);
     }
-  }, [canEdit, fetchJSON, item, resolvedUserEmail, state.header?.title, titleDraft]);
+  }, [canEdit, fetchJSON, item, metadataDraft, resolvedUserEmail, state.header]);
+
+  const metadataHasChanges = useMemo(() => {
+    const header = state.header;
+    if (!header) {
+      return false;
+    }
+    const fallbackTitle = header.title ?? item;
+    const sanitizedTitle = metadataDraft.title.trim() || fallbackTitle;
+    const sanitizedSummary = metadataDraft.summary.trim();
+    const sanitizedKeypoints = metadataDraft.keypoints.trim();
+    const sanitizedVerses = normalizeVerseDrafts(metadataDraft.coreBibleVerses);
+
+    const currentTitle = (header.title ?? item).trim();
+    const currentSummary = (header.summary ?? "").trim();
+    const currentKeypoints = (header.keypoints ?? "").trim();
+    const currentVerses = normalizeVerseDrafts(mapHeaderVersesToDrafts(header.core_bible_verse));
+
+    if (sanitizedTitle !== currentTitle) {
+      return true;
+    }
+    if (sanitizedSummary !== currentSummary) {
+      return true;
+    }
+    if (sanitizedKeypoints !== currentKeypoints) {
+      return true;
+    }
+    if (!areVerseDraftsEqual(sanitizedVerses, currentVerses)) {
+      return true;
+    }
+    return false;
+  }, [item, metadataDraft, state.header]);
 
   const handleTitleBlur = useCallback(() => {
-    saveTitle().catch(() => {});
-  }, [saveTitle]);
+    saveMetadata().catch(() => {});
+  }, [saveMetadata]);
 
   const handleTitleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        saveTitle().catch(() => {});
+        saveMetadata().catch(() => {});
       } else if (event.key === "Escape") {
         const currentTitle = state.header?.title ?? item;
-        setTitleDraft(currentTitle);
-        setTitleSaveError(null);
+        setMetadataDraft((prev) => ({ ...prev, title: currentTitle }));
+        setMetadataSaveError(null);
         event.currentTarget.blur();
       }
     },
-    [item, saveTitle, state.header?.title]
+    [item, saveMetadata, state.header?.title]
   );
+
+  const handleMetadataSubmit = useCallback(() => {
+    saveMetadata().catch(() => {});
+  }, [saveMetadata]);
+
+  const handleGenerateMetadata = useCallback(() => {
+    if (!canEdit || !resolvedUserEmail) {
+      return;
+    }
+    setActiveTab("metadata");
+    setMetadataGenerateError(null);
+    setIsGeneratingMetadata(true);
+
+    const candidateParagraphs = state.paragraphs.filter(
+      (paragraph) => (paragraph.type ?? "content") !== "comment"
+    );
+    const payload: SurmonGenerateMetadataPayload = {
+      user_id: resolvedUserEmail,
+      item,
+      paragraphs: (candidateParagraphs.length > 0 ? candidateParagraphs : state.paragraphs).map((paragraph) => ({
+        index: paragraph.index,
+        text: paragraph.text,
+        type: paragraph.type,
+        start_time: paragraph.start_time,
+        end_time: paragraph.end_time,
+        start_timeline: paragraph.start_timeline,
+        end_index: paragraph.end_index,
+      })),
+    };
+
+    fetchJSON<SurmonGenerateMetadataResponse>(`${API_PREFIX}/generate_metadata`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((response) => {
+        const generatedVerses = mapHeaderVersesToDrafts(response.core_bible_verse);
+        const nextSummary = (response.summary ?? "").trim();
+        const nextKeypoints = (response.keypoints ?? "").trim();
+        const nextTitle = response.title?.trim();
+        setMetadataDraft((prev) => ({
+          title: nextTitle || prev.title || state.header?.title || item,
+          summary: nextSummary,
+          keypoints: nextKeypoints,
+          coreBibleVerses: generatedVerses,
+        }));
+        setMetadataSaveError(null);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "AI 生成失敗，請稍後再試。";
+        setMetadataGenerateError(message);
+      })
+      .finally(() => {
+        setIsGeneratingMetadata(false);
+      });
+  }, [canEdit, fetchJSON, item, resolvedUserEmail, state.header?.title, state.paragraphs]);
 
   const editorToolbar = useMemo<NonNullable<SimpleMDEOptions["toolbar"]>>(
     () =>
@@ -1391,7 +1638,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           <span className="text-lg text-gray-600">标题：</span>
           <input
             type="text"
-            value={titleDraft}
+            value={metadataDraft.title}
             onChange={handleTitleChange}
             onBlur={handleTitleBlur}
             onKeyDown={handleTitleKeyDown}
@@ -1404,7 +1651,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
             placeholder="輸入講道標題"
             aria-label="講道標題"
           />
-          {isSavingTitle && <span className="text-xs text-blue-600">儲存中...</span>}
+          {isSavingMetadata && <span className="text-xs text-blue-600">儲存中...</span>}
         </div>
         <div className="flex-1" />
         <button
@@ -1441,7 +1688,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           </a>
         ) : null}
       </nav>
-      {titleSaveError && <p className="text-xs text-red-600">{titleSaveError}</p>}
+      {metadataSaveError && <p className="text-xs text-red-600">{metadataSaveError}</p>}
 
 
 
@@ -1558,8 +1805,31 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         <section className="xl:col-span-2 space-y-4">
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <h2 className="text-sm font-semibold text-gray-700">講道稿內容</h2>
-              {selectedParagraph && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("script")}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                    activeTab === "script"
+                      ? "border border-blue-200 bg-blue-100 text-blue-700"
+                      : "border border-transparent text-gray-600 hover:text-blue-700"
+                  }`}
+                >
+                  講道稿內容
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("metadata")}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                    activeTab === "metadata"
+                      ? "border border-blue-200 bg-blue-100 text-blue-700"
+                      : "border border-transparent text-gray-600 hover:text-blue-700"
+                  }`}
+                >
+                  标题和简介
+                </button>
+              </div>
+              {activeTab === "script" && selectedParagraph && (
                 <button
                   onClick={() => handleMarkBookmark(selectedParagraph)}
                   className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
@@ -1569,60 +1839,211 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
               )}
             </div>
 
-            <div className="max-h-[70vh] overflow-y-auto">
-              <div className="divide-y divide-gray-100">
-                {state.paragraphs.map((paragraph, index) => {
-                  const isComment = paragraph.type === "comment";
-                  const showAddComment = canEdit && !isComment;
-                  const isBookmarked = paragraph.index === bookmarkIndex;
-                  const isEditing = canEdit && editingIndex === index;
-                  const isSelected = index === selectedIndex;
-                  const isHighlighted = highlightedParagraphs.has(index);
-                  return (
-                    <div
-                      id={`surmon-paragraph-${index}`}
-                      key={`${paragraph.index}-${index}`}
-                      className={`group px-4 py-3 transition-colors ${
-                        isSelected
-                          ? "bg-blue-50"
-                          : isHighlighted
-                          ? "bg-amber-50"
-                          : "hover:bg-gray-50"
-                      } ${isEditing ? "border-l-2 border-blue-300" : ""} ${
-                        isHighlighted ? "ring-1 ring-amber-300" : ""
-                      }`}
-                      onClick={(event) => handleParagraphClick(event, index)}
-                      onDoubleClick={canEdit ? () => handleStartEditing(index) : undefined}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="pt-1 text-xs font-semibold text-gray-400 w-16">
-                          {paragraph.start_timeline ?? "--:--"}
-                        </div>
-                        <div className="flex-1">
-                          {isEditing ? (
-                            <div className="space-y-2">
-                              <SimpleMDE
-                                key={`${paragraph.index ?? "paragraph"}-${index}`}
-                                value={paragraph.text}
-                                onChange={(value) => handleEditorChange(index, value)}
-                                getMdeInstance={(instance) => {
-                                  activeEditorRef.current = instance;
-                                  activeEditorIndexRef.current = index;
-                                }}
-                                options={editorOptions}
-                              />
-                            </div>
-                          ) : (
-                            renderParagraphContent(paragraph)
-                          )}
-
+            {activeTab === "script" ? (
+              <div className="max-h-[70vh] overflow-y-auto">
+                <div className="divide-y divide-gray-100">
+                  {state.paragraphs.map((paragraph, index) => {
+                    const isEditing = canEdit && editingIndex === index;
+                    const isSelected = index === selectedIndex;
+                    const isHighlighted = highlightedParagraphs.has(index);
+                    const isBookmarked = paragraph.index === bookmarkIndex;
+                    return (
+                      <div
+                        id={`surmon-paragraph-${index}`}
+                        key={`${paragraph.index}-${index}`}
+                        className={`group px-4 py-3 transition-colors ${
+                          isSelected
+                            ? "bg-blue-50"
+                            : isHighlighted
+                            ? "bg-amber-50"
+                            : "hover:bg-gray-50"
+                        } ${isEditing ? "border-l-2 border-blue-300" : ""} ${
+                          isHighlighted ? "ring-1 ring-amber-300" : ""
+                        } ${isBookmarked ? "border border-amber-200" : ""}`}
+                        onClick={(event) => handleParagraphClick(event, index)}
+                        onDoubleClick={canEdit ? () => handleStartEditing(index) : undefined}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="pt-1 text-xs font-semibold text-gray-400 w-16">
+                            {paragraph.start_timeline ?? "--:--"}
+                          </div>
+                          <div className="flex-1">
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <SimpleMDE
+                                  key={`${paragraph.index ?? "paragraph"}-${index}`}
+                                  value={paragraph.text}
+                                  onChange={(value) => handleEditorChange(index, value)}
+                                  getMdeInstance={(instance) => {
+                                    activeEditorRef.current = instance;
+                                    activeEditorIndexRef.current = index;
+                                  }}
+                                  options={editorOptions}
+                                />
+                              </div>
+                            ) : (
+                              renderParagraphContent(paragraph)
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
+                <div className="space-y-5">
+                  {metadataGenerateError && (
+                    <p className="text-xs text-red-600">{metadataGenerateError}</p>
+                  )}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">講道標題</label>
+                    <input
+                      type="text"
+                      value={metadataDraft.title}
+                      onChange={handleTitleChange}
+                      onBlur={handleTitleBlur}
+                      onKeyDown={handleTitleKeyDown}
+                      disabled={!canEdit}
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                      placeholder="輸入講道標題"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">講道摘要</label>
+                    <textarea
+                      value={metadataDraft.summary}
+                      onChange={handleSummaryChange}
+                      rows={4}
+                      disabled={!canEdit}
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                      placeholder="輸入講道摘要或簡介"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">要點整理</label>
+                    <textarea
+                      value={metadataDraft.keypoints}
+                      onChange={handleKeypointsChange}
+                      rows={6}
+                      disabled={!canEdit}
+                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                      placeholder="輸入要點條列或重點整理"
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-sm font-semibold text-gray-700">核心經文</label>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={handleAddVerse}
+                          className="text-xs font-medium text-blue-600 hover:text-blue-800"
+                        >
+                          新增經文
+                        </button>
+                      )}
+                    </div>
+                    {metadataDraft.coreBibleVerses.length === 0 ? (
+                      <p className="text-xs text-gray-500">目前尚未設定核心經文。</p>
+                    ) : (
+                      metadataDraft.coreBibleVerses.map((verse, index) => (
+                        <div
+                          key={`core-verse-${index}`}
+                          className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3"
+                        >
+                          <div className="flex flex-col gap-3 md:flex-row">
+                            <div className="flex-1">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">書卷</label>
+                              <input
+                                type="text"
+                                value={verse.book}
+                                onChange={handleVerseFieldChange(index, "book")}
+                                disabled={!canEdit}
+                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                                placeholder="如：創世記"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">章節</label>
+                              <input
+                                type="text"
+                                value={verse.chapter_verse}
+                                onChange={handleVerseFieldChange(index, "chapter_verse")}
+                                disabled={!canEdit}
+                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                                placeholder="例如：3:16-18"
+                              />
+                            </div>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveVerse(index)}
+                                className="self-start rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                              >
+                                移除
+                              </button>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">經文內容</label>
+                            <textarea
+                              value={verse.text}
+                              onChange={handleVerseFieldChange(index, "text")}
+                              disabled={!canEdit}
+                              rows={3}
+                              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                              placeholder="輸入經文內容"
+                            />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {metadataSaveError && (
+                    <p className="text-sm text-red-600">{metadataSaveError}</p>
+                  )}
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateMetadata}
+                      disabled={!canEdit || isGeneratingMetadata || state.paragraphs.length === 0}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50 disabled:text-blue-300"
+                    >
+                      {isGeneratingMetadata ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> 產生中...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-3.5 w-3.5" /> AI 生成
+                        </>
+                      )}
+                    </button>
+                    {metadataHasChanges && !isSavingMetadata ? (
+                      <span className="text-xs text-gray-500">尚有未儲存的變更</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={handleMetadataSubmit}
+                      disabled={!canEdit || !metadataHasChanges || isSavingMetadata}
+                      className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                    >
+                      {isSavingMetadata ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" /> 儲存中...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" /> 儲存標題與簡介
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       </div>

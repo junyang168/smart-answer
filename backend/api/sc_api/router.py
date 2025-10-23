@@ -47,10 +47,25 @@ class UpdateRequest(BaseModel):
     data: List[Union[Slide, Paragraph]]
 
 
+class BibleVerse(BaseModel):
+    book: Optional[str] = None
+    chapter_verse: Optional[str] = None
+    text: Optional[str] = None
+
+
 class UpdateHeaderRequest(BaseModel):
     user_id: Optional[str] = None
     item: str
     title: str
+    summary: Optional[str] = None
+    keypoints: Optional[str] = None
+    core_bible_verse: Optional[List[BibleVerse]] = None
+
+
+class GenerateMetadataRequest(BaseModel):
+    user_id: Optional[str] = None
+    item: str
+    paragraphs: Optional[List[Paragraph]] = None
 
 
 class AssignRequest(BaseModel):
@@ -202,7 +217,35 @@ def update_script(request: UpdateRequest):
 
 @router.post("/update_header")
 def update_header(request: UpdateHeaderRequest):
-    return sermon_manager.update_sermon_header(request.user_id or "", request.item, request.title)
+    core_bible_verse = (
+        [verse.model_dump(exclude_none=True) for verse in request.core_bible_verse]
+        if request.core_bible_verse is not None
+        else None
+    )
+    return sermon_manager.update_sermon_header(
+        request.user_id or "",
+        request.item,
+        request.title,
+        summary=request.summary,
+        keypoints=request.keypoints,
+        core_bible_verse=core_bible_verse,
+    )
+
+
+@router.post("/generate_metadata")
+def generate_metadata(request: GenerateMetadataRequest):
+    try:
+        return sermon_manager.generate_sermon_metadata(
+            request.user_id or "",
+            request.item,
+            request.paragraphs,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - unexpected failure path
+        raise HTTPException(status_code=500, detail="AI 產生講道資訊時發生錯誤") from exc
 
 
 @router.get("/sermon/{user_id}/{item}/{changes}")
