@@ -40,6 +40,10 @@ export interface SurmonScriptParagraph {
   start_time?: number;
   /** Absolute end time in seconds */
   end_time?: number;
+  /** Index of the timeline entry marking the end boundary */
+  end_index?: string;
+  /** Index for the corresponding start boundary */
+  start_index?: string;
   /** Human readable timeline string (e.g. `00:12:34`) */
   start_timeline?: string;
   /** Internal sequence index used for editing */
