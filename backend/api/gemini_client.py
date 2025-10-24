@@ -12,7 +12,7 @@ class GeminiClient:
     def __init__(self) -> None:
         self._client = genai.Client()
 
-    def generate(self, prompt: str) -> str:
+    def generate(self, prompt: str, model=GENERATION_MODEL) -> str:
         contents = [
             types.Content(
                 role="user",
@@ -23,7 +23,7 @@ class GeminiClient:
             thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
         response = self._client.models.generate_content(
-            model=GENERATION_MODEL,
+            model=model,
             contents=contents,
             config=generate_content_config,
         )

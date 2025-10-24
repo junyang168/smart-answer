@@ -385,6 +385,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [canEdit]);
 
   useEffect(() => {
+    if (chatMessages.length === 0 && !isChatLoading) {
+      return;
+    }
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isChatLoading]);
 
@@ -1635,23 +1638,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       <div className="space-y-6">
       <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg text-gray-600">标题：</span>
-          <input
-            type="text"
-            value={metadataDraft.title}
-            onChange={handleTitleChange}
-            onBlur={handleTitleBlur}
-            onKeyDown={handleTitleKeyDown}
-            disabled={!canEdit}
-            className={`w-96 max-w-xl rounded-md border px-2 py-1 text-lg ${
-              canEdit
-                ? "border-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                : "border-transparent bg-transparent text-gray-700"
-            }`}
-            placeholder="輸入講道標題"
-            aria-label="講道標題"
-          />
-          {isSavingMetadata && <span className="text-xs text-blue-600">儲存中...</span>}
+          <span className="text-lg text-gray-600">{metadataDraft.title}</span>
         </div>
         <div className="flex-1" />
         <button

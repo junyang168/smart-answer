@@ -512,8 +512,8 @@ class SermonManager:
         )
 
         try:
-            answer = gemini_client.generate(prompt).strip()
-        except Exception:
+            answer = gemini_client.generate(prompt,'gemini-2.5-flash').strip()
+        except Exception as e:
             return {"answer": "抱歉，助理目前無法取得回應，請稍後再試。"}
 
         if not answer:
