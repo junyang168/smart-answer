@@ -45,6 +45,55 @@ const MEDIA_PREFIX = "/web/video";
 const INDEX_LINK_PREFIX = "index:";
 
 const INDEX_TOKEN_PATTERN = /\[([0-9]+(?:_[0-9]+)?)\]/g;
+const FALLBACK_STRIKETHROUGH_PATTERN = /~~([^~]+?)~~/g;
+
+const remarkSurmonFallbackStrikethrough = () =>
+  (tree: any) => {
+    visit(tree, "text", (node: any, index: number | undefined, parent: any) => {
+      if (!parent || typeof node.value !== "string") {
+        return;
+      }
+      if (parent.type === "link" || parent.type === "linkReference" || parent.type === "definition") {
+        return;
+      }
+      if (parent.type === "code" || parent.type === "inlineCode") {
+        return;
+      }
+
+      const { value } = node;
+      const matches = [...value.matchAll(FALLBACK_STRIKETHROUGH_PATTERN)];
+      if (matches.length === 0) {
+        return;
+      }
+
+      const newChildren: any[] = [];
+      let cursor = 0;
+
+      matches.forEach((match) => {
+        const matchIndex = match.index ?? 0;
+        if (matchIndex > cursor) {
+          newChildren.push({ type: "text", value: value.slice(cursor, matchIndex) });
+        }
+
+        newChildren.push({
+          type: "delete",
+          children: [{ type: "text", value: match[1] }],
+        });
+
+        cursor = matchIndex + match[0].length;
+      });
+
+      if (cursor < value.length) {
+        newChildren.push({ type: "text", value: value.slice(cursor) });
+      }
+
+      if (typeof index === "number") {
+        parent.children.splice(index, 1, ...newChildren);
+        return index + newChildren.length;
+      }
+      return undefined;
+    });
+  };
 
 const remarkSurmonIndexLinks = () =>
   (tree: any) => {
@@ -628,7 +677,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     [activeHighlightToken, highlightedParagraphs, computeHighlightSet]
   );
 
-  const surmonMarkdownRemarkPlugins = useMemo(() => [remarkGfm, remarkSurmonIndexLinks], []);
+  const surmonMarkdownRemarkPlugins = useMemo(
+    () => [remarkGfm, remarkSurmonFallbackStrikethrough, remarkSurmonIndexLinks],
+    []
+  );
 
   const surmonMarkdownComponents = useMemo<ReactMarkdownComponents>(
     () => ({
@@ -668,6 +720,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           </a>
         );
       },
+      del: ({ node: _node, children, className, ...rest }) => (
+        <del
+          {...rest}
+          className={className ? `${className} line-through decoration-2` : "line-through decoration-2"}
+        >
+          {children}
+        </del>
+      ),
     }),
     [highlightParagraphsByToken]
   );
