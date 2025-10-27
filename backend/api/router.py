@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import FileResponse
 
 from .models import (
     ArticleDetail,
@@ -10,9 +11,17 @@ from .models import (
     GenerateArticleResponse,
     GenerateSummaryResponse,
     PromptResponse,
-    SermonSeries,
     SaveArticleRequest,
     SaveArticleResponse,
+    SermonSeries,
+    GenerateHymnLyricsRequest,
+    GenerateHymnLyricsResponse,
+    HymnMetadata,
+    SundayServiceEntry,
+    SundayServiceResources,
+    SundaySong,
+    SundaySongCreate,
+    SundayWorker,
     UpdatePromptRequest,
 )
 from .service import (
@@ -32,6 +41,22 @@ from .service import (
     new_article_template,
     save_article,
     update_prompt,
+    list_sunday_services,
+    create_sunday_service,
+    update_sunday_service,
+    delete_sunday_service,
+    generate_sunday_service_ppt,
+    list_sunday_workers,
+    create_sunday_worker,
+    update_sunday_worker,
+    delete_sunday_worker,
+    list_sunday_songs,
+    create_sunday_song,
+    update_sunday_song,
+    delete_sunday_song,
+    sunday_service_resources,
+    get_hymn_metadata,
+    generate_hymn_lyrics,
 )
 
 router = APIRouter(prefix="/admin/full-articles", tags=["full-articles"])
@@ -120,3 +145,97 @@ def update_sermon_series_entry(series_id: str, payload: SermonSeries) -> SermonS
 @surmon_series_router.delete("/{series_id}")
 def delete_sermon_series_entry(series_id: str) -> None:
     delete_sermon_series(series_id)
+
+
+sunday_service_router = APIRouter(prefix="/admin/sunday-services", tags=["sunday-services"])
+
+
+@sunday_service_router.get("", response_model=list[SundayServiceEntry])
+def get_sunday_services() -> list[SundayServiceEntry]:
+    return list_sunday_services()
+
+
+@sunday_service_router.post("", response_model=SundayServiceEntry)
+def create_sunday_service_entry(entry: SundayServiceEntry) -> SundayServiceEntry:
+    return create_sunday_service(entry)
+
+
+@sunday_service_router.put("/{date:path}", response_model=SundayServiceEntry)
+def update_sunday_service_entry(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
+    return update_sunday_service(date, entry)
+
+
+@sunday_service_router.delete("/{date:path}")
+def delete_sunday_service_entry(date: str) -> None:
+    delete_sunday_service(date)
+
+
+@sunday_service_router.get("/resources", response_model=SundayServiceResources)
+def get_sunday_service_resources() -> SundayServiceResources:
+    return sunday_service_resources()
+
+
+@sunday_service_router.post("/{date:path}/ppt")
+def create_sunday_service_ppt(date: str) -> FileResponse:
+    ppt_path = generate_sunday_service_ppt(date)
+    return FileResponse(
+        ppt_path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=ppt_path.name,
+    )
+
+
+sunday_workers_router = APIRouter(prefix="/admin/sunday-workers", tags=["sunday-workers"])
+
+
+@sunday_workers_router.get("", response_model=list[SundayWorker])
+def get_sunday_workers() -> list[SundayWorker]:
+    return list_sunday_workers()
+
+
+@sunday_workers_router.post("", response_model=SundayWorker)
+def create_sunday_worker_entry(worker: SundayWorker) -> SundayWorker:
+    return create_sunday_worker(worker)
+
+
+@sunday_workers_router.put("/{current_name:path}", response_model=SundayWorker)
+def update_sunday_worker_entry(current_name: str, worker: SundayWorker) -> SundayWorker:
+    return update_sunday_worker(current_name, worker)
+
+
+@sunday_workers_router.delete("/{name:path}")
+def delete_sunday_worker_entry(name: str) -> None:
+    delete_sunday_worker(name)
+
+
+sunday_songs_router = APIRouter(prefix="/admin/sunday-songs", tags=["sunday-songs"])
+
+
+@sunday_songs_router.get("", response_model=list[SundaySong])
+def get_sunday_songs() -> list[SundaySong]:
+    return list_sunday_songs()
+
+
+@sunday_songs_router.post("", response_model=SundaySong)
+def create_sunday_song_entry(payload: SundaySongCreate) -> SundaySong:
+    return create_sunday_song(payload)
+
+
+@sunday_songs_router.put("/{song_id}", response_model=SundaySong)
+def update_sunday_song_entry(song_id: str, payload: SundaySongCreate) -> SundaySong:
+    return update_sunday_song(song_id, payload)
+
+
+@sunday_songs_router.delete("/{song_id}")
+def delete_sunday_song_entry(song_id: str) -> None:
+    delete_sunday_song(song_id)
+
+
+@sunday_songs_router.get("/hymnal/{index}", response_model=HymnMetadata)
+def read_hymn_metadata(index: int) -> HymnMetadata:
+    return get_hymn_metadata(index)
+
+
+@sunday_songs_router.post("/hymnal/{index}/lyrics", response_model=GenerateHymnLyricsResponse)
+def create_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> GenerateHymnLyricsResponse:
+    return generate_hymn_lyrics(index, payload)

@@ -17,6 +17,11 @@ const cards = [
     href: "/admin/fellowship",
   },
   {
+    title: "主日服事管理",
+    description: "設定主日服事同工、詩歌、讀經經文與家事報告內容。",
+    href: "/admin/sunday-service",
+  },
+  {
     title: "講道系列管理",
     description: "建立講道系列、編輯摘要與管理歸屬的講道內容。",
     href: "/admin/surmon_series",

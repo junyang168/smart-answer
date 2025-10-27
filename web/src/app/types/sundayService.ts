@@ -1,0 +1,57 @@
+export type SundaySongSource = "custom" | "hymnal";
+
+export interface SundayWorker {
+  name: string;
+}
+
+export interface SundaySong {
+  id: string;
+  title: string;
+  source: SundaySongSource;
+  hymnalIndex?: number | null;
+  hymnLink?: string | null;
+  lyricsMarkdown?: string | null;
+}
+
+export interface SundaySongPayload {
+  title: string;
+  source: SundaySongSource;
+  hymnalIndex?: number | null;
+  hymnLink?: string | null;
+  lyricsMarkdown?: string | null;
+}
+
+export interface SundayServiceEntry {
+  date: string;
+  presider?: string | null;
+  worshipLeader?: string | null;
+  pianist?: string | null;
+  hymn?: string | null;
+  responseHymn?: string | null;
+  scripture?: string | null;
+  sermonSpeaker?: string | null;
+  sermonTitle?: string | null;
+  announcementsMarkdown?: string | null;
+  health_prayer_markdown?: string | null;
+  scriptureReaders?: string[] | null;
+}
+
+export interface SundayServiceResources {
+  workers: SundayWorker[];
+  songs: SundaySong[];
+}
+
+export interface HymnMetadata {
+  index: number;
+  title: string;
+  link?: string | null;
+}
+
+export interface GenerateHymnLyricsResponse {
+  lyricsMarkdown: string;
+}
+
+export interface ScriptureBook {
+  slug: string;
+  name: string;
+}

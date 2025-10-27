@@ -104,6 +104,74 @@ class FellowshipEntry(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+SongSource = Literal["custom", "hymnal"]
+
+
+class SundaySong(BaseModel):
+    id: str
+    title: str
+    source: SongSource = "custom"
+    lyrics_markdown: Optional[str] = Field(None, alias="lyricsMarkdown")
+    hymn_link: Optional[str] = Field(None, alias="hymnLink")
+    hymnal_index: Optional[int] = Field(None, alias="hymnalIndex")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SundaySongCreate(BaseModel):
+    title: str
+    source: SongSource = "custom"
+    lyrics_markdown: Optional[str] = Field(None, alias="lyricsMarkdown")
+    hymn_link: Optional[str] = Field(None, alias="hymnLink")
+    hymnal_index: Optional[int] = Field(None, alias="hymnalIndex")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SundayWorker(BaseModel):
+    name: str
+
+
+class SundayServiceEntry(BaseModel):
+    date: str
+    presider: Optional[str] = None
+    worship_leader: Optional[str] = Field(None, alias="worshipLeader")
+    pianist: Optional[str] = None
+    scripture: Optional[str] = None
+    sermon_speaker: Optional[str] = Field(None, alias="sermonSpeaker")
+    sermon_title: Optional[str] = Field(None, alias="sermonTitle")
+    hymn: Optional[str] = None
+    hymn_index: Optional[int] = Field(None, alias="hymnIndex")
+    response_hymn: Optional[str] = Field(None, alias="responseHymn")
+    response_hymn_index: Optional[int] = Field(None, alias="responseHymnIndex")
+    announcements_markdown: Optional[str] = Field("", alias="announcementsMarkdown")
+    health_prayer_markdown: Optional[str] = Field("", alias="health_prayer_markdown")
+    scripture_readers: List[str] = Field(default_factory=list, alias="scriptureReaders")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SundayServiceResources(BaseModel):
+    workers: List[SundayWorker] = Field(default_factory=list)
+    songs: List[SundaySong] = Field(default_factory=list)
+
+
+class HymnMetadata(BaseModel):
+    index: int
+    title: str
+    link: Optional[str] = None
+
+
+class GenerateHymnLyricsRequest(BaseModel):
+    title: str
+
+
+class GenerateHymnLyricsResponse(BaseModel):
+    lyrics_markdown: str = Field(..., alias="lyricsMarkdown")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SermonSeries(BaseModel):
     id: str
     title: Optional[str] = None

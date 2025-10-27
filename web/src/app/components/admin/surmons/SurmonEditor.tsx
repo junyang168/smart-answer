@@ -628,9 +628,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     [activeHighlightToken, highlightedParagraphs, computeHighlightSet]
   );
 
-  const assistantRemarkPlugins = useMemo(() => [remarkGfm, remarkSurmonIndexLinks], []);
+  const surmonMarkdownRemarkPlugins = useMemo(() => [remarkGfm, remarkSurmonIndexLinks], []);
 
-  const assistantMarkdownComponents = useMemo<ReactMarkdownComponents>(
+  const surmonMarkdownComponents = useMemo<ReactMarkdownComponents>(
     () => ({
       a: ({ node, children, href, ...props }) => {
         const token = node?.properties['data-surmon-index-token']
@@ -1588,12 +1588,16 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       }
 
       return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} className="prose prose-sm max-w-none">
+        <ReactMarkdown
+          remarkPlugins={surmonMarkdownRemarkPlugins}
+          components={surmonMarkdownComponents}
+          className="prose prose-sm max-w-none"
+        >
           {paragraph.text}
         </ReactMarkdown>
       );
     },
-    [viewChanges]
+    [surmonMarkdownComponents, surmonMarkdownRemarkPlugins, viewChanges]
   );
 
   if (!sessionEmail && authStatus !== "loading" && process.env.NODE_ENV === "production") {
@@ -1732,8 +1736,8 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                   >
                     {message.role === "assistant" ? (
                       <ReactMarkdown
-                        remarkPlugins={assistantRemarkPlugins}
-                        components={assistantMarkdownComponents}
+                        remarkPlugins={surmonMarkdownRemarkPlugins}
+                        components={surmonMarkdownComponents}
                         className="prose prose-sm max-w-none text-gray-700 [&>*:last-child]:mb-0"
                       >
                         {message.content}

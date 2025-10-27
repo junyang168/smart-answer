@@ -15,6 +15,10 @@ from .config import (
     PROMPT_FILE,
     SCRIPTS_DIR,
     SERMON_SERIES_FILE,
+    SUNDAY_SERVICE_FILE,
+    SUNDAY_SONGS_FILE,
+    SUNDAY_WORKERS_FILE,
+    HYMNS_FILE,
 )
 from .models import (
     ArticleDetail,
@@ -25,6 +29,11 @@ from .models import (
     SaveArticleRequest,
     SaveArticleResponse,
     FellowshipEntry,
+    SundayServiceEntry,
+    SundaySong,
+    SundaySongCreate,
+    SundayWorker,
+    HymnMetadata,
     SermonSeries,
 )
 
@@ -78,12 +87,17 @@ class ArticleRepository:
         _ensure_directories()
         if not METADATA_FILE.exists():
             METADATA_FILE.write_text("[]", encoding="utf-8")
-        FELLOWSHIP_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if not FELLOWSHIP_FILE.exists():
-            FELLOWSHIP_FILE.write_text("[]", encoding="utf-8")
-        SERMON_SERIES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if not SERMON_SERIES_FILE.exists():
-            SERMON_SERIES_FILE.write_text("[]", encoding="utf-8")
+        config_files = (
+            FELLOWSHIP_FILE,
+            SERMON_SERIES_FILE,
+            SUNDAY_SERVICE_FILE,
+            SUNDAY_WORKERS_FILE,
+            SUNDAY_SONGS_FILE,
+        )
+        for path in config_files:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text("[]", encoding="utf-8")
 
     # Prompt operations
     def load_prompt(self) -> str:
@@ -380,6 +394,414 @@ class ArticleRepository:
         if len(new_entries) == len(entries):
             raise ValueError(f"Fellowship date {date} not found")
         self._save_fellowship_entries(new_entries)
+
+
+    # Sunday worship service operations
+    def _load_sunday_service_entries(self) -> list[SundayServiceEntry]:
+        try:
+            raw = json.loads(SUNDAY_SERVICE_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse sunday_services.json") from exc
+        entries: list[SundayServiceEntry] = []
+        for item in raw:
+            try:
+                entries.append(SundayServiceEntry.model_validate(item))
+            except Exception as exc:
+                raise ValueError(f"Invalid sunday service entry: {item}") from exc
+        return entries
+
+    def _save_sunday_service_entries(self, entries: list[SundayServiceEntry]) -> None:
+        tmp_path = SUNDAY_SERVICE_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(
+                [entry.model_dump(by_alias=True) for entry in entries],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        tmp_path.replace(SUNDAY_SERVICE_FILE)
+
+    def list_sunday_services(self) -> list[SundayServiceEntry]:
+        entries = self._load_sunday_service_entries()
+
+        def parse_date(value: str) -> datetime:
+            formats = ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y")
+            for fmt in formats:
+                try:
+                    return datetime.strptime(value, fmt)
+                except ValueError:
+                    continue
+            return datetime.min
+
+        return sorted(entries, key=lambda entry: parse_date(entry.date), reverse=True)
+
+    def create_sunday_service(self, entry: SundayServiceEntry) -> SundayServiceEntry:
+        entry = self._apply_hymn_indices(entry)
+        entries = self._load_sunday_service_entries()
+        if any(existing.date == entry.date for existing in entries):
+            raise ValueError(f"Sunday service date {entry.date} already exists")
+        entries.append(entry)
+        self._save_sunday_service_entries(entries)
+        return entry
+
+    def get_sunday_service(self, date: str) -> SundayServiceEntry:
+        entries = self._load_sunday_service_entries()
+        for entry in entries:
+            if entry.date == date:
+                return entry
+        raise ValueError(f"Sunday service date {date} not found")
+
+    def update_sunday_service(self, date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
+        entry = self._apply_hymn_indices(entry)
+        entries = self._load_sunday_service_entries()
+        target = None
+        for index, existing in enumerate(entries):
+            if existing.date == date:
+                target = index
+                break
+        if target is None:
+            raise ValueError(f"Sunday service date {date} not found")
+        if entry.date != date and any(existing.date == entry.date for existing in entries):
+            raise ValueError(f"Sunday service date {entry.date} already exists")
+        entries[target] = entry
+        self._save_sunday_service_entries(entries)
+        return entry
+
+    def delete_sunday_service(self, date: str) -> None:
+        entries = self._load_sunday_service_entries()
+        new_entries = [entry for entry in entries if entry.date != date]
+        if len(new_entries) == len(entries):
+            raise ValueError(f"Sunday service date {date} not found")
+        self._save_sunday_service_entries(new_entries)
+
+    def _apply_hymn_indices(self, entry: SundayServiceEntry) -> SundayServiceEntry:
+        songs = {song.title: song for song in self._load_sunday_songs()}
+
+        def resolve(title: Optional[str]) -> Optional[int]:
+            if not title:
+                return None
+            song = songs.get(title)
+            if song and song.source == "hymnal":
+                return song.hymnal_index
+            return None
+
+        data = entry.model_dump(by_alias=True)
+        data["hymnIndex"] = resolve(entry.hymn)
+        data["responseHymnIndex"] = resolve(entry.response_hymn)
+        return SundayServiceEntry.model_validate(data)
+
+    def _load_sunday_workers(self) -> list[str]:
+        try:
+            raw = json.loads(SUNDAY_WORKERS_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse sunday_workers.json") from exc
+        if not isinstance(raw, list):
+            raise ValueError("sunday_workers.json must contain a list")
+        workers: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                workers.append(item)
+            elif isinstance(item, dict):
+                name = item.get("name")
+                if isinstance(name, str):
+                    workers.append(name)
+        return workers
+
+    def _save_sunday_workers(self, workers: list[str]) -> None:
+        tmp_path = SUNDAY_WORKERS_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(workers, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(SUNDAY_WORKERS_FILE)
+
+    def list_sunday_workers(self) -> list[SundayWorker]:
+        workers = sorted(self._load_sunday_workers(), key=lambda value: value.casefold())
+        return [SundayWorker(name=name) for name in workers]
+
+    def create_sunday_worker(self, worker: SundayWorker) -> SundayWorker:
+        name = worker.name.strip()
+        if not name:
+            raise ValueError("Worker name is required")
+        workers = self._load_sunday_workers()
+        lower_set = {value.casefold(): value for value in workers}
+        if name.casefold() in lower_set:
+            raise ValueError(f"Worker {name} already exists")
+        workers.append(name)
+        workers.sort(key=lambda value: value.casefold())
+        self._save_sunday_workers(workers)
+        return SundayWorker(name=name)
+
+    def update_sunday_worker(self, current_name: str, worker: SundayWorker) -> SundayWorker:
+        target = current_name.strip()
+        if not target:
+            raise ValueError("Current worker name is required")
+        workers = self._load_sunday_workers()
+        try:
+            index = next(i for i, value in enumerate(workers) if value == target)
+        except StopIteration as exc:
+            raise ValueError(f"Worker {current_name} not found") from exc
+
+        new_name = worker.name.strip()
+        if not new_name:
+            raise ValueError("Worker name is required")
+        if new_name != target and any(value.casefold() == new_name.casefold() for value in workers):
+            raise ValueError(f"Worker {new_name} already exists")
+
+        workers[index] = new_name
+        workers.sort(key=lambda value: value.casefold())
+        self._save_sunday_workers(workers)
+
+        if new_name != target:
+            services = self._load_sunday_service_entries()
+            updated = False
+            for service in services:
+                changed = False
+                if service.presider == target:
+                    service.presider = new_name
+                    changed = True
+                if service.worship_leader == target:
+                    service.worship_leader = new_name
+                    changed = True
+                if service.pianist == target:
+                    service.pianist = new_name
+                    changed = True
+                if service.sermon_speaker == target:
+                    service.sermon_speaker = new_name
+                    changed = True
+                if changed:
+                    updated = True
+            if updated:
+                self._save_sunday_service_entries(services)
+
+        return SundayWorker(name=new_name)
+
+    def delete_sunday_worker(self, name: str) -> None:
+        target = name.strip()
+        if not target:
+            raise ValueError("Worker name is required")
+        workers = self._load_sunday_workers()
+        new_workers = [value for value in workers if value != target]
+        if len(new_workers) == len(workers):
+            raise ValueError(f"Worker {name} not found")
+        self._save_sunday_workers(new_workers)
+
+        services = self._load_sunday_service_entries()
+        updated = False
+        for service in services:
+            changed = False
+            if service.presider == target:
+                service.presider = None
+                changed = True
+            if service.worship_leader == target:
+                service.worship_leader = None
+                changed = True
+            if service.pianist == target:
+                service.pianist = None
+                changed = True
+            if service.sermon_speaker == target:
+                service.sermon_speaker = None
+                changed = True
+            if changed:
+                updated = True
+        if updated:
+            self._save_sunday_service_entries(services)
+
+    def _load_sunday_songs(self) -> list[SundaySong]:
+        try:
+            raw = json.loads(SUNDAY_SONGS_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse sunday_songs.json") from exc
+        except FileNotFoundError as exc:
+            raise ValueError("sunday_songs.json file is missing") from exc
+
+        songs: list[SundaySong] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                songs.append(SundaySong.model_validate(item))
+            except Exception:
+                legacy = self._convert_legacy_song(item)
+                songs.append(legacy)
+        return songs
+
+    def _convert_legacy_song(self, item: dict) -> SundaySong:
+        title = item.get("title") or item.get("name") or "未命名詩歌"
+        song_id = item.get("id") or str(uuid.uuid4())
+        lyrics = item.get("lyrics_markdown") or item.get("lyricsMarkdown")
+        if isinstance(lyrics, str):
+            lyrics = lyrics.strip()
+        return SundaySong(
+            id=song_id,
+            title=title,
+            source="custom",
+            lyrics_markdown=lyrics or None,
+            hymn_link=item.get("hymn_link") or item.get("link") or None,
+            hymnal_index=None,
+        )
+
+    def _save_sunday_songs(self, songs: list[SundaySong]) -> None:
+        tmp_path = SUNDAY_SONGS_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps([song.model_dump(by_alias=True) for song in songs], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(SUNDAY_SONGS_FILE)
+
+    def list_sunday_songs(self) -> list[SundaySong]:
+        songs = self._load_sunday_songs()
+        return sorted(songs, key=lambda song: song.title.casefold())
+
+    def create_sunday_song(self, payload: SundaySongCreate) -> SundaySong:
+        title = payload.title.strip()
+        if not title:
+            raise ValueError("Song title is required")
+        songs = self._load_sunday_songs()
+        if any(song.title.casefold() == title.casefold() for song in songs):
+            raise ValueError(f"Song {title} already exists")
+
+        if payload.source == "hymnal" and payload.hymnal_index is None:
+            raise ValueError("Hymnal songs require an index")
+
+        lyrics = (payload.lyrics_markdown or "").strip()
+        new_song = SundaySong(
+            id=str(uuid.uuid4()),
+            title=title,
+            source=payload.source,
+            lyrics_markdown=lyrics or None,
+            hymn_link=payload.hymn_link,
+            hymnal_index=payload.hymnal_index,
+        )
+        songs.append(new_song)
+        songs.sort(key=lambda song: song.title.casefold())
+        self._save_sunday_songs(songs)
+        return new_song
+
+    def update_sunday_song(self, song_id: str, payload: SundaySongCreate) -> SundaySong:
+        songs = self._load_sunday_songs()
+        target = None
+        for index, existing in enumerate(songs):
+            if existing.id == song_id:
+                target = index
+                break
+        if target is None:
+            raise ValueError(f"Song {song_id} not found")
+
+        title = payload.title.strip()
+        if not title:
+            raise ValueError("Song title is required")
+        if any(
+            existing.id != song_id and existing.title.casefold() == title.casefold()
+            for existing in songs
+        ):
+            raise ValueError(f"Song {title} already exists")
+
+        if payload.source == "hymnal" and payload.hymnal_index is None:
+            raise ValueError("Hymnal songs require an index")
+
+        previous_title = songs[target].title
+        lyrics = (payload.lyrics_markdown or "").strip()
+        updated_song = SundaySong(
+            id=song_id,
+            title=title,
+            source=payload.source,
+            lyrics_markdown=lyrics or None,
+            hymn_link=payload.hymn_link,
+            hymnal_index=payload.hymnal_index,
+        )
+        songs[target] = updated_song
+        songs.sort(key=lambda song: song.title.casefold())
+        self._save_sunday_songs(songs)
+
+        if previous_title != title:
+            services = self._load_sunday_service_entries()
+            updated = False
+            for service in services:
+                changed = False
+                if service.hymn == previous_title:
+                    service.hymn = title
+                    changed = True
+                if service.response_hymn == previous_title:
+                    service.response_hymn = title
+                    changed = True
+                if changed:
+                    updated = True
+            if updated:
+                self._save_sunday_service_entries(services)
+
+        return updated_song
+
+    def delete_sunday_song(self, song_id: str) -> None:
+        songs = self._load_sunday_songs()
+        target = None
+        for index, existing in enumerate(songs):
+            if existing.id == song_id:
+                target = index
+                break
+        if target is None:
+            raise ValueError(f"Song {song_id} not found")
+        removed = songs.pop(target)
+        self._save_sunday_songs(songs)
+
+        services = self._load_sunday_service_entries()
+        updated = False
+        for service in services:
+            changed = False
+            if service.hymn == removed.title:
+                service.hymn = None
+                changed = True
+            if service.response_hymn == removed.title:
+                service.response_hymn = None
+                changed = True
+            if changed:
+                updated = True
+        if updated:
+            self._save_sunday_service_entries(services)
+
+    def _load_hymn_entries(self) -> list[HymnMetadata]:
+        if not HYMNS_FILE.exists():
+            raise ValueError("Hymn metadata file not found")
+        try:
+            raw = json.loads(HYMNS_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Unable to parse hymns.json") from exc
+
+        if isinstance(raw, dict):
+            if "hymns" in raw and isinstance(raw["hymns"], list):
+                entries_raw = raw["hymns"]
+            else:
+                raise ValueError("Invalid hymns.json format")
+        elif isinstance(raw, list):
+            entries_raw = raw
+        else:
+            raise ValueError("Invalid hymns.json format")
+
+        entries: list[HymnMetadata] = []
+        for item in entries_raw:
+            if not isinstance(item, dict):
+                continue
+            index = item.get("index")
+            title = item.get("title")
+            if index is None or title is None:
+                continue
+            try:
+                index_value = int(index)
+            except (TypeError, ValueError):
+                continue
+            link = item.get("link")
+            entries.append(HymnMetadata(index=index_value, title=str(title), link=link))
+        if not entries:
+            raise ValueError("Hymn metadata is empty")
+        return entries
+
+    def get_hymn_metadata(self, index: int) -> HymnMetadata:
+        entries = self._load_hymn_entries()
+        for entry in entries:
+            if entry.index == index:
+                return entry
+        raise ValueError(f"Hymn index {index} not found")
 
 
     # Sermon series operations

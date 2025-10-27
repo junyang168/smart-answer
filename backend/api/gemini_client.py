@@ -12,20 +12,25 @@ class GeminiClient:
     def __init__(self) -> None:
         self._client = genai.Client()
 
-    def generate(self, prompt: str, model=GENERATION_MODEL) -> str:
+    def generate(self, prompt: str, model=GENERATION_MODEL, use_search_tool=False) -> str:
         contents = [
             types.Content(
                 role="user",
                 parts=[types.Part.from_text(text=prompt)],
             )
         ]
+        tools = [
+            types.Tool(googleSearch=types.GoogleSearch(
+            )),
+        ] if use_search_tool else []
+       
         generate_content_config = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
         response = self._client.models.generate_content(
             model=model,
             contents=contents,
-            config=generate_content_config,
+            config=generate_content_config
         )
         return response.text
 
