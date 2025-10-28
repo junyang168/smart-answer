@@ -12,7 +12,7 @@
     "remark-stringify": "^11.0.0",
     "showdown": "^2.1.0",
     "unified": "^11.0.5"
-  },
+  }, 
   "name": "smart-answer",
   "version": "1.0.0",
   "description": "![image](https://github.com/junyang168/smart-answer/assets/15166180/8793353e-b56c-402d-bf77-d141a16d50ff)# Smart Answer  Production-ready enterprise Question and Answer(Q&A) chatbot that enables natural language interface to your enterprise applications. # Overview Generative AI's adoption in enterprise faces seveal challenge. One major challenge is LLMs' inability to access proprietary enterprise knowledge, as enterprises often have their data scattered across various applications, each with unique business logic and interfaces. Another concern is data security and privacy when using public LLMs, as many companies require AI systems that can operate on corporate-owned infrastructure.",
