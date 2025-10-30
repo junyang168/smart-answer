@@ -32,5 +32,8 @@ SUNDAY_SONGS_FILE: Final[Path] = SUNDAY_WORSHIP_DIR / "sunday_songs.json"
 HYMNS_FILE: Final[Path] = SUNDAY_WORSHIP_DIR / "hymns.json"
 PPT_TEMPLATE_FILE: Final[Path] = SUNDAY_WORSHIP_DIR / "template.pptx"
 
+WEBCAST_DIR: Final[Path] = DATA_BASE_PATH / "webcast"
+DEPTH_OF_FAITH_FILE: Final[Path] = WEBCAST_DIR / "depth_of_faith.json"
+
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
 GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")

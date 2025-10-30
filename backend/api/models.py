@@ -172,6 +172,45 @@ class GenerateHymnLyricsResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class DepthOfFaithEpisode(BaseModel):
+    id: str
+    title: str
+    description: str
+    audio_filename: Optional[str] = Field(None, alias="audioFilename")
+    scripture: Optional[str] = None
+    duration: Optional[str] = None
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DepthOfFaithEpisodeCreate(BaseModel):
+    id: Optional[str] = None
+    title: str
+    description: str
+    audio_filename: Optional[str] = Field(None, alias="audioFilename")
+    scripture: Optional[str] = None
+    duration: Optional[str] = None
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DepthOfFaithEpisodeUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    audio_filename: Optional[str] = Field(None, alias="audioFilename")
+    scripture: Optional[str] = None
+    duration: Optional[str] = None
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class DepthOfFaithAudioUploadResponse(BaseModel):
+    filename: str
+
+
 class SermonSeries(BaseModel):
     id: str
     title: Optional[str] = None

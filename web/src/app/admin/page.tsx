@@ -26,6 +26,11 @@ const cards = [
     description: "建立講道系列、編輯摘要與管理歸屬的講道內容。",
     href: "/admin/surmon_series",
   },
+  {
+    title: "信仰的深度節目",
+    description: "上傳網播音訊並維護節目摘要、經文與發佈資訊。",
+    href: "/admin/webcast/depth-of-faith",
+  },
 ];
 
 export default function AdminHomePage() {

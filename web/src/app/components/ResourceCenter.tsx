@@ -9,7 +9,7 @@ import ResourceCard from '@/app/components/resources/ResourceCard';
 import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
 import FeaturedPostItem from '@/app/components/resources/FeaturedPostItem';
 
-import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight,ChevronRight } from 'lucide-react';
+import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio } from 'lucide-react';
 
 import type { NextPage } from 'next';
 import { apiToUiSermon} from '@/app/utils/converter'
@@ -36,6 +36,13 @@ const resourceCardsData = [
     description: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色成稿。`,
     link: '/resources/articles',
     linkLabel: '瀏覽所有分享',
+  },
+  {
+    icon: Radio,
+    title: '信仰的深度',
+    description: `透過網播隨時隨地聆聽王守仁教授的聖經教導，讓信仰在日常生活中扎根、深化。`,
+    link: '/resources/depth_of_faith',
+    linkLabel: '開始聆聽',
   },
   {
     icon: MessageCircleQuestion,

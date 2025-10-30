@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import math
 import re
 from urllib.parse import quote_plus
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 
 from .gemini_client import gemini_client
 from .models import (
     ArticleDetail,
     ArticleSummary,
+    DepthOfFaithEpisode,
+    DepthOfFaithEpisodeCreate,
+    DepthOfFaithEpisodeUpdate,
     FellowshipEntry,
     GenerateArticleRequest,
     GenerateArticleResponse,
@@ -271,10 +274,10 @@ def generate_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> Gene
     if title != hymn.title:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="詩歌標題與索引不相符")
 
+    title = "万福恩源"
+
     prompt = (
-        f"請提供教會聖詩第 {index} 首《{title}》的完整歌詞，"
-        "使用繁體中文與 Markdown 格式呈現，每一節以段落分行，若有副歌請以『副歌：』標示。"
-        "僅輸出歌詞內容，不要加入額外說明。"
+        f"請提供教會聖詩(Hymns for God's people)第 {index} 首《{title}》的完整歌詞，給出歌詞出處"
     )
 
     try:
@@ -287,6 +290,54 @@ def generate_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> Gene
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="未取得歌詞內容")
 
     return GenerateHymnLyricsResponse(lyricsMarkdown=cleaned)
+
+
+def list_depth_of_faith_episodes() -> list[DepthOfFaithEpisode]:
+    try:
+        return repository.list_depth_of_faith_episodes()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+def create_depth_of_faith_episode(payload: DepthOfFaithEpisodeCreate) -> DepthOfFaithEpisode:
+    try:
+        return repository.create_depth_of_faith_episode(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def update_depth_of_faith_episode(
+    episode_id: str,
+    payload: DepthOfFaithEpisodeUpdate,
+) -> DepthOfFaithEpisode:
+    try:
+        return repository.update_depth_of_faith_episode(episode_id, payload)
+    except ValueError as exc:
+        _raise_value_error(exc)
+
+
+def delete_depth_of_faith_episode(episode_id: str) -> None:
+    try:
+        repository.delete_depth_of_faith_episode(episode_id)
+    except ValueError as exc:
+        _raise_value_error(exc)
+
+
+def get_depth_of_faith_audio(audio_filename: str) -> Path:
+    try:
+        return repository.resolve_depth_of_faith_audio(audio_filename)
+    except ValueError as exc:
+        _raise_value_error(exc)
+
+
+def upload_depth_of_faith_audio(file: UploadFile) -> str:
+    filename = file.filename or ""
+    try:
+        return repository.save_depth_of_faith_audio(filename, file.file)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 def generate_sunday_service_ppt(date: str) -> Path:
@@ -457,6 +508,8 @@ def _build_ppt_replacements(
     _apply_song_replacements(replacements, "hymn", service.hymn, hymn)
     _apply_song_replacements(replacements, "hymn2", service.response_hymn, response_hymn)
 
+    _populate_fellowship_replacements(replacements, service_date)
+
     return replacements
 
 
@@ -478,6 +531,53 @@ def _apply_song_replacements(
         replacements[f"{prefix}Index"] = ""
         replacements[f"{prefix}Link"] = ""
         replacements[f"{prefix}Lyrics"] = ""
+
+
+def _populate_fellowship_replacements(
+    replacements: dict[str, str],
+    service_date: datetime | None,
+) -> None:
+    defaults = {
+        "fellowDate1": "",
+        "hasFellow1": "無",
+        "fellowDate2": "",
+        "hasFellow2": "無",
+    }
+    replacements.update({key: defaults[key] for key in defaults if key not in replacements})
+
+    if not service_date:
+        return
+
+    fellowship_entries = list_fellowships()
+    fellowship_dates = {
+        parsed for entry in fellowship_entries if (parsed := _parse_fellowship_date(entry.date))
+    }
+
+    first_friday = _upcoming_friday(service_date)
+    second_friday = first_friday + timedelta(weeks=1)
+
+    for date_key, flag_key, target_date in (
+        ("fellowDate1", "hasFellow1", first_friday),
+        ("fellowDate2", "hasFellow2", second_friday),
+    ):
+        replacements[date_key] = target_date.strftime("%m/%d")
+        replacements[flag_key] = "有" if target_date.date() in fellowship_dates else "無"
+
+
+def _upcoming_friday(reference: datetime) -> datetime:
+    days_until_friday = (4 - reference.weekday()) % 7
+    return reference + timedelta(days=days_until_friday)
+
+
+def _parse_fellowship_date(value: str | None) -> datetime.date | None:
+    if not value:
+        return None
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _markdown_to_plain_text(markdown: str | None) -> str:

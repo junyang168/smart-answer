@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import shutil
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import BinaryIO, Iterable, List, Optional
 
 from .config import (
     ARTICLES_DIR,
+    DEPTH_OF_FAITH_FILE,
     FELLOWSHIP_FILE,
     FULL_ARTICLE_ROOT,
+    HYMNS_FILE,
     METADATA_FILE,
     PROMPT_FILE,
     SCRIPTS_DIR,
@@ -18,7 +21,7 @@ from .config import (
     SUNDAY_SERVICE_FILE,
     SUNDAY_SONGS_FILE,
     SUNDAY_WORKERS_FILE,
-    HYMNS_FILE,
+    WEBCAST_DIR,
 )
 from .models import (
     ArticleDetail,
@@ -26,6 +29,9 @@ from .models import (
     ArticleStatus,
     ArticleSummary,
     ArticleType,
+    DepthOfFaithEpisode,
+    DepthOfFaithEpisodeCreate,
+    DepthOfFaithEpisodeUpdate,
     SaveArticleRequest,
     SaveArticleResponse,
     FellowshipEntry,
@@ -98,6 +104,9 @@ class ArticleRepository:
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
                 path.write_text("[]", encoding="utf-8")
+        WEBCAST_DIR.mkdir(parents=True, exist_ok=True)
+        if not DEPTH_OF_FAITH_FILE.exists():
+            DEPTH_OF_FAITH_FILE.write_text("[]", encoding="utf-8")
 
     # Prompt operations
     def load_prompt(self) -> str:
@@ -858,6 +867,250 @@ class ArticleRepository:
         if len(new_entries) == len(entries):
             raise ValueError(f"Sermon series {series_id} not found")
         self._save_sermon_series_entries(new_entries)
+
+    # Webcast operations
+    def _load_depth_of_faith_entries(self) -> list[DepthOfFaithEpisode]:
+        if not DEPTH_OF_FAITH_FILE.exists():
+            return []
+        try:
+            raw_entries = json.loads(DEPTH_OF_FAITH_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Unable to parse depth_of_faith.json at {DEPTH_OF_FAITH_FILE}") from exc
+
+        if not isinstance(raw_entries, list):
+            raise ValueError("depth_of_faith.json must contain a list of episodes")
+
+        episodes: list[DepthOfFaithEpisode] = []
+        seen_ids: set[str] = set()
+
+        for raw in raw_entries:
+            if not isinstance(raw, dict):
+                continue
+
+            episode_id = raw.get("id") or raw.get("slug") or raw.get("item") or raw.get("title")
+            if not episode_id:
+                raise ValueError("Depth of Faith episode entry is missing an id")
+            episode_id = str(episode_id).strip()
+            if not episode_id:
+                raise ValueError("Depth of Faith episode id cannot be blank")
+            if episode_id in seen_ids:
+                raise ValueError(f"Duplicate Depth of Faith episode id detected: {episode_id}")
+            seen_ids.add(episode_id)
+
+            title = raw.get("title")
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError(f"Depth of Faith episode {episode_id} is missing title")
+
+            description = raw.get("description") or raw.get("summary")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(f"Depth of Faith episode {episode_id} is missing description")
+
+            audio_field = (
+                raw.get("audioFilename")
+                or raw.get("audio_filename")
+                or raw.get("audioFile")
+                or raw.get("audio_file")
+                or raw.get("audio")
+                or raw.get("audioPath")
+            )
+            audio_filename = None
+            if isinstance(audio_field, str) and audio_field.strip():
+                candidate = Path(audio_field).name
+                audio_filename = candidate or None
+                if audio_filename and not audio_filename.lower().endswith(".mp3"):
+                    raise ValueError(
+                        f"Depth of Faith episode {episode_id} audio must be an MP3 file when provided"
+                    )
+
+            scripture = raw.get("scripture") or raw.get("scriptureText")
+            if isinstance(scripture, str):
+                scripture = scripture.strip() or None
+
+            duration = raw.get("duration") or raw.get("length")
+            if isinstance(duration, str):
+                duration = duration.strip() or None
+
+            published_at = raw.get("publishedAt") or raw.get("published_at") or raw.get("date")
+            if isinstance(published_at, str):
+                published_at = published_at.strip() or None
+
+            episode = DepthOfFaithEpisode(
+                id=episode_id,
+                title=title.strip(),
+                description=description.strip(),
+                audioFilename=audio_filename,
+                scripture=scripture,
+                duration=duration,
+                publishedAt=published_at,
+            )
+            episodes.append(episode)
+
+        return episodes
+
+    def _save_depth_of_faith_entries(self, episodes: list[DepthOfFaithEpisode]) -> None:
+        tmp_path = DEPTH_OF_FAITH_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps([episode.model_dump(by_alias=True) for episode in episodes], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(DEPTH_OF_FAITH_FILE)
+
+    def _generate_episode_id(self, title: str, episodes: list[DepthOfFaithEpisode]) -> str:
+        base = _slugify(title)
+        if not base:
+            base = uuid.uuid4().hex[:8]
+        candidate = base
+        existing = {episode.id for episode in episodes}
+        counter = 2
+        while candidate in existing:
+            candidate = f"{base}-{counter}"
+            counter += 1
+        return candidate
+
+    def list_depth_of_faith_episodes(self) -> list[DepthOfFaithEpisode]:
+        return self._load_depth_of_faith_entries()
+
+    def create_depth_of_faith_episode(self, payload: DepthOfFaithEpisodeCreate) -> DepthOfFaithEpisode:
+        title = payload.title.strip()
+        if not title:
+            raise ValueError("需提供節目標題")
+        description = payload.description.strip()
+        if not description:
+            raise ValueError("需提供節目描述")
+
+        audio_filename = (payload.audio_filename or "").strip() or None
+
+        episodes = self._load_depth_of_faith_entries()
+        if payload.id and payload.id.strip():
+            episode_id = payload.id.strip()
+            if any(existing.id == episode_id for existing in episodes):
+                raise ValueError(f"節目代號 {episode_id} 已存在")
+        else:
+            episode_id = self._generate_episode_id(title, episodes)
+
+        episode = DepthOfFaithEpisode(
+            id=episode_id,
+            title=title,
+            description=description,
+            audioFilename=audio_filename,
+            scripture=(payload.scripture or "").strip() or None,
+            duration=(payload.duration or "").strip() or None,
+            publishedAt=(payload.published_at or "").strip() or None,
+        )
+        episodes.append(episode)
+        self._save_depth_of_faith_entries(episodes)
+        return episode
+
+    def update_depth_of_faith_episode(
+        self,
+        episode_id: str,
+        payload: DepthOfFaithEpisodeUpdate,
+    ) -> DepthOfFaithEpisode:
+        episodes = self._load_depth_of_faith_entries()
+        target_index = next((index for index, episode in enumerate(episodes) if episode.id == episode_id), None)
+        if target_index is None:
+            raise ValueError(f"Depth of Faith episode {episode_id} not found")
+
+        current = episodes[target_index]
+
+        title = payload.title.strip() if payload.title is not None else current.title
+        if not title:
+            raise ValueError("需提供節目標題")
+
+        description = payload.description.strip() if payload.description is not None else current.description
+        if not description:
+            raise ValueError("需提供節目描述")
+
+        audio_filename = (
+            payload.audio_filename.strip() if payload.audio_filename is not None else current.audio_filename
+        )
+        if audio_filename is not None and audio_filename == "":
+            audio_filename = None
+
+        if payload.scripture is not None:
+            scripture = payload.scripture.strip() or None
+        else:
+            scripture = current.scripture
+        if payload.duration is not None:
+            duration = payload.duration.strip() or None
+        else:
+            duration = current.duration
+        if payload.published_at is not None:
+            published_at = payload.published_at.strip() or None
+        else:
+            published_at = current.published_at
+
+        updated = DepthOfFaithEpisode(
+            id=current.id,
+            title=title,
+            description=description,
+            audioFilename=audio_filename,
+            scripture=scripture,
+            duration=duration,
+            publishedAt=published_at,
+        )
+
+        episodes[target_index] = updated
+        self._save_depth_of_faith_entries(episodes)
+        return updated
+
+    def delete_depth_of_faith_episode(self, episode_id: str) -> None:
+        episodes = self._load_depth_of_faith_entries()
+        new_entries = [episode for episode in episodes if episode.id != episode_id]
+        if len(new_entries) == len(episodes):
+            raise ValueError(f"Depth of Faith episode {episode_id} not found")
+        self._save_depth_of_faith_entries(new_entries)
+
+    def resolve_depth_of_faith_audio(self, filename: str) -> Path:
+        sanitized = Path(filename).name
+        if not sanitized:
+            raise ValueError("Audio filename is required")
+
+        audio_path = (WEBCAST_DIR / sanitized).resolve()
+        try:
+            base_dir = WEBCAST_DIR.resolve()
+        except FileNotFoundError:
+            base_dir = WEBCAST_DIR
+
+        if base_dir not in audio_path.parents and audio_path != base_dir:
+            raise ValueError("Audio filename is not within the webcast directory")
+
+        if not audio_path.exists():
+            raise ValueError(f"Audio file {sanitized} not found")
+
+        return audio_path
+
+    def save_depth_of_faith_audio(self, original_filename: str, file_obj: BinaryIO) -> str:
+        if not original_filename:
+            raise ValueError("需提供檔案名稱")
+        extension = Path(original_filename).suffix.lower()
+        if extension != ".mp3":
+            raise ValueError("僅支援上傳 MP3 格式")
+
+        stem = _slugify(Path(original_filename).stem)
+        if not stem:
+            stem = uuid.uuid4().hex[:8]
+
+        candidate = f"{stem}{extension}"
+        counter = 2
+        while (WEBCAST_DIR / candidate).exists():
+            candidate = f"{stem}-{counter}{extension}"
+            counter += 1
+
+        destination = (WEBCAST_DIR / candidate).resolve()
+        try:
+            base_dir = WEBCAST_DIR.resolve()
+        except FileNotFoundError:
+            base_dir = WEBCAST_DIR
+
+        if base_dir not in destination.parents and destination != base_dir:
+            raise ValueError("無法儲存音訊檔案於指定目錄")
+
+        file_obj.seek(0)
+        with destination.open("wb") as buffer:
+            shutil.copyfileobj(file_obj, buffer)
+        file_obj.seek(0)
+        return candidate
 
 
 repository = ArticleRepository()

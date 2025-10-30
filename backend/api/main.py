@@ -9,6 +9,8 @@ from .router import (
     sunday_service_router,
     sunday_workers_router,
     sunday_songs_router,
+    webcast_router,
+    webcast_admin_router,
 )
 from .slides import router as slides_router
 from .scripture import router as scripture_router
@@ -21,6 +23,8 @@ app.include_router(surmon_series_router)
 app.include_router(sunday_service_router)
 app.include_router(sunday_workers_router)
 app.include_router(sunday_songs_router)
+app.include_router(webcast_router)
+app.include_router(webcast_admin_router)
 app.include_router(slides_router)
 app.include_router(scripture_router)
 app.include_router(sc_api_router)

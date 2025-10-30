@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
 
 from .models import (
     ArticleDetail,
     ArticleSummary,
+    DepthOfFaithEpisode,
+    DepthOfFaithEpisodeCreate,
+    DepthOfFaithEpisodeUpdate,
+    DepthOfFaithAudioUploadResponse,
     FellowshipEntry,
     GenerateArticleRequest,
     GenerateArticleResponse,
@@ -55,6 +59,12 @@ from .service import (
     update_sunday_song,
     delete_sunday_song,
     sunday_service_resources,
+    create_depth_of_faith_episode,
+    update_depth_of_faith_episode,
+    delete_depth_of_faith_episode,
+    upload_depth_of_faith_audio,
+    list_depth_of_faith_episodes,
+    get_depth_of_faith_audio,
     get_hymn_metadata,
     generate_hymn_lyrics,
 )
@@ -239,3 +249,49 @@ def read_hymn_metadata(index: int) -> HymnMetadata:
 @sunday_songs_router.post("/hymnal/{index}/lyrics", response_model=GenerateHymnLyricsResponse)
 def create_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> GenerateHymnLyricsResponse:
     return generate_hymn_lyrics(index, payload)
+
+
+webcast_router = APIRouter(prefix="/webcast", tags=["webcast"])
+
+
+@webcast_router.get("/depth-of-faith", response_model=list[DepthOfFaithEpisode])
+def list_depth_of_faith_entries() -> list[DepthOfFaithEpisode]:
+    return list_depth_of_faith_episodes()
+
+
+@webcast_router.get("/depth-of-faith/audio/{audio_filename}")
+def stream_depth_of_faith_audio(audio_filename: str) -> FileResponse:
+    audio_path = get_depth_of_faith_audio(audio_filename)
+    return FileResponse(audio_path, media_type="audio/mpeg", filename=audio_path.name)
+
+
+webcast_admin_router = APIRouter(prefix="/admin/webcast/depth-of-faith", tags=["webcast-admin"])
+
+
+@webcast_admin_router.get("", response_model=list[DepthOfFaithEpisode])
+def admin_list_depth_of_faith_entries() -> list[DepthOfFaithEpisode]:
+    return list_depth_of_faith_episodes()
+
+
+@webcast_admin_router.post("", response_model=DepthOfFaithEpisode)
+def admin_create_depth_of_faith_entry(payload: DepthOfFaithEpisodeCreate) -> DepthOfFaithEpisode:
+    return create_depth_of_faith_episode(payload)
+
+
+@webcast_admin_router.put("/{episode_id}", response_model=DepthOfFaithEpisode)
+def admin_update_depth_of_faith_entry(
+    episode_id: str,
+    payload: DepthOfFaithEpisodeUpdate,
+) -> DepthOfFaithEpisode:
+    return update_depth_of_faith_episode(episode_id, payload)
+
+
+@webcast_admin_router.delete("/{episode_id}")
+def admin_delete_depth_of_faith_entry(episode_id: str) -> None:
+    delete_depth_of_faith_episode(episode_id)
+
+
+@webcast_admin_router.post("/upload", response_model=DepthOfFaithAudioUploadResponse)
+def admin_upload_depth_of_faith_audio(file: UploadFile = File(...)) -> DepthOfFaithAudioUploadResponse:
+    filename = upload_depth_of_faith_audio(file)
+    return DepthOfFaithAudioUploadResponse(filename=filename)

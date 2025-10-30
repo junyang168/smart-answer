@@ -8,3 +8,4 @@ opencv-python
 jsonlines
 watchdog
 pytz
+python-multipart
