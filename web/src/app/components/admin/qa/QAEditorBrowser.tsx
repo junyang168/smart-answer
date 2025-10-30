@@ -209,12 +209,6 @@ const handleDelete = async (idToDelete: string) => {
 
     if (isLoading) return <div className="p-8">正在加載...</div>;
 
-    const isAdmin = session?.user?.role === "admin"; // ✅ 確認用戶是否為管理員
-//    const isAdmin = true; // 簡化權限判斷
-    if(!isAdmin) return (
-        <div className="p-4">您沒有權限訪問此頁面。</div>
-    );
-
     return (
         <div className="flex h-screen">
             {/* 左側列表欄 */}
