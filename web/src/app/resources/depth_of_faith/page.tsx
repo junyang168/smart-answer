@@ -24,15 +24,15 @@ export default async function DepthOfFaithPage() {
 
       <section className="bg-slate-900 text-white py-16 md:py-20">
         <div className="container mx-auto px-6 text-center md:text-left md:flex md:items-center md:justify-between gap-8">
-          <div className="max-w-4xl mx-auto md:mx-0">
+          <div className="max-w-5xl mx-auto md:mx-0">
             <p className="uppercase tracking-widest text-amber-300 text-sm font-semibold mb-4">
               信仰的深度
             </p>
             <h1 className="text-4xl md:text-5xl font-bold leading-tight mb-6">
-              深入神話語，聆聽生命更新的網絡廣播
+              深入神的話語，聆聽生命的更新
             </h1>
             <p className="text-lg md:text-xl text-slate-200 leading-relaxed">
-              這是一個匯集王守仁教授歷年教導的網播專區。幫助您在忙碌的生活中仍然能夠停下腳步，反思與主同行的腳步。
+              我們講王守仁教授在講道，查經中與弟兄姊妹們的對話藉著 AI加工成簡短的網路廣播。幫助您在忙碌的生活中仍然能夠停下腳步，反思與主同行的腳步。
             </p>
           </div>
           <div className="mt-8 md:mt-0 md:text-right">
@@ -56,7 +56,7 @@ export default async function DepthOfFaithPage() {
               <article key={episode.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                 <div className="p-6">
                   <span className="inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-3 py-1">
-                    聖經研讀
+                    
                   </span>
                 <h3 className="mt-4 text-2xl font-semibold text-slate-900 leading-tight">
                   {episode.title}
