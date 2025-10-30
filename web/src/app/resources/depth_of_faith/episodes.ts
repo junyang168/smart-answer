@@ -1,4 +1,5 @@
 import type { DepthOfFaithEpisode as DepthOfFaithEpisodeDto } from "@/app/types/depthOfFaith";
+import { resolveWebcastAudioUrl } from "@/app/utils/webcast";
 
 const DEFAULT_BASE_URL =
   process.env.FULL_ARTICLE_SERVICE_URL ||
@@ -11,15 +12,11 @@ export interface DepthOfFaithEpisode extends DepthOfFaithEpisodeDto {
   audioUrl?: string;
 }
 
-function buildAudioUrl(filename: string): string {
-  return `/api/webcast/depth_of_faith/audio/${encodeURIComponent(filename)}`;
-}
-
 function sanitizeEpisode(raw: DepthOfFaithEpisodeDto): DepthOfFaithEpisode | null {
   if (!raw.id || !raw.title || !raw.description) {
     return null;
   }
-  const audioUrl = raw.audioFilename ? buildAudioUrl(raw.audioFilename) : undefined;
+  const audioUrl = resolveWebcastAudioUrl(raw.audioFilename);
   return {
     ...raw,
     audioUrl,

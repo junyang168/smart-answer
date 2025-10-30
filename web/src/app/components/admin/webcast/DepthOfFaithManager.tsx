@@ -9,6 +9,7 @@ import {
   uploadDepthOfFaithAudio,
 } from "@/app/admin/webcast/api";
 import type { DepthOfFaithEpisode } from "@/app/types/depthOfFaith";
+import { resolveWebcastAudioUrl } from "@/app/utils/webcast";
 
 interface FormState {
   id?: string;
@@ -31,13 +32,6 @@ const emptyForm: FormState = {
   duration: "",
   publishedAt: "",
 };
-
-function audioUrl(filename?: string | null): string | null {
-  if (!filename) {
-    return null;
-  }
-  return `/api/webcast/depth_of_faith/audio/${encodeURIComponent(filename)}`;
-}
 
 export function DepthOfFaithManager() {
   const [episodes, setEpisodes] = useState<DepthOfFaithEpisode[]>([]);
@@ -179,7 +173,7 @@ export function DepthOfFaithManager() {
     if (!formState.audioFilename) {
       return null;
     }
-    return audioUrl(formState.audioFilename);
+    return resolveWebcastAudioUrl(formState.audioFilename) ?? null;
   }, [formState.audioFilename]);
 
   return (
@@ -387,10 +381,10 @@ export function DepthOfFaithManager() {
                     <td className="px-4 py-3">{episode.duration || "—"}</td>
                     <td className="px-4 py-3">{episode.scripture || "—"}</td>
                     <td className="px-4 py-3">
-                      {audioUrl(episode.audioFilename) ? (
+                      {resolveWebcastAudioUrl(episode.audioFilename) ? (
                         <audio
                           controls
-                          src={audioUrl(episode.audioFilename) ?? undefined}
+                          src={resolveWebcastAudioUrl(episode.audioFilename) ?? undefined}
                           className="w-48"
                         >
                           您的瀏覽器不支援 audio 元素。
