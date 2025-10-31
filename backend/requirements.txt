@@ -1,3 +1,4 @@
+beautifulsoup4
 fastapi
 httpx
 google-genai
@@ -9,3 +10,4 @@ jsonlines
 watchdog
 pytz
 python-multipart
+markdownify
