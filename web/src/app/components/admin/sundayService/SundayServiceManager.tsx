@@ -784,7 +784,7 @@ export function SundayServiceManager() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-semibold text-gray-700">家事與報告 (Markdown)</label>
+              <label className="mb-1 block text-sm font-semibold text-gray-700">家事與報告</label>
               <textarea
                 className="h-40 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
                 value={form.announcementsMarkdown}
@@ -794,7 +794,7 @@ export function SundayServiceManager() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-semibold text-gray-700">身體健康代祷 (Markdown)</label>
+              <label className="mb-1 block text-sm font-semibold text-gray-700">身體健康代祷</label>
               <textarea
                 className="h-32 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
                 value={form.healthPrayerMarkdown}
