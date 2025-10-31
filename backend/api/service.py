@@ -37,7 +37,7 @@ from .storage import repository
 from .config import SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
 from .ppt_generator import generate_presentation_from_template
 from .scripture import parse_reference, BIBLE_API_TRANSLATION_ZH, ALIAS_TO_API_BOOK, BOOK_SLUG_TO_NAME
-
+from .webpage_extractor import fetch_lyrics_text
 
 def compose_generation_prompt(prompt_template: str, script_markdown: str) -> str:
     placeholder = "{{SCRIPT}}"
@@ -268,28 +268,15 @@ def get_hymn_metadata(index: int) -> HymnMetadata:
         _raise_value_error(exc)
 
 
+
 def generate_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> GenerateHymnLyricsResponse:
     hymn = get_hymn_metadata(index)
     title = payload.title.strip() if payload.title else hymn.title
     if title != hymn.title:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="詩歌標題與索引不相符")
+    
+    return fetch_lyrics_text(hymn.lyrics_url)
 
-    title = "万福恩源"
-
-    prompt = (
-        f"請提供教會聖詩(Hymns for God's people)第 {index} 首《{title}》的完整歌詞，給出歌詞出處"
-    )
-
-    try:
-        lyrics_markdown = gemini_client.generate(prompt,use_search_tool=True)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    cleaned = lyrics_markdown.strip()
-    if not cleaned:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="未取得歌詞內容")
-
-    return GenerateHymnLyricsResponse(lyricsMarkdown=cleaned)
 
 
 def list_depth_of_faith_episodes() -> list[DepthOfFaithEpisode]:

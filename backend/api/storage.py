@@ -800,7 +800,10 @@ class ArticleRepository:
             except (TypeError, ValueError):
                 continue
             link = item.get("link")
-            entries.append(HymnMetadata(index=index_value, title=str(title), link=link))
+            lyrics_url = item.get("lyrics_url") or item.get("lyricsUrl")
+            entries.append(
+                HymnMetadata(index=index_value, title=str(title), link=link, lyrics_url=lyrics_url)
+            )
         if not entries:
             raise ValueError("Hymn metadata is empty")
         return entries

@@ -45,6 +45,7 @@ export interface HymnMetadata {
   index: number;
   title: string;
   link?: string | null;
+  lyricsUrl?: string | null;
 }
 
 export interface GenerateHymnLyricsResponse {

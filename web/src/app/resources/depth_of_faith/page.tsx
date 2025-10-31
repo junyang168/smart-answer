@@ -32,7 +32,7 @@ export default async function DepthOfFaithPage() {
               深入神的話語，聆聽生命的更新
             </h1>
             <p className="text-lg md:text-xl text-slate-200 leading-relaxed">
-              我們講王守仁教授在講道，查經中與弟兄姊妹們的對話藉著 AI加工成簡短的網路廣播。幫助您在忙碌的生活中仍然能夠停下腳步，反思與主同行的腳步。
+              我們將王守仁教授在講道中和弟兄姊妹們在查經中的對話藉著 AI加工成簡短的網路廣播。幫助您在忙碌的生活中仍然能夠停下腳步，反思與主同行的腳步。
             </p>
           </div>
           <div className="mt-8 md:mt-0 md:text-right">

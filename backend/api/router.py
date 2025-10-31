@@ -248,7 +248,7 @@ def read_hymn_metadata(index: int) -> HymnMetadata:
 
 @sunday_songs_router.post("/hymnal/{index}/lyrics", response_model=GenerateHymnLyricsResponse)
 def create_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> GenerateHymnLyricsResponse:
-    return generate_hymn_lyrics(index, payload)
+    return GenerateHymnLyricsResponse(lyrics_markdown=generate_hymn_lyrics(index, payload))
 
 
 webcast_router = APIRouter(prefix="/webcast", tags=["webcast"])

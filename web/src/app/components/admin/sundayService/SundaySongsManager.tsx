@@ -34,6 +34,19 @@ const emptyForm: SongFormState = {
   hymnLink: "",
 };
 
+const HYMNS_BASE_URL = "https://www.zanmei.ai/";
+
+function resolveHymnLink(url?: string | null): string | undefined {
+  if (!url) {
+    return undefined;
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return url;
+  }
+  const trimmed = url.replace(/^\/+/, "");
+  return `${HYMNS_BASE_URL}${trimmed}`;
+}
+
 function toPayload(form: SongFormState): SundaySongPayload {
   const lyrics = form.lyricsMarkdown.trim();
   if (form.source === "hymnal") {
@@ -97,6 +110,11 @@ export function SundaySongsManager() {
     return [...songs].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
   }, [songs]);
 
+  const resolvedHymnMetadataLink = hymnMetadata ? resolveHymnLink(hymnMetadata.link) : undefined;
+  const resolvedHymnMetadataLyricsLink = hymnMetadata
+    ? resolveHymnLink(hymnMetadata.lyricsUrl)
+    : undefined;
+
   const resetForm = () => {
     setForm({ ...emptyForm });
     setEditing(null);
@@ -136,7 +154,7 @@ export function SundaySongsManager() {
       setForm((prev) => ({
         ...prev,
         title: metadata.title,
-        hymnLink: metadata.link ?? "",
+        hymnLink: resolveHymnLink(metadata.link) ?? "",
       }));
       setFeedback(`已載入教會聖詩第 ${metadata.index} 首：${metadata.title}`);
     } catch (err) {
@@ -221,7 +239,7 @@ export function SundaySongsManager() {
         title: song.title,
         hymnalIndex: song.hymnalIndex != null ? String(song.hymnalIndex) : "",
         lyricsMarkdown: song.lyricsMarkdown ?? "",
-        hymnLink: song.hymnLink ?? "",
+        hymnLink: resolveHymnLink(song.hymnLink) ?? "",
       });
       if (song.hymnalIndex != null) {
         setLookupLoading(true);
@@ -231,7 +249,7 @@ export function SundaySongsManager() {
             setForm((prev) => ({
               ...prev,
               title: metadata.title,
-              hymnLink: metadata.link ?? "",
+              hymnLink: resolveHymnLink(metadata.link) ?? "",
             }));
           })
           .catch((err: unknown) => {
@@ -240,7 +258,8 @@ export function SundaySongsManager() {
             setHymnMetadata({
               index: song.hymnalIndex ?? 0,
               title: song.title,
-              link: song.hymnLink ?? undefined,
+              link: resolveHymnLink(song.hymnLink) ?? undefined,
+              lyricsUrl: undefined,
             });
           })
           .finally(() => {
@@ -389,15 +408,27 @@ export function SundaySongsManager() {
                     <p>
                       教會聖詩第 {hymnMetadata.index} 首：《{hymnMetadata.title}》
                     </p>
-                    {hymnMetadata.link && (
+                    {resolvedHymnMetadataLink && (
                       <p>
                         <a
-                          href={hymnMetadata.link}
+                          href={resolvedHymnMetadataLink}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 underline"
                         >
                           線上樂譜 / 樂譜連結
+                        </a>
+                      </p>
+                    )}
+                    {resolvedHymnMetadataLyricsLink && (
+                      <p>
+                        <a
+                          href={resolvedHymnMetadataLyricsLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 underline"
+                        >
+                          歌詞
                         </a>
                       </p>
                     )}
@@ -427,7 +458,7 @@ export function SundaySongsManager() {
               onClick={handleGenerateLyrics}
               disabled={generating || saving || !hymnMetadata}
             >
-              {generating ? "取得歌詞中…" : "以 LLM 取得歌詞"}
+              {generating ? "取得歌詞中…" : "取得歌詞"}
             </button>
           )}
 

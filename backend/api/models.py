@@ -160,6 +160,9 @@ class HymnMetadata(BaseModel):
     index: int
     title: str
     link: Optional[str] = None
+    lyrics_url: Optional[str] = Field(None, alias="lyricsUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class GenerateHymnLyricsRequest(BaseModel):
