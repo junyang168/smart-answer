@@ -23,6 +23,7 @@ from .models import (
     HymnMetadata,
     SundayServiceEntry,
     SundayServiceResources,
+    SundayServiceEmailResult,
     SundaySong,
     SundaySongCreate,
     SundayWorker,
@@ -50,6 +51,9 @@ from .service import (
     update_sunday_service,
     delete_sunday_service,
     generate_sunday_service_ppt,
+    email_sunday_service,
+    upload_final_sunday_service_ppt,
+    get_final_sunday_service_ppt,
     list_sunday_workers,
     create_sunday_worker,
     update_sunday_worker,
@@ -193,6 +197,26 @@ def create_sunday_service_ppt(date: str) -> FileResponse:
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=ppt_path.name,
     )
+
+
+@sunday_service_router.post("/{date:path}/ppt/final", response_model=SundayServiceEntry)
+async def upload_sunday_service_final_ppt(date: str, file: UploadFile = File(...)) -> SundayServiceEntry:
+    return upload_final_sunday_service_ppt(date, file)
+
+
+@sunday_service_router.get("/{date:path}/ppt/final")
+def download_sunday_service_final_ppt(date: str) -> FileResponse:
+    ppt_path = get_final_sunday_service_ppt(date)
+    return FileResponse(
+        ppt_path,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=ppt_path.name,
+    )
+
+
+@sunday_service_router.post("/{date:path}/email", response_model=SundayServiceEmailResult)
+def send_sunday_service_email(date: str) -> SundayServiceEmailResult:
+    return email_sunday_service(date)
 
 
 sunday_workers_router = APIRouter(prefix="/admin/sunday-workers", tags=["sunday-workers"])

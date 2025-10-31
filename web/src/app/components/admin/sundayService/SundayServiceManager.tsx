@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSundayService,
   deleteSundayService,
@@ -9,6 +9,9 @@ import {
   fetchSundayServices,
   fetchScriptureBooks,
   generateSundayServicePpt,
+  downloadFinalSundayServicePpt,
+  uploadFinalSundayServicePpt,
+  sendSundayServiceEmail,
   updateSundayService,
 } from "@/app/admin/sunday-service/api";
 import { SundayWorkerManager } from "@/app/components/admin/sundayService/SundayWorkerManager";
@@ -26,6 +29,13 @@ interface ScriptureSelection {
   end: string;
 }
 
+const createEmptyScriptureSelection = (): ScriptureSelection => ({
+  book: "",
+  chapter: "",
+  start: "",
+  end: "",
+});
+
 interface FormState {
   date: string;
   presider: string;
@@ -33,10 +43,7 @@ interface FormState {
   pianist: string;
   hymn: string;
   responseHymn: string;
-  scriptureBook: string;
-  scriptureChapter: string;
-  scriptureStart: string;
-  scriptureEnd: string;
+  scriptures: ScriptureSelection[];
   scriptureReader1: string;
   scriptureReader2: string;
   scriptureReader3: string;
@@ -44,35 +51,65 @@ interface FormState {
   sermonTitle: string;
   announcementsMarkdown: string;
   healthPrayerMarkdown: string;
+  holdHolyCommunion: boolean;
 }
 
-const emptyForm: FormState = {
-  date: "",
-  presider: "",
-  worshipLeader: "",
-  pianist: "",
-  hymn: "",
-  responseHymn: "",
-  scriptureBook: "",
-  scriptureChapter: "",
-  scriptureStart: "",
-  scriptureEnd: "",
-  scriptureReader1: "",
-  scriptureReader2: "",
-  scriptureReader3: "",
-  sermonSpeaker: "",
-  sermonTitle: "",
-  announcementsMarkdown: "",
-  healthPrayerMarkdown: "",
-};
+function createEmptyForm(): FormState {
+  return {
+    date: "",
+    presider: "",
+    worshipLeader: "",
+    pianist: "",
+    hymn: "",
+    responseHymn: "",
+    scriptures: [createEmptyScriptureSelection()],
+    scriptureReader1: "",
+    scriptureReader2: "",
+    scriptureReader3: "",
+    sermonSpeaker: "",
+    sermonTitle: "",
+    announcementsMarkdown: "",
+    healthPrayerMarkdown: "",
+    holdHolyCommunion: false,
+  };
+}
 
-function parseScriptureValue(value: string | null | undefined): ScriptureSelection {
+function isFirstSundayOfMonth(value: string): boolean {
   if (!value) {
-    return { book: "", chapter: "", start: "", end: "" };
+    return false;
   }
-  const parts = value.split("-");
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number.parseInt(yearText ?? "", 10);
+  const month = Number.parseInt(monthText ?? "", 10);
+  const day = Number.parseInt(dayText ?? "", 10);
+  if (
+    Number.isNaN(year) ||
+    Number.isNaN(month) ||
+    Number.isNaN(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return false;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const dayOfWeek = date.getUTCDay();
+  const dayOfMonth = date.getUTCDate();
+  return dayOfWeek === 0 && dayOfMonth <= 7;
+}
+
+function parseScriptureSlug(value: string | null | undefined): ScriptureSelection {
+  if (!value) {
+    return createEmptyScriptureSelection();
+  }
+  const trimmed = value.trim().replace(/^scripture-/, "");
+  if (!trimmed) {
+    return createEmptyScriptureSelection();
+  }
+  const parts = trimmed.split("-");
   if (parts.length < 3) {
-    return { book: "", chapter: "", start: "", end: "" };
+    return createEmptyScriptureSelection();
   }
   const [book, chapter, start, maybeEnd] = parts;
   return {
@@ -83,11 +120,21 @@ function parseScriptureValue(value: string | null | undefined): ScriptureSelecti
   };
 }
 
-function composeScriptureValue(form: FormState): string | null {
-  const book = form.scriptureBook.trim();
-  const chapter = form.scriptureChapter.trim();
-  const start = form.scriptureStart.trim();
-  const end = form.scriptureEnd.trim();
+function parseScriptureValues(values: string[] | null | undefined): ScriptureSelection[] {
+  if (!values || values.length === 0) {
+    return [createEmptyScriptureSelection()];
+  }
+  const parsed = values
+    .map((value) => parseScriptureSlug(value))
+    .filter((selection) => selection.book || selection.chapter || selection.start || selection.end);
+  return parsed.length > 0 ? parsed : [createEmptyScriptureSelection()];
+}
+
+function composeScriptureSlug(selection: ScriptureSelection): string | null {
+  const book = selection.book.trim();
+  const chapter = selection.chapter.trim();
+  const start = selection.start.trim();
+  const end = selection.end.trim();
   if (!book || !chapter || !start) {
     return null;
   }
@@ -101,22 +148,37 @@ function composeScriptureValue(form: FormState): string | null {
   return `${book}-${chapterNum}-${startNum}-${normalizedEnd}`;
 }
 
+function composeScriptureValues(selections: ScriptureSelection[]): string[] {
+  const slugs: string[] = [];
+  const seen = new Set<string>();
+  selections.forEach((selection) => {
+    const slug = composeScriptureSlug(selection);
+    if (slug && !seen.has(slug)) {
+      slugs.push(slug);
+      seen.add(slug);
+    }
+  });
+  return slugs;
+}
+
 function toForm(entry: SundayServiceEntry | null): FormState {
   if (!entry) {
-    return { ...emptyForm };
+    return createEmptyForm();
   }
-  const scripture = parseScriptureValue(entry.scripture);
+  const base = createEmptyForm();
+  const rawHold =
+    entry.holdHolyCommunion ??
+    (entry as { hold_holy_communion?: boolean | null }).hold_holy_communion ??
+    null;
   return {
+    ...base,
     date: entry.date ?? "",
     presider: entry.presider ?? "",
     worshipLeader: entry.worshipLeader ?? "",
     pianist: entry.pianist ?? "",
     hymn: entry.hymn ?? "",
     responseHymn: entry.responseHymn ?? "",
-    scriptureBook: scripture.book,
-    scriptureChapter: scripture.chapter,
-    scriptureStart: scripture.start,
-    scriptureEnd: scripture.end,
+    scriptures: parseScriptureValues(entry.scripture ?? null),
     scriptureReader1: entry.scriptureReaders?.[0] ?? "",
     scriptureReader2: entry.scriptureReaders?.[1] ?? "",
     scriptureReader3: entry.scriptureReaders?.[2] ?? "",
@@ -124,6 +186,8 @@ function toForm(entry: SundayServiceEntry | null): FormState {
     sermonTitle: entry.sermonTitle ?? "",
     announcementsMarkdown: entry.announcementsMarkdown ?? "",
     healthPrayerMarkdown: entry.health_prayer_markdown ?? "",
+    holdHolyCommunion:
+      rawHold ?? (entry.date ? isFirstSundayOfMonth(entry.date) : base.holdHolyCommunion),
   };
 }
 
@@ -132,6 +196,7 @@ function fromForm(form: FormState): SundayServiceEntry {
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
   };
+  const scriptureSelections = composeScriptureValues(form.scriptures);
   return {
     date: form.date,
     presider: optional(form.presider),
@@ -139,7 +204,7 @@ function fromForm(form: FormState): SundayServiceEntry {
     pianist: optional(form.pianist),
     hymn: optional(form.hymn),
     responseHymn: optional(form.responseHymn),
-    scripture: composeScriptureValue(form),
+    scripture: scriptureSelections,
     scriptureReaders: [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3]
       .map((value) => value.trim())
       .filter((value) => value.length > 0),
@@ -147,6 +212,7 @@ function fromForm(form: FormState): SundayServiceEntry {
     sermonTitle: optional(form.sermonTitle),
     announcementsMarkdown: form.announcementsMarkdown.trim(),
     health_prayer_markdown: form.healthPrayerMarkdown.trim(),
+    holdHolyCommunion: form.holdHolyCommunion,
   };
 }
 
@@ -160,33 +226,43 @@ function renderSongLabel(song: SundaySong): string {
 }
 
 function validateScripture(form: FormState): string | null {
-  const hasAny =
-    form.scriptureBook.trim() ||
-    form.scriptureChapter.trim() ||
-    form.scriptureStart.trim() ||
-    form.scriptureEnd.trim();
-  if (!hasAny) {
+  const processed = form.scriptures.map((selection) => ({
+    book: selection.book.trim(),
+    chapter: selection.chapter.trim(),
+    start: selection.start.trim(),
+    end: selection.end.trim(),
+  }));
+
+  const filled = processed.filter(
+    (selection) => selection.book || selection.chapter || selection.start || selection.end,
+  );
+
+  if (filled.length === 0) {
     return "請完整輸入讀經經文";
   }
-  if (!form.scriptureBook.trim()) {
-    return "請選擇經文書卷";
-  }
-  const chapter = Number.parseInt(form.scriptureChapter.trim(), 10);
-  const start = Number.parseInt(form.scriptureStart.trim(), 10);
-  const end = form.scriptureEnd.trim()
-    ? Number.parseInt(form.scriptureEnd.trim(), 10)
-    : start;
-  if (Number.isNaN(chapter) || chapter <= 0) {
-    return "章節須為正整數";
-  }
-  if (Number.isNaN(start) || start <= 0) {
-    return "起始經文須為正整數";
-  }
-  if (Number.isNaN(end) || end <= 0) {
-    return "結束經文須為正整數";
-  }
-  if (end < start) {
-    return "結束經文須大於或等於起始經文";
+
+  for (let index = 0; index < filled.length; index += 1) {
+    const selection = filled[index];
+    const prefix = `第 ${index + 1} 段`;
+    if (!selection.book) {
+      return `${prefix}：請選擇經文書卷`;
+    }
+    const chapter = Number.parseInt(selection.chapter, 10);
+    if (Number.isNaN(chapter) || chapter <= 0) {
+      return `${prefix}：章節須為正整數`;
+    }
+    const start = Number.parseInt(selection.start, 10);
+    if (Number.isNaN(start) || start <= 0) {
+      return `${prefix}：起始經文須為正整數`;
+    }
+    const effectiveEnd = selection.end || selection.start;
+    const end = Number.parseInt(effectiveEnd, 10);
+    if (Number.isNaN(end) || end <= 0) {
+      return `${prefix}：結束經文須為正整數`;
+    }
+    if (end < start) {
+      return `${prefix}：結束經文須大於或等於起始經文`;
+    }
   }
   const readers = [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3].map((value) =>
     value.trim(),
@@ -198,18 +274,21 @@ function validateScripture(form: FormState): string | null {
 }
 
 function formatScriptureDisplay(
-  value: string | null | undefined,
+  value: string[] | null | undefined,
   lookup: Map<string, string>,
-): string {
-  const { book, chapter, start, end } = parseScriptureValue(value);
-  if (!book || !chapter || !start) {
-    return value ?? "-";
+): string[] {
+  if (!value || value.length === 0) {
+    return [];
   }
-  const name = lookup.get(book) ?? book.toUpperCase();
-  if (!end || end === start) {
-    return `${name} ${chapter}:${start}`;
-  }
-  return `${name} ${chapter}:${start}-${end}`;
+  return value
+    .map((item) => parseScriptureSlug(item))
+    .filter((selection) => selection.book && selection.chapter && selection.start)
+    .map((selection) => {
+      const name = lookup.get(selection.book) ?? selection.book.toUpperCase();
+      const hasRange = selection.end && selection.end !== selection.start;
+      const range = hasRange ? `${selection.start}-${selection.end}` : selection.start;
+      return `${name} ${selection.chapter}:${range}`;
+    });
 }
 
 export function SundayServiceManager() {
@@ -217,27 +296,34 @@ export function SundayServiceManager() {
   const [resources, setResources] = useState<SundayServiceResources>({ workers: [], songs: [] });
   const [scriptureBooks, setScriptureBooks] = useState<ScriptureBook[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [form, setForm] = useState<FormState>({ ...emptyForm });
+  const [form, setForm] = useState<FormState>(createEmptyForm());
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pptGenerating, setPptGenerating] = useState<string | null>(null);
+  const [finalPptUploading, setFinalPptUploading] = useState(false);
+  const [finalPptDownloading, setFinalPptDownloading] = useState<string | null>(null);
+  const [emailSending, setEmailSending] = useState<string | null>(null);
+  const finalPptInputRef = useRef<HTMLInputElement | null>(null);
 
   const bookNameMap = useMemo(
     () => new Map(scriptureBooks.map((book) => [book.slug, book.name])),
     [scriptureBooks],
   );
 
-  const scriptureBookOptions = useMemo(() => {
-    if (!form.scriptureBook) {
-      return scriptureBooks;
-    }
-    if (scriptureBooks.some((book) => book.slug === form.scriptureBook)) {
-      return scriptureBooks;
-    }
-    return [...scriptureBooks, { slug: form.scriptureBook, name: form.scriptureBook }];
-  }, [scriptureBooks, form.scriptureBook]);
+  const resolveBookOptions = useCallback(
+    (current: string) => {
+      if (!current) {
+        return scriptureBooks;
+      }
+      if (scriptureBooks.some((book) => book.slug === current)) {
+        return scriptureBooks;
+      }
+      return [...scriptureBooks, { slug: current, name: current }];
+    },
+    [scriptureBooks],
+  );
 
   const loadResources = useCallback(async () => {
     try {
@@ -250,10 +336,26 @@ export function SundayServiceManager() {
   }, []);
 
   useEffect(() => {
-    if (!editingDate && scriptureBooks.length > 0 && !form.scriptureBook) {
-      setForm((prev) => ({ ...prev, scriptureBook: scriptureBooks[0].slug }));
+    if (scriptureBooks.length === 0) {
+      return;
     }
-  }, [editingDate, scriptureBooks, form.scriptureBook]);
+    setForm((prev) => {
+      const fallback = scriptureBooks[0]?.slug ?? "";
+      const base = prev.scriptures.length > 0 ? prev.scriptures : [createEmptyScriptureSelection()];
+      let changed = base.length !== prev.scriptures.length;
+      const updated = base.map((selection) => {
+        if (selection.book) {
+          return selection;
+        }
+        if (!fallback) {
+          return selection;
+        }
+        changed = true;
+        return { ...selection, book: fallback };
+      });
+      return changed ? { ...prev, scriptures: updated } : prev;
+    });
+  }, [scriptureBooks]);
 
   useEffect(() => {
     if (editingDate) {
@@ -337,6 +439,13 @@ export function SundayServiceManager() {
     return [...resources.songs].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
   }, [resources.songs]);
 
+  const currentService = useMemo(() => {
+    if (!editingDate) {
+      return null;
+    }
+    return services.find((entry) => entry.date === editingDate) ?? null;
+  }, [services, editingDate]);
+
   const workerNames = useMemo(
     () => resources.workers.map((worker) => worker.name).filter((name) => name.trim().length > 0),
     [resources.workers],
@@ -369,22 +478,83 @@ export function SundayServiceManager() {
   const handleInputChange = (field: keyof FormState) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
       const value = event.target.value;
-      setForm((prev) => ({ ...prev, [field]: value }));
+      setForm((prev) => {
+        if (field === "date") {
+          const shouldHoldHolyCommunion = isFirstSundayOfMonth(value);
+          return { ...prev, date: value, holdHolyCommunion: shouldHoldHolyCommunion };
+        }
+        return { ...prev, [field]: value };
+      });
     };
 
+  const handleCheckboxChange = (field: keyof FormState) =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const checked = event.target.checked;
+      setForm((prev) => ({ ...prev, [field]: checked }));
+    };
+
+  const handleScriptureFieldChange =
+    (index: number, field: keyof ScriptureSelection) =>
+    (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      const value = event.target.value;
+      setForm((prev) => {
+        const updated = prev.scriptures.map((selection, idx) =>
+          idx === index ? { ...selection, [field]: value } : selection,
+        );
+        return { ...prev, scriptures: updated };
+      });
+    };
+
+  const addScriptureSelection = () => {
+    setForm((prev) => {
+      const fallback = scriptureBooks[0]?.slug ?? "";
+      const next = createEmptyScriptureSelection();
+      if (fallback) {
+        next.book = fallback;
+      }
+      return { ...prev, scriptures: [...prev.scriptures, next] };
+    });
+  };
+
+  const removeScriptureSelection = (index: number) => {
+    setForm((prev) => {
+      if (prev.scriptures.length <= 1) {
+        return prev;
+      }
+      const updated = prev.scriptures.filter((_, idx) => idx !== index);
+      return { ...prev, scriptures: updated };
+    });
+  };
+
   const resetForm = () => {
-    setForm((prev) => ({
-      ...emptyForm,
-      scriptureBook: scriptureBooks[0]?.slug ?? prev.scriptureBook ?? "",
-    }));
+    const base = createEmptyForm();
+    const fallbackBook = scriptureBooks[0]?.slug ?? "";
+    if (fallbackBook) {
+      base.scriptures[0] = { ...base.scriptures[0], book: fallbackBook };
+    }
+    setForm(base);
     setEditingDate(null);
   };
 
   const handleEdit = (entry: SundayServiceEntry) => {
     setEditingDate(entry.date);
     const next = toForm(entry);
-    if (!next.scriptureBook && scriptureBooks.length > 0) {
-      next.scriptureBook = scriptureBooks[0].slug;
+    if (scriptureBooks.length > 0) {
+      const fallback = scriptureBooks[0].slug;
+      let changed = false;
+      const normalized = next.scriptures.map((selection) => {
+        if (selection.book) {
+          return selection;
+        }
+        if (!fallback) {
+          return selection;
+        }
+        changed = true;
+        return { ...selection, book: fallback };
+      });
+      if (changed) {
+        next.scriptures = normalized;
+      }
     }
     setForm(next);
     setFeedback(null);
@@ -475,6 +645,95 @@ export function SundayServiceManager() {
     }
   };
 
+  const handleFinalPptUpload = async (file: File) => {
+    if (!editingDate) {
+      setError("請先選擇主日日期並儲存資料");
+      return;
+    }
+    if (!currentService) {
+      setError("請先儲存主日服事資料後再上傳 PPT");
+      return;
+    }
+    setFinalPptUploading(true);
+    setFeedback(null);
+    setError(null);
+    try {
+      await uploadFinalSundayServicePpt(editingDate, file);
+      setFeedback("已上傳最終 PPT");
+      await loadServices({ preserveForm: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "上傳最終 PPT 失敗";
+      setError(message);
+    } finally {
+      setFinalPptUploading(false);
+      if (finalPptInputRef.current) {
+        finalPptInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleFinalPptFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    void handleFinalPptUpload(file);
+  };
+
+  const handleDownloadFinalPpt = async (entry: SundayServiceEntry) => {
+    if (!entry.finalPptFilename) {
+      setError("尚未上傳最終 PPT");
+      return;
+    }
+    setFinalPptDownloading(entry.date);
+    setFeedback(null);
+    setError(null);
+    try {
+      const blob = await downloadFinalSundayServicePpt(entry.date);
+      if (blob.size === 0) {
+        throw new Error("下載的檔案內容為空");
+      }
+      const fileName =
+        entry.finalPptFilename && entry.finalPptFilename.trim().length > 0
+          ? entry.finalPptFilename
+          : `聖道教會${formatDisplayDate(entry.date)}主日崇拜.pptx`;
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+      setFeedback(`已下載 ${fileName}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "下載最終 PPT 失敗";
+      setError(message);
+    } finally {
+      setFinalPptDownloading(null);
+    }
+  };
+
+  const handleSendEmail = async (entry: SundayServiceEntry) => {
+    if (!entry.finalPptFilename) {
+      setError("請先上傳最終 PPT");
+      return;
+    }
+    setEmailSending(entry.date);
+    setFeedback(null);
+    setError(null);
+    try {
+      const result = await sendSundayServiceEmail(entry.date);
+      const count = result.recipients.length;
+      setFeedback(`已發送主日服事 email 給 ${count} 位同工`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "發送 email 失敗";
+      setError(message);
+    } finally {
+      setEmailSending(null);
+    }
+  };
+
   const handleRefresh = async () => {
     setFeedback(null);
     setError(null);
@@ -506,12 +765,48 @@ export function SundayServiceManager() {
     if (!value) {
       return "";
     }
-    const timestamp = Date.parse(value);
-    if (!Number.isNaN(timestamp)) {
-      const date = new Date(timestamp);
-      return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, "0")}-${`${date.getDate()}`.padStart(2, "0")}`;
+    const trimmed = value.trim();
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      return trimmed;
     }
-    return value;
+    const ymdSlashMatch = trimmed.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (ymdSlashMatch) {
+      const [, year, month, day] = ymdSlashMatch;
+      return `${year}-${month}-${day}`;
+    }
+    const mdySlashMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (mdySlashMatch) {
+      const [, month, day, year] = mdySlashMatch;
+      return `${year}-${month}-${day}`;
+    }
+    const timestamp = Date.parse(trimmed);
+    if (Number.isNaN(timestamp)) {
+      return trimmed;
+    }
+    const formatter = new Intl.DateTimeFormat("zh-TW", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const formattedParts = formatter.formatToParts(new Date(timestamp));
+    let year: string | undefined;
+    let month: string | undefined;
+    let day: string | undefined;
+    for (const part of formattedParts) {
+      if (part.type === "year") {
+        year = part.value;
+      } else if (part.type === "month") {
+        month = part.value;
+      } else if (part.type === "day") {
+        day = part.value;
+      }
+    }
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+    return trimmed;
   };
 
   return (
@@ -560,15 +855,64 @@ export function SundayServiceManager() {
             {editingDate ? `編輯 ${formatDisplayDate(editingDate)} 主日` : "新增主日服事"}
           </h3>
           {editingDate && (
-            <div className="mb-4 flex justify-end">
-              <button
-                type="button"
-                className="rounded border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
-                onClick={() => handleGeneratePpt(editingDate)}
-                disabled={pptGenerating === editingDate || saving}
-              >
-                {pptGenerating === editingDate ? "生成中…" : "生成 PPT"}
-              </button>
+            <div className="mb-4 space-y-3 rounded border border-blue-100 bg-blue-50 p-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="rounded border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
+                  onClick={() => handleGeneratePpt(editingDate)}
+                  disabled={pptGenerating === editingDate || saving}
+                >
+                  {pptGenerating === editingDate ? "生成中…" : "生成 PPT"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-green-300 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:border-green-200 disabled:text-green-300"
+                  onClick={() => currentService && handleDownloadFinalPpt(currentService)}
+                  disabled={
+                    !currentService?.finalPptFilename ||
+                    finalPptDownloading === editingDate ||
+                    saving
+                  }
+                >
+                  {finalPptDownloading === editingDate
+                    ? "下載中…"
+                    : currentService?.finalPptFilename
+                      ? "下載最終 PPT"
+                      : "尚未上傳"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-purple-300 px-4 py-2 text-sm font-semibold text-purple-700 hover:bg-purple-100 disabled:cursor-not-allowed disabled:border-purple-200 disabled:text-purple-300"
+                  onClick={() => currentService && handleSendEmail(currentService)}
+                  disabled={
+                    !currentService?.finalPptFilename ||
+                    emailSending === editingDate ||
+                    saving
+                  }
+                >
+                  {emailSending === editingDate ? "發送中…" : "發送 email"}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="font-semibold text-gray-700">上傳最終 PPT</span>
+                <input
+                  ref={finalPptInputRef}
+                  type="file"
+                  accept=".pptx"
+                  className="text-sm"
+                  onChange={handleFinalPptFileChange}
+                  disabled={finalPptUploading || saving || !currentService}
+                />
+                <span className="text-xs text-gray-500">僅接受 .pptx 檔案</span>
+              </div>
+              <p className="text-xs text-gray-600">
+                {finalPptUploading
+                  ? "最終 PPT 上傳中…"
+                  : currentService?.finalPptFilename
+                    ? `目前檔案：${currentService.finalPptFilename}`
+                    : "尚未上傳最終 PPT"}
+              </p>
             </div>
           )}
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -582,6 +926,23 @@ export function SundayServiceManager() {
                 disabled={saving}
                 required
               />
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  id="holdHolyCommunion"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  checked={form.holdHolyCommunion}
+                  onChange={handleCheckboxChange("holdHolyCommunion")}
+                  disabled={saving}
+                />
+                <label
+                  htmlFor="holdHolyCommunion"
+                  className="text-sm font-semibold text-gray-700"
+                >
+                  守聖餐
+                </label>
+                <span className="text-xs text-gray-500">每月第一個主日會自動勾選</span>
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
@@ -685,48 +1046,74 @@ export function SundayServiceManager() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-semibold text-gray-700">讀經經文</label>
-              <div className="grid gap-3 md:grid-cols-4">
-                <select
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  value={form.scriptureBook}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, scriptureBook: event.target.value }))
-                  }
-                  disabled={saving || scriptureBookOptions.length === 0}
+              <div className="space-y-3">
+                {form.scriptures.map((selection, index) => {
+                  const options = resolveBookOptions(selection.book);
+                  return (
+                    <div
+                      key={`scripture-${index}`}
+                      className="grid items-end gap-3 md:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))_auto]"
+                    >
+                      <select
+                        className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                        value={selection.book}
+                        onChange={handleScriptureFieldChange(index, "book")}
+                        disabled={saving || options.length === 0}
+                      >
+                        {options.map((book) => (
+                          <option key={`${index}-${book.slug}`} value={book.slug}>
+                            {book.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min={1}
+                        className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                        placeholder="章"
+                        value={selection.chapter}
+                        onChange={handleScriptureFieldChange(index, "chapter")}
+                        disabled={saving}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                        placeholder="起始經文"
+                        value={selection.start}
+                        onChange={handleScriptureFieldChange(index, "start")}
+                        disabled={saving}
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                        placeholder="結束經文 (可留空)"
+                        value={selection.end}
+                        onChange={handleScriptureFieldChange(index, "end")}
+                        disabled={saving}
+                      />
+                      {form.scriptures.length > 1 && (
+                        <button
+                          type="button"
+                          className="rounded border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                          onClick={() => removeScriptureSelection(index)}
+                          disabled={saving}
+                        >
+                          移除
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="rounded border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
+                  onClick={addScriptureSelection}
+                  disabled={saving}
                 >
-                  {scriptureBookOptions.map((book) => (
-                    <option key={book.slug} value={book.slug}>
-                      {book.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  placeholder="章"
-                  value={form.scriptureChapter}
-                  onChange={handleInputChange("scriptureChapter")}
-                  disabled={saving}
-                />
-                <input
-                  type="number"
-                  min={1}
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  placeholder="起始經文"
-                  value={form.scriptureStart}
-                  onChange={handleInputChange("scriptureStart")}
-                  disabled={saving}
-                />
-                <input
-                  type="number"
-                  min={1}
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  placeholder="結束經文 (可留空)"
-                  value={form.scriptureEnd}
-                  onChange={handleInputChange("scriptureEnd")}
-                  disabled={saving}
-                />
+                  新增經文段落
+                </button>
               </div>
             </div>
             <div>
@@ -844,72 +1231,125 @@ export function SundayServiceManager() {
                 <th className="w-40 px-3 py-2">講員 / 題目</th>
                 <th className="w-56 px-3 py-2">讀經</th>
                 <th className="w-40 px-3 py-2">讀經同工</th>
-                <th className="w-32 px-3 py-2">操作</th>
+                <th className="w-20 px-3 py-2 text-center">聖餐</th>
+                <th className="w-44 px-3 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
-              {services.map((entry) => (
-                <tr key={entry.date} className="border-t border-gray-100">
-                  <td className="px-3 py-2 font-medium text-gray-900">{formatDisplayDate(entry.date)}</td>
-                  <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
-                  <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
-                  <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
-                  <td className="px-3 py-2 text-gray-700">
-                    <div className="flex flex-col">
-                      <span>{entry.hymn ?? "-"}</span>
-                      <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-gray-700">
-                    <div className="flex flex-col">
-                      <span>{entry.sermonSpeaker ?? "-"}</span>
-                      <span className="text-xs text-gray-500">{entry.sermonTitle ?? ""}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-gray-700">
-                    {formatScriptureDisplay(entry.scripture, bookNameMap)}
-                  </td>
-                  <td className="px-3 py-2 text-gray-700">
-                    {(entry.scriptureReaders && entry.scriptureReaders.length > 0
-                      ? entry.scriptureReaders.join("、")
-                      : "-")}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                        onClick={() => handleEdit(entry)}
-                        disabled={saving}
-                      >
-                        編輯
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-blue-300 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
-                        onClick={() => handleGeneratePpt(entry.date)}
-                        disabled={pptGenerating === entry.date || saving}
-                      >
-                        {pptGenerating === entry.date ? "生成中…" : "生成 PPT"}
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
-                        onClick={() => handleDelete(entry.date)}
-                        disabled={saving}
-                      >
-                        刪除
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {services.map((entry) => {
+                const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
+                const holdsCommunion =
+                  entry.holdHolyCommunion ??
+                  (entry.date ? isFirstSundayOfMonth(entry.date) : false);
+                return (
+                  <tr key={entry.date} className="border-t border-gray-100">
+                    <td className="px-3 py-2 font-medium text-gray-900">{formatDisplayDate(entry.date)}</td>
+                    <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">
+                      <div className="flex flex-col">
+                        <span>{entry.hymn ?? "-"}</span>
+                        <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      <div className="flex flex-col">
+                        <span>{entry.sermonSpeaker ?? "-"}</span>
+                        <span className="text-xs text-gray-500">{entry.sermonTitle ?? ""}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {scriptureLines.length > 0 ? (
+                        <div className="flex flex-col">
+                          {scriptureLines.map((label, idx) => (
+                            <span key={`${entry.date}-scripture-${idx}`}>{label}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {(entry.scriptureReaders && entry.scriptureReaders.length > 0
+                        ? entry.scriptureReaders.join("、")
+                        : "-")}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {holdsCommunion ? "是" : "否"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                          onClick={() => handleEdit(entry)}
+                          disabled={saving}
+                        >
+                          編輯
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-green-300 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:border-green-100 disabled:text-green-300"
+                          onClick={() => handleDownloadFinalPpt(entry)}
+                          disabled={
+                            !entry.finalPptFilename ||
+                            finalPptDownloading === entry.date ||
+                            saving
+                          }
+                          title={
+                            entry.finalPptFilename
+                              ? `下載 ${entry.finalPptFilename}`
+                              : "尚未上傳最終 PPT"
+                          }
+                        >
+                          {finalPptDownloading === entry.date
+                            ? "下載中…"
+                            : entry.finalPptFilename
+                              ? "下載最終"
+                              : "未上傳"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-purple-300 px-3 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:cursor-not-allowed disabled:border-purple-100 disabled:text-purple-300"
+                          onClick={() => handleSendEmail(entry)}
+                          disabled={
+                            !entry.finalPptFilename ||
+                            emailSending === entry.date ||
+                            saving
+                          }
+                          title={
+                            entry.finalPptFilename
+                              ? "發送主日服事 email"
+                              : "尚未上傳最終 PPT"
+                          }
+                        >
+                          {emailSending === entry.date ? "發送中…" : "發送 email"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-blue-300 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
+                          onClick={() => handleGeneratePpt(entry.date)}
+                          disabled={pptGenerating === entry.date || saving}
+                        >
+                          {pptGenerating === entry.date ? "生成中…" : "生成 PPT"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                          onClick={() => handleDelete(entry.date)}
+                          disabled={saving}
+                        >
+                          刪除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {services.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="px-3 py-6 text-center text-sm text-gray-500"
-                  >
+                  <td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">
                     尚未建立主日服事資訊。
                   </td>
                 </tr>

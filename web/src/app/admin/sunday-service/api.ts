@@ -7,6 +7,7 @@ import {
   HymnMetadata,
   GenerateHymnLyricsResponse,
   ScriptureBook,
+  SundayServiceEmailResult,
 } from "@/app/types/sundayService";
 
 const SERVICES_BASE_PATH = "/api/admin/sunday-services";
@@ -189,6 +190,44 @@ export async function generateSundayServicePpt(date: string): Promise<Blob> {
     throw new Error(message || `Request failed with status ${response.status}`);
   }
   return response.blob();
+}
+
+export async function uploadFinalSundayServicePpt(
+  date: string,
+  file: File,
+): Promise<SundayServiceEntry> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(
+    resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/ppt/final`),
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+  return parseJson(response);
+}
+
+export async function downloadFinalSundayServicePpt(date: string): Promise<Blob> {
+  const response = await fetch(
+    resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/ppt/final`),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+  return response.blob();
+}
+
+export async function sendSundayServiceEmail(date: string): Promise<SundayServiceEmailResult> {
+  const response = await fetch(
+    resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/email`),
+    {
+      method: "POST",
+    },
+  );
+  return parseJson(response);
 }
 
 export async function fetchScriptureBooks(): Promise<ScriptureBook[]> {

@@ -441,7 +441,7 @@ export function SundaySongsManager() {
           )}
 
           <label className="flex flex-col gap-1 text-sm font-semibold text-gray-700">
-            歌詞 (Markdown)
+            歌詞
             <textarea
               className="h-48 rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
               value={form.lyricsMarkdown}

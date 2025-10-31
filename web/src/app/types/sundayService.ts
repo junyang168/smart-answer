@@ -2,6 +2,15 @@ export type SundaySongSource = "custom" | "hymnal";
 
 export interface SundayWorker {
   name: string;
+  email?: string | null;
+}
+
+export interface SundayServiceEmailResult {
+  date: string;
+  recipients: string[];
+  pptFilename: string;
+  subject: string;
+  dryRun?: boolean;
 }
 
 export interface SundaySong {
@@ -28,12 +37,14 @@ export interface SundayServiceEntry {
   pianist?: string | null;
   hymn?: string | null;
   responseHymn?: string | null;
-  scripture?: string | null;
+  scripture?: string[] | null;
   sermonSpeaker?: string | null;
   sermonTitle?: string | null;
   announcementsMarkdown?: string | null;
   health_prayer_markdown?: string | null;
   scriptureReaders?: string[] | null;
+  holdHolyCommunion?: boolean | null;
+  finalPptFilename?: string | null;
 }
 
 export interface SundayServiceResources {

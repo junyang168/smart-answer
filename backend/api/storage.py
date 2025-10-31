@@ -473,6 +473,9 @@ class ArticleRepository:
             raise ValueError(f"Sunday service date {date} not found")
         if entry.date != date and any(existing.date == entry.date for existing in entries):
             raise ValueError(f"Sunday service date {entry.date} already exists")
+        existing_entry = entries[target]
+        if entry.final_ppt_filename is None and existing_entry.final_ppt_filename:
+            entry = entry.model_copy(update={"final_ppt_filename": existing_entry.final_ppt_filename})
         entries[target] = entry
         self._save_sunday_service_entries(entries)
         return entry
@@ -483,6 +486,16 @@ class ArticleRepository:
         if len(new_entries) == len(entries):
             raise ValueError(f"Sunday service date {date} not found")
         self._save_sunday_service_entries(new_entries)
+
+    def set_sunday_service_final_ppt(self, date: str, filename: Optional[str]) -> SundayServiceEntry:
+        entries = self._load_sunday_service_entries()
+        for index, existing in enumerate(entries):
+            if existing.date == date:
+                updated = existing.model_copy(update={"final_ppt_filename": filename})
+                entries[index] = updated
+                self._save_sunday_service_entries(entries)
+                return updated
+        raise ValueError(f"Sunday service date {date} not found")
 
     def _apply_hymn_indices(self, entry: SundayServiceEntry) -> SundayServiceEntry:
         songs = {song.title: song for song in self._load_sunday_songs()}
@@ -500,47 +513,61 @@ class ArticleRepository:
         data["responseHymnIndex"] = resolve(entry.response_hymn)
         return SundayServiceEntry.model_validate(data)
 
-    def _load_sunday_workers(self) -> list[str]:
+    def _load_sunday_workers(self) -> list[SundayWorker]:
         try:
             raw = json.loads(SUNDAY_WORKERS_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("Unable to parse sunday_workers.json") from exc
         if not isinstance(raw, list):
             raise ValueError("sunday_workers.json must contain a list")
-        workers: list[str] = []
+        workers: list[SundayWorker] = []
         for item in raw:
             if isinstance(item, str):
-                workers.append(item)
+                try:
+                    workers.append(SundayWorker(name=item))
+                except ValueError:
+                    continue
             elif isinstance(item, dict):
-                name = item.get("name")
+                data = dict(item)
+                name = data.get("name")
+                email = data.get("email")
                 if isinstance(name, str):
-                    workers.append(name)
+                    try:
+                        workers.append(SundayWorker(name=name, email=email))
+                    except ValueError:
+                        try:
+                            workers.append(SundayWorker(name=name))
+                        except ValueError:
+                            continue
         return workers
 
-    def _save_sunday_workers(self, workers: list[str]) -> None:
+    def _save_sunday_workers(self, workers: list[SundayWorker]) -> None:
         tmp_path = SUNDAY_WORKERS_FILE.with_suffix(".tmp")
         tmp_path.write_text(
-            json.dumps(workers, ensure_ascii=False, indent=2),
+            json.dumps(
+                [worker.model_dump(by_alias=True, exclude_none=True) for worker in workers],
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         tmp_path.replace(SUNDAY_WORKERS_FILE)
 
     def list_sunday_workers(self) -> list[SundayWorker]:
-        workers = sorted(self._load_sunday_workers(), key=lambda value: value.casefold())
-        return [SundayWorker(name=name) for name in workers]
+        workers = sorted(self._load_sunday_workers(), key=lambda worker: worker.name.casefold())
+        return [SundayWorker.model_validate(worker.model_dump()) for worker in workers]
 
     def create_sunday_worker(self, worker: SundayWorker) -> SundayWorker:
         name = worker.name.strip()
-        if not name:
-            raise ValueError("Worker name is required")
         workers = self._load_sunday_workers()
-        lower_set = {value.casefold(): value for value in workers}
+        lower_set = {existing.name.casefold(): existing for existing in workers}
         if name.casefold() in lower_set:
             raise ValueError(f"Worker {name} already exists")
-        workers.append(name)
-        workers.sort(key=lambda value: value.casefold())
+        new_worker = SundayWorker(name=name, email=worker.email)
+        workers.append(new_worker)
+        workers.sort(key=lambda value: value.name.casefold())
         self._save_sunday_workers(workers)
-        return SundayWorker(name=name)
+        return new_worker
 
     def update_sunday_worker(self, current_name: str, worker: SundayWorker) -> SundayWorker:
         target = current_name.strip()
@@ -548,18 +575,17 @@ class ArticleRepository:
             raise ValueError("Current worker name is required")
         workers = self._load_sunday_workers()
         try:
-            index = next(i for i, value in enumerate(workers) if value == target)
+            index = next(i for i, value in enumerate(workers) if value.name == target)
         except StopIteration as exc:
             raise ValueError(f"Worker {current_name} not found") from exc
 
         new_name = worker.name.strip()
-        if not new_name:
-            raise ValueError("Worker name is required")
-        if new_name != target and any(value.casefold() == new_name.casefold() for value in workers):
+        if new_name != target and any(value.name.casefold() == new_name.casefold() for value in workers):
             raise ValueError(f"Worker {new_name} already exists")
 
-        workers[index] = new_name
-        workers.sort(key=lambda value: value.casefold())
+        updated_worker = SundayWorker(name=new_name, email=worker.email)
+        workers[index] = updated_worker
+        workers.sort(key=lambda value: value.name.casefold())
         self._save_sunday_workers(workers)
 
         if new_name != target:
@@ -584,14 +610,14 @@ class ArticleRepository:
             if updated:
                 self._save_sunday_service_entries(services)
 
-        return SundayWorker(name=new_name)
+        return updated_worker
 
     def delete_sunday_worker(self, name: str) -> None:
         target = name.strip()
         if not target:
             raise ValueError("Worker name is required")
         workers = self._load_sunday_workers()
-        new_workers = [value for value in workers if value != target]
+        new_workers = [value for value in workers if value.name != target]
         if len(new_workers) == len(workers):
             raise ValueError(f"Worker {name} not found")
         self._save_sunday_workers(new_workers)

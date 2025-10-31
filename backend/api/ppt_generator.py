@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from copy import deepcopy
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Optional
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -21,12 +21,15 @@ def generate_presentation_from_template(
     *,
     section_configs: Mapping[str, dict[str, object]] | None = None,
     scripture_summary: list[dict[str, str]] | None = None,
+    holy_communion: Optional[Mapping[str, str]] = None,
 ) -> Path:
     """Populate placeholders in a PPTX template and save to output_path."""
     normalized = {key: str(value) for key, value in replacements.items()}
     presentation = Presentation(template_path)
     _expand_section_slides(presentation, section_configs or {})
     _populate_scripture_summary(presentation, scripture_summary or [])
+    if holy_communion:
+        _insert_holy_communion_row(presentation, holy_communion)
     _apply_replacements(presentation, normalized)
     presentation.save(output_path)
     return output_path
@@ -259,6 +262,92 @@ def _fill_summary_row(row, entry: dict[str, str]) -> None:
             _replace_in_text_frame(cell.text_frame, replacements)
 
 
+def _insert_holy_communion_row(presentation: Presentation, config: Mapping[str, str]) -> None:
+    if not presentation.slides:
+        return
+    enabled_text = str(config.get("enabled", "true")).lower()
+    if enabled_text in {"false", "0", "no"}:
+        return
+    slide_index = 1
+    try:
+        slide_index = int(str(config.get("slide_index", "1")))
+    except ValueError:
+        slide_index = 1
+    if slide_index < 0 or slide_index >= len(presentation.slides):
+        return
+    slide = presentation.slides[slide_index]
+    anchor_text = config.get("anchor_text", "證道")
+    target = _find_table_row_by_first_cell(slide, anchor_text)
+    if not target:
+        return
+    table, row_index = target
+    template_row = table.rows[row_index]
+    new_row = _insert_row_from_template(table, template_row._tr, row_index + 1)
+    if not new_row:
+        return
+
+    label_text = config.get("label_text", "守聖餐")
+    scripture_text = config.get("scripture_text", "林前11:23-29")
+    speaker_placeholder = config.get("speaker_placeholder", "{sermonSpeaker}")
+    speaker_text = f"{speaker_placeholder}/眾坐" if speaker_placeholder else "眾坐"
+
+    cells = list(new_row.cells)
+    if cells:
+        _set_text_frame_text(cells[0].text_frame, label_text)
+    if len(cells) > 1:
+        _set_text_frame_text(cells[1].text_frame, scripture_text)
+    if len(cells) > 2:
+        _set_text_frame_text(cells[2].text_frame, speaker_text)
+    for cell in cells[3:]:
+        _set_text_frame_text(cell.text_frame, "")
+
+
+def _find_table_row_by_first_cell(slide, target_text: str):
+    normalized_target = _normalize_text(target_text)
+    if not normalized_target:
+        return None
+    for shape in slide.shapes:
+        if getattr(shape, "has_table", False):
+            table = shape.table
+            for idx, row in enumerate(table.rows):
+                if not row.cells:
+                    continue
+                cell = row.cells[0]
+                if not getattr(cell, "text_frame", None):
+                    continue
+                cell_text = _text_frame_content(cell.text_frame)
+                if _normalize_text(cell_text) == normalized_target:
+                    return table, idx
+    return None
+
+
+def _set_text_frame_text(text_frame, text: str) -> None:
+    if not text_frame:
+        return
+    paragraphs = list(text_frame.paragraphs)
+    if not paragraphs:
+        text_frame.text = text
+        return
+    first = paragraphs[0]
+    if first.runs:
+        first.runs[0].text = text
+        for run in first.runs[1:]:
+            run.text = ""
+    else:
+        first.text = text
+    for para in paragraphs[1:]:
+        if para.runs:
+            for run in para.runs:
+                run.text = ""
+        para.text = ""
+
+
+def _normalize_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", "", value.strip())
+
+
 def _get_section_reader(sections: list[dict[str, object]], index: int) -> str:
     if index >= len(sections):
         return ""
@@ -337,6 +426,17 @@ def _render_section(
             if label is not None and "{" + f"{placeholder_key}Label" + "}" in content:
                 _replace_in_text_frame(text_frame, {f"{placeholder_key}Label": str(label)})
                 content = _text_frame_content(text_frame)
+            reference = section.get("reference") if isinstance(section, dict) else None
+            if reference:
+                tokens = [
+                    "scriptureReference",
+                    f"{placeholder_key}Reference",
+                ]
+                for token_name in tokens:
+                    token_str = "{" + token_name + "}"
+                    if token_str in content:
+                        _replace_in_text_frame(text_frame, {token_name: str(reference)})
+                        content = _text_frame_content(text_frame)
         elif style == "lyrics":
             if isinstance(section, dict):
                 index_value = section.get("index")

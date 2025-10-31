@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal, Optional, Tuple, List
+from collections.abc import Sequence
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 ArticleStatus = Literal["draft", "generated", "final"]
@@ -130,6 +131,35 @@ class SundaySongCreate(BaseModel):
 
 class SundayWorker(BaseModel):
     name: str
+    email: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("Worker name is required")
+        return name
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
+class SundayServiceEmailResult(BaseModel):
+    date: str
+    recipients: List[str]
+    ppt_filename: str = Field(..., alias="pptFilename")
+    subject: str
+    dry_run: bool = Field(False, alias="dryRun")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SundayServiceEntry(BaseModel):
@@ -137,7 +167,7 @@ class SundayServiceEntry(BaseModel):
     presider: Optional[str] = None
     worship_leader: Optional[str] = Field(None, alias="worshipLeader")
     pianist: Optional[str] = None
-    scripture: Optional[str] = None
+    scripture: List[str] = Field(default_factory=list)
     sermon_speaker: Optional[str] = Field(None, alias="sermonSpeaker")
     sermon_title: Optional[str] = Field(None, alias="sermonTitle")
     hymn: Optional[str] = None
@@ -147,8 +177,37 @@ class SundayServiceEntry(BaseModel):
     announcements_markdown: Optional[str] = Field("", alias="announcementsMarkdown")
     health_prayer_markdown: Optional[str] = Field("", alias="health_prayer_markdown")
     scripture_readers: List[str] = Field(default_factory=list, alias="scriptureReaders")
+    hold_holy_communion: bool = Field(False, alias="holdHolyCommunion")
+    final_ppt_filename: Optional[str] = Field(None, alias="finalPptFilename")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("scripture", mode="before")
+    @classmethod
+    def _normalize_scripture(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            parts = [part.strip() for part in value.split(",")]
+        elif isinstance(value, Sequence):
+            parts = []
+            for item in value:
+                if item is None:
+                    continue
+                parts.append(str(item).strip())
+        else:
+            return value
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            if not part:
+                continue
+            if part in seen:
+                continue
+            normalized.append(part)
+            seen.add(part)
+        return normalized
 
 
 class SundayServiceResources(BaseModel):

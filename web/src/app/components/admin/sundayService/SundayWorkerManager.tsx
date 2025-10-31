@@ -14,9 +14,11 @@ interface SundayWorkerManagerProps {
 }
 
 export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerManagerProps) {
-  const [newWorker, setNewWorker] = useState("");
+  const [newWorkerName, setNewWorkerName] = useState("");
+  const [newWorkerEmail, setNewWorkerEmail] = useState("");
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  const [editingEmail, setEditingEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,16 +30,18 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
 
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmed = newWorker.trim();
+    const trimmed = newWorkerName.trim();
     if (!trimmed) {
       setError("同工姓名不可為空");
       return;
     }
+    const email = newWorkerEmail.trim();
     setSaving(true);
     resetState();
     try {
-      await createSundayWorker({ name: trimmed });
-      setNewWorker("");
+      await createSundayWorker({ name: trimmed, email: email || undefined });
+      setNewWorkerName("");
+      setNewWorkerEmail("");
       setFeedback("已新增同工");
       onWorkersChanged?.();
     } catch (err) {
@@ -48,15 +52,17 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
     }
   };
 
-  const startEdit = (name: string) => {
-    setEditingName(name);
-    setEditingValue(name);
+  const startEdit = (worker: SundayWorker) => {
+    setEditingName(worker.name);
+    setEditingValue(worker.name);
+    setEditingEmail(worker.email ?? "");
     resetState();
   };
 
   const cancelEdit = () => {
     setEditingName(null);
     setEditingValue("");
+    setEditingEmail("");
   };
 
   const submitEdit = async () => {
@@ -68,11 +74,12 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
       setError("同工姓名不可為空");
       return;
     }
+    const email = editingEmail.trim();
     setSaving(true);
     resetState();
     try {
-      await updateSundayWorker(editingName, { name: trimmed });
-      setFeedback("已更新同工姓名");
+      await updateSundayWorker(editingName, { name: trimmed, email: email || undefined });
+      setFeedback("已更新同工資訊");
       cancelEdit();
       onWorkersChanged?.();
     } catch (err) {
@@ -109,13 +116,21 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
       <p className="mb-4 text-sm text-gray-600">
         編輯同工名單後，現有的主日服事安排會自動更新相同姓名。
       </p>
-      <form onSubmit={handleAdd} className="mb-6 flex flex-col gap-2 sm:flex-row">
+      <form onSubmit={handleAdd} className="mb-6 grid gap-2 sm:grid-cols-[2fr_2fr_auto]">
         <input
-          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+          className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
           placeholder="新增同工姓名"
-          value={newWorker}
-          onChange={(event) => setNewWorker(event.target.value)}
+          value={newWorkerName}
+          onChange={(event) => setNewWorkerName(event.target.value)}
           disabled={saving}
+        />
+        <input
+          className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+          placeholder="電子郵件（選填）"
+          value={newWorkerEmail}
+          onChange={(event) => setNewWorkerEmail(event.target.value)}
+          disabled={saving}
+          type="email"
         />
         <button
           type="submit"
@@ -132,12 +147,20 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
             className="flex items-center justify-between rounded border border-gray-200 px-3 py-2"
           >
             {editingName === worker.name ? (
-              <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex w-full flex-col gap-2 lg:flex-row lg:items-center">
                 <input
                   className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
                   value={editingValue}
                   onChange={(event) => setEditingValue(event.target.value)}
                   disabled={saving}
+                />
+                <input
+                  className="flex-1 rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none"
+                  value={editingEmail}
+                  onChange={(event) => setEditingEmail(event.target.value)}
+                  disabled={saving}
+                  placeholder="電子郵件（選填）"
+                  type="email"
                 />
                 <div className="flex gap-2">
                   <button
@@ -160,12 +183,17 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
               </div>
             ) : (
               <div className="flex w-full items-center justify-between gap-4">
-                <span className="text-sm text-gray-800">{worker.name}</span>
+                <div className="flex flex-1 flex-col">
+                  <span className="text-sm font-medium text-gray-800">{worker.name}</span>
+                  {worker.email && (
+                    <span className="text-xs text-gray-500">{worker.email}</span>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <button
                     type="button"
                     className="rounded border border-gray-300 px-3 py-1 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                    onClick={() => startEdit(worker.name)}
+                    onClick={() => startEdit(worker)}
                     disabled={saving}
                   >
                     編輯

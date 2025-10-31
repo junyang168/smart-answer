@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import math
+import shutil
+import os
+import os
 import re
 from urllib.parse import quote_plus
+from collections.abc import Sequence
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
@@ -34,6 +38,7 @@ from .models import (
     SundaySongCreate,
 )
 from .storage import repository
+from .sunday_service_email import send_sunday_service_email as _send_sunday_service_email
 from .config import SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
 from .ppt_generator import generate_presentation_from_template
 from .scripture import parse_reference, BIBLE_API_TRANSLATION_ZH, ALIAS_TO_API_BOOK, BOOK_SLUG_TO_NAME
@@ -185,6 +190,8 @@ def list_sunday_services() -> list[SundayServiceEntry]:
 
 
 def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
+    if not entry.scripture:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.create_sunday_service(entry)
     except ValueError as exc:
@@ -192,6 +199,8 @@ def create_sunday_service(entry: SundayServiceEntry) -> SundayServiceEntry:
 
 
 def update_sunday_service(date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
+    if not entry.scripture:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供讀經經文")
     try:
         return repository.update_sunday_service(date, entry)
     except ValueError as exc:
@@ -367,28 +376,30 @@ def generate_sunday_service_ppt(date: str) -> Path:
                 "style": "lyrics",
             }
 
-    scripture_display, scripture_lines = _fetch_scripture_lines(service.scripture)
-    if scripture_display:
-        replacements.setdefault("scriptureReference", scripture_display)
-    else:
-        replacements.setdefault("scriptureReference", "")
-    if scripture_lines:
-        scripture_sections = _split_scripture_sections(scripture_lines)
-        if scripture_sections:
-            scripture_sections_data, scripture_summary = _assign_scripture_sections(
+    scripture_sections = _fetch_scripture_sections(service.scripture)
+    replacements["scriptureReference"] = "；".join(section["display"] for section in scripture_sections) or replacements.get("scripture", "")
+
+    summary_data: list[dict[str, str]] = []
+    assigned_readers: list[str] = []
+    if scripture_sections:
+        try:
+            scripture_sections_data, summary_data, assigned_readers = _prepare_scripture_sections(
                 scripture_sections,
                 readers,
-                scripture_display,
             )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if scripture_sections_data:
             section_configs["scriptureVerses"] = {
                 "sections": scripture_sections_data,
                 "style": "scripture",
             }
-            summary_data = scripture_summary
-        else:
-            summary_data = []
-    else:
-        summary_data = []
+    if assigned_readers:
+        replacements["scriptureReaders"] = "、".join(assigned_readers)
+        replacements["scriptureReader"] = assigned_readers[0]
+        replacements["reader"] = f"⇉讀經 by {assigned_readers[0]}"
+        for idx in range(3):
+            replacements[f"scriptureReader{idx + 1}"] = assigned_readers[idx] if idx < len(assigned_readers) else ""
 
     _populate_future_service_tokens(replacements, service)
 
@@ -399,14 +410,108 @@ def generate_sunday_service_ppt(date: str) -> Path:
     filename = _build_ppt_filename(date, service)
     output_path = SUNDAY_WORSHIP_DIR / filename
 
+    holy_comm_config: dict[str, str] | None = None
+    if getattr(service, "hold_holy_communion", False):
+        holy_comm_config = {
+            "slide_index": "1",
+            "anchor_text": "證道",
+            "label_text": "守聖餐",
+            "scripture_text": "林前11:23-29",
+            "speaker_placeholder": "{sermonSpeaker}",
+        }
+
     generate_presentation_from_template(
         PPT_TEMPLATE_FILE,
         replacements,
         output_path,
         section_configs=section_configs,
         scripture_summary=summary_data,
+        holy_communion=holy_comm_config,
     )
     return output_path
+
+
+def email_sunday_service(date: str):
+    try:
+        return _send_sunday_service_email(date, dry_run=False)
+    except (ValueError, RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServiceEntry:
+    filename = file.filename or ""
+    if not filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="請選擇要上傳的 PPT 檔案")
+    submitted_name = filename.lower()
+    if not submitted_name.endswith(".pptx"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="僅支援 .pptx 檔案")
+
+    service = get_sunday_service(date)
+    output_filename = _build_final_ppt_filename(service.date or date)
+    SUNDAY_WORSHIP_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = SUNDAY_WORSHIP_DIR / output_filename
+    temp_path = output_path.with_suffix(output_path.suffix + ".uploading")
+
+    try:
+        try:
+            file.file.seek(0)
+        except (AttributeError, OSError):
+            pass
+
+        with temp_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        written_size = temp_path.stat().st_size
+        if written_size == 0:
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上傳的檔案內容為空")
+
+        temp_path.replace(output_path)
+        _sanitize_zip_file(output_path)
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return repository.set_sunday_service_final_ppt(service.date, output_filename)
+
+
+def get_final_sunday_service_ppt(date: str) -> Path:
+    service = get_sunday_service(date)
+    filename = service.final_ppt_filename
+    if not filename:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="尚未上傳最終 PPT")
+    ppt_path = SUNDAY_WORSHIP_DIR / filename
+    if not ppt_path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="找不到已上傳的 PPT 檔案")
+    return ppt_path
+
+
+def _sanitize_zip_file(path: Path) -> None:
+    try:
+        file_size = path.stat().st_size
+    except OSError:
+        return
+    if file_size <= 0:
+        return
+
+    chunk_size = min(file_size, 65536)
+    try:
+        with path.open("r+b") as handle:
+            handle.seek(-chunk_size, os.SEEK_END)
+            tail = handle.read(chunk_size)
+            marker = tail.rfind(b"PK\x05\x06")
+            if marker == -1:
+                return
+            marker_pos = file_size - chunk_size + marker
+            if marker + 22 > len(tail):
+                return
+            comment_len = int.from_bytes(tail[marker + 20 : marker + 22], "little")
+            expected_end = marker_pos + 22 + comment_len
+            if expected_end < file_size:
+                handle.truncate(expected_end)
+    except OSError:
+        return
 
 
 def list_sermon_series() -> list[SermonSeries]:
@@ -453,7 +558,6 @@ def _build_ppt_replacements(
         ("pianist", service.pianist),
         ("hymn", service.hymn),
         ("hymn2", service.response_hymn),
-        ("scripture", service.scripture),
         ("sermonSpeaker", service.sermon_speaker),
         ("sermonTitle", service.sermon_title),
         ("announcements", service.announcements_markdown),
@@ -465,6 +569,8 @@ def _build_ppt_replacements(
     replacements["scriptureReader"] = readers[0] if readers else ""
     for idx in range(3):
         replacements[f"scriptureReader{idx + 1}"] = readers[idx] if idx < len(readers) else ""
+
+    replacements["scripture"] = _format_scripture_references(service.scripture)
 
     sermon_speaker = replacements.get("sermonSpeaker", "")
     sermon_title = replacements.get("sermonTitle", "")
@@ -610,6 +716,21 @@ def _build_ppt_filename(date: str, service: SundayServiceEntry) -> str:
     return "_".join(parts) + ".pptx"
 
 
+def _build_final_ppt_filename(service_date: str | None) -> str:
+    parsed = _parse_service_date(service_date)
+    if parsed:
+        formatted = parsed.strftime("%Y-%m-%d")
+    else:
+        if service_date:
+            normalized = service_date.strip().replace("/", "-")
+            normalized = re.sub(r"[^0-9-]", "-", normalized)
+            normalized = re.sub(r"-+", "-", normalized).strip("-")
+            formatted = normalized or "worship"
+        else:
+            formatted = "worship"
+    return f"聖道教會{formatted}主日崇拜.pptx"
+
+
 def _sanitize_for_filename(value: str | None) -> str:
     if not value:
         return ""
@@ -631,24 +752,81 @@ def _split_lyrics_sections(raw: str) -> list[list[str]]:
     return result
 
 
-def _fetch_scripture_lines(reference: str | None) -> tuple[str | None, list[str]]:
-    if not reference:
-        return None, []
+def _normalize_scripture_list(references: Sequence[str] | str | None) -> list[str]:
+    if references is None:
+        return []
+    if isinstance(references, str):
+        return [part.strip() for part in references.split(",") if part.strip()]
+    normalized: list[str] = []
+    for item in references:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _format_scripture_references(references: Sequence[str] | str | None) -> str:
+    normalized = _normalize_scripture_list(references)
+    labels: list[str] = []
+    for reference in normalized:
+        try:
+            info = parse_reference(reference)
+        except ValueError:
+            labels.append(reference)
+            continue
+        verse_part = (
+            f"{info['chapter']}:{info['start']}-{info['end']}"
+            if info["end"] != info["start"]
+            else f"{info['chapter']}:{info['start']}"
+        )
+        book_slug = info.get("slug")
+        if isinstance(book_slug, str):
+            book_name = BOOK_SLUG_TO_NAME.get(book_slug, book_slug.upper())
+        else:
+            book_name = ""
+        display = f"{book_name} {verse_part}".strip() if book_name else info.get("display", reference)
+        labels.append(display)
+    return "；".join(labels)
+
+
+def _fetch_scripture_sections(references: Sequence[str] | str | None) -> list[dict[str, object]]:
+    normalized = _normalize_scripture_list(references)
+    if not normalized:
+        return []
+
+    sections: list[dict[str, object]] = []
+    for reference in normalized:
+        display, verse_entries, book_name = _fetch_single_scripture(reference)
+        sections.append(
+            {
+                "slug": reference,
+                "display": display or reference,
+                "book": book_name or "",
+                "verses": verse_entries,
+            }
+        )
+    return sections
+
+
+def _fetch_single_scripture(reference: str) -> tuple[str | None, list[dict[str, object]], str | None]:
     try:
         info = parse_reference(reference)
     except ValueError:
-        return None, []
+        return reference, [], None
 
     translation = BIBLE_API_TRANSLATION_ZH
     if not translation:
-        return info.get("display"), []
+        book_slug = info.get("slug")
+        book_name = BOOK_SLUG_TO_NAME.get(book_slug, book_slug.upper()) if isinstance(book_slug, str) else None
+        return info.get("display"), [], book_name
 
     verse_part = (
         f"{info['chapter']}:{info['start']}-{info['end']}"
         if info["end"] != info["start"]
         else f"{info['chapter']}:{info['start']}"
     )
-#    english_book = ALIAS_TO_API_BOOK.get(info["slug_book"], info["slug_book"])
     book_slug = info["slug_book"]
     query = quote_plus(f"{book_slug} {verse_part}")
     url = f"https://bible-api.com/{query}?translation={translation}"
@@ -657,32 +835,49 @@ def _fetch_scripture_lines(reference: str | None) -> tuple[str | None, list[str]
         response = httpx.get(url, timeout=10)
         response.raise_for_status()
     except httpx.HTTPError:
-        return info.get("display"), []
+        book_slug = info.get("slug")
+        book_name = BOOK_SLUG_TO_NAME.get(book_slug, book_slug.upper()) if isinstance(book_slug, str) else None
+        return info.get("display"), [], book_name
 
     payload = response.json()
     verses = payload.get("verses") or []
-    lines: list[str] = []
+    verse_entries: list[dict[str, object]] = []
+    book_name = BOOK_SLUG_TO_NAME.get(info.get("slug"), info.get("slug", "").upper())
     for verse in verses:
-        text = (verse.get("text") or "").strip()
+        text_raw = verse.get("text")
+        text = text_raw.strip() if isinstance(text_raw, str) else ""
         if not text:
             continue
         verse_number = verse.get("verse")
-        if verse_number is not None:
-            lines.append(f"{info['chapter']}:{verse_number} {text}")
-        else:
-            lines.append(text)
+        chapter_number = verse.get("chapter")
+        try:
+            verse_int = int(verse_number) if verse_number is not None else None
+        except (TypeError, ValueError):
+            verse_int = None
+        if verse_int is None:
+            continue
+        try:
+            chapter_int = int(chapter_number) if chapter_number is not None else info["chapter"]
+        except (TypeError, ValueError):
+            chapter_int = info["chapter"]
+        verse_entries.append(
+            {
+                "book": book_name,
+                "chapter": chapter_int,
+                "verse": verse_int,
+                "text": text,
+            }
+        )
 
-    display = info.get("display")
-    slug = info.get("slug")
-    if slug and slug in BOOK_SLUG_TO_NAME:
-        chinese_name = BOOK_SLUG_TO_NAME[slug]
-        display = f"{chinese_name} {verse_part}"
-
-    return display, lines
+    if book_name:
+        display = f"{book_name} {verse_part}"
+    else:
+        display = info.get("display")
+    return display, verse_entries, book_name
 
 
-def _split_scripture_sections(lines: list[str]) -> list[list[str]]:
-    total = len(lines)
+def _split_scripture_section(verses: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    total = len(verses)
     if total == 0:
         return []
 
@@ -707,14 +902,100 @@ def _split_scripture_sections(lines: list[str]) -> list[list[str]]:
             slides -= 1
         chosen_sizes = sizes
 
-    sections: list[list[str]] = []
+    sections: list[list[dict[str, object]]] = []
     index = 0
     for size in chosen_sizes:
-        sections.append(lines[index : index + size])
+        sections.append(verses[index : index + size])
         index += size
     if index < total:
-        sections[-1].extend(lines[index:])
+        sections[-1].extend(verses[index:])
     return sections
+
+
+def _prepare_scripture_sections(
+    sections: list[dict[str, object]],
+    readers: list[str],
+) -> tuple[list[dict[str, object]], list[dict[str, str]], list[str]]:
+    slide_entries: list[dict[str, object]] = []
+    for section in sections:
+        verses = section.get("verses") or []
+        if not verses:
+            continue
+        section_slides = _split_scripture_section(verses)
+        book_name = section.get("book") or ""
+        for slide in section_slides:
+            if not slide:
+                continue
+            first = slide[0]
+            last = slide[-1]
+            chapter_start = first.get("chapter")
+            verse_start = first.get("verse")
+            chapter_end = last.get("chapter")
+            verse_end = last.get("verse")
+
+            line_texts = []
+            for verse in slide:
+                chapter = verse.get("chapter")
+                verse_number = verse.get("verse")
+                text = verse.get("text") or ""
+                if chapter is None or verse_number is None:
+                    line_texts.append(str(text))
+                else:
+                    line_texts.append(f"{chapter}:{verse_number} {text}")
+
+            label = _format_scripture_section_label(
+                book_name,
+                chapter_start,
+                verse_start,
+                chapter_end,
+                verse_end,
+            )
+            slide_entries.append(
+                {
+                    "lines": line_texts,
+                    "label": label,
+                    "reference": section.get("display", ""),
+                }
+            )
+
+    if not slide_entries:
+        return [], [], []
+
+    required = len(slide_entries)
+    assigned_readers: list[str] = []
+    seen: set[str] = set()
+    for candidate in readers:
+        name = (candidate or "").strip()
+        if not name:
+            continue
+        if name in seen:
+            raise ValueError(f"讀經同工不可重複：{name}")
+        assigned_readers.append(name)
+        seen.add(name)
+        if len(assigned_readers) == required:
+            break
+
+    if len(assigned_readers) < required:
+        raise ValueError("讀經同工人數不足，無法分配每段經文")
+
+    assigned_sections: list[dict[str, object]] = []
+    summary: list[dict[str, str]] = []
+    for index, slide in enumerate(slide_entries):
+        reader = assigned_readers[index]
+        assigned_sections.append(
+            {
+                "lines": slide["lines"],
+                "reader": reader,
+                "label": slide["label"],
+                "reference": slide.get("reference", ""),
+            }
+        )
+        entry = {"label": slide["label"]}
+        if reader:
+            entry["reader"] = reader
+        summary.append(entry)
+
+    return assigned_sections, summary, assigned_readers
 
 
 def _populate_future_service_tokens(replacements: dict[str, str], current_service: SundayServiceEntry) -> None:
@@ -760,47 +1041,6 @@ def _apply_future_service_values(
     replacements[f"presider{position}"] = _normalize_text(entry.presider)
     replacements[f"worshipLeader{position}"] = _normalize_text(entry.worship_leader)
     replacements[f"pianist{position}"] = _normalize_text(entry.pianist)
-
-
-def _assign_scripture_sections(
-    sections: list[list[str]],
-    readers: list[str],
-    scripture_display: str | None,
-) -> tuple[list[dict[str, object]], list[str]]:
-    assigned: list[dict[str, object]] = []
-    summary: list[str] = []
-    book_name = ""
-    if scripture_display:
-        book_name = scripture_display.split(" ")[0]
-
-    for idx, lines in enumerate(sections):
-        if not lines:
-            continue
-        reader = readers[idx] if idx < len(readers) and readers[idx] else (readers[idx % len(readers)] if readers else "")
-        chapter_start, verse_start = _parse_scripture_line(lines[0])
-        chapter_end, verse_end = _parse_scripture_line(lines[-1])
-        label = _format_scripture_section_label(
-            book_name,
-            chapter_start,
-            verse_start,
-            chapter_end,
-            verse_end,
-        )
-        assigned.append({"lines": lines, "reader": reader, "label": label})
-        summary_line = {"label" : label}
-        if reader:
-            summary_line['reader'] = reader
-        summary.append(summary_line)
-    return assigned, summary
-
-
-def _parse_scripture_line(line: str) -> tuple[int | None, int | None]:
-    match = re.match(r"^(?P<chapter>\d+):(\d+)", line.strip())
-    if not match:
-        return None, None
-    chapter = int(match.group(1))
-    verse = int(match.group(2))
-    return chapter, verse
 
 
 def _format_scripture_section_label(
