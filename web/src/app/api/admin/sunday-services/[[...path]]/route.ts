@@ -33,9 +33,12 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
 
   let body: BodyInit | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
-    const text = await request.text();
-    body = text.length ? text : undefined;
+    const buffer = await request.arrayBuffer();
+    if (buffer.byteLength > 0) {
+      body = buffer;
+    }
   }
+
 
   const backendResponse = await fetch(targetUrl, {
     method: request.method,

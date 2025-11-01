@@ -467,7 +467,8 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上傳的檔案內容為空")
 
         temp_path.replace(output_path)
-        _sanitize_zip_file(output_path)
+
+#        _sanitize_zip_file(output_path)
     except HTTPException:
         raise
     except OSError as exc:

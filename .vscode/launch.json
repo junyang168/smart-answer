@@ -2,44 +2,76 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Next.js dev server",
+      "name": "Debug API Service",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "backend.api.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8222",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "DATA_BASE_DIR": "/opt/homebrew/var/www/church/web/data",
+        "FULL_ARTICLE_SERVICE_URL": "http://127.0.0.1:8222",
+        "FULL_ARTICLE_MODEL": "gemini-2.5-pro"
+      }
+    },
+    {
+      "name": "Run API Module (no Uvicorn)",
+      "type": "python",
+      "request": "launch",
+      "module": "backend.api.main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "DATA_BASE_DIR": "/opt/homebrew/var/www/church/web/data",
+        "FULL_ARTICLE_MODEL": "gemini-2.5-pro"
+      }
+    },
+    {
+      "name": "Generate Webcast Audio",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/webcast_tts.py",
+      "args": [
+        "--ssml-file",
+        "${workspaceFolder}/backend/test2.ssml",
+        "--output",
+        "${workspaceFolder}/backend/test2.mp3",
+        "--no-vertex"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Debug Next.js App",
       "type": "node",
       "request": "launch",
-      "runtimeExecutable": "node",
+      "runtimeExecutable": "npm",
       "runtimeArgs": [
-        "--inspect-brk",
-        "${workspaceFolder}/web/node_modules/.bin/next",
-        "dev",
-        "-p",
-        "3003"
+        "run",
+        "dev"
       ],
       "cwd": "${workspaceFolder}/web",
-      "port": 9229,
-      "console": "integratedTerminal",
       "env": {
-        "NODE_OPTIONS": "--enable-source-maps"
+        "NODE_OPTIONS": "--inspect"
       },
-      "skipFiles": [
-        "<node_internals>/**",
-        "${workspaceFolder}/web/node_modules/**"
-      ]
-    },
-    {
-      "name": "Chrome: Next.js",
-      "type": "pwa-chrome",
-      "request": "launch",
-      "url": "http://localhost:3000",
-      "webRoot": "${workspaceFolder}",
-      "sourceMaps": true
-    },
-    {
-      "name": "Attach to Next.js",
-      "type": "node",
-      "request": "attach",
-      "port": 9229,
+      "console": "integratedTerminal",
       "restart": true,
-      "cwd": "${workspaceFolder}",
-      "protocol": "inspector"
+      "serverReadyAction": {
+        "pattern": "started server on .*:(\\d+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
     }
   ]
 }
