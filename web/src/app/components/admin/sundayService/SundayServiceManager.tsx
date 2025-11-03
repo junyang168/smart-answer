@@ -521,20 +521,25 @@ export function SundayServiceManager() {
     }
     const now = new Date();
     const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-    let candidate: { date: string; timestamp: number } | null = null;
-    services.forEach((entry) => {
-      const normalizedDate = entry.date?.trim() ?? "";
-      const timestamp = parseServiceDateValue(normalizedDate);
-      if (timestamp === null) {
+    let selectedDate: string | null = null;
+    let selectedTimestamp = Number.POSITIVE_INFINITY;
+
+    services.forEach((entry: SundayServiceEntry) => {
+      const normalizedDate = entry.date?.trim();
+      if (!normalizedDate) {
         return;
       }
-      if (timestamp >= todayUtc) {
-        if (!candidate || timestamp < candidate.timestamp) {
-          candidate = { date: normalizedDate, timestamp };
-        }
+      const timestamp = parseServiceDateValue(normalizedDate);
+      if (timestamp === null || timestamp < todayUtc) {
+        return;
+      }
+      if (timestamp < selectedTimestamp) {
+        selectedTimestamp = timestamp;
+        selectedDate = normalizedDate;
       }
     });
-    return candidate?.date ?? null;
+
+    return Number.isFinite(selectedTimestamp) ? selectedDate : null;
   }, [services]);
 
   const workersByName = useMemo(() => {
@@ -1409,7 +1414,7 @@ export function SundayServiceManager() {
               </tr>
             </thead>
             <tbody>
-              {services.map((entry) => {
+              {services.map((entry: SundayServiceEntry) => {
                 const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
                 const holdsCommunion =
                   entry.holdHolyCommunion ??
