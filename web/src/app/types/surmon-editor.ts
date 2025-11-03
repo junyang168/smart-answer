@@ -162,3 +162,19 @@ export interface SurmonAdminListItem {
   last_updated?: string;
   source?: string | null;
 }
+
+export interface SurmonAuditFieldChange {
+  old?: unknown;
+  new?: unknown;
+}
+
+export interface SurmonAuditEntry {
+  id: string;
+  item: string;
+  timestamp: string;
+  actor_id?: string | null;
+  actor_name?: string | null;
+  context?: string | null;
+  sequence?: number;
+  changes: Record<string, SurmonAuditFieldChange>;
+}

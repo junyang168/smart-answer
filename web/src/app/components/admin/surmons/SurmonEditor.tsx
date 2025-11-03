@@ -16,7 +16,19 @@ import remarkGfm from "remark-gfm";
 import "easymde/dist/easymde.min.css";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BookmarkPlus, Loader2, RotateCcw, Save, Sparkles, UserPlus, Video } from "lucide-react";
+import {
+  AlertTriangle,
+  BookmarkPlus,
+  History,
+  Loader2,
+  RefreshCcw,
+  RotateCcw,
+  Save,
+  Sparkles,
+  UserPlus,
+  Video,
+  X,
+} from "lucide-react";
 import type SimpleMDEEditor from "easymde";
 import type { Options as SimpleMDEOptions } from "easymde";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -35,6 +47,7 @@ import {
   SurmonChatResponse,
   SurmonChatReference,
   SurmonCoreBibleVerse,
+  SurmonAuditEntry,
 } from "@/app/types/surmon-editor";
 
 const SimpleMDE = dynamic(() => import("react-simplemde-editor"), { ssr: false });
@@ -46,6 +59,25 @@ const INDEX_LINK_PREFIX = "index:";
 
 const INDEX_TOKEN_PATTERN = /\[([0-9]+(?:_[0-9]+)?)\]/g;
 const FALLBACK_STRIKETHROUGH_PATTERN = /~~([^~]+?)~~/g;
+
+const AUDIT_FIELD_LABELS: Record<string, string> = {
+  status: "狀態",
+  assigned_to: "指派帳號",
+  assigned_to_name: "指派者",
+  assigned_to_date: "指派時間",
+  author: "最後修改帳號",
+  author_name: "最後修改者",
+  last_updated: "最後更新",
+  published_date: "發布時間",
+  title: "標題",
+  summary: "摘要",
+  keypoints: "重點",
+  core_bible_verse: "核心經文",
+  deliver_date: "講道日期",
+  theme: "主題",
+  type: "類型",
+  source: "來源",
+};
 
 const remarkSurmonFallbackStrikethrough = () =>
   (tree: any) => {
@@ -409,6 +441,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [highlightedParagraphs, setHighlightedParagraphs] = useState<Set<number>>(() => new Set());
   const [activeHighlightToken, setActiveHighlightToken] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"script" | "metadata">("script");
+  const [historyEntries, setHistoryEntries] = useState<SurmonAuditEntry[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -416,6 +452,8 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const activeEditorIndexRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const slidesLoadedRef = useRef(false);
+  const historyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const historyPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const sessionEmail = session?.user?.email ?? null;
 
@@ -432,6 +470,45 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       setEditingIndex(null);
     }
   }, [canEdit]);
+
+  useEffect(() => {
+    setHistoryEntries([]);
+    setHistoryStatus("idle");
+    setHistoryError(null);
+    setHistoryOpen(false);
+  }, [item, resolvedUserEmail]);
+
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (historyPopoverRef.current && historyPopoverRef.current.contains(target)) {
+        return;
+      }
+      if (historyButtonRef.current && historyButtonRef.current.contains(target)) {
+        return;
+      }
+      setHistoryOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHistoryOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [historyOpen]);
 
   useEffect(() => {
     if (chatMessages.length === 0 && !isChatLoading) {
@@ -576,6 +653,80 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     }
     return (await response.json()) as T;
   }, []);
+
+  const formatHistoryTimestamp = useCallback((value: string) => {
+    if (!value) {
+      return "未知時間";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  }, []);
+
+  const formatHistoryValue = useCallback((value: unknown) => {
+    if (value === null || value === undefined || value === "") {
+      return "—";
+    }
+    if (typeof value === "string") {
+      return value.length > 160 ? `${value.slice(0, 157)}…` : value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    try {
+      const serialized = JSON.stringify(value);
+      return serialized.length > 160 ? `${serialized.slice(0, 157)}…` : serialized;
+    } catch {
+      return String(value);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    if (!resolvedUserEmail) {
+      return;
+    }
+    setHistoryStatus("loading");
+    setHistoryError(null);
+    try {
+      const data = await fetchJSON<SurmonAuditEntry[]>(
+        `${API_PREFIX}/sermons/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}/history`
+      );
+      setHistoryEntries(data);
+      setHistoryStatus("ready");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "載入歷史失敗";
+      setHistoryError(message);
+      setHistoryStatus("error");
+    }
+  }, [fetchJSON, item, resolvedUserEmail]);
+
+  const handleToggleHistory = useCallback(() => {
+    setHistoryOpen((prev) => {
+      const next = !prev;
+      if (!prev && historyStatus === "idle") {
+        void loadHistory();
+      }
+      return next;
+    });
+  }, [historyStatus, loadHistory]);
+
+  const handleRefreshHistory = useCallback(() => {
+    if (historyStatus === "loading") {
+      return;
+    }
+    void loadHistory();
+  }, [historyStatus, loadHistory]);
+
+  useEffect(() => {
+    if (!historyOpen) {
+      return;
+    }
+    if (historyStatus === "idle") {
+      void loadHistory();
+    }
+  }, [historyOpen, historyStatus, loadHistory]);
 
   const sendChatRequest = useCallback(
     async (history: SurmonChatMessage[]) => {
@@ -1700,49 +1851,163 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   return (
     <>
       <div className="space-y-6">
-      <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg text-gray-600">{metadataDraft.title}</span>
+        <div className="relative">
+          <nav className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-lg text-gray-600">{metadataDraft.title}</span>
+            </div>
+            <div className="flex-1" />
+            {resolvedUserEmail ? (
+              <button
+                ref={historyButtonRef}
+                onClick={handleToggleHistory}
+                className={`inline-flex items-center px-2.5 py-1.5 font-medium border rounded-md transition ${
+                  historyOpen
+                    ? "bg-gray-100 text-gray-900 border-gray-300"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-100"
+                }`}
+                type="button"
+              >
+                <History className="w-4 h-4 mr-2" /> 編輯歷史
+              </button>
+            ) : null}
+            <button
+              onClick={() =>
+                router.push(
+                  `/admin/surmons/${encodeURIComponent(item)}?view=${viewChanges ? "draft" : "changes"}`
+                )
+              }
+              className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
+              type="button"
+            >
+              <RotateCcw className="w-4 h-4 mr-2" /> {viewChanges ? "返回編輯" : "查看差異"}
+            </button>
+            {permissions?.canAssign || permissions?.canUnassign ? (
+              <button
+                onClick={handleAssignToggle}
+                className="inline-flex items-center px-2.5 py-1.5 font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
+                type="button"
+              >
+                <UserPlus className="w-4 h-4 mr-2" /> {permissions.canAssign ? "認領" : "取消認領"}
+              </button>
+            ) : null}
+            {permissions?.canPublish ? (
+              <button
+                onClick={handlePublish}
+                className="inline-flex items-center px-2.5 py-1.5 font-medium text-green-700 bg-green-100 border border-green-200 rounded-md hover:bg-green-200"
+                type="button"
+              >
+                <Save className="w-4 h-4 mr-2" /> 發布完成版本
+              </button>
+            ) : null}
+            {permissions?.canViewPublished ? (
+              <a
+                href={`/resources/sermons/${encodeURIComponent(item)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
+              >
+                <Video className="w-4 h-4 mr-2" /> 查看完成版本
+              </a>
+            ) : null}
+          </nav>
+          {historyOpen ? (
+            <div
+              ref={historyPopoverRef}
+              className="absolute right-0 top-full z-20 mt-2 w-[24rem] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <History className="h-4 w-4" /> 編輯歷史
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRefreshHistory}
+                    disabled={historyStatus === "loading"}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    type="button"
+                  >
+                    {historyStatus === "loading" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCcw className="h-3 w-3" />
+                    )}
+                    重新整理
+                  </button>
+                  <button
+                    onClick={() => setHistoryOpen(false)}
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-[18rem] overflow-y-auto px-4 py-3">
+                {historyStatus === "loading" ? (
+                  <div className="flex items-center justify-center py-6 text-sm text-gray-500">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    正在載入歷史...
+                  </div>
+                ) : historyStatus === "error" ? (
+                  <div className="space-y-2 text-sm text-red-600">
+                    <p>載入歷史失敗。</p>
+                    {historyError ? <p className="text-xs text-red-500">{historyError}</p> : null}
+                  </div>
+                ) : historyEntries.length === 0 ? (
+                  <div className="py-4 text-sm text-gray-500">尚未記錄任何編輯歷史。</div>
+                ) : (
+                  <ul className="space-y-3">
+                    {historyEntries.map((entry) => {
+                      const changeEntries = Object.entries(entry.changes ?? {});
+                      return (
+                        <li
+                          key={entry.id ?? `${entry.timestamp}-${entry.actor_id ?? "unknown"}`}
+                          className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                        >
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <span>{formatHistoryTimestamp(entry.timestamp)}</span>
+                            <span>{entry.actor_name ?? entry.actor_id ?? "未知使用者"}</span>
+                          </div>
+                          {entry.context ? (
+                            <p className="mt-1 text-xs text-gray-400">動作：{entry.context}</p>
+                          ) : null}
+                          {changeEntries.length > 0 ? (
+                            <dl className="mt-2 space-y-1 text-xs text-gray-600">
+                              {changeEntries.map(([field, change]) => (
+                                <div
+                                  key={field}
+                                  className="border-t border-gray-200 pt-1 first:border-t-0 first:pt-0"
+                                >
+                                  <dt className="font-semibold text-gray-700">
+                                    {AUDIT_FIELD_LABELS[field] ?? field}
+                                  </dt>
+                                  <dd className="mt-0.5">
+                                    <span className="text-gray-500">由</span>{" "}
+                                    <span className="font-medium text-red-600">
+                                      {formatHistoryValue(change?.old)}
+                                    </span>{" "}
+                                    <span className="text-gray-500">變更為</span>{" "}
+                                    <span className="font-medium text-green-700">
+                                      {formatHistoryValue(change?.new)}
+                                    </span>
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          ) : (
+                            <p className="mt-2 text-xs text-gray-500">沒有可顯示的欄位變更。</p>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
-        <div className="flex-1" />
-        <button
-          onClick={() => router.push(`/admin/surmons/${encodeURIComponent(item)}?view=${viewChanges ? "draft" : "changes"}`)}
-          className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
-        >
-          <RotateCcw className="w-4 h-4 mr-2" /> {viewChanges ? "返回編輯" : "查看差異"}
-        </button>
-        {permissions?.canAssign || permissions?.canUnassign ? (
-  
-          <button
-            onClick={handleAssignToggle}
-            className="inline-flex items-center px-2.5 py-1.5 font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
-          >
-            <UserPlus className="w-4 h-4 mr-2" /> {permissions.canAssign ? "認領" : "取消認領"}
-          </button>
-        ) : null}
-        {permissions?.canPublish ? (
-          <button
-            onClick={handlePublish}
-            className="inline-flex items-center px-2.5 py-1.5 font-medium text-green-700 bg-green-100 border border-green-200 rounded-md hover:bg-green-200"
-          >
-            <Save className="w-4 h-4 mr-2" /> 發布完成版本
-          </button>
-        ) : null}
-        {permissions?.canViewPublished ? (
-          <a
-            href={`/resources/sermons/${encodeURIComponent(item)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center px-2.5 py-1.5 font-medium text-gray-700 bg-white border border-gray-200 rounded-md hover:bg-gray-100"
-          >
-            <Video className="w-4 h-4 mr-2" /> 查看完成版本
-          </a>
-        ) : null}
-      </nav>
-      {metadataSaveError && <p className="text-xs text-red-600">{metadataSaveError}</p>}
-
-
-
+        {metadataSaveError && <p className="text-xs text-red-600">{metadataSaveError}</p>}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <aside className="flex flex-col gap-4 self-stretch min-h-0">
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">

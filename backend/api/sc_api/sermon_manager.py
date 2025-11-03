@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import copy
 import json
 import requests
 from dotenv import load_dotenv
@@ -53,6 +54,27 @@ class SermonManager:
         self._sm = SermonMetaManager(self.base_folder, self._acl.get_user)
         self._scm = SermonCommentManager()
         self.semantic_search_url = os.getenv('SEMANTIC_SEARCH_API_URL')
+        self._audit_fields = (
+            "status",
+            "assigned_to",
+            "assigned_to_name",
+            "assigned_to_date",
+            "author",
+            "author_name",
+            "last_updated",
+            "published_date",
+            "title",
+            "summary",
+            "keypoints",
+            "core_bible_verse",
+            "deliver_date",
+            "theme",
+            "type",
+            "source",
+        )
+        self._audit_log_dir = os.path.join(self.base_folder, "logs")
+        self._audit_log_file = os.path.join(self._audit_log_dir, "sermon_meta_audit.log")
+        os.makedirs(self._audit_log_dir, exist_ok=True)
 
         with open(os.path.join(self.config_folder, 'fellowship.json'), 'r', encoding='utf-8') as f:
             self.fellowship = json.load(f)
@@ -144,6 +166,10 @@ class SermonManager:
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canWrite:
             return {"message": "You don't have permission to update this item"}
+        sermon = self._sm.get_sermon_metadata(user_id, item)
+        if not sermon:
+            return {"message": "sermon not found"}
+        before_snapshot = self._snapshot_sermon_meta(sermon)
         self._sm.update_sermon_metadata(
             user_id,
             item,
@@ -153,6 +179,13 @@ class SermonManager:
             core_bible_verse=core_bible_verse,
         )
         self._sm.save_sermon_metadata()
+        self._log_sermon_meta_change(
+            user_id,
+            item,
+            before_snapshot,
+            self._snapshot_sermon_meta(sermon),
+            context="update_sermon_header",
+        )
         return {}
 
     def generate_sermon_metadata(
@@ -279,6 +312,88 @@ class SermonManager:
         return self._sm.sermons
     
 
+    def _snapshot_sermon_meta(self, sermon: Optional[Sermon]) -> dict:
+        if sermon is None:
+            return {}
+        snapshot = {}
+        for field in self._audit_fields:
+            snapshot[field] = copy.deepcopy(getattr(sermon, field, None))
+        return snapshot
+
+    def _log_sermon_meta_change(
+        self,
+        actor_id: str,
+        item: str,
+        before: dict,
+        after: dict,
+        *,
+        context: Optional[str] = None,
+    ) -> None:
+        if not before and not after:
+            return
+
+        changes = {}
+        for field in self._audit_fields:
+            old_value = before.get(field)
+            new_value = after.get(field)
+            if old_value != new_value:
+                changes[field] = {"old": old_value, "new": new_value}
+
+        if not changes:
+            return
+
+        actor_info = self.get_user_info(actor_id) if actor_id else None
+        entry = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "item": item,
+            "actor_id": actor_id,
+            "actor_name": actor_info.get("name") if actor_info else None,
+            "changes": changes,
+        }
+        if context:
+            entry["context"] = context
+
+        try:
+            with open(self._audit_log_file, "a", encoding="utf-8") as log_file:
+                log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            # Failing to log should not block core workflow.
+            pass
+
+    def get_sermon_audit_log(self, item: str, limit: int = 50) -> List[dict]:
+        if limit <= 0:
+            return []
+        capped_limit = min(limit, 200)
+        if not os.path.exists(self._audit_log_file):
+            return []
+
+        entries: List[dict] = []
+        try:
+            with open(self._audit_log_file, "r", encoding="utf-8") as log_file:
+                for raw_line in log_file:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("item") != item:
+                        continue
+                    entries.append(entry)
+        except OSError:
+            return []
+
+        entries.sort(key=lambda entry: entry.get("timestamp") or "", reverse=True)
+        limited = entries[:capped_limit]
+        result: List[dict] = []
+        for index, entry in enumerate(limited):
+            normalized = dict(entry)
+            normalized.setdefault("id", f"{normalized.get('timestamp', '')}-{index}")
+            normalized["sequence"] = index + 1
+            result.append(normalized)
+        return result
+
     def get_no_permission(self):
         return Permission(canRead=False, canWrite=False, canAssign=False, canUnassign=False, canAssignAnyone=False)
     
@@ -344,22 +459,38 @@ class SermonManager:
 
     def assign(self, user_id:str, item:str, action:str) -> Permission: 
         sermon = self._sm.get_sermon_metadata(user_id, item) 
+        if not sermon:
+            return None
         permissions = self.get_sermon_permissions(user_id, item)
+        context = None
+        before_snapshot = None
         if action == 'assign' and permissions.canAssign:
+            before_snapshot = self._snapshot_sermon_meta(sermon)
             sermon.assigned_to = user_id       
             sermon.assigned_to_name = self._acl.get_user(user_id).get('name')  
             sermon.status = 'assigned'  
             sermon.assigned_to_date = self._sm.convert_datetime_to_cst_string(datetime.now())
+            context = 'assign'
 
         elif action == 'unassign' and permissions.canUnassign:
+            before_snapshot = self._snapshot_sermon_meta(sermon)
             sermon.assigned_to = None
             sermon.assigned_to_name = None
             sermon.status = 'ready'
             sermon.assigned_to_date = None
+            context = 'unassign'
         else:
             return None
         
         self._sm.save_sermon_metadata()
+        if before_snapshot:
+            self._log_sermon_meta_change(
+                user_id,
+                item,
+                before_snapshot,
+                self._snapshot_sermon_meta(sermon),
+                context=context,
+            )
         
 
         return self.get_sermon_permissions(user_id, item)
@@ -392,9 +523,19 @@ class SermonManager:
             return  {"message": "You don't have permission to publish this item"}
         
         sermon = self._sm.get_sermon_metadata(user_id, item)
+        if not sermon:
+            return {"message": "sermon not found"}
+        before_snapshot = self._snapshot_sermon_meta(sermon)
         sermon.status = 'published'
         sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.now())
         self._sm.save_sermon_metadata()
+        self._log_sermon_meta_change(
+            user_id,
+            item,
+            before_snapshot,
+            self._snapshot_sermon_meta(sermon),
+            context="publish",
+        )
         ScriptDelta(self.base_folder, item).publish(sermon.assigned_to)
         return {"message": "sermon has been published"}
     

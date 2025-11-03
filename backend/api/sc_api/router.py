@@ -254,6 +254,15 @@ def get_sermon(user_id: str, item: str, changes: Optional[str] = None):
     return {"header": header, "script": script}
 
 
+@router.get("/sermons/{user_id}/{item}/history")
+def get_sermon_history(user_id: str, item: str, limit: int = 50):
+    permissions: Permission = sermon_manager.get_sermon_permissions(user_id, item)
+    if not permissions.canRead:
+        raise HTTPException(status_code=403, detail="You don't have permission to view this history")
+    sanitized_limit = max(1, min(limit, 200))
+    return sermon_manager.get_sermon_audit_log(item, sanitized_limit)
+
+
 @router.get("/slide_text/{user_id}/{item}/{timestamp}")
 def get_slide(user_id: str, item: str, timestamp: int):
     return sermon_manager.get_slide_text(user_id, item, timestamp)
