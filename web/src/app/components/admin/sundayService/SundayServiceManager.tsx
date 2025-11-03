@@ -19,6 +19,8 @@ import {
   SundayServiceEntry,
   SundayServiceResources,
   SundaySong,
+  SundayWorker,
+  UnavailableDateRange,
   ScriptureBook,
 } from "@/app/types/sundayService";
 
@@ -160,6 +162,73 @@ function composeScriptureValues(selections: ScriptureSelection[]): string[] {
   });
   return slugs;
 }
+
+const getWorkerUnavailableRanges = (worker: SundayWorker): UnavailableDateRange[] => {
+  if (worker.unavailableRanges && worker.unavailableRanges.length > 0) {
+    return worker.unavailableRanges;
+  }
+  const legacy = (worker as { unavailableDates?: string[] }).unavailableDates;
+  if (legacy && legacy.length > 0) {
+    return legacy
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter((value): value is string => value.length > 0)
+      .map((value) => ({ startDate: value, endDate: value }));
+  }
+  return [];
+};
+
+const isRangeActiveOnDate = (range: UnavailableDateRange, date: string): boolean => {
+  const target = date.trim();
+  if (!target) {
+    return false;
+  }
+  return range.startDate <= target && target <= range.endDate;
+};
+
+const isWorkerUnavailableOnDate = (worker: SundayWorker, date: string): boolean => {
+  return getWorkerUnavailableRanges(worker).some((range) => isRangeActiveOnDate(range, date));
+};
+
+const parseServiceDateValue = (value: string | null | undefined): number | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parts = trimmed.split(/[-/]/);
+  if (parts.length !== 3) {
+    return null;
+  }
+  let year: number;
+  let month: number;
+  let day: number;
+  const [first, second, third] = parts;
+  if (first.length === 4) {
+    year = Number.parseInt(first, 10);
+    month = Number.parseInt(second, 10);
+    day = Number.parseInt(third, 10);
+  } else if (third.length === 4) {
+    year = Number.parseInt(third, 10);
+    month = Number.parseInt(first, 10);
+    day = Number.parseInt(second, 10);
+  } else {
+    return null;
+  }
+  if (
+    Number.isNaN(year) ||
+    Number.isNaN(month) ||
+    Number.isNaN(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+  return Date.UTC(year, month - 1, day);
+};
 
 function toForm(entry: SundayServiceEntry | null): FormState {
   if (!entry) {
@@ -446,10 +515,90 @@ export function SundayServiceManager() {
     return services.find((entry) => entry.date === editingDate) ?? null;
   }, [services, editingDate]);
 
+  const upcomingServiceDate = useMemo(() => {
+    if (services.length === 0) {
+      return null;
+    }
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    let candidate: { date: string; timestamp: number } | null = null;
+    services.forEach((entry) => {
+      const normalizedDate = entry.date?.trim() ?? "";
+      const timestamp = parseServiceDateValue(normalizedDate);
+      if (timestamp === null) {
+        return;
+      }
+      if (timestamp >= todayUtc) {
+        if (!candidate || timestamp < candidate.timestamp) {
+          candidate = { date: normalizedDate, timestamp };
+        }
+      }
+    });
+    return candidate?.date ?? null;
+  }, [services]);
+
+  const workersByName = useMemo(() => {
+    const map = new Map<string, SundayWorker>();
+    resources.workers.forEach((worker) => {
+      map.set(worker.name, worker);
+    });
+    return map;
+  }, [resources.workers]);
+
+  const unavailableWorkerNames = useMemo(() => {
+    const date = form.date?.trim();
+    if (!date) {
+      return new Set<string>();
+    }
+    const set = new Set<string>();
+    resources.workers.forEach((worker) => {
+      if (isWorkerUnavailableOnDate(worker, date)) {
+        set.add(worker.name);
+      }
+    });
+    return set;
+  }, [resources.workers, form.date]);
+
+  const availableWorkers = useMemo(() => {
+    if (unavailableWorkerNames.size === 0) {
+      return resources.workers;
+    }
+    return resources.workers.filter((worker) => !unavailableWorkerNames.has(worker.name));
+  }, [resources.workers, unavailableWorkerNames]);
+
   const workerNames = useMemo(
-    () => resources.workers.map((worker) => worker.name).filter((name) => name.trim().length > 0),
-    [resources.workers],
+    () =>
+      availableWorkers.map((worker) => worker.name).filter((name) => name.trim().length > 0),
+    [availableWorkers],
   );
+
+  const workerAssignmentFields = [
+    "presider",
+    "worshipLeader",
+    "pianist",
+    "sermonSpeaker",
+    "scriptureReader1",
+    "scriptureReader2",
+    "scriptureReader3",
+  ] as const;
+
+  useEffect(() => {
+    if (unavailableWorkerNames.size === 0) {
+      return;
+    }
+    setForm((prev) => {
+      let changed = false;
+      const next: FormState = { ...prev };
+      workerAssignmentFields.forEach((field) => {
+        const current = prev[field];
+        if (current && unavailableWorkerNames.has(current)) {
+          next[field] = "";
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [unavailableWorkerNames]);
 
   const readerOptions1 = useMemo(() => {
     const set = new Set(workerNames);
@@ -570,6 +719,30 @@ export function SundayServiceManager() {
     const scriptureError = validateScripture(form);
     if (scriptureError) {
       setError(scriptureError);
+      return;
+    }
+    const serviceDate = form.date.trim();
+    const conflicts: string[] = [];
+    const checkAvailability = (value: string | null | undefined, label: string) => {
+      if (!value) {
+        return;
+      }
+      const worker = workersByName.get(value);
+      if (worker && isWorkerUnavailableOnDate(worker, serviceDate)) {
+        conflicts.push(`${label}：${value}`);
+      }
+    };
+    checkAvailability(form.presider, "司會");
+    checkAvailability(form.worshipLeader, "領詩");
+    checkAvailability(form.pianist, "司琴");
+    checkAvailability(form.sermonSpeaker, "證道");
+    [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3].forEach(
+      (reader, index) => {
+        checkAvailability(reader, `讀經同工${index + 1}`);
+      },
+    );
+    if (conflicts.length > 0) {
+      setError(`以下同工於 ${serviceDate} 無法服事：${conflicts.join("、")}`);
       return;
     }
     setSaving(true);
@@ -954,7 +1127,7 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {resources.workers.map((worker) => (
+                  {availableWorkers.map((worker) => (
                     <option key={worker.name} value={worker.name}>
                       {worker.name}
                     </option>
@@ -970,7 +1143,7 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {resources.workers.map((worker) => (
+                  {availableWorkers.map((worker) => (
                     <option key={worker.name} value={worker.name}>
                       {worker.name}
                     </option>
@@ -986,7 +1159,7 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {resources.workers.map((worker) => (
+                  {availableWorkers.map((worker) => (
                     <option key={worker.name} value={worker.name}>
                       {worker.name}
                     </option>
@@ -1241,9 +1414,23 @@ export function SundayServiceManager() {
                 const holdsCommunion =
                   entry.holdHolyCommunion ??
                   (entry.date ? isFirstSundayOfMonth(entry.date) : false);
+                const entryDateValue = entry.date?.trim() ?? "";
+                const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
+                const rowClasses = `border-t border-gray-100 ${isUpcoming ? "bg-amber-50" : "bg-white"}`;
                 return (
-                  <tr key={entry.date} className="border-t border-gray-100">
-                    <td className="px-3 py-2 font-medium text-gray-900">{formatDisplayDate(entry.date)}</td>
+                  <tr key={entry.date} className={rowClasses}>
+                    <td className="px-3 py-2 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        {!isUpcoming && (
+                        <span>{formatDisplayDate(entry.date)}</span>
+                        )}                        
+                        {isUpcoming && (
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                            {formatDisplayDate(entry.date)}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
                     <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
                     <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
@@ -1288,52 +1475,7 @@ export function SundayServiceManager() {
                         >
                           編輯
                         </button>
-                        <button
-                          type="button"
-                          className="rounded border border-green-300 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-100 disabled:cursor-not-allowed disabled:border-green-100 disabled:text-green-300"
-                          onClick={() => handleDownloadFinalPpt(entry)}
-                          disabled={
-                            !entry.finalPptFilename ||
-                            finalPptDownloading === entry.date ||
-                            saving
-                          }
-                          title={
-                            entry.finalPptFilename
-                              ? `下載 ${entry.finalPptFilename}`
-                              : "尚未上傳最終 PPT"
-                          }
-                        >
-                          {finalPptDownloading === entry.date
-                            ? "下載中…"
-                            : entry.finalPptFilename
-                              ? "下載最終"
-                              : "未上傳"}
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-purple-300 px-3 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:cursor-not-allowed disabled:border-purple-100 disabled:text-purple-300"
-                          onClick={() => handleSendEmail(entry)}
-                          disabled={
-                            !entry.finalPptFilename ||
-                            emailSending === entry.date ||
-                            saving
-                          }
-                          title={
-                            entry.finalPptFilename
-                              ? "發送主日服事 email"
-                              : "尚未上傳最終 PPT"
-                          }
-                        >
-                          {emailSending === entry.date ? "發送中…" : "發送 email"}
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded border border-blue-300 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
-                          onClick={() => handleGeneratePpt(entry.date)}
-                          disabled={pptGenerating === entry.date || saving}
-                        >
-                          {pptGenerating === entry.date ? "生成中…" : "生成 PPT"}
-                        </button>
+
                         <button
                           type="button"
                           className="rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"

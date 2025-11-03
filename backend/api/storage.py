@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Iterable, List, Optional
+from collections.abc import Sequence
 
 from .config import (
     ARTICLES_DIR,
@@ -445,8 +446,34 @@ class ArticleRepository:
 
         return sorted(entries, key=lambda entry: parse_date(entry.date), reverse=True)
 
+    def _ensure_worker_availability(self, entry: SundayServiceEntry) -> None:
+        date_text = (entry.date or "").strip()
+        if not date_text:
+            return
+        workers = {worker.name: worker for worker in self._load_sunday_workers()}
+        unavailable: list[str] = []
+
+        def check(role: str, name: Optional[str]) -> None:
+            if not name:
+                return
+            worker = workers.get(name)
+            if worker and not worker.is_available_on(date_text):
+                unavailable.append(f"{role}：{name}")
+
+        check("司會", entry.presider)
+        check("領詩", entry.worship_leader)
+        check("司琴", entry.pianist)
+        check("證道", entry.sermon_speaker)
+
+        for index, reader in enumerate(entry.scripture_readers or [], start=1):
+            check(f"讀經同工{index}", reader)
+
+        if unavailable:
+            raise ValueError(f"以下同工於 {date_text} 無法服事：{', '.join(unavailable)}")
+
     def create_sunday_service(self, entry: SundayServiceEntry) -> SundayServiceEntry:
         entry = self._apply_hymn_indices(entry)
+        self._ensure_worker_availability(entry)
         entries = self._load_sunday_service_entries()
         if any(existing.date == entry.date for existing in entries):
             raise ValueError(f"Sunday service date {entry.date} already exists")
@@ -463,6 +490,7 @@ class ArticleRepository:
 
     def update_sunday_service(self, date: str, entry: SundayServiceEntry) -> SundayServiceEntry:
         entry = self._apply_hymn_indices(entry)
+        self._ensure_worker_availability(entry)
         entries = self._load_sunday_service_entries()
         target = None
         for index, existing in enumerate(entries):
@@ -529,16 +557,48 @@ class ArticleRepository:
                     continue
             elif isinstance(item, dict):
                 data = dict(item)
-                name = data.get("name")
-                email = data.get("email")
-                if isinstance(name, str):
-                    try:
-                        workers.append(SundayWorker(name=name, email=email))
-                    except ValueError:
+                try:
+                    workers.append(SundayWorker.model_validate(data))
+                    continue
+                except Exception:
+                    name = data.get("name")
+                    email = data.get("email")
+                    unavailable = (
+                        data.get("unavailableRanges")
+                        or data.get("unavailable_ranges")
+                        or data.get("unavailable_dates")
+                        or data.get("unavailableDates")
+                    )
+                    ranges: list[dict] = []
+                    if isinstance(unavailable, Sequence) and not isinstance(unavailable, (str, bytes)):
+                        for raw_range in unavailable:
+                            if isinstance(raw_range, dict):
+                                start = raw_range.get("startDate") or raw_range.get("start_date")
+                                end = raw_range.get("endDate") or raw_range.get("end_date")
+                                if isinstance(start, str) and isinstance(end, str):
+                                    ranges.append({"startDate": start, "endDate": end})
+                            else:
+                                text = str(raw_range).strip()
+                                if text:
+                                    ranges.append({"startDate": text, "endDate": text})
+                    elif unavailable:
+                        text = str(unavailable).strip()
+                        if text:
+                            ranges.append({"startDate": text, "endDate": text})
+                    if isinstance(name, str):
                         try:
-                            workers.append(SundayWorker(name=name))
+                            workers.append(
+                                SundayWorker(
+                                    name=name,
+                                    email=email,
+                                    unavailable_ranges=ranges,
+                                )
+                            )
                         except ValueError:
-                            continue
+                            try:
+                                workers.append(SundayWorker(name=name, email=email))
+                            except ValueError:
+                                continue
         return workers
 
     def _save_sunday_workers(self, workers: list[SundayWorker]) -> None:
@@ -563,7 +623,11 @@ class ArticleRepository:
         lower_set = {existing.name.casefold(): existing for existing in workers}
         if name.casefold() in lower_set:
             raise ValueError(f"Worker {name} already exists")
-        new_worker = SundayWorker(name=name, email=worker.email)
+        new_worker = SundayWorker(
+            name=name,
+            email=worker.email,
+            unavailable_ranges=worker.unavailable_ranges,
+        )
         workers.append(new_worker)
         workers.sort(key=lambda value: value.name.casefold())
         self._save_sunday_workers(workers)
@@ -583,7 +647,11 @@ class ArticleRepository:
         if new_name != target and any(value.name.casefold() == new_name.casefold() for value in workers):
             raise ValueError(f"Worker {new_name} already exists")
 
-        updated_worker = SundayWorker(name=new_name, email=worker.email)
+        updated_worker = SundayWorker(
+            name=new_name,
+            email=worker.email,
+            unavailable_ranges=worker.unavailable_ranges,
+        )
         workers[index] = updated_worker
         workers.sort(key=lambda value: value.name.casefold())
         self._save_sunday_workers(workers)

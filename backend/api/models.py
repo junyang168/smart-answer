@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional, Tuple, List
 from collections.abc import Sequence
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
 ArticleStatus = Literal["draft", "generated", "final"]
@@ -129,11 +129,75 @@ class SundaySongCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class UnavailableDateRange(BaseModel):
+    start_date: str = Field(..., alias="startDate")
+    end_date: str = Field(..., alias="endDate")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("start_date", "end_date", mode="before")
+    @classmethod
+    def _normalize_date(cls, value):
+        if value is None:
+            raise ValueError("Unavailable date is required")
+        text = str(value).strip()
+        if not text:
+            raise ValueError("Unavailable date is required")
+        return text
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def _validate_format(cls, value: str) -> str:
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("Unavailable dates must use YYYY-MM-DD format") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _validate_order(self):
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        if end < start:
+            raise ValueError("Unavailable date range end must be after start date")
+        return self
+
+    def contains(self, date: str) -> bool:
+        try:
+            target = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            return False
+        start = datetime.strptime(self.start_date, "%Y-%m-%d")
+        end = datetime.strptime(self.end_date, "%Y-%m-%d")
+        return start <= target <= end
+
+
 class SundayWorker(BaseModel):
     name: str
     email: Optional[str] = None
+    unavailable_ranges: List[UnavailableDateRange] = Field(
+        default_factory=list, alias="unavailableRanges"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_legacy(cls, data):
+        if isinstance(data, dict):
+            if "unavailableRanges" not in data:
+                legacy = data.get("unavailable_dates") or data.get("unavailableDates")
+                if legacy:
+                    ranges = []
+                    for value in legacy:
+                        text = str(value).strip()
+                        if not text:
+                            continue
+                        ranges.append({"startDate": text, "endDate": text})
+                    if ranges:
+                        data = dict(data)
+                        data["unavailableRanges"] = ranges
+        return data
 
     @field_validator("name")
     @classmethod
@@ -150,6 +214,14 @@ class SundayWorker(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    def is_available_on(self, date: Optional[str]) -> bool:
+        if not date:
+            return True
+        target = date.strip()
+        if not target:
+            return True
+        return all(not range_.contains(target) for range_ in self.unavailable_ranges)
 
 
 class SundayServiceEmailResult(BaseModel):

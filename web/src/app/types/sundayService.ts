@@ -1,8 +1,14 @@
 export type SundaySongSource = "custom" | "hymnal";
 
+export interface UnavailableDateRange {
+  startDate: string;
+  endDate: string;
+}
+
 export interface SundayWorker {
   name: string;
   email?: string | null;
+  unavailableRanges?: UnavailableDateRange[];
 }
 
 export interface SundayServiceEmailResult {
