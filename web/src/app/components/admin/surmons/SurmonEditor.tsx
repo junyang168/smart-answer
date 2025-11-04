@@ -1219,9 +1219,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const handleFramePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!canEdit || !frameImageSize) {
-        return;
-      }
+//      if (!canEdit || !frameImageSize) {
+//        return;
+//      }
       if (event.pointerType === "mouse" && event.button !== 0) {
         return;
       }
