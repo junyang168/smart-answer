@@ -6,7 +6,9 @@ import type {
   FormEvent as ReactFormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactNode,
+  SyntheticEvent as ReactSyntheticEvent,
 } from "react";
 import { visit } from "unist-util-visit";
 import dynamic from "next/dynamic";
@@ -43,6 +45,11 @@ import {
   SurmonGenerateMetadataPayload,
   SurmonGenerateMetadataResponse,
   SurmonSlideAsset,
+  SurmonSlideFrameInfo,
+  SurmonSlideFrameUpdatePayload,
+  SurmonSlideGenerationResponse,
+  SurmonSlideFrameCoordinates,
+  SurmonSlideFrameDimensions,
   SurmonChatMessage,
   SurmonChatResponse,
   SurmonChatReference,
@@ -56,6 +63,7 @@ const API_PREFIX = "/api/sc_api";
 const SLIDES_PREFIX = "/api/slides";
 const MEDIA_PREFIX = "/web/video";
 const INDEX_LINK_PREFIX = "index:";
+const MIN_SELECTION_SIZE = 16;
 
 const INDEX_TOKEN_PATTERN = /\[([0-9]+(?:_[0-9]+)?)\]/g;
 const FALLBACK_STRIKETHROUGH_PATTERN = /~~([^~]+?)~~/g;
@@ -433,6 +441,17 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [slides, setSlides] = useState<SurmonSlideAsset[]>([]);
   const [slidesStatus, setSlidesStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [slidesError, setSlidesError] = useState<string | null>(null);
+  const [slideFrame, setSlideFrame] = useState<SurmonSlideFrameInfo | null>(null);
+  const [slideFrameStatus, setSlideFrameStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [slideFrameError, setSlideFrameError] = useState<string | null>(null);
+  const [frameSelection, setFrameSelection] = useState<SurmonSlideFrameCoordinates | null>(null);
+  const [frameImageSize, setFrameImageSize] = useState<SurmonSlideFrameDimensions | null>(null);
+  const [isSavingFrame, setIsSavingFrame] = useState(false);
+  const [frameSaveMessage, setFrameSaveMessage] = useState<string | null>(null);
+  const [isGeneratingSlides, setIsGeneratingSlides] = useState(false);
+  const [slideGenerationMessage, setSlideGenerationMessage] = useState<string | null>(null);
+  const [slideGenerationError, setSlideGenerationError] = useState<string | null>(null);
+  const [isDrawingFrame, setIsDrawingFrame] = useState(false);
   const [openSlidePickerIndex, setOpenSlidePickerIndex] = useState<number | null>(null);
   const [chatMessages, setChatMessages] = useState<SurmonConversationMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>("");
@@ -440,7 +459,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [chatError, setChatError] = useState<string | null>(null);
   const [highlightedParagraphs, setHighlightedParagraphs] = useState<Set<number>>(() => new Set());
   const [activeHighlightToken, setActiveHighlightToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"script" | "metadata">("script");
+  const [activeTab, setActiveTab] = useState<"script" | "metadata" | "slides">("script");
   const [historyEntries, setHistoryEntries] = useState<SurmonAuditEntry[]>([]);
   const [historyStatus, setHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -454,6 +473,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const slidesLoadedRef = useRef(false);
   const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const historyPopoverRef = useRef<HTMLDivElement | null>(null);
+  const frameImageRef = useRef<HTMLImageElement | null>(null);
+  const frameContainerRef = useRef<HTMLDivElement | null>(null);
+  const frameDrawOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const frameSelectionRef = useRef<SurmonSlideFrameCoordinates | null>(null);
 
   const sessionEmail = session?.user?.email ?? null;
 
@@ -516,6 +539,38 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     }
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages, isChatLoading]);
+
+  useEffect(() => {
+    frameSelectionRef.current = frameSelection;
+  }, [frameSelection]);
+
+  useEffect(() => {
+    setSlideFrame(null);
+    setSlideFrameStatus("idle");
+    setSlideFrameError(null);
+    setFrameSelection(null);
+    setFrameImageSize(null);
+    setIsSavingFrame(false);
+    setFrameSaveMessage(null);
+    setIsGeneratingSlides(false);
+    setSlideGenerationMessage(null);
+    setSlideGenerationError(null);
+    setIsDrawingFrame(false);
+  }, [item]);
+
+  useEffect(() => {
+    if (!slideFrame) {
+      return;
+    }
+    if (slideFrame.coordinates) {
+      setFrameSelection(slideFrame.coordinates);
+    } else {
+      setFrameSelection(null);
+    }
+    if (slideFrame.frame_dimensions) {
+      setFrameImageSize((prev) => prev ?? slideFrame.frame_dimensions ?? null);
+    }
+  }, [slideFrame]);
 
   useEffect(() => {
     setChatMessages([]);
@@ -976,12 +1031,41 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     }
   }, [fetchJSON, item, slidesStatus]);
 
+  const loadSlideFrame = useCallback(async () => {
+    setSlideFrameStatus("loading");
+    setSlideFrameError(null);
+    try {
+      const data = await fetchJSON<SurmonSlideFrameInfo>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/frame`
+      );
+      setSlideFrame(data);
+      setSlideFrameStatus("ready");
+      setFrameSaveMessage(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "無法取得投影畫面";
+      setSlideFrameError(message);
+      setSlideFrameStatus("error");
+    }
+  }, [fetchJSON, item]);
+
   useEffect(() => {
     slidesLoadedRef.current = false;
     setSlides([]);
     setSlidesError(null);
     setSlidesStatus("idle");
   }, [item]);
+
+  useEffect(() => {
+    if (activeTab === "slides" && slideFrameStatus === "idle") {
+      loadSlideFrame().catch(() => {});
+    }
+  }, [activeTab, loadSlideFrame, slideFrameStatus]);
+
+  useEffect(() => {
+    if (activeTab === "slides" && slidesStatus === "idle") {
+      loadSlides().catch(() => {});
+    }
+  }, [activeTab, loadSlides, slidesStatus]);
 
   const createSlideMarkdown = useCallback(
     (slide: SurmonSlideAsset) => {
@@ -997,6 +1081,256 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     setSlidesError(null);
     setSlidesStatus("idle");
   }, []);
+
+  const resolvedFrameDimensions = useMemo<SurmonSlideFrameDimensions | null>(() => {
+    if (frameImageSize) {
+      return frameImageSize;
+    }
+    if (slideFrame?.frame_dimensions) {
+      return slideFrame.frame_dimensions;
+    }
+    return null;
+  }, [frameImageSize, slideFrame]);
+
+  const frameOverlayStyle = useMemo(() => {
+    if (!frameSelection || !resolvedFrameDimensions) {
+      return null;
+    }
+    const width = Math.max(resolvedFrameDimensions.width, 1);
+    const height = Math.max(resolvedFrameDimensions.height, 1);
+    if (frameSelection.width <= 0 || frameSelection.height <= 0) {
+      return null;
+    }
+    return {
+      left: `${(frameSelection.x / width) * 100}%`,
+      top: `${(frameSelection.y / height) * 100}%`,
+      width: `${(frameSelection.width / width) * 100}%`,
+      height: `${(frameSelection.height / height) * 100}%`,
+    };
+  }, [frameSelection, resolvedFrameDimensions]);
+
+  const frameDirty = useMemo(() => {
+    if (!frameSelection) {
+      return false;
+    }
+    const savedCoordinates = slideFrame?.coordinates;
+    const savedDimensions = slideFrame?.frame_dimensions;
+    const currentDimensions = frameImageSize ?? savedDimensions ?? null;
+    if (!currentDimensions) {
+      return false;
+    }
+    if (!savedCoordinates) {
+      return true;
+    }
+    if (!savedDimensions) {
+      return true;
+    }
+    const sameCoords =
+      savedCoordinates.x === frameSelection.x &&
+      savedCoordinates.y === frameSelection.y &&
+      savedCoordinates.width === frameSelection.width &&
+      savedCoordinates.height === frameSelection.height;
+    const sameDims =
+      currentDimensions.width === savedDimensions.width &&
+      currentDimensions.height === savedDimensions.height;
+    return !(sameCoords && sameDims);
+  }, [frameImageSize, frameSelection, slideFrame]);
+
+  const canSaveFrame =
+    Boolean(canEdit && frameSelection && frameImageSize && frameDirty) && !isSavingFrame;
+  const canGenerateSlides =
+    Boolean(canEdit && slideFrame?.coordinates && slideFrameStatus === "ready") && !isGeneratingSlides;
+
+  const handleFrameImageLoad = useCallback((event: ReactSyntheticEvent<HTMLImageElement>) => {
+    const target = event.currentTarget;
+    if (target.naturalWidth > 0 && target.naturalHeight > 0) {
+      setFrameImageSize({ width: target.naturalWidth, height: target.naturalHeight });
+    }
+  }, []);
+
+  const handleFramePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!canEdit || !frameImageRef.current || !frameImageSize) {
+        return;
+      }
+      event.preventDefault();
+      if (event.pointerType !== "touch") {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+      const rect = frameImageRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return;
+      }
+      const clampToRect = (value: number, max: number) => Math.min(Math.max(value, 0), max);
+      const offsetX = clampToRect(event.clientX - rect.left, rect.width);
+      const offsetY = clampToRect(event.clientY - rect.top, rect.height);
+      const scaleX = frameImageSize.width / rect.width;
+      const scaleY = frameImageSize.height / rect.height;
+      const startX = Math.round(offsetX * scaleX);
+      const startY = Math.round(offsetY * scaleY);
+      frameDrawOriginRef.current = { x: startX, y: startY };
+      setIsDrawingFrame(true);
+      setFrameSaveMessage(null);
+      setSlideFrameError(null);
+      setFrameSelection({
+        x: startX,
+        y: startY,
+        width: 0,
+        height: 0,
+      });
+    },
+    [canEdit, frameImageSize]
+  );
+
+  const handleFramePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isDrawingFrame || !frameDrawOriginRef.current || !frameImageRef.current || !frameImageSize) {
+        return;
+      }
+      event.preventDefault();
+      const rect = frameImageRef.current.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return;
+      }
+      const clampToRect = (value: number, max: number) => Math.min(Math.max(value, 0), max);
+      const offsetX = clampToRect(event.clientX - rect.left, rect.width);
+      const offsetY = clampToRect(event.clientY - rect.top, rect.height);
+      const scaleX = frameImageSize.width / rect.width;
+      const scaleY = frameImageSize.height / rect.height;
+      const currentX = Math.round(offsetX * scaleX);
+      const currentY = Math.round(offsetY * scaleY);
+      const origin = frameDrawOriginRef.current;
+      const clampCoord = (value: number, size: number) => Math.min(Math.max(value, 0), size);
+      const originX = clampCoord(origin.x, frameImageSize.width);
+      const originY = clampCoord(origin.y, frameImageSize.height);
+      const targetX = clampCoord(currentX, frameImageSize.width);
+      const targetY = clampCoord(currentY, frameImageSize.height);
+      const left = Math.min(originX, targetX);
+      const top = Math.min(originY, targetY);
+      const width = Math.abs(targetX - originX);
+      const height = Math.abs(targetY - originY);
+      setFrameSelection({
+        x: left,
+        y: top,
+        width,
+        height,
+      });
+    },
+    [isDrawingFrame, frameImageSize]
+  );
+
+  const handleFramePointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (!isDrawingFrame) {
+        return;
+      }
+      event.preventDefault();
+      setIsDrawingFrame(false);
+      frameDrawOriginRef.current = null;
+      const current = frameSelectionRef.current;
+      if (!current || current.width < MIN_SELECTION_SIZE || current.height < MIN_SELECTION_SIZE) {
+        setFrameSelection(null);
+      }
+    },
+    [isDrawingFrame]
+  );
+
+  const handleResetFrameSelection = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    frameDrawOriginRef.current = null;
+    setFrameSelection(null);
+    setFrameSaveMessage(null);
+  }, [canEdit]);
+
+  const handleReloadFrame = useCallback(() => {
+    if (slideFrameStatus === "loading") {
+      return;
+    }
+    loadSlideFrame().catch(() => {});
+  }, [loadSlideFrame, slideFrameStatus]);
+
+  const handleSaveFrame = useCallback(async () => {
+    if (!canEdit) {
+      return;
+    }
+    if (!frameSelection || !frameImageSize) {
+      setSlideFrameError("請先選取投影畫面範圍");
+      return;
+    }
+    const selection = {
+      x: Math.max(0, Math.round(frameSelection.x)),
+      y: Math.max(0, Math.round(frameSelection.y)),
+      width: Math.max(0, Math.round(frameSelection.width)),
+      height: Math.max(0, Math.round(frameSelection.height)),
+    };
+    if (selection.width < MIN_SELECTION_SIZE || selection.height < MIN_SELECTION_SIZE) {
+      setSlideFrameError(`選取範圍至少需要 ${MIN_SELECTION_SIZE} 像素`);
+      return;
+    }
+    setIsSavingFrame(true);
+    setSlideFrameError(null);
+    setFrameSaveMessage(null);
+    try {
+      const payload: SurmonSlideFrameUpdatePayload = {
+        coordinates: selection,
+        frame_dimensions: {
+          width: Math.max(0, Math.round(frameImageSize.width)),
+          height: Math.max(0, Math.round(frameImageSize.height)),
+        },
+      };
+      const result = await fetchJSON<SurmonSlideFrameInfo>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/frame`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      setSlideFrame(result);
+      setFrameSaveMessage("投影畫面範圍已儲存");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "儲存投影畫面範圍失敗";
+      setSlideFrameError(message);
+    } finally {
+      setIsSavingFrame(false);
+    }
+  }, [canEdit, fetchJSON, frameImageSize, frameSelection, item]);
+
+  const handleGenerateSlides = useCallback(async () => {
+    if (!canEdit) {
+      return;
+    }
+    if (!slideFrame?.coordinates) {
+      setSlideGenerationError("請先儲存投影畫面框線");
+      return;
+    }
+    setIsGeneratingSlides(true);
+    setSlideGenerationError(null);
+    setSlideGenerationMessage(null);
+    try {
+      const data = await fetchJSON<SurmonSlideGenerationResponse>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/generate`,
+        {
+          method: "POST",
+        }
+      );
+      setSlideGenerationMessage(`已生成 ${data.count} 張投影片`);
+      setSlides(data.slides);
+      slidesLoadedRef.current = true;
+      setSlidesStatus("ready");
+      setSlidesError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "投影片生成失敗";
+      setSlideGenerationError(message);
+    } finally {
+      setIsGeneratingSlides(false);
+    }
+  }, [canEdit, fetchJSON, item, slideFrame?.coordinates]);
 
   const handleChatInputChange = useCallback((event: ReactChangeEvent<HTMLTextAreaElement>) => {
     setChatInput(event.target.value);
@@ -2016,6 +2350,11 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                 <source src={mediaSource ?? ""} />
                 您的瀏覽器不支援 audio 元素。
               </audio>
+            ) : activeTab === "metadata" ? (
+              <video ref={handleMediaRef} controls className="w-full">
+                <source src={mediaSource ?? ""} />
+                您的瀏覽器不支援 video 元素。
+              </video>
             ) : (
               <video ref={handleMediaRef} controls className="w-full">
                 <source src={mediaSource ?? ""} />
@@ -2144,6 +2483,17 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                 >
                   标题和简介
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("slides")}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                    activeTab === "slides"
+                      ? "border border-blue-200 bg-blue-100 text-blue-700"
+                      : "border border-transparent text-gray-600 hover:text-blue-700"
+                  }`}
+                >
+                  生成 slides
+                </button>
               </div>
               {activeTab === "script" && selectedParagraph && (
                 <button
@@ -2207,7 +2557,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                   })}
                 </div>
               </div>
-            ) : (
+            ) : activeTab === "metadata" ? (
               <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
                 <div className="space-y-5">
                   {metadataGenerateError && (
@@ -2357,6 +2707,201 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                       )}
                     </button>
                   </div>
+                </div>
+              </div>
+            ) : (
+              <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
+                <div className="space-y-6">
+                  <section className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-gray-800">步驟一：設定投影畫面框線</h3>
+                      <span className="text-xs text-gray-500">
+                        參考時間：{formatTimestamp(slideFrame?.timestamp_seconds ?? 60) ?? "1:00"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      於參考影格中框選投影幕的範圍，並儲存座標供產生投影片時使用。
+                    </p>
+                    {slideFrame?.updated_at ? (
+                      <p className="text-xs text-gray-400">
+                        最後更新：{formatHistoryTimestamp(slideFrame.updated_at)}
+                      </p>
+                    ) : null}
+                    {slideFrameError && slideFrameStatus !== "error" ? (
+                      <p className="text-xs text-red-600">{slideFrameError}</p>
+                    ) : null}
+                    {frameSaveMessage ? (
+                      <p className="text-xs text-green-600">{frameSaveMessage}</p>
+                    ) : null}
+                    <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
+                      {slideFrameStatus === "loading" ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <Loader2 className="h-4 w-4 animate-spin" /> 擷取畫面中...
+                        </div>
+                      ) : slideFrameStatus === "error" ? (
+                        <div className="flex flex-col items-center gap-2 text-center text-sm text-red-600">
+                          <p>{slideFrameError ?? "無法取得投影畫面"}</p>
+                          <button
+                            type="button"
+                            onClick={handleReloadFrame}
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
+                          >
+                            <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
+                          </button>
+                        </div>
+                      ) : slideFrame ? (
+                        <div
+                          ref={frameContainerRef}
+                          className={`relative inline-block max-w-full ${canEdit ? "cursor-crosshair" : ""}`}
+                          onPointerDown={handleFramePointerDown}
+                          onPointerMove={handleFramePointerMove}
+                          onPointerUp={handleFramePointerUp}
+                          onPointerLeave={handleFramePointerUp}
+                          onPointerCancel={handleFramePointerUp}
+                        >
+                          <img
+                            ref={frameImageRef}
+                            src={slideFrame.image_url}
+                            alt="投影畫面參考影格"
+                            className="block max-h-[360px] w-auto select-none rounded border border-gray-200 bg-black/80"
+                            onLoad={handleFrameImageLoad}
+                            draggable={false}
+                          />
+                          {frameOverlayStyle ? (
+                            <div
+                              className="absolute border-2 border-blue-500 bg-blue-500/20"
+                              style={frameOverlayStyle}
+                            />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">尚未取得參考影格。</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleReloadFrame}
+                        disabled={slideFrameStatus === "loading"}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" /> 重新載入畫面
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleResetFrameSelection}
+                        disabled={!canEdit || (!frameSelection && !isDrawingFrame)}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" /> 清除框線
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        type="button"
+                        onClick={handleSaveFrame}
+                        disabled={!canSaveFrame}
+                        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                      >
+                        {isSavingFrame ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" /> 儲存中...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="h-4 w-4" /> 儲存框線
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </section>
+                  <section className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-gray-800">步驟二：生成投影片</h3>
+                      <span className="text-xs text-gray-500">
+                        目前共有 {slides.length} 張投影片
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      完成框線設定後即可生成投影片，生成後會覆蓋既有的影像與 metadata 檔案。
+                    </p>
+                    {slideGenerationError ? (
+                      <p className="text-xs text-red-600">{slideGenerationError}</p>
+                    ) : null}
+                    {slideGenerationMessage ? (
+                      <p className="text-xs text-green-600">{slideGenerationMessage}</p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGenerateSlides}
+                        disabled={!canGenerateSlides}
+                        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                      >
+                        {isGeneratingSlides ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" /> 生成中...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-4 w-4" /> 生成 slide
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSlideRetry}
+                        disabled={slidesStatus === "loading"}
+                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" /> 重新載入資料
+                      </button>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-white p-3">
+                      {slidesStatus === "loading" ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <Loader2 className="h-4 w-4 animate-spin" /> 載入投影片中...
+                        </div>
+                      ) : slidesStatus === "error" ? (
+                        <div className="space-y-2 text-sm text-red-600">
+                          <p>{slidesError ?? "投影片載入失敗"}</p>
+                          <button
+                            type="button"
+                            onClick={handleSlideRetry}
+                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
+                          >
+                            <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
+                          </button>
+                        </div>
+                      ) : slides.length === 0 ? (
+                        <p className="text-sm text-gray-500">尚未生成投影片。</p>
+                      ) : (
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {slides.map((slide) => {
+                            const timestampLabel = formatTimestamp(slide.timestamp_seconds ?? null);
+                            return (
+                              <div
+                                key={slide.id}
+                                className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                              >
+                                <Image
+                                  src={slide.image_url}
+                                  alt={`Slide ${slide.id}`}
+                                  width={800}
+                                  height={450}
+                                  unoptimized
+                                  className="h-auto w-full bg-black object-contain"
+                                />
+                                <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-600">
+                                  <span className="font-medium text-gray-700">{slide.id}</span>
+                                  {timestampLabel ? <span>{timestampLabel}</span> : null}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </section>
                 </div>
               </div>
             )}

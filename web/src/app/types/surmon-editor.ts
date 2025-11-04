@@ -73,6 +73,38 @@ export interface SurmonSlideAsset {
   extracted_text?: string | null;
 }
 
+export interface SurmonSlideFrameCoordinates {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SurmonSlideFrameDimensions {
+  width: number;
+  height: number;
+}
+
+export interface SurmonSlideFrameInfo {
+  timestamp_seconds: number;
+  image: string;
+  image_url: string;
+  coordinates?: SurmonSlideFrameCoordinates | null;
+  frame_dimensions?: SurmonSlideFrameDimensions | null;
+  updated_at?: string | null;
+}
+
+export interface SurmonSlideFrameUpdatePayload {
+  coordinates: SurmonSlideFrameCoordinates;
+  frame_dimensions: SurmonSlideFrameDimensions;
+}
+
+export interface SurmonSlideGenerationResponse {
+  count: number;
+  metadata_path: string;
+  slides: SurmonSlideAsset[];
+}
+
 export interface SurmonTimelineEntry {
   index: string;
   timestamp: string;
