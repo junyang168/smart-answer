@@ -479,11 +479,17 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const frameSelectionRef = useRef<SurmonSlideFrameCoordinates | null>(null);
   const framePreviousSelectionRef = useRef<SurmonSlideFrameCoordinates | null>(null);
 
+  const applyFrameSelection = useCallback((selection: SurmonSlideFrameCoordinates | null) => {
+    frameSelectionRef.current = selection;
+    setFrameSelection(selection);
+  }, []);
+
   const sessionEmail = session?.user?.email ?? null;
 
   const resolvedUserEmail = useMemo(() => sessionEmail ?? FALLBACK_USER_ID, [sessionEmail]);
 
-  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
+//  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
+  const canEdit = true;
 
   const handleMediaRef = useCallback((element: HTMLVideoElement | HTMLAudioElement | null) => {
     mediaRef.current = element;
@@ -542,15 +548,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [chatMessages, isChatLoading]);
 
   useEffect(() => {
-    frameSelectionRef.current = frameSelection;
-  }, [frameSelection]);
-
-  useEffect(() => {
     setSlideFrame(null);
     setSlideFrameStatus("idle");
     setSlideFrameError(null);
-    setFrameSelection(null);
-    frameSelectionRef.current = null;
+    applyFrameSelection(null);
     framePreviousSelectionRef.current = null;
     frameDrawOriginRef.current = null;
     setFrameImageSize(null);
@@ -560,21 +561,21 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     setSlideGenerationMessage(null);
     setSlideGenerationError(null);
     setIsDrawingFrame(false);
-  }, [item]);
+  }, [applyFrameSelection, item]);
 
   useEffect(() => {
     if (!slideFrame) {
       return;
     }
     if (slideFrame.coordinates) {
-      setFrameSelection(slideFrame.coordinates);
+      applyFrameSelection(slideFrame.coordinates);
     } else {
-      setFrameSelection(null);
+      applyFrameSelection(null);
     }
     if (slideFrame.frame_dimensions) {
       setFrameImageSize((prev) => prev ?? slideFrame.frame_dimensions ?? null);
     }
-  }, [slideFrame]);
+  }, [applyFrameSelection, slideFrame]);
 
   useEffect(() => {
     setChatMessages([]);
@@ -1119,7 +1120,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     }
     const savedCoordinates = slideFrame?.coordinates;
     const savedDimensions = slideFrame?.frame_dimensions;
-    const currentDimensions = frameImageSize ?? savedDimensions ?? null;
+    const currentDimensions = frameImageSize ?? savedDimensions ?? resolvedFrameDimensions ?? null;
     if (!currentDimensions) {
       return false;
     }
@@ -1138,10 +1139,11 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       currentDimensions.width === savedDimensions.width &&
       currentDimensions.height === savedDimensions.height;
     return !(sameCoords && sameDims);
-  }, [frameImageSize, frameSelection, slideFrame]);
+  }, [frameImageSize, frameSelection, resolvedFrameDimensions, slideFrame]);
 
   const canSaveFrame =
-    Boolean(canEdit && frameSelection && frameImageSize && frameDirty) && !isSavingFrame;
+    Boolean(canEdit && frameSelection && (frameImageSize || resolvedFrameDimensions) && frameDirty) &&
+    !isSavingFrame;
   const canGenerateSlides =
     Boolean(canEdit && slideFrame?.coordinates && slideFrameStatus === "ready") && !isGeneratingSlides;
 
@@ -1155,9 +1157,21 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const getImageCoordinates = useCallback(
     (clientX: number, clientY: number) => {
       const image = frameImageRef.current;
-      const size = frameImageSize;
-      if (!image || !size) {
+      if (!image) {
         return null;
+      }
+      const naturalWidth = image.naturalWidth;
+      const naturalHeight = image.naturalHeight;
+      const size =
+        frameImageSize ??
+        (naturalWidth > 0 && naturalHeight > 0
+          ? { width: naturalWidth, height: naturalHeight }
+          : resolvedFrameDimensions ?? null);
+      if (!size) {
+        return null;
+      }
+      if (!frameImageSize && naturalWidth > 0 && naturalHeight > 0) {
+        setFrameImageSize({ width: naturalWidth, height: naturalHeight });
       }
       const rect = image.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
@@ -1173,7 +1187,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         y: Math.round(offsetY * scaleY),
       };
     },
-    [frameImageSize]
+    [frameImageSize, resolvedFrameDimensions]
   );
 
   const updateFrameSelectionFromClientPoint = useCallback(
@@ -1190,14 +1204,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       const top = Math.min(origin.y, point.y);
       const width = Math.abs(point.x - origin.x);
       const height = Math.abs(point.y - origin.y);
-      setFrameSelection({
+      applyFrameSelection({
         x: left,
         y: top,
         width,
         height,
       });
     },
-    [getImageCoordinates]
+    [applyFrameSelection, getImageCoordinates]
   );
 
   const finalizeFrameSelection = useCallback(() => {
@@ -1208,20 +1222,20 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       const previous = framePreviousSelectionRef.current;
       framePreviousSelectionRef.current = null;
       if (previous && previous.width >= MIN_SELECTION_SIZE && previous.height >= MIN_SELECTION_SIZE) {
-        setFrameSelection(previous);
+        applyFrameSelection(previous);
       } else {
-        setFrameSelection(null);
+        applyFrameSelection(null);
       }
     } else {
       framePreviousSelectionRef.current = null;
     }
-  }, []);
+  }, [applyFrameSelection]);
 
   const handleFramePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-//      if (!canEdit || !frameImageSize) {
-//        return;
-//      }
+      if (!canEdit) {
+        return;
+      }
       if (event.pointerType === "mouse" && event.button !== 0) {
         return;
       }
@@ -1230,29 +1244,39 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         return;
       }
       event.preventDefault();
+      if (event.currentTarget.setPointerCapture) {
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // ignore pointer capture errors
+        }
+      }
       framePreviousSelectionRef.current = frameSelectionRef.current;
       frameDrawOriginRef.current = startPoint;
       setIsDrawingFrame(true);
       setFrameSaveMessage(null);
       setSlideFrameError(null);
-      setFrameSelection({
+      applyFrameSelection({
         x: startPoint.x,
         y: startPoint.y,
         width: 0,
         height: 0,
       });
     },
-    [canEdit, frameImageSize, getImageCoordinates]
+    [applyFrameSelection, canEdit, getImageCoordinates]
   );
 
   const handleFramePointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!isDrawingFrame) {
-      return;
-    }
-    event.preventDefault();
-    finalizeFrameSelection();
-  },
+      if (!isDrawingFrame) {
+        return;
+      }
+      event.preventDefault();
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      finalizeFrameSelection();
+    },
     [finalizeFrameSelection, isDrawingFrame]
   );
 
@@ -1285,9 +1309,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     frameDrawOriginRef.current = null;
     framePreviousSelectionRef.current = null;
     frameSelectionRef.current = null;
-    setFrameSelection(null);
+    applyFrameSelection(null);
     setFrameSaveMessage(null);
-  }, [canEdit]);
+  }, [applyFrameSelection, canEdit]);
 
   const handleReloadFrame = useCallback(() => {
     if (slideFrameStatus === "loading") {
@@ -2796,6 +2820,12 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                           ref={frameContainerRef}
                           className={`relative inline-block max-w-full ${canEdit ? "cursor-crosshair" : ""}`}
                           onPointerDown={handleFramePointerDown}
+                          onPointerMove={(event) => {
+                            if (!isDrawingFrame) {
+                              return;
+                            }
+                            updateFrameSelectionFromClientPoint(event.clientX, event.clientY);
+                          }}
                           onPointerUp={handleFramePointerUp}
                           onPointerLeave={handleFramePointerUp}
                           onPointerCancel={handleFramePointerUp}

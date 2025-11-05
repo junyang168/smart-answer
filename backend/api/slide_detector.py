@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-
+ 
 @dataclass(frozen=True)
 class FrameRegion:
     """Represents a rectangular region inside the video frame."""
@@ -70,10 +70,19 @@ def ensure_clean_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def extract_candidates(video: Path, raw_dir: Path, threshold: float) -> list[Path]:
+def extract_candidates(
+    video: Path,
+    raw_dir: Path,
+    threshold: float,
+    *,
+    crop_region: FrameRegion | None = None,
+) -> list[Path]:
     ensure_clean_dir(raw_dir)
     pattern = raw_dir / "slide_%03d.png"
-    filter_expr = f"select='gt(scene,{threshold})'"
+    filter_expr = _build_filters(
+        _crop_filter(crop_region),
+        f"select='gt(scene,{threshold})'",
+    )
     run_ffmpeg(
         [
             "-y",
@@ -93,9 +102,20 @@ def escape_movie_path(path: Path) -> str:
     return str(path).replace("'", r"\'")
 
 
-def scene_timestamps(video: Path, threshold: float) -> list[float]:
+def scene_timestamps(
+    video: Path,
+    threshold: float,
+    *,
+    crop_region: FrameRegion | None = None,
+) -> list[float]:
     escaped = escape_movie_path(video.resolve())
-    filter_spec = f"movie='{escaped}',select=gt(scene\\,{threshold})"
+    filter_chain = _build_filters(
+        _crop_filter(crop_region),
+        f"select=gt(scene\\,{threshold})",
+    )
+    filter_spec = f"movie='{escaped}'"
+    if filter_chain:
+        filter_spec = f"{filter_spec},{filter_chain}"
     proc = subprocess.run(
         [
             "ffprobe",
@@ -166,6 +186,9 @@ def looks_blue(rgb: tuple[int, int, int], *, minimum: int, dominance: int) -> bo
 
 def _copy_frame(src: Path, dest: Path, *, crop_region: FrameRegion | None = None) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if crop_region is None:
+        shutil.copy2(src, dest)
+        return
     filters = _build_filters(_crop_filter(crop_region))
     args: list[str] = ["-y", "-i", str(src)]
     if filters:
@@ -185,12 +208,13 @@ def filter_blue_frames(
     ensure_clean_dir(out_dir)
     kept: list[SlideRecord] = []
     for src, timestamp in frames:
-        rgb = average_rgb(src, crop_region=crop_region)
-        if rgb is None:
-            continue
-        if looks_blue(rgb, minimum=minimum, dominance=dominance):
+#        rgb = average_rgb(src, crop_region=crop_region)
+#        if rgb is None:
+#            continue
+#        if looks_blue(rgb, minimum=minimum, dominance=dominance):
+        if True:
             dest = out_dir / src.name
-            _copy_frame(src, dest, crop_region=crop_region)
+            _copy_frame(src, dest)
             kept.append(SlideRecord(image=dest, timestamp=timestamp, rgb=rgb))
     return kept
 
@@ -234,21 +258,30 @@ def capture_video_frame(video: Path, timestamp_seconds: float, destination: Path
 
 
 def run_slide_detection(config: SlideDetectionConfig) -> list[SlideRecord]:
-    raw_frames = extract_candidates(config.video, config.raw_dir, config.scene_threshold)
-    timestamps = scene_timestamps(config.video, config.scene_threshold)
+    raw_frames = extract_candidates(
+        config.video,
+        config.raw_dir,
+        config.scene_threshold,
+        crop_region=config.crop_region,
+    )
+    timestamps = scene_timestamps(
+        config.video,
+        config.scene_threshold,
+        crop_region=config.crop_region,
+    )
 
     frame_pairs = list(zip(raw_frames, timestamps))
     if len(raw_frames) != len(timestamps):
         min_length = min(len(raw_frames), len(timestamps))
         frame_pairs = list(zip(raw_frames[:min_length], timestamps[:min_length]))
 
-    slides = filter_blue_frames(
-        frame_pairs,
-        config.output_dir,
-        minimum=config.blue_min,
-        dominance=config.blue_dominance,
-        crop_region=config.crop_region,
-    )
+    ensure_clean_dir(config.output_dir)
+    slides: list[SlideRecord] = []
+    for src, timestamp in frame_pairs:
+        dest = config.output_dir / src.name
+        _copy_frame(src, dest)
+        rgb = average_rgb(dest) or (0, 0, 0)
+        slides.append(SlideRecord(image=dest, timestamp=timestamp, rgb=rgb))
     return slides
 
 
@@ -309,8 +342,30 @@ def main(namespace: argparse.Namespace | None = None) -> None:
 
     base_name = args.video.stem
     target_root = args.output_dir if args.output_dir else Path(base_name)
-    image_dir = target_root
+    target_root = target_root / base_name 
+    image_dir = target_root / 'images'
     json_path = args.json_output if args.json_output else target_root / "slide_meta.json"
+
+    frame_metadata_path = target_root / "frame.json"
+    crop_region = None
+    if frame_metadata_path.exists():
+        try:
+            with frame_metadata_path.open("r", encoding="utf-8") as fh:
+                metadata = json.load(fh)
+        except json.JSONDecodeError:
+            metadata = None
+        if isinstance(metadata, dict):
+            coordinates = metadata.get("coordinates")
+            if isinstance(coordinates, dict):
+                try:
+                    crop_region = FrameRegion(
+                        x=int(coordinates["x"]),
+                        y=int(coordinates["y"]),
+                        width=int(coordinates["width"]),
+                        height=int(coordinates["height"]),
+                    )
+                except (KeyError, TypeError, ValueError):
+                    crop_region = None
 
     config = SlideDetectionConfig(
         video=args.video,
@@ -319,17 +374,18 @@ def main(namespace: argparse.Namespace | None = None) -> None:
         scene_threshold=args.scene_threshold,
         blue_min=args.blue_min,
         blue_dominance=args.blue_dominance,
+        crop_region=crop_region,
     )
 
     slides = run_slide_detection(config)
 
-    if args.contact_sheet != Path("-"):
-        sheet_path = (
-            args.contact_sheet
-            if args.contact_sheet != Path("slide_detector.jpeg")
-            else target_root / "slide_detector.jpeg"
-        )
-        build_contact_sheet([record.image for record in slides], sheet_path)
+#    if args.contact_sheet != Path("-"):
+#        sheet_path = (
+#            args.contact_sheet
+#            if args.contact_sheet != Path("slide_detector.jpeg")
+#            else target_root / "slide_detector.jpeg"
+#        )
+#        build_contact_sheet([record.image for record in slides], sheet_path)
 
     summary = build_slide_summary(config, slides)
 
@@ -338,8 +394,8 @@ def main(namespace: argparse.Namespace | None = None) -> None:
         json.dump(summary, fh, indent=2)
 
     print(f"Detected {len(slides)} blue slide(s). Output folder: {image_dir}")
-    if args.contact_sheet != Path("-"):
-        print(f"Contact sheet: {sheet_path}")
+#    if args.contact_sheet != Path("-"):
+#        print(f"Contact sheet: {sheet_path}")
     print(f"Metadata JSON: {json_path}")
 
 

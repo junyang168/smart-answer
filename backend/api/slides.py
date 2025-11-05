@@ -188,7 +188,7 @@ def _list_slide_assets(item: str) -> list[SurmonSlideAsset]:
 
 
 def _locate_video_file(item: str) -> Path:
-    video_root = DATA_BASE_PATH / VIDEO_DIR_NAME
+    video_root = Path('/Volumes/Jun SSD/data/video').resolve()
     if not video_root.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Video directory is missing on the server")
 
