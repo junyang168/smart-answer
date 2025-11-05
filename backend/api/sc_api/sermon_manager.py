@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import copy
 import json
@@ -75,6 +75,9 @@ class SermonManager:
         self._audit_log_dir = os.path.join(self.base_folder, "logs")
         self._audit_log_file = os.path.join(self._audit_log_dir, "sermon_meta_audit.log")
         os.makedirs(self._audit_log_dir, exist_ok=True)
+
+        self._quick_search_cache: Dict[str, Tuple[datetime, List[str]]] = {}
+        self._quick_search_ttl = timedelta(minutes=10)
 
         with open(os.path.join(self.config_folder, 'fellowship.json'), 'r', encoding='utf-8') as f:
             self.fellowship = json.load(f)
@@ -789,6 +792,13 @@ class SermonManager:
         }
 
     def quick_search(self, term: str) -> List[str]:
+        now = datetime.utcnow()
+        cached_entry = self._quick_search_cache.get(term)
+        if cached_entry:
+            cached_at, cached_ids = cached_entry
+            if now - cached_at < self._quick_search_ttl:
+                return cached_ids
+
         sermon_data = self._sm.get_sermon_meta_str()
         prompt = f"""The json data about a list of sermons. The id of sermons is "item" field.
 Your task is return the most relevant sermons related to users's query using the json data. Sort by relevance in descending order.
@@ -814,7 +824,7 @@ User Query:
             ),
             response_mime_type="application/json",
         )
-        
+
         response =  client.models.generate_content(
             model=model,
             contents=contents,
@@ -822,6 +832,7 @@ User Query:
         )
     #    print(response.usage_metadata)
         ids = json.loads(response.text)
+        self._quick_search_cache[term] = (datetime.utcnow(), ids)
         return ids
 
 class ConfigFileEventHandler(FileSystemEventHandler):
