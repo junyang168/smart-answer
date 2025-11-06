@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChangeEvent as ReactChangeEvent,
+  ComponentPropsWithoutRef,
   FormEvent as ReactFormEvent,
+  HTMLAttributes,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
@@ -13,8 +15,9 @@ import type {
 import { visit } from "unist-util-visit";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import ReactMarkdown, { type Components as ReactMarkdownComponents } from "react-markdown";
+import ReactMarkdown, { type Components as ReactMarkdownComponents, type ExtraProps as ReactMarkdownExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import "easymde/dist/easymde.min.css";
 import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -196,11 +199,14 @@ interface SlidePickerModalProps {
   slides: SurmonSlideAsset[];
   status: "idle" | "loading" | "ready" | "error";
   error: string | null;
-  onSelect: (slide: SurmonSlideAsset) => void;
+  onInsert: (slide: SurmonSlideAsset) => void;
+  onInsertText: (slide: SurmonSlideAsset, markdown: string) => void;
+  onExtract: (slide: SurmonSlideAsset) => Promise<SurmonSlideAsset>;
   onRetry: () => void;
   onClose: () => void;
   activeIndex: number | null;
   formatTimestamp: (value: number | null | undefined) => string | null;
+  canEdit: boolean;
 }
 
 const SlidePickerModal = ({
@@ -208,13 +214,62 @@ const SlidePickerModal = ({
   slides,
   status,
   error,
-  onSelect,
+  onInsert,
+  onInsertText,
+  onExtract,
   onRetry,
   onClose,
   activeIndex,
   formatTimestamp,
+  canEdit,
 }: SlidePickerModalProps) => {
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const [selectedSlide, setSelectedSlide] = useState<SurmonSlideAsset | null>(null);
+  const [markdownDraft, setMarkdownDraft] = useState<string>("");
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const extractionEditorOptions = useMemo<SimpleMDEOptions>(
+    () => ({
+      toolbar: [
+        "bold",
+        "italic",
+        "heading",
+        "|",
+        "quote",
+        "unordered-list",
+        "ordered-list",
+        "|",
+        "link",
+        "preview",
+        "side-by-side",
+        "fullscreen",
+      ],
+      status: false,
+      spellChecker: false,
+      autofocus: false,
+      minHeight: "200px",
+      placeholder: "Gemini 將於此提供 Markdown 內容",
+    }),
+    []
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setSelectedSlide(null);
+      setMarkdownDraft("");
+      setIsExtracting(false);
+      setExtractError(null);
+      return;
+    }
+    if (selectedSlide) {
+      return;
+    }
+    if (activeIndex != null && slides[activeIndex]) {
+      const candidate = slides[activeIndex];
+      setSelectedSlide(candidate);
+      setMarkdownDraft(candidate.extracted_text ?? "");
+    }
+  }, [open, activeIndex, slides, selectedSlide]);
 
   useEffect(() => {
     if (!open) {
@@ -229,6 +284,48 @@ const SlidePickerModal = ({
     }
     handle.scrollToIndex({ index: activeIndex, align: "start", behavior: "auto" });
   }, [open, activeIndex]);
+
+  const handleSelectSlide = useCallback((slide: SurmonSlideAsset) => {
+    setSelectedSlide(slide);
+    setMarkdownDraft(slide.extracted_text ?? "");
+    setExtractError(null);
+  }, []);
+
+  const handleExtract = useCallback(async () => {
+    if (!selectedSlide) {
+      return;
+    }
+    setIsExtracting(true);
+    setExtractError(null);
+    try {
+      const updated = await onExtract(selectedSlide);
+      setSelectedSlide(updated);
+      setMarkdownDraft(updated.extracted_text ?? "");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "提取文字時發生錯誤";
+      setExtractError(message);
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [onExtract, selectedSlide]);
+
+  const handleInsert = useCallback(() => {
+    if (!selectedSlide) {
+      return;
+    }
+    onInsert(selectedSlide);
+  }, [onInsert, selectedSlide]);
+
+  const handleInsertMarkdown = useCallback(() => {
+    if (!selectedSlide) {
+      return;
+    }
+    const content = markdownDraft.trim();
+    if (!content) {
+      return;
+    }
+    onInsertText(selectedSlide, markdownDraft);
+  }, [markdownDraft, onInsertText, selectedSlide]);
 
   if (!open) {
     return null;
@@ -270,55 +367,131 @@ const SlidePickerModal = ({
           ) : slides.length === 0 ? (
             <p className="text-xs text-gray-500">目前沒有投影片資料。</p>
           ) : (
-            <Virtuoso
-              ref={virtuosoRef}
-              style={{ height: "60vh" }}
-              data={slides}
-              totalCount={slides.length}
-              initialTopMostItemIndex={activeIndex ?? 0}
-              itemContent={(index, slide) => {
-                const timestamp = formatTimestamp(slide.timestamp_seconds ?? null);
-                const isActive = activeIndex === index;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => onSelect(slide)}
-                    className={`w-full rounded-lg border ${
-                      isActive ? "border-blue-300 bg-blue-50" : "border-transparent bg-gray-50"
-                    } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
-                  >
-                    <div className="flex gap-4">
-                      <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
-                        <Image
-                          src={slide.image_url}
-                          alt={`Slide ${slide.id}`}
-                          width={1000}
-                          height={1000}
-                          unoptimized
-                          className="h-auto w-full object-contain"
-                        />
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm font-semibold text-gray-700">{slide.id}</p>
-                        {timestamp ? <p className="text-xs text-gray-500">{timestamp}</p> : null}
-                        {slide.extracted_text ? (
-                          <p className="text-xs text-gray-600 line-clamp-4">{slide.extracted_text}</p>
-                        ) : null}
-                      </div>
+            <div className="flex flex-col gap-4 lg:flex-row">
+              <div className="lg:w-1/2">
+                <Virtuoso
+                  ref={virtuosoRef}
+                  style={{ height: "60vh" }}
+                  data={slides}
+                  totalCount={slides.length}
+                  initialTopMostItemIndex={activeIndex ?? 0}
+                  itemContent={(index, slide) => {
+                    const timestamp = formatTimestamp(slide.timestamp_seconds ?? null);
+                    const isSelected = selectedSlide?.id === slide.id;
+                    const isSuggested = activeIndex === index;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => handleSelectSlide(slide)}
+                        onDoubleClick={() => onInsert(slide)}
+                        className={`w-full rounded-lg border ${
+                          isSelected
+                            ? "border-blue-400 bg-blue-50"
+                            : isSuggested
+                            ? "border-blue-200 bg-blue-50/50"
+                            : "border-transparent bg-gray-50"
+                        } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
+                      >
+                        <div className="flex gap-4">
+                          <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+                            <Image
+                              src={slide.image_url}
+                              alt={`Slide ${slide.id}`}
+                              width={1000}
+                              height={1000}
+                              unoptimized
+                              className="h-auto w-full object-contain"
+                            />
+                          </div>
+                          <div className="flex-1 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-gray-700">{slide.id}</p>
+                              {isSuggested ? (
+                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600">
+                                  建議
+                                </span>
+                              ) : null}
+                            </div>
+                            {timestamp ? <p className="text-xs text-gray-500">{timestamp}</p> : null}
+                            {slide.extracted_text ? (
+                              <p className="text-xs text-gray-600 line-clamp-4">{slide.extracted_text}</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  }}
+                />
+              </div>
+              <div className="lg:w-1/2">
+                {selectedSlide ? (
+                  <div className="flex h-full flex-col gap-3">
+                    <div className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50">
+                      <Image
+                        src={selectedSlide.image_url}
+                        alt={`Slide ${selectedSlide.id}`}
+                        width={1200}
+                        height={675}
+                        unoptimized
+                        className="h-auto w-full bg-black object-contain"
+                      />
                     </div>
-                  </button>
-                );
-              }}
-            />
+                    {extractError ? (
+                      <p className="text-xs text-red-600">{extractError}</p>
+                    ) : null}
+                    {markdownDraft ? (
+                      <SimpleMDE value={markdownDraft} options={extractionEditorOptions} onChange={setMarkdownDraft} />
+                    ) : (
+                      <div className="flex h-full min-h-[200px] items-center justify-center rounded border border-dashed border-gray-300 p-4 text-xs text-gray-500">
+                        尚未提取文字，請點選「提取文字」。
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex h-full min-h-[320px] items-center justify-center rounded border border-dashed border-gray-300 p-4 text-xs text-gray-500">
+                    請從左側選取投影片以檢視或提取文字。
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
-        <div className="flex justify-end border-t border-gray-200 px-4 py-3">
+        <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-3">
+          {selectedSlide ? (
+            <button
+              type="button"
+              onClick={handleExtract}
+              disabled={!canEdit || isExtracting}
+              className="inline-flex items-center gap-1.5 rounded border border-blue-300 px-3 py-1.5 text-sm text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isExtracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              提取文字
+            </button>
+          ) : null}
+          {selectedSlide ? (
+            <button
+              type="button"
+              onClick={handleInsertMarkdown}
+              disabled={!markdownDraft.trim()}
+              className="inline-flex items-center gap-1.5 rounded border border-green-300 px-3 py-1.5 text-sm text-green-600 transition hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              插入文字
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onClose}
             className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
           >
             取消
+          </button>
+          <button
+            type="button"
+            onClick={handleInsert}
+            disabled={!selectedSlide}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+          >
+            插入投影片
           </button>
         </div>
       </div>
@@ -893,6 +1066,8 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     []
   );
 
+  const surmonMarkdownRehypePlugins = useMemo(() => [rehypeRaw], []);
+
   const surmonMarkdownComponents = useMemo<ReactMarkdownComponents>(
     () => ({
       a: ({ node, children, href, ...props }) => {
@@ -939,6 +1114,43 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           {children}
         </del>
       ),
+      code: (rawProps) => {
+        const { node, className, children, inline, ...rest } = rawProps as ComponentPropsWithoutRef<"code"> &
+          ReactMarkdownExtraProps & { inline?: boolean };
+        const isInline = inline ?? false;
+        const languageValue =
+          node && "lang" in node && typeof (node as { lang?: string }).lang === "string"
+            ? (node as { lang?: string }).lang
+            : undefined;
+        const language = languageValue ? languageValue.toLowerCase() : undefined;
+        const rawValue = String(children ?? "");
+        const trimmedValue = rawValue.endsWith("\n") ? rawValue.slice(0, -1) : rawValue;
+        const shouldRenderAsHtml =
+          !isInline &&
+          (language === "html" ||
+            language === "svg" ||
+            trimmedValue.trimStart().toLowerCase().startsWith("<svg"));
+
+        if (shouldRenderAsHtml) {
+          return (
+            <div {...(rest as HTMLAttributes<HTMLDivElement>)} dangerouslySetInnerHTML={{ __html: trimmedValue }} />
+          );
+        }
+
+        if (isInline) {
+          return (
+            <code {...(rest as HTMLAttributes<HTMLElement>)} className={className}>
+              {children}
+            </code>
+          );
+        }
+
+        return (
+          <pre className={className}>
+            <code {...(rest as HTMLAttributes<HTMLElement>)}>{children}</code>
+          </pre>
+        );
+      },
     }),
     [highlightParagraphsByToken]
   );
@@ -1035,6 +1247,18 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       setSlidesStatus("error");
     }
   }, [fetchJSON, item, slidesStatus]);
+
+  const handleExtractSlide = useCallback(
+    async (slide: SurmonSlideAsset) => {
+      const data = await fetchJSON<SurmonSlideAsset>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/${encodeURIComponent(slide.id)}/extract_text`,
+        { method: "POST" }
+      );
+      setSlides((prev) => prev.map((entry) => (entry.id === data.id ? data : entry)));
+      return data;
+    },
+    [fetchJSON, item]
+  );
 
   const loadSlideFrame = useCallback(async () => {
     setSlideFrameStatus("loading");
@@ -1595,6 +1819,36 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       setOpenSlidePickerIndex(null);
     },
     [createSlideMarkdown, updateParagraph]
+  );
+
+  const handleInsertSlideQuote = useCallback(
+    (index: number, markdown: string) => {
+      const editor = activeEditorRef.current;
+      const formatted = markdown
+        .split(/\r?\n/)
+        .map((line) => {
+          const trimmed = line.trimEnd();
+          return trimmed ? `> ${trimmed}` : ">";
+        })
+        .join("\n");
+
+      if (editor && activeEditorIndexRef.current === index) {
+        const doc = editor.codemirror.getDoc();
+        const selection = doc.getSelection();
+        const insertion = selection ? `${selection}\n\n${formatted}\n` : `\n\n${formatted}\n\n`;
+        doc.replaceSelection(insertion);
+        editor.codemirror.focus();
+      } else {
+        updateParagraph(index, (paragraph) => {
+          const base = paragraph.text ?? "";
+          const trimmed = base.trimEnd();
+          const prefix = trimmed ? `${trimmed}\n\n` : "";
+          return { ...paragraph, text: `${prefix}${formatted}\n` };
+        });
+      }
+      setOpenSlidePickerIndex(null);
+    },
+    [updateParagraph]
   );
 
   const handleEditorChange = useCallback(
@@ -2201,6 +2455,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       return (
         <ReactMarkdown
           remarkPlugins={surmonMarkdownRemarkPlugins}
+          rehypePlugins={surmonMarkdownRehypePlugins}
           components={surmonMarkdownComponents}
           className="prose prose-sm max-w-none"
         >
@@ -2467,6 +2722,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                     {message.role === "assistant" ? (
                       <ReactMarkdown
                         remarkPlugins={surmonMarkdownRemarkPlugins}
+                        rehypePlugins={surmonMarkdownRehypePlugins}
                         components={surmonMarkdownComponents}
                         className="prose prose-sm max-w-none text-gray-700 [&>*:last-child]:mb-0"
                       >
@@ -2985,15 +3241,22 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       slides={slides}
       status={slidesStatus}
       error={slidesError}
-      onSelect={(slide) => {
+      onInsert={(slide) => {
         if (openSlidePickerIndex != null) {
           handleInsertSlide(openSlidePickerIndex, slide);
         }
       }}
+      onInsertText={(slide, markdown) => {
+        if (openSlidePickerIndex != null) {
+          handleInsertSlideQuote(openSlidePickerIndex, markdown);
+        }
+      }}
+      onExtract={handleExtractSlide}
       onRetry={handleSlideRetry}
       onClose={() => setOpenSlidePickerIndex(null)}
       activeIndex={closestSlideIndex}
       formatTimestamp={formatTimestamp}
+      canEdit={canEdit}
     />
     </>
   );

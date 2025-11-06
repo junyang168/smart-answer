@@ -90,6 +90,7 @@ class SurmonSlideAsset(BaseModel):
     image_url: str
     timestamp_seconds: Optional[float] = None
     average_rgb: Optional[List[int]] = None
+    extracted_text: Optional[str] = None
 
 
 class SurmonSlideResponse(BaseModel):
@@ -174,6 +175,7 @@ def _load_slide_metadata(item: str) -> SurmonSlideResponse:
                 image_url=_build_slide_url(relative_path),
                 timestamp_seconds=float(timestamp) if isinstance(timestamp, (int, float)) else None,
                 average_rgb=average_rgb,
+                extracted_text=entry.get("extracted_text") or entry.get("text"),
             )
         )
 

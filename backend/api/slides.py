@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
+import cv2
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, ValidationError
 
@@ -21,6 +22,7 @@ from .slide_detector import (
     run_slide_detection,
     build_slide_summary,
 )
+from .sc_api.image_to_text import ImageToText
 
 SLIDES_DIR_NAME = "slides"
 SLIDE_WEB_PREFIX = "/web/data/slides"
@@ -145,30 +147,26 @@ def _parse_slide(item: str, data: dict[str, Any]) -> SurmonSlideAsset:
         except (TypeError, ValueError):  # pragma: no cover - defensive
             average_rgb = None
 
+    extracted_text_value = data.get("extracted_text") or data.get("text")
+    extracted_text = extracted_text_value if isinstance(extracted_text_value, str) else None
+
     return SurmonSlideAsset(
         id=relative_path.stem,
         image=relative_path.as_posix(),
         image_url=_build_image_url(relative_path),
         timestamp_seconds=timestamp,
         average_rgb=average_rgb,
+        extracted_text=extracted_text,
     )
 
 
 def _list_slide_assets(item: str) -> list[SurmonSlideAsset]:
-    slides_root = _slide_root(item)
-    if not slides_root.exists():
-        return []
-
-    metadata_path = slides_root / "slide_meta.json"
-    if not metadata_path.exists():
-        return []
-
     try:
-        with metadata_path.open("r", encoding="utf-8") as handle:
-            metadata = json.load(handle)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slide metadata JSON") from exc
-
+        metadata = _load_slide_metadata_document(item)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return []
+        raise
     raw_slides = metadata.get("slides", [])
     if not isinstance(raw_slides, list):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slides format in metadata")
@@ -186,6 +184,23 @@ def _list_slide_assets(item: str) -> list[SurmonSlideAsset]:
 
     slides.sort(key=lambda slide: (slide.timestamp_seconds is None, slide.timestamp_seconds))
     return slides
+
+
+def _load_slide_metadata_document(item: str) -> dict[str, Any]:
+    slides_root = _slide_root(item)
+    if not slides_root.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "slides directory not found")
+
+    metadata_path = slides_root / "slide_meta.json"
+    if not metadata_path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "slide_meta.json not found")
+
+    try:
+        with metadata_path.open("r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slide metadata JSON") from exc
+    return metadata
 
 
 def _locate_video_file(item: str) -> Path:
@@ -322,14 +337,17 @@ def _frame_region_from_metadata(item: str, metadata: Optional[Dict[str, Any]]) -
 
 
 def _build_slide_entries(item: str, records: list[SurmonSlideAsset]) -> list[dict[str, Any]]:
-    return [
-        {
+    entries: list[dict[str, Any]] = []
+    for asset in records:
+        entry: dict[str, Any] = {
             "image": asset.image,
             "timestamp_seconds": asset.timestamp_seconds,
             "average_rgb": asset.average_rgb,
         }
-        for asset in records
-    ]
+        if asset.extracted_text:
+            entry["extracted_text"] = asset.extracted_text
+        entries.append(entry)
+    return entries
 
 
 def _write_slide_metadata(
@@ -352,13 +370,74 @@ def _write_slide_metadata(
     }
 
     with metadata_path.open("w", encoding="utf-8") as handle:
-        json.dump(document, handle, indent=2)
+        json.dump(document, handle, indent=2, ensure_ascii=False)
 
 
 @router.get("/{item_id}", response_model=list[SurmonSlideAsset])
 def list_surmon_slides(item_id: str) -> list[SurmonSlideAsset]:
     item = _sanitize_item(item_id)
     return _list_slide_assets(item)
+
+
+@router.post("/{item_id}/{slide_id}/extract_text", response_model=SurmonSlideAsset)
+def extract_slide_text(item_id: str, slide_id: str) -> SurmonSlideAsset:
+    item = _sanitize_item(item_id)
+    slide = slide_id.strip()
+    if not slide:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Slide id is required")
+
+    try:
+        metadata = _load_slide_metadata_document(item)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Slides metadata not found") from exc
+        raise
+
+    raw_slides = metadata.get("slides")
+    if not isinstance(raw_slides, list):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slides format in metadata")
+
+    target_index: Optional[int] = None
+    target_entry: Optional[dict[str, Any]] = None
+    for index, entry in enumerate(raw_slides):
+        if not isinstance(entry, dict):
+            continue
+        image_value = entry.get("image")
+        if not isinstance(image_value, str) or not image_value:
+            continue
+        relative_path = _normalize_image_path(item, image_value)
+        if relative_path.stem == slide:
+            target_index = index
+            target_entry = entry
+            break
+
+    if target_index is None or target_entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Slide {slide} not found")
+
+    relative_path = _normalize_image_path(item, target_entry.get("image", ""))
+    image_path = DATA_BASE_PATH / SLIDES_DIR_NAME / relative_path
+    if not image_path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Slide image not found: {relative_path.as_posix()}")
+
+    frame = cv2.imread(str(image_path))
+    if frame is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Unable to load slide image")
+
+    extractor = ImageToText(item)
+    extracted_markdown = extractor.extract_text_from_frame(frame, as_markdown=True)
+    if not extracted_markdown:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gemini 未回傳任何文字")
+
+    markdown_text = extracted_markdown.strip()
+    target_entry["extracted_text"] = markdown_text
+    target_entry["text"] = markdown_text  # legacy compatibility
+    raw_slides[target_index] = target_entry
+
+    metadata_path = _slide_root(item) / "slide_meta.json"
+    with metadata_path.open("w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2, ensure_ascii=False)
+
+    return _parse_slide(item, target_entry)
 
 
 @router.get("/{item_id}/frame", response_model=FrameInfo)

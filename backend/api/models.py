@@ -374,4 +374,6 @@ class SurmonSlideAsset(BaseModel):
     image_url: str
     timestamp_seconds: Optional[float] = None
     average_rgb: Optional[Tuple[int, int, int]] = None
-    text : Optional[str] = None
+    extracted_text: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
