@@ -2893,7 +2893,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                       </span>
                     </div>
                     <p className="text-xs text-gray-500">
-                      完成框線設定後即可生成投影片，生成後會覆蓋既有的影像與 metadata 檔案。
+                      完成框線設定後即可生成投影片
                     </p>
                     {slideGenerationError ? (
                       <p className="text-xs text-red-600">{slideGenerationError}</p>

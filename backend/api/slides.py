@@ -157,11 +157,11 @@ def _parse_slide(item: str, data: dict[str, Any]) -> SurmonSlideAsset:
 def _list_slide_assets(item: str) -> list[SurmonSlideAsset]:
     slides_root = _slide_root(item)
     if not slides_root.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Slides not found for item {item}")
+        return []
 
     metadata_path = slides_root / "slide_meta.json"
     if not metadata_path.exists():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"slide_meta.json missing for item {item}")
+        return []
 
     try:
         with metadata_path.open("r", encoding="utf-8") as handle:
