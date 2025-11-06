@@ -18,11 +18,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
+
+from functools import lru_cache
 
  
 @dataclass(frozen=True)
@@ -55,13 +58,61 @@ class SlideRecord:
     rgb: tuple[int, int, int]
 
 
+class ExecutableNotFoundError(RuntimeError):
+    """Raised when a required external executable cannot be found."""
+
+
+def _candidate_paths(name: str) -> list[Path]:
+    env_key = f"{name.upper()}_PATH"
+    env_value = os.getenv(env_key)
+    candidates: list[Path] = []
+    if env_value:
+        candidates.append(Path(env_value).expanduser())
+
+    located = shutil.which(name)
+    if located:
+        candidates.append(Path(located))
+
+    for root in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"):
+        candidates.append(Path(root) / name)
+
+    return candidates
+
+
+def _resolve_executable(name: str) -> str:
+    for path in _candidate_paths(name):
+        if path and path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    raise ExecutableNotFoundError(
+        f"Unable to locate required executable '{name}'. Install it or set {name.upper()}_PATH."
+    )
+
+
+@lru_cache(maxsize=None)
+def _ffmpeg_cmd() -> str:
+    return _resolve_executable("ffmpeg")
+
+
+@lru_cache(maxsize=None)
+def _ffprobe_cmd() -> str:
+    return _resolve_executable("ffprobe")
+
+
 def run_ffmpeg(args: Sequence[str], *, capture: bool = False) -> subprocess.CompletedProcess:
     """Execute ffmpeg with shared defaults."""
-    base_cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    cmd = [_ffmpeg_cmd(), "-hide_banner", "-loglevel", "error", *list(args)]
+    run_kwargs: dict[str, Any] = {"check": True}
     if capture:
-        return subprocess.run(base_cmd + list(args), check=True, stdout=subprocess.PIPE)
-    subprocess.run(base_cmd + list(args), check=True)
-    return subprocess.CompletedProcess(args=[], returncode=0)
+        run_kwargs["stdout"] = subprocess.PIPE
+    
+    print(cmd)
+
+    try:
+        return subprocess.run(cmd, **run_kwargs)
+    except FileNotFoundError as exc:  # pragma: no cover - depends on environment
+        raise ExecutableNotFoundError(
+            "ffmpeg executable not found. Install ffmpeg or set FFMPEG_PATH."
+        ) from exc
 
 
 def ensure_clean_dir(path: Path) -> None:
@@ -116,24 +167,29 @@ def scene_timestamps(
     filter_spec = f"movie='{escaped}'"
     if filter_chain:
         filter_spec = f"{filter_spec},{filter_chain}"
-    proc = subprocess.run(
-        [
-            "ffprobe",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            filter_spec,
-            "-show_entries",
-            "frame=best_effort_timestamp_time",
-            "-of",
-            "csv=p=0",
-        ],
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                _ffprobe_cmd(),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                filter_spec,
+                "-show_entries",
+                "frame=best_effort_timestamp_time",
+                "-of",
+                "csv=p=0",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as exc:  # pragma: no cover - depends on environment
+        raise ExecutableNotFoundError(
+            "ffprobe executable not found. Install ffmpeg or set FFPROBE_PATH."
+        ) from exc
     timestamps: list[float] = []
     for line in proc.stdout.splitlines():
         line = line.strip()

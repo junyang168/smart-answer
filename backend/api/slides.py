@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .config import DATA_BASE_PATH
 from .models import SurmonSlideAsset
 from .slide_detector import (
+    ExecutableNotFoundError,
     FrameRegion,
     SlideDetectionConfig,
     capture_video_frame,
@@ -209,6 +210,8 @@ def _ensure_frame_image(item: str) -> Path:
     video_path = _locate_video_file(item)
     try:
         capture_video_frame(video_path, FRAME_REFERENCE_SECONDS, frame_path)
+    except ExecutableNotFoundError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to capture reference frame") from exc
     return frame_path
@@ -394,6 +397,8 @@ def generate_slides(item_id: str) -> SlideGenerationResponse:
 
     try:
         records = run_slide_detection(config)
+    except ExecutableNotFoundError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Slide generation failed") from exc
     finally:
