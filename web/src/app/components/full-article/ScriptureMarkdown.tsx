@@ -208,6 +208,14 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
 }
 
 export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
+  const normalizeSrc = (value?: string) => {
+    if (!value) {
+      return value;
+    }
+    const trimmed = value.trim();
+    return trimmed.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
+  };
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -227,6 +235,14 @@ export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
               {children}
             </a>
           );
+        },
+        img({ node, ...props }) {
+          const htmlProps = props as React.ImgHTMLAttributes<HTMLImageElement>;
+          const nodeProps = (node as { properties?: { src?: string; alt?: string } })?.properties ?? {};
+          const rawSrc = htmlProps.src ?? (typeof nodeProps.src === "string" ? nodeProps.src : undefined);
+          const rawAlt = htmlProps.alt ?? (typeof nodeProps.alt === "string" ? nodeProps.alt : undefined);
+          const { src: _ignoredSrc, alt: _ignoredAlt, ...rest } = htmlProps;
+          return <img src={normalizeSrc(rawSrc)} alt={rawAlt} {...rest} />;
         },
       }}
     >

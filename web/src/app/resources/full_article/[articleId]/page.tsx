@@ -16,11 +16,12 @@ const SERMON_BACKEND_BASE =
 
 const SERMON_USER_ID = process.env.SC_API_DEFAULT_USER_ID || "junyang168@gmail.com";
 
-async function fetchArticle(articleId: string): Promise<FullArticleDetail | null> {
+async function fetchArticle(articleId: string, options?: { disableCache?: boolean }): Promise<FullArticleDetail | null> {
   const url = new URL(`/admin/full-articles/${encodeURIComponent(articleId)}`, ARTICLE_BACKEND_BASE);
-  const response = await fetch(url.toString(), {
-    next: { revalidate: 300 },
-  });
+  const fetchOptions: RequestInit & { next?: { revalidate: number } } = options?.disableCache
+    ? { cache: "no-store" }
+    : { next: { revalidate: 300 } };
+  const response = await fetch(url.toString(), fetchOptions);
 
   if (!response.ok) {
     return null;
@@ -35,15 +36,19 @@ interface SermonListEntry {
   title?: string;
 }
 
-async function fetchSermonTitleMap(sermonIds: string[]): Promise<Record<string, string>> {
+async function fetchSermonTitleMap(
+  sermonIds: string[],
+  options?: { disableCache?: boolean },
+): Promise<Record<string, string>> {
   if (sermonIds.length === 0) {
     return {};
   }
 
   const url = new URL(`/sc_api/sermons/${encodeURIComponent(SERMON_USER_ID)}`, SERMON_BACKEND_BASE);
-  const response = await fetch(url.toString(), {
-    next: { revalidate: 300 },
-  });
+  const fetchOptions: RequestInit & { next?: { revalidate: number } } = options?.disableCache
+    ? { cache: "no-store" }
+    : { next: { revalidate: 300 } };
+  const response = await fetch(url.toString(), fetchOptions);
 
   if (!response.ok) {
     return {};
@@ -65,16 +70,19 @@ async function fetchSermonTitleMap(sermonIds: string[]): Promise<Record<string, 
 
 export default async function FullArticleViewer({
   params,
+  searchParams,
 }: {
   params: { articleId: string };
+  searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const article = await fetchArticle(params.articleId);
+  const disableCache = typeof searchParams?.nocache !== "undefined";
+  const article = await fetchArticle(params.articleId, { disableCache });
   if (!article) {
     notFound();
   }
 
   const sourceSermons = (article.sourceSermonIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
-  const sermonTitleMap = await fetchSermonTitleMap(sourceSermons);
+  const sermonTitleMap = await fetchSermonTitleMap(sourceSermons, { disableCache });
   const sourceSermonItems = sourceSermons.map((id) => ({ id, title: sermonTitleMap[id] ?? id }));
   const hasSourceSermons = sourceSermonItems.length > 0;
 
