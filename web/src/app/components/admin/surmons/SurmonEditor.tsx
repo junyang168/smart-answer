@@ -440,10 +440,30 @@ const SlidePickerModal = ({
     captureVideoRef.current.currentTime = Math.max(paragraphEnd, 0);
   }, [paragraphEnd]);
 
+  const handleSeekBackward = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    const current = captureVideoRef.current.currentTime || 0;
+    const target = Math.max(current - 5, paragraphStart ?? 0, 0);
+    captureVideoRef.current.currentTime = target;
+  }, [paragraphStart]);
+
+  const handleSeekForward = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    const current = captureVideoRef.current.currentTime || 0;
+    const upperBound = paragraphEnd ?? Number.POSITIVE_INFINITY;
+    const target = Math.min(current + 5, upperBound);
+    captureVideoRef.current.currentTime = target;
+  }, [paragraphEnd]);
+
   const handleCaptureCurrentFrame = useCallback(async () => {
     if (!captureVideoRef.current) {
       return;
     }
+    captureVideoRef.current.pause();
     const timestamp = captureVideoRef.current.currentTime || 0;
     setIsCapturingFrame(true);
     setCaptureError(null);
@@ -575,24 +595,54 @@ const SlidePickerModal = ({
                         您的瀏覽器不支援 video 元素。
                       </video>
                     </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                          <button
-                            type="button"
-                            onClick={handleSeekToStart}
-                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
-                          >
-                            跳至段落開始
-                            {paragraphStart != null ? `（${formatTimestamp(paragraphStart)}）` : null}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSeekToEnd}
-                            disabled={paragraphEnd == null}
-                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            跳至段落結束
-                            {paragraphEnd != null ? `（${formatTimestamp(paragraphEnd)}）` : null}
-                          </button>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={handleSeekToStart}
+                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                        title={paragraphStart != null ? `跳至段落開始（${formatTimestamp(paragraphStart)}）` : "跳至段落開始"}
+                      >
+                        <i className="fa fa-step-backward" aria-hidden="true" />
+                        {paragraphStart != null ? (
+                          <span className="text-[11px] text-blue-600">
+                            {formatTimestamp(paragraphStart)}
+                          </span>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSeekToEnd}
+                        disabled={paragraphEnd == null}
+                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        title={
+                          paragraphEnd != null
+                            ? `跳至段落結束（${formatTimestamp(paragraphEnd)}）`
+                            : "跳至段落結束"
+                        }
+                      >
+                        <i className="fa fa-step-forward" aria-hidden="true" />
+                        {paragraphEnd != null ? (
+                          <span className="text-[11px] text-blue-600">
+                            {formatTimestamp(paragraphEnd)}
+                          </span>
+                        ) : null}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSeekBackward}
+                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                        title="倒退 5 秒"
+                      >
+                        <i className="fa fa-rotate-left" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSeekForward}
+                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                        title="快進 5 秒"
+                      >
+                        <i className="fa fa-rotate-right" aria-hidden="true" />
+                      </button>
                           <div className="flex-1" />
                           <button
                             type="button"
@@ -741,7 +791,7 @@ const SlidePickerModal = ({
                     {markdownDraft ? (
                       <SimpleMDE value={markdownDraft} options={extractionEditorOptions} onChange={setMarkdownDraft} />
                     ) : (
-                      <div className="flex h-full min-h-[200px] items-center justify-center rounded border border-dashed border-gray-300 p-4 text-xs text-gray-500">
+                      <div className="flex min-h-[100px] items-center justify-center rounded border border-dashed border-gray-300 p-4 text-xs text-gray-500">
                         尚未提取文字，請點選「提取文字」。
                       </div>
                     )}
