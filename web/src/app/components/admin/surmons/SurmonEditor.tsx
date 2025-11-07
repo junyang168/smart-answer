@@ -202,11 +202,16 @@ interface SlidePickerModalProps {
   onInsert: (slide: SurmonSlideAsset) => void;
   onInsertText: (slide: SurmonSlideAsset, markdown: string) => void;
   onExtract: (slide: SurmonSlideAsset) => Promise<SurmonSlideAsset>;
+  onExtractCapture: (slide: SurmonSlideAsset) => Promise<SurmonSlideAsset>;
   onRetry: () => void;
   onClose: () => void;
   activeIndex: number | null;
   formatTimestamp: (value: number | null | undefined) => string | null;
   canEdit: boolean;
+  videoSource: string | null;
+  paragraphStart: number | null;
+  paragraphEnd: number | null;
+  onCaptureFrame: (timestampSeconds: number) => Promise<SurmonSlideAsset>;
 }
 
 const SlidePickerModal = ({
@@ -217,17 +222,29 @@ const SlidePickerModal = ({
   onInsert,
   onInsertText,
   onExtract,
+  onExtractCapture,
   onRetry,
   onClose,
   activeIndex,
   formatTimestamp,
   canEdit,
+  videoSource,
+  paragraphStart,
+  paragraphEnd,
+  onCaptureFrame,
 }: SlidePickerModalProps) => {
+  type SlideCandidate = SurmonSlideAsset & { origin?: "library" | "capture" };
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  const [selectedSlide, setSelectedSlide] = useState<SurmonSlideAsset | null>(null);
+  const [selectedSlide, setSelectedSlide] = useState<SlideCandidate | null>(null);
   const [markdownDraft, setMarkdownDraft] = useState<string>("");
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [capturedSlides, setCapturedSlides] = useState<SlideCandidate[]>([]);
+  const [isCapturingFrame, setIsCapturingFrame] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const captureVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [captureCurrentTime, setCaptureCurrentTime] = useState(0);
+  const [pickerTab, setPickerTab] = useState<"capture" | "slides">(videoSource ? "capture" : "slides");
   const extractionEditorOptions = useMemo<SimpleMDEOptions>(
     () => ({
       toolbar: [
@@ -259,17 +276,54 @@ const SlidePickerModal = ({
       setMarkdownDraft("");
       setIsExtracting(false);
       setExtractError(null);
+      setCapturedSlides([]);
+      setIsCapturingFrame(false);
+      setCaptureError(null);
+      setCaptureCurrentTime(paragraphStart ?? 0);
+      setPickerTab(videoSource ? "capture" : "slides");
+      if (captureVideoRef.current) {
+        captureVideoRef.current.pause();
+        if (paragraphStart != null) {
+          captureVideoRef.current.currentTime = paragraphStart;
+        }
+      }
       return;
     }
     if (selectedSlide) {
       return;
     }
     if (activeIndex != null && slides[activeIndex]) {
-      const candidate = slides[activeIndex];
+      const candidate: SlideCandidate = { ...slides[activeIndex], origin: "library" };
       setSelectedSlide(candidate);
       setMarkdownDraft(candidate.extracted_text ?? "");
     }
-  }, [open, activeIndex, slides, selectedSlide]);
+  }, [open, activeIndex, slides, selectedSlide, paragraphStart, videoSource]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (!videoSource && pickerTab === "capture") {
+      setPickerTab("slides");
+    }
+  }, [open, pickerTab, videoSource]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    if (paragraphStart == null) {
+      return;
+    }
+    setCaptureCurrentTime(paragraphStart);
+    if (captureVideoRef.current) {
+      try {
+        captureVideoRef.current.currentTime = Math.max(paragraphStart, 0);
+      } catch {
+        // Ignore failures; the loadedmetadata handler will retry
+      }
+    }
+  }, [open, paragraphStart]);
 
   useEffect(() => {
     if (!open) {
@@ -285,7 +339,7 @@ const SlidePickerModal = ({
     handle.scrollToIndex({ index: activeIndex, align: "start", behavior: "auto" });
   }, [open, activeIndex]);
 
-  const handleSelectSlide = useCallback((slide: SurmonSlideAsset) => {
+  const handleSelectSlide = useCallback((slide: SlideCandidate) => {
     setSelectedSlide(slide);
     setMarkdownDraft(slide.extracted_text ?? "");
     setExtractError(null);
@@ -298,16 +352,118 @@ const SlidePickerModal = ({
     setIsExtracting(true);
     setExtractError(null);
     try {
-      const updated = await onExtract(selectedSlide);
-      setSelectedSlide(updated);
-      setMarkdownDraft(updated.extracted_text ?? "");
+      const handler = selectedSlide.origin === "capture" ? onExtractCapture : onExtract;
+      const updated = await handler(selectedSlide);
+      const enriched: SlideCandidate = { ...updated, origin: selectedSlide.origin };
+      setSelectedSlide(enriched);
+      setMarkdownDraft(enriched.extracted_text ?? "");
+      if (selectedSlide.origin === "capture") {
+        setCapturedSlides((prev) => prev.map((entry) => (entry.id === enriched.id ? enriched : entry)));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "提取文字時發生錯誤";
       setExtractError(message);
     } finally {
       setIsExtracting(false);
     }
-  }, [onExtract, selectedSlide]);
+  }, [onExtract, onExtractCapture, selectedSlide]);
+
+  const enforceCaptureBounds = useCallback(
+    (video: HTMLVideoElement): number => {
+      let nextTime = video.currentTime ?? 0;
+      if (paragraphStart != null && nextTime < paragraphStart) {
+        nextTime = Math.max(paragraphStart, 0);
+        video.currentTime = nextTime;
+      }
+      if (paragraphEnd != null && nextTime > paragraphEnd) {
+        nextTime = paragraphEnd;
+        video.currentTime = nextTime;
+        video.pause();
+      }
+      return nextTime;
+    },
+    [paragraphEnd, paragraphStart]
+  );
+
+  const handleCaptureTimeUpdate = useCallback(() => {
+    const video = captureVideoRef.current;
+    if (!video) {
+      return;
+    }
+    const bounded = enforceCaptureBounds(video);
+    setCaptureCurrentTime(bounded);
+  }, [enforceCaptureBounds]);
+
+  const handleCaptureLoaded = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    if (paragraphStart != null) {
+      captureVideoRef.current.currentTime = Math.max(paragraphStart, 0);
+    }
+    const next = enforceCaptureBounds(captureVideoRef.current);
+    setCaptureCurrentTime(next);
+  }, [enforceCaptureBounds, paragraphStart]);
+
+  const handleCapturePlay = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    const bounded = enforceCaptureBounds(captureVideoRef.current);
+    if (bounded !== captureVideoRef.current.currentTime) {
+      captureVideoRef.current.currentTime = bounded;
+    }
+  }, [enforceCaptureBounds]);
+
+  const handleCaptureSeeking = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    enforceCaptureBounds(captureVideoRef.current);
+  }, [enforceCaptureBounds]);
+
+  const handleSeekToStart = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    const target = paragraphStart ?? 0;
+    captureVideoRef.current.currentTime = Math.max(target, 0);
+  }, [paragraphStart]);
+
+  const handleSeekToEnd = useCallback(() => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    if (paragraphEnd == null) {
+      return;
+    }
+    captureVideoRef.current.currentTime = Math.max(paragraphEnd, 0);
+  }, [paragraphEnd]);
+
+  const handleCaptureCurrentFrame = useCallback(async () => {
+    if (!captureVideoRef.current) {
+      return;
+    }
+    const timestamp = captureVideoRef.current.currentTime || 0;
+    setIsCapturingFrame(true);
+    setCaptureError(null);
+    try {
+      const captured = await onCaptureFrame(Math.max(0, timestamp));
+      const enriched: SlideCandidate = { ...captured, origin: "capture" };
+      setCapturedSlides((prev) => {
+        const filtered = prev.filter((entry) => entry.id !== enriched.id);
+        return [enriched, ...filtered].slice(0, 6);
+      });
+      setSelectedSlide(enriched);
+      setMarkdownDraft(enriched.extracted_text ?? "");
+      setExtractError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "擷取畫面時發生錯誤";
+      setCaptureError(message);
+    } finally {
+      setIsCapturingFrame(false);
+    }
+  }, [onCaptureFrame]);
 
   const handleInsert = useCallback(() => {
     if (!selectedSlide) {
@@ -368,60 +524,203 @@ const SlidePickerModal = ({
             <p className="text-xs text-gray-500">目前沒有投影片資料。</p>
           ) : (
             <div className="flex flex-col gap-4 lg:flex-row">
-              <div className="lg:w-1/2">
-                <Virtuoso
-                  ref={virtuosoRef}
-                  style={{ height: "60vh" }}
-                  data={slides}
-                  totalCount={slides.length}
-                  initialTopMostItemIndex={activeIndex ?? 0}
-                  itemContent={(index, slide) => {
-                    const timestamp = formatTimestamp(slide.timestamp_seconds ?? null);
-                    const isSelected = selectedSlide?.id === slide.id;
-                    const isSuggested = activeIndex === index;
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSlide(slide)}
-                        onDoubleClick={() => onInsert(slide)}
-                        className={`w-full rounded-lg border ${
-                          isSelected
-                            ? "border-blue-400 bg-blue-50"
-                            : isSuggested
-                            ? "border-blue-200 bg-blue-50/50"
-                            : "border-transparent bg-gray-50"
-                        } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
-                      >
-                        <div className="flex gap-4">
-                          <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
-                            <Image
-                              src={slide.image_url}
-                              alt={`Slide ${slide.id}`}
-                              width={1000}
-                              height={1000}
-                              unoptimized
-                              className="h-auto w-full object-contain"
-                            />
-                          </div>
-                          <div className="flex-1 space-y-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-semibold text-gray-700">{slide.id}</p>
-                              {isSuggested ? (
-                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600">
-                                  建議
-                                </span>
-                              ) : null}
-                            </div>
-                            {timestamp ? <p className="text-xs text-gray-500">{timestamp}</p> : null}
-                            {slide.extracted_text ? (
-                              <p className="text-xs text-gray-600 line-clamp-4">{slide.extracted_text}</p>
-                            ) : null}
-                          </div>
+              <div className="lg:w-1/2 space-y-4">
+                <div className="flex gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs font-medium text-gray-600">
+                  <button
+                    type="button"
+                    onClick={() => setPickerTab("capture")}
+                    disabled={!videoSource}
+                    className={`flex-1 rounded-md px-3 py-1 transition ${
+                      pickerTab === "capture" && videoSource
+                        ? "bg-white text-blue-600 shadow"
+                        : videoSource
+                        ? "hover:bg-white"
+                        : "opacity-50"
+                    }`}
+                  >
+                    從影片擷取畫面
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPickerTab("slides")}
+                    className={`flex-1 rounded-md px-3 py-1 transition ${
+                      pickerTab === "slides" ? "bg-white text-blue-600 shadow" : "hover:bg-white"
+                    }`}
+                  >
+                    已生成投影片
+                  </button>
+                </div>
+                {pickerTab === "capture" ? (
+                  videoSource ? (
+                    <>
+                      <section className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 shadow-inner">
+                        <div className="flex flex-wrap items-center justify-between text-xs text-blue-800">
+                          <p className="font-semibold">從影片擷取畫面</p>
+                          <span>
+                            目前時間：{formatTimestamp(captureCurrentTime) ?? "0:00"}
+                          </span>
                         </div>
-                      </button>
-                    );
-                  }}
-                />
+                    <div className="mt-2 overflow-hidden rounded-md border border-blue-200 bg-black/80">
+                      <video
+                        ref={captureVideoRef}
+                        controls
+                        preload="metadata"
+                        className="w-full bg-black"
+                        onTimeUpdate={handleCaptureTimeUpdate}
+                        onLoadedMetadata={handleCaptureLoaded}
+                        onPlay={handleCapturePlay}
+                        onSeeking={handleCaptureSeeking}
+                      >
+                        <source src={videoSource} />
+                        您的瀏覽器不支援 video 元素。
+                      </video>
+                    </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={handleSeekToStart}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                          >
+                            跳至段落開始
+                            {paragraphStart != null ? `（${formatTimestamp(paragraphStart)}）` : null}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSeekToEnd}
+                            disabled={paragraphEnd == null}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            跳至段落結束
+                            {paragraphEnd != null ? `（${formatTimestamp(paragraphEnd)}）` : null}
+                          </button>
+                          <div className="flex-1" />
+                          <button
+                            type="button"
+                            onClick={handleCaptureCurrentFrame}
+                            disabled={!canEdit || isCapturingFrame}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                          >
+                            {isCapturingFrame ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" /> 擷取中...
+                              </>
+                            ) : (
+                              <>
+                                <Video className="h-4 w-4" /> 擷取目前畫面
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        {captureError ? <p className="mt-2 text-xs text-red-600">{captureError}</p> : null}
+                      </section>
+                      {capturedSlides.length > 0 ? (
+                        <section className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                          <div className="flex items-center justify-between text-xs text-gray-600">
+                            <p className="font-semibold text-gray-800">最近擷取</p>
+                            <span>點擊即可選取</span>
+                          </div>
+                          <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                            {capturedSlides.map((capture) => {
+                              const timestamp = formatTimestamp(capture.timestamp_seconds ?? null);
+                              const isSelected = selectedSlide?.id === capture.id;
+                              return (
+                                <button
+                                  type="button"
+                                  key={capture.id}
+                                  onClick={() => handleSelectSlide(capture)}
+                                  onDoubleClick={() => onInsert(capture)}
+                                  className={`flex min-w-[10rem] flex-col gap-2 rounded-lg border p-2 text-left text-xs transition ${
+                                    isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
+                                  }`}
+                                >
+                                  <div className="overflow-hidden rounded border border-gray-200 bg-black/70">
+                                    <Image
+                                      src={capture.image_url}
+                                      alt={`Capture ${capture.id}`}
+                                      width={320}
+                                      height={180}
+                                      unoptimized
+                                      className="h-auto w-full object-contain"
+                                    />
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="font-semibold text-gray-700">{capture.id}</p>
+                                    {timestamp ? <p className="text-gray-500">{timestamp}</p> : null}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500">
+                      尚未提供影片來源，無法擷取畫面。
+                    </div>
+                  )
+                ) : null}
+                {pickerTab === "slides" ? (
+                  <section className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 shadow-inner">
+                    <div className="flex items-center justify-between text-xs text-blue-800">
+                      <p className="font-semibold">投影片清單</p>
+                      <span>雙擊即可插入</span>
+                    </div>
+                    <div className="mt-2 rounded-lg border border-gray-200 bg-white p-2">
+                      <Virtuoso
+                        ref={virtuosoRef}
+                        style={{ height: "60vh" }}
+                        data={slides}
+                        totalCount={slides.length}
+                        initialTopMostItemIndex={activeIndex ?? 0}
+                        itemContent={(index, slide) => {
+                          const timestamp = formatTimestamp(slide.timestamp_seconds ?? null);
+                          const isSelected = selectedSlide?.id === slide.id;
+                          const isSuggested = activeIndex === index;
+                          const candidate: SlideCandidate = { ...slide, origin: "library" };
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => handleSelectSlide(candidate)}
+                              onDoubleClick={() => onInsert(slide)}
+                              className={`w-full rounded-lg border ${
+                                isSelected
+                                  ? "border-blue-400 bg-blue-50"
+                                  : isSuggested
+                                  ? "border-blue-200 bg-blue-50/50"
+                                  : "border-transparent bg-gray-50"
+                              } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
+                            >
+                              <div className="flex gap-4">
+                                <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
+                                  <Image
+                                    src={slide.image_url}
+                                    alt={`Slide ${slide.id}`}
+                                    width={1000}
+                                    height={1000}
+                                    unoptimized
+                                    className="h-auto w-full object-contain"
+                                  />
+                                </div>
+                                <div className="flex-1 space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-semibold text-gray-700">{slide.id}</p>
+                                    {isSuggested ? (
+                                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600">
+                                        建議
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {timestamp ? <p className="text-xs text-gray-500">{timestamp}</p> : null}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        }}
+                      />
+                    </div>
+                  </section>
+                ) : null}
               </div>
               <div className="lg:w-1/2">
                 {selectedSlide ? (
@@ -480,18 +779,19 @@ const SlidePickerModal = ({
           ) : null}
           <button
             type="button"
-            onClick={onClose}
-            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
-          >
-            取消
-          </button>
-          <button
-            type="button"
             onClick={handleInsert}
             disabled={!selectedSlide}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
             插入投影片
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100"
+          >
+            取消
           </button>
         </div>
       </div>
@@ -878,6 +1178,24 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     return null;
   }, [selectedTiming]);
 
+  const slidePickerTiming = useMemo(() => {
+    if (openSlidePickerIndex == null) {
+      return { start: null as number | null, end: null as number | null };
+    }
+    const timedEntry = timedParagraphs.find((entry) => entry.index === openSlidePickerIndex);
+    if (timedEntry) {
+      return {
+        start: typeof timedEntry.start === "number" ? timedEntry.start : null,
+        end: typeof timedEntry.end === "number" ? timedEntry.end : null,
+      };
+    }
+    const fallback = paragraphTimingData[openSlidePickerIndex];
+    return {
+      start: typeof fallback?.start === "number" ? fallback.start : null,
+      end: typeof fallback?.end === "number" ? fallback.end : null,
+    };
+  }, [openSlidePickerIndex, paragraphTimingData, timedParagraphs]);
+
   const fetchJSON = useCallback(async <T,>(url: string, init?: RequestInit) => {
     const response = await fetch(url, init);
     if (!response.ok) {
@@ -1256,6 +1574,59 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       );
       setSlides((prev) => prev.map((entry) => (entry.id === data.id ? data : entry)));
       return data;
+    },
+    [fetchJSON, item]
+  );
+
+  const handleCaptureSlideFrame = useCallback(
+    async (timestampSeconds: number) => {
+      const payload = {
+        timestamp_seconds: Math.max(0, Number.isFinite(timestampSeconds) ? timestampSeconds : 0),
+      };
+      return fetchJSON<SurmonSlideAsset>(`${SLIDES_PREFIX}/${encodeURIComponent(item)}/captures`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    },
+    [fetchJSON, item]
+  );
+
+  const handleExtractCaptureSlide = useCallback(
+    async (slide: SurmonSlideAsset) => {
+      const captureId = slide.id?.trim();
+      if (!captureId) {
+        throw new Error("擷取畫面缺少識別碼");
+      }
+      return fetchJSON<SurmonSlideAsset>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/captures/${encodeURIComponent(captureId)}/extract_text`,
+        { method: "POST" }
+      );
+    },
+    [fetchJSON, item]
+  );
+
+  const persistCaptureSlide = useCallback(
+    async (slide: SurmonSlideAsset, extractedText?: string | null) => {
+      const captureId = slide.id?.trim();
+      if (!captureId) {
+        return null;
+      }
+      const payload = {
+        timestamp_seconds:
+          typeof slide.timestamp_seconds === "number" && !Number.isNaN(slide.timestamp_seconds)
+            ? slide.timestamp_seconds
+            : null,
+        extracted_text: extractedText ?? null,
+      };
+      return fetchJSON<SurmonSlideAsset>(
+        `${SLIDES_PREFIX}/${encodeURIComponent(item)}/captures/${encodeURIComponent(captureId)}/persist`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
     },
     [fetchJSON, item]
   );
@@ -1802,6 +2173,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     (index: number, slide: SurmonSlideAsset) => {
       const editor = activeEditorRef.current;
       const markdown = createSlideMarkdown(slide);
+      const isCapturedSlide = typeof slide.image === "string" && slide.image.includes("/captures/");
       if (editor && activeEditorIndexRef.current === index) {
         const doc = editor.codemirror.getDoc();
         const selection = doc.getSelection();
@@ -1816,14 +2188,20 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           return { ...paragraph, text: `${prefix}${markdown}\n` };
         });
       }
+      if (isCapturedSlide) {
+        persistCaptureSlide(slide).catch(() => {
+          // Non-blocking best-effort persistence
+        });
+      }
       setOpenSlidePickerIndex(null);
     },
-    [createSlideMarkdown, updateParagraph]
+    [createSlideMarkdown, persistCaptureSlide, updateParagraph]
   );
 
   const handleInsertSlideQuote = useCallback(
-    (index: number, markdown: string) => {
+    (index: number, slide: SurmonSlideAsset, markdown: string) => {
       const editor = activeEditorRef.current;
+      const isCapturedSlide = typeof slide.image === "string" && slide.image.includes("/captures/");
       const formatted = markdown
         .split(/\r?\n/)
         .map((line) => {
@@ -1846,9 +2224,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           return { ...paragraph, text: `${prefix}${formatted}\n` };
         });
       }
+      if (isCapturedSlide) {
+        persistCaptureSlide(slide, markdown).catch(() => {
+          // Non-blocking best-effort persistence
+        });
+      }
       setOpenSlidePickerIndex(null);
     },
-    [updateParagraph]
+    [persistCaptureSlide, updateParagraph]
   );
 
   const handleEditorChange = useCallback(
@@ -3248,15 +3631,20 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       }}
       onInsertText={(slide, markdown) => {
         if (openSlidePickerIndex != null) {
-          handleInsertSlideQuote(openSlidePickerIndex, markdown);
+          handleInsertSlideQuote(openSlidePickerIndex, slide, markdown);
         }
       }}
       onExtract={handleExtractSlide}
+      onExtractCapture={handleExtractCaptureSlide}
       onRetry={handleSlideRetry}
       onClose={() => setOpenSlidePickerIndex(null)}
       activeIndex={closestSlideIndex}
       formatTimestamp={formatTimestamp}
       canEdit={canEdit}
+      videoSource={mediaSource}
+      paragraphStart={slidePickerTiming.start}
+      paragraphEnd={slidePickerTiming.end}
+      onCaptureFrame={handleCaptureSlideFrame}
     />
     </>
   );

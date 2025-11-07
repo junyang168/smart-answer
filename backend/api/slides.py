@@ -4,8 +4,9 @@ import json
 import shutil
 import subprocess
 from datetime import datetime, timezone
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import cv2
@@ -30,6 +31,7 @@ FRAME_IMAGE_NAME = "frame.jpg"
 FRAME_METADATA_NAME = "frame.json"
 FRAME_REFERENCE_SECONDS = 60.0
 FRAMES_SUBDIR = "frames"
+CAPTURES_SUBDIR = "captures"
 RAW_SUBDIR = "_raw"
 VIDEO_DIR_NAME = "../video"
 
@@ -62,6 +64,15 @@ class FrameUpdatePayload(BaseModel):
     frame_dimensions: FrameDimensions
 
 
+class FrameCapturePayload(BaseModel):
+    timestamp_seconds: float = Field(..., ge=0.0)
+
+
+class CapturePersistPayload(BaseModel):
+    timestamp_seconds: Optional[float] = Field(default=None, ge=0.0)
+    extracted_text: Optional[str] = None
+
+
 class SlideGenerationResponse(BaseModel):
     count: int
     metadata_path: str
@@ -90,6 +101,10 @@ def _slide_root(item: str) -> Path:
 
 def _frames_output_dir(item: str) -> Path:
     return _slide_root(item) / FRAMES_SUBDIR
+
+
+def _captures_output_dir(item: str) -> Path:
+    return _slide_root(item) / CAPTURES_SUBDIR
 
 
 def _raw_output_dir(item: str) -> Path:
@@ -200,7 +215,27 @@ def _load_slide_metadata_document(item: str) -> dict[str, Any]:
             metadata = json.load(handle)
     except json.JSONDecodeError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slide metadata JSON") from exc
+    slides_value = metadata.get("slides")
+    if isinstance(slides_value, list):
+        metadata["slides"] = _sort_slide_entries(slides_value)
     return metadata
+
+
+def _load_or_initialize_slide_metadata(item: str) -> Tuple[dict[str, Any], Path]:
+    slides_root = _slide_root(item)
+    slides_root.mkdir(parents=True, exist_ok=True)
+    metadata_path = slides_root / "slide_meta.json"
+    if metadata_path.exists():
+        try:
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+                slides_value = metadata.get("slides")
+                if isinstance(slides_value, list):
+                    metadata["slides"] = _sort_slide_entries(slides_value)
+                return metadata, metadata_path
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid slide metadata JSON") from exc
+    return {"slides": []}, metadata_path
 
 
 def _locate_video_file(item: str) -> Path:
@@ -275,6 +310,112 @@ def _build_frame_info(item: str, metadata: Optional[Dict[str, Any]]) -> FrameInf
         coordinates=coordinates_model,
         frame_dimensions=dimensions_model,
         updated_at=updated_at,
+    )
+
+
+def _build_capture_asset(
+    item: str,
+    capture_path: Path,
+    *,
+    timestamp_seconds: Optional[float] = None,
+    extracted_text: Optional[str] = None,
+) -> SurmonSlideAsset:
+    relative_path = Path(item) / CAPTURES_SUBDIR / capture_path.name
+    return SurmonSlideAsset(
+        id=capture_path.stem,
+        image=relative_path.as_posix(),
+        image_url=_build_image_url(relative_path),
+        timestamp_seconds=timestamp_seconds,
+        extracted_text=extracted_text,
+    )
+
+
+def _capture_image_path(item: str, capture_id: str) -> Path:
+    sanitized = capture_id.strip()
+    if not sanitized:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Capture id is required")
+    capture_dir = _captures_output_dir(item)
+    candidate = capture_dir / f"{sanitized}.jpg"
+    if not candidate.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Capture {sanitized} not found")
+    return candidate
+
+
+def _timestamp_from_capture_name(path: Path) -> Optional[float]:
+    stem = path.stem
+    if not stem.startswith("capture-"):
+        return None
+    parts = stem.split("-")
+    if len(parts) < 3:
+        return None
+    try:
+        millis = int(parts[1])
+    except ValueError:
+        return None
+    return millis / 1000.0
+
+
+def _sort_slide_entries(slide_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    valid_entries: List[Dict[str, Any]] = [entry for entry in slide_entries if isinstance(entry, dict)]
+    invalid_entries = [entry for entry in slide_entries if not isinstance(entry, dict)]
+
+    def sort_key(entry: Dict[str, Any]) -> Tuple[bool, float, str]:
+        timestamp = entry.get("timestamp_seconds")
+        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+            value = float(timestamp)
+            missing = False
+        else:
+            value = float("inf")
+            missing = True
+        image_value = entry.get("image")
+        image_key = image_value if isinstance(image_value, str) else ""
+        return (missing, value, image_key)
+
+    return sorted(valid_entries, key=sort_key) + invalid_entries
+
+
+def _persist_capture_metadata(
+    item: str,
+    capture_path: Path,
+    *,
+    timestamp_seconds: Optional[float] = None,
+    extracted_text: Optional[str] = None,
+) -> SurmonSlideAsset:
+    metadata, metadata_path = _load_or_initialize_slide_metadata(item)
+    slides_value = metadata.get("slides")
+    if not isinstance(slides_value, list):
+        slides_value = []
+        metadata["slides"] = slides_value
+
+    relative_image = (Path(item) / CAPTURES_SUBDIR / capture_path.name).as_posix()
+    existing_entry: Optional[dict[str, Any]] = None
+    for entry in slides_value:
+        if isinstance(entry, dict) and entry.get("image") == relative_image:
+            existing_entry = entry
+            break
+
+    if existing_entry is None:
+        existing_entry = {"image": relative_image}
+        slides_value.append(existing_entry)
+
+    if timestamp_seconds is not None:
+        existing_entry["timestamp_seconds"] = float(timestamp_seconds)
+
+    if extracted_text:
+        sanitized = extracted_text.strip()
+        if sanitized:
+            existing_entry["extracted_text"] = sanitized
+            existing_entry["text"] = sanitized
+
+    metadata["slides"] = _sort_slide_entries(slides_value)
+    with metadata_path.open("w", encoding="utf-8") as handle:
+        json.dump(metadata, handle, indent=2, ensure_ascii=False)
+
+    return _build_capture_asset(
+        item,
+        capture_path,
+        timestamp_seconds=existing_entry.get("timestamp_seconds"),
+        extracted_text=existing_entry.get("extracted_text"),
     )
 
 
@@ -366,11 +507,73 @@ def _write_slide_metadata(
         "blue_dominance": metadata.get("blue_dominance"),
         "generated_at": metadata.get("generated_at"),
         "frame": metadata.get("frame"),
-        "slides": _build_slide_entries(item, slides),
+        "slides": _sort_slide_entries(_build_slide_entries(item, slides)),
     }
 
     with metadata_path.open("w", encoding="utf-8") as handle:
         json.dump(document, handle, indent=2, ensure_ascii=False)
+
+
+@router.post("/{item_id}/captures", response_model=SurmonSlideAsset)
+def capture_custom_frame(item_id: str, payload: FrameCapturePayload) -> SurmonSlideAsset:
+    item = _sanitize_item(item_id)
+    timestamp = max(0.0, float(payload.timestamp_seconds))
+    capture_dir = _captures_output_dir(item)
+    capture_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp_ms = int(round(timestamp * 1000))
+    suffix = uuid.uuid4().hex[:6]
+    filename = f"capture-{timestamp_ms}-{suffix}.jpg"
+    destination = capture_dir / filename
+
+    video_path = _locate_video_file(item)
+    try:
+        capture_video_frame(video_path, timestamp, destination)
+    except ExecutableNotFoundError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to capture video frame") from exc
+
+    return _build_capture_asset(item, destination, timestamp_seconds=timestamp)
+
+
+@router.post("/{item_id}/captures/{capture_id}/extract_text", response_model=SurmonSlideAsset)
+def extract_custom_frame_text(item_id: str, capture_id: str) -> SurmonSlideAsset:
+    item = _sanitize_item(item_id)
+    image_path = _capture_image_path(item, capture_id)
+
+    frame = cv2.imread(str(image_path))
+    if frame is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Unable to load capture image")
+
+    extractor = ImageToText(item)
+    extracted_markdown = extractor.extract_text_from_frame(frame, as_markdown=True)
+    if not extracted_markdown:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Gemini 未回傳任何文字")
+
+    timestamp_seconds = _timestamp_from_capture_name(image_path)
+    markdown_text = extracted_markdown.strip()
+    return _build_capture_asset(
+        item,
+        image_path,
+        timestamp_seconds=timestamp_seconds,
+        extracted_text=markdown_text,
+    )
+
+
+@router.post("/{item_id}/captures/{capture_id}/persist", response_model=SurmonSlideAsset)
+def persist_capture_entry(item_id: str, capture_id: str, payload: CapturePersistPayload) -> SurmonSlideAsset:
+    item = _sanitize_item(item_id)
+    image_path = _capture_image_path(item, capture_id)
+    timestamp = payload.timestamp_seconds
+    if timestamp is None:
+        timestamp = _timestamp_from_capture_name(image_path)
+    return _persist_capture_metadata(
+        item,
+        image_path,
+        timestamp_seconds=timestamp,
+        extracted_text=payload.extracted_text,
+    )
 
 
 @router.get("/{item_id}", response_model=list[SurmonSlideAsset])
