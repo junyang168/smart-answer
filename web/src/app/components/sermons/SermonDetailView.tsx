@@ -6,6 +6,7 @@ import { useParams, notFound } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 
 import { Sermon} from '@/app/interfaces/article';
 import { BibleVerse} from '@/app/interfaces/article';
@@ -180,7 +181,7 @@ export const SermonDetailView = () => {
 
         {status === "authenticated" ? (
           <article className="prose lg:prose-lg max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{sermon.markdownContent}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sermon.markdownContent}</ReactMarkdown>
           </article>
         ) : (
           <SermonKeyPoints sermon={sermon} />
