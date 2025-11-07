@@ -31,7 +31,7 @@ export const SermonDetailView = () => {
 
   const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
   let status = sessionStatus;
-  let isEditor = session?.user?.role === "editor";
+  let isEditor = session?.user?.role === "editor" || session?.user?.role === "admin";
 
   if (process.env.NODE_ENV !== 'production') {
     status = 'authenticated';
