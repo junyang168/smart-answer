@@ -48,6 +48,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   const [coreBibleVersesInput, setCoreBibleVersesInput] = useState(
     (initialArticle.coreBibleVerses ?? []).join("\n"),
   );
+  const [sourceSermonIdsInput, setSourceSermonIdsInput] = useState(
+    (initialArticle.sourceSermonIds ?? []).join("\n"),
+  );
 
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -112,6 +115,10 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
         .split(/\r?\n/)
         .map((verse) => verse.trim())
         .filter((verse) => verse.length > 0);
+      const sourceSermonIds = sourceSermonIdsInput
+        .split(/\r?\n/)
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
       const payload = {
         id: articleId || undefined,
         name,
@@ -123,6 +130,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
         summaryMarkdown,
         articleType: articleType || undefined,
         coreBibleVerses,
+        sourceSermonIds,
       };
       const saved = await saveFullArticle(payload);
       setArticleId(saved.id);
@@ -135,6 +143,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setSummaryMarkdown(saved.summaryMarkdown ?? "");
       setArticleType(saved.articleType ?? "");
       setCoreBibleVersesInput((saved.coreBibleVerses ?? []).join("\n"));
+      setSourceSermonIdsInput((saved.sourceSermonIds ?? []).join("\n"));
       setPromptDirty(false);
       setFeedback({ type: "success", message: "已儲存文章內容" });
       if (!articleId && saved.id) {
@@ -297,6 +306,16 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
               rows={4}
               className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="例如：\n約翰福音 3:16"
+            />
+          </label>
+          <label className="flex flex-col md:col-span-2">
+            <span className="text-sm font-medium text-gray-700">來源講道 ID（每行一個）</span>
+            <textarea
+              value={sourceSermonIdsInput}
+              onChange={(event) => setSourceSermonIdsInput(event.target.value)}
+              rows={3}
+              className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="例如：\nsermon-2024-05-12"
             />
           </label>
         </div>

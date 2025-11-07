@@ -140,6 +140,7 @@ class ArticleRepository:
                 summary_markdown=entry.summary_markdown or "",
                 article_type=entry.article_type,
                 core_bible_verses=entry.core_bible_verses or [],
+                source_sermon_ids=entry.source_sermon_ids or [],
             )
             for entry in sorted(records, key=lambda e: e.updated_at, reverse=True)
         ]
@@ -180,6 +181,7 @@ class ArticleRepository:
             summary_markdown=entry.summary_markdown or "",
             article_type=entry.article_type,
             core_bible_verses=entry.core_bible_verses or [],
+            source_sermon_ids=entry.source_sermon_ids or [],
         )
 
     def _read_markdown(self, path: Path) -> str:
@@ -226,6 +228,7 @@ class ArticleRepository:
                 summary_markdown=payload.summary_markdown or "",
                 article_type=payload.article_type,
                 core_bible_verses=[verse for verse in payload.core_bible_verses if verse],
+                source_sermon_ids=[sid for sid in payload.source_sermon_ids if sid],
             )
             records.append(entry)
 
@@ -235,6 +238,7 @@ class ArticleRepository:
         entry.summary_markdown = payload.summary_markdown if payload.summary_markdown is not None else (entry.summary_markdown or "")
         entry.article_type = payload.article_type
         entry.core_bible_verses = [verse for verse in payload.core_bible_verses if verse]
+        entry.source_sermon_ids = [sid for sid in payload.source_sermon_ids if sid]
 
         script_path = SCRIPTS_DIR / entry.script_filename
         article_path = ARTICLES_DIR / entry.article_filename
@@ -328,6 +332,7 @@ class ArticleRepository:
             summaryMarkdown="",
             articleType=None,
             coreBibleVerses=[],
+            sourceSermonIds=[],
         )
         return SaveArticleResponse.parse_obj(placeholder.dict(by_alias=True))
 

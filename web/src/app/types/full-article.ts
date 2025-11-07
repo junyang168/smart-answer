@@ -13,6 +13,7 @@ export interface FullArticleSummary {
   summaryMarkdown?: string;
   articleType?: FullArticleType | null;
   coreBibleVerses?: string[];
+  sourceSermonIds?: string[];
 }
 
 export interface FullArticleDetail extends FullArticleSummary {
@@ -22,6 +23,7 @@ export interface FullArticleDetail extends FullArticleSummary {
   summaryMarkdown: string;
   articleType?: FullArticleType | null;
   coreBibleVerses: string[];
+  sourceSermonIds?: string[];
 }
 
 export interface SaveFullArticlePayload {
@@ -35,6 +37,7 @@ export interface SaveFullArticlePayload {
   summaryMarkdown?: string;
   articleType?: FullArticleType | null;
   coreBibleVerses?: string[];
+  sourceSermonIds?: string[];
 }
 
 export interface GenerateArticleResponse {

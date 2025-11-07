@@ -26,6 +26,7 @@ class ArticleMetadata(BaseModel):
     summary_markdown: Optional[str] = None
     article_type: Optional[ArticleType] = None
     core_bible_verses: List[str] = Field(default_factory=list)
+    source_sermon_ids: List[str] = Field(default_factory=list)
 
 
 class ArticleSummary(BaseModel):
@@ -40,6 +41,7 @@ class ArticleSummary(BaseModel):
     summary_markdown: Optional[str] = Field(None, alias="summaryMarkdown")
     article_type: Optional[ArticleType] = Field(None, alias="articleType")
     core_bible_verses: List[str] = Field(default_factory=list, alias="coreBibleVerses")
+    source_sermon_ids: List[str] = Field(default_factory=list, alias="sourceSermonIds")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -63,6 +65,7 @@ class SaveArticleRequest(BaseModel):
     summary_markdown: Optional[str] = Field(None, alias="summaryMarkdown")
     article_type: Optional[ArticleType] = Field(None, alias="articleType")
     core_bible_verses: List[str] = Field(default_factory=list, alias="coreBibleVerses")
+    source_sermon_ids: List[str] = Field(default_factory=list, alias="sourceSermonIds")
 
     model_config = ConfigDict(populate_by_name=True)
 
