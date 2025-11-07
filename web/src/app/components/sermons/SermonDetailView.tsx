@@ -1,7 +1,7 @@
 // components/sermons/SermonDetailView.tsx
 "use client";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, notFound } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -31,12 +31,29 @@ export const SermonDetailView = () => {
 
   const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
   let status = sessionStatus;
-  let isEditor = session?.user?.role === "editor" || session?.user?.role === "admin";
+  const userRole = session?.user?.role;
+  let isEditor = userRole === "editor" || userRole === "admin";
 
   if (process.env.NODE_ENV !== 'production') {
     status = 'authenticated';
     isEditor = true;
   }
+
+  const [copyStatus, setCopyStatus] = useState<"idle" | "success" | "error">("idle");
+
+  const handleCopyMarkdown = useCallback(async (content?: string) => {
+    if (!content) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopyStatus("success");
+      setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch (error) {
+      setCopyStatus("error");
+      setTimeout(() => setCopyStatus("idle"), 2000);
+    }
+  }, []);
 
 
   // --- Data Fetching ---
@@ -150,16 +167,29 @@ export const SermonDetailView = () => {
       {/* 左側主內容區 */}
       <main className="lg:col-span-2">
         <Breadcrumb links={breadcrumbLinks} />
-        <div className="mb-3 flex items-center gap-3">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
           <h1 className="text-3xl lg:text-4xl font-bold font-display text-gray-900">{sermon.title}</h1>
-          {isEditor && (
-            <Link
-              href={`/admin/surmons/${encodeURIComponent(id)}`}
-              className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-200 rounded-md bg-blue-50 hover:bg-blue-100"
-            >
-              編輯
-            </Link>
-          )}
+          {isEditor ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/admin/surmons/${encodeURIComponent(id)}`}
+                className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-blue-700 border border-blue-200 rounded-md bg-blue-50 hover:bg-blue-100"
+              >
+                編輯
+              </Link>
+              <button
+                type="button"
+                onClick={() => handleCopyMarkdown(sermon.markdownContent)}
+                className="inline-flex items-center rounded-md border border-blue-200 px-3 py-1.5 text-sm text-blue-700 transition hover:bg-blue-50"
+              >
+                {copyStatus === "success"
+                  ? "已複製"
+                  : copyStatus === "error"
+                  ? "複製失敗"
+                  : "複製 Markdown"}
+              </button>
+            </div>
+          ) : null}
         </div>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
 
