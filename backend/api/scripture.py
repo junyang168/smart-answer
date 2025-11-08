@@ -418,6 +418,25 @@ def parse_reference(slug: str) -> Dict[str, object]:
     }
 
 
+def format_chinese_reference(slug: str) -> str:
+    try:
+        info = parse_reference(slug)
+    except ValueError:
+        return slug
+
+    book_slug = str(info.get("slug", "")).lower()
+    book_name = BOOK_SLUG_TO_NAME.get(book_slug, book_slug.upper())
+    chapter = info.get("chapter")
+    start = info.get("start")
+    end = info.get("end")
+
+    if not isinstance(chapter, int) or not isinstance(start, int) or not isinstance(end, int):
+        return f"{book_name} {info.get('display', slug)}"
+
+    verse_part = f"{start}-{end}" if end != start else f"{start}"
+    return f"{book_name} {chapter}:{verse_part}"
+
+
 def build_params() -> Dict[str, str]:
     return {
         "content-type": "text",

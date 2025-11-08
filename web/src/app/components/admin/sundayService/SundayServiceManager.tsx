@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   createSundayService,
   deleteSundayService,
@@ -13,8 +14,9 @@ import {
   uploadFinalSundayServicePpt,
   sendSundayServiceEmail,
   updateSundayService,
+  updateSundayServiceEmailBody,
+  fetchSundayServiceEmailBody,
 } from "@/app/admin/sunday-service/api";
-import { SundayWorkerManager } from "@/app/components/admin/sundayService/SundayWorkerManager";
 import {
   SundayServiceEntry,
   SundayServiceResources,
@@ -61,6 +63,7 @@ interface FormState {
   sermonTitle: string;
   announcementsMarkdown: string;
   healthPrayerMarkdown: string;
+  donationAmount: string;
   holdHolyCommunion: boolean;
 }
 
@@ -78,6 +81,7 @@ function createEmptyForm(): FormState {
     sermonTitle: "",
     announcementsMarkdown: "",
     healthPrayerMarkdown: "",
+    donationAmount: "",
     holdHolyCommunion: false,
   };
 }
@@ -259,6 +263,10 @@ function toForm(entry: SundayServiceEntry | null): FormState {
     sermonTitle: entry.sermonTitle ?? "",
     announcementsMarkdown: entry.announcementsMarkdown ?? "",
     healthPrayerMarkdown: entry.health_prayer_markdown ?? "",
+    donationAmount:
+      entry.donationAmount != null && Number.isFinite(entry.donationAmount)
+        ? String(entry.donationAmount)
+        : "",
     holdHolyCommunion:
       rawHold ?? (entry.date ? isFirstSundayOfMonth(entry.date) : base.holdHolyCommunion),
   };
@@ -285,8 +293,25 @@ function fromForm(form: FormState): SundayServiceEntry {
     sermonTitle: optional(form.sermonTitle),
     announcementsMarkdown: form.announcementsMarkdown.trim(),
     health_prayer_markdown: form.healthPrayerMarkdown.trim(),
+    donationAmount: parseDonationInput(form.donationAmount),
     holdHolyCommunion: form.holdHolyCommunion,
   };
+}
+
+function parseDonationInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const normalized = trimmed.replace(/[$,]/g, "");
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return Math.round(parsed * 100) / 100;
 }
 
 function renderSongLabel(song: SundaySong): string {
@@ -376,7 +401,13 @@ export function SundayServiceManager() {
   const [finalPptUploading, setFinalPptUploading] = useState(false);
   const [finalPptDownloading, setFinalPptDownloading] = useState<string | null>(null);
   const [emailSending, setEmailSending] = useState<string | null>(null);
+  const [emailBodyHtml, setEmailBodyHtml] = useState("");
+  const [emailBodySaving, setEmailBodySaving] = useState(false);
+  const [emailBodyLoading, setEmailBodyLoading] = useState(false);
+  const [emailBodyError, setEmailBodyError] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const finalPptInputRef = useRef<HTMLInputElement | null>(null);
+  const emailEditorRef = useRef<HTMLDivElement | null>(null);
 
   const bookNameMap = useMemo(
     () => new Map(scriptureBooks.map((book) => [book.slug, book.name])),
@@ -516,6 +547,53 @@ export function SundayServiceManager() {
     }
     return services.find((entry) => entry.date === editingDate) ?? null;
   }, [services, editingDate]);
+
+  useEffect(() => {
+    if (!editingDate || !currentService?.finalPptFilename) {
+      setEmailBodyHtml("");
+      setEmailBodyError(null);
+      setEmailBodyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEmailBodyLoading(true);
+    setEmailBodyError(null);
+    const initialHtml = currentService.emailBodyHtml ?? "";
+    setEmailBodyHtml(initialHtml);
+    fetchSundayServiceEmailBody(editingDate)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setEmailBodyHtml(result.html ?? "");
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+        const message = err instanceof Error ? err.message : "載入 email 內容失敗";
+        setEmailBodyError(message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setEmailBodyLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingDate, currentService?.finalPptFilename]);
+
+  useEffect(() => {
+    const editor = emailEditorRef.current;
+    if (!editor) {
+      return;
+    }
+    const normalized = emailBodyHtml || "";
+    if (editor.innerHTML !== normalized) {
+      editor.innerHTML = normalized;
+    }
+  }, [emailBodyHtml]);
 
   const upcomingServiceDate = useMemo(() => {
     if (services.length === 0) {
@@ -697,6 +775,13 @@ export function SundayServiceManager() {
     });
   };
 
+  const handleStartCreate = () => {
+    resetForm();
+    setShowCreateForm(true);
+    setFeedback(null);
+    setError(null);
+  };
+
   const resetForm = () => {
     const base = createEmptyForm();
     const fallbackBook = scriptureBooks[0]?.slug ?? "";
@@ -707,7 +792,13 @@ export function SundayServiceManager() {
     setEditingDate(null);
   };
 
+  const handleCancelEdit = () => {
+    resetForm();
+    setShowCreateForm(false);
+  };
+
   const handleEdit = (entry: SundayServiceEntry) => {
+    setShowCreateForm(false);
     setEditingDate(entry.date);
     const next = toForm(entry);
     if (scriptureBooks.length > 0) {
@@ -800,6 +891,7 @@ export function SundayServiceManager() {
       setFeedback("已刪除主日服事資訊");
       if (editingDate === date) {
         resetForm();
+        setShowCreateForm(false);
       }
       await loadServices();
     } catch (err) {
@@ -871,6 +963,70 @@ export function SundayServiceManager() {
       return;
     }
     void handleFinalPptUpload(file);
+  };
+
+  const handleEmailEditorInput = useCallback((event: FormEvent<HTMLDivElement>) => {
+    setEmailBodyHtml(event.currentTarget.innerHTML);
+  }, []);
+
+  const executeEditorCommand = useCallback(
+    (command: string, value?: string) => {
+      if (typeof document === "undefined") {
+        return;
+      }
+      const editor = emailEditorRef.current;
+      if (!editor) {
+        return;
+      }
+      editor.focus();
+      try {
+        document.execCommand(command, false, value ?? null);
+        setEmailBodyHtml(editor.innerHTML);
+      } catch {
+        // ignore command errors
+      }
+    },
+    [],
+  );
+
+  const handleEditorMenuAction = useCallback(
+    (command: string) => {
+      if (command === "createLink") {
+        const url = window.prompt("輸入連結網址", "https://");
+        if (url) {
+          executeEditorCommand(command, url);
+        }
+        return;
+      }
+      if (command === "removeFormat") {
+        executeEditorCommand("removeFormat");
+        executeEditorCommand("unlink");
+        return;
+      }
+      executeEditorCommand(command);
+    },
+    [executeEditorCommand],
+  );
+
+  const handleEmailBodySave = async () => {
+    if (!editingDate) {
+      setError("請先選擇主日日期");
+      return;
+    }
+    setEmailBodySaving(true);
+    setFeedback(null);
+    setEmailBodyError(null);
+    try {
+      const result = await updateSundayServiceEmailBody(editingDate, emailBodyHtml);
+      setEmailBodyHtml(result.html ?? "");
+      setFeedback("已更新 email 內容");
+      await loadServices({ preserveForm: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "儲存 email 內容失敗";
+      setEmailBodyError(message);
+    } finally {
+      setEmailBodySaving(false);
+    }
   };
 
   const handleDownloadFinalPpt = async (entry: SundayServiceEntry) => {
@@ -1002,6 +1158,20 @@ export function SundayServiceManager() {
     return trimmed;
   };
 
+  const formatDonationAmount = (value?: number | null) => {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      return "-";
+    }
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value); 
+  };
+
+  const isFormVisible = Boolean(editingDate) || showCreateForm;
+
   return (
     <div className="space-y-8">
       <header className="rounded-lg border border-blue-100 bg-blue-50 p-6">
@@ -1013,6 +1183,20 @@ export function SundayServiceManager() {
             </p>
           </div>
           <div className="flex gap-3">
+            <button
+              type="button"
+              className="rounded border border-green-300 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100"
+              onClick={handleStartCreate}
+              disabled={status === "loading" || saving}
+            >
+              新增主日服事
+            </button>
+            <Link
+              href="/admin/sunday-workers"
+              className="rounded border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
+            >
+              管理同工名單
+            </Link>
             <Link
               href="/admin/sunday-service/songs"
               className="rounded border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
@@ -1059,16 +1243,13 @@ export function SundayServiceManager() {
                 <th className="w-40 px-3 py-2">講員 / 題目</th>
                 <th className="w-56 px-3 py-2">讀經</th>
                 <th className="w-40 px-3 py-2">讀經同工</th>
-                <th className="w-20 px-3 py-2 text-center">聖餐</th>
+                <th className="w-24 px-3 py-2 text-right">奉獻</th>
                 <th className="w-44 px-3 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
               {services.map((entry: SundayServiceEntry) => {
                 const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
-                const holdsCommunion =
-                  entry.holdHolyCommunion ??
-                  (entry.date ? isFirstSundayOfMonth(entry.date) : false);
                 const entryDateValue = entry.date?.trim() ?? "";
                 const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
                 const rowClasses = `border-t border-gray-100 ${isUpcoming ? "bg-amber-50" : "bg-white"}`;
@@ -1117,8 +1298,8 @@ export function SundayServiceManager() {
                         ? entry.scriptureReaders.join("、")
                         : "-")}
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      {holdsCommunion ? "是" : "否"}
+                    <td className="px-3 py-2 text-right text-gray-700">
+                      {formatDonationAmount(entry.donationAmount)}
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-2">
@@ -1156,11 +1337,12 @@ export function SundayServiceManager() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-gray-800">
-            {editingDate ? `編輯 ${formatDisplayDate(editingDate)} 主日` : "新增主日服事"}
-          </h3>
+      {isFormVisible && (
+        <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-semibold text-gray-800">
+              {editingDate ? `編輯 ${formatDisplayDate(editingDate)} 主日` : "新增主日服事"}
+            </h3>
           {editingDate && (
             <div className="mb-4 space-y-3 rounded border border-blue-100 bg-blue-50 p-4">
               <div className="flex flex-wrap items-center gap-3">
@@ -1220,6 +1402,60 @@ export function SundayServiceManager() {
                     ? `目前檔案：${currentService.finalPptFilename}`
                     : "尚未上傳最終 PPT"}
               </p>
+              {currentService?.finalPptFilename && (
+                <div className="space-y-3 rounded border border-purple-200 bg-white/90 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-sm font-semibold text-purple-900">同工 Email 內容</span>
+                    <button
+                      type="button"
+                      className="rounded border border-purple-300 px-3 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:border-purple-100 disabled:text-purple-300"
+                      onClick={handleEmailBodySave}
+                      disabled={emailBodySaving || saving || emailBodyLoading}
+                    >
+                      {emailBodySaving ? "儲存中…" : "儲存 Email 內容"}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 rounded border border-purple-100 bg-purple-50 p-2 text-xs font-semibold text-purple-800">
+                    {[
+                      { label: "B", title: "粗體", command: "bold" },
+                      { label: "I", title: "斜體", command: "italic" },
+                      { label: "U", title: "底線", command: "underline" },
+                      { label: "•", title: "項目符號", command: "insertUnorderedList" },
+                      { label: "1.", title: "編號清單", command: "insertOrderedList" },
+                      { label: "Link", title: "加入連結", command: "createLink" },
+                      { label: "清除格式", title: "移除格式", command: "removeFormat" },
+                    ].map((item) => (
+                      <button
+                        key={item.command}
+                        type="button"
+                        className="rounded border border-purple-200 px-2 py-1 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => handleEditorMenuAction(item.command)}
+                        disabled={emailBodySaving || saving || emailBodyLoading}
+                        title={item.title}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    ref={emailEditorRef}
+                    className="min-h-[200px] w-full rounded border border-purple-200 bg-white px-3 py-2 text-sm text-gray-800 shadow-inner focus:outline-none focus:ring-2 focus:ring-purple-200"
+                    contentEditable
+                    suppressContentEditableWarning
+                    onInput={handleEmailEditorInput}
+                    aria-label="Email 內容編輯器"
+                  />
+                  {emailBodyLoading && (
+                    <p className="text-xs text-purple-500">Email 內容載入中…</p>
+                  )}
+                  {emailBodyError && (
+                    <p className="text-xs text-red-600">{emailBodyError}</p>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    上傳最終 PPT 後會自動產生 email 內容，您可以在此調整並儲存，送出 email 時會套用此 HTML。
+                  </p>
+                </div>
+              )}
             </div>
           )}
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -1474,6 +1710,20 @@ export function SundayServiceManager() {
               />
             </div>
             <div>
+              <label className="mb-1 block text-sm font-semibold text-gray-700">奉獻金額 (USD)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                placeholder="如：1250.50"
+                value={form.donationAmount}
+                onChange={handleInputChange("donationAmount")}
+                disabled={saving}
+              />
+              <p className="mt-1 text-xs text-gray-500">系統會以美元格式顯示於 PPT。</p>
+            </div>
+            <div>
               <label className="mb-1 block text-sm font-semibold text-gray-700">家事與報告</label>
               <textarea
                 className="h-40 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
@@ -1498,7 +1748,7 @@ export function SundayServiceManager() {
                 <button
                   type="button"
                   className="rounded border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                  onClick={resetForm}
+                  onClick={handleCancelEdit}
                   disabled={saving}
                 >
                   取消編輯
@@ -1512,10 +1762,10 @@ export function SundayServiceManager() {
                 {editingDate ? "更新" : "新增"}
               </button>
             </div>
-          </form>
-        </div>
-        <SundayWorkerManager workers={resources.workers} onWorkersChanged={loadResources} />
-      </section>
+            </form>
+          </div>
+        </section>
+      )}
 
 
     </div>

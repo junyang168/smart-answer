@@ -1,21 +1,38 @@
 from __future__ import annotations
 
+import html
 import os
+import re
 import smtplib
 from collections import OrderedDict
 from datetime import date, datetime
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Optional
 
+from backend.emailing import (
+    chunked,
+    determine_notification_recipients_file,
+    determine_recipient_batch_size,
+    is_truthy,
+    load_notification_recipients,
+    resolve_data_base_dir,
+)
 from .config import SUNDAY_SERVICE_FILE, SUNDAY_WORKERS_FILE, SUNDAY_WORSHIP_DIR
 from .models import (
     SundayServiceEmailResult,
     SundayServiceEntry,
     SundayWorker,
 )
+from .scripture import format_chinese_reference
 from .storage import repository
+
+
+EMAIL_PRODUCTION = is_truthy(os.getenv("RODUCTION"))
+NOTIFICATION_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
+TEST_RECIPIENT = os.getenv("SUNDAY_SERVICE_TEST_RECIPIENT", "junyang168@gmail.com")
 
 
 def _parse_service_date(raw: str | None) -> Optional[date]:
@@ -100,7 +117,53 @@ def _fallback(value: Optional[str]) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else "未定"
 
 
-def _build_email_bodies(service: SundayServiceEntry) -> tuple[str, str]:
+def _format_scripture_reference(scripture: Iterable[str] | None) -> str:
+    if not scripture:
+        return "未定"
+    values: list[str] = []
+    for part in scripture:
+        if not isinstance(part, str):
+            continue
+        trimmed = part.strip()
+        if not trimmed:
+            continue
+        values.append(format_chinese_reference(trimmed))
+    return "、".join(values) if values else "未定"
+
+
+def _format_subject_date(raw_date: str) -> str:
+    parsed = _parse_service_date(raw_date)
+    if parsed:
+        return parsed.strftime("%Y年%m月%d日")
+    normalized = raw_date.strip() if isinstance(raw_date, str) else ""
+    return normalized or raw_date or ""
+
+
+def _build_congregation_subject(service: SundayServiceEntry) -> str:
+    formatted = _format_subject_date(service.date)
+    return f"聖道教會{formatted}主日崇拜"
+
+
+@lru_cache()
+def _load_congregation_template() -> str:
+    template_path = resolve_data_base_dir() / "sunday_worship" / "sunday_service_reminder.html"
+    try:
+        return template_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Sunday service reminder template not found at {template_path}") from exc
+
+
+def _build_congregation_email_html(service: SundayServiceEntry) -> str:
+    template = _load_congregation_template()
+    replacements = {
+        "sermonTitle": _fallback(service.sermon_title),
+        "sermonSpeaker": _fallback(service.sermon_speaker),
+        "scriptureReference": _format_scripture_reference(service.scripture),
+    }
+    return template.format(**replacements)
+
+
+def build_sunday_service_email_bodies(service: SundayServiceEntry) -> tuple[str, str]:
     sermon_speaker = _fallback(service.sermon_speaker)
     presider = _fallback(service.presider)
     worship_leader = _fallback(service.worship_leader)
@@ -137,6 +200,18 @@ def _build_email_bodies(service: SundayServiceEntry) -> tuple[str, str]:
     return text_body, html_body
 
 
+def _html_to_text(value: str) -> str:
+    if not value:
+        return ""
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", value)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</p>", "\n\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    lines = [line.rstrip() for line in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
 def _resolve_ppt_path(service: SundayServiceEntry) -> Path:
     if not service.final_ppt_filename:
         raise RuntimeError(f"Service {service.date} does not have a finalized PPT")
@@ -144,6 +219,34 @@ def _resolve_ppt_path(service: SundayServiceEntry) -> Path:
     if not ppt_path.exists():
         raise FileNotFoundError(f"Finalized PPT not found at {ppt_path}")
     return ppt_path
+
+
+def _send_congregation_email(
+    smtp: smtplib.SMTP,
+    *,
+    sender: str,
+    recipients: list[str],
+    subject: str,
+    text_body: str,
+    html_body: str,
+) -> None:
+    if not recipients:
+        return
+
+    batch_size = determine_recipient_batch_size()
+    to_header = os.getenv("REMINDER_TO_HEADER", "Undisclosed recipients:;")
+    cc_header = os.getenv("REMINDER_CC_HEADER")
+
+    for batch in chunked(recipients, batch_size):
+        message = EmailMessage()
+        message["From"] = sender
+        message["To"] = to_header
+        if cc_header:
+            message["Cc"] = cc_header
+        message["Subject"] = subject
+        message.set_content(text_body)
+        message.add_alternative(html_body, subtype="html")
+        smtp.send_message(message, to_addrs=batch)
 
 
 def send_sunday_service_email(
@@ -154,17 +257,36 @@ def send_sunday_service_email(
     services = _load_services()
     workers = _load_workers()
     service = _select_service(services, target_date)
-    recipients = _collect_recipient_emails(workers)
-    if not recipients:
+    worker_recipients = _collect_recipient_emails(workers)
+    if not worker_recipients:
         raise RuntimeError("No worker email addresses available to send the Sunday service email.")
+    congregation_recipients_path = determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
+    congregation_recipients = load_notification_recipients(congregation_recipients_path)
 
     ppt_path = _resolve_ppt_path(service)
     formatted_date = _format_display_date(service.date)
     subject = f"圣道教会{formatted_date}的主日崇拜同工安排及ppt"
-    text_body, html_body = _build_email_bodies(service)
+    default_text_body, default_html_body = build_sunday_service_email_bodies(service)
+    html_body = service.email_body_html or default_html_body
+    text_body = (
+        default_text_body if not service.email_body_html else _html_to_text(service.email_body_html)
+    )
+    congregation_html_body = _build_congregation_email_html(service)
+    congregation_text_body = _html_to_text(congregation_html_body)
+    congregation_subject = _build_congregation_subject(service)
+
+    worker_recipient_list = list(worker_recipients)
+    congregation_recipient_list = list(congregation_recipients)
+    if not EMAIL_PRODUCTION:
+        worker_recipient_list = [TEST_RECIPIENT]
+        congregation_recipient_list = [TEST_RECIPIENT]
 
     if dry_run:
-        recipients = ['junyang168@gmail.com']
+        worker_recipient_list = [TEST_RECIPIENT]
+        congregation_recipient_list = [TEST_RECIPIENT]
+
+    if not worker_recipient_list:
+        raise RuntimeError("No worker email recipients resolved for Sunday service email.")
 
     host = os.getenv("SMTP_HOST")
     if not host:
@@ -178,7 +300,7 @@ def send_sunday_service_email(
 
     message = EmailMessage()
     message["From"] = sender
-    message["To"] = ", ".join(recipients)
+    message["To"] = ", ".join(worker_recipient_list)
     message["Subject"] = subject
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
@@ -198,11 +320,19 @@ def send_sunday_service_email(
             smtp.ehlo()
         if username and password:
             smtp.login(username, password)
-        smtp.send_message(message, to_addrs=recipients)
+        smtp.send_message(message, to_addrs=worker_recipient_list)
+        _send_congregation_email(
+            smtp,
+            sender=sender,
+            recipients=congregation_recipient_list,
+            subject=congregation_subject,
+            text_body=congregation_text_body,
+            html_body=congregation_html_body,
+        )
 
     return SundayServiceEmailResult(
         date=formatted_date,
-        recipients=recipients,
+        recipients=worker_recipient_list,
         ppt_filename=ppt_path.name,
         subject=subject,
         dry_run=False,

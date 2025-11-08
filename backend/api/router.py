@@ -24,6 +24,7 @@ from .models import (
     SundayServiceEntry,
     SundayServiceResources,
     SundayServiceEmailResult,
+    SundayServiceEmailBody,
     SundaySong,
     SundaySongCreate,
     SundayWorker,
@@ -54,6 +55,8 @@ from .service import (
     email_sunday_service,
     upload_final_sunday_service_ppt,
     get_final_sunday_service_ppt,
+    get_sunday_service_email_body,
+    update_sunday_service_email_body,
     list_sunday_workers,
     create_sunday_worker,
     update_sunday_worker,
@@ -172,6 +175,18 @@ def get_sunday_services() -> list[SundayServiceEntry]:
 @sunday_service_router.post("", response_model=SundayServiceEntry)
 def create_sunday_service_entry(entry: SundayServiceEntry) -> SundayServiceEntry:
     return create_sunday_service(entry)
+
+
+@sunday_service_router.get("/{date:path}/email-body", response_model=SundayServiceEmailBody)
+def read_sunday_service_email_body(date: str) -> SundayServiceEmailBody:
+    html = get_sunday_service_email_body(date)
+    return SundayServiceEmailBody(html=html)
+
+
+@sunday_service_router.put("/{date:path}/email-body", response_model=SundayServiceEmailBody)
+def write_sunday_service_email_body(date: str, payload: SundayServiceEmailBody) -> SundayServiceEmailBody:
+    updated = update_sunday_service_email_body(date, payload.html)
+    return SundayServiceEmailBody(html=updated.email_body_html or "")
 
 
 @sunday_service_router.put("/{date:path}", response_model=SundayServiceEntry)

@@ -530,6 +530,16 @@ class ArticleRepository:
                 return updated
         raise ValueError(f"Sunday service date {date} not found")
 
+    def set_sunday_service_email_body(self, date: str, html: Optional[str]) -> SundayServiceEntry:
+        entries = self._load_sunday_service_entries()
+        for index, existing in enumerate(entries):
+            if existing.date == date:
+                updated = existing.model_copy(update={"email_body_html": html or ""})
+                entries[index] = updated
+                self._save_sunday_service_entries(entries)
+                return updated
+        raise ValueError(f"Sunday service date {date} not found")
+
     def _apply_hymn_indices(self, entry: SundayServiceEntry) -> SundayServiceEntry:
         songs = {song.title: song for song in self._load_sunday_songs()}
 

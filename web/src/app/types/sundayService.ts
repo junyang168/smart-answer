@@ -48,14 +48,20 @@ export interface SundayServiceEntry {
   sermonTitle?: string | null;
   announcementsMarkdown?: string | null;
   health_prayer_markdown?: string | null;
+  donationAmount?: number | null;
   scriptureReaders?: string[] | null;
   holdHolyCommunion?: boolean | null;
   finalPptFilename?: string | null;
+  emailBodyHtml?: string | null;
 }
 
 export interface SundayServiceResources {
   workers: SundayWorker[];
   songs: SundaySong[];
+}
+
+export interface SundayServiceEmailBody {
+  html: string;
 }
 
 export interface HymnMetadata {

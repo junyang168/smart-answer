@@ -8,6 +8,7 @@ import {
   GenerateHymnLyricsResponse,
   ScriptureBook,
   SundayServiceEmailResult,
+  SundayServiceEmailBody,
 } from "@/app/types/sundayService";
 
 const SERVICES_BASE_PATH = "/api/admin/sunday-services";
@@ -225,6 +226,29 @@ export async function sendSundayServiceEmail(date: string): Promise<SundayServic
     resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/email`),
     {
       method: "POST",
+    },
+  );
+  return parseJson(response);
+}
+
+export async function fetchSundayServiceEmailBody(date: string): Promise<SundayServiceEmailBody> {
+  const response = await fetch(
+    resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    { cache: "no-store" },
+  );
+  return parseJson(response);
+}
+
+export async function updateSundayServiceEmailBody(
+  date: string,
+  html: string,
+): Promise<SundayServiceEmailBody> {
+  const response = await fetch(
+    resolveApiUrl(`${SERVICES_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ html }),
     },
   );
   return parseJson(response);

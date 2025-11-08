@@ -251,9 +251,11 @@ class SundayServiceEntry(BaseModel):
     response_hymn_index: Optional[int] = Field(None, alias="responseHymnIndex")
     announcements_markdown: Optional[str] = Field("", alias="announcementsMarkdown")
     health_prayer_markdown: Optional[str] = Field("", alias="health_prayer_markdown")
+    donation_amount: Optional[float] = Field(None, alias="donationAmount")
     scripture_readers: List[str] = Field(default_factory=list, alias="scriptureReaders")
     hold_holy_communion: bool = Field(False, alias="holdHolyCommunion")
     final_ppt_filename: Optional[str] = Field(None, alias="finalPptFilename")
+    email_body_html: Optional[str] = Field(None, alias="emailBodyHtml")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -288,6 +290,10 @@ class SundayServiceEntry(BaseModel):
 class SundayServiceResources(BaseModel):
     workers: List[SundayWorker] = Field(default_factory=list)
     songs: List[SundaySong] = Field(default_factory=list)
+
+
+class SundayServiceEmailBody(BaseModel):
+    html: str = ""
 
 
 class HymnMetadata(BaseModel):

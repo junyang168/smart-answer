@@ -7,6 +7,7 @@ import shutil
 import os
 import os
 import re
+from decimal import Decimal
 from urllib.parse import quote_plus
 from collections.abc import Sequence
 
@@ -38,7 +39,10 @@ from .models import (
     SundaySongCreate,
 )
 from .storage import repository
-from .sunday_service_email import send_sunday_service_email as _send_sunday_service_email
+from .sunday_service_email import (
+    send_sunday_service_email as _send_sunday_service_email,
+    build_sunday_service_email_bodies,
+)
 from .config import SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
 from .ppt_generator import generate_presentation_from_template
 from .scripture import parse_reference, BIBLE_API_TRANSLATION_ZH, ALIAS_TO_API_BOOK, BOOK_SLUG_TO_NAME
@@ -475,7 +479,12 @@ def upload_final_sunday_service_ppt(date: str, file: UploadFile) -> SundayServic
     except OSError as exc:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
-    return repository.set_sunday_service_final_ppt(service.date, output_filename)
+    updated = repository.set_sunday_service_final_ppt(service.date, output_filename)
+    _, default_html = build_sunday_service_email_bodies(updated)
+    try:
+        return repository.set_sunday_service_email_body(updated.date, default_html)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def get_final_sunday_service_ppt(date: str) -> Path:
@@ -487,6 +496,21 @@ def get_final_sunday_service_ppt(date: str) -> Path:
     if not ppt_path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="找不到已上傳的 PPT 檔案")
     return ppt_path
+
+
+def get_sunday_service_email_body(date: str) -> str:
+    service = get_sunday_service(date)
+    if service.email_body_html:
+        return service.email_body_html
+    _, html_body = build_sunday_service_email_bodies(service)
+    return html_body
+
+
+def update_sunday_service_email_body(date: str, html: str) -> SundayServiceEntry:
+    try:
+        return repository.set_sunday_service_email_body(date, html)
+    except ValueError as exc:
+        _raise_value_error(exc)
 
 
 def _sanitize_zip_file(path: Path) -> None:
@@ -566,6 +590,7 @@ def _build_ppt_replacements(
         ("healthPrayer", service.health_prayer_markdown),
     ):
         replacements[key] = _normalize_text(value)
+    replacements["donation"] = _format_currency(service.donation_amount)
 
     replacements["scriptureReaders"] = "、".join(readers)
     replacements["scriptureReader"] = readers[0] if readers else ""
@@ -696,6 +721,27 @@ def _markdown_to_plain_text(markdown: str | None) -> str:
 
 def _normalize_text(value: str | None) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _format_currency(value: float | Decimal | str | None) -> str:
+    if value is None:
+        return ""
+    amount: float
+    if isinstance(value, str):
+        cleaned = value.strip().replace("$", "").replace(",", "")
+        if not cleaned:
+            return ""
+        try:
+            amount = float(cleaned)
+        except ValueError:
+            return value.strip()
+    else:
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            return ""
+    rounded = round(amount)
+    return f"${rounded:,.0f}"
 
 
 def _parse_service_date(value: str | None) -> datetime | None:

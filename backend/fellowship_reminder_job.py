@@ -3,58 +3,43 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import smtplib
 import time as time_module
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, time
 from email.message import EmailMessage
-from email.utils import formataddr, parseaddr
 from pathlib import Path
 from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
+from backend.emailing import (
+    chunked,
+    determine_notification_recipients_file,
+    determine_recipient_batch_size,
+    is_truthy,
+    load_notification_recipients,
+    resolve_data_base_dir,
+)
 
 TIMEZONE = ZoneInfo("America/Chicago")
 SEND_TIME = time(8, 0)
 
 
-def _determine_batch_size() -> int:
-    raw = os.getenv("REMINDER_RECIPIENT_BATCH_SIZE", "10")
-    try:
-        size = int(raw)
-    except ValueError:
-        raise ValueError("REMINDER_RECIPIENT_BATCH_SIZE must be an integer") from None
-    if size <= 0:
-        raise ValueError("REMINDER_RECIPIENT_BATCH_SIZE must be a positive integer")
-    return size
-
-
-RECIPIENT_BATCH_SIZE = _determine_batch_size()
+RECIPIENT_BATCH_SIZE = determine_recipient_batch_size()
 
 load_dotenv()
 
-BASE_DIR = os.getenv("DATA_BASE_DIR")
-if not BASE_DIR:
-    raise RuntimeError("DATA_BASE_DIR environment variable is required")
+BASE_DIR = str(resolve_data_base_dir())
 
 
-def _is_truthy(value: Optional[str]) -> bool:
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+IS_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
+IS_EMAIL_PRODUCTION = is_truthy(os.getenv("RODUCTION"))
+FALLBACK_TEST_RECIPIENT = "junyang168@gmail.com"
 
-
-IS_PRODUCTION = _is_truthy(os.getenv("PRODUCTION"))
-
-FELLOWSHIP_FILE = os.path.join(BASE_DIR , "config", "fellowship.json")
-RECIPIENTS_FILE = os.path.join(
-    BASE_DIR,
-    "notification",
-    "email_recipients.txt" if IS_PRODUCTION else "email_recipients_test.txt",
-)
+FELLOWSHIP_FILE = os.path.join(BASE_DIR, "config", "fellowship.json")
+RECIPIENTS_FILE = determine_notification_recipients_file(IS_PRODUCTION, base_dir=Path(BASE_DIR))
 print('production environment:', IS_PRODUCTION)
 LOG_FILE = os.path.join(BASE_DIR , "notification", "notification.log")
 STATUS_FILE = os.path.join(BASE_DIR , "notification", "last_sent.json")
@@ -111,33 +96,6 @@ def load_fellowship_events(path: str) -> list[FellowshipEvent]:
             )
         )
     return parsed
-
-
-def load_recipients(path: str) -> list[str]:
-    path = Path(path)
-    recipients: list[str] = []
-    for line in path.read_text().splitlines():
-        trimmed = line.strip()
-        if not trimmed or trimmed.startswith("#"):
-            continue
-        recipients.append(_validate_recipient(trimmed, path))
-    if not recipients:
-        raise ValueError("No recipients found in email_recipients.txt")
-    return recipients
-
-
-_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def _validate_recipient(raw_value: str, source_path: Path) -> str:
-    """Extract and validate an email address from the recipients list."""
-    _, parsed_email = parseaddr(raw_value)
-    candidate = (parsed_email or raw_value).strip()
-    if not candidate:
-        raise ValueError(f"Empty email entry in {source_path}")
-    if not _EMAIL_PATTERN.fullmatch(candidate):
-        raise ValueError(f"Invalid email address '{raw_value}' in {source_path}")
-    return candidate
 
 
 def _log_notification(message: str) -> None:
@@ -286,14 +244,12 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     return sender, subject, text_body, html_body
 
 
-def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
-    for index in range(0, len(items), size):
-        yield items[index : index + size]
-
-
 def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
     sender, subject, text_body, html_body = build_email_content(event)
     recipient_list = list(recipients)
+    if not IS_EMAIL_PRODUCTION:
+        recipient_list = [FALLBACK_TEST_RECIPIENT]
+        print("IPRODUCTION is false; overriding recipients to test address.")
     if not recipient_list:
         return
 
@@ -320,7 +276,7 @@ def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
                 smtp.ehlo()
             if username and password:
                 smtp.login(username, password)
-            for index, batch in enumerate(_chunked(recipient_list, RECIPIENT_BATCH_SIZE), start=1):
+            for index, batch in enumerate(chunked(recipient_list, RECIPIENT_BATCH_SIZE), start=1):
                 message = EmailMessage()
                 message["From"] = sender
                 message["To"] = to_header
@@ -370,7 +326,7 @@ def main() -> None:
     args = parser.parse_args()
 
     events = load_fellowship_events(FELLOWSHIP_FILE)
-    recipients = load_recipients(RECIPIENTS_FILE)
+    recipients = load_notification_recipients(RECIPIENTS_FILE)
     event, send_at = compute_send_timestamp(events)
 
     last_sent_event = _load_last_sent_event_date()
