@@ -38,6 +38,16 @@ const createEmptyScriptureSelection = (): ScriptureSelection => ({
   end: "",
 });
 
+const MIN_SCRIPTURE_READERS = 3;
+
+const ensureReaderSlots = (values?: string[] | null): string[] => {
+  const slots = Array.isArray(values) ? [...values] : [];
+  while (slots.length < MIN_SCRIPTURE_READERS) {
+    slots.push("");
+  }
+  return slots;
+};
+
 interface FormState {
   date: string;
   presider: string;
@@ -46,9 +56,7 @@ interface FormState {
   hymn: string;
   responseHymn: string;
   scriptures: ScriptureSelection[];
-  scriptureReader1: string;
-  scriptureReader2: string;
-  scriptureReader3: string;
+  scriptureReaders: string[];
   sermonSpeaker: string;
   sermonTitle: string;
   announcementsMarkdown: string;
@@ -65,9 +73,7 @@ function createEmptyForm(): FormState {
     hymn: "",
     responseHymn: "",
     scriptures: [createEmptyScriptureSelection()],
-    scriptureReader1: "",
-    scriptureReader2: "",
-    scriptureReader3: "",
+    scriptureReaders: ensureReaderSlots(),
     sermonSpeaker: "",
     sermonTitle: "",
     announcementsMarkdown: "",
@@ -248,9 +254,7 @@ function toForm(entry: SundayServiceEntry | null): FormState {
     hymn: entry.hymn ?? "",
     responseHymn: entry.responseHymn ?? "",
     scriptures: parseScriptureValues(entry.scripture ?? null),
-    scriptureReader1: entry.scriptureReaders?.[0] ?? "",
-    scriptureReader2: entry.scriptureReaders?.[1] ?? "",
-    scriptureReader3: entry.scriptureReaders?.[2] ?? "",
+    scriptureReaders: ensureReaderSlots(entry.scriptureReaders ?? []),
     sermonSpeaker: entry.sermonSpeaker ?? "",
     sermonTitle: entry.sermonTitle ?? "",
     announcementsMarkdown: entry.announcementsMarkdown ?? "",
@@ -274,7 +278,7 @@ function fromForm(form: FormState): SundayServiceEntry {
     hymn: optional(form.hymn),
     responseHymn: optional(form.responseHymn),
     scripture: scriptureSelections,
-    scriptureReaders: [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3]
+    scriptureReaders: form.scriptureReaders
       .map((value) => value.trim())
       .filter((value) => value.length > 0),
     sermonSpeaker: optional(form.sermonSpeaker),
@@ -333,11 +337,9 @@ function validateScripture(form: FormState): string | null {
       return `${prefix}：結束經文須大於或等於起始經文`;
     }
   }
-  const readers = [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3].map((value) =>
-    value.trim(),
-  );
-  if (readers.some((value) => value.length === 0)) {
-    return "請輸入三位讀經人員姓名";
+  const readers = form.scriptureReaders.map((value) => value.trim()).filter((value) => value.length > 0);
+  if (readers.length < MIN_SCRIPTURE_READERS) {
+    return `請至少輸入 ${MIN_SCRIPTURE_READERS} 位讀經同工`;
   }
   return null;
 }
@@ -577,15 +579,12 @@ export function SundayServiceManager() {
     [availableWorkers],
   );
 
-  const workerAssignmentFields = [
+  const workerAssignmentFields: Array<"presider" | "worshipLeader" | "pianist" | "sermonSpeaker"> = [
     "presider",
     "worshipLeader",
     "pianist",
     "sermonSpeaker",
-    "scriptureReader1",
-    "scriptureReader2",
-    "scriptureReader3",
-  ] as const;
+  ];
 
   useEffect(() => {
     if (unavailableWorkerNames.size === 0) {
@@ -601,33 +600,26 @@ export function SundayServiceManager() {
           changed = true;
         }
       });
+      const updatedReaders = prev.scriptureReaders.map((reader) =>
+        reader && unavailableWorkerNames.has(reader) ? "" : reader,
+      );
+      const readersChanged = updatedReaders.some((value, index) => value !== prev.scriptureReaders[index]);
+      if (readersChanged) {
+        next.scriptureReaders = updatedReaders;
+        changed = true;
+      }
       return changed ? next : prev;
     });
   }, [unavailableWorkerNames]);
-
-  const readerOptions1 = useMemo(() => {
+  const readerOptions = useMemo(() => {
     const set = new Set(workerNames);
-    if (form.scriptureReader1.trim() && !set.has(form.scriptureReader1)) {
-      set.add(form.scriptureReader1);
-    }
+    form.scriptureReaders.forEach((reader) => {
+      if (reader.trim() && !set.has(reader)) {
+        set.add(reader);
+      }
+    });
     return Array.from(set);
-  }, [workerNames, form.scriptureReader1]);
-
-  const readerOptions2 = useMemo(() => {
-    const set = new Set(workerNames);
-    if (form.scriptureReader2.trim() && !set.has(form.scriptureReader2)) {
-      set.add(form.scriptureReader2);
-    }
-    return Array.from(set);
-  }, [workerNames, form.scriptureReader2]);
-
-  const readerOptions3 = useMemo(() => {
-    const set = new Set(workerNames);
-    if (form.scriptureReader3.trim() && !set.has(form.scriptureReader3)) {
-      set.add(form.scriptureReader3);
-    }
-    return Array.from(set);
-  }, [workerNames, form.scriptureReader3]);
+  }, [workerNames, form.scriptureReaders]);
 
   const handleInputChange = (field: keyof FormState) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -658,6 +650,31 @@ export function SundayServiceManager() {
         return { ...prev, scriptures: updated };
       });
     };
+
+  const handleScriptureReaderChange = (index: number) =>
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      setForm((prev) => {
+        const updated = prev.scriptureReaders.map((reader, idx) =>
+          idx === index ? value : reader,
+        );
+        return { ...prev, scriptureReaders: updated };
+      });
+    };
+
+  const addScriptureReader = () => {
+    setForm((prev) => ({ ...prev, scriptureReaders: [...prev.scriptureReaders, ""] }));
+  };
+
+  const removeScriptureReader = (index: number) => {
+    setForm((prev) => {
+      if (prev.scriptureReaders.length <= MIN_SCRIPTURE_READERS) {
+        return prev;
+      }
+      const nextReaders = prev.scriptureReaders.filter((_, idx) => idx !== index);
+      return { ...prev, scriptureReaders: nextReaders };
+    });
+  };
 
   const addScriptureSelection = () => {
     setForm((prev) => {
@@ -741,11 +758,9 @@ export function SundayServiceManager() {
     checkAvailability(form.worshipLeader, "領詩");
     checkAvailability(form.pianist, "司琴");
     checkAvailability(form.sermonSpeaker, "證道");
-    [form.scriptureReader1, form.scriptureReader2, form.scriptureReader3].forEach(
-      (reader, index) => {
-        checkAvailability(reader, `讀經同工${index + 1}`);
-      },
-    );
+    form.scriptureReaders.forEach((reader, index) => {
+      checkAvailability(reader, `讀經同工${index + 1}`);
+    });
     if (conflicts.length > 0) {
       setError(`以下同工於 ${serviceDate} 無法服事：${conflicts.join("、")}`);
       return;
@@ -1296,46 +1311,42 @@ export function SundayServiceManager() {
             </div>
             <div>
               <label className="mb-1 block text-sm font-semibold text-gray-700">讀經同工</label>
-              <div className="grid gap-3 md:grid-cols-3">
-                <select
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  value={form.scriptureReader1}
-                  onChange={handleInputChange("scriptureReader1")}
-                  disabled={saving || readerOptions1.length === 0}
+              <div className="space-y-3">
+                {form.scriptureReaders.map((reader, index) => (
+                  <div key={`reader-${index}`} className="flex flex-col gap-2 md:flex-row md:items-center">
+                    <select
+                      className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                      value={reader}
+                      onChange={handleScriptureReaderChange(index)}
+                      disabled={saving || readerOptions.length === 0}
+                    >
+                      <option value="">{`選擇同工 ${index + 1}`}</option>
+                      {readerOptions.map((name) => (
+                        <option key={`reader-${index}-${name}`} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    {form.scriptureReaders.length > MIN_SCRIPTURE_READERS && (
+                      <button
+                        type="button"
+                        className="whitespace-nowrap rounded border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                        onClick={() => removeScriptureReader(index)}
+                        disabled={saving}
+                      >
+                        移除
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="rounded border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-200 disabled:text-blue-300"
+                  onClick={addScriptureReader}
+                  disabled={saving}
                 >
-                  <option value="">選擇同工 1</option>
-                  {readerOptions1.map((name) => (
-                    <option key={`reader1-${name}`} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  value={form.scriptureReader2}
-                  onChange={handleInputChange("scriptureReader2")}
-                  disabled={saving || readerOptions2.length === 0}
-                >
-                  <option value="">選擇同工 2</option>
-                  {readerOptions2.map((name) => (
-                    <option key={`reader2-${name}`} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  value={form.scriptureReader3}
-                  onChange={handleInputChange("scriptureReader3")}
-                  disabled={saving || readerOptions3.length === 0}
-                >
-                  <option value="">選擇同工 3</option>
-                  {readerOptions3.map((name) => (
-                    <option key={`reader3-${name}`} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                  新增讀經同工
+                </button>
               </div>
             </div>
             <div>

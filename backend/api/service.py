@@ -398,7 +398,8 @@ def generate_sunday_service_ppt(date: str) -> Path:
         replacements["scriptureReaders"] = "、".join(assigned_readers)
         replacements["scriptureReader"] = assigned_readers[0]
         replacements["reader"] = f"⇉讀經 by {assigned_readers[0]}"
-        for idx in range(3):
+        slot_count = max(3, len(assigned_readers))
+        for idx in range(slot_count):
             replacements[f"scriptureReader{idx + 1}"] = assigned_readers[idx] if idx < len(assigned_readers) else ""
 
     _populate_future_service_tokens(replacements, service)
@@ -568,7 +569,8 @@ def _build_ppt_replacements(
 
     replacements["scriptureReaders"] = "、".join(readers)
     replacements["scriptureReader"] = readers[0] if readers else ""
-    for idx in range(3):
+    slot_count = max(3, len(readers))
+    for idx in range(slot_count):
         replacements[f"scriptureReader{idx + 1}"] = readers[idx] if idx < len(readers) else ""
 
     replacements["scripture"] = _format_scripture_references(service.scripture)
@@ -877,10 +879,15 @@ def _fetch_single_scripture(reference: str) -> tuple[str | None, list[dict[str, 
     return display, verse_entries, book_name
 
 
-def _split_scripture_section(verses: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+def _split_scripture_section(
+    verses: list[dict[str, object]],
+    max_segments: int | None = None,
+) -> list[list[dict[str, object]]]:
     total = len(verses)
     if total == 0:
         return []
+
+    max_slots = max_segments if isinstance(max_segments, int) and max_segments > 0 else 3
 
     def balanced(slides: int) -> list[int]:
         base = total // slides
@@ -888,14 +895,14 @@ def _split_scripture_section(verses: list[dict[str, object]]) -> list[list[dict[
         return [base + (1 if idx < remainder else 0) for idx in range(slides)]
 
     chosen_sizes: list[int] | None = None
-    for slides in range(1, min(3, total) + 1):
+    for slides in range(1, min(max_slots, total) + 1):
         sizes = balanced(slides)
         if all(5 <= size <= 7 for size in sizes):
             chosen_sizes = sizes
             break
 
     if chosen_sizes is None:
-        slides = min(3, max(1, math.ceil(total / 7)))
+        slides = min(max_slots, max(1, math.ceil(total / 7)))
         sizes = balanced(slides)
         while slides > 1 and sizes[-1] < 5:
             sizes[-2] += sizes[-1]
@@ -922,7 +929,7 @@ def _prepare_scripture_sections(
         verses = section.get("verses") or []
         if not verses:
             continue
-        section_slides = _split_scripture_section(verses)
+        section_slides = _split_scripture_section(verses, max_segments=len(readers) if readers else None)
         book_name = section.get("book") or ""
         for slide in section_slides:
             if not slide:
