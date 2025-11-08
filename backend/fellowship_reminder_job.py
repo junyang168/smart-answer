@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from email.utils import formataddr, parseaddr
 import json
 import os
 import smtplib

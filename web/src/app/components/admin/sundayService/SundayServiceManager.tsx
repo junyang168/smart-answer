@@ -560,7 +560,8 @@ export function SundayServiceManager() {
     setEmailBodyError(null);
     const initialHtml = currentService.emailBodyHtml ?? "";
     setEmailBodyHtml(initialHtml);
-    fetchSundayServiceEmailBody(editingDate)
+    const targetDate = editingDate;
+    fetchSundayServiceEmailBody(targetDate)
       .then((result) => {
         if (cancelled) {
           return;
@@ -935,6 +936,7 @@ export function SundayServiceManager() {
       setError("請先選擇主日日期並儲存資料");
       return;
     }
+    const targetDate = editingDate;
     if (!currentService) {
       setError("請先儲存主日服事資料後再上傳 PPT");
       return;
@@ -943,7 +945,7 @@ export function SundayServiceManager() {
     setFeedback(null);
     setError(null);
     try {
-      await uploadFinalSundayServicePpt(editingDate, file);
+      await uploadFinalSundayServicePpt(targetDate, file);
       setFeedback("已上傳最終 PPT");
       await loadServices({ preserveForm: true });
     } catch (err) {
@@ -980,7 +982,7 @@ export function SundayServiceManager() {
       }
       editor.focus();
       try {
-        document.execCommand(command, false, value ?? null);
+        document.execCommand(command, false, value);
         setEmailBodyHtml(editor.innerHTML);
       } catch {
         // ignore command errors
@@ -1013,11 +1015,12 @@ export function SundayServiceManager() {
       setError("請先選擇主日日期");
       return;
     }
+    const targetDate = editingDate;
     setEmailBodySaving(true);
     setFeedback(null);
     setEmailBodyError(null);
     try {
-      const result = await updateSundayServiceEmailBody(editingDate, emailBodyHtml);
+      const result = await updateSundayServiceEmailBody(targetDate, emailBodyHtml);
       setEmailBodyHtml(result.html ?? "");
       setFeedback("已更新 email 內容");
       await loadServices({ preserveForm: true });
