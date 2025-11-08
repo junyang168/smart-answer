@@ -6,6 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Search, Menu, X, ChevronDown } from 'lucide-react';
 import { AuthButton } from '@/app/components/common/AuthButton';
+import { useSession } from "next-auth/react";
 
 const NavLink = ({ href, children }: { href: string; children: React.ReactNode }) => (
   <Link href={href} className="text-gray-700 hover:text-[#D4AF37] transition-colors duration-300">
@@ -17,6 +18,9 @@ const NavLink = ({ href, children }: { href: string; children: React.ReactNode }
 
 export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { data: session } = useSession();
+  const userRole = session?.user?.role;
+  const canAccessAdmin = userRole === "editor" || userRole === "admin";
 
   return (
     <header id="global-site-header" className="bg-white/95 backdrop-blur-sm sticky top-0 z-50 shadow-md">
@@ -35,6 +39,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
           <NavLink href="/resources">AI 輔助查經</NavLink>
           <NavLink href="/ministries">事工介紹</NavLink>
           <NavLink href="/contact">聯絡我們</NavLink>
+          {canAccessAdmin && <NavLink href="/admin">後臺管理</NavLink>}
         </nav>
 
         {/* Desktop Action Buttons */}
@@ -60,6 +65,7 @@ export const Header: FC<{ show_signin: string }> = ({ show_signin }) => {
             <NavLink href="/about">關於我們</NavLink>
             <NavLink href="/ministries">事工介紹</NavLink>
             <NavLink href="/contact">聯絡我們</NavLink>
+            {canAccessAdmin && <NavLink href="/admin">後臺管理</NavLink>}
             <div className="mt-4 border-t w-full flex justify-center pt-6 gap-6">
               <AuthButton />
             </div>
