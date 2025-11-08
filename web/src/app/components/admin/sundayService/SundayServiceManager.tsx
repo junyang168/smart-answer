@@ -1042,6 +1042,120 @@ export function SundayServiceManager() {
         </div>
       )}
 
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <header className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-800">主日服事清單</h3>
+          <span className="text-sm text-gray-500">共 {services.length} 筆</span>
+        </header>
+        <div className="overflow-auto">
+          <table className="min-w-full table-fixed text-left text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-xs uppercase text-gray-500">
+                <th className="w-32 px-3 py-2">日期</th>
+                <th className="w-24 px-3 py-2">司會</th>
+                <th className="w-24 px-3 py-2">領詩</th>
+                <th className="w-24 px-3 py-2">司琴</th>
+                <th className="w-40 px-3 py-2">詩歌 / 回應</th>
+                <th className="w-40 px-3 py-2">講員 / 題目</th>
+                <th className="w-56 px-3 py-2">讀經</th>
+                <th className="w-40 px-3 py-2">讀經同工</th>
+                <th className="w-20 px-3 py-2 text-center">聖餐</th>
+                <th className="w-44 px-3 py-2">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((entry: SundayServiceEntry) => {
+                const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
+                const holdsCommunion =
+                  entry.holdHolyCommunion ??
+                  (entry.date ? isFirstSundayOfMonth(entry.date) : false);
+                const entryDateValue = entry.date?.trim() ?? "";
+                const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
+                const rowClasses = `border-t border-gray-100 ${isUpcoming ? "bg-amber-50" : "bg-white"}`;
+                return (
+                  <tr key={entry.date} className={rowClasses}>
+                    <td className="px-3 py-2 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        {!isUpcoming && (
+                        <span>{formatDisplayDate(entry.date)}</span>
+                        )}                        
+                        {isUpcoming && (
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                            {formatDisplayDate(entry.date)}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
+                    <td className="px-3 py-2 text-gray-700">
+                      <div className="flex flex-col">
+                        <span>{entry.hymn ?? "-"}</span>
+                        <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      <div className="flex flex-col">
+                        <span>{entry.sermonSpeaker ?? "-"}</span>
+                        <span className="text-xs text-gray-500">{entry.sermonTitle ?? ""}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {scriptureLines.length > 0 ? (
+                        <div className="flex flex-col">
+                          {scriptureLines.map((label, idx) => (
+                            <span key={`${entry.date}-scripture-${idx}`}>{label}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-gray-700">
+                      {(entry.scriptureReaders && entry.scriptureReaders.length > 0
+                        ? entry.scriptureReaders.join("、")
+                        : "-")}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {holdsCommunion ? "是" : "否"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                          onClick={() => handleEdit(entry)}
+                          disabled={saving}
+                        >
+                          編輯
+                        </button>
+
+                        <button
+                          type="button"
+                          className="rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                          onClick={() => handleDelete(entry.date)}
+                          disabled={saving}
+                        >
+                          刪除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {services.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">
+                    尚未建立主日服事資訊。
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 text-lg font-semibold text-gray-800">
@@ -1403,119 +1517,7 @@ export function SundayServiceManager() {
         <SundayWorkerManager workers={resources.workers} onWorkersChanged={loadResources} />
       </section>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <header className="mb-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-800">主日服事清單</h3>
-          <span className="text-sm text-gray-500">共 {services.length} 筆</span>
-        </header>
-        <div className="overflow-auto">
-          <table className="min-w-full table-fixed text-left text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-xs uppercase text-gray-500">
-                <th className="w-32 px-3 py-2">日期</th>
-                <th className="w-24 px-3 py-2">司會</th>
-                <th className="w-24 px-3 py-2">領詩</th>
-                <th className="w-24 px-3 py-2">司琴</th>
-                <th className="w-40 px-3 py-2">詩歌 / 回應</th>
-                <th className="w-40 px-3 py-2">講員 / 題目</th>
-                <th className="w-56 px-3 py-2">讀經</th>
-                <th className="w-40 px-3 py-2">讀經同工</th>
-                <th className="w-20 px-3 py-2 text-center">聖餐</th>
-                <th className="w-44 px-3 py-2">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {services.map((entry: SundayServiceEntry) => {
-                const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
-                const holdsCommunion =
-                  entry.holdHolyCommunion ??
-                  (entry.date ? isFirstSundayOfMonth(entry.date) : false);
-                const entryDateValue = entry.date?.trim() ?? "";
-                const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
-                const rowClasses = `border-t border-gray-100 ${isUpcoming ? "bg-amber-50" : "bg-white"}`;
-                return (
-                  <tr key={entry.date} className={rowClasses}>
-                    <td className="px-3 py-2 font-medium text-gray-900">
-                      <div className="flex items-center gap-2">
-                        {!isUpcoming && (
-                        <span>{formatDisplayDate(entry.date)}</span>
-                        )}                        
-                        {isUpcoming && (
-                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
-                            {formatDisplayDate(entry.date)}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">{entry.presider ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-700">{entry.worshipLeader ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-700">{entry.pianist ?? "-"}</td>
-                    <td className="px-3 py-2 text-gray-700">
-                      <div className="flex flex-col">
-                        <span>{entry.hymn ?? "-"}</span>
-                        <span className="text-xs text-gray-500">回應：{entry.responseHymn ?? "-"}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">
-                      <div className="flex flex-col">
-                        <span>{entry.sermonSpeaker ?? "-"}</span>
-                        <span className="text-xs text-gray-500">{entry.sermonTitle ?? ""}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">
-                      {scriptureLines.length > 0 ? (
-                        <div className="flex flex-col">
-                          {scriptureLines.map((label, idx) => (
-                            <span key={`${entry.date}-scripture-${idx}`}>{label}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span>-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-gray-700">
-                      {(entry.scriptureReaders && entry.scriptureReaders.length > 0
-                        ? entry.scriptureReaders.join("、")
-                        : "-")}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {holdsCommunion ? "是" : "否"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                          onClick={() => handleEdit(entry)}
-                          disabled={saving}
-                        >
-                          編輯
-                        </button>
 
-                        <button
-                          type="button"
-                          className="rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
-                          onClick={() => handleDelete(entry.date)}
-                          disabled={saving}
-                        >
-                          刪除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {services.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-sm text-gray-500">
-                    尚未建立主日服事資訊。
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
   );
 }
