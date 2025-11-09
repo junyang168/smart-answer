@@ -30,7 +30,7 @@ from .scripture import format_chinese_reference
 from .storage import repository
 
 
-EMAIL_PRODUCTION = is_truthy(os.getenv("RODUCTION"))
+EMAIL_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
 NOTIFICATION_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
 TEST_RECIPIENT = os.getenv("SUNDAY_SERVICE_TEST_RECIPIENT", "junyang168@gmail.com")
 
