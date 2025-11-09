@@ -36,7 +36,7 @@ BASE_DIR = str(resolve_data_base_dir())
 
 
 IS_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
-IS_EMAIL_PRODUCTION = is_truthy(os.getenv("RODUCTION"))
+IS_EMAIL_PRODUCTION = is_truthy(os.getenv("PRODUCTION"))
 FALLBACK_TEST_RECIPIENT = "junyang168@gmail.com"
 
 FELLOWSHIP_FILE = os.path.join(BASE_DIR, "config", "fellowship.json")
