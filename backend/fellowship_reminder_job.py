@@ -15,14 +15,33 @@ from typing import Iterable, Optional
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
-from .emailing import (
-    chunked,
-    determine_notification_recipients_file,
-    determine_recipient_batch_size,
-    is_truthy,
-    load_notification_recipients,
-    resolve_data_base_dir,
-)
+try:
+    from .emailing import (
+        chunked,
+        determine_notification_recipients_file,
+        determine_recipient_batch_size,
+        is_truthy,
+        load_notification_recipients,
+        resolve_data_base_dir,
+    )
+except ImportError as exc:  # Allows running as a script (python fellowship_reminder_job.py)
+    if __package__:
+        raise
+
+    import sys
+
+    script_dir = Path(__file__).resolve().parent
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+
+    from emailing import (  # type: ignore[no-redef]
+        chunked,
+        determine_notification_recipients_file,
+        determine_recipient_batch_size,
+        is_truthy,
+        load_notification_recipients,
+        resolve_data_base_dir,
+    )
 
 TIMEZONE = ZoneInfo("America/Chicago")
 SEND_TIME = time(8, 0)
