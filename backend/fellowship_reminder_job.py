@@ -15,7 +15,7 @@ from typing import Iterable, Optional
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
-from backend.emailing import (
+from .emailing import (
     chunked,
     determine_notification_recipients_file,
     determine_recipient_batch_size,
