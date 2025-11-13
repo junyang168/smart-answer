@@ -177,7 +177,7 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     display_name = name_override or parsed_name
     sender = formataddr((display_name, parsed_email)) if display_name else parsed_email
 
-    subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 8:00 - 9:30 CST ")
+    subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ")
     details_lines: list[str] = []
     if event.host:
         details_lines.append(f"主持人: {event.host} ")
