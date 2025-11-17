@@ -194,7 +194,7 @@ export function FullArticleList({ initialArticles }: FullArticleListProps) {
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <Link
-                        href={`/resources/full_article/${article.id}`}
+                        href={`/resources/full_article/${article.id}?nocache=1`}
                         className="inline-flex items-center rounded-md border border-blue-200 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50"
                       >
                         觀看
