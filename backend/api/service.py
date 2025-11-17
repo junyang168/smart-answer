@@ -8,6 +8,7 @@ import os
 import os
 import re
 from decimal import Decimal
+from typing import Optional
 from urllib.parse import quote_plus
 from collections.abc import Sequence
 

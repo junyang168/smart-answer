@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, Optional
 from urllib.parse import quote_plus
 
@@ -349,6 +350,108 @@ CHINESE_BOOKS: tuple[tuple[str, str], ...] = (
     ("rev", "啟示錄"),
 )
 
+CHINESE_BOOK_ABBREVIATIONS: Dict[str, str] = {
+    # Old Testament
+    "創": "gen",
+    "创": "gen",
+    "出": "exo",
+    "利": "lev",
+    "民": "num",
+    "申": "deu",
+    "書": "jos",
+    "书": "jos",
+    "約書": "jos",
+    "约书": "jos",
+    "約書亞": "jos",
+    "约书亚": "jos",
+    "士": "jdg",
+    "得": "rut",
+    "撒上": "1sa",
+    "撒下": "2sa",
+    "王上": "1ki",
+    "王下": "2ki",
+    "代上": "1ch",
+    "代下": "2ch",
+    "拉": "ezr",
+    "尼": "neh",
+    "斯": "est",
+    "伯": "job",
+    "詩": "psa",
+    "诗": "psa",
+    "箴": "pro",
+    "傳": "ecc",
+    "传": "ecc",
+    "歌": "sng",
+    "賽": "isa",
+    "赛": "isa",
+    "耶": "jer",
+    "哀": "lam",
+    "結": "ezk",
+    "结": "ezk",
+    "但": "dan",
+    "何": "hos",
+    "珥": "jol",
+    "摩": "amo",
+    "俄": "oba",
+    "拿": "jon",
+    "彌": "mic",
+    "弥": "mic",
+    "鴻": "nam",
+    "鸿": "nam",
+    "哈": "hab",
+    "番": "zep",
+    "該": "hag",
+    "该": "hag",
+    "亞": "zec",
+    "亚": "zec",
+    "瑪": "mal",
+    "玛": "mal",
+    # New Testament
+    "太": "mat",
+    "可": "mrk",
+    "路": "luk",
+    "約": "jhn",
+    "约": "jhn",
+    "徒": "act",
+    "羅": "rom",
+    "罗": "rom",
+    "林前": "1co",
+    "哥前": "1co",
+    "林後": "2co",
+    "林后": "2co",
+    "哥後": "2co",
+    "哥后": "2co",
+    "加": "gal",
+    "弗": "eph",
+    "腓": "php",
+    "西": "col",
+    "帖前": "1th",
+    "帖後": "2th",
+    "帖后": "2th",
+    "提前": "1ti",
+    "提後": "2ti",
+    "提后": "2ti",
+    "多": "tit",
+    "門": "phm",
+    "门": "phm",
+    "來": "heb",
+    "来": "heb",
+    "雅": "jas",
+    "彼前": "1pe",
+    "彼後": "2pe",
+    "彼后": "2pe",
+    "約一": "1jn",
+    "约一": "1jn",
+    "約二": "2jn",
+    "约二": "2jn",
+    "約三": "3jn",
+    "约三": "3jn",
+    "猶": "jud",
+    "犹": "jud",
+    "啟": "rev",
+    "启": "rev",
+}
+
 BOOK_NAME_TO_SLUG: Dict[str, str] = {}
 BOOK_SLUG_TO_NAME: Dict[str, str] = {}
 
@@ -364,6 +467,10 @@ for slug, name in CHINESE_BOOKS:
         if english:
             BOOK_NAME_TO_SLUG[english] = slug
             BOOK_NAME_TO_SLUG[english.lower()] = slug
+
+for alias, slug in CHINESE_BOOK_ABBREVIATIONS.items():
+    BOOK_NAME_TO_SLUG[alias] = slug
+    BOOK_NAME_TO_SLUG[alias.lower()] = slug
 
 API_ENDPOINT = os.getenv("SCRIPTURE_API_ENDPOINT", "https://api.scripture.api.bible/v1/bibles")
 SCRIPTURE_API_KEY = os.getenv("SCRIPTURE_API_KEY")
@@ -435,6 +542,100 @@ def format_chinese_reference(slug: str) -> str:
 
     verse_part = f"{start}-{end}" if end != start else f"{start}"
     return f"{book_name} {chapter}:{verse_part}"
+
+
+_PAREN_REFERENCE_PATTERN = re.compile(r"（(?P<content>[^（）]+)）")
+_SINGLE_REFERENCE_PATTERN = re.compile(
+    r"(?P<prefix>\s*)(?<!\[)(?P<book>[A-Za-z0-9\u4e00-\u9fff一二三上下前後后]+)"
+    r"\s*(?P<chapter>\d+)\s*(?:[:：])\s*(?P<start>\d+)"
+    r"(?:\s*(?:[-–—~～至]\s*(?P<end>\d+)))?"
+)
+_REFERENCE_SEPARATOR_CHARS = set(" ，,、；;/／&＆和與与及跟或")
+
+
+def _resolve_book_slug(token: str) -> Optional[str]:
+    normalized = token.strip()
+    if not normalized:
+        return None
+    slug = BOOK_NAME_TO_SLUG.get(normalized)
+    if slug:
+        return slug
+    compact = normalized.replace(" ", "")
+    slug = BOOK_NAME_TO_SLUG.get(compact)
+    if slug:
+        return slug
+    slug = BOOK_NAME_TO_SLUG.get(compact.lower())
+    if slug:
+        return slug
+    return None
+
+
+def _build_reference_link(slug: str, chapter: str, start: str, end: Optional[str]) -> str:
+    book_name = BOOK_SLUG_TO_NAME.get(slug, slug.upper())
+    chapter_number = int(chapter)
+    verse_start = int(start)
+    verse_end = int(end) if end else None
+    verse_part = f"{verse_start}-{verse_end}" if verse_end is not None else str(verse_start)
+    anchor = f"#scripture-{slug}-{chapter_number}-{verse_start}"
+    if verse_end is not None:
+        anchor += f"-{verse_end}"
+    return f"[{book_name} {chapter_number}:{verse_part}]({anchor})"
+
+
+def _convert_references_in_segment(content: str) -> tuple[str, list[tuple[int, int]]]:
+    result: list[str] = []
+    replaced_spans: list[tuple[int, int]] = []
+    last_index = 0
+    for match in _SINGLE_REFERENCE_PATTERN.finditer(content):
+        start, end = match.span()
+        result.append(content[last_index:start])
+        slug = _resolve_book_slug(match.group("book"))
+        if not slug:
+            result.append(content[start:end])
+        else:
+            prefix = match.group("prefix") or ""
+            replacement = _build_reference_link(slug, match.group("chapter"), match.group("start"), match.group("end"))
+            result.append(prefix + replacement)
+            replaced_spans.append((start, end))
+        last_index = end
+    result.append(content[last_index:])
+    return "".join(result), replaced_spans
+
+
+def _content_is_reference_only(content: str, spans: list[tuple[int, int]]) -> bool:
+    if not spans:
+        return False
+    remaining_parts: list[str] = []
+    last = 0
+    for start, end in spans:
+        remaining_parts.append(content[last:start])
+        last = end
+    remaining_parts.append(content[last:])
+    residual = "".join(remaining_parts).strip()
+    if not residual:
+        return True
+    for char in residual:
+        if char.isspace():
+            continue
+        if char not in _REFERENCE_SEPARATOR_CHARS:
+            return False
+    return True
+
+
+def convert_parenthetical_references(markdown: str) -> str:
+    if not markdown:
+        return markdown
+
+    def _replace(match: re.Match) -> str:
+        content = match.group("content") or ""
+        converted, spans = _convert_references_in_segment(content)
+        if not spans:
+            return match.group(0)
+        if _content_is_reference_only(content, spans):
+            return converted.strip()
+        return f"（{converted}）"
+
+    return _PAREN_REFERENCE_PATTERN.sub(_replace, markdown)
 
 
 def build_params() -> Dict[str, str]:

@@ -43,6 +43,7 @@ from .models import (
     HymnMetadata,
     SermonSeries,
 )
+from .scripture import convert_parenthetical_references
 
 
 def _ensure_directories() -> None:
@@ -244,7 +245,8 @@ class ArticleRepository:
         article_path = ARTICLES_DIR / entry.article_filename
 
         self._write_markdown(script_path, payload.script_markdown)
-        self._write_markdown(article_path, payload.article_markdown)
+        normalized_article = convert_parenthetical_references(payload.article_markdown)
+        self._write_markdown(article_path, normalized_article)
 
         if (
             previous_script_path
@@ -285,7 +287,8 @@ class ArticleRepository:
         entry.updated_at = now
         entry.last_generated_at = now
 
-        self._write_markdown(ARTICLES_DIR / entry.article_filename, article_markdown)
+        normalized_article = convert_parenthetical_references(article_markdown)
+        self._write_markdown(ARTICLES_DIR / entry.article_filename, normalized_article)
         _persist_metadata(records)
         return self._assemble_detail(entry)
 

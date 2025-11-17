@@ -99,6 +99,17 @@ class SurmonSlideResponse(BaseModel):
     slides: List[SurmonSlideAsset]
 
 
+class SeriesMarkdownRequest(BaseModel):
+    user_id: str
+
+
+class SeriesMarkdownResponse(BaseModel):
+    seriesId: str
+    outputDir: str
+    sermonCount: int
+    generatedFiles: List[str]
+
+
 def _normalize_slide_path(item: str, raw_path: str) -> Path:
     candidate = Path(raw_path)
     if candidate.is_absolute():
@@ -331,6 +342,19 @@ def get_final_sermon(user_id: str, item: str, remove_tags: bool = True):
 @router.get("/sermon_series")
 def get_sermon_series():
     return sermon_manager.get_sermon_series()
+
+
+@router.post("/series/{series_id}/markdown", response_model=SeriesMarkdownResponse)
+def export_series_markdown(series_id: str, payload: SeriesMarkdownRequest) -> SeriesMarkdownResponse:
+    try:
+        result = sermon_manager.export_series_markdown(payload.user_id, series_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "找不到系列" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    return SeriesMarkdownResponse(**result)
 
 
 @router.get("/article_series")

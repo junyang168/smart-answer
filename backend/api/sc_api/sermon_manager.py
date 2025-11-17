@@ -1,9 +1,11 @@
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import copy
 import json
+import re
 import requests
 from dotenv import load_dotenv
 from google import genai
@@ -734,6 +736,147 @@ class SermonManager:
                     sermons.append(sermon_meta)
             series['sermons'] = sermons
         return series_meta
+
+    def _sanitize_series_id(self, series_id: str) -> str:
+        normalized = (series_id or "").strip()
+        normalized = normalized.replace(" ", "-")
+        normalized = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "-", normalized)
+        normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+        return normalized or "series"
+
+    def _normalize_keypoints(self, raw_keypoints):
+        if not raw_keypoints:
+            return []
+        entries: List[str] = []
+        if isinstance(raw_keypoints, list):
+            entries = [str(item).strip() for item in raw_keypoints if str(item).strip()]
+        elif isinstance(raw_keypoints, str):
+            lines = raw_keypoints.replace("\r", "").split("\n")
+            for line in lines:
+                cleaned = line.strip()
+                cleaned = cleaned.lstrip("-•* \t")
+                if cleaned:
+                    entries.append(cleaned)
+        return entries
+
+    def _script_entries_to_markdown(self, entries: List[dict]) -> str:
+        paragraphs: List[str] = []
+        for entry in entries or []:
+            text = ""
+            index = None
+            if isinstance(entry, dict):
+                text = entry.get("text") or ""
+                index = entry.get("index") or entry.get("start_index")
+            else:
+                text = getattr(entry, "text", "") or ""
+                index = getattr(entry, "index", None) or getattr(entry, "start_index", None)
+            text = text.strip()
+            if not text:
+                continue
+            prefix = f"[{index}] " if index else ""
+            paragraphs.append(f"{prefix}{text}")
+        return "\n\n".join(paragraphs).strip()
+
+    def _build_sermon_markdown_payload(self, sermon_payload: dict, fallback_title: str) -> str:
+        metadata = sermon_payload.get("metadata", {}) if isinstance(sermon_payload, dict) else {}
+        script_entries = sermon_payload.get("script") if isinstance(sermon_payload, dict) else None
+
+        title = (metadata.get("title") or fallback_title or "").strip()
+        summary = (metadata.get("summary") or "").strip()
+        keypoints = self._normalize_keypoints(metadata.get("keypoints"))
+        deliver_date = (metadata.get("deliver_date") or metadata.get("date") or "").strip()
+        author = (metadata.get("author") or metadata.get("assigned_to_name") or "").strip()
+
+        lines: List[str] = []
+        if title:
+            lines.append(f"# {title}")
+
+        info_parts: List[str] = []
+        if deliver_date:
+            info_parts.append(f"日期：{deliver_date}")
+        if author:
+            info_parts.append(f"講員：{author}")
+        if info_parts:
+            lines.append("")
+            lines.append("，".join(info_parts))
+
+        if summary:
+            lines.append("")
+            lines.append("## 摘要")
+            lines.append(summary)
+
+        if keypoints:
+            lines.append("")
+            lines.append("## 講道要點")
+            for kp in keypoints:
+                lines.append(f"- {kp}")
+
+        script_markdown = self._script_entries_to_markdown(script_entries or [])
+        if script_markdown:
+            lines.append("")
+            lines.append("## 講道內容")
+            lines.append(script_markdown)
+
+        return "\n".join(lines).strip()
+
+    def export_series_markdown(self, user_id: str, series_id: str) -> dict:
+        if not user_id:
+            raise PermissionError("需提供使用者帳號才能匯出 Markdown。")
+
+        series_list = self.get_sermon_series()
+        target_series = None
+        for entry in series_list:
+            if isinstance(entry, dict) and entry.get("id") == series_id:
+                target_series = entry
+                break
+        if not target_series:
+            raise ValueError(f"找不到系列：{series_id}")
+
+        sermons = target_series.get("sermons") if isinstance(target_series, dict) else None
+        if not sermons:
+            raise ValueError(f"系列 {series_id} 尚未包含任何講道。")
+
+        safe_series_id = self._sanitize_series_id(series_id)
+        output_dir = Path(self.base_folder) / "series" / safe_series_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        generated_files: List[str] = []
+        for sermon_entry in sermons:
+            sermon_id = None
+            sermon_title = series_id
+            if isinstance(sermon_entry, dict):
+                sermon_id = sermon_entry.get("item") or sermon_entry.get("id")
+                sermon_title = sermon_entry.get("title") or sermon_entry.get("item") or series_id
+            else:
+                sermon_id = getattr(sermon_entry, "item", None)
+                sermon_title = getattr(sermon_entry, "title", None) or sermon_id or series_id
+
+            if not sermon_id:
+                continue
+
+            permissions = self.get_sermon_permissions(user_id, sermon_id)
+            if not permissions.canRead:
+                raise PermissionError(f"沒有權限讀取講道 {sermon_id}")
+
+            sermon_payload = self.get_final_sermon(user_id, sermon_id, remove_tags=True)
+            if not isinstance(sermon_payload, dict) or "script" not in sermon_payload:
+                message = sermon_payload.get("message") if isinstance(sermon_payload, dict) else None
+                raise ValueError(message or f"無法讀取講道 {sermon_id}")
+
+            markdown_content = self._build_sermon_markdown_payload(sermon_payload, sermon_title)
+            if not markdown_content:
+                continue
+
+            target_path = output_dir / f"{sermon_id}.md"
+            target_path.write_text(markdown_content + "\n", encoding="utf-8")
+            generated_files.append(str(target_path))
+
+        return {
+            "seriesId": series_id,
+            "outputDir": str(output_dir),
+            "sermonCount": len(generated_files),
+            "generatedFiles": generated_files,
+        }
 
     def get_article_series(self):
         articles_series = self.get_articles_and_series()

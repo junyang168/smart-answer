@@ -8,13 +8,16 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PlayCircle, ListMusic, ChevronRight } from 'lucide-react';
-import { SermonSeries,  Sermon } from '@/app/interfaces/article';
+import { SermonSeries } from '@/app/interfaces/article';
+import { useSession } from 'next-auth/react';
 
 export const SeriesPlayerView = () => {
     // --- State Management ---
   const [series, setSeries] = useState<SermonSeries | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
   // ✅ 1. 新增 state 來管理要點部分的折疊狀態
   const [isKeypointsOpen, setIsKeypointsOpen] = useState(false);
 
@@ -23,6 +26,12 @@ export const SeriesPlayerView = () => {
   const searchParams = useSearchParams();
   const seriesId = decodeURIComponent(params.seriesId as string);
   const currentSermonId = decodeURIComponent(searchParams.get('sermon') as string) || '';
+  const { data: session } = useSession();
+
+  const userRole = session?.user?.role;
+  const isEditorRole = userRole === 'editor' || userRole === 'admin';
+  const isEditor =
+    isEditorRole || (process.env.NODE_ENV !== 'production');
 
 
 
@@ -77,6 +86,40 @@ export const SeriesPlayerView = () => {
       .map((topic) => topic.trim())
       .filter(Boolean);
   }, [series]);
+
+  const handleGenerateMarkdown = async () => {
+    if (!series) {
+      return;
+    }
+    const fallbackUser = process.env.NODE_ENV !== 'production' ? 'junyang168@gmail.com' : '';
+    const userId = session?.user?.internalId || session?.user?.email || fallbackUser;
+    if (!userId) {
+      setExportStatus('error');
+      setExportMessage('請先登入以匯出 Markdown。');
+      return;
+    }
+    setExportStatus('loading');
+    setExportMessage(null);
+    try {
+      const response = await fetch(`/api/sc_api/series/${encodeURIComponent(series.id)}/markdown`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || '匯出失敗');
+      }
+      const result = await response.json();
+      setExportStatus('success');
+      setExportMessage(`已匯出 ${result.sermonCount} 篇講道至 ${result.outputDir}`);
+    } catch (err: any) {
+      setExportStatus('error');
+      setExportMessage(err.message || '匯出過程發生錯誤。');
+    }
+  };
   
   // --- Render Logic ---
   if (isLoading) {
@@ -98,19 +141,47 @@ export const SeriesPlayerView = () => {
 
   return (
     <>
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
-        <p className="mt-2 text-lg text-gray-600">{series.summary}</p>
-        {topics.length ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {topics.map((topic) => (
-              <span
-                key={topic}
-                className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
+      <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex-1">
+          <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
+          <p className="mt-2 text-lg text-gray-600">{series.summary}</p>
+          {topics.length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {topics.map((topic) => (
+                <span
+                  key={topic}
+                  className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700"
+                >
+                  #{topic}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        {isEditor ? (
+          <div className="w-full rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900 lg:w-auto lg:min-w-[260px]">
+            <p className="font-semibold mb-3">系列匯出工具</p>
+            <button
+              type="button"
+              onClick={handleGenerateMarkdown}
+              disabled={exportStatus === 'loading'}
+              className="w-full rounded-md bg-blue-600 py-2 text-white font-semibold hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {exportStatus === 'loading' ? '生成中…' : '生成 Markdown'}
+            </button>
+            {exportMessage ? (
+              <p
+                className={`mt-3 text-xs ${
+                  exportStatus === 'success' ? 'text-green-700' : 'text-red-600'
+                }`}
               >
-                #{topic}
-              </span>
-            ))}
+                {exportMessage}
+              </p>
+            ) : (
+              <p className="mt-3 text-xs text-blue-700">
+                產生後會將各講道匯出到 DATA_BASE_DIR/series/{series.id}
+              </p>
+            )}
           </div>
         ) : null}
       </div>

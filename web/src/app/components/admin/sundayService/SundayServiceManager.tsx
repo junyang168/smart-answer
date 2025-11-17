@@ -1255,7 +1255,11 @@ export function SundayServiceManager() {
                 const scriptureLines = formatScriptureDisplay(entry.scripture, bookNameMap);
                 const entryDateValue = entry.date?.trim() ?? "";
                 const isUpcoming = upcomingServiceDate ? entryDateValue === upcomingServiceDate : false;
-                const rowClasses = `border-t border-gray-100 ${isUpcoming ? "bg-amber-50" : "bg-white"}`;
+                const isEditing = editingDate === entry.date;
+                const rowClasses = [
+                  "border-t border-gray-100 transition-colors",
+                  isEditing ? "bg-blue-50" : "bg-white",
+                ].join(" ");
                 return (
                   <tr key={entry.date} className={rowClasses}>
                     <td className="px-3 py-2 font-medium text-gray-900">
