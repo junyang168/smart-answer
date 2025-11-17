@@ -145,12 +145,8 @@ export function FullArticleReader({ markdown, articleTitle, summaryMarkdown, top
 
 
       {currentSection && (
-        <section
-          key={currentSection.id}
-          id={currentSection.id}
-          className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
-        >
-          <div className="border-b border-gray-100 pb-4">
+        <section key={currentSection.id} id={currentSection.id} className="bg-white">
+          <div className="border-b border-gray-100  pb-4">
 
             <h2 className="mt-3 text-2xl font-semibold text-gray-900">{normalizeTitle(currentSection.title)}</h2>
           </div>
