@@ -93,7 +93,7 @@ export default async function FullArticleViewer({
   const sourceSermonItems = sourceSermons.map((id) => ({ id, title: sermonTitleMap[id] ?? id }));
   const hasSourceSermons = sourceSermonItems.length > 0;
   const showSourceSermons = Boolean(session) && hasSourceSermons;
-  const showChapterNavigation = !session;
+  const showChapterNavigation = true;
 
   const articleTopAnchorId = "full-article-top";
 
