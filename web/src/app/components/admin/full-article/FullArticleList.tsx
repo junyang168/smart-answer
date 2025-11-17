@@ -195,6 +195,8 @@ export function FullArticleList({ initialArticles }: FullArticleListProps) {
                     <div className="flex gap-2">
                       <Link
                         href={`/resources/full_article/${article.id}?nocache=1`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center rounded-md border border-blue-200 px-3 py-1 text-sm text-blue-600 hover:bg-blue-50"
                       >
                         觀看
