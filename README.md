@@ -1,48 +1,100 @@
-![image](https://github.com/junyang168/smart-answer/assets/15166180/8793353e-b56c-402d-bf77-d141a16d50ff)# Smart Answer
- Production-ready enterprise Question and Answer(Q&A) chatbot that enables natural language interface to your enterprise applications.
-# Overview
-Generative AI's adoption in enterprise faces seveal challenge. One major challenge is LLMs' inability to access proprietary enterprise knowledge, as enterprises often have their data scattered across various applications, each with unique business logic and interfaces. Another concern is data security and privacy when using public LLMs, as many companies require AI systems that can operate on corporate-owned infrastructure.
+# 達拉斯聖道教會 AI 輔助查經平臺 (Smart Answer)
 
-Smart Answer, a production-ready enterprise Question and Answer (Q&A) chatbot is designed to provide accurate answers by sourcing knowledge from multiple enterprise applications. It integrates quickly with these applications, speeding up its deployment. Smart Answer operates on both public and smaller, open-source LLMs that can be hosted in-house on consumer-grade hardware, ensuring data security and privacy.
+這是 **達拉斯聖道教會** 的網站，也是教會 AI 輔助查經的平臺。 這個新平臺由教會同工藉著 AI 技術，把王守仁教授多年講道的語音內容整理，並轉化為文字，成為門徒靈修、查經的寶貴資源。
 
-# Solution Design
-Smart Answer is based on Retrieval Augmented Generation, a popular architecture of Generative AI. It emulates the human process of selecting and using IT tools to answer queries to routes queries to the most suitable 'tool' or application, retrieves relevant data, and generates answers. The system also includes optimizations for enhancing answer precision. The chatbot presents answers to users along with links to data sources for reference.
-[Please refer to the technical overview for solution architecture and design detail](https://medium.com/@junyang168/smart-answer-turning-enterprise-applications-into-ai-powered-chatbot-4b1aabce6c9d)
+## 主要功能 (Key Features)
 
-# Usage
-Plesae refer to the following Jupyter Notebooks 
-* [Overview and Routing](https://github.com/junyang168/smart-answer/blob/main/routing.ipynb)  
+在新網站上，你可以：
 
-# Contributing
-We welcome contributions to Smart Answers. If you are interested in contributing, please contact us for more information.
+1.  **講道影音庫**: 在線上收聽收看王守仁教授講道部分或全部講道的錄音與錄像。
+2.  **AI 輔助查經講稿**: 閱讀周五團契查經的講稿—這些內容源於弟兄姊妹的討論，經 AI 輔助潤色後更為完整， 并獲取最新的團契信息。
+3.  **信仰問答集**: 查詢團契中真實的信仰問答，AI 整理並潤色成貼近生活的答問集。
+4.  **主題文章**: 閱讀由教授多篇講道整合而成的主題文章。
+5.  **教會資訊管理**: 查詢教會團契及主日崇拜信息。
 
-# License
-Smart Answers is licensed under the Apache 2.0 License.
+## Architecture (Technical Specs)
 
-# Folders and Files
-* production installed at /opt/homebrew/var/www/smart-answer
-* both prod and dev venv at /Users/junyang/app/smart-answer/.venv
-# Semantic Search API
-* port 8000 - dev 8080
-* /Users/junyang/Library/LaunchAgents/com.semantic_search.service.plist
-* launchctl load ~/Library/LaunchAgents/semantic_search.service.plist 
-* launchctl start semantic_search.service
-* launchctl unload ~/Library/LaunchAgents/semantic_search.service.plist
-* launchctl list |grep semantic_search.service
-* uvicorn --reload --host 0.0.0.0  --port 9000 --app-dir /Users/junyang/app/smart-answer/src/semantic_search_service api:app
-* API doc: http://localhost:9000/docs
-* API Endpoint: http://localhost:9000/semantic_search/question
-# Smart Answer API
-* /Users/junyang/Library/LaunchAgents/com.smart_answer.service.plist
-* launchctl unload ~/Library/LaunchAgents/com.smart_answer.service.plist
-* launchctl start smart_answer.service
-* launchctl load ~/Library/LaunchAgents/com.smart_answer.service.plist
-* uvicorn --reload --host 0.0.0.0  --port 60000 --app-dir /opt/homebrew/var/www/smart-answer/src/smart_answer_service smart_answer_api:app
-# Smart Answer UI
-* production port 60000
-* launchctl unload ~/Library/LaunchAgents/com.sa_app.service.plist
-* launchctl load ~/Library/LaunchAgents/com.sa_app.service.plist 
-* launchctl start sa_app.service
+The application follows a microservices-like architecture with a Next.js frontend and a Python backend service.
 
-dev port 3003
+### Components
 
+1.  **Frontend (Web UI)**:
+    -   **Path**: `web/`
+    -   **Tech**: Next.js, Tailwind CSS
+    -   **Port**: 3003
+    -   **Description**: Provides the user interface for sermon archives, Bible study notes, and church management.
+
+2.  **Admin & Orchestration Service (Backend API)**:
+    -   **Path**: `backend/`
+    -   **Tech**: FastAPI, Python
+    -   **Port**: 8222 (mapped to `/sc_api` and `/api/admin` via Next.js proxy)
+    -   **Description**: The core application backend for the **new Smart Answer UI**. Handles:
+        -   Church management (fellowships, sermons, Sunday services).
+        -   Webcast and slide management.
+        -   API endpoints under `/sc_api` and `/admin`.
+
+3.  **Legacy Web Application**:
+    -   **Path**: `/web` (URL path), served from static files. Source code not included.
+    -   **Backend**: Port **8008** (via Nginx reverse proxy). Source code not included.
+    -   **Description**: An older web interface co-hosted on the same infrastructure.
+
+### Infrastructure
+
+-   **Nginx**: Acts as a reverse proxy, 
+        For legacy app, routing traffic to the appropriate services based on URL paths (`/web`, `/sc_api`, etc.).
+        For new app, routing internet traffic to the appropriate services (`/`, ).
+-   **Data Stores**:
+    -   **FileSystem**: Used for storing slides, audio, and generated markdown files.
+
+## Getting Started
+
+### Prerequisites
+
+-   Node.js and npm
+-   Python 3.x
+-   Nginx (optional, for production-like routing)
+-   Google Gemini API Key (and other LLM keys as needed)
+
+### Installation
+
+1.  **Clone the repository**:
+    ```bash
+    git clone <repository-url>
+    cd smart-answer
+    ```
+
+2.  **Backend Setup**:
+    Navigate to the `backend` directory, create a virtual environment, and install dependencies:
+    ```bash
+    cd backend
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    cd ..
+    ```
+
+3.  **Frontend Setup**:
+    Navigate to the `web` directory and install dependencies:
+    ```bash
+    cd web
+    npm install
+    ```
+
+### Running the Application
+
+1.  **Admin & Orchestration Service (Backend)**:
+    ```bash
+    source backend/.venv/bin/activate
+    uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8222
+    ```
+
+2.  **Web UI**:
+    ```bash
+    cd web
+    npm run dev
+    ```
+    Access at `http://localhost:3003`.
+
+### Nginx Configuration
+
+See `docs/infrastructure.md` for the Nginx configuration used to route requests to these services.
