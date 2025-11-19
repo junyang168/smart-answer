@@ -150,7 +150,7 @@ export default async function FullArticleViewer({
                 ) }
                 {showSourceSermons && (
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
-                    <h2 className="text-xl font-semibold text-gray-900">來源講道</h2>
+                    <h2 className="text-xl font-semibold text-gray-900">講道來源</h2>
                     <p className="mt-1 text-sm text-gray-600">
                       本文由以下講道彙整而成。
                     </p>
