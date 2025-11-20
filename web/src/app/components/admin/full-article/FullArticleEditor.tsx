@@ -12,6 +12,8 @@ import {
 } from "@/app/admin/full_article/api";
 import { FullArticleDetail, FullArticleStatus, FullArticleType } from "@/app/types/full-article";
 import { ArrowDown, ArrowUp, Plus, Trash2, LayoutList, FileText, Settings, FileText as FileIcon, AlignLeft, ScrollText, MessageSquare } from "lucide-react";
+import ReactDOMServer from "react-dom/server";
+import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdown";
 
 import "easymde/dist/easymde.min.css";
 
@@ -207,6 +209,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       spellChecker: false,
       status: false,
       minHeight: "calc(100vh - 250px)",
+      previewRender: (plainText: string) => {
+        return ReactDOMServer.renderToStaticMarkup(<ScriptureMarkdown markdown={plainText} />);
+      },
     }),
     [],
   );
@@ -216,6 +221,19 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       spellChecker: false,
       status: false,
       minHeight: "calc(100vh - 250px)",
+    }),
+    [],
+  );
+
+  const sectionEditorOptions = useMemo(
+    () => ({
+      spellChecker: false,
+      status: false,
+      minHeight: "300px",
+      maxHeight: "calc(100vh - 350px)",
+      previewRender: (plainText: string) => {
+        return ReactDOMServer.renderToStaticMarkup(<ScriptureMarkdown markdown={plainText} />);
+      },
     }),
     [],
   );
@@ -650,7 +668,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
           <SimpleMDE
             value={section.content}
             onChange={(value) => handleSectionChange(section.id, "content", value)}
-            options={{ ...articleEditorOptions, minHeight: "calc(100vh - 300px)" }}
+            options={sectionEditorOptions}
           />
         </div>
       </div>

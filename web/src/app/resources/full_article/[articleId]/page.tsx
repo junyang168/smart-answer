@@ -147,7 +147,7 @@ export default async function FullArticleViewer({
                       </ul>
                     )}
                   </div>
-                ) }
+                )}
                 {showSourceSermons && (
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
                     <h2 className="text-xl font-semibold text-gray-900">講道來源</h2>
@@ -172,7 +172,7 @@ export default async function FullArticleViewer({
                       ))}
                     </ul>
                   </div>
-                ) }
+                )}
 
               </div>
             </aside>

@@ -208,12 +208,34 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
 }
 
 export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
+  const NOTE_MARKER_DETECT_REGEX = /\[!note\]/i;
+  const NOTE_MARKER_REMOVE_REGEX = /\s*\[!note\]\s*/gi;
+
   const normalizeSrc = (value?: string) => {
     if (!value) {
       return value;
     }
     const trimmed = value.trim();
     return trimmed.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
+  };
+
+  const removeNoteMarkers = (node: React.ReactNode): React.ReactNode => {
+    if (typeof node === "string") {
+      const cleaned = node.replace(NOTE_MARKER_REMOVE_REGEX, " ").replace(/\s{2,}/g, " ").trimStart();
+      return cleaned.length > 0 ? cleaned : null;
+    }
+
+    if (Array.isArray(node)) {
+      return node.map((child) => removeNoteMarkers(child)).filter((child) => child !== null);
+    }
+
+    if (React.isValidElement(node)) {
+      const childNodes = React.Children.toArray(node.props.children);
+      const newChildren = childNodes.map((child) => removeNoteMarkers(child)).filter((child) => child !== null);
+      return React.cloneElement(node, node.props, newChildren);
+    }
+
+    return node;
   };
 
   return (
@@ -243,6 +265,41 @@ export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
           const rawAlt = htmlProps.alt ?? (typeof nodeProps.alt === "string" ? nodeProps.alt : undefined);
           const { src: _ignoredSrc, alt: _ignoredAlt, ...rest } = htmlProps;
           return <img src={normalizeSrc(rawSrc)} alt={rawAlt} {...rest} />;
+        },
+        p({ children, ...props }) {
+          return <p {...props}>{children}</p>;
+        },
+        blockquote({ children, ...props }) {
+          // Detect marker anywhere in the blockquote content
+          const blockquoteText = extractText(children);
+          if (!NOTE_MARKER_DETECT_REGEX.test(blockquoteText)) {
+            return <blockquote {...props}>{children}</blockquote>;
+          }
+
+          const cleanedChildren = React.Children.map(children, (child) => removeNoteMarkers(child));
+
+          return (
+            <div className="my-4 rounded-r border-l-4 border-blue-400 bg-blue-50 p-4 text-blue-900" data-is-alert="true">
+              <div className="mb-2 flex items-center gap-2 font-bold text-blue-700">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Editor's Note
+              </div>
+              <div className="text-sm leading-relaxed opacity-90 [&>p]:my-0 space-y-2">
+                {cleanedChildren}
+              </div>
+            </div>
+          );
         },
       }}
     >
