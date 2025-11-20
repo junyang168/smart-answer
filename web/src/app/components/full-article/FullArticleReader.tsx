@@ -22,31 +22,47 @@ export function FullArticleReader({ markdown, articleTitle, summaryMarkdown, top
     setActiveIndex(0);
   }, [sections]);
 
-  const scrollToAnchor = useCallback(() => {
+  const scrollToAnchor = useCallback((targetId?: string) => {
     if (typeof window === "undefined") {
       return;
     }
-    if (topAnchorId) {
-      const node = document.getElementById(topAnchorId);
-      if (node) {
-        const targetTop = node.getBoundingClientRect().top + window.scrollY;
-        const headerOffset = 120;
-        window.scrollTo({ top: Math.max(0, targetTop - headerOffset), behavior: "smooth" });
-        return;
-      }
+    const idToScroll = targetId || topAnchorId;
+    if (idToScroll) {
+      // Wait a tick for the DOM to update if we just switched sections
+      setTimeout(() => {
+        const node = document.getElementById(idToScroll);
+        if (node) {
+          const targetTop = node.getBoundingClientRect().top + window.scrollY;
+          const headerOffset = 120;
+          window.scrollTo({ top: Math.max(0, targetTop - headerOffset), behavior: "smooth" });
+          return;
+        }
+        // Fallback if specific anchor not found (e.g. subsection)
+        if (targetId !== topAnchorId && topAnchorId) {
+          const topNode = document.getElementById(topAnchorId);
+          if (topNode) {
+            const targetTop = topNode.getBoundingClientRect().top + window.scrollY;
+            const headerOffset = 120;
+            window.scrollTo({ top: Math.max(0, targetTop - headerOffset), behavior: "smooth" });
+          }
+        }
+      }, 100);
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }, [topAnchorId]);
 
   const goToSection = useCallback(
-    (index: number, options?: { updateHash?: boolean }) => {
+    (index: number, options?: { updateHash?: boolean; targetId?: string }) => {
       if (index < 0 || index >= sections.length) {
         return;
       }
       setActiveIndex(index);
       setMobileTOCOpen(false);
+
+      const targetId = options?.targetId || sections[index]?.id;
+
       if (options?.updateHash !== false) {
-        const targetId = sections[index]?.id;
         if (targetId && typeof window !== "undefined") {
           const hash = `#${targetId}`;
           if (window.location.hash !== hash) {
@@ -54,7 +70,7 @@ export function FullArticleReader({ markdown, articleTitle, summaryMarkdown, top
           }
         }
       }
-      scrollToAnchor();
+      scrollToAnchor(targetId);
     },
     [scrollToAnchor, sections],
   );
@@ -68,15 +84,33 @@ export function FullArticleReader({ markdown, articleTitle, summaryMarkdown, top
       if (!rawHash) {
         return;
       }
-      const index = sections.findIndex((section) => section.id === rawHash);
-      if (index >= 0 && index !== activeIndex) {
-        goToSection(index, { updateHash: false });
+
+      // Check if hash matches a section ID
+      let index = sections.findIndex((section) => section.id === rawHash);
+      let targetId = rawHash;
+
+      // If not a section ID, check if it matches a subsection ID
+      if (index === -1) {
+        for (let i = 0; i < sections.length; i++) {
+          const section = sections[i];
+          if (section.subsections?.some((sub) => sub.id === rawHash)) {
+            index = i;
+            targetId = rawHash;
+            break;
+          }
+        }
+      }
+
+      if (index >= 0) {
+        // Always go to section if found, even if index matches activeIndex, 
+        // because we might need to scroll to a specific subsection
+        goToSection(index, { updateHash: false, targetId });
       }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [activeIndex, goToSection, sections]);
+  }, [goToSection, sections]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -152,7 +186,7 @@ export function FullArticleReader({ markdown, articleTitle, summaryMarkdown, top
           </div>
 
           <div id={`${currentSection.id}-content`} className="prose prose-base lg:prose-lg prose-slate mt-6 max-w-none">
-            <ScriptureMarkdown markdown={currentSection.markdown} />
+            <ScriptureMarkdown markdown={currentSection.markdown} sectionId={currentSection.id} />
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3 text-sm">

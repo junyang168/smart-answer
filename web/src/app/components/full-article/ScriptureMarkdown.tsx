@@ -207,7 +207,7 @@ function BibleReferenceLink({ href, label, children }: React.PropsWithChildren<{
   );
 }
 
-export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
+export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProps & { sectionId?: string }) {
   const NOTE_MARKER_DETECT_REGEX = /\[!note\]/i;
   const NOTE_MARKER_REMOVE_REGEX = /\s*\[!note\]\s*/gi;
 
@@ -243,6 +243,26 @@ export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeRaw]}
       components={{
+        h4({ children, ...props }) {
+          const text = extractText(children);
+          // We need to match the ID generation logic from section-utils.ts
+          // slugifySectionTitle logic:
+          const slug = text
+            .trim()
+            .toLowerCase()
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+
+          const id = sectionId ? `${sectionId}--${slug}` : undefined;
+
+          return (
+            <h4 id={id} className="scroll-mt-24" {...props}>
+              {children}
+            </h4>
+          );
+        },
         a({ children, href, ...props }) {
           if (href && href.startsWith("#scripture-")) {
             const label = extractText(children);

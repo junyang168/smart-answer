@@ -6,17 +6,18 @@ import { FullArticleReader } from "@/app/components/full-article/FullArticleRead
 import { authConfig } from "@/app/utils/auth";
 import { buildArticleSections } from "@/app/components/full-article/section-utils";
 import { FullArticleUtilities } from "@/app/components/full-article/FullArticleUtilities";
+import { ArticleTOC } from "@/app/components/full-article/ArticleTOC";
 
 const ARTICLE_BACKEND_BASE =
   process.env.FULL_ARTICLE_SERVICE_URL ||
   process.env.NEXT_PUBLIC_FULL_ARTICLE_SERVICE_URL ||
-  "http://127.0.0.1:8555";
+  "http://127.0.0.1:8222";
 
 const SERMON_BACKEND_BASE =
   process.env.SC_API_SERVICE_URL ||
   process.env.FULL_ARTICLE_SERVICE_URL ||
   process.env.NEXT_PUBLIC_FULL_ARTICLE_SERVICE_URL ||
-  "http://127.0.0.1:8555";
+  "http://127.0.0.1:8222";
 
 const SERMON_USER_ID = process.env.SC_API_DEFAULT_USER_ID || "junyang168@gmail.com";
 
@@ -126,25 +127,10 @@ export default async function FullArticleViewer({
                 {showChapterNavigation && (
                   <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
                     <h2 className="text-xl font-semibold text-gray-900">章節導覽</h2>
-                    <p className="mt-1 text-sm text-gray-600">快速導覽各段內容。</p>
                     {articleSections.length === 0 ? (
                       <p className="mt-4 text-sm text-gray-500">目前沒有章節可供導覽。</p>
                     ) : (
-                      <ul className="mt-4 space-y-2">
-                        {articleSections.map((section) => {
-                          const plainTitle = section.title.replace(/\*\*/g, "").trim();
-                          return (
-                            <li key={section.id}>
-                              <a
-                                href={`#${section.id}`}
-                                className="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 text-sm text-gray-700 transition hover:border-blue-200 hover:text-blue-700"
-                              >
-                                <span className="truncate">{plainTitle}</span>
-                              </a>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                      <ArticleTOC sections={articleSections} />
                     )}
                   </div>
                 )}

@@ -3,6 +3,7 @@ export interface ArticleSection {
   title: string;
   markdown: string;
   index: number;
+  subsections: { id: string; title: string }[];
 }
 
 export function slugifySectionTitle(value: string): string {
@@ -46,11 +47,27 @@ export function buildArticleSections(markdown: string): ArticleSection[] {
     const slugIndex = (slugCounter.get(slugBase) ?? 0) + 1;
     slugCounter.set(slugBase, slugIndex);
     const id = slugIndex === 1 ? slugBase : `${slugBase}-${slugIndex}`;
+
+    // Parse subsections (H4) from the body
+    const subsections: { id: string; title: string }[] = [];
+    const subsectionMatches = body.matchAll(/^####\s+(.*)$/gm);
+    for (const match of subsectionMatches) {
+      const subTitle = match[1]?.trim();
+      if (subTitle) {
+        const subSlug = slugifySectionTitle(subTitle);
+        subsections.push({
+          id: `${id}--${subSlug}`,
+          title: subTitle,
+        });
+      }
+    }
+
     sections.push({
       id,
       title,
       markdown: body,
       index: sections.length,
+      subsections,
     });
     buffer = [];
     currentHeading = null;
@@ -75,6 +92,7 @@ export function buildArticleSections(markdown: string): ArticleSection[] {
         title: "全文",
         markdown: markdown.trim(),
         index: 0,
+        subsections: [],
       },
     ];
   }
