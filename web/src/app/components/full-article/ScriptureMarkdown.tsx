@@ -264,6 +264,8 @@ export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
           const rawSrc = htmlProps.src ?? (typeof nodeProps.src === "string" ? nodeProps.src : undefined);
           const rawAlt = htmlProps.alt ?? (typeof nodeProps.alt === "string" ? nodeProps.alt : undefined);
           const { src: _ignoredSrc, alt: _ignoredAlt, ...rest } = htmlProps;
+          // Accuracy matters more than Next.js image optimization for markdown content
+          // eslint-disable-next-line @next/next/no-img-element
           return <img src={normalizeSrc(rawSrc)} alt={rawAlt} {...rest} />;
         },
         p({ children, ...props }) {
@@ -293,7 +295,7 @@ export function ScriptureMarkdown({ markdown }: ScriptureMarkdownProps) {
                     clipRule="evenodd"
                   />
                 </svg>
-                Editor's Note
+                Editor&apos;s Note
               </div>
               <div className="text-sm leading-relaxed opacity-90 [&>p]:my-0 space-y-2">
                 {cleanedChildren}
