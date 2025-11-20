@@ -243,7 +243,14 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
       remarkPlugins={[remarkGfm]}
       rehypePlugins={[rehypeRaw]}
       components={{
-        h4({ children, ...props }) {
+        h2({ children, ...props }) {
+          return (
+            <h2 className="scroll-mt-24 text-3xl font-bold mt-8 mb-4 text-gray-900" {...props}>
+              {children}
+            </h2>
+          );
+        },
+        h3({ children, ...props }) {
           const text = extractText(children);
           // We need to match the ID generation logic from section-utils.ts
           // slugifySectionTitle logic:
@@ -258,9 +265,9 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
           const id = sectionId ? `${sectionId}--${slug}` : undefined;
 
           return (
-            <h4 id={id} className="scroll-mt-24" {...props}>
+            <h3 id={id} className="scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-gray-800" {...props}>
               {children}
-            </h4>
+            </h3>
           );
         },
         a({ children, href, ...props }) {

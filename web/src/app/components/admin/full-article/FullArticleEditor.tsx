@@ -38,14 +38,14 @@ function parseSections(markdown: string): Section[] {
   let currentContent: string[] = [];
   let isFirst = true;
 
-  // Handle case where file doesn't start with ###
-  if (lines.length > 0 && !lines[0].startsWith("### ")) {
+  // Handle case where file doesn't start with ##
+  if (lines.length > 0 && !lines[0].startsWith("## ")) {
     // It's the intro/preamble
     // We will treat it as a section with empty title
   }
 
   lines.forEach((line) => {
-    if (line.startsWith("### ")) {
+    if (line.startsWith("## ")) {
       if (!isFirst || currentContent.length > 0 || currentTitle) {
         sections.push({
           id: generateId(),
@@ -53,7 +53,7 @@ function parseSections(markdown: string): Section[] {
           content: currentContent.join("\n").trim(),
         });
       }
-      currentTitle = line.substring(4).trim();
+      currentTitle = line.substring(3).trim();
       currentContent = [];
       isFirst = false;
     } else {
@@ -81,7 +81,7 @@ function parseSections(markdown: string): Section[] {
 function assembleSections(sections: Section[]): string {
   return sections
     .map((section) => {
-      const titlePart = section.title ? `### ${section.title}\n` : "";
+      const titlePart = section.title ? `## ${section.title}\n` : "";
       return `${titlePart}${section.content}`;
     })
     .join("\n\n");

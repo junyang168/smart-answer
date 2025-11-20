@@ -50,7 +50,7 @@ export function buildArticleSections(markdown: string): ArticleSection[] {
 
     // Parse subsections (H4) from the body
     const subsections: { id: string; title: string }[] = [];
-    const subsectionMatches = body.matchAll(/^####\s+(.*)$/gm);
+    const subsectionMatches = body.matchAll(/^###\s+(.*)$/gm);
     for (const match of subsectionMatches) {
       const subTitle = match[1]?.trim();
       if (subTitle) {
@@ -74,7 +74,7 @@ export function buildArticleSections(markdown: string): ArticleSection[] {
   };
 
   for (const line of lines) {
-    const headingMatch = line.match(/^###\s+(.*)$/);
+    const headingMatch = line.match(/^##\s+(.*)$/);
     if (headingMatch) {
       pushSection();
       currentHeading = headingMatch[1]?.trim() ?? null;
