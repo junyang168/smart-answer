@@ -3,15 +3,17 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useDebouncedCallback } from "use-debounce";
 import {
   regenerateFullArticle,
   regenerateSummary,
   saveFullArticle,
   updatePrompt,
-} from "@/app/admin/full_article/api";
+  commitArticle,
+} from "../../../admin/full_article/api";
 import { FullArticleDetail, FullArticleStatus, FullArticleType } from "@/app/types/full-article";
-import { ArrowDown, ArrowUp, Plus, Trash2, LayoutList, FileText, Settings, FileText as FileIcon, AlignLeft, ScrollText, MessageSquare } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2, LayoutList, FileText, Settings, FileText as FileIcon, AlignLeft, ScrollText, MessageSquare, ChevronDown, ChevronRight } from "lucide-react";
 import ReactDOMServer from "react-dom/server";
 import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdown";
 
@@ -21,10 +23,16 @@ const SimpleMDE = dynamic(() => import("react-simplemde-editor"), {
   ssr: false,
 });
 
+interface Subsection {
+  id: string;
+  title: string;
+}
+
 interface Section {
   id: string;
   title: string;
   content: string;
+  subsections: Subsection[];
 }
 
 function generateId() {
@@ -36,6 +44,7 @@ function parseSections(markdown: string): Section[] {
   const sections: Section[] = [];
   let currentTitle = "";
   let currentContent: string[] = [];
+  let currentSubsections: Subsection[] = [];
   let isFirst = true;
 
   // Handle case where file doesn't start with ##
@@ -51,12 +60,20 @@ function parseSections(markdown: string): Section[] {
           id: generateId(),
           title: currentTitle,
           content: currentContent.join("\n").trim(),
+          subsections: currentSubsections,
         });
       }
       currentTitle = line.substring(3).trim();
       currentContent = [];
+      currentSubsections = [];
       isFirst = false;
     } else {
+      if (line.startsWith("### ")) {
+        currentSubsections.push({
+          id: generateId(),
+          title: line.substring(4).trim(),
+        });
+      }
       currentContent.push(line);
     }
   });
@@ -67,12 +84,13 @@ function parseSections(markdown: string): Section[] {
       id: generateId(),
       title: currentTitle,
       content: currentContent.join("\n").trim(),
+      subsections: currentSubsections,
     });
   }
 
   // If empty, ensure at least one section
   if (sections.length === 0) {
-    sections.push({ id: generateId(), title: "", content: "" });
+    sections.push({ id: generateId(), title: "", content: "", subsections: [] });
   }
 
   return sections;
@@ -123,14 +141,20 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   );
 
   const [saving, setSaving] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [updatingPrompt, setUpdatingPrompt] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
   // 2-Column Layout State
   const [activeSidebarItem, setActiveSidebarItem] = useState<SidebarItem>("metadata");
+  const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
   const [sections, setSections] = useState<Section[]>([]);
+
+  // Ref to track if it's the initial load to prevent auto-save on mount
+  const isInitialLoad = useRef(true);
 
   // Initialize sections from articleMarkdown on load
   useEffect(() => {
@@ -148,13 +172,14 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   };
 
   const handleAddSection = (index: number) => {
-    const newSection: Section = { id: generateId(), title: "New Section", content: "" };
+    const newSection: Section = { id: generateId(), title: "New Section", content: "", subsections: [] };
     setSections((prev) => {
       const newSections = [...prev];
       newSections.splice(index + 1, 0, newSection);
       return newSections;
     });
     setActiveSidebarItem(newSection.id);
+    setExpandedSectionId(newSection.id);
   };
 
   const handleDeleteSection = (index: number, e: React.MouseEvent) => {
@@ -231,6 +256,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       status: false,
       minHeight: "300px",
       maxHeight: "calc(100vh - 350px)",
+      forceSync: true, // Force sync to ensure textarea value is updated
       previewRender: (plainText: string) => {
         return ReactDOMServer.renderToStaticMarkup(<ScriptureMarkdown markdown={plainText} />);
       },
@@ -250,8 +276,11 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
 
   const resetFeedback = () => setFeedback(null);
 
-  const handleSave = async () => {
-    resetFeedback();
+  const handleSave = async (options?: { showFeedback?: boolean }) => {
+    const showFeedback = options?.showFeedback ?? true;
+    if (showFeedback) {
+      resetFeedback();
+    }
     setSaving(true);
     try {
       const coreBibleVerses = coreBibleVersesInput
@@ -285,20 +314,8 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setStatus(saved.status);
       setScriptMarkdown(saved.scriptMarkdown);
       setArticleMarkdown(saved.articleMarkdown);
-      // Update sections from saved markdown to ensure sync
-      const newSections = parseSections(saved.articleMarkdown);
-      setSections(newSections);
-
-      // Restore active section if possible
-      if (activeSidebarItem !== "metadata" && activeSidebarItem !== "summary" && activeSidebarItem !== "script" && activeSidebarItem !== "prompt") {
-        // Find which index was active
-        const activeIndex = sections.findIndex(s => s.id === activeSidebarItem);
-        if (activeIndex !== -1 && activeIndex < newSections.length) {
-          setActiveSidebarItem(newSections[activeIndex].id);
-        } else {
-          setActiveSidebarItem("metadata");
-        }
-      }
+      // Do NOT update sections from saved markdown here, as it generates new IDs and causes an auto-save loop.
+      // We trust that our local sections state is up to date since we just generated the markdown from it.
 
       setPromptMarkdown(saved.promptMarkdown);
       setSummaryMarkdown(saved.summaryMarkdown ?? "");
@@ -306,7 +323,11 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setCoreBibleVersesInput((saved.coreBibleVerses ?? []).join("\n"));
       setSourceSermonIdsInput((saved.sourceSermonIds ?? []).join("\n"));
       setPromptDirty(false);
-      setFeedback({ type: "success", message: "已儲存文章內容" });
+      setPromptDirty(false);
+      setLastSavedAt(new Date());
+      if (showFeedback) {
+        // setFeedback({ type: "success", message: "已儲存文章內容" });
+      }
       if (!articleId && saved.id) {
         router.replace(`/admin/full_article/${saved.id}`);
       }
@@ -315,6 +336,26 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setFeedback({ type: "error", message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCommit = async () => {
+    resetFeedback();
+    if (!articleId) {
+      setFeedback({ type: "error", message: "請先儲存文章以取得 ID" });
+      return;
+    }
+    setCommitting(true);
+    try {
+      // Ensure latest changes are saved first
+      await handleSave({ showFeedback: false });
+      const result = await commitArticle(articleId);
+      setFeedback({ type: "success", message: `已提交至 Git (${result.message})` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "提交失敗";
+      setFeedback({ type: "error", message });
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -340,7 +381,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
 
       // Restore active section if possible
       if (activeIndex !== -1 && activeIndex < newSections.length) {
-        setActiveSidebarItem(newSections[activeIndex].id);
+        const newId = newSections[activeIndex].id;
+        setActiveSidebarItem(newId);
+        setExpandedSectionId(newId);
       } else if (activeIndex !== -1) {
         setActiveSidebarItem("metadata");
       }
@@ -390,6 +433,41 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
     }
   };
 
+  // Keep a ref to the latest handleSave to avoid stale closures in debounced callback
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  });
+
+  // Auto-save logic
+  // Use a stable callback for the debounced function
+  const performAutoSave = useCallback(() => {
+    handleSaveRef.current({ showFeedback: false });
+  }, []);
+
+  const debouncedAutoSave = useDebouncedCallback(performAutoSave, 2000);
+
+  useEffect(() => {
+    if (isInitialLoad.current) {
+      isInitialLoad.current = false;
+      return;
+    }
+
+    // Trigger auto-save when any of these change
+    debouncedAutoSave();
+  }, [
+    name,
+    subtitle,
+    status,
+    scriptMarkdown,
+    summaryMarkdown,
+    articleType,
+    coreBibleVersesInput,
+    sourceSermonIdsInput,
+    sections, // This covers articleMarkdown changes since sections are the source of truth
+    debouncedAutoSave
+  ]);
+
   // Render Helpers
   const renderSidebar = () => (
     <div className="w-64 flex-shrink-0 border-r border-gray-200 bg-gray-50 h-full overflow-y-auto flex flex-col">
@@ -436,41 +514,82 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       </div>
 
       <div className="flex-1 p-2 space-y-1 overflow-y-auto">
-        {sections.map((section, index) => (
-          <div
-            key={section.id}
-            className={`group flex items-center justify-between px-3 py-2 rounded-md text-sm cursor-pointer ${activeSidebarItem === section.id ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
-              }`}
-            onClick={() => setActiveSidebarItem(section.id)}
-          >
-            <div className="flex items-center gap-2 truncate">
-              <FileIcon className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">{section.title || "(無標題)"}</span>
+        {sections.map((section, index) => {
+          const hasSubsections = section.subsections && section.subsections.length > 0;
+          const isExpanded = expandedSectionId === section.id;
+
+          return (
+            <div key={section.id}>
+              <div
+                className={`group flex items-center justify-between px-3 py-2 rounded-md text-sm cursor-pointer ${activeSidebarItem === section.id ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                onClick={() => {
+                  setActiveSidebarItem(section.id);
+                  setExpandedSectionId(section.id);
+                }}
+              >
+                <div className="flex items-center gap-2 truncate flex-1">
+                  <FileIcon className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">{section.title || "(無標題)"}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {hasSubsections && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setExpandedSectionId(prev => prev === section.id ? null : section.id);
+                      }}
+                      className="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-200"
+                    >
+                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                  )}
+                  <div className="hidden group-hover:flex items-center gap-1">
+                    <button
+                      onClick={(e) => handleMoveSection(index, "up", e)}
+                      disabled={index === 0}
+                      className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30"
+                    >
+                      <ArrowUp className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => handleMoveSection(index, "down", e)}
+                      disabled={index === sections.length - 1}
+                      className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30"
+                    >
+                      <ArrowDown className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteSection(index, e)}
+                      className="p-0.5 hover:bg-red-100 text-red-500 rounded"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {/* Subsections */}
+              {hasSubsections && isExpanded && (
+                <div className="ml-4 mt-1 space-y-1 border-l border-gray-200 pl-2">
+                  {section.subsections.map((sub) => (
+                    <div
+                      key={sub.id}
+                      className="px-2 py-1 text-xs text-gray-500 hover:text-blue-600 cursor-pointer truncate rounded hover:bg-gray-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveSidebarItem(section.id);
+                        // Ensure parent remains expanded
+                        setExpandedSectionId(section.id);
+                      }}
+                    >
+                      {sub.title}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="hidden group-hover:flex items-center gap-1">
-              <button
-                onClick={(e) => handleMoveSection(index, "up", e)}
-                disabled={index === 0}
-                className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30"
-              >
-                <ArrowUp className="w-3 h-3" />
-              </button>
-              <button
-                onClick={(e) => handleMoveSection(index, "down", e)}
-                disabled={index === sections.length - 1}
-                className="p-0.5 hover:bg-gray-200 rounded disabled:opacity-30"
-              >
-                <ArrowDown className="w-3 h-3" />
-              </button>
-              <button
-                onClick={(e) => handleDeleteSection(index, e)}
-                className="p-0.5 hover:bg-red-100 text-red-500 rounded"
-              >
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -686,9 +805,18 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
             >
               ← 回到列表
             </Link>
-            <h1 className="text-xl font-bold text-gray-900 truncate">
-              {articleId ? (name || "未命名文章") : "從講稿生成文章"}
-            </h1>
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-xl font-bold text-gray-900 truncate">
+                {articleId ? (name || "未命名文章") : "從講稿生成文章"}
+              </h1>
+              <div className="text-xs text-gray-400 font-normal">
+                {saving ? (
+                  <span>儲存中...</span>
+                ) : lastSavedAt ? (
+                  <span>已儲存 {lastSavedAt.toLocaleTimeString()}</span>
+                ) : null}
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {articleId ? (
@@ -703,11 +831,11 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
             ) : null}
             <button
               type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="inline-flex items-center px-4 py-1.5 rounded-md bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60"
+              onClick={handleCommit}
+              disabled={committing}
+              className="inline-flex items-center px-4 py-1.5 rounded-md bg-green-600 text-white font-medium hover:bg-green-700 disabled:opacity-60 ml-2"
             >
-              {saving ? "儲存中..." : "儲存"}
+              {committing ? "提交中..." : "提交 Git"}
             </button>
           </div>
         </div>

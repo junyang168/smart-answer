@@ -63,6 +63,17 @@ export async function saveFullArticle(payload: SaveFullArticlePayload): Promise<
   return parseJson(response);
 }
 
+export async function commitArticle(id: string): Promise<{ message: string; commit_id: string }> {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${id}/commit`), {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Commit failed");
+  }
+  return response.json();
+}
+
 export async function regenerateFullArticle(
   articleId: string,
   scriptMarkdown?: string,

@@ -6,11 +6,13 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+import git
 from typing import BinaryIO, Iterable, List, Optional
 from collections.abc import Sequence
 
 from .config import (
     ARTICLES_DIR,
+    DATA_BASE_DIR,
     DEPTH_OF_FAITH_FILE,
     FELLOWSHIP_FILE,
     FULL_ARTICLE_ROOT,
@@ -267,6 +269,39 @@ class ArticleRepository:
             self.save_prompt(payload.prompt_markdown)
 
         return self._assemble_detail(entry)
+
+    def commit_article(self, article_id: str) -> str:
+        records = _load_metadata_models()
+        entry = next((item for item in records if item.id == article_id), None)
+        if not entry:
+            raise ValueError(f"Article {article_id} not found")
+
+        repo = git.Repo(DATA_BASE_DIR)
+        
+        paths_to_add = []
+        if METADATA_FILE.exists():
+            paths_to_add.append(str(METADATA_FILE))
+        
+        if entry.script_filename:
+            script_path = SCRIPTS_DIR / entry.script_filename
+            if script_path.exists():
+                paths_to_add.append(str(script_path))
+        
+        if entry.article_filename:
+            article_path = ARTICLES_DIR / entry.article_filename
+            if article_path.exists():
+                paths_to_add.append(str(article_path))
+
+        if not paths_to_add:
+             raise ValueError("No files found to commit for this article")
+
+        repo.index.add(paths_to_add)
+        
+        if not repo.index.diff("HEAD"):
+             return "Nothing to commit"
+
+        commit = repo.index.commit(f"Update article: {entry.name}")
+        return str(commit.hexsha)
 
     def update_generated_article(
         self,

@@ -7,6 +7,7 @@ import shutil
 import os
 import os
 import re
+import git
 from decimal import Decimal
 from typing import Optional
 from urllib.parse import quote_plus
@@ -91,6 +92,17 @@ def save_article(payload: SaveArticleRequest) -> SaveArticleResponse:
         return repository.save_article(payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def commit_article(article_id: str) -> str:
+    try:
+        return repository.commit_article(article_id)
+    except ValueError as exc:
+        if "Nothing to commit" in str(exc):
+             return "Nothing to commit"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except git.exc.GitCommandError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Git error: {exc}") from exc
 
 
 def generate_article(article_id: str, payload: GenerateArticleRequest) -> GenerateArticleResponse:

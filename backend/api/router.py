@@ -46,6 +46,7 @@ from .service import (
     list_articles,
     new_article_template,
     save_article,
+    commit_article,
     update_prompt,
     list_sunday_services,
     create_sunday_service,
@@ -107,6 +108,12 @@ def retrieve_article(article_id: str) -> ArticleDetail:
 @router.post("", response_model=SaveArticleResponse)
 def create_or_update_article(payload: SaveArticleRequest) -> SaveArticleResponse:
     return save_article(payload)
+
+
+@router.post("/{article_id}/commit")
+def commit_article_endpoint(article_id: str) -> dict[str, str]:
+    result = commit_article(article_id)
+    return {"message": "Committed successfully", "commit_id": result}
 
 
 @router.post("/{article_id}/generate", response_model=GenerateArticleResponse)
