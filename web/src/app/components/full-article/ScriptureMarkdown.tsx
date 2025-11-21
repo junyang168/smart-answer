@@ -265,9 +265,16 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
           const id = sectionId ? `${sectionId}--${slug}` : undefined;
 
           return (
-            <h3 id={id} className="scroll-mt-24 text-xl font-semibold mt-6 mb-3 text-gray-800" {...props}>
+            <h3 id={id} className="scroll-mt-24 text-2xl font-semibold mt-6 mb-3 text-gray-800" {...props}>
               {children}
             </h3>
+          );
+        },
+        h4({ children, ...props }) {
+          return (
+            <h4 className="scroll-mt-24 text-xl font-semibold mt-5 mb-2 text-gray-800" {...props}>
+              {children}
+            </h4>
           );
         },
         a({ children, href, ...props }) {
