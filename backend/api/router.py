@@ -46,6 +46,7 @@ from .service import (
     list_articles,
     new_article_template,
     save_article,
+    delete_article,
     commit_article,
     update_prompt,
     list_sunday_services,
@@ -108,6 +109,12 @@ def retrieve_article(article_id: str) -> ArticleDetail:
 @router.post("", response_model=SaveArticleResponse)
 def create_or_update_article(payload: SaveArticleRequest) -> SaveArticleResponse:
     return save_article(payload)
+
+
+@router.delete("/{article_id}")
+def delete_article_endpoint(article_id: str) -> dict[str, str]:
+    delete_article(article_id)
+    return {"message": "Article deleted successfully"}
 
 
 @router.post("/{article_id}/commit")

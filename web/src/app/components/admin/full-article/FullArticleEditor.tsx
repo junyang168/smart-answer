@@ -11,6 +11,7 @@ import {
   saveFullArticle,
   updatePrompt,
   commitArticle,
+  deleteFullArticle,
 } from "../../../admin/full_article/api";
 import { FullArticleDetail, FullArticleStatus, FullArticleType } from "@/app/types/full-article";
 import { ArrowDown, ArrowUp, Plus, Trash2, LayoutList, FileText, Settings, FileText as FileIcon, AlignLeft, ScrollText, MessageSquare, ChevronDown, ChevronRight } from "lucide-react";
@@ -117,7 +118,7 @@ const STATUS_LABEL: Record<FullArticleStatus, string> = {
   final: "已定稿",
 };
 
-const ARTICLE_TYPES: FullArticleType[] = ["釋經", "神學觀點", "短文"];
+const ARTICLE_TYPES: FullArticleType[] = ["釋經", "神學觀點", "短文", "講稿素材"];
 
 type SidebarItem = "metadata" | "summary" | "script" | "prompt" | string; // string is section ID
 
@@ -138,6 +139,9 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   );
   const [sourceSermonIdsInput, setSourceSermonIdsInput] = useState(
     (initialArticle.sourceSermonIds ?? []).join("\n"),
+  );
+  const [sourceFullArticleIdsInput, setSourceFullArticleIdsInput] = useState(
+    (initialArticle.sourceFullArticleIds ?? []).join("\n"),
   );
 
   const [saving, setSaving] = useState(false);
@@ -162,6 +166,15 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setSections(parseSections(initialArticle.articleMarkdown));
     }
   }, [initialArticle.articleMarkdown]);
+
+  // Effect to switch view if current view is hidden by article type change
+  useEffect(() => {
+    if (articleType === "講稿素材") {
+      if (activeSidebarItem === "summary" || activeSidebarItem === "prompt" || sections.some(s => s.id === activeSidebarItem)) {
+        setActiveSidebarItem("metadata");
+      }
+    }
+  }, [articleType, activeSidebarItem, sections]);
 
   const handleSectionChange = (id: string, field: "title" | "content", value: string) => {
     setSections((prev) =>
@@ -276,6 +289,20 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
 
   const resetFeedback = () => setFeedback(null);
 
+  const handleDelete = async () => {
+    if (!articleId) return;
+    if (!confirm("確定要刪除這篇文章嗎？此動作無法復原。")) {
+      return;
+    }
+    try {
+      await deleteFullArticle(articleId);
+      router.replace("/admin/full_article");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "刪除失敗";
+      setFeedback({ type: "error", message });
+    }
+  };
+
   const handleSave = async (options?: { showFeedback?: boolean }) => {
     const showFeedback = options?.showFeedback ?? true;
     if (showFeedback) {
@@ -288,6 +315,10 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
         .map((verse) => verse.trim())
         .filter((verse) => verse.length > 0);
       const sourceSermonIds = sourceSermonIdsInput
+        .split(/\r?\n/)
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+      const sourceFullArticleIds = sourceFullArticleIdsInput
         .split(/\r?\n/)
         .map((id) => id.trim())
         .filter((id) => id.length > 0);
@@ -306,6 +337,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
         articleType: articleType || undefined,
         coreBibleVerses,
         sourceSermonIds,
+        sourceFullArticleIds,
       };
       const saved = await saveFullArticle(payload);
       setArticleId(saved.id);
@@ -322,6 +354,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
       setArticleType(saved.articleType ?? "");
       setCoreBibleVersesInput((saved.coreBibleVerses ?? []).join("\n"));
       setSourceSermonIdsInput((saved.sourceSermonIds ?? []).join("\n"));
+      setSourceFullArticleIdsInput((saved.sourceFullArticleIds ?? []).join("\n"));
       setPromptDirty(false);
       setPromptDirty(false);
       setLastSavedAt(new Date());
@@ -442,8 +475,12 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
   // Auto-save logic
   // Use a stable callback for the debounced function
   const performAutoSave = useCallback(() => {
+    // Don't auto-save new articles (without ID) that don't have a title yet
+    if (!articleId && !name.trim()) {
+      return;
+    }
     handleSaveRef.current({ showFeedback: false });
-  }, []);
+  }, [articleId, name]);
 
   const debouncedAutoSave = useDebouncedCallback(performAutoSave, 2000);
 
@@ -464,6 +501,7 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
     articleType,
     coreBibleVersesInput,
     sourceSermonIdsInput,
+    sourceFullArticleIdsInput,
     sections, // This covers articleMarkdown changes since sections are the source of truth
     debouncedAutoSave
   ]);
@@ -481,14 +519,6 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
           基本資訊
         </button>
         <button
-          onClick={() => setActiveSidebarItem("summary")}
-          className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeSidebarItem === "summary" ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
-            }`}
-        >
-          <AlignLeft className="w-4 h-4" />
-          摘要
-        </button>
-        <button
           onClick={() => setActiveSidebarItem("script")}
           className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeSidebarItem === "script" ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
             }`}
@@ -496,25 +526,39 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
           <ScrollText className="w-4 h-4" />
           原始講稿
         </button>
-        <button
-          onClick={() => setActiveSidebarItem("prompt")}
-          className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeSidebarItem === "prompt" ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
-            }`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          Prompt
-        </button>
+        {articleType !== "講稿素材" && (
+          <>
+            <button
+              onClick={() => setActiveSidebarItem("summary")}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeSidebarItem === "summary" ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
+                }`}
+            >
+              <AlignLeft className="w-4 h-4" />
+              摘要
+            </button>
+            <button
+              onClick={() => setActiveSidebarItem("prompt")}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${activeSidebarItem === "prompt" ? "bg-white shadow-sm text-blue-600" : "text-gray-700 hover:bg-gray-100"
+                }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Prompt
+            </button>
+          </>
+        )}
       </div>
 
-      <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider flex justify-between items-center border-t border-gray-200 mt-2 pt-4">
-        <span>文章章節</span>
-        <button onClick={() => handleAddSection(sections.length - 1)} className="hover:bg-gray-200 p-1 rounded">
-          <Plus className="w-3 h-3" />
-        </button>
-      </div>
+      {articleType !== "講稿素材" && (
+        <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider flex justify-between items-center border-t border-gray-200 mt-2 pt-4">
+          <span>文章章節</span>
+          <button onClick={() => handleAddSection(sections.length - 1)} className="hover:bg-gray-200 p-1 rounded">
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 p-2 space-y-1 overflow-y-auto">
-        {sections.map((section, index) => {
+        {articleType !== "講稿素材" && sections.map((section, index) => {
           const hasSubsections = section.subsections && section.subsections.length > 0;
           const isExpanded = expandedSectionId === section.id;
 
@@ -666,6 +710,16 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
             placeholder="例如：\nsermon-2024-05-12"
           />
         </label>
+        <label className="flex flex-col md:col-span-2">
+          <span className="text-sm font-medium text-gray-700">講道素材文章來源 ID（每行一個）</span>
+          <textarea
+            value={sourceFullArticleIdsInput}
+            onChange={(event) => setSourceFullArticleIdsInput(event.target.value)}
+            rows={3}
+            className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="例如：\narticle-2024-05-12"
+          />
+        </label>
       </div>
     </div>
   );
@@ -701,14 +755,16 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
           <h2 className="text-xl font-semibold text-gray-900">講稿</h2>
           <p className="text-gray-600 text-sm mt-1">提供給AI的原始講稿內容。</p>
         </div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={generating}
-          className="inline-flex items-center px-4 py-2 rounded-md bg-purple-600 text-white font-medium hover:bg-purple-700 disabled:opacity-60"
-        >
-          {generating ? "生成中..." : "生成文章"}
-        </button>
+        {articleType !== "講稿素材" && (
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={generating}
+            className="inline-flex items-center px-4 py-2 rounded-md bg-purple-600 text-white font-medium hover:bg-purple-700 disabled:opacity-60"
+          >
+            {generating ? "生成中..." : "生成文章"}
+          </button>
+        )}
       </header>
       <div className="flex-1 overflow-y-auto">
         <SimpleMDE
@@ -837,6 +893,16 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
             >
               {committing ? "提交中..." : "提交 Git"}
             </button>
+            {articleId && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="inline-flex items-center px-3 py-1.5 rounded-md bg-red-50 text-red-600 font-medium hover:bg-red-100 ml-2"
+                title="刪除文章"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       </header>

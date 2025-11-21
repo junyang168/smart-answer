@@ -94,6 +94,15 @@ def save_article(payload: SaveArticleRequest) -> SaveArticleResponse:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+def delete_article(article_id: str) -> None:
+    try:
+        repository.delete_article(article_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal error: {str(exc)}") from exc
+
+
 def commit_article(article_id: str) -> str:
     try:
         return repository.commit_article(article_id)

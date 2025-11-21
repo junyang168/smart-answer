@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, model_valida
 
 
 ArticleStatus = Literal["draft", "generated", "final"]
-ArticleType = Literal["釋經", "神學觀點", "短文"]
+ArticleType = Literal["釋經", "神學觀點", "短文", "講稿素材"]
 
 
 class ArticleMetadata(BaseModel):
@@ -27,6 +27,7 @@ class ArticleMetadata(BaseModel):
     article_type: Optional[ArticleType] = None
     core_bible_verses: List[str] = Field(default_factory=list)
     source_sermon_ids: List[str] = Field(default_factory=list)
+    source_full_article_ids: List[str] = Field(default_factory=list)
 
 
 class ArticleSummary(BaseModel):
@@ -42,6 +43,7 @@ class ArticleSummary(BaseModel):
     article_type: Optional[ArticleType] = Field(None, alias="articleType")
     core_bible_verses: List[str] = Field(default_factory=list, alias="coreBibleVerses")
     source_sermon_ids: List[str] = Field(default_factory=list, alias="sourceSermonIds")
+    source_full_article_ids: List[str] = Field(default_factory=list, alias="sourceFullArticleIds")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -66,6 +68,7 @@ class SaveArticleRequest(BaseModel):
     article_type: Optional[ArticleType] = Field(None, alias="articleType")
     core_bible_verses: List[str] = Field(default_factory=list, alias="coreBibleVerses")
     source_sermon_ids: List[str] = Field(default_factory=list, alias="sourceSermonIds")
+    source_full_article_ids: List[str] = Field(default_factory=list, alias="sourceFullArticleIds")
 
     model_config = ConfigDict(populate_by_name=True)
 

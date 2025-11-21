@@ -144,6 +144,7 @@ class ArticleRepository:
                 article_type=entry.article_type,
                 core_bible_verses=entry.core_bible_verses or [],
                 source_sermon_ids=entry.source_sermon_ids or [],
+                source_full_article_ids=entry.source_full_article_ids or [],
             )
             for entry in sorted(records, key=lambda e: e.updated_at, reverse=True)
         ]
@@ -157,6 +158,17 @@ class ArticleRepository:
             slug = f"{base}-{counter}"
             counter += 1
         return slug
+
+    def _generate_next_id(self, records: list[ArticleMetadata]) -> str:
+        max_id = 0
+        for entry in records:
+            try:
+                current = int(entry.id)
+                if current > max_id:
+                    max_id = current
+            except ValueError:
+                continue
+        return str(max_id + 1)
 
     def get_article(self, article_id: str) -> ArticleDetail:
         records = _load_metadata_models()
@@ -185,6 +197,7 @@ class ArticleRepository:
             article_type=entry.article_type,
             core_bible_verses=entry.core_bible_verses or [],
             source_sermon_ids=entry.source_sermon_ids or [],
+            source_full_article_ids=entry.source_full_article_ids or [],
         )
 
     def _read_markdown(self, path: Path) -> str:
@@ -209,22 +222,20 @@ class ArticleRepository:
             entry = next((item for item in records if item.id == payload.id), None)
             if not entry:
                 raise ValueError(f"Article {payload.id} not found")
-            if entry.script_filename:
-                previous_script_path = SCRIPTS_DIR / entry.script_filename
-            if entry.article_filename:
-                previous_article_path = ARTICLES_DIR / entry.article_filename
+            # Existing article: keep existing filenames (frozen)
             entry.name = payload.name
             entry.subtitle = payload.subtitle
             entry.status = payload.status
             entry.updated_at = now
         else:
+            new_id = self._generate_next_id(records)
             entry = ArticleMetadata(
-                id=str(uuid.uuid4()),
+                id=new_id,
                 name=payload.name,
                 subtitle=payload.subtitle,
                 slug="",
-                script_filename="",
-                article_filename="",
+                script_filename=f"{new_id}.md",
+                article_filename=f"{new_id}.md",
                 created_at=now,
                 updated_at=now,
                 status=payload.status,
@@ -232,16 +243,22 @@ class ArticleRepository:
                 article_type=payload.article_type,
                 core_bible_verses=[verse for verse in payload.core_bible_verses if verse],
                 source_sermon_ids=[sid for sid in payload.source_sermon_ids if sid],
+                source_full_article_ids=[aid for aid in payload.source_full_article_ids if aid],
             )
             records.append(entry)
 
         entry.slug = self._determine_slug(payload.name, records, entry.id)
-        entry.script_filename = f"{entry.slug}.md"
-        entry.article_filename = f"{entry.slug}.md"
+        # Ensure filenames are set (for safety), but do NOT overwrite with slug
+        if not entry.script_filename:
+            entry.script_filename = f"{entry.id}.md"
+        if not entry.article_filename:
+            entry.article_filename = f"{entry.id}.md"
+            
         entry.summary_markdown = payload.summary_markdown if payload.summary_markdown is not None else (entry.summary_markdown or "")
         entry.article_type = payload.article_type
         entry.core_bible_verses = [verse for verse in payload.core_bible_verses if verse]
         entry.source_sermon_ids = [sid for sid in payload.source_sermon_ids if sid]
+        entry.source_full_article_ids = [aid for aid in payload.source_full_article_ids if aid]
 
         script_path = SCRIPTS_DIR / entry.script_filename
         article_path = ARTICLES_DIR / entry.article_filename
@@ -250,18 +267,7 @@ class ArticleRepository:
         normalized_article = convert_parenthetical_references(payload.article_markdown)
         self._write_markdown(article_path, normalized_article)
 
-        if (
-            previous_script_path
-            and previous_script_path != script_path
-            and previous_script_path.exists()
-        ):
-            previous_script_path.unlink()
-        if (
-            previous_article_path
-            and previous_article_path != article_path
-            and previous_article_path.exists()
-        ):
-            previous_article_path.unlink()
+        # No file deletion/renaming logic needed for hybrid approach
 
         _persist_metadata(records)
 
@@ -269,6 +275,25 @@ class ArticleRepository:
             self.save_prompt(payload.prompt_markdown)
 
         return self._assemble_detail(entry)
+
+    def delete_article(self, article_id: str) -> None:
+        records = _load_metadata_models()
+        entry = next((item for item in records if item.id == article_id), None)
+        if not entry:
+            raise ValueError(f"Article {article_id} not found")
+
+        if entry.script_filename:
+            script_path = SCRIPTS_DIR / entry.script_filename
+            if script_path.exists():
+                script_path.unlink()
+        
+        if entry.article_filename:
+            article_path = ARTICLES_DIR / entry.article_filename
+            if article_path.exists():
+                article_path.unlink()
+
+        records = [item for item in records if item.id != article_id]
+        _persist_metadata(records)
 
     def commit_article(self, article_id: str) -> str:
         records = _load_metadata_models()

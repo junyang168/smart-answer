@@ -63,6 +63,16 @@ export async function saveFullArticle(payload: SaveFullArticlePayload): Promise<
   return parseJson(response);
 }
 
+export async function deleteFullArticle(articleId: string): Promise<void> {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(articleId)}`), {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || "刪除失敗");
+  }
+}
+
 export async function commitArticle(id: string): Promise<{ message: string; commit_id: string }> {
   const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${id}/commit`), {
     method: "POST",

@@ -6,6 +6,7 @@
       "type": "python",
       "request": "launch",
       "module": "uvicorn",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "args": [
         "backend.api.main:app",
         "--host",
@@ -37,22 +38,6 @@
       }
     },
     {
-      "name": "Generate Webcast Audio",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/backend/webcast_tts.py",
-      "args": [
-        "--ssml-file",
-        "${workspaceFolder}/backend/test2.ssml",
-        "--output",
-        "${workspaceFolder}/backend/test2.mp3",
-        "--no-vertex"
-      ],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
       "name": "Debug Next.js App",
       "type": "node",
       "request": "launch",
@@ -72,6 +57,24 @@
         "uriFormat": "http://localhost:%s",
         "action": "openExternally"
       }
-    }
+    },
+    {
+      "name": "Slide Detector",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/api/slide_detector.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--video",
+        "/Volumes/Jun SSD/data/video/2019-2-15 心mp4.mp4",
+        "--output",
+        "--scene-threshold",
+        "0.05",
+        "--blue-min",
+        "81",
+        "--output-dir",
+        "/opt/homebrew/var/www/church/web/data/slides"
+      ]
+    },
   ]
 }

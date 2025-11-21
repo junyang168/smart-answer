@@ -1,5 +1,5 @@
 export type FullArticleStatus = "draft" | "generated" | "final";
-export type FullArticleType = "釋經" | "神學觀點" | "短文";
+export type FullArticleType = "釋經" | "神學觀點" | "短文" | "講稿素材";
 
 export interface FullArticleSummary {
   id: string;
@@ -14,6 +14,7 @@ export interface FullArticleSummary {
   articleType?: FullArticleType | null;
   coreBibleVerses?: string[];
   sourceSermonIds?: string[];
+  sourceFullArticleIds?: string[];
 }
 
 export interface FullArticleDetail extends FullArticleSummary {
@@ -24,6 +25,7 @@ export interface FullArticleDetail extends FullArticleSummary {
   articleType?: FullArticleType | null;
   coreBibleVerses: string[];
   sourceSermonIds?: string[];
+  sourceFullArticleIds?: string[];
 }
 
 export interface SaveFullArticlePayload {
@@ -38,6 +40,7 @@ export interface SaveFullArticlePayload {
   articleType?: FullArticleType | null;
   coreBibleVerses?: string[];
   sourceSermonIds?: string[];
+  sourceFullArticleIds?: string[];
 }
 
 export interface GenerateArticleResponse {
