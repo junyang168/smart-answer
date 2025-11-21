@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth";
 import { FullArticleDetail } from "@/app/types/full-article";
 import { FullArticleReader } from "@/app/components/full-article/FullArticleReader";
-import { authConfig } from "@/app/utils/auth";
+import { getSessionWithDevFallback } from "@/app/utils/auth";
 import { buildArticleSections } from "@/app/components/full-article/section-utils";
 import { FullArticleUtilities } from "@/app/components/full-article/FullArticleUtilities";
 import { ArticleTOC } from "@/app/components/full-article/ArticleTOC";
@@ -88,12 +87,32 @@ export default async function FullArticleViewer({
 
   const articleSections = buildArticleSections(article.articleMarkdown || "");
   const sourceSermons = (article.sourceSermonIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
-  const session = await getServerSession(authConfig);
+  const sourceFullArticleIds = (article.sourceFullArticleIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+
+  const session = await getSessionWithDevFallback();
+
+  // Fetch sermon titles for direct source sermons
   const sermonTitleMap =
     session && sourceSermons.length > 0 ? await fetchSermonTitleMap(sourceSermons, { disableCache }) : {};
   const sourceSermonItems = sourceSermons.map((id) => ({ id, title: sermonTitleMap[id] ?? id }));
+
+  // Fetch source full articles
+  const sourceFullArticles: Array<FullArticleDetail & { sermonItems: Array<{ id: string; title: string }> }> = [];
+  if (session && sourceFullArticleIds.length > 0) {
+    for (const articleId of sourceFullArticleIds) {
+      const sourceArticle = await fetchArticle(articleId, { disableCache });
+      if (sourceArticle && sourceArticle.articleType === '講稿素材') {
+        const articleSermons = (sourceArticle.sourceSermonIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
+        const articleSermonTitleMap = articleSermons.length > 0 ? await fetchSermonTitleMap(articleSermons, { disableCache }) : {};
+        const sermonItems = articleSermons.map((id) => ({ id, title: articleSermonTitleMap[id] ?? id }));
+        sourceFullArticles.push({ ...sourceArticle, sermonItems });
+      }
+    }
+  }
+
   const hasSourceSermons = sourceSermonItems.length > 0;
-  const showSourceSermons = Boolean(session) && hasSourceSermons;
+  const hasSourceArticles = sourceFullArticles.length > 0;
+  const showSourceSection = Boolean(session) && (hasSourceSermons || hasSourceArticles);
   const showChapterNavigation = articleSections.length > 1;
 
   const articleTopAnchorId = "full-article-top";
@@ -120,7 +139,7 @@ export default async function FullArticleViewer({
             />
           </main>
 
-          {(showSourceSermons || showChapterNavigation) && (
+          {(showSourceSection || showChapterNavigation) && (
             <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
               <div className="space-y-6">
                 <FullArticleUtilities articleTitle={article.name || article.slug} articleMarkdown={article.articleMarkdown} />
@@ -134,29 +153,80 @@ export default async function FullArticleViewer({
                     )}
                   </div>
                 )}
-                {showSourceSermons && (
+                {showSourceSection && (
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
                     <h2 className="text-xl font-semibold text-gray-900">講道來源</h2>
                     <p className="mt-1 text-sm text-gray-600">
                       本文由以下講道彙整而成。
                     </p>
-                    <ul className="mt-4 space-y-3">
-                      {sourceSermonItems.map((item) => (
-                        <li key={item.id}>
-                          <Link
-                            href={`/resources/sermons/${encodeURIComponent(item.id)}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-semibold text-gray-900">{item.title}</p>
-                            </div>
-                            <span className="text-sm">↗</span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
+
+                    {/* Direct source sermons */}
+                    {hasSourceSermons && (
+                      <div className="mt-4">
+                        <ul className="space-y-3">
+                          {sourceSermonItems.map((item) => (
+                            <li key={item.id}>
+                              <Link
+                                href={`/resources/sermons/${encodeURIComponent(item.id)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate font-semibold text-gray-900">{item.title}</p>
+                                </div>
+                                <span className="text-sm">↗</span>
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Source material articles with nested sermons */}
+                    {hasSourceArticles && (
+                      <div className="mt-6">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">講稿素材文章</h3>
+                        <ul className="space-y-4">
+                          {sourceFullArticles.map((sourceArticle) => (
+                            <li key={sourceArticle.id} className="border-l-2 border-amber-300 pl-3">
+                              <Link
+                                href={`/resources/full_article/${encodeURIComponent(sourceArticle.id)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm font-medium transition hover:bg-amber-100"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <p className="font-semibold text-gray-900">{sourceArticle.name || sourceArticle.slug}</p>
+                                  <span className="text-sm text-amber-700">↗</span>
+                                </div>
+                              </Link>
+
+                              {/* Nested sermons for this material article */}
+                              {sourceArticle.sermonItems.length > 0 && (
+                                <ul className="mt-2 ml-3 space-y-2">
+                                  {sourceArticle.sermonItems.map((sermon) => (
+                                    <li key={sermon.id}>
+                                      <Link
+                                        href={`/resources/sermons/${encodeURIComponent(sermon.id)}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-2 py-1.5 text-xs transition hover:bg-blue-50"
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate text-gray-700">{sermon.title}</p>
+                                        </div>
+                                        <span className="text-xs text-blue-600">↗</span>
+                                      </Link>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
 

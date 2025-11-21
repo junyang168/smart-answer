@@ -3,7 +3,7 @@ import { useSession } from "next-auth/react";
 import { redirect, useRouter } from "next/navigation";
 
 import GoogleProvider from "next-auth/providers/google";
-import {getUserByEmail} from "./user-db"
+import { getUserByEmail } from "./user-db"
 
 
 export const authConfig: NextAuthOptions = {
@@ -24,12 +24,12 @@ export const authConfig: NextAuthOptions = {
      */
     async jwt({ token, user, account }) {
       // 这个回调在 JWT 被创建或更新时触发（例如，在登录时）
-      
+
       // 1. 登录时 (user 对象存在)
       if (user && account) {
         // 2. 根据登录用户的 email，从我们的数据库中查找附加信息
         const internalUser = await getUserByEmail(user.email);
-        
+
         if (internalUser) {
           // 3. 将我们的自定义数据（角色和ID）附加到 JWT token 上
           const normalizedRole = internalUser.role?.toLowerCase();
@@ -45,7 +45,7 @@ export const authConfig: NextAuthOptions = {
           token.internalId = internalUser.internalId;
         }
       }
-      
+
       // 4. 返回更新后的 token
       return token;
     },
@@ -57,7 +57,17 @@ export const authConfig: NextAuthOptions = {
      */
     async session({ session, token }) {
       // 这个回调在 session 被访问时触发（例如，客户端调用 useSession()）
-      
+
+      // DEV ENVIRONMENT: Hardcode role to 'editor' when Google Auth is not working
+      if (process.env.NODE_ENV === 'development') {
+        if (session.user) {
+          session.user.role = 'editor';
+          session.user.internalId = 'dev-user';
+        }
+        return session;
+      }
+
+      // PRODUCTION: Use token data from JWT callback
       // 1. 我们将 JWT token 中的自定义数据，同步到客户端可以访问的 session.user 对象上
       if (token.role && session.user) {
         session.user.role = token.role;
@@ -70,7 +80,7 @@ export const authConfig: NextAuthOptions = {
       return session;
     },
   },
-  
+
   // 确保您使用的是 'jwt' session 策略，这是默认的
   session: {
     strategy: "jwt",
@@ -91,3 +101,32 @@ export function loginIsRequiredClient() {
   }
 }
 */
+
+/**
+ * Get session with dev environment fallback
+ * In development, returns a mock editor session if no real session exists
+ */
+export async function getSessionWithDevFallback() {
+  const session = await getServerSession(authConfig);
+
+  // If we have a real session, return it
+  if (session) {
+    return session;
+  }
+
+  // In development, return a mock editor session
+  if (process.env.NODE_ENV === 'development') {
+    return {
+      user: {
+        name: 'Dev User',
+        email: 'dev@example.com',
+        role: 'editor' as const,
+        internalId: 'dev-user',
+      },
+      expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours from now
+    };
+  }
+
+  // In production, return null if no session
+  return null;
+}
