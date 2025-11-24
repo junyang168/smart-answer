@@ -27,7 +27,7 @@ export interface SurmonEditorHeader {
   core_bible_verse?: SurmonCoreBibleVerse[];
 }
 
-export type SurmonParagraphType = 'content' | 'comment';
+export type SurmonParagraphType = 'content' | 'comment' | 'subtitle';
 
 export interface SurmonScriptParagraph {
   /** Unique index that aligns with the media timeline */
@@ -209,4 +209,14 @@ export interface SurmonAuditEntry {
   context?: string | null;
   sequence?: number;
   changes: Record<string, SurmonAuditFieldChange>;
+}
+
+export interface SubtitleInsertion {
+  afterIndex: string;
+  text: string;
+  level: number;
+}
+
+export interface GenerateSubtitlesPayload {
+  paragraphs: SurmonScriptParagraph[];
 }

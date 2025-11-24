@@ -389,3 +389,17 @@ class SurmonSlideAsset(BaseModel):
     extracted_text: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class SubtitleInsertion(BaseModel):
+    after_index: str = Field(..., alias="afterIndex")
+    text: str
+    level: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GenerateSubtitlesRequest(BaseModel):
+    paragraphs: List[dict]
+
+    model_config = ConfigDict(populate_by_name=True)

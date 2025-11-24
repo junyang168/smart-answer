@@ -24,6 +24,7 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   BookmarkPlus,
+  Heading,
   History,
   Loader2,
   RefreshCcw,
@@ -58,6 +59,8 @@ import {
   SurmonChatReference,
   SurmonCoreBibleVerse,
   SurmonAuditEntry,
+  GenerateSubtitlesPayload,
+  SubtitleInsertion,
 } from "@/app/types/surmon-editor";
 
 const SimpleMDE = dynamic(() => import("react-simplemde-editor"), { ssr: false });
@@ -550,22 +553,20 @@ const SlidePickerModal = ({
                     type="button"
                     onClick={() => setPickerTab("capture")}
                     disabled={!videoSource}
-                    className={`flex-1 rounded-md px-3 py-1 transition ${
-                      pickerTab === "capture" && videoSource
-                        ? "bg-white text-blue-600 shadow"
-                        : videoSource
+                    className={`flex-1 rounded-md px-3 py-1 transition ${pickerTab === "capture" && videoSource
+                      ? "bg-white text-blue-600 shadow"
+                      : videoSource
                         ? "hover:bg-white"
                         : "opacity-50"
-                    }`}
+                      }`}
                   >
                     從影片擷取畫面
                   </button>
                   <button
                     type="button"
                     onClick={() => setPickerTab("slides")}
-                    className={`flex-1 rounded-md px-3 py-1 transition ${
-                      pickerTab === "slides" ? "bg-white text-blue-600 shadow" : "hover:bg-white"
-                    }`}
+                    className={`flex-1 rounded-md px-3 py-1 transition ${pickerTab === "slides" ? "bg-white text-blue-600 shadow" : "hover:bg-white"
+                      }`}
                   >
                     已生成投影片
                   </button>
@@ -580,69 +581,69 @@ const SlidePickerModal = ({
                             目前時間：{formatTimestamp(captureCurrentTime) ?? "0:00"}
                           </span>
                         </div>
-                    <div className="mt-2 overflow-hidden rounded-md border border-blue-200 bg-black/80">
-                      <video
-                        ref={captureVideoRef}
-                        controls
-                        preload="metadata"
-                        className="w-full bg-black"
-                        onTimeUpdate={handleCaptureTimeUpdate}
-                        onLoadedMetadata={handleCaptureLoaded}
-                        onPlay={handleCapturePlay}
-                        onSeeking={handleCaptureSeeking}
-                      >
-                        <source src={videoSource} />
-                        您的瀏覽器不支援 video 元素。
-                      </video>
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                      <button
-                        type="button"
-                        onClick={handleSeekToStart}
-                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
-                        title={paragraphStart != null ? `跳至段落開始（${formatTimestamp(paragraphStart)}）` : "跳至段落開始"}
-                      >
-                        <i className="fa fa-step-backward" aria-hidden="true" />
-                        {paragraphStart != null ? (
-                          <span className="text-[11px] text-blue-600">
-                            {formatTimestamp(paragraphStart)}
-                          </span>
-                        ) : null}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSeekToEnd}
-                        disabled={paragraphEnd == null}
-                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        title={
-                          paragraphEnd != null
-                            ? `跳至段落結束（${formatTimestamp(paragraphEnd)}）`
-                            : "跳至段落結束"
-                        }
-                      >
-                        <i className="fa fa-step-forward" aria-hidden="true" />
-                        {paragraphEnd != null ? (
-                          <span className="text-[11px] text-blue-600">
-                            {formatTimestamp(paragraphEnd)}
-                          </span>
-                        ) : null}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSeekBackward}
-                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
-                        title="倒退 5 秒"
-                      >
-                        <i className="fa fa-rotate-left" aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSeekForward}
-                        className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
-                        title="快進 5 秒"
-                      >
-                        <i className="fa fa-rotate-right" aria-hidden="true" />
-                      </button>
+                        <div className="mt-2 overflow-hidden rounded-md border border-blue-200 bg-black/80">
+                          <video
+                            ref={captureVideoRef}
+                            controls
+                            preload="metadata"
+                            className="w-full bg-black"
+                            onTimeUpdate={handleCaptureTimeUpdate}
+                            onLoadedMetadata={handleCaptureLoaded}
+                            onPlay={handleCapturePlay}
+                            onSeeking={handleCaptureSeeking}
+                          >
+                            <source src={videoSource} />
+                            您的瀏覽器不支援 video 元素。
+                          </video>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={handleSeekToStart}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                            title={paragraphStart != null ? `跳至段落開始（${formatTimestamp(paragraphStart)}）` : "跳至段落開始"}
+                          >
+                            <i className="fa fa-step-backward" aria-hidden="true" />
+                            {paragraphStart != null ? (
+                              <span className="text-[11px] text-blue-600">
+                                {formatTimestamp(paragraphStart)}
+                              </span>
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSeekToEnd}
+                            disabled={paragraphEnd == null}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={
+                              paragraphEnd != null
+                                ? `跳至段落結束（${formatTimestamp(paragraphEnd)}）`
+                                : "跳至段落結束"
+                            }
+                          >
+                            <i className="fa fa-step-forward" aria-hidden="true" />
+                            {paragraphEnd != null ? (
+                              <span className="text-[11px] text-blue-600">
+                                {formatTimestamp(paragraphEnd)}
+                              </span>
+                            ) : null}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSeekBackward}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                            title="倒退 5 秒"
+                          >
+                            <i className="fa fa-rotate-left" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSeekForward}
+                            className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-blue-700 transition hover:bg-blue-100"
+                            title="快進 5 秒"
+                          >
+                            <i className="fa fa-rotate-right" aria-hidden="true" />
+                          </button>
                           <div className="flex-1" />
                           <button
                             type="button"
@@ -679,9 +680,8 @@ const SlidePickerModal = ({
                                   key={capture.id}
                                   onClick={() => handleSelectSlide(capture)}
                                   onDoubleClick={() => onInsert(capture)}
-                                  className={`flex min-w-[10rem] flex-col gap-2 rounded-lg border p-2 text-left text-xs transition ${
-                                    isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
-                                  }`}
+                                  className={`flex min-w-[10rem] flex-col gap-2 rounded-lg border p-2 text-left text-xs transition ${isSelected ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50"
+                                    }`}
                                 >
                                   <div className="overflow-hidden rounded border border-gray-200 bg-black/70">
                                     <Image
@@ -733,13 +733,12 @@ const SlidePickerModal = ({
                               type="button"
                               onClick={() => handleSelectSlide(candidate)}
                               onDoubleClick={() => onInsert(slide)}
-                              className={`w-full rounded-lg border ${
-                                isSelected
-                                  ? "border-blue-400 bg-blue-50"
-                                  : isSuggested
+                              className={`w-full rounded-lg border ${isSelected
+                                ? "border-blue-400 bg-blue-50"
+                                : isSuggested
                                   ? "border-blue-200 bg-blue-50/50"
                                   : "border-transparent bg-gray-50"
-                              } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
+                                } p-3 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50`}
                             >
                               <div className="flex gap-4">
                                 <div className="w-[500px] overflow-hidden rounded-md border border-gray-200 bg-gray-100">
@@ -960,6 +959,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [isSavingMetadata, setIsSavingMetadata] = useState(false);
   const [metadataSaveError, setMetadataSaveError] = useState<string | null>(null);
   const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
+  const [isGeneratingSubtitles, setIsGeneratingSubtitles] = useState(false);
   const [metadataGenerateError, setMetadataGenerateError] = useState<string | null>(null);
   const [slides, setSlides] = useState<SurmonSlideAsset[]>([]);
   const [slidesStatus, setSlidesStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -1011,7 +1011,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const resolvedUserEmail = useMemo(() => sessionEmail ?? FALLBACK_USER_ID, [sessionEmail]);
 
-//  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
+  //  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
   const canEdit = true;
 
   const handleMediaRef = useCallback((element: HTMLVideoElement | HTMLAudioElement | null) => {
@@ -1567,8 +1567,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           `${API_PREFIX}/permissions/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}`
         ),
         fetchJSON<SurmonScriptResponse>(
-          `${API_PREFIX}/sermon/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}/${
-            viewChanges ? "changes" : "no_changes"
+          `${API_PREFIX}/sermon/${encodeURIComponent(resolvedUserEmail)}/${encodeURIComponent(item)}/${viewChanges ? "changes" : "no_changes"
           }`
         ),
       ]);
@@ -1707,13 +1706,13 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   useEffect(() => {
     if (activeTab === "slides" && slideFrameStatus === "idle") {
-      loadSlideFrame().catch(() => {});
+      loadSlideFrame().catch(() => { });
     }
   }, [activeTab, loadSlideFrame, slideFrameStatus]);
 
   useEffect(() => {
     if (activeTab === "slides" && slidesStatus === "idle") {
-      loadSlides().catch(() => {});
+      loadSlides().catch(() => { });
     }
   }, [activeTab, loadSlides, slidesStatus]);
 
@@ -1962,7 +1961,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     if (slideFrameStatus === "loading") {
       return;
     }
-    loadSlideFrame().catch(() => {});
+    loadSlideFrame().catch(() => { });
   }, [loadSlideFrame, slideFrameStatus]);
 
   const handleSaveFrame = useCallback(async () => {
@@ -2139,18 +2138,18 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       setState({ status: "error", paragraphs: [], error: "請登入後再進入編輯頁面。" });
       return;
     }
-    loadData().catch(() => {});
+    loadData().catch(() => { });
   }, [authStatus, loadData, sessionEmail]);
 
-//  useEffect(() => {
-//    if (state.status === "ready" && canEdit) {
-//      loadSlides().catch(() => {});
-//   }
-//  }, [canEdit, loadSlides, state.status]);
+  //  useEffect(() => {
+  //    if (state.status === "ready" && canEdit) {
+  //      loadSlides().catch(() => {});
+  //   }
+  //  }, [canEdit, loadSlides, state.status]);
 
   useEffect(() => {
     if (openSlidePickerIndex != null && slidesStatus === "idle") {
-      loadSlides().catch(() => {});
+      loadSlides().catch(() => { });
     }
   }, [loadSlides, openSlidePickerIndex, slidesStatus]);
 
@@ -2572,14 +2571,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   }, [item, metadataDraft, state.header]);
 
   const handleTitleBlur = useCallback(() => {
-    saveMetadata().catch(() => {});
+    saveMetadata().catch(() => { });
   }, [saveMetadata]);
 
   const handleTitleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        saveMetadata().catch(() => {});
+        saveMetadata().catch(() => { });
       } else if (event.key === "Escape") {
         const currentTitle = state.header?.title ?? item;
         setMetadataDraft((prev) => ({ ...prev, title: currentTitle }));
@@ -2591,7 +2590,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   );
 
   const handleMetadataSubmit = useCallback(() => {
-    saveMetadata().catch(() => {});
+    saveMetadata().catch(() => { });
   }, [saveMetadata]);
 
   const handleGenerateMetadata = useCallback(() => {
@@ -2708,7 +2707,13 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           className: "fa fa-step-forward",
           title: "跳至段落結尾",
         }
-      ] as NonNullable<SimpleMDEOptions["toolbar"]>,
+      ].filter((item) => {
+        // Hide insert-slide button if sermon type is not video
+        if (typeof item === "object" && item.name === "insert-slide") {
+          return state.header?.type === "video";
+        }
+        return true;
+      }) as NonNullable<SimpleMDEOptions["toolbar"]>,
     [
       handleJumpToEnd,
       handleJumpToStart,
@@ -2717,6 +2722,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       handlePlayMedia,
       handleSkipBackward,
       handleSkipForward,
+      state.header,
     ]
   );
 
@@ -2817,6 +2823,90 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     },
     [fetchJSON, item, resolvedUserEmail]
   );
+
+  const handleAddSubtitle = useCallback(async () => {
+    if (!canEdit || isGeneratingSubtitles) return;
+
+    setIsGeneratingSubtitles(true);
+    try {
+      const payload: GenerateSubtitlesPayload = {
+        paragraphs: state.paragraphs,
+      };
+
+      const insertions = await fetchJSON<SubtitleInsertion[]>(`${API_PREFIX}/generate_subtitles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (insertions.length === 0) {
+        window.alert("AI 未能產生任何小標題建議。");
+        return;
+      }
+
+      console.log("Received insertions:", insertions);
+
+      setState((prev) => {
+        const nextParagraphs = [...prev.paragraphs];
+        let insertedCount = 0;
+
+        const insertionMap = new Map<string, SubtitleInsertion[]>();
+        for (const ins of insertions) {
+          const key = ins.afterIndex;
+          if (!insertionMap.has(key)) {
+            insertionMap.set(key, []);
+          }
+          insertionMap.get(key)?.push(ins);
+        }
+
+        console.log("Insertion Map:", Object.fromEntries(insertionMap));
+        console.log("Current Paragraph Indices:", nextParagraphs.map(p => p.index));
+
+        const newParagraphs: SurmonScriptParagraph[] = [];
+
+        // Handle "START" insertions
+        if (insertionMap.has("START")) {
+          const startInsertions = insertionMap.get("START")!;
+          for (const ins of startInsertions) {
+            newParagraphs.push({
+              index: `subtitle-${Date.now()}-${insertedCount++}`,
+              type: "content",
+              text: ins.text,
+              user_id: resolvedUserEmail ?? undefined,
+              user_name: "AI Assistant",
+            });
+          }
+        }
+
+        for (const p of nextParagraphs) {
+          newParagraphs.push(p);
+          const pIndexStr = String(p.index);
+          if (insertionMap.has(pIndexStr)) {
+            const insList = insertionMap.get(pIndexStr)!;
+            for (const ins of insList) {
+              newParagraphs.push({
+                index: `subtitle-${Date.now()}-${insertedCount++}`,
+                type: "subtitle",
+                text: ins.text,
+                user_id: resolvedUserEmail ?? undefined,
+                user_name: "AI Assistant",
+              });
+            }
+          }
+        }
+
+        const sequenced = ensureSequence(newParagraphs);
+        requestSave(sequenced);
+        return { ...prev, paragraphs: sequenced };
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "產生小標題失敗";
+      window.alert(`產生小標題失敗：${message}`);
+    } finally {
+      setIsGeneratingSubtitles(false);
+    }
+  }, [canEdit, isGeneratingSubtitles, fetchJSON, resolvedUserEmail, requestSave, state.paragraphs]);
 
   useEffect(() => {
     return () => {
@@ -2949,11 +3039,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
               <button
                 ref={historyButtonRef}
                 onClick={handleToggleHistory}
-                className={`inline-flex items-center px-2.5 py-1.5 font-medium border rounded-md transition ${
-                  historyOpen
-                    ? "bg-gray-100 text-gray-900 border-gray-300"
-                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-100"
-                }`}
+                className={`inline-flex items-center px-2.5 py-1.5 font-medium border rounded-md transition ${historyOpen
+                  ? "bg-gray-100 text-gray-900 border-gray-300"
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-100"
+                  }`}
                 type="button"
               >
                 <History className="w-4 h-4 mr-2" /> 編輯歷史
@@ -3096,606 +3185,617 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           ) : null}
         </div>
         {metadataSaveError && <p className="text-xs text-red-600">{metadataSaveError}</p>}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <aside className="flex flex-col gap-4 self-stretch min-h-0">
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            {header?.type === "audio" ? (
-              <audio ref={handleMediaRef} controls className="w-full">
-                <source src={mediaSource ?? ""} />
-                您的瀏覽器不支援 audio 元素。
-              </audio>
-            ) : activeTab === "metadata" ? (
-              <video ref={handleMediaRef} controls className="w-full">
-                <source src={mediaSource ?? ""} />
-                您的瀏覽器不支援 video 元素。
-              </video>
-            ) : (
-              <video ref={handleMediaRef} controls className="w-full">
-                <source src={mediaSource ?? ""} />
-                您的瀏覽器不支援 video 元素。
-              </video>
-            )}
-          </div>
-          <header className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
-              {header?.deliver_date && <span>讲道日期：{header.deliver_date}</span>}
-              {header?.theme && <span>主題：{header.theme}</span>}
-              <span>
-                權限：
-                {permissions?.canWrite ? "可編輯" : permissions?.canRead ? "僅可讀" : "未授權"}
-                {viewChanges && "（差異檢視）"}
-              </span>
-            </div>
-            {saveError && <p className="mt-3 text-sm text-red-600">儲存失敗：{saveError}</p>}
-            {isSaving && <p className="mt-3 text-sm text-blue-600">正在自動儲存...</p>}
-            {lastSavedAt && !isSaving && (
-              <p className="mt-3 text-sm text-gray-500">最後儲存：{lastSavedAt.toLocaleTimeString()}</p>
-            )}
-          </header>
-          <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col flex-1 min-h-0 max-h-[70vh] overflow-hidden">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-700">講道 AI 助理</h3>
-              <span className="text-xs text-gray-400">Beta</span>
-            </div>
-            <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
-              {chatMessages.length === 0 ? (
-                <p className="text-sm leading-relaxed text-gray-500">
-                  歡迎提問講道相關問題，助理會根據讲道內容提供回答。
-                </p>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <aside className="flex flex-col gap-4 self-stretch min-h-0">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              {header?.type === "audio" ? (
+                <audio ref={handleMediaRef} controls className="w-full">
+                  <source src={mediaSource ?? ""} />
+                  您的瀏覽器不支援 audio 元素。
+                </audio>
+              ) : activeTab === "metadata" ? (
+                <video ref={handleMediaRef} controls className="w-full">
+                  <source src={mediaSource ?? ""} />
+                  您的瀏覽器不支援 video 元素。
+                </video>
               ) : (
-                chatMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`rounded-lg border px-3 py-2 text-sm leading-relaxed shadow-sm ${
-                      message.role === "user"
+                <video ref={handleMediaRef} controls className="w-full">
+                  <source src={mediaSource ?? ""} />
+                  您的瀏覽器不支援 video 元素。
+                </video>
+              )}
+            </div>
+            <header className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+              <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+                {header?.deliver_date && <span>讲道日期：{header.deliver_date}</span>}
+                {header?.theme && <span>主題：{header.theme}</span>}
+                <span>
+                  權限：
+                  {permissions?.canWrite ? "可編輯" : permissions?.canRead ? "僅可讀" : "未授權"}
+                  {viewChanges && "（差異檢視）"}
+                </span>
+              </div>
+              {saveError && <p className="mt-3 text-sm text-red-600">儲存失敗：{saveError}</p>}
+              {isSaving && <p className="mt-3 text-sm text-blue-600">正在自動儲存...</p>}
+              {lastSavedAt && !isSaving && (
+                <p className="mt-3 text-sm text-gray-500">最後儲存：{lastSavedAt.toLocaleTimeString()}</p>
+              )}
+            </header>
+            <section className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col flex-1 min-h-0 max-h-[70vh] overflow-hidden">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-700">講道 AI 助理</h3>
+                <span className="text-xs text-gray-400">Beta</span>
+              </div>
+              <div className="mt-3 flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+                {chatMessages.length === 0 ? (
+                  <p className="text-sm leading-relaxed text-gray-500">
+                    歡迎提問講道相關問題，助理會根據讲道內容提供回答。
+                  </p>
+                ) : (
+                  chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`rounded-lg border px-3 py-2 text-sm leading-relaxed shadow-sm ${message.role === "user"
                         ? "border-blue-200 bg-blue-50 text-blue-800"
                         : "border-gray-200 bg-gray-50 text-gray-700"
-                    }`}
-                  >
-                    {message.role === "assistant" ? (
-                      <ReactMarkdown
-                        remarkPlugins={surmonMarkdownRemarkPlugins}
-                        rehypePlugins={surmonMarkdownRehypePlugins}
-                        components={surmonMarkdownComponents}
-                        className="prose prose-sm max-w-none text-gray-700 [&>*:last-child]:mb-0"
-                      >
-                        {message.content}
-                      </ReactMarkdown>
-                    ) : (
-                      <p className="whitespace-pre-wrap">{message.content}</p>
-                    )}
-                    {message.quotes?.length ? (
-                      <ul className="mt-2 space-y-1 border-l border-gray-200 pl-3 text-xs text-gray-500">
-                        {message.quotes.map((quote) => (
-                          <li key={`${message.id}-${quote.Id}`}>
-                            <span className="font-semibold text-gray-600">[{quote.Index}]</span>{" "}
-                            {quote.Title ?? "相關引文"}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ))
-              )}
-              {isChatLoading ? (
-                <div className="flex items-center gap-2 text-sm text-blue-600">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  助理正在整理回應...
-                </div>
-              ) : null}
-              <div ref={chatEndRef} />
-            </div>
-            <form onSubmit={handleChatSubmit} className="mt-3 space-y-2">
-              <textarea
-                value={chatInput}
-                onChange={handleChatInputChange}
-                disabled={isChatLoading}
-                rows={3}
-                className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm shadow-inner focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                placeholder="輸入想詢問的內容，例如：這段講道的重點是什麼？"
-              />
-              <div className="flex items-center justify-between">
-                {chatError ? (
-                  <p className="text-xs text-red-600">{chatError}</p>
-                ) : (
-                  <span className="text-xs text-gray-400">Shift + Enter 換行</span>
+                        }`}
+                    >
+                      {message.role === "assistant" ? (
+                        <ReactMarkdown
+                          remarkPlugins={surmonMarkdownRemarkPlugins}
+                          rehypePlugins={surmonMarkdownRehypePlugins}
+                          components={surmonMarkdownComponents}
+                          className="prose prose-sm max-w-none text-gray-700 [&>*:last-child]:mb-0"
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      ) : (
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      )}
+                      {message.quotes?.length ? (
+                        <ul className="mt-2 space-y-1 border-l border-gray-200 pl-3 text-xs text-gray-500">
+                          {message.quotes.map((quote) => (
+                            <li key={`${message.id}-${quote.Id}`}>
+                              <span className="font-semibold text-gray-600">[{quote.Index}]</span>{" "}
+                              {quote.Title ?? "相關引文"}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ))
                 )}
-                <button
-                  type="submit"
-                  disabled={isChatLoading || chatInput.trim() === ""}
-                  className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-                >
-                  發送
-                </button>
+                {isChatLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-blue-600">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    助理正在整理回應...
+                  </div>
+                ) : null}
+                <div ref={chatEndRef} />
               </div>
-            </form>
-          </section>
-        </aside>
+              <form onSubmit={handleChatSubmit} className="mt-3 space-y-2">
+                <textarea
+                  value={chatInput}
+                  onChange={handleChatInputChange}
+                  disabled={isChatLoading}
+                  rows={3}
+                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm shadow-inner focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                  placeholder="輸入想詢問的內容，例如：這段講道的重點是什麼？"
+                />
+                <div className="flex items-center justify-between">
+                  {chatError ? (
+                    <p className="text-xs text-red-600">{chatError}</p>
+                  ) : (
+                    <span className="text-xs text-gray-400">Shift + Enter 換行</span>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={isChatLoading || chatInput.trim() === ""}
+                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                  >
+                    發送
+                  </button>
+                </div>
+              </form>
+            </section>
+          </aside>
 
-        <section className="xl:col-span-2 space-y-4">
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("script")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                    activeTab === "script"
+          <section className="xl:col-span-2 space-y-4">
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("script")}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "script"
                       ? "border border-blue-200 bg-blue-100 text-blue-700"
                       : "border border-transparent text-gray-600 hover:text-blue-700"
-                  }`}
-                >
-                  講道稿內容
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("metadata")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                    activeTab === "metadata"
+                      }`}
+                  >
+                    講道稿內容
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("metadata")}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "metadata"
                       ? "border border-blue-200 bg-blue-100 text-blue-700"
                       : "border border-transparent text-gray-600 hover:text-blue-700"
-                  }`}
-                >
-                  标题和简介
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("slides")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                    activeTab === "slides"
+                      }`}
+                  >
+                    标题和简介
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("slides")}
+                    disabled={header?.type !== "video"}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "slides"
                       ? "border border-blue-200 bg-blue-100 text-blue-700"
                       : "border border-transparent text-gray-600 hover:text-blue-700"
-                  }`}
-                >
-                  生成 slides
-                </button>
+                      } ${header?.type !== "video" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    生成 slides
+                  </button>
+                </div>
+                {activeTab === "script" && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleAddSubtitle}
+                      disabled={!canEdit || isGeneratingSubtitles}
+                      className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isGeneratingSubtitles ? (
+                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      ) : (
+                        <Heading className="w-3 h-3 mr-1" />
+                      )}
+                      {isGeneratingSubtitles ? "生成中..." : "加小標題"}
+                    </button>
+                    {selectedParagraph && (
+                      <button
+                        onClick={() => handleMarkBookmark(selectedParagraph)}
+                        className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                      >
+                        <BookmarkPlus className="w-3 h-3 mr-1" /> 設為書籤
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              {activeTab === "script" && selectedParagraph && (
-                <button
-                  onClick={() => handleMarkBookmark(selectedParagraph)}
-                  className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
-                >
-                  <BookmarkPlus className="w-3 h-3 mr-1" /> 設為書籤
-                </button>
-              )}
-            </div>
 
-            {activeTab === "script" ? (
-              <div className="max-h-[70vh] overflow-y-auto">
-                <div className="divide-y divide-gray-100">
-                  {state.paragraphs.map((paragraph, index) => {
-                    const isEditing = canEdit && editingIndex === index;
-                    const isSelected = index === selectedIndex;
-                    const isHighlighted = highlightedParagraphs.has(index);
-                    const isBookmarked = paragraph.index === bookmarkIndex;
-                    return (
-                      <div
-                        id={`surmon-paragraph-${index}`}
-                        key={`${paragraph.index}-${index}`}
-                        className={`group px-4 py-3 transition-colors ${
-                          isSelected
+              {activeTab === "script" ? (
+                <div className="max-h-[70vh] overflow-y-auto">
+                  <div className="divide-y divide-gray-100">
+                    {state.paragraphs.map((paragraph, index) => {
+                      const isEditing = canEdit && editingIndex === index;
+                      const isSelected = index === selectedIndex;
+                      const isHighlighted = highlightedParagraphs.has(index);
+                      const isBookmarked = paragraph.index === bookmarkIndex;
+                      return (
+                        <div
+                          id={`surmon-paragraph-${index}`}
+                          key={`${paragraph.index}-${index}`}
+                          className={`group px-4 py-3 transition-colors ${isSelected
                             ? "bg-blue-50"
                             : isHighlighted
-                            ? "bg-amber-50"
-                            : "hover:bg-gray-50"
-                        } ${isEditing ? "border-l-2 border-blue-300" : ""} ${
-                          isHighlighted ? "ring-1 ring-amber-300" : ""
-                        } ${isBookmarked ? "border border-amber-200" : ""}`}
-                        onClick={(event) => handleParagraphClick(event, index)}
-                        onDoubleClick={canEdit ? () => handleStartEditing(index) : undefined}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="pt-1 text-xs font-semibold text-gray-400 w-16">
-                            {paragraph.start_timeline ?? "--:--"}
-                          </div>
-                          <div className="flex-1">
-                            {isEditing ? (
-                              <div className="space-y-2">
-                                <SimpleMDE
-                                  key={`${paragraph.index ?? "paragraph"}-${index}`}
-                                  value={paragraph.text}
-                                  onChange={(value) => handleEditorChange(index, value)}
-                                  getMdeInstance={(instance) => {
-                                    activeEditorRef.current = instance;
-                                    activeEditorIndexRef.current = index;
-                                  }}
-                                  options={editorOptions}
-                                />
-                              </div>
-                            ) : (
-                              renderParagraphContent(paragraph)
-                            )}
+                              ? "bg-amber-50"
+                              : "hover:bg-gray-50"
+                            } ${isEditing ? "border-l-2 border-blue-300" : ""} ${isHighlighted ? "ring-1 ring-amber-300" : ""
+                            } ${isBookmarked ? "border border-amber-200" : ""}`}
+                          onClick={(event) => handleParagraphClick(event, index)}
+                          onDoubleClick={canEdit ? () => handleStartEditing(index) : undefined}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="pt-1 text-xs font-semibold text-gray-400 w-16">
+                              {paragraph.start_timeline ?? "--:--"}
+                            </div>
+                            <div className="flex-1">
+                              {isEditing ? (
+                                <div className="space-y-2">
+                                  <SimpleMDE
+                                    key={`${paragraph.index ?? "paragraph"}-${index}`}
+                                    value={paragraph.text}
+                                    onChange={(value) => handleEditorChange(index, value)}
+                                    getMdeInstance={(instance) => {
+                                      activeEditorRef.current = instance;
+                                      activeEditorIndexRef.current = index;
+                                    }}
+                                    options={editorOptions}
+                                  />
+                                </div>
+                              ) : (
+                                renderParagraphContent(paragraph)
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : activeTab === "metadata" ? (
-              <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
-                <div className="space-y-5">
-                  {metadataGenerateError && (
-                    <p className="text-xs text-red-600">{metadataGenerateError}</p>
-                  )}
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">講道標題</label>
-                    <input
-                      type="text"
-                      value={metadataDraft.title}
-                      onChange={handleTitleChange}
-                      onBlur={handleTitleBlur}
-                      onKeyDown={handleTitleKeyDown}
-                      disabled={!canEdit}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                      placeholder="輸入講道標題"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">講道摘要</label>
-                    <textarea
-                      value={metadataDraft.summary}
-                      onChange={handleSummaryChange}
-                      rows={4}
-                      disabled={!canEdit}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                      placeholder="輸入講道摘要或簡介"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">要點整理</label>
-                    <textarea
-                      value={metadataDraft.keypoints}
-                      onChange={handleKeypointsChange}
-                      rows={6}
-                      disabled={!canEdit}
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                      placeholder="輸入要點條列或重點整理"
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-sm font-semibold text-gray-700">核心經文</label>
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={handleAddVerse}
-                          className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                        >
-                          新增經文
-                        </button>
-                      )}
-                    </div>
-                    {metadataDraft.coreBibleVerses.length === 0 ? (
-                      <p className="text-xs text-gray-500">目前尚未設定核心經文。</p>
-                    ) : (
-                      metadataDraft.coreBibleVerses.map((verse, index) => (
-                        <div
-                          key={`core-verse-${index}`}
-                          className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3"
-                        >
-                          <div className="flex flex-col gap-3 md:flex-row">
-                            <div className="flex-1">
-                              <label className="block text-xs font-medium text-gray-600 mb-1">書卷</label>
-                              <input
-                                type="text"
-                                value={verse.book}
-                                onChange={handleVerseFieldChange(index, "book")}
-                                disabled={!canEdit}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                                placeholder="如：創世記"
-                              />
-                            </div>
-                            <div className="flex-1">
-                              <label className="block text-xs font-medium text-gray-600 mb-1">章節</label>
-                              <input
-                                type="text"
-                                value={verse.chapter_verse}
-                                onChange={handleVerseFieldChange(index, "chapter_verse")}
-                                disabled={!canEdit}
-                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                                placeholder="例如：3:16-18"
-                              />
-                            </div>
-                            {canEdit && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveVerse(index)}
-                                className="self-start rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                              >
-                                移除
-                              </button>
-                            )}
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">經文內容</label>
-                            <textarea
-                              value={verse.text}
-                              onChange={handleVerseFieldChange(index, "text")}
-                              disabled={!canEdit}
-                              rows={3}
-                              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
-                              placeholder="輸入經文內容"
-                            />
-                          </div>
-                        </div>
-                      ))
+              ) : activeTab === "metadata" ? (
+                <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
+                  <div className="space-y-5">
+                    {metadataGenerateError && (
+                      <p className="text-xs text-red-600">{metadataGenerateError}</p>
                     )}
-                  </div>
-                  {metadataSaveError && (
-                    <p className="text-sm text-red-600">{metadataSaveError}</p>
-                  )}
-                  <div className="flex items-center justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={handleGenerateMetadata}
-                      disabled={!canEdit || isGeneratingMetadata || state.paragraphs.length === 0}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50 disabled:text-blue-300"
-                    >
-                      {isGeneratingMetadata ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> 產生中...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-3.5 w-3.5" /> AI 生成
-                        </>
-                      )}
-                    </button>
-                    {metadataHasChanges && !isSavingMetadata ? (
-                      <span className="text-xs text-gray-500">尚有未儲存的變更</span>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={handleMetadataSubmit}
-                      disabled={!canEdit || !metadataHasChanges || isSavingMetadata}
-                      className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-                    >
-                      {isSavingMetadata ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" /> 儲存中...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="h-4 w-4" /> 儲存標題與簡介
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
-                <div className="space-y-6">
-                  <section className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-gray-800">步驟一：設定投影畫面框線</h3>
-                      <span className="text-xs text-gray-500">
-                        參考時間：{formatTimestamp(slideFrame?.timestamp_seconds ?? 60) ?? "1:00"}
-                      </span>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">講道標題</label>
+                      <input
+                        type="text"
+                        value={metadataDraft.title}
+                        onChange={handleTitleChange}
+                        onBlur={handleTitleBlur}
+                        onKeyDown={handleTitleKeyDown}
+                        disabled={!canEdit}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                        placeholder="輸入講道標題"
+                      />
                     </div>
-                    <p className="text-xs text-gray-500">
-                      於參考影格中框選投影幕的範圍，並儲存座標供產生投影片時使用。
-                    </p>
-                    {slideFrame?.updated_at ? (
-                      <p className="text-xs text-gray-400">
-                        最後更新：{formatHistoryTimestamp(slideFrame.updated_at)}
-                      </p>
-                    ) : null}
-                    {slideFrameError && slideFrameStatus !== "error" ? (
-                      <p className="text-xs text-red-600">{slideFrameError}</p>
-                    ) : null}
-                    {frameSaveMessage ? (
-                      <p className="text-xs text-green-600">{frameSaveMessage}</p>
-                    ) : null}
-                    <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
-                      {slideFrameStatus === "loading" ? (
-                        <div className="flex items-center gap-2 text-sm text-gray-500">
-                          <Loader2 className="h-4 w-4 animate-spin" /> 擷取畫面中...
-                        </div>
-                      ) : slideFrameStatus === "error" ? (
-                        <div className="flex flex-col items-center gap-2 text-center text-sm text-red-600">
-                          <p>{slideFrameError ?? "無法取得投影畫面"}</p>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">講道摘要</label>
+                      <textarea
+                        value={metadataDraft.summary}
+                        onChange={handleSummaryChange}
+                        rows={4}
+                        disabled={!canEdit}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                        placeholder="輸入講道摘要或簡介"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">要點整理</label>
+                      <textarea
+                        value={metadataDraft.keypoints}
+                        onChange={handleKeypointsChange}
+                        rows={6}
+                        disabled={!canEdit}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                        placeholder="輸入要點條列或重點整理"
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-sm font-semibold text-gray-700">核心經文</label>
+                        {canEdit && (
                           <button
                             type="button"
-                            onClick={handleReloadFrame}
-                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
+                            onClick={handleAddVerse}
+                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
                           >
-                            <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
+                            新增經文
                           </button>
-                        </div>
-                      ) : slideFrame ? (
-                        <div
-                          ref={frameContainerRef}
-                          className={`relative inline-block max-w-full ${canEdit ? "cursor-crosshair" : ""}`}
-                          onPointerDown={handleFramePointerDown}
-                          onPointerMove={(event) => {
-                            if (!isDrawingFrame) {
-                              return;
-                            }
-                            updateFrameSelectionFromClientPoint(event.clientX, event.clientY);
-                          }}
-                          onPointerUp={handleFramePointerUp}
-                          onPointerLeave={handleFramePointerUp}
-                          onPointerCancel={handleFramePointerUp}
-                        >
-                          <img
-                            ref={frameImageRef}
-                            src={slideFrame.image_url}
-                            alt="投影畫面參考影格"
-                            className="block max-h-[360px] w-auto select-none rounded border border-gray-200 bg-black/80"
-                            onLoad={handleFrameImageLoad}
-                            draggable={false}
-                          />
-                          {frameOverlayStyle ? (
-                            <div
-                              className="absolute border-2 border-blue-500 bg-blue-500/20"
-                              style={frameOverlayStyle}
-                            />
-                          ) : null}
-                        </div>
+                        )}
+                      </div>
+                      {metadataDraft.coreBibleVerses.length === 0 ? (
+                        <p className="text-xs text-gray-500">目前尚未設定核心經文。</p>
                       ) : (
-                        <p className="text-sm text-gray-500">尚未取得參考影格。</p>
+                        metadataDraft.coreBibleVerses.map((verse, index) => (
+                          <div
+                            key={`core-verse-${index}`}
+                            className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3"
+                          >
+                            <div className="flex flex-col gap-3 md:flex-row">
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-gray-600 mb-1">書卷</label>
+                                <input
+                                  type="text"
+                                  value={verse.book}
+                                  onChange={handleVerseFieldChange(index, "book")}
+                                  disabled={!canEdit}
+                                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                                  placeholder="如：創世記"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-xs font-medium text-gray-600 mb-1">章節</label>
+                                <input
+                                  type="text"
+                                  value={verse.chapter_verse}
+                                  onChange={handleVerseFieldChange(index, "chapter_verse")}
+                                  disabled={!canEdit}
+                                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                                  placeholder="例如：3:16-18"
+                                />
+                              </div>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveVerse(index)}
+                                  className="self-start rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                                >
+                                  移除
+                                </button>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">經文內容</label>
+                              <textarea
+                                value={verse.text}
+                                onChange={handleVerseFieldChange(index, "text")}
+                                disabled={!canEdit}
+                                rows={3}
+                                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm resize-y focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                                placeholder="輸入經文內容"
+                              />
+                            </div>
+                          </div>
+                        ))
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    {metadataSaveError && (
+                      <p className="text-sm text-red-600">{metadataSaveError}</p>
+                    )}
+                    <div className="flex items-center justify-end gap-2 pt-2">
                       <button
                         type="button"
-                        onClick={handleReloadFrame}
-                        disabled={slideFrameStatus === "loading"}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={handleGenerateMetadata}
+                        disabled={!canEdit || isGeneratingMetadata || state.paragraphs.length === 0}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-blue-100 disabled:bg-blue-50 disabled:text-blue-300"
                       >
-                        <RefreshCcw className="h-3.5 w-3.5" /> 重新載入畫面
+                        {isGeneratingMetadata ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> 產生中...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" /> AI 生成
+                          </>
+                        )}
                       </button>
+                      {metadataHasChanges && !isSavingMetadata ? (
+                        <span className="text-xs text-gray-500">尚有未儲存的變更</span>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={handleResetFrameSelection}
-                        disabled={!canEdit || (!frameSelection && !isDrawingFrame)}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={handleMetadataSubmit}
+                        disabled={!canEdit || !metadataHasChanges || isSavingMetadata}
+                        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
                       >
-                        <RotateCcw className="h-3.5 w-3.5" /> 清除框線
-                      </button>
-                      <div className="flex-1" />
-                      <button
-                        type="button"
-                        onClick={handleSaveFrame}
-                        disabled={!canSaveFrame}
-                        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                      >
-                        {isSavingFrame ? (
+                        {isSavingMetadata ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin" /> 儲存中...
                           </>
                         ) : (
                           <>
-                            <Save className="h-4 w-4" /> 儲存框線
+                            <Save className="h-4 w-4" /> 儲存標題與簡介
                           </>
                         )}
                       </button>
                     </div>
-                  </section>
-                  <section className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-gray-800">步驟二：生成投影片</h3>
-                      <span className="text-xs text-gray-500">
-                        目前共有 {slides.length} 張投影片
-                      </span>
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      完成框線設定後即可生成投影片
-                    </p>
-                    {slideGenerationError ? (
-                      <p className="text-xs text-red-600">{slideGenerationError}</p>
-                    ) : null}
-                    {slideGenerationMessage ? (
-                      <p className="text-xs text-green-600">{slideGenerationMessage}</p>
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleGenerateSlides}
-                        disabled={!canGenerateSlides}
-                        className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                      >
-                        {isGeneratingSlides ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" /> 生成中...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="h-4 w-4" /> 生成 slide
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSlideRetry}
-                        disabled={slidesStatus === "loading"}
-                        className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <RefreshCcw className="h-3.5 w-3.5" /> 重新載入資料
-                      </button>
-                    </div>
-                    <div className="rounded-lg border border-gray-200 bg-white p-3">
-                      {slidesStatus === "loading" ? (
-                        <div className="flex items-center gap-2 text-sm text-gray-500">
-                          <Loader2 className="h-4 w-4 animate-spin" /> 載入投影片中...
-                        </div>
-                      ) : slidesStatus === "error" ? (
-                        <div className="space-y-2 text-sm text-red-600">
-                          <p>{slidesError ?? "投影片載入失敗"}</p>
-                          <button
-                            type="button"
-                            onClick={handleSlideRetry}
-                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
-                          >
-                            <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
-                          </button>
-                        </div>
-                      ) : slides.length === 0 ? (
-                        <p className="text-sm text-gray-500">尚未生成投影片。</p>
-                      ) : (
-                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {slides.map((slide) => {
-                            const timestampLabel = formatTimestamp(slide.timestamp_seconds ?? null);
-                            return (
-                              <div
-                                key={slide.id}
-                                className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
-                              >
-                                <Image
-                                  src={slide.image_url}
-                                  alt={`Slide ${slide.id}`}
-                                  width={800}
-                                  height={450}
-                                  unoptimized
-                                  className="h-auto w-full bg-black object-contain"
-                                />
-                                <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-600">
-                                  <span className="font-medium text-gray-700">{slide.id}</span>
-                                  {timestampLabel ? <span>{timestampLabel}</span> : null}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  </section>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </section>
+              ) : (
+                <div className="max-h-[70vh] overflow-y-auto px-4 py-4">
+                  <div className="space-y-6">
+                    <section className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-gray-800">步驟一：設定投影畫面框線</h3>
+                        <span className="text-xs text-gray-500">
+                          參考時間：{formatTimestamp(slideFrame?.timestamp_seconds ?? 60) ?? "1:00"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        於參考影格中框選投影幕的範圍，並儲存座標供產生投影片時使用。
+                      </p>
+                      {slideFrame?.updated_at ? (
+                        <p className="text-xs text-gray-400">
+                          最後更新：{formatHistoryTimestamp(slideFrame.updated_at)}
+                        </p>
+                      ) : null}
+                      {slideFrameError && slideFrameStatus !== "error" ? (
+                        <p className="text-xs text-red-600">{slideFrameError}</p>
+                      ) : null}
+                      {frameSaveMessage ? (
+                        <p className="text-xs text-green-600">{frameSaveMessage}</p>
+                      ) : null}
+                      <div className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
+                        {slideFrameStatus === "loading" ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <Loader2 className="h-4 w-4 animate-spin" /> 擷取畫面中...
+                          </div>
+                        ) : slideFrameStatus === "error" ? (
+                          <div className="flex flex-col items-center gap-2 text-center text-sm text-red-600">
+                            <p>{slideFrameError ?? "無法取得投影畫面"}</p>
+                            <button
+                              type="button"
+                              onClick={handleReloadFrame}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-3 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
+                            >
+                              <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
+                            </button>
+                          </div>
+                        ) : slideFrame ? (
+                          <div
+                            ref={frameContainerRef}
+                            className={`relative inline-block max-w-full ${canEdit ? "cursor-crosshair" : ""}`}
+                            onPointerDown={handleFramePointerDown}
+                            onPointerMove={(event) => {
+                              if (!isDrawingFrame) {
+                                return;
+                              }
+                              updateFrameSelectionFromClientPoint(event.clientX, event.clientY);
+                            }}
+                            onPointerUp={handleFramePointerUp}
+                            onPointerLeave={handleFramePointerUp}
+                            onPointerCancel={handleFramePointerUp}
+                          >
+                            <img
+                              ref={frameImageRef}
+                              src={slideFrame.image_url}
+                              alt="投影畫面參考影格"
+                              className="block max-h-[360px] w-auto select-none rounded border border-gray-200 bg-black/80"
+                              onLoad={handleFrameImageLoad}
+                              draggable={false}
+                            />
+                            {frameOverlayStyle ? (
+                              <div
+                                className="absolute border-2 border-blue-500 bg-blue-500/20"
+                                style={frameOverlayStyle}
+                              />
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">尚未取得參考影格。</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleReloadFrame}
+                          disabled={slideFrameStatus === "loading"}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RefreshCcw className="h-3.5 w-3.5" /> 重新載入畫面
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleResetFrameSelection}
+                          disabled={!canEdit || (!frameSelection && !isDrawingFrame)}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" /> 清除框線
+                        </button>
+                        <div className="flex-1" />
+                        <button
+                          type="button"
+                          onClick={handleSaveFrame}
+                          disabled={!canSaveFrame}
+                          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                        >
+                          {isSavingFrame ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" /> 儲存中...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="h-4 w-4" /> 儲存框線
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </section>
+                    <section className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-gray-800">步驟二：生成投影片</h3>
+                        <span className="text-xs text-gray-500">
+                          目前共有 {slides.length} 張投影片
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        完成框線設定後即可生成投影片
+                      </p>
+                      {slideGenerationError ? (
+                        <p className="text-xs text-red-600">{slideGenerationError}</p>
+                      ) : null}
+                      {slideGenerationMessage ? (
+                        <p className="text-xs text-green-600">{slideGenerationMessage}</p>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleGenerateSlides}
+                          disabled={!canGenerateSlides}
+                          className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                        >
+                          {isGeneratingSlides ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" /> 生成中...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" /> 生成 slide
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSlideRetry}
+                          disabled={slidesStatus === "loading"}
+                          className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RefreshCcw className="h-3.5 w-3.5" /> 重新載入資料
+                        </button>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-3">
+                        {slidesStatus === "loading" ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-500">
+                            <Loader2 className="h-4 w-4 animate-spin" /> 載入投影片中...
+                          </div>
+                        ) : slidesStatus === "error" ? (
+                          <div className="space-y-2 text-sm text-red-600">
+                            <p>{slidesError ?? "投影片載入失敗"}</p>
+                            <button
+                              type="button"
+                              onClick={handleSlideRetry}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1.5 text-xs text-red-600 transition hover:bg-red-50"
+                            >
+                              <RefreshCcw className="h-3.5 w-3.5" /> 重新嘗試
+                            </button>
+                          </div>
+                        ) : slides.length === 0 ? (
+                          <p className="text-sm text-gray-500">尚未生成投影片。</p>
+                        ) : (
+                          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {slides.map((slide) => {
+                              const timestampLabel = formatTimestamp(slide.timestamp_seconds ?? null);
+                              return (
+                                <div
+                                  key={slide.id}
+                                  className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                                >
+                                  <Image
+                                    src={slide.image_url}
+                                    alt={`Slide ${slide.id}`}
+                                    width={800}
+                                    height={450}
+                                    unoptimized
+                                    className="h-auto w-full bg-black object-contain"
+                                  />
+                                  <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-600">
+                                    <span className="font-medium text-gray-700">{slide.id}</span>
+                                    {timestampLabel ? <span>{timestampLabel}</span> : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
-    <SlidePickerModal
-      open={openSlidePickerIndex != null}
-      slides={slides}
-      status={slidesStatus}
-      error={slidesError}
-      onInsert={(slide) => {
-        if (openSlidePickerIndex != null) {
-          handleInsertSlide(openSlidePickerIndex, slide);
-        }
-      }}
-      onInsertText={(slide, markdown) => {
-        if (openSlidePickerIndex != null) {
-          handleInsertSlideQuote(openSlidePickerIndex, slide, markdown);
-        }
-      }}
-      onExtract={handleExtractSlide}
-      onExtractCapture={handleExtractCaptureSlide}
-      onRetry={handleSlideRetry}
-      onClose={() => setOpenSlidePickerIndex(null)}
-      activeIndex={closestSlideIndex}
-      formatTimestamp={formatTimestamp}
-      canEdit={canEdit}
-      videoSource={mediaSource}
-      paragraphStart={slidePickerTiming.start}
-      paragraphEnd={slidePickerTiming.end}
-      onCaptureFrame={handleCaptureSlideFrame}
-    />
+      <SlidePickerModal
+        open={openSlidePickerIndex != null}
+        slides={slides}
+        status={slidesStatus}
+        error={slidesError}
+        onInsert={(slide) => {
+          if (openSlidePickerIndex != null) {
+            handleInsertSlide(openSlidePickerIndex, slide);
+          }
+        }}
+        onInsertText={(slide, markdown) => {
+          if (openSlidePickerIndex != null) {
+            handleInsertSlideQuote(openSlidePickerIndex, slide, markdown);
+          }
+        }}
+        onExtract={handleExtractSlide}
+        onExtractCapture={handleExtractCaptureSlide}
+        onRetry={handleSlideRetry}
+        onClose={() => setOpenSlidePickerIndex(null)}
+        activeIndex={closestSlideIndex}
+        formatTimestamp={formatTimestamp}
+        canEdit={canEdit}
+        videoSource={mediaSource}
+        paragraphStart={slidePickerTiming.start}
+        paragraphEnd={slidePickerTiming.end}
+        onCaptureFrame={handleCaptureSlideFrame}
+      />
     </>
   );
 };

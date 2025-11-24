@@ -12,6 +12,8 @@ from backend.api.config import DATA_BASE_PATH
 from .copilot import ChatMessage
 from .qaManager import QAItem, qaManager
 from .sermon_manager import Permission, sermonManager
+from backend.api.models import GenerateSubtitlesRequest, SubtitleInsertion
+from backend.api.gemini_client import gemini_client
 
 sermon_manager = sermonManager
 qa_manager = qaManager
@@ -259,6 +261,12 @@ def generate_metadata(request: GenerateMetadataRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - unexpected failure path
         raise HTTPException(status_code=500, detail="AI 產生講道資訊時發生錯誤") from exc
+
+
+@router.post("/generate_subtitles", response_model=list[SubtitleInsertion])
+def generate_subtitles(payload: GenerateSubtitlesRequest) -> list[SubtitleInsertion]:
+    insertions = gemini_client.generate_subtitles(payload.paragraphs)
+    return [SubtitleInsertion(**i) for i in insertions]
 
 
 @router.get("/sermon/{user_id}/{item}/{changes}")

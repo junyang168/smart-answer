@@ -77,6 +77,8 @@ class ScriptDelta:
         paragraphs = [ p for p in paragraphs if p.get('type') != 'comment']
         for i in range(0, len(paragraphs)):
             para = paragraphs[i]
+            if isinstance(para.get('index'), str) and para['index'].startswith('subtitle-'):
+                continue
 
             if para.get('end_index'):
                 start_item = self.timelineDictionary[  para['index'] ] 
