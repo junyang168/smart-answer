@@ -2732,6 +2732,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       spellChecker: false,
       status: false,
       placeholder: "在此編輯講道內容...",
+      maxHeight: "60vh",
       toolbar: editorToolbar,
     }),
     [editorToolbar]
