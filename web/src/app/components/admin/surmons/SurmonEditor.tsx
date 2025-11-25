@@ -2829,8 +2829,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
     setIsGeneratingSubtitles(true);
     try {
+      // Filter out existing subtitles before sending to AI
+      const contentParagraphs = state.paragraphs.filter((p) => p.type !== "subtitle");
       const payload: GenerateSubtitlesPayload = {
-        paragraphs: state.paragraphs,
+        paragraphs: contentParagraphs,
       };
 
       const insertions = await fetchJSON<SubtitleInsertion[]>(`${API_PREFIX}/generate_subtitles`, {
@@ -2847,7 +2849,8 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       console.log("Received insertions:", insertions);
 
       setState((prev) => {
-        const nextParagraphs = [...prev.paragraphs];
+        // Remove existing subtitles from the state before inserting new ones
+        const nextParagraphs = prev.paragraphs.filter((p) => p.type !== "subtitle");
         let insertedCount = 0;
 
         const insertionMap = new Map<string, SubtitleInsertion[]>();
