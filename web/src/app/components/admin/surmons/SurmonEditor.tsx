@@ -983,7 +983,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
   const [chatError, setChatError] = useState<string | null>(null);
   const [highlightedParagraphs, setHighlightedParagraphs] = useState<Set<number>>(() => new Set());
   const [activeHighlightToken, setActiveHighlightToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"script" | "metadata" | "slides">("script");
+  const [activeTab, setActiveTab] = useState<"metadata" | "script" | "slides">("script");
   const [historyEntries, setHistoryEntries] = useState<SurmonAuditEntry[]>([]);
   const [historyStatus, setHistoryStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -3343,16 +3343,6 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setActiveTab("script")}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "script"
-                      ? "border border-blue-200 bg-blue-100 text-blue-700"
-                      : "border border-transparent text-gray-600 hover:text-blue-700"
-                      }`}
-                  >
-                    講道稿內容
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setActiveTab("metadata")}
                     className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "metadata"
                       ? "border border-blue-200 bg-blue-100 text-blue-700"
@@ -3360,6 +3350,16 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                       }`}
                   >
                     标题和简介
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("script")}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${activeTab === "script"
+                      ? "border border-blue-200 bg-blue-100 text-blue-700"
+                      : "border border-transparent text-gray-600 hover:text-blue-700"
+                      }`}
+                  >
+                    講道稿內容
                   </button>
                   <button
                     type="button"
