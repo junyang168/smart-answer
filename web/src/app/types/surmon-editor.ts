@@ -23,6 +23,8 @@ export interface SurmonEditorHeader {
   theme?: string;
   /** Content source (internal vs public) */
   source?: string;
+  /** Name of the user assigned to this sermon */
+  assigned_to_name?: string;
   /** Core bible verses referenced by the sermon */
   core_bible_verse?: SurmonCoreBibleVerse[];
 }
