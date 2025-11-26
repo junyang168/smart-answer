@@ -3217,6 +3217,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
               <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
                 {header?.deliver_date && <span>讲道日期：{header.deliver_date}</span>}
                 {header?.theme && <span>主題：{header.theme}</span>}
+                {header?.assigned_to_name && <span>認領人：{header.assigned_to_name}</span>}
                 <span>
                   權限：
                   {permissions?.canWrite ? "可編輯" : permissions?.canRead ? "僅可讀" : "未授權"}
