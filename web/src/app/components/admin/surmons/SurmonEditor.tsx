@@ -23,6 +23,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  Bookmark,
   BookmarkPlus,
   Heading,
   History,
@@ -2822,12 +2823,29 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           { method: "PUT" }
         );
         setBookmarkIndex(paragraph.index);
+        alert("書籤設定成功！");
       } catch (error) {
         // ignore bookmark failures
       }
     },
     [fetchJSON, item, resolvedUserEmail]
   );
+
+  const handleGoToBookmark = useCallback(() => {
+    if (!bookmarkIndex) return;
+    const index = state.paragraphs.findIndex((p) => String(p.index) === String(bookmarkIndex));
+    if (index !== -1) {
+      const element = document.getElementById(`surmon-paragraph-${index}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        alert("找不到書籤所在的段落元素");
+      }
+    } else {
+      const sampleIndices = state.paragraphs.slice(0, 3).map(p => `${p.index}(${typeof p.index})`).join(", ");
+      alert(`找不到書籤所在的段落: ${bookmarkIndex}(${typeof bookmarkIndex})。樣本: ${sampleIndices}`);
+    }
+  }, [bookmarkIndex, state.paragraphs]);
 
   const handleAddSubtitle = useCallback(async () => {
     if (!canEdit || isGeneratingSubtitles) return;
@@ -3375,6 +3393,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                         className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                       >
                         <BookmarkPlus className="w-3 h-3 mr-1" /> 設為書籤
+                      </button>
+                    )}
+                    {bookmarkIndex && (
+                      <button
+                        onClick={handleGoToBookmark}
+                        className="inline-flex items-center text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                      >
+                        <Bookmark className="w-3 h-3 mr-1" /> 前往書籤
                       </button>
                     )}
                   </div>
