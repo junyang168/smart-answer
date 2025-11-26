@@ -1012,8 +1012,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const resolvedUserEmail = useMemo(() => sessionEmail ?? FALLBACK_USER_ID, [sessionEmail]);
 
-  //  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
-  const canEdit = true;
+  const canEdit = Boolean(permissions?.canWrite && !viewChanges);
 
   const handleMediaRef = useCallback((element: HTMLVideoElement | HTMLAudioElement | null) => {
     mediaRef.current = element;
