@@ -1346,6 +1346,10 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
     [fetchJSON, item, resolvedUserEmail]
   );
 
+  const handleClearChat = useCallback(() => {
+    setChatMessages([]);
+  }, []);
+
   const computeHighlightSet = useCallback(
     (token: string) => {
       const normalized = token.trim();
@@ -3292,13 +3296,23 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
                   ) : (
                     <span className="text-xs text-gray-400">Shift + Enter 換行</span>
                   )}
-                  <button
-                    type="submit"
-                    disabled={isChatLoading || chatInput.trim() === ""}
-                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
-                  >
-                    發送
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleClearChat}
+                      disabled={chatMessages.length === 0}
+                      className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-200 disabled:opacity-50"
+                    >
+                      清除
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isChatLoading || chatInput.trim() === ""}
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 disabled:bg-blue-300"
+                    >
+                      發送
+                    </button>
+                  </div>
                 </div>
               </form>
             </section>
