@@ -125,6 +125,8 @@ class SermonManager:
             return "You don't have permission to read this item"
 
         sermon = self._sm.get_sermon_metadata(user_id, item)
+        if sermon:
+            sermon.series_id = self.get_series_id_for_item(item)
 
         sd = ScriptDelta(self.base_folder, item)
         script =  sd.get_script( changes == 'changes')
@@ -134,6 +136,21 @@ class SermonManager:
                 if ui:
                     p['user_name'] = ui.get('name')
         return sermon, script
+    
+    def get_series_id_for_item(self, item: str) -> Optional[str]:
+        series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
+        if not os.path.exists(series_meta_file):
+            return None
+        try:
+            with open(series_meta_file, 'r', encoding='utf-8') as f:
+                series_list = json.load(f)
+        except json.JSONDecodeError:
+            return None
+            
+        for series in series_list:
+            if item in series.get('sermons', []):
+                return series.get('id')
+        return None
     
     def get_slide_text(self, user_id:str, item:str, timestamp:int):
         permissions = self.get_sermon_permissions(user_id, item)
@@ -573,6 +590,7 @@ class SermonManager:
         sermon_data['metadata']['core_bible_verse'] = sermon.core_bible_verse
         sermon_data['metadata']['keypoints'] = sermon.keypoints if sermon.keypoints else ''
         sermon_data['metadata']['source'] = sermon.source 
+        sermon_data['metadata']['series_id'] = self.get_series_id_for_item(item)
 
         return sermon_data
     

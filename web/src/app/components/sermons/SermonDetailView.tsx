@@ -8,8 +8,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
-import { Sermon} from '@/app/interfaces/article';
-import { BibleVerse} from '@/app/interfaces/article';
+import { Sermon } from '@/app/interfaces/article';
+import { BibleVerse } from '@/app/interfaces/article';
 
 import { SermonDetailSidebar } from '@/app/components/sermons/SermonDetailSidebar';
 import { FileText } from 'lucide-react';
@@ -58,11 +58,11 @@ export const SermonDetailView = () => {
 
   // --- Data Fetching ---
   useEffect(() => {
-  if (!id) return; // 如果沒有 ID，則不執行任何操作
+    if (!id) return; // 如果沒有 ID，則不執行任何操作
     const fetchSermon = async () => {
       setIsLoading(true);
       setError(null);
-      
+
       // ✅ 使用您提供的新 API 端點
       const apiUrl = `/api/sc_api/final_sermon/junyang168@gmail.com/${id}`;
 
@@ -76,35 +76,36 @@ export const SermonDetailView = () => {
           throw new Error(`API request failed with status ${res.status}`);
         }
 
-        const data  = await res.json();
+        const data = await res.json();
 
-        const article : Sermon = {
-            id: id,
-            title: data.metadata.title,
-            summary: data.metadata.summary,
-            status: data.metadata.status,
-            date: data.metadata.deliver_date,
-            assigned_to_name: data.metadata.assigned_to_name,
-            speaker: data.metadata.speaker || '王守仁',
-            scripture: [], // 將所有經文合併為一個字符串
-            book: data.metadata.book || '',
-            topic: data.metadata.topic || '',
-            videoUrl:  data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null, 
-            audioUrl:  data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
-            source: data.metadata.source || '',
-            keypoints: data.metadata.keypoints || '',
-            theme: data.metadata.theme || '',
-            core_bible_verses: {},
+        const article: Sermon = {
+          id: id,
+          title: data.metadata.title,
+          summary: data.metadata.summary,
+          status: data.metadata.status,
+          date: data.metadata.deliver_date,
+          assigned_to_name: data.metadata.assigned_to_name,
+          speaker: data.metadata.speaker || '王守仁',
+          scripture: [], // 將所有經文合併為一個字符串
+          book: data.metadata.book || '',
+          topic: data.metadata.topic || '',
+          videoUrl: data.metadata.type == null || data.metadata.type != "audio" ? `/web/video/${id}.mp4` : null,
+          audioUrl: data.metadata.type === "audio" ? `/web/video/${id}.mp3` : "",
+          source: data.metadata.source || '',
+          keypoints: data.metadata.keypoints || '',
+          theme: data.metadata.theme || '',
+          core_bible_verses: {},
+          series_id: data.metadata.series_id,
         }
 
         if (data.metadata && data.metadata.core_bible_verse) {
-            data.metadata.core_bible_verse.map((book_verse: BibleVerse) => {
-                const key = `${book_verse.book} ${book_verse.chapter_verse}`;
-                article.scripture.push(key);
-                if (book_verse.text) {
-                    article.core_bible_verses![key] = book_verse.text;
-                }
-            });
+          data.metadata.core_bible_verse.map((book_verse: BibleVerse) => {
+            const key = `${book_verse.book} ${book_verse.chapter_verse}`;
+            article.scripture.push(key);
+            if (book_verse.text) {
+              article.core_bible_verses![key] = book_verse.text;
+            }
+          });
         }
 
 
@@ -113,7 +114,7 @@ export const SermonDetailView = () => {
         console.log(data.script)
 
         for (let i = 0; i < data.script.length; i++) {
-            paragraphs.push(data.script[i].text);
+          paragraphs.push(data.script[i].text);
         }
 
         article.markdownContent = paragraphs.join('\n\n');
@@ -133,13 +134,13 @@ export const SermonDetailView = () => {
     };
 
     fetchSermon();
-  }, [id,status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
+  }, [id, status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
 
-  if ( isLoading  ) {
+  if (isLoading) {
     // 顯示加載中的條件：身份驗證中，或者已認證但在獲取數據中
     return <div className="text-center py-20">正在加載...</div>;
   }
-  
+
 
   if (error === '404') {
     // 調用 notFound() 將會渲染 Next.js 內置的 404 頁面
@@ -155,7 +156,7 @@ export const SermonDetailView = () => {
     return <div className="text-center py-20">未找到該篇講道。</div>;
   }
 
-    const breadcrumbLinks = [
+  const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: 'AI 輔助查經', href: '/resources' },
     { name: '講道中心', href: '/resources/sermons' },
@@ -185,8 +186,8 @@ export const SermonDetailView = () => {
                 {copyStatus === "success"
                   ? "已複製"
                   : copyStatus === "error"
-                  ? "複製失敗"
-                  : "複製 Markdown"}
+                    ? "複製失敗"
+                    : "複製 Markdown"}
               </button>
             </div>
           ) : null}
@@ -195,7 +196,7 @@ export const SermonDetailView = () => {
 
         <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} />
 
-                {/* ✅ 新增的講道摘要區域 */}
+        {/* ✅ 新增的講道摘要區域 */}
         {sermon.summary && (
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 mb-8">
             <div className="flex items-center mb-3">
@@ -216,7 +217,7 @@ export const SermonDetailView = () => {
         ) : (
           <SermonKeyPoints sermon={sermon} />
         )
-         }
+        }
       </main>
 
       {/* 右側邊欄 */}

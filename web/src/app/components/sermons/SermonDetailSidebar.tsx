@@ -8,22 +8,32 @@ interface SermonDetailSidebarProps {
   authenticated: boolean;
 }
 
-const InfoRow = ({ label, value }: { label: string, value: string }) => (
+import Link from 'next/link';
+
+const InfoRow = ({ label, value, link }: { label: string, value: string, link?: string }) => (
   <div className="flex justify-between py-2 border-b border-gray-100">
     <dt className="text-sm font-medium text-gray-500">{label}</dt>
-    <dd className="text-sm text-gray-900 text-right">{value}</dd>
+    <dd className="text-sm text-gray-900 text-right">
+      {link ? (
+        <Link href={link} className="text-blue-600 hover:text-blue-800 hover:underline">
+          {value}
+        </Link>
+      ) : (
+        value
+      )}
+    </dd>
   </div>
 );
 
 const MultiValueRow = ({ label, values }: { label: string, values: string[] }) => (
-    <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
-        <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">{label}</dt>
-        <dd className="flex flex-col items-end ml-4 text-sm text-gray-900">
-            {values.map((value, index) => (
-                <span key={index} className={index < values.length - 1 ? 'mb-1.5' : ''}>{value}</span>
-            ))}
-        </dd>
-    </div>
+  <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
+    <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">{label}</dt>
+    <dd className="flex flex-col items-end ml-4 text-sm text-gray-900">
+      {values.map((value, index) => (
+        <span key={index} className={index < values.length - 1 ? 'mb-1.5' : ''}>{value}</span>
+      ))}
+    </dd>
+  </div>
 );
 
 export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSidebarProps) => {
@@ -32,23 +42,27 @@ export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSideb
       <div className="bg-gray-50 p-6 rounded-lg">
         <h3 className="text-xl font-bold font-display mb-4">講道信息</h3>
         <dl>
-          <InfoRow label="主題" value={sermon.theme} />
+          <InfoRow
+            label="講道系列"
+            value={sermon.series_id || 'None'}
+            link={sermon.series_id ? `/resources/series/${sermon.series_id}` : undefined}
+          />
 
           {sermon.scripture && sermon.scripture.length > 0 && (
             <div className="flex justify-between items-baseline py-3 border-b border-gray-200">
-              
+
               {/* 左側標籤 */}
               <dt className="text-sm font-medium text-gray-500 whitespace-nowrap">
                 主要經文
               </dt>
-              
+
               {/* 右側值列表 */}
               <dd className="flex flex-col items-end ml-4">
-                  {sermon.scripture.map((line, index) => (
-                    <div key={index} className={index < sermon.scripture.length - 1 ? 'mb-1.5' : ''}>
-                      <ScriptureHover key={line} reference={line} text={sermon.core_bible_verses![line]} />
-                    </div>
-                  ))}
+                {sermon.scripture.map((line, index) => (
+                  <div key={index} className={index < sermon.scripture.length - 1 ? 'mb-1.5' : ''}>
+                    <ScriptureHover key={line} reference={line} text={sermon.core_bible_verses![line]} />
+                  </div>
+                ))}
               </dd>
             </div>
           )}
@@ -56,7 +70,7 @@ export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSideb
       </div>
 
       {authenticated && <SermonKeyPoints sermon={sermon} />}
-        
+
     </aside>
   );
 };

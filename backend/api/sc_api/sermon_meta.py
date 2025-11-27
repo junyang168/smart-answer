@@ -27,6 +27,7 @@ class Sermon(BaseModel):
     keypoints: Optional[str] = None
     core_bible_verse: Optional[List[dict]] = None
     source: Optional[str] = None
+    series_id: Optional[str] = None
 
 class SermonMetaManager:
 
