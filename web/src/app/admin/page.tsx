@@ -31,6 +31,11 @@ const cards = [
     description: "上傳網播音訊並維護節目摘要、經文與發佈資訊。",
     href: "/admin/webcast/depth-of-faith",
   },
+  {
+    title: "發送 Email to 會眾",
+    description: "發送自定義 Email 給會眾，支援 HTML 內容。",
+    href: "/admin/email",
+  },
 ];
 
 export default function AdminHomePage() {

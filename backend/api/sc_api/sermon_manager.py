@@ -97,13 +97,20 @@ class SermonManager:
         last_fellowship = self.fellowship[-1] 
         last_date_str = last_fellowship['date'] 
         last_date = datetime.strptime(last_date_str, "%m/%d/%Y")
+
+        # If the last recorded date is already in the future, return it
+        if last_date > datetime.now():
+             return {'date': last_date.strftime("%m/%d/%Y")}
+
         next_date = last_date + timedelta(weeks=2)
         if next_date < datetime.now():
-            last_date = next_date
-            self.fellowship.append({'date': next_date.strftime("%m/%d/%Y")})
+            while next_date < datetime.now():
+                last_date = next_date
+                self.fellowship.append({'date': next_date.strftime("%m/%d/%Y")})
+                next_date = last_date + timedelta(weeks=2)
+            
             with open(os.path.join(self.config_folder, 'fellowship.json'), 'w', encoding='utf-8') as f:
                 json.dump(self.fellowship, f, ensure_ascii=False, indent=4)
-            next_date = last_date + timedelta(weeks=2)
 
         return {'date': next_date.strftime("%m/%d/%Y")}
 

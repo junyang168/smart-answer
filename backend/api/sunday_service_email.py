@@ -221,32 +221,55 @@ def _resolve_ppt_path(service: SundayServiceEntry) -> Path:
     return ppt_path
 
 
-def _send_congregation_email(
-    smtp: smtplib.SMTP,
-    *,
-    sender: str,
+def send_email(
     recipients: list[str],
     subject: str,
     text_body: str,
     html_body: str,
+    sender: Optional[str] = None,
+    smtp: Optional[smtplib.SMTP] = None,
 ) -> None:
     if not recipients:
         return
+
+    if not sender:
+        sender = _resolve_sender()
 
     batch_size = determine_recipient_batch_size()
     to_header = os.getenv("REMINDER_TO_HEADER", "Undisclosed recipients:;")
     cc_header = os.getenv("REMINDER_CC_HEADER")
 
-    for batch in chunked(recipients, batch_size):
-        message = EmailMessage()
-        message["From"] = sender
-        message["To"] = to_header
-        if cc_header:
-            message["Cc"] = cc_header
-        message["Subject"] = subject
-        message.set_content(text_body)
-        message.add_alternative(html_body, subtype="html")
-        smtp.send_message(message, to_addrs=batch)
+    def _send_batch(server: smtplib.SMTP, batch_recipients: list[str]):
+        for batch in chunked(batch_recipients, batch_size):
+            message = EmailMessage()
+            message["From"] = sender
+            message["To"] = to_header
+            if cc_header:
+                message["Cc"] = cc_header
+            message["Subject"] = subject
+            message.set_content(text_body)
+            message.add_alternative(html_body, subtype="html")
+            server.send_message(message, to_addrs=batch)
+
+    if smtp:
+        _send_batch(smtp, recipients)
+    else:
+        host = os.getenv("SMTP_HOST")
+        if not host:
+            raise RuntimeError("SMTP_HOST environment variable is required")
+        port = int(os.getenv("SMTP_PORT", "587"))
+        username = os.getenv("SMTP_USERNAME")
+        password = os.getenv("SMTP_PASSWORD")
+        use_tls = os.getenv("SMTP_USE_TLS", "true").lower() in {"1", "true", "yes", "on"}
+
+        with smtplib.SMTP(host, port) as server:
+            server.ehlo()
+            if use_tls:
+                server.starttls()
+                server.ehlo()
+            if username and password:
+                server.login(username, password)
+            _send_batch(server, recipients)
 
 
 def send_sunday_service_email(
@@ -265,7 +288,7 @@ def send_sunday_service_email(
 
     ppt_path = _resolve_ppt_path(service)
     formatted_date = _format_display_date(service.date)
-    subject = f"圣道教会{formatted_date}的主日崇拜同工安排及ppt"
+    subject = f"圣道教會{formatted_date}的主日崇拜同工安排及ppt"
     default_text_body, default_html_body = build_sunday_service_email_bodies(service)
     html_body = service.email_body_html or default_html_body
     text_body = (
@@ -321,13 +344,13 @@ def send_sunday_service_email(
         if username and password:
             smtp.login(username, password)
         smtp.send_message(message, to_addrs=worker_recipient_list)
-        _send_congregation_email(
-            smtp,
-            sender=sender,
+        send_email(
             recipients=congregation_recipient_list,
             subject=congregation_subject,
             text_body=congregation_text_body,
             html_body=congregation_html_body,
+            sender=sender,
+            smtp=smtp,
         )
 
     return SundayServiceEmailResult(

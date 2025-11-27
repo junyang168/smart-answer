@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
+
 
 from .models import (
     ArticleDetail,
@@ -77,6 +79,22 @@ from .service import (
     get_hymn_metadata,
     generate_hymn_lyrics,
 )
+from backend.api.sunday_service_email import (
+    send_email,
+    _html_to_text,
+    determine_notification_recipients_file,
+    load_notification_recipients,
+    NOTIFICATION_PRODUCTION,
+    TEST_RECIPIENT,
+    EMAIL_PRODUCTION,
+)
+
+
+class EmailRequest(BaseModel):
+    subject: str
+    body: str  # HTML body
+    recipients_type: str = "congregation"  # Default to congregation
+
 
 router = APIRouter(prefix="/admin/full-articles", tags=["full-articles"])
 
@@ -348,3 +366,36 @@ def admin_delete_depth_of_faith_entry(episode_id: str) -> None:
 def admin_upload_depth_of_faith_audio(file: UploadFile = File(...)) -> DepthOfFaithAudioUploadResponse:
     filename = upload_depth_of_faith_audio(file)
     return DepthOfFaithAudioUploadResponse(filename=filename)
+    filename = upload_depth_of_faith_audio(file)
+    return DepthOfFaithAudioUploadResponse(filename=filename)
+
+
+email_router = APIRouter(prefix="/admin/email", tags=["email"])
+
+
+@email_router.post("/send")
+def send_custom_email(req: EmailRequest):
+    # Determine recipients
+    if req.recipients_type == "congregation":
+        recipients_path = determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
+        recipients = load_notification_recipients(recipients_path)
+    else:
+        # Fallback or other types can be added here
+        raise HTTPException(status_code=400, detail=f"Unknown recipients type: {req.recipients_type}")
+
+    recipient_list = list(recipients)
+    if not EMAIL_PRODUCTION:
+        recipient_list = [TEST_RECIPIENT]
+
+    text_body = _html_to_text(req.body)
+
+    try:
+        send_email(
+            recipients=recipient_list,
+            subject=req.subject,
+            text_body=text_body,
+            html_body=req.body,
+        )
+        return {"status": "success", "recipient_count": len(recipient_list)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

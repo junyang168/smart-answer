@@ -15,6 +15,7 @@ from .sermon_manager import Permission, sermonManager
 from backend.api.models import GenerateSubtitlesRequest, SubtitleInsertion
 from backend.api.gemini_client import gemini_client
 
+
 sermon_manager = sermonManager
 qa_manager = qaManager
 
@@ -110,6 +111,8 @@ class SeriesMarkdownResponse(BaseModel):
     outputDir: str
     sermonCount: int
     generatedFiles: List[str]
+
+
 
 
 def _normalize_slide_path(item: str, raw_path: str) -> Path:
@@ -435,3 +438,5 @@ def delete_qa(user_id: str, qa_id: str):
 @router.get("/qas/{user_id}/{qa_id}")
 def get_qa_by_id(user_id: str, qa_id: str) -> Optional[QAItem]:
     return qa_manager.get_qa_by_id(user_id, qa_id)
+
+
