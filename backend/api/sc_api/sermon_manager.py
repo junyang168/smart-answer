@@ -447,7 +447,7 @@ class SermonManager:
             canWrite =  'write_owned_item' in writePermissions or 'write_any_item' in writePermissions
                 
         else:
-            canWrite =  'write_any_item' in writePermissions
+            canWrite =  'write_any_item' in writePermissions or 'assign_any_item' in permissions
 
         #admin can assign to anyone any item      
         #editor can assign to himself item that is not assigned
