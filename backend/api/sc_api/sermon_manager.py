@@ -244,6 +244,9 @@ class SermonManager:
                 text = entry.get('text')
             if not text:
                 continue
+            text = ScriptDelta.remove_format(text)
+            if not text:
+                continue
             index_value = getattr(entry, 'index', None)
             if index_value is None and isinstance(entry, dict):
                 index_value = entry.get('index')
@@ -273,7 +276,6 @@ class SermonManager:
             "規則：\n"
             "- title：10-18 個繁體中文字，呼應講道主題。\n"
             "- summary：少于150字，概括講道重點。\n"
-            "- keypoints：每條 12-24 個字，使用精簡語句。\n"
             "- core_bible_verse：最多 3 節經文，若判斷不出可回傳空陣列。\n"
             "- 若缺乏足夠資訊，請以空字串或空陣列表示。\n"
             "- 不要輸出任何解釋或額外文字。\n\n"

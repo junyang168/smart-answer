@@ -227,7 +227,8 @@ class ScriptDelta:
         return {"message": f"{folder} updated successfully"}
 
 
-    def remove_format(self, text:str):
+    @staticmethod
+    def remove_format(text:str):
         text =  re.sub(r'~~(.|\n)*?~~', '', text) 
         idx = text.find('~~')
         if idx >= 0 :
@@ -238,7 +239,7 @@ class ScriptDelta:
     def get_clean_script(self, paras):
         for p in paras:
             if p.get('text'):
-                p['text'] = self.remove_format(p.get('text'))
+                p['text'] = ScriptDelta.remove_format(p.get('text'))
         for i in reversed(range(1, len(paras))):
             if not paras[i]['text'] :
                 paras.pop(i)

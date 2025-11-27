@@ -268,6 +268,10 @@ def generate_metadata(request: GenerateMetadataRequest):
 
 @router.post("/generate_subtitles", response_model=list[SubtitleInsertion])
 def generate_subtitles(payload: GenerateSubtitlesRequest) -> list[SubtitleInsertion]:
+    from .script_delta import ScriptDelta
+    for p in payload.paragraphs:
+        if p.text:
+            p.text = ScriptDelta.remove_format(p.text)
     insertions = gemini_client.generate_subtitles(payload.paragraphs)
     return [SubtitleInsertion(**i) for i in insertions]
 
