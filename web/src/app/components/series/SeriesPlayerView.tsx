@@ -46,9 +46,7 @@ export const SeriesPlayerView = () => {
         const allSeries: SermonSeries[] = await res.json();
 
         let foundSeries = allSeries.find(s => s.id === seriesId) || null;
-        if (foundSeries) {
-          foundSeries.topics = [];
-        }
+
 
         if (foundSeries) {
           setSeries(foundSeries);
