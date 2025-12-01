@@ -70,3 +70,20 @@ export async function deleteSermonSeries(seriesId: string): Promise<void> {
     throw new Error(message || `Request failed with status ${response.status}`);
   }
 }
+
+export async function generateSeriesMetadata(
+  seriesId: string,
+  userId: string,
+): Promise<{
+  title: string;
+  summary: string;
+  topics: string[];
+  keypoints: string[];
+}> {
+  const response = await fetch(resolveApiUrl("/api/sc_api/generate_series_metadata"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ series_id: seriesId, user_id: userId }),
+  });
+  return parseJson(response);
+}

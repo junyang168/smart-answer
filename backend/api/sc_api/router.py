@@ -71,6 +71,11 @@ class GenerateMetadataRequest(BaseModel):
     paragraphs: Optional[List[Paragraph]] = None
 
 
+class GenerateSeriesMetadataRequest(BaseModel):
+    user_id: Optional[str] = None
+    series_id: str
+
+
 class AssignRequest(BaseModel):
     user_id: str
     item: str
@@ -264,6 +269,21 @@ def generate_metadata(request: GenerateMetadataRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - unexpected failure path
         raise HTTPException(status_code=500, detail="AI 產生講道資訊時發生錯誤") from exc
+
+
+@router.post("/generate_series_metadata")
+def generate_series_metadata(request: GenerateSeriesMetadataRequest):
+    try:
+        return sermon_manager.generate_sermon_series_metadata(
+            request.user_id or "",
+            request.series_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="AI 產生系列資訊時發生錯誤") from exc
 
 
 @router.post("/generate_subtitles", response_model=list[SubtitleInsertion])

@@ -277,6 +277,7 @@ class SermonManager:
             "- title：10-18 個繁體中文字，呼應講道主題。\n"
             "- summary：少于150字，概括講道重點。\n"
             "- core_bible_verse：最多 3 節經文，若判斷不出可回傳空陣列。\n"
+            "- keypoints：系列核心要點。Format: MarkdownOrdered Lists\n"
             "- 若缺乏足夠資訊，請以空字串或空陣列表示。\n"
             "- 不要輸出任何解釋或額外文字。\n\n"
             f"講道原始標題：{existing_title}\n"
@@ -337,6 +338,93 @@ class SermonManager:
             "summary": summary,
             "keypoints": keypoints,
             "core_bible_verse": normalized_verses,
+        }
+
+    def generate_sermon_series_metadata(self, user_id: str, series_id: str) -> dict:
+        # Check permissions - assuming similar permissions to reading sermons
+        # Since series doesn't have direct permissions, we might check if user can read sermons?
+        # For now, let's assume any logged-in user can generate metadata for a series if they have access
+        # Or we can check if they are admin/editor.
+        permissions = self._acl.get_user_permissions(user_id)
+        if not permissions: # Basic check if user exists/has any permissions
+             raise PermissionError("You don't have permission to perform this action")
+
+        series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
+        if not os.path.exists(series_meta_file):
+            raise ValueError("Series configuration not found")
+
+        try:
+            with open(series_meta_file, 'r', encoding='utf-8') as f:
+                series_list = json.load(f)
+        except json.JSONDecodeError as exc:
+             raise ValueError("Invalid series configuration") from exc
+
+        target_series = next((s for s in series_list if s.get('id') == series_id), None)
+        if not target_series:
+            raise ValueError(f"Series with id {series_id} not found")
+
+        sermon_ids = target_series.get('sermons', [])
+        if not sermon_ids:
+             raise ValueError("Series has no sermons")
+
+        doc = ""
+        for item in sermon_ids:
+            try:
+                sd = ScriptDelta(self.base_folder, item)
+                script = sd.get_final_script(False)
+                article =  '\n\n'.join([ p['text'] for p in script['script'] ])
+                doc += f"--- Sermon: {item} ---\n{article}\n\n"
+            except Exception:
+                # Skip if a sermon cannot be loaded
+                continue
+        
+        if not doc.strip():
+             raise ValueError("No content found for sermons in this series")
+
+        prompt = (
+            "你是一位熟悉聖經與講道寫作的華語牧者助理，"
+            "請根據提供的系列講道內容，總結出新的系列標題、摘要、主題列表以及要點。"
+            "請務必使用繁體中文，並且僅輸出 JSON 字串，符合以下格式：\n"
+            "{\n"
+            '  "title": "...",\n'
+            '  "summary": "...",\n'
+            '  "topics": ["..."],\n'
+            '  "keypoints": ["..."]\n'
+            "}\n"
+            "規則：\n"
+            "- title：概括系列主題。\n"
+            "- summary：概括系列重點。要提到釋經重點經書和章。\n"
+            "- topics：3-5 個主題關鍵詞。\n"
+            "- keypoints：系列核心要點。Format: MarkdownOrdered Lists\n"
+            "- 不要輸出任何解釋或額外文字。\n\n"
+            f"系列原始標題：{target_series.get('title', '')}\n"
+            "系列講道內容：\n"
+            f"{doc}\n"
+        )
+
+        raw_response = gemini_client.generate(prompt)
+        cleaned_response = raw_response.strip()
+
+        if cleaned_response.startswith("```"):
+            segments = cleaned_response.split("```")
+            cleaned_response = "".join(segment for segment in segments if segment.strip().startswith("{")) or cleaned_response
+
+        if not cleaned_response.strip().startswith("{"):
+            start = cleaned_response.find("{")
+            end = cleaned_response.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned_response = cleaned_response[start : end + 1]
+
+        try:
+            payload = json.loads(cleaned_response)
+        except json.JSONDecodeError as exc:
+            raise ValueError("AI 回傳結果解析失敗，請稍後再試。") from exc
+
+        return {
+            "title": str(payload.get("title") or target_series.get('title', '')).strip(),
+            "summary": str(payload.get("summary") or "").strip(),
+            "topics": payload.get("topics", []),
+            "keypoints": payload.get("keypoints", [])
         }
 
     def get_sermons(self, user_id:str):

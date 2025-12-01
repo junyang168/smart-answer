@@ -1,7 +1,9 @@
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useSession } from "next-auth/react";
 import {
   fetchSermonSeries,
   createSermonSeries,
@@ -37,11 +39,13 @@ const sanitizeSermons = (sermons: string[]) =>
   sermons.map((item) => item.trim()).filter((item, index, array) => item && array.indexOf(item) === index);
 
 export function SermonSeriesManager() {
+  const { data: session } = useSession();
   const [state, setState] = useState<FetchState>({ status: "idle", data: [] });
   const [form, setForm] = useState<FormState>(emptyForm);
   const [newSermon, setNewSermon] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +62,7 @@ export function SermonSeriesManager() {
 
   useEffect(() => {
     if (state.status === "idle") {
-      load().catch(() => {});
+      load().catch(() => { });
     }
   }, [state.status, load]);
 
@@ -176,6 +180,44 @@ export function SermonSeriesManager() {
     }
   };
 
+  const handleGenerateAI = async () => {
+    if (!editingId) return;
+
+    let userEmail = session?.user?.email;
+    if (!userEmail) {
+      if (process.env.NODE_ENV === "development") {
+        userEmail = "junyang168@gmail.com";
+      } else {
+        setError("無法取得使用者資訊，請重新登入");
+        return;
+      }
+    }
+
+    setGenerating(true);
+    setFeedback(null);
+    setError(null);
+    try {
+
+
+      const { generateSeriesMetadata } = await import("@/app/admin/surmon_series/api");
+      const result = await generateSeriesMetadata(editingId, userEmail);
+
+      setForm((prev) => ({
+        ...prev,
+        title: result.title || prev.title,
+        summary: result.summary || prev.summary,
+        topics: Array.isArray(result.topics) ? result.topics.join(", ") : prev.topics,
+        keypoints: Array.isArray(result.keypoints) ? result.keypoints.join("\n") : prev.keypoints,
+      }));
+      setFeedback("AI 生成完成，請檢查並儲存");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI 生成失敗";
+      setError(message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6 space-y-4">
@@ -289,17 +331,27 @@ export function SermonSeriesManager() {
 
           <div className="flex justify-end gap-2">
             {editingId != null && (
-              <button
-                type="button"
-                onClick={resetForm}
-                className="inline-flex items-center rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-              >
-                取消編輯
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleGenerateAI}
+                  disabled={saving || generating}
+                  className="inline-flex items-center rounded-md border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100 disabled:opacity-60"
+                >
+                  {generating ? "正在生成..." : "AI 生成"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="inline-flex items-center rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  取消編輯
+                </button>
+              </>
             )}
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || generating}
               className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {saving ? "儲存中..." : editingId != null ? "更新系列" : "新增系列"}
@@ -307,6 +359,7 @@ export function SermonSeriesManager() {
           </div>
         </form>
       </section>
+
 
       <section className="bg-white border border-gray-200 rounded-xl shadow-sm">
         <div className="overflow-x-auto">
@@ -354,7 +407,7 @@ export function SermonSeriesManager() {
                           編輯
                         </button>
                         <a
-                          href={`/resources/series/${encodeURIComponent(entry.id)}`}
+                          href={`/ resources / series / ${encodeURIComponent(entry.id)} `}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center rounded-md border border-emerald-200 px-3 py-1 text-emerald-600 hover:bg-emerald-50"
@@ -377,6 +430,6 @@ export function SermonSeriesManager() {
           </table>
         </div>
       </section>
-    </div>
+    </div >
   );
 }
