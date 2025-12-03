@@ -263,6 +263,15 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
     [],
   );
 
+  const metadataSummaryEditorOptions = useMemo(
+    () => ({
+      spellChecker: false,
+      status: false,
+      minHeight: "300px",
+    }),
+    [],
+  );
+
   const sectionEditorOptions = useMemo(
     () => ({
       spellChecker: false,
@@ -720,6 +729,24 @@ export function FullArticleEditor({ initialArticle }: FullArticleEditorProps) {
             placeholder="例如：\narticle-2024-05-12"
           />
         </label>
+        <div className="flex flex-col md:col-span-2">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-sm font-medium text-gray-700">摘要</span>
+            <button
+              type="button"
+              onClick={handleGenerateSummary}
+              disabled={generatingSummary || !articleId}
+              className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded hover:bg-purple-200 disabled:opacity-50"
+            >
+              {generatingSummary ? "生成中..." : "生成摘要"}
+            </button>
+          </div>
+          <SimpleMDE
+            value={summaryMarkdown}
+            onChange={(value) => setSummaryMarkdown(value)}
+            options={metadataSummaryEditorOptions}
+          />
+        </div>
       </div>
     </div>
   );
