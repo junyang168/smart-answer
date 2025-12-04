@@ -85,7 +85,9 @@ export default async function FullArticleViewer({
     notFound();
   }
 
-  const articleSections = buildArticleSections(article.articleMarkdown || "");
+  const isMaterial = article.articleType === "講稿素材";
+  const displayMarkdown = isMaterial ? article.scriptMarkdown : (article.articleMarkdown || "");
+  const articleSections = buildArticleSections(displayMarkdown);
   const sourceSermons = (article.sourceSermonIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
   const sourceFullArticleIds = (article.sourceFullArticleIds ?? []).map((id) => id.trim()).filter((id) => id.length > 0);
 
@@ -132,7 +134,7 @@ export default async function FullArticleViewer({
             </header>
 
             <FullArticleReader
-              markdown={article.articleMarkdown || ""}
+              markdown={displayMarkdown}
               articleTitle={article.name || article.slug}
               summaryMarkdown={article.summaryMarkdown}
               topAnchorId={articleTopAnchorId}
@@ -142,7 +144,7 @@ export default async function FullArticleViewer({
           {(showSourceSection || showChapterNavigation) && (
             <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
               <div className="space-y-6">
-                <FullArticleUtilities articleTitle={article.name || article.slug} articleMarkdown={article.articleMarkdown} />
+                <FullArticleUtilities articleTitle={article.name || article.slug} articleMarkdown={displayMarkdown} />
                 {showChapterNavigation && (
                   <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
                     <h2 className="text-xl font-semibold text-gray-900">章節導覽</h2>
