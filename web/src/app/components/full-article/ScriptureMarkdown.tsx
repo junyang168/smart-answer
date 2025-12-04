@@ -232,6 +232,13 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
     }
 
     if (React.isValidElement(node)) {
+      // Void elements cannot have children, so we shouldn't try to process them
+      // or clone them with a children array (even an empty one).
+      const voidElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+      if (typeof node.type === 'string' && voidElements.has(node.type)) {
+        return node;
+      }
+
       const childNodes = React.Children.toArray(node.props.children);
       const newChildren = childNodes.map((child) => removeAlertMarkers(child)).filter((child) => child !== null);
       return React.cloneElement(node, node.props, newChildren);
