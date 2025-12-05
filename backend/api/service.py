@@ -14,6 +14,7 @@ from urllib.parse import quote_plus
 from collections.abc import Sequence
 
 import httpx
+from opencc import OpenCC
 from fastapi import HTTPException, UploadFile, status
 
 from .gemini_client import gemini_client
@@ -310,7 +311,9 @@ def generate_hymn_lyrics(index: int, payload: GenerateHymnLyricsRequest) -> Gene
     if title != hymn.title:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="詩歌標題與索引不相符")
     
-    return fetch_lyrics_text(hymn.lyrics_url)
+    raw_lyrics = fetch_lyrics_text(hymn.lyrics_url)
+    cc = OpenCC('s2t')
+    return cc.convert(raw_lyrics)
 
 
 
@@ -965,7 +968,7 @@ def _split_scripture_section(
     chosen_sizes: list[int] | None = None
     for slides in range(1, min(max_slots, total) + 1):
         sizes = balanced(slides)
-        if all(5 <= size <= 7 for size in sizes):
+        if all(4 <= size <= 7 for size in sizes):
             chosen_sizes = sizes
             break
 

@@ -13,3 +13,4 @@ python-multipart
 markdownify
 ffmpeg-python
 GitPython
+opencc-python-reimplemented

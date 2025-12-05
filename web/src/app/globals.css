@@ -17,27 +17,42 @@ select:-webkit-autofill:focus {
 
 #copilot-chat ol {
   display: block;
-  list-style-type: decimal; /* Numbers: 1, 2, 3, etc. */
+  list-style-type: decimal;
+  /* Numbers: 1, 2, 3, etc. */
   margin-top: 1em;
   margin-bottom: 1em;
   margin-left: 0;
   margin-right: 0;
-  padding-left: 10px; /* Indentation for the list items */
+  padding-left: 10px;
+  /* Indentation for the list items */
 }
 
 /* Define the animation */
 @keyframes blink {
-  0% { opacity: 1; } /* Text is fully visible */
-  50% { opacity: 0; } /* Text is half-transparent */
-  100% { opacity: 1; } /* Text is fully visible again */
+  0% {
+    opacity: 1;
+  }
+
+  /* Text is fully visible */
+  50% {
+    opacity: 0;
+  }
+
+  /* Text is half-transparent */
+  100% {
+    opacity: 1;
+  }
+
+  /* Text is fully visible again */
 }
 
 /* Apply the animation to the text */
 .flashing-text {
-  animation: blink 1s infinite; /* Blink animation, 1 second duration, repeat forever */
+  animation: blink 1s infinite;
+  /* Blink animation, 1 second duration, repeat forever */
 }
 
-details[open] > summary .details-open\:rotate-180 {
+details[open]>summary .details-open\:rotate-180 {
   transform: rotate(180deg);
 }
 
@@ -71,6 +86,7 @@ details[open] > summary .details-open\:rotate-180 {
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
   }
+
   .dark {
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
@@ -105,6 +121,7 @@ details[open] > summary .details-open\:rotate-180 {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }

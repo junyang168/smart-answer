@@ -65,12 +65,23 @@ export function FullArticleUtilities({ articleTitle, articleMarkdown }: FullArti
       withMessage("無法開啟列印視窗");
       return;
     }
-    const styles = `<style>
-      body { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 40px; }
+    // Capture all existing styles (Tailwind, FontAwesome, etc.)
+    const existingStyles = Array.from(document.querySelectorAll("style, link[rel='stylesheet']"))
+      .map((node) => node.outerHTML)
+      .join("");
+
+    const customStyles = `<style>
+      body { font-family: "PingFang TC", "Microsoft JhengHei", "Heiti TC", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 40px; }
       h1, h2, h3, h4 { color: #0f172a; }
       img { max-width: 100%; height: auto; }
+      /* Print override to ensure hidden alerts are shown */
+      @media print {
+        .print\\:block { display: block !important; }
+        .hidden { display: none; }
+      }
     </style>`;
-    printWindow.document.write(`<html><head><title>${articleTitle ?? "全文文章"}</title>${styles}</head><body>`);
+
+    printWindow.document.write(`<html><head><base href="${window.location.origin}"><meta charset="utf-8"><title>${articleTitle ?? "全文文章"}</title>${existingStyles}${customStyles}</head><body>`);
     if (articleTitle) {
       printWindow.document.write(`<h1>${articleTitle}</h1>`);
     }
@@ -78,7 +89,18 @@ export function FullArticleUtilities({ articleTitle, articleMarkdown }: FullArti
     printWindow.document.write("</body></html>");
     printWindow.document.close();
     printWindow.focus();
-    printWindow.print();
+
+    // Wait for styles/images to load before printing
+    printWindow.onload = () => {
+      printWindow.print();
+    };
+
+    // Fallback if onload doesn't fire (e.g. cached resources or timing)
+    setTimeout(() => {
+      if (printWindow.document.readyState === 'complete') {
+        printWindow.print();
+      }
+    }, 1000);
   }, [articleTitle, safeMarkdown, withMessage]);
 
   return (
