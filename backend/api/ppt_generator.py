@@ -30,6 +30,9 @@ def generate_presentation_from_template(
     _populate_scripture_summary(presentation, scripture_summary or [])
     if holy_communion:
         _insert_holy_communion_row(presentation, holy_communion)
+    else:
+        _remove_slides_by_note_keyword(presentation, "守聖餐")
+
     _apply_replacements(presentation, normalized)
     presentation.save(output_path)
     return output_path
@@ -378,6 +381,25 @@ def _move_slide(presentation: Presentation, old_index: int, new_index: int) -> N
     slide_id_list.insert(new_index, slide_id)
 
 
+def _remove_slides_by_note_keyword(presentation: Presentation, keyword: str) -> None:
+    slides_to_remove = []
+    for i, slide in enumerate(presentation.slides):
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+            text = slide.notes_slide.notes_text_frame.text
+            if keyword in text:
+                slides_to_remove.append(i)
+
+    if not slides_to_remove:
+        return
+
+    slide_id_list = presentation.slides._sldIdLst
+    slide_ids = list(slide_id_list)
+    
+    # Switch to HIDING slides prevents corruption issues with Sections/Custom Shows
+    for i in sorted(slides_to_remove, reverse=True):
+        slide = presentation.slides[i]
+        slide.element.set("show", "0")
+
 def _render_section(
     slide,
     *,
@@ -484,6 +506,8 @@ def _populate_lyrics_text_frame(text_frame, lines: list[str]) -> None:
         run = paragraph.add_run()
         run.text = line
         run.font.color.rgb = RGBColor(255, 255, 0) if (index + 1) % 2 == 0 else RGBColor(255, 255, 255)
+        run.font.name = "DengXian"
+        run.font.bold = True
 
 
 def _populate_scripture_text_frame(text_frame, lines: list[str]) -> None:
@@ -504,14 +528,20 @@ def _populate_scripture_text_frame(text_frame, lines: list[str]) -> None:
             verse_run.text = match.group('verse')
             verse_run.font.superscript = True
             verse_run.font.color.rgb = color
+            verse_run.font.name = "DengXian"
+            verse_run.font.bold = True
 
             body_run = paragraph.add_run()
             body_run.text = f" {match.group('body')}"
             body_run.font.color.rgb = color
+            body_run.font.name = "DengXian"
+            body_run.font.bold = True
         else:
             run = paragraph.add_run()
             run.text = line
             run.font.color.rgb = color
+            run.font.name = "DengXian"
+            run.font.bold = True
 
 
 def _apply_slide_template(slide, base_shapes: list, base_notes: str | None) -> None:
