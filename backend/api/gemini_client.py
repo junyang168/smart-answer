@@ -67,6 +67,8 @@ Rules:
 3. Do not change the original text. Only provide insertions.
 4. Ensure the "after_index" corresponds to a valid index from the input.
 5. If a subtitle should be at the very beginning, use "START" as the after_index.
+6. The subtitle text MUST be in Traditional Chinese (繁體中文).
+7. Only include other languages in the subtitle if they are crucial for context or specialized terms; otherwise, strictly use Traditional Chinese.
 
 Input Script:
 """
