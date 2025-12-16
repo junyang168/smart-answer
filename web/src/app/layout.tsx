@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 import { ReactNode } from "react";
 import Head from 'next/head';
 import { Header } from "@/app/components/header";
 import { Footer } from '@/app/components/footer';
-import { Providers } from '@/app/components/providers/provider'; 
+import { Providers } from '@/app/components/providers/provider';
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -43,11 +44,11 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${notoSansTC.variable} ${merriweather.variable} font-sans flex flex-col min-h-screen bg-gray-50`}>
         <Providers>
-          <Header show_signin="True"/>
+          <Header show_signin="True" />
           <main className="flex-grow">
-                {children}
+            {children}
           </main>
-        <Footer />
+          <Footer />
         </Providers>
       </body>
     </html>

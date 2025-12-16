@@ -3,7 +3,9 @@
 import React, { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
+import rehypeKatex from "rehype-katex";
 import { Popover, PopoverTrigger, PopoverContent } from "@/app/components/popover";
 import * as Tabs from "@radix-ui/react-tabs";
 
@@ -321,8 +323,8 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
 
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeRaw, rehypeKatex]}
       components={{
         h2({ children, ...props }) {
           return (
