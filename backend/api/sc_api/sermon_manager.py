@@ -937,17 +937,23 @@ class SermonManager:
         return "\n".join(lines).strip()
 
     def export_series_markdown(self, user_id: str, series_id: str) -> dict:
-        if not user_id:
-            raise PermissionError("需提供使用者帳號才能匯出 Markdown。")
+        # Default user_id to empty string if None, to safely check permissions
+        safe_user_id = user_id or ""
+
+        # Decode series_id if it comes in url-encoded
+        from urllib.parse import unquote
+        decoded_series_id = unquote(series_id)
 
         series_list = self.get_sermon_series()
         target_series = None
         for entry in series_list:
-            if isinstance(entry, dict) and entry.get("id") == series_id:
+            eid = entry.get("id")
+            if isinstance(entry, dict) and (eid == series_id or eid == decoded_series_id):
                 target_series = entry
                 break
+        
         if not target_series:
-            raise ValueError(f"找不到系列：{series_id}")
+            raise ValueError(f"找不到系列：{series_id} (decoded: {decoded_series_id})")
 
         sermons = target_series.get("sermons") if isinstance(target_series, dict) else None
         if not sermons:
@@ -958,6 +964,11 @@ class SermonManager:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         generated_files: List[str] = []
+        all_markdown_content: List[str] = []
+
+        all_markdown_content.append(f"# {target_series.get('title', series_id)}")
+        all_markdown_content.append(f"\n{target_series.get('summary', '')}\n")
+        
         for sermon_entry in sermons:
             sermon_id = None
             sermon_title = series_id
@@ -971,14 +982,21 @@ class SermonManager:
             if not sermon_id:
                 continue
 
-            permissions = self.get_sermon_permissions(user_id, sermon_id)
-            if not permissions.canRead:
-                raise PermissionError(f"沒有權限讀取講道 {sermon_id}")
+            # Check permissions or if content is published
+            permissions = self.get_sermon_permissions(safe_user_id, sermon_id)
+            sermon_meta = self._sm.get_sermon_metadata(safe_user_id, sermon_id)
+            is_published = sermon_meta and sermon_meta.status == 'published'
 
-            sermon_payload = self.get_final_sermon(user_id, sermon_id, remove_tags=True)
+            if not (permissions.canRead or is_published):
+                continue
+
+            try:
+                sermon_payload = self.get_final_sermon(safe_user_id, sermon_id, remove_tags=True)
+            except Exception:
+                 continue
+
             if not isinstance(sermon_payload, dict) or "script" not in sermon_payload:
-                message = sermon_payload.get("message") if isinstance(sermon_payload, dict) else None
-                raise ValueError(message or f"無法讀取講道 {sermon_id}")
+                continue
 
             markdown_content = self._build_sermon_markdown_payload(sermon_payload, sermon_title)
             if not markdown_content:
@@ -987,12 +1005,14 @@ class SermonManager:
             target_path = output_dir / f"{sermon_id}.md"
             target_path.write_text(markdown_content + "\n", encoding="utf-8")
             generated_files.append(str(target_path))
+            all_markdown_content.append(markdown_content)
 
         return {
             "seriesId": series_id,
             "outputDir": str(output_dir),
             "sermonCount": len(generated_files),
             "generatedFiles": generated_files,
+            "markdownContent": "\n\n---\n\n".join(all_markdown_content)
         }
 
     def get_article_series(self):

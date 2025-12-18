@@ -5,9 +5,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useSearchParams, notFound } from 'next/navigation';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { PlayCircle, ListMusic } from 'lucide-react';
+import { PlayCircle, ListMusic, Clipboard, Check } from 'lucide-react';
 import { SermonSeries } from '@/app/interfaces/article';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/app/components/hover-card';
 
@@ -17,6 +18,10 @@ export const SeriesPlayerView = () => {
   const [series, setSeries] = useState<SermonSeries | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isCopying, setIsCopying] = useState(false);
+  const [hasCopied, setHasCopied] = useState(false);
+
+  const { data: session } = useSession();
 
 
 
@@ -84,6 +89,38 @@ export const SeriesPlayerView = () => {
       .filter(Boolean);
   }, [series]);
 
+  const handleCopyMarkdown = async () => {
+    if (!series) return;
+    setIsCopying(true);
+    try {
+      const res = await fetch(`/api/sc_api/series/${encodeURIComponent(series.id)}/markdown`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ user_id: '' }), // Send empty user_id for public access
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch markdown');
+      }
+
+      const data = await res.json();
+      if (data.markdownContent) {
+        await navigator.clipboard.writeText(data.markdownContent);
+        setHasCopied(true);
+        setTimeout(() => setHasCopied(false), 2000);
+      } else {
+        alert("未找到 Markdown 內容");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("複製失敗，請稍後再試");
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
 
   // --- Render Logic ---
   if (isLoading) {
@@ -107,7 +144,29 @@ export const SeriesPlayerView = () => {
     <>
       <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex-1">
-          <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-4xl font-bold font-display text-gray-800">{series.title}</h1>
+            {session?.user?.role === 'editor' && (
+              <button
+                onClick={handleCopyMarkdown}
+                disabled={isCopying}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 transition-colors"
+                title="複製系列 Markdown"
+              >
+                {hasCopied ? (
+                  <>
+                    <Check className="w-4 h-4 text-green-600" />
+                    <span className="text-green-600">已複製</span>
+                  </>
+                ) : (
+                  <>
+                    <Clipboard className="w-4 h-4 text-gray-500" />
+                    <span>{isCopying ? '處理中...' : '複製 Markdown'}</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
           <p className="mt-2 text-lg text-gray-600">{series.summary}</p>
           {series.keypoints && (
             <div className="mt-2">

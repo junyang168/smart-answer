@@ -83,7 +83,20 @@ def list_articles() -> list[ArticleSummary]:
 
 def get_article(article_id: str) -> ArticleDetail:
     try:
-        return repository.get_article(article_id)
+        article = repository.get_article(article_id)
+        if article.article_markdown:
+             article.article_markdown = re.sub(
+                r'<!-- Page: (.*?)\.jpeg -->',
+                r'[Page \1](/web/data/full_article/images/scanned_mat/notes_main/chapter5-7/\1.jpeg)',
+                article.article_markdown
+            )
+        if article.script_markdown:
+             article.script_markdown = re.sub(
+                r'<!-- Page: (.*?)\.jpeg -->',
+                r'[Page \1](/web/data/full_article/images/scanned_mat/notes_main/chapter5-7/\1.jpeg)',
+                article.script_markdown
+            )
+        return article
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 

@@ -108,7 +108,7 @@ class SurmonSlideResponse(BaseModel):
 
 
 class SeriesMarkdownRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
 
 
 class SeriesMarkdownResponse(BaseModel):
@@ -116,6 +116,7 @@ class SeriesMarkdownResponse(BaseModel):
     outputDir: str
     sermonCount: int
     generatedFiles: List[str]
+    markdownContent: Optional[str] = None
 
 
 
