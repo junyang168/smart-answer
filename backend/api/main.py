@@ -17,6 +17,9 @@ from .router import (
 from .slides import router as slides_router
 from .scripture import router as scripture_router
 from .sc_api import router as sc_api_router
+from .sc_api import router as sc_api_router
+from .sc_api.rag import router as rag_router
+from .sermon_converter_router import router as sermon_converter_router
 
 app = FastAPI(title="Full Article Admin Service")
 app.include_router(router)
@@ -32,6 +35,9 @@ app.include_router(email_router)
 app.include_router(slides_router)
 app.include_router(scripture_router)
 app.include_router(sc_api_router)
+app.include_router(sc_api_router)
+app.include_router(rag_router)
+app.include_router(sermon_converter_router)
 
 
 @app.get("/healthz")

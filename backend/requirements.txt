@@ -14,3 +14,5 @@ markdownify
 ffmpeg-python
 GitPython
 opencc-python-reimplemented
+google-cloud-aiplatform>=1.73.0
+google-api-python-client
