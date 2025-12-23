@@ -37,3 +37,9 @@ DEPTH_OF_FAITH_FILE: Final[Path] = WEBCAST_DIR / "depth_of_faith.json"
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
 GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+# RAG Configuration
+GOOGLE_CLOUD_PROJECT: Final[str] = os.getenv("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0011233318")
+GOOGLE_CLOUD_LOCATION: Final[str] = "europe-west3"
+GOOGLE_DRIVE_FOLDER_ID: Final[str] = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1ar9kpkbmW0_E-882mjcWJYuG2lZ1XodG")
+RAG_CORPUS_ID: Final[Optional[str]] = os.getenv("RAG_CORPUS_ID")
