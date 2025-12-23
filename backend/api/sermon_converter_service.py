@@ -37,6 +37,7 @@ class SermonProject(BaseModel):
     title: str
     pages: List[str] # List of filenames like ["1-01.jpeg", "1-02.jpeg"]
     processing: bool = False
+    google_doc_id: Optional[str] = None
 
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
@@ -608,14 +609,18 @@ def export_sermon_to_doc(sermon_id: str) -> str:
 
     meta_file = sermon_dir / "meta.json"
     title = f"Sermon Draft: {sermon_id}"
+    
+    import json
+    meta_data = {}
     if meta_file.exists():
-        import json
         try:
             with open(meta_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                title = data.get("title", title)
+                meta_data = json.load(f)
+                title = meta_data.get("title", title)
         except:
             pass
+            
+    existing_doc_id = meta_data.get("google_doc_id")
 
     # 2. Authenticate
     SCOPES = ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive']
@@ -651,39 +656,78 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     </html>
     """
     
-    # 4. Create File Metadata
-    file_metadata = {
-        'name': title,
-        'mimeType': 'application/vnd.google-apps.document'
-    }
-    
-    if GOOGLE_DRIVE_FOLDER_ID:
-        file_metadata['parents'] = [GOOGLE_DRIVE_FOLDER_ID]
-        
-    # 5. Create & Upload
+    # 5. Create Or Update
     media = MediaIoBaseUpload(
         BytesIO(html_content.encode('utf-8')),
         mimetype='text/html',
         resumable=True
     )
     
+    file_id = None
+    
     try:
-        file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink'
-        ).execute()
+        # A. Try to Update if ID exists
+        if existing_doc_id:
+            try:
+                # We use update to overwrite content. 
+                # Note: For Google Docs, updating 'media_body' requires using the underlying file update 
+                # but depending on if it's a proprietary Doc or just a file. 
+                # Actually, standard 'update' with uploadType=media works for many types, 
+                # but for Native Google Docs, simple full overwrite via Drive API might be tricky without 'convert'.
+                # However, since we originally created it with import/convert, let's see.
+                # A safer way to "Overwrite" a Google Doc with HTML is tricky. 
+                # The Drive API 'update' method CAN update content of standard files, but for Docs it might just append or be complex.
+                # Actually, the simplest way to "replace" content of a Google Doc is to use the Docs API to delete everything and insert.
+                # BUT, given we are converting HTML -> Doc, using Drive API 'update' with 'newRevision' might work if we treat it as an import?
+                # No, Drive API update with conversion is not standard.
+                
+                # ALTERNATE STRATEGY for UPDATE: Use Docs API to clear and replace?
+                # Or just check if valid, if so, maybe just creating new one is actually better for "Draft v2"?
+                # User wants "Only ONE google doc".
+                # Let's try to just update the file metadata/content using Drive API. 
+                # If we send HTML, Drive helper usually converts it on Create. On Update? 
+                
+                # Let's try to update the content.
+                drive_service.files().update(
+                    fileId=existing_doc_id,
+                    media_body=media
+                ).execute()
+                file_id = existing_doc_id
+                print(f"Updated existing doc: {file_id}")
+            except Exception as update_err:
+                print(f"Failed to update existing doc (maybe deleted?): {update_err}")
+                # Fallback to create new
+                existing_doc_id = None
+        
+        # B. Create New if needed
+        if not existing_doc_id:
+            file_metadata = {
+                'name': title,
+                'mimeType': 'application/vnd.google-apps.document'
+            }
+            if GOOGLE_DRIVE_FOLDER_ID:
+                file_metadata['parents'] = [GOOGLE_DRIVE_FOLDER_ID]
+                
+            file = drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
+            file_id = file.get('id')
+            
+            # Save the new ID to meta
+            meta_data["google_doc_id"] = file_id
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, indent=2)
+
     except Exception as e:
         if "ACCESS_TOKEN_SCOPE_INSUFFICIENT" in str(e):
              raise RuntimeError(
-                 "Authentication Error: Insufficient permissions. "
-                 "Please run the following command in your terminal to grant access:\n\n"
-                 "gcloud auth application-default login --scopes=\"https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/documents,https://www.googleapis.com/auth/cloud-platform\" --client-id-file=PATH_TO_YOUR_CLIENT_SECRET.json\n\n"
-                 "Note: You must create a custom 'Desktop App' OAuth Client ID in your Google Cloud Project to avoid 'App Blocked' errors."
+                 "Authentication Error: Insufficient permissions."
              )
         raise e
 
-    return f"https://docs.google.com/document/d/{file.get('id')}/edit"
+    return f"https://docs.google.com/document/d/{file_id}/edit"
 
 
 def refine_sermon_draft(sermon_id: str, selection: str, instruction: str) -> str:

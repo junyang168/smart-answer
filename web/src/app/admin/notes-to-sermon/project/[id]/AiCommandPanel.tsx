@@ -18,7 +18,7 @@ export default function AiCommandPanel({ selectedText, onRefine, isRefining }: A
 
     if (!selectedText) {
         return (
-            <div className="bg-gray-50 border-l h-full p-4 w-[300px] flex flex-col items-center justify-center text-gray-400 text-sm text-center">
+            <div className="bg-gray-50 border-l h-full p-4 w-[350px] flex flex-col items-center justify-center text-gray-400 text-sm text-center">
                 <p>Select text in the editor to refine it with AI.</p>
             </div>
         );
