@@ -36,6 +36,11 @@ const cards = [
     description: "發送自定義 Email 給會眾，支援 HTML 內容。",
     href: "/admin/email",
   },
+  {
+    title: "筆記生成講稿",
+    description: "從手寫筆記圖像生成結構化講章草稿，並支援 AI 協作修訂。",
+    href: "/admin/notes-to-sermon/projects",
+  },
 ];
 
 export default function AdminHomePage() {
