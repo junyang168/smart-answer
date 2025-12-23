@@ -13,10 +13,12 @@ export default (phase, { defaultConfig }) => {
       ],
     },
     async rewrites() {
+      const isProd = process.env.NODE_ENV === 'production';
+      const destination = isProd ? 'http://127.0.0.1:8555/:path*' : 'http://127.0.0.1:8222/:path*';
       return [
         {
           source: '/api/:path*',
-          destination: 'http://127.0.0.1:8222/:path*',
+          destination,
         },
       ];
     },
