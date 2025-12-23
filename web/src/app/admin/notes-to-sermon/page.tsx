@@ -4,8 +4,8 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 
 interface NoteImage {
-    filename: str;
-    path: str;
+    filename: string;
+    path: string;
     processed: boolean;
 }
 
