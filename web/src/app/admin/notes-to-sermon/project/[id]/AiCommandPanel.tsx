@@ -36,7 +36,7 @@ export default function AiCommandPanel({ selectedText, onRefine, isRefining }: A
                 {/* Context Preview */}
                 <div className="bg-white border rounded p-3 text-xs text-gray-500 max-h-[150px] overflow-y-auto italic">
                     <span className="font-bold text-gray-700 not-italic block mb-1">Selected Context:</span>
-                    "{selectedText}"
+                    &quot;{selectedText}&quot;
                 </div>
 
                 {/* Instruction Input */}

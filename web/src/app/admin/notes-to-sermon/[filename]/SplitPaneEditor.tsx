@@ -43,6 +43,7 @@ export default function SplitPaneEditor({ filename }: { filename: string }) {
             <div className="w-1/2 bg-gray-100 border-r overflow-auto p-4 flex justify-center">
                 <div className="relative border shadow-lg bg-white min-h-[800px] w-full max-w-[800px]">
                     {imageUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
                         <img src={imageUrl} alt="Source Note" className="w-full h-auto" />
                     ) : (
                         <p className="text-center p-10 text-gray-400">Loading Image...</p>

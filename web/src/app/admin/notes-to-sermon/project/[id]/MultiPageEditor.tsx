@@ -184,7 +184,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             }, 3000);
         }
         return () => clearInterval(interval);
-    }, [isProcessing, projectId]);
+    }, [isProcessing, projectId, viewMode]);
 
     const handleOCR = async (filename: string) => {
         const confirm = window.confirm(`Start OCR for ${filename}? This might take a few seconds.`);
@@ -491,6 +491,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                         </div>
                                     </div>
                                     {/* Use existing image endpoint */}
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                         src={`/api/admin/notes-to-sermon/image/${img}`}
                                         alt={img}
