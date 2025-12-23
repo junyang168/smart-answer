@@ -17,7 +17,11 @@ export default (phase, { defaultConfig }) => {
       const destination = isProd ? 'http://127.0.0.1:8555/:path*' : 'http://127.0.0.1:8222/:path*';
       return [
         {
-          source: '/api/:path*',
+          source: '/api/auth/:path*',
+          destination: '/api/auth/:path*',
+        },
+        {
+          source: '/api/:path((?!auth).*)',
           destination,
         },
       ];
