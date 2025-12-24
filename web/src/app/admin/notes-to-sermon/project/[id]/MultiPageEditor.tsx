@@ -15,6 +15,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [viewMode, setViewMode] = useState<'source' | 'draft'>('source');
     const [isGenerating, setIsGenerating] = useState(false);
     const [projectTitle, setProjectTitle] = useState(projectId);
+    const [bibleVerse, setBibleVerse] = useState("");
+    const [showMetaEdit, setShowMetaEdit] = useState(false);
+    const [metaForm, setMetaForm] = useState({ title: "", bibleVerse: "" });
+    const [prompts, setPrompts] = useState<any[]>([]);
+    const [selectedPromptId, setSelectedPromptId] = useState<string>("");
+    const [usedPromptId, setUsedPromptId] = useState<string>("");
 
     // Content State
     const [markdown, setMarkdown] = useState("");
@@ -149,8 +155,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 if (metaData.title) {
                     setProjectTitle(metaData.title);
                 }
+                if (metaData.bible_verse) {
+                    setBibleVerse(metaData.bible_verse);
+                }
                 if (metaData.processing) {
                     setIsProcessing(true);
+                }
+                if (metaData.prompt_id) {
+                    setUsedPromptId(metaData.prompt_id);
                 }
 
                 setLoading(false);
@@ -161,6 +173,23 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         load();
     }, [projectId, viewMode]);
 
+    // Load Prompts
+    useEffect(() => {
+        fetch("/api/admin/notes-to-sermon/prompts")
+            .then(res => res.json())
+            .then(data => {
+                setPrompts(data);
+                if (data.length > 0) {
+                    // Try to finding default
+                    const def = data.find((p: any) => p.is_default);
+                    if (def) setSelectedPromptId(def.id);
+                    else setSelectedPromptId(data[0].id);
+                }
+            });
+    }, []);
+
+    const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+
     // Polling for status
     useEffect(() => {
         let interval: NodeJS.Timeout;
@@ -168,8 +197,20 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             interval = setInterval(async () => {
                 const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}`);
                 const data = await res.json();
+
+                // Update progress if available
+                if (data.progress) {
+                    setProgress(data.progress);
+                }
+
+                // Update prompt ID if available (it might be set during processing)
+                if (data.prompt_id) {
+                    setUsedPromptId(data.prompt_id);
+                }
+
                 if (!data.processing) {
                     setIsProcessing(false);
+                    setProgress(null);
                     // Re-fetch content based on current viewMode
                     const endpoint = viewMode === 'source' ? 'source' : 'draft';
                     const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`);
@@ -185,6 +226,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
         return () => clearInterval(interval);
     }, [isProcessing, projectId, viewMode]);
+
+
 
     const handleOCR = async (filename: string) => {
         const confirm = window.confirm(`Start OCR for ${filename}? This might take a few seconds.`);
@@ -303,7 +346,11 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
 
         setIsGenerating(true);
         try {
-            await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/generate-draft`, { method: "POST" });
+            await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/generate-draft`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt_id: selectedPromptId })
+            });
             alert("Draft generation started! Switching to Draft view...");
             setViewMode('draft');
         } catch (e) {
@@ -384,6 +431,36 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         setIsRefining(false);
     };
 
+    const handleOpenMetaEdit = () => {
+        setMetaForm({ title: projectTitle, bibleVerse: bibleVerse });
+        setShowMetaEdit(true);
+    };
+
+    const handleSaveMeta = async () => {
+        if (!metaForm.title) return alert("Title is required");
+
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/metadata`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    title: metaForm.title,
+                    bible_verse: metaForm.bibleVerse
+                })
+            });
+            if (res.ok) {
+                setProjectTitle(metaForm.title);
+                setBibleVerse(metaForm.bibleVerse);
+                setShowMetaEdit(false);
+            } else {
+                const data = await res.json();
+                alert("Failed to update metadata: " + (data.detail || "Unknown error"));
+            }
+        } catch (e) {
+            alert("Error updating metadata");
+        }
+    };
+
 
     if (loading) {
         return <div className="p-10 text-center">Loading / Processing Project...</div>;
@@ -398,9 +475,47 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     <Link href="/admin/notes-to-sermon/projects" className="text-gray-500 hover:text-gray-700 text-sm">
                         &larr; Back to Projects
                     </Link>
-                    <h1 className="text-xl font-bold">Project: {projectTitle}</h1>
+                    <div>
+                        <div className="flex items-center space-x-2">
+                            <h1 className="text-xl font-bold">Project: {projectTitle}</h1>
+                            <button onClick={handleOpenMetaEdit} className="text-gray-400 hover:text-indigo-600">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                            </button>
+                        </div>
+                        {bibleVerse && <p className="text-sm text-gray-600">{bibleVerse}</p>}
+                    </div>
                 </div>
                 <div className="flex items-center space-x-2">
+                    {/* Prompt Selector */}
+                    {/* Prompt Selector */}
+                    <div className="flex items-center space-x-1 mr-2">
+                        <span className="text-xs text-gray-500">Prompt:</span>
+                        <select
+                            className="text-sm border rounded p-1 max-w-[150px]"
+                            value={selectedPromptId}
+                            onChange={(e) => setSelectedPromptId(e.target.value)}
+                        >
+                            {prompts.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                        <Link href="/admin/notes-to-sermon/prompts" target="_blank" className="text-gray-400 hover:text-indigo-600" title="Manage Prompts">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </Link>
+                    </div>
+
+                    {viewMode === 'draft' && usedPromptId && (
+                        <div className="flex items-center space-x-1 mr-2 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                            <span>Generated with:</span>
+                            <span className="font-bold">{prompts.find(p => p.id === usedPromptId)?.name || "Unknown Prompt"}</span>
+                        </div>
+                    )}
+
                     <button
                         onClick={handleGenerate}
                         disabled={isGenerating}
@@ -455,8 +570,18 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             </button>
                         </div>
                         {isProcessing && (
-                            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-2 mb-2 text-sm">
-                                Processing pages in background... text will update automatically.
+                            <div className="bg-white border rounded p-3 mb-4 shadow-sm space-y-2">
+                                <div className="flex justify-between text-sm font-bold text-gray-700">
+                                    <span>Processing pages...</span>
+                                    {progress && <span>{progress.current} / {progress.total}</span>}
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                                    <div
+                                        className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500 ease-in-out"
+                                        style={{ width: progress ? `${(progress.current / progress.total) * 100}%` : '5%' }}
+                                    ></div>
+                                </div>
+                                <p className="text-xs text-gray-500 italic text-center">Do not close this window.</p>
                             </div>
                         )}
                         <div className="space-y-4 max-w-[800px] mx-auto">
@@ -579,6 +704,48 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     )}
                 </div>
             </div>
+            {/* Metadata Modal */}
+            {showMetaEdit && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded shadow-lg w-[400px]">
+                        <h3 className="text-lg font-bold mb-4">Edit Project Info</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-bold mb-1">Title</label>
+                                <input
+                                    type="text"
+                                    className="w-full border p-2 rounded"
+                                    value={metaForm.title}
+                                    onChange={e => setMetaForm({ ...metaForm, title: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold mb-1">Bible Verse</label>
+                                <textarea
+                                    className="w-full border p-2 rounded h-24"
+                                    placeholder="e.g. John 3:16"
+                                    value={metaForm.bibleVerse}
+                                    onChange={e => setMetaForm({ ...metaForm, bibleVerse: e.target.value })}
+                                />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                                <button
+                                    onClick={() => setShowMetaEdit(false)}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSaveMeta}
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

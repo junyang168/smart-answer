@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel
 
 from google import genai
@@ -38,6 +38,9 @@ class SermonProject(BaseModel):
     pages: List[str] # List of filenames like ["1-01.jpeg", "1-02.jpeg"]
     processing: bool = False
     google_doc_id: Optional[str] = None
+    progress: Optional[Dict[str, int]] = None # e.g. {"current": 1, "total": 10}
+    bible_verse: Optional[str] = None
+    prompt_id: Optional[str] = None
 
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
@@ -322,7 +325,7 @@ def trigger_project_page_ocr(sermon_id: str, filename: str):
             data = json.load(f)
         _rebuild_unified_source(sermon_id, data.get("pages", []))
 
-def update_sermon_processing_status(sermon_id: str, is_processing: bool):
+def update_sermon_processing_status(sermon_id: str, is_processing: bool, progress: Optional[Dict[str, int]] = None):
     """
     Update the processing status in meta.json.
     """
@@ -333,6 +336,14 @@ def update_sermon_processing_status(sermon_id: str, is_processing: bool):
         with open(meta_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         data["processing"] = is_processing
+        
+        # If we are done processing, clear progress. Otherwise update it if provided.
+        if not is_processing:
+            if "progress" in data:
+                del data["progress"]
+        elif progress:
+             data["progress"] = progress
+             
         with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -351,33 +362,43 @@ def trigger_project_batch_ocr(sermon_id: str):
         
     pages = data.get("pages", [])
     
-    # Mark as processing
-    update_sermon_processing_status(sermon_id, True)
+    # Calculate total work first
+    unprocessed_pages = []
+    for filename in pages:
+        if not get_raw_ocr_path(filename).exists():
+             unprocessed_pages.append(filename)
+             
+    total_files = len(unprocessed_pages)
+    current_count = 0
+
+    # Mark as processing with init progress
+    update_sermon_processing_status(sermon_id, True, {"current": 0, "total": total_files})
     
     try:
         newly_processed = []
         for filename in pages:
-            # Check if already processed
+            # Check if updated progress is needed
+            # We iterate all pages but only count the ones we actually process
             is_processed = get_raw_ocr_path(filename).exists()
             
-            # If not processed, process it
-            if not is_processed:
-                print(f"Batch processing: {filename}")
-                try:
-                    process_note_image(filename)
-                    newly_processed.append(filename)
-                except Exception as e:
-                    print(f"Error processing {filename}: {e}")
+            # If not processed (or it was just in our unprocessed list), process it
+            if filename in unprocessed_pages: 
+                # Double check existence to be safe or just rely on list
+                if not get_raw_ocr_path(filename).exists():
+                    print(f"Batch processing: {filename}")
+                    try:
+                        current_count += 1
+                        # Update progress before starting heavy work? Or after?
+                        # Usually user wants to see "Processing 1/5".
+                        update_sermon_processing_status(sermon_id, True, {"current": current_count, "total": total_files})
+                        
+                        process_note_image(filename)
+                        newly_processed.append(filename)
+                    except Exception as e:
+                        print(f"Error processing {filename}: {e}")
             else:
-                # OPTIONAL: If it IS processed, but the source still has the placeholder, 
-                # we should treat it as 'newly processed' for injection purposes to fix 'stale' source.
-                # However, this function is 'ocr-all' so checking strict existence is faster.
-                # Let's double check if we need to repair.
                 pass
 
-        # Always try to inject any page that might be missing in the source but exists on disk
-        # We can just iterate ALL pages and try to inject if placeholder exists.
-        # This fixes the user's issue where the file existed but source was stale.
         _inject_newly_processed_pages(sermon_id, pages)
 
     finally:
@@ -429,13 +450,61 @@ def save_sermon_draft(sermon_id: str, content: str) -> bool:
         f.write(content)
     return True
 
-def generate_sermon_draft(sermon_id: str) -> str:
+    return True
+
+def split_markdown_by_headings(content: str) -> List[str]:
+    """
+    Split markdown content into sections based on headers (H1, H2).
+    Simple heuristic: Split by lines starting with '# ' or '## '.
+    Returns a list of section strings.
+    """
+    import re
+    # Split by looking ahead for a header at the start of a line
+    # We want to keep the delimiter (the header) with the section.
+    # Pattern: (?=^#+ ) - matches position before a header
+    # But python re.split with lookahead might trigger empty strings.
+    
+    # A safer manual approach for reliability:
+    lines = content.split('\n')
+    sections = []
+    current_section = []
+    
+    for line in lines:
+        # Check if line identifies a new major section (H1 or H2)
+        # We assume H1 is title, but notes often have # I. Introduction
+        if (line.startswith("# ") or line.startswith("## ")) and current_section:
+            # If we have accumulated content, push it and start new
+            sections.append("\n".join(current_section))
+            current_section = []
+            
+        current_section.append(line)
+        
+    if current_section:
+        sections.append("\n".join(current_section))
+        
+    # Filter empty sections
+    return [s for s in sections if s.strip()]
+
+def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> str:
     """
     Generate the sermon draft using Gemini.
+    Uses iterative "Split & Merge" strategy for deep generation.
     """
     try:
         # 1. Mark as processing
         update_sermon_processing_status(sermon_id, True)
+
+        # Save used prompt ID to metadata
+        if prompt_id:
+            sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+            meta_file = sermon_dir / "meta.json"
+            if meta_file.exists():
+                import json
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["prompt_id"] = prompt_id
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
 
         source_content = get_sermon_source(sermon_id)
         if not source_content:
@@ -450,47 +519,115 @@ def generate_sermon_draft(sermon_id: str) -> str:
         )
         model_id = "gemini-3-pro-preview"
         
-        # Construct Prompt
-        system_prompt = """
-        你現在是精通聖經原文的釋經講道大師（類似王守仁教授的風格）。
-        你的任務是將用戶提供的『原始講義筆記』（Unified Manuscript）改寫成一篇『大師級的釋經講章草稿』。
         
-        ### 核心原則：
-        1. **語氣**：權威、學術嚴謹，但充滿牧者的慈愛與迫切感。
-        2. **原文釋經**：當筆記中出現希臘文/希伯來文時，請務必展開解釋其字義、時態或文法的精妙之處（擴寫 200-300 字）。
-        3. **例證擴充**：將筆記中簡略的例子（如 "David"）擴寫成生動的歷史或聖經故事。
-        4. **應用導向**：每一段釋經最後必須轉向對現代信徒的應用 (Life Application)。使用「弟兄姊妹...」直接對會眾說話。
-        5. **敘事流暢**：不要使用條列式（Bullet points），請將其轉化為連貫的口語敘事段落。
+        # Resolve Prompt
+        from backend.api.prompt_manager import get_prompt, DEFAULT_SYSTEM_PROMPT
         
-        ### 格式要求：
-        - 使用 Markdown 格式。
-        - 保留大綱標題（# I. ...），但在標題下展現豐富的講道內容。
-        - 總字數目標：盡量豐富詳盡，不低於 2000 字。
-        """
+        system_prompt = DEFAULT_SYSTEM_PROMPT
+        generation_temperature = 0.7
         
-        response = client.models.generate_content(
-            model=model_id,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.7 
-            ),
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=f"這是我的講道筆記，請幫我撰寫講章草稿：\n\n{source_content}")
+        if prompt_id:
+            p = get_prompt(prompt_id)
+            if p:
+               system_prompt = p.content
+               generation_temperature = p.temperature
+
+        # --- Iterative Generation Strategy ---
+        sections = split_markdown_by_headings(source_content)
+        
+        # If too few sections or short content, just do one pass (fallback)
+        if len(sections) <= 1:
+            total_sections = 1
+            update_sermon_processing_status(sermon_id, True, {"current": 0, "total": 1})
+            
+            response = client.models.generate_content(
+                model=model_id,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=generation_temperature
+                ),
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_text(text=f"這是我的講道筆記，請幫我撰寫講章草稿：\n\n{source_content}")
+                        ]
+                    )
+                ]
+            )
+            draft_content = response.text
+        else:
+            # Multi-pass generation
+            total_sections = len(sections)
+            generated_parts = []
+            
+            print(f"Generating draft in {total_sections} sections for {sermon_id}")
+            
+            for i, section in enumerate(sections):
+                # Update progress
+                update_sermon_processing_status(sermon_id, True, {"current": i + 1, "total": total_sections})
+                
+                # Context aware prompt
+                # To maintain context, we provide the FULL notes as reference, 
+                # AND the previously generated content to ensure flow.
+                
+                previous_context = ""
+                if generated_parts:
+                    # Provide the last 1000 chars or full previous content? 
+                    # Gemini has huge window, let's provide everything generated so far to ensure perfect flow.
+                    previous_text = "\n\n".join(generated_parts)
+                    previous_context = f"""
+                    === 前面已撰寫的內容（Previously Generated） ===
+                    {previous_text}
+                    === 前面內容結束 ===
+                    """
+                
+                iterative_prompt = f"""
+                你是正在撰寫一篇長講章的大師。
+                
+                這是整份『原始講義筆記』（Unified Manuscript）供你參考上下文（Global Context）：
+                === 完整筆記開始 ===
+                {source_content}
+                === 完整筆記結束 ===
+                
+                {previous_context}
+                
+                現在，請專注於撰寫第 {i+1}/{total_sections} 部分。
+                
+                === 當前需撰寫的段落（Current Section） ===
+                {section}
+                
+                **任務要求**：
+                1. 請參考「完整筆記」與「前面已撰寫的內容」。
+                2. 確保語氣、用詞與前文連貫，不要與前文重複，而是順暢地接續下去。
+                3. **只輸出** 「當前需撰寫的段落」 的擴寫內容。
+                4. 必須極度詳盡，保留所有希臘文/希伯來文的釋經細節。
+                """
+                
+                response = client.models.generate_content(
+                    model=model_id,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                        temperature=generation_temperature
+                    ),
+                    contents=[
+                        types.Content(
+                            role="user",
+                            parts=[
+                                types.Part.from_text(text=iterative_prompt)
+                            ]
+                        )
                     ]
                 )
-            ]
-        )
-        
-        draft_content = response.text
+                generated_parts.append(response.text)
+                
+            draft_content = "\n\n".join(generated_parts)
+
         save_sermon_draft(sermon_id, draft_content)
         return draft_content
 
     except Exception as e:
         print(f"Error generating draft for {sermon_id}: {e}")
-        # In a real app we might want to save the error state somewhere
         raise e
     finally:
         # 2. Mark as done
@@ -588,6 +725,54 @@ def commit_sermon_project(sermon_id: str) -> str:
 
     commit = repo.index.commit(f"Update sermon project: {title}")
     return str(commit.hexsha)
+
+
+def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Optional[str] = None) -> SermonProject:
+    """
+    Update the project metadata (title, bible_verse).
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    if not sermon_dir.exists():
+        raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+        
+    meta_file = sermon_dir / "meta.json"
+    import json
+    data = {}
+    if meta_file.exists():
+        with open(meta_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+    data["title"] = title
+    if bible_verse:
+        data["bible_verse"] = bible_verse
+    elif "bible_verse" in data:
+        # If explicitly passed as None (or empty string handled by caller), should we delete?
+        # Let's assume input reflects desired state. 
+        # But python Optional default is None. 
+        # Let's trust that if the key is updated, we keep it. 
+        # Actually simplest to just set it if provided.
+        # If user wants to clear it, they might send empty string.
+        pass
+        
+    # Standardize: Always write what we have
+    data["bible_verse"] = bible_verse
+    
+    # Ensure ID is present (it might be missing in old meta files)
+    if "id" not in data:
+        data["id"] = sermon_id
+    
+    # Ensure pages is present
+    if "pages" not in data:
+        data["pages"] = []
+
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        
+    try:
+        return SermonProject(**data)
+    except Exception as e:
+        # If validation fails, we shouldn't just crash with 500 without details
+        raise ValueError(f"Metadata Validation Error: {e}")
 
 
 def export_sermon_to_doc(sermon_id: str) -> str:

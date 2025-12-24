@@ -61,23 +61,71 @@ export default function ProjectCreationPage() {
             <h1 className="text-3xl font-bold mb-6">Sermon Projects</h1>
 
             {/* Project List */}
-            <div className="mb-10">
-                <h2 className="text-xl font-semibold mb-4">Existing Projects</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {projects.map(p => (
-                        <div
-                            key={p.id}
-                            className="bg-white p-4 rounded shadow border hover:shadow-md cursor-pointer flex justify-between items-center"
-                            onClick={() => router.push(`/admin/notes-to-sermon/project/${p.id}`)}
-                        >
-                            <div>
-                                <h3 className="font-bold text-lg">{p.title}</h3>
-                                <span className="text-gray-500 text-sm">{p.pages.length} pages</span>
-                            </div>
-                            <span className="text-indigo-600">Open &rarr;</span>
-                        </div>
-                    ))}
-                    {projects.length === 0 && <p className="text-gray-500">No projects yet.</p>}
+            {/* Project List */}
+            <div className="mb-10 bg-white shadow rounded overflow-hidden">
+                <div className="px-6 py-4 border-b">
+                    <h2 className="text-xl font-semibold">Existing Projects</h2>
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Title / ID
+                                </th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Bible Verse
+                                </th>
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Pages
+                                </th>
+                                <th scope="col" className="relative px-6 py-3">
+                                    <span className="sr-only">Open</span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            {projects.map((p) => (
+                                <tr key={p.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <div
+                                            className="cursor-pointer"
+                                            onClick={() => router.push(`/admin/notes-to-sermon/project/${p.id}`)}
+                                        >
+                                            <div className="text-sm font-medium text-indigo-600 hover:text-indigo-900">{p.title}</div>
+                                            <div className="text-sm text-gray-500">{p.id}</div>
+                                            {p.processing && (
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
+                                                    Processing...
+                                                </span>
+                                            )}
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <div className="text-sm text-gray-900 max-w-xs truncate" title={p.bible_verse}>{p.bible_verse || "-"}</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <div className="text-sm text-gray-500">{p.pages.length} pages</div>
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <button
+                                            onClick={() => router.push(`/admin/notes-to-sermon/project/${p.id}`)}
+                                            className="text-indigo-600 hover:text-indigo-900"
+                                        >
+                                            Open
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {projects.length === 0 && (
+                                <tr>
+                                    <td colSpan={4} className="px-6 py-4 text-center text-sm text-gray-500">
+                                        No projects found.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 

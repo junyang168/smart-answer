@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+
 from fastapi.responses import FileResponse
 from backend.api.sermon_converter_service import (
     list_note_images, 
@@ -23,9 +24,20 @@ from backend.api.sermon_converter_service import (
     commit_sermon_project,
     export_sermon_to_doc,
     refine_sermon_draft,
+    update_sermon_project_metadata,
+    NoteImage,
+    Segment,
     NoteImage,
     Segment,
     SermonProject
+)
+from backend.api.prompt_manager import (
+    list_prompts,
+    get_prompt,
+    create_prompt,
+    update_prompt,
+    delete_prompt,
+    Prompt
 )
 from pydantic import BaseModel
 
@@ -107,15 +119,23 @@ def save_project_source(sermon_id: str, payload: SaveSourceRequest):
 
 # --- Draft Generation Endpoints ---
 
+class GenerateDraftRequest(BaseModel):
+    prompt_id: Optional[str] = None
+
 @router.post("/sermon-project/{sermon_id}/generate-draft")
-def trigger_draft_generation(sermon_id: str, background_tasks: BackgroundTasks):
+def trigger_draft_generation(sermon_id: str, payload: Optional[GenerateDraftRequest] = None, background_tasks: BackgroundTasks = None):
     """
     Generate the sermon draft in background.
     """
     try:
+        # FastAPI dependency fix: If payload is missing, it might be None
+        # Actually standard for optional body is to declare it. 
+        # But we need to handle if client sends nothing.
+        prompt_id = payload.prompt_id if payload else None
+        
         # We wrap the synchronous call in a simple lambda or direct call
         # But wait, generate_sermon_draft is blocking and calls the API. BackgroundTasks is perfect.
-        background_tasks.add_task(generate_sermon_draft, sermon_id)
+        background_tasks.add_task(generate_sermon_draft, sermon_id, prompt_id)
         return {"status": "success", "message": "Draft generation started."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -242,3 +262,62 @@ def refine_draft_endpoint(sermon_id: str, payload: RefineRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class UpdateMetadataRequest(BaseModel):
+    title: str
+    bible_verse: Optional[str] = None
+
+@router.post("/sermon-project/{sermon_id}/metadata", response_model=SermonProject)
+def update_project_metadata(sermon_id: str, payload: UpdateMetadataRequest):
+    """
+    Update project title and bible verse.
+    """
+    try:
+        # Import locally to ensure fresh reload during dev
+        from backend.api.sermon_converter_service import update_sermon_project_metadata
+        return update_sermon_project_metadata(sermon_id, payload.title, payload.bible_verse)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Sermon project not found")
+    except ValueError as ve:
+        # Handle the validation error we explicitly raise
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+# --- Prompt Management Endpoints ---
+
+@router.get("/prompts", response_model=List[Prompt])
+def get_prompts_endpoint():
+    return list_prompts()
+
+@router.get("/prompts/{prompt_id}", response_model=Prompt)
+def get_prompt_detail_endpoint(prompt_id: str):
+    p = get_prompt(prompt_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return p
+
+class CreatePromptRequest(BaseModel):
+    name: str
+    content: str
+    temperature: float = 0.7
+
+@router.post("/prompts", response_model=Prompt)
+def create_prompt_endpoint(payload: CreatePromptRequest):
+    return create_prompt(payload.name, payload.content, payload.temperature)
+
+@router.put("/prompts/{prompt_id}", response_model=Prompt)
+def update_prompt_endpoint(prompt_id: str, payload: CreatePromptRequest):
+    p = update_prompt(prompt_id, payload.name, payload.content, payload.temperature)
+    if not p:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return p
+
+@router.delete("/prompts/{prompt_id}")
+def delete_prompt_endpoint(prompt_id: str):
+    success = delete_prompt(prompt_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return {"status": "success"}
