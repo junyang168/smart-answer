@@ -41,6 +41,8 @@ class SermonProject(BaseModel):
     progress: Optional[Dict[str, int]] = None # e.g. {"current": 1, "total": 10}
     bible_verse: Optional[str] = None
     prompt_id: Optional[str] = None
+    series_id: Optional[str] = None
+    lecture_id: Optional[str] = None
 
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
@@ -773,6 +775,29 @@ def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Opti
     except Exception as e:
         # If validation fails, we shouldn't just crash with 500 without details
         raise ValueError(f"Metadata Validation Error: {e}")
+
+
+def update_sermon_project_linking(sermon_id: str, series_id: Optional[str], lecture_id: Optional[str]) -> bool:
+    """
+    Update the linking of a project to a Series/Lecture.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    if not sermon_dir.exists():
+        return False
+        
+    meta_file = sermon_dir / "meta.json"
+    import json
+    data = {}
+    if meta_file.exists():
+        with open(meta_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+    data["series_id"] = series_id
+    data["lecture_id"] = lecture_id
+    
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return True
 
 
 def export_sermon_to_doc(sermon_id: str) -> str:
