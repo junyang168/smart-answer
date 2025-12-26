@@ -89,7 +89,11 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
             case "illustrator": return agentState.illustration_ideas || "Waiting for output...";
             case "structuring_specialist":
                 const beats = agentState.beats;
-                if (Array.isArray(beats)) return beats.join("\n\n---\n\n");
+                if (Array.isArray(beats)) {
+                    return beats.map((b: string, i: number) =>
+                        `> [!NOTE]\n> **Macro-Beat ${i + 1}**\n>\n> ${b.replace(/\n/g, "\n> ")}`
+                    ).join("\n\n");
+                }
                 return "Waiting for structure...";
             case "drafter":
                 if (agentState.draft_chunks?.length > 0) return agentState.draft_chunks.join("\n\n");
