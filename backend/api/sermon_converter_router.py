@@ -121,23 +121,35 @@ def save_project_source(sermon_id: str, payload: SaveSourceRequest):
 
 class GenerateDraftRequest(BaseModel):
     prompt_id: Optional[str] = None
+    use_mas: bool = True # Default to Multi-Agent System
+    restart: bool = False # Force restart
 
 @router.post("/sermon-project/{sermon_id}/generate-draft")
-def trigger_draft_generation(sermon_id: str, payload: Optional[GenerateDraftRequest] = None, background_tasks: BackgroundTasks = None):
+def trigger_draft_generation(sermon_id: str, background_tasks: BackgroundTasks, payload: Optional[GenerateDraftRequest] = None):
     """
     Generate the sermon draft in background.
     """
     try:
-        # FastAPI dependency fix: If payload is missing, it might be None
-        # Actually standard for optional body is to declare it. 
-        # But we need to handle if client sends nothing.
-        prompt_id = payload.prompt_id if payload else None
+        payload = payload or GenerateDraftRequest()
         
-        # We wrap the synchronous call in a simple lambda or direct call
-        # But wait, generate_sermon_draft is blocking and calls the API. BackgroundTasks is perfect.
-        background_tasks.add_task(generate_sermon_draft, sermon_id, prompt_id)
+        if payload.use_mas:
+            # Inline import to avoid potential circular dependency issues at top level
+            # though usually it's fine.
+            from backend.api.multi_agent.orchestrator import process_project_with_mas
+            
+            if payload.restart:
+                from backend.api.sermon_converter_service import reset_agent_state
+                reset_agent_state(sermon_id)
+                
+            background_tasks.add_task(process_project_with_mas, sermon_id)
+        else:
+            # Legacy Single Agent
+            background_tasks.add_task(generate_sermon_draft, sermon_id, payload.prompt_id)
+            
         return {"status": "success", "message": "Draft generation started."}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sermon-project/{sermon_id}/draft")
@@ -303,14 +315,15 @@ class CreatePromptRequest(BaseModel):
     name: str
     content: str
     temperature: float = 0.7
+    role: str = "drafter"
 
 @router.post("/prompts", response_model=Prompt)
 def create_prompt_endpoint(payload: CreatePromptRequest):
-    return create_prompt(payload.name, payload.content, payload.temperature)
+    return create_prompt(payload.name, payload.content, payload.temperature, payload.role)
 
 @router.put("/prompts/{prompt_id}", response_model=Prompt)
 def update_prompt_endpoint(prompt_id: str, payload: CreatePromptRequest):
-    p = update_prompt(prompt_id, payload.name, payload.content, payload.temperature)
+    p = update_prompt(prompt_id, payload.name, payload.content, payload.temperature, payload.role)
     if not p:
         raise HTTPException(status_code=404, detail="Prompt not found")
     return p
@@ -321,3 +334,48 @@ def delete_prompt_endpoint(prompt_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"status": "success"}
+
+@router.get("/sermon-project/{sermon_id}/agent-logs")
+def get_agent_logs_endpoint(sermon_id: str):
+    """
+    Get the execution logs from the multi-agent system.
+    """
+    import json
+    from backend.api.config import DATA_BASE_PATH
+    
+    logs = []
+    
+    # 1. Read legacy logs first (older)
+    legacy_log_file = DATA_BASE_PATH / "sermon_projects" / sermon_id / "agent_logs.json"
+    if legacy_log_file.exists():
+        try:
+            with open(legacy_log_file, "r", encoding="utf-8") as f:
+                logs.extend(json.load(f))
+        except:
+            pass
+
+    # 2. Read new logs (newer)
+    new_log_file = DATA_BASE_PATH / "notes_to_surmon" / sermon_id / "agent_logs.json"
+    if new_log_file.exists():
+        try:
+            with open(new_log_file, "r", encoding="utf-8") as f:
+                new_logs = json.load(f)
+                # Avoid duplicates if we migrated the file (simple check)
+                # But here we assume disjoint or overlap. Simple append is safer for now.
+                # If both exist, legacy usually ends where new begins.
+                logs.extend(new_logs)
+        except:
+            pass
+            
+    return logs
+
+@router.get("/sermon-project/{sermon_id}/agent-state")
+def get_agent_state_endpoint(sermon_id: str):
+    """
+    Get the full agent state (artifacts).
+    """
+    from backend.api.sermon_converter_service import get_agent_state_data
+    data = get_agent_state_data(sermon_id)
+    if not data:
+        return {} # Return empty dict instead of 404 to simplify frontend logic
+    return data

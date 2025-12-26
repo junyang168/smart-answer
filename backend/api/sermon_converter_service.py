@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 from google import genai
@@ -38,7 +38,10 @@ class SermonProject(BaseModel):
     pages: List[str] # List of filenames like ["1-01.jpeg", "1-02.jpeg"]
     processing: bool = False
     google_doc_id: Optional[str] = None
-    progress: Optional[Dict[str, int]] = None # e.g. {"current": 1, "total": 10}
+    progress: Optional[Dict[str, Any]] = None # e.g. {"current": 1, "total": 10} or {"stage": "...", "progress": ...}
+    processing_status: Optional[str] = None
+    processing_progress: Optional[int] = None
+    processing_error: Optional[str] = None
     bible_verse: Optional[str] = None
     prompt_id: Optional[str] = None
     series_id: Optional[str] = None
@@ -327,7 +330,7 @@ def trigger_project_page_ocr(sermon_id: str, filename: str):
             data = json.load(f)
         _rebuild_unified_source(sermon_id, data.get("pages", []))
 
-def update_sermon_processing_status(sermon_id: str, is_processing: bool, progress: Optional[Dict[str, int]] = None):
+def update_sermon_processing_status(sermon_id: str, is_processing: bool, progress: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
     """
     Update the processing status in meta.json.
     """
@@ -337,15 +340,47 @@ def update_sermon_processing_status(sermon_id: str, is_processing: bool, progres
         import json
         with open(meta_file, "r", encoding="utf-8") as f:
             data = json.load(f)
+        
         data["processing"] = is_processing
         
-        # If we are done processing, clear progress. Otherwise update it if provided.
-        if not is_processing:
-            if "progress" in data:
-                del data["progress"]
-        elif progress:
+        # 1. Update fields from progress if provided (regardless of processing state)
+        if progress:
              data["progress"] = progress
+             if "stage" in progress:
+                 data["processing_status"] = str(progress["stage"])
+             if "progress" in progress and isinstance(progress["progress"], (int, float)):
+                 data["processing_progress"] = int(progress["progress"])
              
+             # Support "current"/"total" style
+             if "current" in progress and "total" in progress:
+                 try:
+                     pct = int((progress["current"] / progress["total"]) * 100)
+                     data["processing_progress"] = pct
+                     data["processing_status"] = f"Processing {progress['current']}/{progress['total']}"
+                 except:
+                     pass
+        
+        # 2. Handle Completion/Stopping
+        if not is_processing:
+            # Only clear fields if NO final progress was provided (i.e. cancelled or silent stop)
+            # If we passed {"stage": "Complete", "progress": 100}, we WANT to keep it.
+            if not progress:
+                keys_to_remove = ["progress", "processing_status", "processing_progress"]
+                for k in keys_to_remove:
+                    if k in data: del data[k]
+
+            # Save error if provided
+            if error:
+                data["processing_error"] = error
+            elif "processing_error" in data:
+                # Clear previous error on success (if no new error)
+                del data["processing_error"]
+        
+        # 3. If processing is True, definitely clear OLD errors
+        elif is_processing:
+            if "processing_error" in data:
+                 del data["processing_error"]
+              
         with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
@@ -431,6 +466,66 @@ def save_sermon_source(sermon_id: str, content: str) -> bool:
 def get_sermon_draft_path(sermon_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
     return sermon_dir / "draft_v1.md"
+
+def reset_agent_state(sermon_id: str):
+    """
+    Reset the multi-agent system state for a project, allowing a fresh restart.
+    Deletes agent_state.json and agent_logs.json, and resets metadata status.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    
+    # 1. Delete State File
+    state_file = sermon_dir / "agent_state.json"
+    if state_file.exists():
+        state_file.unlink()
+        
+    # 2. Delete Logs (New Path)
+    new_logs = sermon_dir / "agent_logs.json"
+    if new_logs.exists():
+        new_logs.unlink()
+        
+    # 3. Delete Logs (Legacy Path) - cleanup
+    legacy_logs = DATA_BASE_PATH / "sermon_projects" / sermon_id / "agent_logs.json"
+    if legacy_logs.exists():
+        legacy_logs.unlink()
+        
+    # 4. Reset Metadata
+    meta_file = sermon_dir / "meta.json"
+    if meta_file.exists():
+        import json
+        with open(meta_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        # Clear processing flags
+        keys_to_clear = [
+            "processing", 
+            "processing_status", 
+            "processing_progress", 
+            "processing_error",
+            "progress" # Clear detailed progress dict
+        ]
+        
+        for k in keys_to_clear:
+            if k in data:
+                del data[k]
+                
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+def get_agent_state_data(sermon_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retrieve the full agent state JSON for inspection.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    state_file = sermon_dir / "agent_state.json"
+    if not state_file.exists():
+        return None
+    import json
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return None
 
 def get_sermon_draft(sermon_id: str) -> str:
     draft_file = get_sermon_draft_path(sermon_id)

@@ -7,12 +7,48 @@ from google import genai
 from google.genai import types
 import json
 
-from .config import GENERATION_MODEL, GEMINI_API_KEY
+from .config import GENERATION_MODEL, GEMINI_API_KEY, GOOGLE_CLOUD_PROJECT
 
 
 class GeminiClient:
     def __init__(self) -> None:
-        self._client = genai.Client()
+        # 1. Standard Client (Gemini 1.5/2.0 Pro/Flash etc via AI Studio or Default ADC)
+        if GEMINI_API_KEY:
+            self._client = genai.Client(api_key=GEMINI_API_KEY)
+        else:
+            self._client = genai.Client()
+            
+        # 2. Vertex Client (For Gemini 3.0 Pro Preview)
+        # Gemini 3 is strictly locked to global region on Vertex currently
+        try:
+            self._vertex_client = genai.Client(
+                vertexai=True,
+                project=GOOGLE_CLOUD_PROJECT,
+                location="global"
+            )
+        except Exception as e:
+            print(f"Warning: Failed to initialize Vertex AI Client: {e}")
+            self._vertex_client = None
+
+    def _get_client_for_model(self, model: str):
+        """
+        Selects the appropriate client based on the model.
+        Gemini 3 Pro Preview requires Vertex AI.
+        """
+        if "gemini-3" in model and self._vertex_client:
+            return self._vertex_client
+        return self._client
+
+    def generate_raw(self, contents, config=None, model=GENERATION_MODEL):
+        """
+        Direct wrapper around client.models.generate_content for advanced usage.
+        """
+        client = self._get_client_for_model(model)
+        return client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config
+        )
 
     def generate(self, prompt: str, model=GENERATION_MODEL, use_search_tool=False, use_url_context=False) -> str:
         contents = [
@@ -34,7 +70,8 @@ class GeminiClient:
             thinking_config=types.ThinkingConfig(thinking_budget=-1),
             tools=tools,
         )
-        response = self._client.models.generate_content(
+        # Use generate_raw to leverage routing logic
+        response = self.generate_raw(
             model=model,
             contents=contents,
             config=generate_content_config
@@ -83,7 +120,8 @@ Input Script:
         prompt += json.dumps(simplified_script, ensure_ascii=False, indent=2)
 
         try:
-            response = self._client.models.generate_content(
+            # Use generate_raw
+            response = self.generate_raw(
                 model=GENERATION_MODEL,
                 contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
             )

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import "easymde/dist/easymde.min.css";
 
 import AiCommandPanel from "./AiCommandPanel";
@@ -12,6 +13,7 @@ const SimpleMDE = dynamic(() => import("react-simplemde-editor"), {
 });
 
 export default function MultiPageEditor({ projectId }: { projectId: string }) {
+    const router = useRouter();
     const [viewMode, setViewMode] = useState<'source' | 'draft'>('source');
     const [isGenerating, setIsGenerating] = useState(false);
     const [projectTitle, setProjectTitle] = useState(projectId);
@@ -188,7 +190,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             });
     }, []);
 
-    const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+    interface ProgressState {
+        current?: number;
+        total?: number;
+        stage?: string;
+        progress?: number;
+    }
+
+    const [progress, setProgress] = useState<ProgressState | null>(null);
 
     // Polling for status
     useEffect(() => {
@@ -351,8 +360,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ prompt_id: selectedPromptId })
             });
-            alert("Draft generation started! Switching to Draft view...");
-            setViewMode('draft');
+            // alert("Draft generation started! Switching to Draft view...");
+            // setViewMode('draft');
+            router.push(`/admin/notes-to-sermon/project/${projectId}/generation`);
         } catch (e) {
             alert("Failed to start generation");
         }
@@ -569,16 +579,24 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 {isProcessing ? "Processing..." : "Process All"}
                             </button>
                         </div>
-                        {isProcessing && (
+                        {isProcessing && progress && (
                             <div className="bg-white border rounded p-3 mb-4 shadow-sm space-y-2">
                                 <div className="flex justify-between text-sm font-bold text-gray-700">
-                                    <span>Processing pages...</span>
-                                    {progress && <span>{progress.current} / {progress.total}</span>}
+                                    <span>{progress.stage ? progress.stage : "Processing..."}</span>
+                                    {progress.total && progress.current !== undefined ? (
+                                        <span>{progress.current} / {progress.total}</span>
+                                    ) : (
+                                        <span>{progress.progress || 0}%</span>
+                                    )}
                                 </div>
                                 <div className="w-full bg-gray-200 rounded-full h-2.5">
                                     <div
                                         className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500 ease-in-out"
-                                        style={{ width: progress ? `${(progress.current / progress.total) * 100}%` : '5%' }}
+                                        style={{
+                                            width: (progress.total && progress.current !== undefined)
+                                                ? `${(progress.current / progress.total) * 100}%`
+                                                : `${progress.progress || 5}%`
+                                        }}
                                     ></div>
                                 </div>
                                 <p className="text-xs text-gray-500 italic text-center">Do not close this window.</p>
