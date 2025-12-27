@@ -16,10 +16,12 @@ router = APIRouter(prefix="/admin/notes-to-sermon/series", tags=["Lecture Series
 class CreateSeriesRequest(BaseModel):
     title: str
     description: Optional[str] = None
+    folder: Optional[str] = None
 
 class CreateLectureRequest(BaseModel):
     title: str
     description: Optional[str] = None
+    folder: Optional[str] = None
 
 class AssignProjectRequest(BaseModel):
     project_id: str
@@ -37,7 +39,7 @@ def list_series_endpoint():
 
 @router.post("", response_model=LectureSeries)
 def create_series_endpoint(payload: CreateSeriesRequest):
-    return create_series(payload.title, payload.description)
+    return create_series(payload.title, payload.description, payload.folder)
 
 @router.get("/{series_id}", response_model=LectureSeries)
 def get_series_endpoint(series_id: str):
@@ -48,7 +50,7 @@ def get_series_endpoint(series_id: str):
 
 @router.put("/{series_id}", response_model=LectureSeries)
 def update_series_endpoint(series_id: str, payload: CreateSeriesRequest):
-    series = update_series_metadata(series_id, payload.title, payload.description)
+    series = update_series_metadata(series_id, payload.title, payload.description, payload.folder)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     return series
@@ -59,18 +61,31 @@ def delete_series_endpoint(series_id: str):
         raise HTTPException(status_code=404, detail="Series not found")
     return {"status": "success"}
 
+# --- Folder Listing Endpoints ---
+
+@router.get("/folders/root", response_model=List[str])
+def list_series_folders_endpoint():
+    from backend.api.lecture_manager import list_series_folders
+    return list_series_folders()
+
+@router.get("/folders/{series_folder}", response_model=List[str])
+def list_lecture_folders_endpoint(series_folder: str):
+    from backend.api.lecture_manager import list_lecture_folders
+    headers = list_lecture_folders(series_folder)
+    return headers
+
 # --- Lecture Endpoints ---
 
 @router.post("/{series_id}/lectures", response_model=Lecture)
 def add_lecture_endpoint(series_id: str, payload: CreateLectureRequest):
-    lecture = add_lecture(series_id, payload.title, payload.description)
+    lecture = add_lecture(series_id, payload.title, payload.description, payload.folder)
     if not lecture:
         raise HTTPException(status_code=404, detail="Series not found")
     return lecture
 
 @router.put("/{series_id}/lectures/{lecture_id}", response_model=Lecture)
 def update_lecture_endpoint(series_id: str, lecture_id: str, payload: CreateLectureRequest):
-    lecture = update_lecture(series_id, lecture_id, payload.title, payload.description)
+    lecture = update_lecture(series_id, lecture_id, payload.title, payload.description, payload.folder)
     if not lecture:
         raise HTTPException(status_code=404, detail="Lecture not found")
     return lecture

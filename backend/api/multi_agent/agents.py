@@ -9,21 +9,25 @@ from backend.api.multi_agent.types import AgentState, AgentRole
 # Shared Gemini Config
 MODEL_ID = "gemini-3-pro-preview" 
 
-def _get_system_prompt(role: str) -> str:
+def _get_prompt_config(role: str, default_temp: float = 0.7) -> tuple[str, float]:
+    """
+    Fetch both content and temperature for a given role.
+    Returns (content, temperature).
+    """
     # Ensure defaults exist
     try:
         init_default_prompt()
         prompts = list_prompts()
         for p in prompts:
             if p.role == role:
-                return p.content
+                return p.content, p.temperature
     except Exception as e:
         print(f"Error fetching prompts: {e}")
             
-    return "You are a helpful assistant."
+    return "You are a helpful assistant.", default_temp
 
 def run_exegete(state: AgentState) -> str:
-    system_prompt = _get_system_prompt(AgentRole.EXEGETE.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.EXEGETE.value, 0.7)
     
     user_prompt = f"""
     Here is the section of sermon notes we effectively need to research.
@@ -40,13 +44,14 @@ def run_exegete(state: AgentState) -> str:
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=0.7
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
     )
     return response.text
 
 def run_theologian(state: AgentState) -> str:
-    system_prompt = _get_system_prompt(AgentRole.THEOLOGIAN.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.THEOLOGIAN.value, 0.7)
     
     user_prompt = f"""
     Context:
@@ -67,13 +72,14 @@ def run_theologian(state: AgentState) -> str:
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=0.7
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
     )
     return response.text
 
 def run_illustrator(state: AgentState) -> str:
-    system_prompt = _get_system_prompt(AgentRole.ILLUSTRATOR.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.ILLUSTRATOR.value, 0.9)
     
     user_prompt = f"""
     Help us find illustrations for this sermon section.
@@ -92,13 +98,14 @@ def run_illustrator(state: AgentState) -> str:
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=0.9
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
     )
     return response.text
 
 def run_homiletician_beat(state: AgentState, beat_content: str, previous_text: str) -> str:
-    system_prompt = _get_system_prompt(AgentRole.HOMILETICIAN.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.HOMILETICIAN.value, 0.7)
     
     user_prompt = f"""
     write the manuscript for the following section (Beat).
@@ -119,7 +126,9 @@ def run_homiletician_beat(state: AgentState, beat_content: str, previous_text: s
     === Section to Write Now ===
     {beat_content}
     
-    REMINDER: Write a FULL MANUSCRIPT. No outlines. Speak to the people.
+    REMINDER: Write a FULL SPOKEN MANUSCRIPT. 
+    - Do NOT use bullet points.
+    - Use '##' for Major Sections (e.g. "I. The Problem") and '###' for Sub-points.
     """
     
     response = gemini_client.generate_raw(
@@ -127,13 +136,14 @@ def run_homiletician_beat(state: AgentState, beat_content: str, previous_text: s
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=0.7
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
     )
     return response.text
 
 def run_critic_check(text: str) -> bool:
-    system_prompt = _get_system_prompt(AgentRole.CRITIC.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.CRITIC.value, 0.0)
     
     user_prompt = f"""
     Review this text. Does it meet the criteria of being a "Spoken Manuscript"?
@@ -155,7 +165,8 @@ def run_critic_check(text: str) -> bool:
         contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
-            temperature=0.0
+            temperature=temperature,
+            thinking_config=types.ThinkingConfig(thinking_budget=-1)
         )
     )
     
@@ -163,7 +174,7 @@ def run_critic_check(text: str) -> bool:
     return output.startswith("PASS")
 
 def identify_beats(state: AgentState) -> List[str]:
-    system_prompt = _get_system_prompt(AgentRole.STRUCTURING_SPECIALIST.value)
+    system_prompt, temperature = _get_prompt_config(AgentRole.STRUCTURING_SPECIALIST.value, 0.1)
     
     user_prompt = f"""
     Please structure the following raw notes into beats.
@@ -179,8 +190,9 @@ def identify_beats(state: AgentState) -> List[str]:
             contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])],
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                temperature=0.1,
-                response_mime_type="application/json"
+                temperature=temperature,
+                response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_budget=-1)
             )
         )
         

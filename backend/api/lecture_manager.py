@@ -5,15 +5,30 @@ from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
 
-from backend.api.config import DATA_BASE_PATH
+from backend.api.config import DATA_BASE_PATH, FULL_ARTICLE_ROOT
 
 # Define the storage file
 SERIES_DB_PATH = DATA_BASE_PATH / "notes_to_surmon" / "series_db.json"
+IMAGES_ROOT = FULL_ARTICLE_ROOT / "images" / "scanned_mat"
+
+def list_series_folders() -> List[str]:
+    """List subdirectories in full_article/images"""
+    if not IMAGES_ROOT.exists():
+        return []
+    return [d.name for d in IMAGES_ROOT.iterdir() if d.is_dir()]
+
+def list_lecture_folders(series_folder: str) -> List[str]:
+    """List subdirectories in full_article/images/{series_folder}"""
+    series_path = IMAGES_ROOT / series_folder
+    if not series_path.exists() or not series_path.is_dir():
+        return []
+    return [d.name for d in series_path.iterdir() if d.is_dir()]
 
 class Lecture(BaseModel):
     id: str
     title: str
     description: Optional[str] = None
+    folder: Optional[str] = None
     project_ids: List[str] = [] # Ordered list of project IDs (Chapters)
     created_at: str
     updated_at: str
@@ -22,6 +37,7 @@ class LectureSeries(BaseModel):
     id: str
     title: str
     description: Optional[str] = None
+    folder: Optional[str] = None
     lectures: List[Lecture] = []
     created_at: str
     updated_at: str
@@ -57,11 +73,12 @@ def get_series(series_id: str) -> Optional[LectureSeries]:
             return s
     return None
 
-def create_series(title: str, description: Optional[str] = None) -> LectureSeries:
+def create_series(title: str, description: Optional[str] = None, folder: Optional[str] = None) -> LectureSeries:
     new_series = LectureSeries(
         id=str(uuid.uuid4()),
         title=title,
         description=description,
+        folder=folder,
         lectures=[],
         created_at=datetime.utcnow().isoformat(),
         updated_at=datetime.utcnow().isoformat()
@@ -71,12 +88,14 @@ def create_series(title: str, description: Optional[str] = None) -> LectureSerie
     _save_db(data)
     return new_series
 
-def update_series_metadata(series_id: str, title: str, description: Optional[str] = None) -> Optional[LectureSeries]:
+def update_series_metadata(series_id: str, title: str, description: Optional[str] = None, folder: Optional[str] = None) -> Optional[LectureSeries]:
     data = _load_db()
     for item in data:
         if item["id"] == series_id:
             item["title"] = title
             item["description"] = description
+            if folder is not None:
+                item["folder"] = folder
             item["updated_at"] = datetime.utcnow().isoformat()
             _save_db(data)
             return LectureSeries(**item)
@@ -93,7 +112,7 @@ def delete_series(series_id: str) -> bool:
 
 # --- Lecture CRUD ---
 
-def add_lecture(series_id: str, title: str, description: Optional[str] = None) -> Optional[Lecture]:
+def add_lecture(series_id: str, title: str, description: Optional[str] = None, folder: Optional[str] = None) -> Optional[Lecture]:
     data = _load_db()
     target_series = None
     for item in data:
@@ -108,6 +127,7 @@ def add_lecture(series_id: str, title: str, description: Optional[str] = None) -
         id=str(uuid.uuid4()),
         title=title,
         description=description,
+        folder=folder,
         project_ids=[],
         created_at=datetime.utcnow().isoformat(),
         updated_at=datetime.utcnow().isoformat()
@@ -118,7 +138,7 @@ def add_lecture(series_id: str, title: str, description: Optional[str] = None) -
     _save_db(data)
     return new_lecture
 
-def update_lecture(series_id: str, lecture_id: str, title: str, description: Optional[str] = None) -> Optional[Lecture]:
+def update_lecture(series_id: str, lecture_id: str, title: str, description: Optional[str] = None, folder: Optional[str] = None) -> Optional[Lecture]:
     data = _load_db()
     for s in data:
         if s["id"] == series_id:
@@ -126,6 +146,8 @@ def update_lecture(series_id: str, lecture_id: str, title: str, description: Opt
                 if l["id"] == lecture_id:
                     l["title"] = title
                     l["description"] = description
+                    if folder is not None:
+                        l["folder"] = folder
                     l["updated_at"] = datetime.utcnow().isoformat()
                     s["updated_at"] = datetime.utcnow().isoformat()
                     _save_db(data)

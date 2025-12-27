@@ -12,11 +12,10 @@ import git
 import google.auth
 from googleapiclient.discovery import build
 
-from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID
+from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT
 
-# Define the source directory for notes (hardcoded as per user request for now, or could be config)
-# User request: /Volumes/Jun SSD/data/scanned_mat/notes_main/chapter5-7
-SOURCE_NOTES_DIR = Path("/Volumes/Jun SSD/data/scanned_mat/notes_main/chapter5-7")
+# Define the source directory for notes
+IMAGES_ROOT = FULL_ARTICLE_ROOT / "images" / "scanned_mat"
 
 # Define the output directory
 NOTES_TO_SERMON_DIR = DATA_BASE_PATH / "notes_to_surmon"
@@ -25,6 +24,7 @@ class NoteImage(BaseModel):
     filename: str
     path: str
     processed: bool = False
+    folder: Optional[str] = None
 
 class Segment(BaseModel):
     id: str
@@ -55,48 +55,62 @@ def ensure_dirs():
     raw_ocr_dir.mkdir(exist_ok=True)
     return raw_ocr_dir
 
-def get_raw_ocr_path(filename: str) -> Path:
+def get_raw_ocr_path(filename: str, folder: str = "") -> Path:
     """
     Get the flat path for a page's markdown file.
-    e.g. NOTES_TO_SERMON/raw_ocr/1-01.jpeg.md
+    Flattens the path (folder + filename) to avoid subdirectories in raw_ocr.
     """
     raw_dir = ensure_dirs()
-    return raw_dir / f"{filename}.md"
+    full_path_str = filename
+    if folder:
+        full_path_str = f"{folder}/{filename}"
+    
+    # Sanitize: replace / and \ with _
+    safe_name = full_path_str.replace("/", "_").replace("\\", "_")
+    return raw_dir / f"{safe_name}.md"
 
-def list_note_images() -> List[NoteImage]:
+def list_note_images(folder: str = "") -> List[NoteImage]:
     """
     List all images in the source directory and check if processed.
+    If folder is provided, list images in that subdirectory of IMAGES_ROOT.
     """
-    if not SOURCE_NOTES_DIR.exists():
+    target_dir = IMAGES_ROOT
+    if folder:
+        target_dir = target_dir / folder
+    
+    if not target_dir.exists():
         return []
     
     extensions = {'.jpg', '.jpeg', '.png'}
     images = []
     
     # Sort alphabetically
-    for f in sorted(list(SOURCE_NOTES_DIR.iterdir()), key=lambda p: p.name):
+    for f in sorted(list(target_dir.iterdir()), key=lambda p: p.name):
         if f.is_file() and f.suffix.lower() in extensions:
-            # Check flat path
-            is_processed = get_raw_ocr_path(f.name).exists()
+            # Construct relative filename
+            rel_filename = f.name
+            if folder:
+                rel_filename = f"{folder}/{f.name}"
+                
+            # Check flat path using relative filename (folder="" because it's in filename)
+            is_processed = get_raw_ocr_path(rel_filename).exists()
             images.append(NoteImage(
-                filename=f.name,
+                filename=rel_filename,
                 path=str(f),
-                processed=is_processed
+                processed=is_processed,
+                folder=folder
             ))
     return images
 
-def process_note_image(filename: str) -> str:
+def process_note_image(filename: str, folder: str = "") -> str:
     """
     Process a single image using Gemini 3 Pro.
     Returns the process_id (which currently is just the filename stem).
     """
     ensure_dirs()
     
-    image_path = SOURCE_NOTES_DIR / filename
-    if not image_path.exists():
-        raise FileNotFoundError(f"Image {filename} not found in source directory.")
-
-    output_file = get_raw_ocr_path(filename)
+    image_path = get_image_path(filename, folder)
+    output_file = get_raw_ocr_path(filename, folder)
     
     # Init Gemini Client
     client = genai.Client(
@@ -146,13 +160,17 @@ def process_note_image(filename: str) -> str:
         
     return filename
 
-def get_image_path(filename: str) -> Path:
+def get_image_path(filename: str, folder: str = "") -> Path:
     """
     Return the absolute path to the source image.
     """
-    image_path = SOURCE_NOTES_DIR / filename
+    target_dir = IMAGES_ROOT
+    if folder:
+        target_dir = target_dir / folder
+        
+    image_path = target_dir / filename
     if not image_path.exists():
-        raise FileNotFoundError(f"Image {filename} not found.")
+        raise FileNotFoundError(f"Image {filename} not found in {target_dir}.")
     return image_path
 
 def get_page_segments(filename: str) -> List[Segment]:
@@ -178,7 +196,7 @@ def get_page_segments(filename: str) -> List[Segment]:
         )
     ]
 
-def create_sermon_project(title: str, pages: List[str]) -> SermonProject:
+def create_sermon_project(title: str, pages: List[str], series_id: Optional[str] = None, lecture_id: Optional[str] = None) -> SermonProject:
     """
     Create a new sermon project.
     1. Create a folder for the sermon.
@@ -200,13 +218,34 @@ def create_sermon_project(title: str, pages: List[str]) -> SermonProject:
     metadata = {
         "id": sermon_id,
         "title": title,
-        "pages": pages
+        "pages": pages,
+        "series_id": series_id,
+        "lecture_id": lecture_id
     }
     with open(sermon_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     # Build source (without auto-process)
     _rebuild_unified_source(sermon_id, pages)
+    
+    # Sync with Lecture Manager if linked
+    if series_id and lecture_id:
+        try:
+            from backend.api.lecture_manager import assign_project_to_lecture
+            # Note: assign_project_to_lecture might call back to update_sermon_project_linking, 
+            # but that just updates meta which we just wrote. It handles redundancy.
+            # But wait, assign_project_to_lecture calls update_sermon_project_linking.
+            # update_sermon_project_linking reads meta, updates it, writes it.
+            # We just wrote meta. So we are fine.
+            # However, to avoid double writing, maybe we rely on assign_project_to_lecture to update the meta link?
+            # assign_project_to_lecture ADDS the project to the lecture list.
+            # And it calls update_sermon_project_linking(project_id, series_id, lecture_id) to update project meta.
+            # So actually, we don't need to write series_id/lecture_id in the initial dump if we call assign.
+            # BUT, if assign fails, we want it recorded? 
+            # safely: write it, then call assign. Assign will overwrite meta with same values.
+            assign_project_to_lecture(series_id, lecture_id, sermon_id)
+        except Exception as e:
+            print(f"Failed to auto-link project to lecture: {e}")
         
     return SermonProject(**metadata)
 

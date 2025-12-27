@@ -8,6 +8,7 @@ interface LectureSeries {
     id: string;
     title: string;
     description?: string;
+    folder?: string;
     created_at: string;
     updated_at: string;
     lectures: any[];
@@ -17,13 +18,30 @@ export default function SeriesDashboardPage() {
     const [seriesList, setSeriesList] = useState<LectureSeries[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showCreateForm, setShowCreateForm] = useState(false);
+    const [editingSeries, setEditingSeries] = useState<LectureSeries | null>(null);
+
     const [newTitle, setNewTitle] = useState("");
     const [newDesc, setNewDesc] = useState("");
-    const router = useRouter();
+    const [newFolder, setNewFolder] = useState("");
+    const [availableFolders, setAvailableFolders] = useState<string[]>([]);
+
+    // ... fetch useEffects ...
 
     useEffect(() => {
         fetchSeries();
+        fetchFolders();
     }, []);
+
+    const fetchFolders = async () => {
+        try {
+            const res = await fetch("/api/admin/notes-to-sermon/series/folders/root");
+            if (res.ok) {
+                setAvailableFolders(await res.json());
+            }
+        } catch (e) {
+            console.error("Failed to fetch folders", e);
+        }
+    };
 
     const fetchSeries = async () => {
         try {
@@ -39,33 +57,73 @@ export default function SeriesDashboardPage() {
         }
     };
 
-    const handleCreate = async () => {
+    const handleOpenCreate = () => {
+        setEditingSeries(null);
+        setNewTitle("");
+        setNewDesc("");
+        setNewFolder("");
+        setShowCreateForm(true);
+    };
+
+    const handleOpenEdit = (series: LectureSeries) => {
+        setEditingSeries(series);
+        setNewTitle(series.title);
+        setNewDesc(series.description || "");
+        setNewFolder(series.folder || "");
+        setShowCreateForm(true);
+    };
+
+    const handleSave = async () => {
         if (!newTitle) return alert("Title is required");
+
+        const payload = {
+            title: newTitle,
+            description: newDesc,
+            folder: newFolder || undefined
+        };
+
         try {
-            const res = await fetch("/api/admin/notes-to-sermon/series", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: newTitle, description: newDesc }),
-            });
+            let res;
+            if (editingSeries) {
+                // Update
+                res = await fetch(`/api/admin/notes-to-sermon/series/${editingSeries.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+            } else {
+                // Create
+                res = await fetch("/api/admin/notes-to-sermon/series", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+            }
+
             if (res.ok) {
-                const created = await res.json();
-                setSeriesList([...seriesList, created]);
+                const saved = await res.json();
+                if (editingSeries) {
+                    setSeriesList(seriesList.map(s => s.id === saved.id ? saved : s));
+                    alert("Series updated!");
+                } else {
+                    setSeriesList([...seriesList, saved]);
+                    alert("Series created!");
+                }
                 setShowCreateForm(false);
+                setEditingSeries(null);
                 setNewTitle("");
                 setNewDesc("");
-                alert("Series created!");
-                // Optionally redirect to detail page
-                // router.push(`/admin/notes-to-sermon/series/${created.id}`);
+                setNewFolder("");
             } else {
-                alert("Failed to create series");
+                alert("Failed to save series");
             }
         } catch (e) {
-            alert("Error creating series");
+            alert("Error saving series");
         }
     };
 
     const handleDelete = async (id: string, e: React.MouseEvent) => {
-        e.preventDefault(); // Prevent navigation if button is inside link (though it shouldn't be)
+        e.preventDefault();
         if (!confirm("Are you sure you want to delete this series? All lectures inside it will be lost.")) return;
 
         try {
@@ -92,7 +150,7 @@ export default function SeriesDashboardPage() {
                     <h1 className="text-2xl font-bold">Lecture Series</h1>
                 </div>
                 <button
-                    onClick={() => setShowCreateForm(true)}
+                    onClick={handleOpenCreate}
                     className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 shadow"
                 >
                     + New Series
@@ -101,7 +159,7 @@ export default function SeriesDashboardPage() {
 
             {showCreateForm && (
                 <div className="bg-white p-6 rounded-lg shadow-md border mb-8 animate-fade-in-down">
-                    <h2 className="text-lg font-semibold mb-4">Create New Series</h2>
+                    <h2 className="text-lg font-semibold mb-4">{editingSeries ? "Edit Series" : "Create New Series"}</h2>
                     <div className="grid grid-cols-1 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Title</label>
@@ -123,6 +181,20 @@ export default function SeriesDashboardPage() {
                                 placeholder="Goal description..."
                             />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Source Folder (Optional)</label>
+                            <select
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-white"
+                                value={newFolder}
+                                onChange={e => setNewFolder(e.target.value)}
+                            >
+                                <option value="">Select a folder...</option>
+                                {availableFolders.map(f => (
+                                    <option key={f} value={f}>{f}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">Select folder from full_article/images</p>
+                        </div>
                         <div className="flex justify-end space-x-3 mt-2">
                             <button
                                 onClick={() => setShowCreateForm(false)}
@@ -131,10 +203,10 @@ export default function SeriesDashboardPage() {
                                 Cancel
                             </button>
                             <button
-                                onClick={handleCreate}
+                                onClick={handleSave}
                                 className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700"
                             >
-                                Create
+                                {editingSeries ? "Update" : "Create"}
                             </button>
                         </div>
                     </div>
@@ -159,12 +231,25 @@ export default function SeriesDashboardPage() {
                                 <p className="text-gray-500 text-sm mb-4 line-clamp-2">
                                     {item.description || "No description"}
                                 </p>
+                                {item.folder && (
+                                    <div className="mb-4">
+                                        <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded font-mono">
+                                            📂 {item.folder}
+                                        </span>
+                                    </div>
+                                )}
                                 <div className="flex items-center justify-between text-xs text-gray-400 mt-auto">
                                     <span>{item.lectures.length} Lectures</span>
                                     <span>Updated: {new Date(item.updated_at).toLocaleDateString()}</span>
                                 </div>
                             </Link>
-                            <div className="border-t p-3 bg-gray-50 flex justify-end">
+                            <div className="border-t p-3 bg-gray-50 flex justify-end space-x-2">
+                                <button
+                                    onClick={(e) => { e.preventDefault(); handleOpenEdit(item); }}
+                                    className="text-blue-600 hover:text-blue-800 text-sm px-2 py-1"
+                                >
+                                    Edit
+                                </button>
                                 <button
                                     onClick={(e) => handleDelete(item.id, e)}
                                     className="text-red-500 hover:text-red-700 text-sm px-2 py-1"

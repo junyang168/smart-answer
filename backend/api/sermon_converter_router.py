@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 
 from fastapi.responses import FileResponse
 from backend.api.sermon_converter_service import (
@@ -45,11 +45,11 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/admin/notes-to-sermon", tags=["notes-to-sermon"])
 
 @router.get("/images", response_model=List[NoteImage])
-def get_images() -> List[NoteImage]:
+def get_images(folder: Optional[str] = Query(None)) -> List[NoteImage]:
     """
     List all available note images from the source directory.
     """
-    return list_note_images()
+    return list_note_images(folder or "")
 
 @router.post("/page/{filename}/process")
 def process_page_endpoint(filename: str):
@@ -67,7 +67,7 @@ def process_page_endpoint(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/image/{filename}")
+@router.get("/image/{filename:path}")
 def get_page_image(filename: str) -> FileResponse:
     """
     Serve the source image file.
@@ -88,13 +88,15 @@ def get_page_detail(filename: str) -> List[Segment]:
 class CreateSermonRequest(BaseModel):
     title: str
     pages: List[str]
+    series_id: Optional[str] = None
+    lecture_id: Optional[str] = None
 
 @router.post("/sermon-project", response_model=SermonProject)
 def create_sermon(payload: CreateSermonRequest) -> SermonProject:
     """
     Create a new logical sermon project from a list of pages.
     """
-    return create_sermon_project(payload.title, payload.pages)
+    return create_sermon_project(payload.title, payload.pages, payload.series_id, payload.lecture_id)
 
 @router.get("/sermon-project/{sermon_id}/source")
 def get_project_source(sermon_id: str):
