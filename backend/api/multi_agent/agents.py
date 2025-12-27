@@ -108,8 +108,9 @@ def run_homiletician_beat(state: AgentState, beat_content: str, previous_text: s
     Theme: {state.sermon_series_description}
     
     === Background Research ===
-    [Exegetical Notes]: {state.exegetical_notes[:500]}... (truncated for focus)
-    [Theological Notes]: {state.theological_analysis[:500]}...
+    === Background Research ===
+    [Exegetical Notes]: {state.exegetical_notes}
+    [Theological Notes]: {state.theological_analysis}
     [Illustrations Available]: {state.illustration_ideas}
     
     === Previous Spoken Context (Maintain Flow) ===

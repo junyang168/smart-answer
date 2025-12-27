@@ -377,5 +377,7 @@ def get_agent_state_endpoint(sermon_id: str):
     from backend.api.sermon_converter_service import get_agent_state_data
     data = get_agent_state_data(sermon_id)
     if not data:
-        return {} # Return empty dict instead of 404 to simplify frontend logic
+        # Return 404 so frontend knows to clear the state/icons (it thinks "no file" = "not started")
+        # Returning {} makes frontend think "started but empty", which might be confusing.
+        raise HTTPException(status_code=404, detail="Agent state not found")
     return data

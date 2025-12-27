@@ -69,6 +69,8 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
             if (stateRes.ok) {
                 const stateData = await stateRes.json();
                 setAgentState(stateData);
+            } else if (stateRes.status === 404) {
+                setAgentState(null); // Clear state if file deleted
             }
         } catch (e) {
             console.error(e);
@@ -190,6 +192,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                             body: JSON.stringify({ use_mas: true, restart: true })
                                         });
                                         setLogs([]);
+                                        setAgentState(null); // Fix: Clear local state immediately to reset icons
                                         setStatus({ is_processing: true, processing_status: "Restarting..." });
                                     } catch (e) {
                                         alert("Failed to restart: " + e);

@@ -97,7 +97,7 @@ async def process_project_with_mas(project_id: str):
             update_sermon_processing_status(project_id, True, {"stage": "Exegetical Research", "progress": 10})
             _log_agent_action(project_id, "exegete", "Starting deep research on original text...")
             
-            state.exegetical_notes = run_exegete(state)
+            state.exegetical_notes = await asyncio.to_thread(run_exegete, state)
             _save_agent_state(state)
             _log_agent_action(project_id, "exegete", "Research complete. Notes generated.")
         else:
@@ -107,13 +107,13 @@ async def process_project_with_mas(project_id: str):
         if not state.theological_analysis:
             update_sermon_processing_status(project_id, True, {"stage": "Theological Analysis", "progress": 30})
             _log_agent_action(project_id, "theologian", "Reviewing theological consistency...")
-            state.theological_analysis = run_theologian(state) # Fixed typo
+            state.theological_analysis = await asyncio.to_thread(run_theologian, state)
             _save_agent_state(state)
         
         if not state.illustration_ideas:
             update_sermon_processing_status(project_id, True, {"stage": "Illustration Brainstorming", "progress": 50})
             _log_agent_action(project_id, "illustrator", "Brainstorming modern examples...")
-            state.illustration_ideas = run_illustrator(state)
+            state.illustration_ideas = await asyncio.to_thread(run_illustrator, state)
             _save_agent_state(state)
         
         # Phase 3: Drafting (The Anti-Outline Loop)
@@ -122,7 +122,7 @@ async def process_project_with_mas(project_id: str):
             _log_agent_action(project_id, "structuring_specialist", "Analyzing structure...")
             
             # Use LLM to split
-            beats = identify_beats(state)
+            beats = await asyncio.to_thread(identify_beats, state)
             state.beats = beats if beats else [state.source_notes]
             _save_agent_state(state)
             _log_agent_action(project_id, "structuring_specialist", f"Identified {len(state.beats)} macro-beats.")
@@ -155,10 +155,10 @@ async def process_project_with_mas(project_id: str):
                 best_attempt = ""
                 
                 for attempt in range(max_retries + 1):
-                    draft_chunk = run_homiletician_beat(state, beat, current_draft_context)
+                    draft_chunk = await asyncio.to_thread(run_homiletician_beat, state, beat, current_draft_context)
                     best_attempt = draft_chunk # Keep latest
                     
-                    check_result = run_critic_check(draft_chunk)
+                    check_result = await asyncio.to_thread(run_critic_check, draft_chunk)
                     if check_result:
                         _log_agent_action(project_id, "critic", f"Beat {i+1} PASSED review.")
                         passed = True

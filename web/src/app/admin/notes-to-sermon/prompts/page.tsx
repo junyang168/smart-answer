@@ -117,7 +117,11 @@ export default function PromptManagerPage() {
     const handleDelete = async () => {
         if (!selectedPrompt) return;
         // Allow deleting any prompt if the user really wants to, backend handles logic if needed.
-        if (!confirm(`Delete prompt "${selectedPrompt.name}"?`)) return;
+        const message = selectedPrompt.is_default
+            ? `Reset "${selectedPrompt.name}" to Factory Default?\n\nThis will discard your custom edits and restore the system default.`
+            : `Delete prompt "${selectedPrompt.name}"?`;
+
+        if (!confirm(message)) return;
 
         try {
             const res = await fetch(`/api/admin/notes-to-sermon/prompts/${selectedPrompt.id}`, {
@@ -254,14 +258,15 @@ export default function PromptManagerPage() {
                                             >
                                                 Edit
                                             </button>
-                                            {!selectedPrompt?.is_default && (
-                                                <button
-                                                    onClick={handleDelete}
-                                                    className="text-red-600 hover:text-red-800 px-3 py-1 rounded border border-red-200"
-                                                >
-                                                    Delete
-                                                </button>
-                                            )}
+                                            <button
+                                                onClick={handleDelete}
+                                                className={`px-3 py-1 rounded border ${selectedPrompt?.is_default
+                                                    ? "text-orange-600 hover:text-orange-800 border-orange-200"
+                                                    : "text-red-600 hover:text-red-800 border-red-200"
+                                                    }`}
+                                            >
+                                                {selectedPrompt?.is_default ? "Reset to Default" : "Delete"}
+                                            </button>
                                         </>
                                     )}
                                     {isEditing && (
