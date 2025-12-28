@@ -32,7 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
+app.include_router(api_router)
 app.include_router(fellowship_router)
 app.include_router(surmon_series_router)
 app.include_router(sunday_service_router)
