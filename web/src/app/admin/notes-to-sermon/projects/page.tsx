@@ -155,6 +155,7 @@ export default function ProjectCreationPage() {
                             {/* Thumbnail Placeholder */}
                             {/* Thumbnail Replaced with Real Image */}
                             <div className="aspect-[3/4] bg-gray-200 mb-2 overflow-hidden">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
                                     src={`/api/admin/notes-to-sermon/image/${img.filename}`}
                                     alt={img.filename}

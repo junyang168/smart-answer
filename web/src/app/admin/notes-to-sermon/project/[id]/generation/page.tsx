@@ -42,6 +42,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
         const interval = setInterval(fetchData, 2000);
         fetchData();
         return () => clearInterval(interval);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {
