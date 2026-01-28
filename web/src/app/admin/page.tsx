@@ -39,7 +39,7 @@ const cards = [
   {
     title: "筆記生成講稿",
     description: "從手寫筆記圖像生成結構化講章草稿，並支援 AI 協作修訂。",
-    href: "/admin/notes-to-sermon/projects",
+    href: "/admin/notes-to-sermon/series",
   },
 ];
 
