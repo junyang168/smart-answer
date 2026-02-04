@@ -967,7 +967,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     existing_doc_id = meta_data.get("google_doc_id")
 
     # 2. Authenticate
-    # 2. Authenticate
+
     SCOPES = ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive']
     
     # Try using OAuth Token First (Desktop App)
@@ -1005,7 +1005,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
         creds = credentials
     
     # We primarily need Drive API for file creation/import
-    drive_service = build('drive', 'v3', credentials=credentials)
+    drive_service = build('drive', 'v3', credentials=creds)
     
     # 3. Convert Markdown to HTML
     import markdown
