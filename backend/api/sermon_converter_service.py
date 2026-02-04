@@ -967,8 +967,42 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     existing_doc_id = meta_data.get("google_doc_id")
 
     # 2. Authenticate
+    # 2. Authenticate
     SCOPES = ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive']
-    credentials, _ = google.auth.default(scopes=SCOPES)
+    
+    # Try using OAuth Token First (Desktop App)
+    import os
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    
+    # Locate token.json relative to project root or config
+    # We assume it's in DATA_BASE_PATH's parent or specific location. 
+    # For now, mimic config assumption: base_dir
+    # Best to use consistent path derived from config.
+    token_path = DATA_BASE_PATH.parent / "token.json" 
+    # Or just assume standard working dir if not robust? 
+    # Let's use absolute path logic similar to service_account.json
+    # Users/junyang/app/smart-answer/token.json
+    # DATA_BASE_PATH is /opt/homebrew/var/www/church/web/data ... wait.
+    # User's project root is /Users/junyang/app/smart-answer
+    # We should look in the project root.
+    # But DATA_BASE_PATH is configured to /opt/...
+    # Let's rely on finding it near config.py or CWD?
+    # Safer: Check CWD and Env Var.
+    # Or hardcode for this user's fix first? No, let's use CWD as fallback.
+    
+    creds = None
+    possible_token = Path("token.json").resolve()
+    if possible_token.exists():
+         try:
+             creds = Credentials.from_authorized_user_file(str(possible_token), SCOPES)
+         except Exception as e:
+             print(f"Failed to load token.json: {e}")
+             
+    if not creds:
+        # Fallback to Service Account / ADC
+        credentials, _ = google.auth.default(scopes=SCOPES)
+        creds = credentials
     
     # We primarily need Drive API for file creation/import
     drive_service = build('drive', 'v3', credentials=credentials)

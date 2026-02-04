@@ -105,7 +105,8 @@ classifiers = [  # Optional
 dependencies = [ # Optional
   "openai","langchain",
   "google-api-python-client",
-  "google-auth"
+  "google-auth",
+  "google-auth-oauthlib"
 ]
 
 # List additional groups of dependencies here (e.g. development

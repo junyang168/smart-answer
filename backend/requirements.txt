@@ -18,3 +18,4 @@ google-cloud-aiplatform>=1.73.0
 google-api-python-client
 markdown
 google-auth
+google-auth-oauthlib

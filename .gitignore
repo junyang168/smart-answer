@@ -171,3 +171,6 @@ gen-ai.log.*
 .DS_Store
 
 service_account.json
+
+token.json
+client_secret.json
