@@ -1012,7 +1012,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     from io import BytesIO
     from googleapiclient.http import MediaIoBaseUpload
     
-    html_body = markdown.markdown(draft_content)
+    html_body = markdown.markdown(draft_content, extensions=['tables'])
     
     # Wrap in full HTML with styles to enforce spacing
     html_content = f"""
