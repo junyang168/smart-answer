@@ -1014,6 +1014,11 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     
     html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes'])
     
+    # Strip <thead>/<tbody> tags — Google Docs renders them as extra empty rows
+    import re
+    html_body = re.sub(r'</?thead>', '', html_body)
+    html_body = re.sub(r'</?tbody>', '', html_body)
+    
     # Wrap in full HTML with styles to enforce spacing
     html_content = f"""
     <html>
@@ -1026,6 +1031,9 @@ def export_sermon_to_doc(sermon_id: str) -> str:
         h3 {{ font-size: 14pt; margin-top: 14pt; margin-bottom: 6pt; }}
         ul, ol {{ margin-bottom: 12pt; }}
         li {{ margin-bottom: 4pt; }}
+        table {{ border-collapse: collapse; width: 100%; margin-bottom: 12pt; }}
+        th, td {{ border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: top; }}
+        th {{ background-color: #f0f0f0; font-weight: bold; }}
     </style>
     </head>
     <body>
@@ -1104,6 +1112,45 @@ def export_sermon_to_doc(sermon_id: str) -> str:
                  "Authentication Error: Insufficient permissions."
              )
         raise e
+
+    # Post-process: Shift heading levels down (H1→Title, H2→H1, H3→H2, etc.)
+    try:
+        heading_remap = {
+            'HEADING_1': 'TITLE',
+            'HEADING_2': 'HEADING_1',
+            'HEADING_3': 'HEADING_2',
+            'HEADING_4': 'HEADING_3',
+            'HEADING_5': 'HEADING_4',
+            'HEADING_6': 'HEADING_5',
+        }
+        docs_service = build('docs', 'v1', credentials=creds)
+        doc = docs_service.documents().get(documentId=file_id).execute()
+        requests = []
+        for element in doc.get('body', {}).get('content', []):
+            paragraph = element.get('paragraph')
+            if paragraph:
+                named_style = paragraph.get('paragraphStyle', {}).get('namedStyleType')
+                new_style = heading_remap.get(named_style)
+                if new_style:
+                    requests.append({
+                        'updateParagraphStyle': {
+                            'range': {
+                                'startIndex': element.get('startIndex'),
+                                'endIndex': element.get('endIndex')
+                            },
+                            'paragraphStyle': {
+                                'namedStyleType': new_style
+                            },
+                            'fields': 'namedStyleType'
+                        }
+                    })
+        if requests:
+            docs_service.documents().batchUpdate(
+                documentId=file_id,
+                body={'requests': requests}
+            ).execute()
+    except Exception as e:
+        print(f"Warning: Failed to remap heading styles: {e}")
 
     return f"https://docs.google.com/document/d/{file_id}/edit"
 
