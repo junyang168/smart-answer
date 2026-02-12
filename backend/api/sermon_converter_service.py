@@ -1027,6 +1027,18 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     # Pre-process: Strip leading whitespace from heading lines (AI drafts sometimes indent them)
     import re
     draft_content = re.sub(r'^[ \t]+(#{1,6}\s)', r'\1', draft_content, flags=re.MULTILINE)
+
+    # Pre-process: Force line breaks in blockquotes
+    # Find lines starting with > and ensure they end with 2 spaces
+    def preserve_blockquote_lines(match):
+        line = match.group(0)
+        # If line is just ">" or "> " without text, maybe don't add spaces? 
+        # But for safety, let's just add spaces to any quote line that has content.
+        # Actually, if we just want line breaks, 2 spaces is standard markdown "hard wrapping".
+        return line.rstrip() + "  "
+
+    # Regex: Start of line, optional whitespace, >, then content.
+    draft_content = re.sub(r'^\s*>.*$', preserve_blockquote_lines, draft_content, flags=re.MULTILINE)
     
     html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes'])
     
