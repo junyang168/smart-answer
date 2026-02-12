@@ -999,6 +999,18 @@ def export_sermon_to_doc(sermon_id: str) -> str:
          except Exception as e:
              print(f"Failed to load token.json: {e}")
              
+    # Refresh token if expired
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            # Save refreshed token back to token.json
+            with open(possible_token, "w") as token_file:
+                token_file.write(creds.to_json())
+            print("Refreshed OAuth token successfully.")
+        except Exception as e:
+            print(f"Failed to refresh token: {e}")
+            creds = None
+
     if not creds:
         # Fallback to Service Account / ADC
         credentials, _ = google.auth.default(scopes=SCOPES)
@@ -1011,6 +1023,10 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     import markdown
     from io import BytesIO
     from googleapiclient.http import MediaIoBaseUpload
+    
+    # Pre-process: Strip leading whitespace from heading lines (AI drafts sometimes indent them)
+    import re
+    draft_content = re.sub(r'^[ \t]+(#{1,6}\s)', r'\1', draft_content, flags=re.MULTILINE)
     
     html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes'])
     
