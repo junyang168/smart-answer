@@ -1030,8 +1030,10 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     
     html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes'])
     
+    # Process Images (SVG -> PNG, Local -> Base64)
+    html_body = _process_images_for_export(html_body)
+
     # Strip <thead>/<tbody> tags — Google Docs renders them as extra empty rows
-    import re
     html_body = re.sub(r'</?thead>', '', html_body)
     html_body = re.sub(r'</?tbody>', '', html_body)
     
@@ -1225,3 +1227,86 @@ def refine_sermon_draft(sermon_id: str, selection: str, instruction: str) -> str
     except Exception as e:
         print(f"Error refining draft for {sermon_id}: {e}")
         raise e
+
+def _process_images_for_export(html_content: str) -> str:
+    """
+    Process HTML to make images compatible with Google Docs:
+    1. Resolve local paths (/web/data -> DATA_BASE_PATH)
+    2. Convert SVGs to PNGs (using cairosvg)
+    3. Embed all images as Base64 Data URIs
+    """
+    from bs4 import BeautifulSoup
+    import base64
+    import mimetypes
+    import os
+    
+    # --- MacOS Apple Silicon Cairo Fix ---
+    # Attempt to help ctypes find the library on Apple Silicon for cairosvg
+    extra_lib_path = "/opt/homebrew/lib"
+    if os.path.exists(extra_lib_path):
+        os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = extra_lib_path + ":" + os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')
+        import ctypes
+        try:
+            ctypes.CDLL("/opt/homebrew/lib/libcairo.2.dylib")
+        except:
+            try:
+                ctypes.CDLL("/opt/homebrew/lib/libcairo.dylib")
+            except:
+                pass
+    
+    try:
+        import cairosvg
+    except ImportError:
+        print("Warning: cairosvg not found. SVG conversion will fail.")
+        cairosvg = None
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    for img in soup.find_all('img'):
+        src = img.get('src')
+        if not src:
+            continue
+            
+        # Resolve local path
+        local_path = None
+        if src.startswith('/web/data/'):
+            # Map /web/data/ -> DATA_BASE_PATH/
+            # DATA_BASE_PATH is /.../web/data
+            rel_path = src.replace('/web/data/', '')
+            local_path = DATA_BASE_PATH / rel_path
+        elif src.startswith('http'):
+            # Skip remote images for now (Google Docs handles them if public, but we could embed them too)
+            pass
+            
+        if local_path and local_path.exists():
+            try:
+                mime_type, _ = mimetypes.guess_type(local_path)
+                
+                # Special handling for SVG
+                if mime_type == 'image/svg+xml' or local_path.suffix.lower() == '.svg':
+                    if cairosvg:
+                        try:
+                            with open(local_path, 'rb') as f:
+                                svg_data = f.read()
+                            # Convert to PNG
+                            png_data = cairosvg.svg2png(bytestring=svg_data)
+                            b64_data = base64.b64encode(png_data).decode('utf-8')
+                            img['src'] = f"data:image/png;base64,{b64_data}"
+                            # Remove height/width attributes if they cause issues, or let Docs handle it?
+                            # Usually Docs handles standard images fine.
+                        except Exception as e:
+                            print(f"Failed to convert SVG {local_path}: {e}")
+                    else:
+                        print(f"Skipping SVG {local_path} - cairosvg missing")
+                else:
+                    # Standard Image (JPG, PNG)
+                    with open(local_path, "rb") as f:
+                        data = f.read()
+                        b64_data = base64.b64encode(data).decode('utf-8')
+                        if not mime_type: mime_type = 'image/png'
+                        img['src'] = f"data:{mime_type};base64,{b64_data}"
+                        
+            except Exception as e:
+                print(f"Error processing image {src}: {e}")
+                
+    return str(soup)

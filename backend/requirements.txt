@@ -19,3 +19,6 @@ google-api-python-client
 markdown
 google-auth
 google-auth-oauthlib
+cairosvg
+cssutils
+defusedxml
