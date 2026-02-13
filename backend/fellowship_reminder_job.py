@@ -320,10 +320,26 @@ def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
 def compute_send_timestamp(events: list[FellowshipEvent]) -> tuple[FellowshipEvent, datetime]:
     if not events:
         raise ValueError("No fellowship events available")
-    last_event = events[-1]
-    send_date = last_event.date - timedelta(days=1)
+
+    # Sort events by date to ensure correctness regardless of JSON order
+    sorted_events = sorted(events, key=lambda e: e.date)
+
+    # Find the next event that is strictly in the future relative to "today".
+    # Logic: We send the reminder 1 day before the event.
+    # If today is (event.date - 1), then event.date > today.
+    # If today is event.date, the window has passed (now.date() > send_at.date()).
+    now_date = datetime.now(TIMEZONE).date()
+    future_events = [e for e in sorted_events if e.date > now_date]
+
+    if future_events:
+        target_event = future_events[0]
+    else:
+        # Fallback to the absolute last event if no future events exist
+        target_event = sorted_events[-1]
+
+    send_date = target_event.date - timedelta(days=1)
     send_at = datetime.combine(send_date, SEND_TIME, tzinfo=TIMEZONE)
-    return last_event, send_at
+    return target_event, send_at
 
 
 def main() -> None:
@@ -367,8 +383,14 @@ def main() -> None:
         print("Reminder already sent for this fellowship; exiting without sending.")
         return
     if not args.force:
+        # Safety check: If the target event is in the past, it means we likely
+        # exhausted our configuration (fallback to last event) or missed the window.
+        if event.date < now.date():
+            print(f"Configuration exhausted or stale. Last event was {event.date}. Exiting.")
+            return
+
         if now < send_at:
-            print("Not time yet; exiting without sending.")
+            print(f"Not time yet. Scheduled for {send_at}. Exiting without sending.")
             return
         if now.date() > send_at.date():
             print("Send window has passed; exiting without sending.")
