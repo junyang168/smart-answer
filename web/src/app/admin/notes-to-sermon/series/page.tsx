@@ -11,6 +11,7 @@ interface LectureSeries {
     folder?: string;
     created_at: string;
     updated_at: string;
+    project_type?: string;
     lectures: any[];
 }
 
@@ -23,6 +24,7 @@ export default function SeriesDashboardPage() {
     const [newTitle, setNewTitle] = useState("");
     const [newDesc, setNewDesc] = useState("");
     const [newFolder, setNewFolder] = useState("");
+    const [newProjectType, setNewProjectType] = useState("sermon_note");
     const [availableFolders, setAvailableFolders] = useState<string[]>([]);
 
     // ... fetch useEffects ...
@@ -61,7 +63,9 @@ export default function SeriesDashboardPage() {
         setEditingSeries(null);
         setNewTitle("");
         setNewDesc("");
+        setNewDesc("");
         setNewFolder("");
+        setNewProjectType("sermon_note");
         setShowCreateForm(true);
     };
 
@@ -69,7 +73,9 @@ export default function SeriesDashboardPage() {
         setEditingSeries(series);
         setNewTitle(series.title);
         setNewDesc(series.description || "");
+        setNewDesc(series.description || "");
         setNewFolder(series.folder || "");
+        setNewProjectType(series.project_type || "sermon_note");
         setShowCreateForm(true);
     };
 
@@ -79,7 +85,8 @@ export default function SeriesDashboardPage() {
         const payload = {
             title: newTitle,
             description: newDesc,
-            folder: newFolder || undefined
+            folder: newFolder || undefined,
+            project_type: newProjectType
         };
 
         try {
@@ -114,6 +121,7 @@ export default function SeriesDashboardPage() {
                 setNewTitle("");
                 setNewDesc("");
                 setNewFolder("");
+                setNewProjectType("sermon_note");
             } else {
                 alert("Failed to save series");
             }
@@ -181,19 +189,32 @@ export default function SeriesDashboardPage() {
                                 placeholder="Goal description..."
                             />
                         </div>
+                        {newProjectType !== 'transcript' && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Source Folder (Optional)</label>
+                                <select
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-white"
+                                    value={newFolder}
+                                    onChange={e => setNewFolder(e.target.value)}
+                                >
+                                    <option value="">Select a folder...</option>
+                                    {availableFolders.map(f => (
+                                        <option key={f} value={f}>{f}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-gray-500 mt-1">Select folder from full_article/images</p>
+                            </div>
+                        )}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Source Folder (Optional)</label>
+                            <label className="block text-sm font-medium text-gray-700">Project Type</label>
                             <select
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 bg-white"
-                                value={newFolder}
-                                onChange={e => setNewFolder(e.target.value)}
+                                value={newProjectType}
+                                onChange={e => setNewProjectType(e.target.value)}
                             >
-                                <option value="">Select a folder...</option>
-                                {availableFolders.map(f => (
-                                    <option key={f} value={f}>{f}</option>
-                                ))}
+                                <option value="sermon_note">Sermon Note (Scanned Images)</option>
+                                <option value="transcript">Fellowship Transcript (Raw Text)</option>
                             </select>
-                            <p className="text-xs text-gray-500 mt-1">Select folder from full_article/images</p>
                         </div>
                         <div className="flex justify-end space-x-3 mt-2">
                             <button
@@ -231,13 +252,18 @@ export default function SeriesDashboardPage() {
                                 <p className="text-gray-500 text-sm mb-4 line-clamp-2">
                                     {item.description || "No description"}
                                 </p>
-                                {item.folder && (
-                                    <div className="mb-4">
+                                <div className="mb-4 space-x-2">
+                                    {item.project_type !== 'transcript' && item.folder && (
                                         <span className="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded font-mono">
                                             📂 {item.folder}
                                         </span>
-                                    </div>
-                                )}
+                                    )}
+                                    {item.project_type === 'transcript' && (
+                                        <span className="inline-block bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded font-bold">
+                                            📝 Transcript
+                                        </span>
+                                    )}
+                                </div>
                                 <div className="flex items-center justify-between text-xs text-gray-400 mt-auto">
                                     <span>{item.lectures.length} Lectures</span>
                                     <span>Updated: {new Date(item.updated_at).toLocaleDateString()}</span>

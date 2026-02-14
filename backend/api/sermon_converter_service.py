@@ -46,6 +46,7 @@ class SermonProject(BaseModel):
     prompt_id: Optional[str] = None
     series_id: Optional[str] = None
     lecture_id: Optional[str] = None
+    project_type: str = "sermon_note" 
 
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
@@ -196,7 +197,7 @@ def get_page_segments(filename: str) -> List[Segment]:
         )
     ]
 
-def create_sermon_project(title: str, pages: List[str], series_id: Optional[str] = None, lecture_id: Optional[str] = None) -> SermonProject:
+def create_sermon_project(title: str, pages: List[str], series_id: Optional[str] = None, lecture_id: Optional[str] = None, project_type: str = "sermon_note") -> SermonProject:
     """
     Create a new sermon project.
     1. Create a folder for the sermon.
@@ -220,7 +221,8 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
         "title": title,
         "pages": pages,
         "series_id": series_id,
-        "lecture_id": lecture_id
+        "lecture_id": lecture_id,
+        "project_type": project_type
     }
     with open(sermon_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
@@ -909,6 +911,28 @@ def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Opti
     except Exception as e:
         # If validation fails, we shouldn't just crash with 500 without details
         raise ValueError(f"Metadata Validation Error: {e}")
+
+
+def update_sermon_project_type(sermon_id: str, project_type: str) -> bool:
+    """
+    Update the project type in metadata.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    if not sermon_dir.exists():
+        return False
+        
+    meta_file = sermon_dir / "meta.json"
+    import json
+    data = {}
+    if meta_file.exists():
+        with open(meta_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+    data["project_type"] = project_type
+    
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return True
 
 
 def update_sermon_project_linking(sermon_id: str, series_id: Optional[str], lecture_id: Optional[str]) -> bool:

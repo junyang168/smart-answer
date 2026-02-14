@@ -38,6 +38,7 @@ class LectureSeries(BaseModel):
     title: str
     description: Optional[str] = None
     folder: Optional[str] = None
+    project_type: str = "sermon_note"  # Default to existing behavior
     lectures: List[Lecture] = []
     created_at: str
     updated_at: str
@@ -64,6 +65,10 @@ def _save_db(data: List[dict]):
 
 def list_series() -> List[LectureSeries]:
     data = _load_db()
+    # Handle legacy data missing project_type
+    for item in data:
+        if "project_type" not in item:
+            item["project_type"] = "sermon_note"
     return [LectureSeries(**item) for item in data]
 
 def get_series(series_id: str) -> Optional[LectureSeries]:
@@ -73,12 +78,13 @@ def get_series(series_id: str) -> Optional[LectureSeries]:
             return s
     return None
 
-def create_series(title: str, description: Optional[str] = None, folder: Optional[str] = None) -> LectureSeries:
+def create_series(title: str, description: Optional[str] = None, folder: Optional[str] = None, project_type: str = "sermon_note") -> LectureSeries:
     new_series = LectureSeries(
         id=str(uuid.uuid4()),
         title=title,
         description=description,
         folder=folder,
+        project_type=project_type,
         lectures=[],
         created_at=datetime.utcnow().isoformat(),
         updated_at=datetime.utcnow().isoformat()
@@ -88,7 +94,7 @@ def create_series(title: str, description: Optional[str] = None, folder: Optiona
     _save_db(data)
     return new_series
 
-def update_series_metadata(series_id: str, title: str, description: Optional[str] = None, folder: Optional[str] = None) -> Optional[LectureSeries]:
+def update_series_metadata(series_id: str, title: str, description: Optional[str] = None, folder: Optional[str] = None, project_type: Optional[str] = None) -> Optional[LectureSeries]:
     data = _load_db()
     for item in data:
         if item["id"] == series_id:
@@ -96,8 +102,31 @@ def update_series_metadata(series_id: str, title: str, description: Optional[str
             item["description"] = description
             if folder is not None:
                 item["folder"] = folder
+            
+            if project_type is not None:
+                # Check for change to cascade updates
+                old_type = item.get("project_type", "sermon_note")
+                item["project_type"] = project_type
+                
+                if project_type != old_type:
+                    try:
+                        from backend.api.sermon_converter_service import update_sermon_project_type
+                        for lecture in item.get("lectures", []):
+                            for project_id in lecture.get("project_ids", []):
+                                try:
+                                    update_sermon_project_type(project_id, project_type)
+                                except Exception as e:
+                                    print(f"Failed to update project type for {project_id}: {e}")
+                    except ImportError:
+                        pass # Should not happen given structure
+
             item["updated_at"] = datetime.utcnow().isoformat()
             _save_db(data)
+            
+            # Ensure return object has default if missing in old data (though we just saved it)
+            if "project_type" not in item:
+                item["project_type"] = "sermon_note"
+                
             return LectureSeries(**item)
     return None
 

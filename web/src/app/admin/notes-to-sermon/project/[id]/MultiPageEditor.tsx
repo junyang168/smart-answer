@@ -23,6 +23,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [prompts, setPrompts] = useState<any[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<string>("");
     const [usedPromptId, setUsedPromptId] = useState<string>("");
+    const [projectType, setProjectType] = useState<string>("sermon_note");
 
     // Content State
     const [markdown, setMarkdown] = useState("");
@@ -44,9 +45,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         spellChecker: false,
         status: false,
 
-        placeholder: viewMode === 'source' ? "Unified manuscript will appear here..." : "Generated Draft will appear here...",
+        placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : "Generated Draft will appear here...",
         minHeight: "500px",
-    }), [viewMode]);
+    }), [viewMode, projectType]);
 
     // Handle Selection changes
     useEffect(() => {
@@ -165,6 +166,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 }
                 if (metaData.prompt_id) {
                     setUsedPromptId(metaData.prompt_id);
+                }
+                if (metaData.project_type) {
+                    setProjectType(metaData.project_type);
                 }
 
                 setLoading(false);
@@ -558,7 +562,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
 
             <div className="flex h-full flex-1 overflow-hidden">
                 {/* Left Pane: Multi-Page Image Viewer */}
-                {viewMode === 'source' && (
+                {viewMode === 'source' && projectType !== 'transcript' && (
                     <div className="w-1/2 bg-gray-100 border-r overflow-auto p-4">
                         <div className="mb-4 flex justify-between items-center">
                             <div className="flex items-center space-x-2">
@@ -680,7 +684,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 )}
 
                 {/* Right Pane: Unified Editor + AI Panel */}
-                <div className={`${viewMode === 'source' ? 'w-1/2' : 'w-full'} bg-white flex flex-row border-l`}>
+                <div className={`${viewMode === 'source' && projectType !== 'transcript' ? 'w-1/2' : 'w-full'} bg-white flex flex-row border-l`}>
                     <div className="flex-1 flex flex-col overflow-hidden p-4">
                         <div className="mb-2 text-sm text-gray-500 flex justify-between items-center">
                             <div className="flex items-center space-x-4">

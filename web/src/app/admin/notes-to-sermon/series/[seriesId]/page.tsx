@@ -25,6 +25,7 @@ interface LectureSeries {
     title: string;
     description?: string;
     folder?: string;
+    project_type?: string;
     lectures: Lecture[];
 }
 
@@ -120,6 +121,14 @@ export default function SeriesDetailPage() {
     const [isFetchingImages, setIsFetchingImages] = useState(false);
 
     const handleOpenCreateProject = async (lecture: Lecture) => {
+        // If transcript type, we don't need folder images
+        if (series?.project_type === 'transcript') {
+            setCreatingProjectForLecture(lecture);
+            setNewProjectTitle(lecture.title);
+            setSelectedImages([]); // No images needed
+            return;
+        }
+
         if (!series?.folder || !lecture.folder) {
             alert("Cannot create project: Series or Lecture folder is missing.");
             return;
@@ -150,7 +159,11 @@ export default function SeriesDetailPage() {
     const handleCreateProject = async () => {
         if (!creatingProjectForLecture) return;
         if (!newProjectTitle) return alert("Title required");
-        if (selectedImages.length === 0) return alert("Select at least one image");
+
+        // Validation depends on type
+        if (series?.project_type !== 'transcript' && selectedImages.length === 0) {
+            return alert("Select at least one image");
+        }
 
         try {
             const res = await fetch("/api/admin/notes-to-sermon/sermon-project", {
@@ -160,7 +173,8 @@ export default function SeriesDetailPage() {
                     title: newProjectTitle,
                     pages: selectedImages,
                     series_id: seriesId,
-                    lecture_id: creatingProjectForLecture.id
+                    lecture_id: creatingProjectForLecture.id,
+                    project_type: series?.project_type || 'sermon_note'
                 })
             });
 
@@ -363,6 +377,9 @@ export default function SeriesDetailPage() {
                         {series.folder && (
                             <p className="text-xs text-gray-400 mt-1">Source Folder: {series.folder}</p>
                         )}
+                        {series.project_type === 'transcript' && (
+                            <p className="text-xs text-purple-600 font-bold mt-1">Type: Fellowship Transcript</p>
+                        )}
                     </div>
                     {/* Series Actions (Edit/Delete) could go here */}
                 </div>
@@ -470,8 +487,8 @@ export default function SeriesDetailPage() {
                                 <button
                                     onClick={() => handleOpenCreateProject(lecture)}
                                     className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    disabled={!series.folder || !lecture.folder}
-                                    title={(!series.folder || !lecture.folder) ? "Configure folders to enable creation" : "Create new project from lecture folder"}
+                                    disabled={series.project_type !== 'transcript' && (!series.folder || !lecture.folder)}
+                                    title={(series.project_type !== 'transcript' && (!series.folder || !lecture.folder)) ? "Configure folders to enable creation" : "Create new project from lecture folder"}
                                 >
                                     + New Project
                                 </button>
@@ -588,56 +605,67 @@ export default function SeriesDetailPage() {
                                 />
                             </div>
 
-                            <label className="block text-sm font-medium mb-2">Select Images from {series?.folder}/{creatingProjectForLecture.folder}</label>
-
-                            {isFetchingImages ? (
-                                <div className="py-8 text-center text-gray-500">Loading images...</div>
-                            ) : projectImages.length === 0 ? (
-                                <div className="py-8 text-center text-gray-500 bg-gray-50 rounded">No images found in this folder.</div>
-                            ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {projectImages.map((img: any) => (
-                                        <div
-                                            key={img.filename}
-                                            className={`
-                                                relative border rounded p-2 cursor-pointer transition-all
-                                                ${selectedImages.includes(img.filename) ? 'ring-2 ring-indigo-500 bg-indigo-50 border-indigo-500' : 'hover:bg-gray-50'}
-                                            `}
-                                            onClick={() => toggleImageSelection(img.filename)}
-                                        >
-                                            <div className="aspect-[3/4] bg-gray-200 mb-2 rounded overflow-hidden">
-                                                {/* Use /image endpoint - but handle encoded filename */}
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img
-                                                    src={`/api/admin/notes-to-sermon/image/${encodeURIComponent(img.filename)}`}
-                                                    alt={img.filename}
-                                                    className="w-full h-full object-cover"
-                                                    loading="lazy"
-                                                />
-                                            </div>
-                                            <div className="text-xs truncate font-mono" title={img.filename}>
-                                                {/* Display only basename for cleanliness if path matches folder */}
-                                                {img.filename.split('/').pop()}
-                                            </div>
-                                            {selectedImages.includes(img.filename) && (
-                                                <div className="absolute top-2 right-2 bg-indigo-600 text-white rounded-full p-1 shadow">
-                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
+                            {series?.project_type === 'transcript' ? (
+                                <div className="p-4 bg-purple-50 rounded text-purple-700 italic text-center rounded border border-purple-200">
+                                    Transcript projects do not use scanned images.
+                                    A simplified editor will be created.
                                 </div>
+                            ) : (
+                                <>
+                                    <label className="block text-sm font-medium mb-2">Select Images from {series?.folder}/{creatingProjectForLecture.folder}</label>
+
+                                    {isFetchingImages ? (
+                                        <div className="py-8 text-center text-gray-500">Loading images...</div>
+                                    ) : projectImages.length === 0 ? (
+                                        <div className="py-8 text-center text-gray-500 bg-gray-50 rounded">No images found in this folder.</div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {projectImages.map((img: any) => (
+                                                <div
+                                                    key={img.filename}
+                                                    className={`
+                                                        relative border rounded p-2 cursor-pointer transition-all
+                                                        ${selectedImages.includes(img.filename) ? 'ring-2 ring-indigo-500 bg-indigo-50 border-indigo-500' : 'hover:bg-gray-50'}
+                                                    `}
+                                                    onClick={() => toggleImageSelection(img.filename)}
+                                                >
+                                                    <div className="aspect-[3/4] bg-gray-200 mb-2 rounded overflow-hidden">
+                                                        {/* Use /image endpoint - but handle encoded filename */}
+                                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                        <img
+                                                            src={`/api/admin/notes-to-sermon/image/${encodeURIComponent(img.filename)}`}
+                                                            alt={img.filename}
+                                                            className="w-full h-full object-cover"
+                                                            loading="lazy"
+                                                        />
+                                                    </div>
+                                                    <div className="text-xs truncate font-mono" title={img.filename}>
+                                                        {/* Display only basename for cleanliness if path matches folder */}
+                                                        {img.filename.split('/').pop()}
+                                                    </div>
+                                                    {selectedImages.includes(img.filename) && (
+                                                        <div className="absolute top-2 right-2 bg-indigo-600 text-white rounded-full p-1 shadow">
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
 
                         <div className="p-4 border-t bg-gray-50 rounded-b-lg flex justify-between items-center">
-                            <span className="text-sm text-gray-600">{selectedImages.length} images selected</span>
+                            <span className="text-sm text-gray-600">
+                                {series?.project_type === 'transcript' ? 'Ready to create' : `${selectedImages.length} images selected`}
+                            </span>
                             <div className="space-x-3">
                                 <button onClick={() => setCreatingProjectForLecture(null)} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
                                 <button
                                     onClick={handleCreateProject}
                                     className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
-                                    disabled={selectedImages.length === 0}
+                                    disabled={series?.project_type !== 'transcript' && selectedImages.length === 0}
                                 >
                                     Create Project
                                 </button>

@@ -14,6 +14,7 @@ export default function ProjectCreationPage() {
     const [projects, setProjects] = useState<any[]>([]);
     const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
     const [title, setTitle] = useState("");
+    const [projectType, setProjectType] = useState("sermon_note");
     const router = useRouter();
 
     useEffect(() => {
@@ -38,7 +39,7 @@ export default function ProjectCreationPage() {
 
     const createProject = async () => {
         if (!title) return alert("Please enter a title");
-        if (selectedImages.size === 0) return alert("Please select at least one page");
+        if (projectType !== 'transcript' && selectedImages.size === 0) return alert("Please select at least one page");
 
         const sortedPages = Array.from(selectedImages).sort(); // Basic sort, could be drag-drop later
 
@@ -46,7 +47,7 @@ export default function ProjectCreationPage() {
             const res = await fetch("/api/admin/notes-to-sermon/sermon-project", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, pages: sortedPages })
+                body: JSON.stringify({ title, pages: sortedPages, project_type: projectType })
             });
             const project = await res.json();
             // Redirect to the Unified Lab (will be created next)
@@ -103,6 +104,9 @@ export default function ProjectCreationPage() {
                                     </td>
                                     <td className="px-6 py-4">
                                         <div className="text-sm text-gray-900 max-w-xs truncate" title={p.bible_verse}>{p.bible_verse || "-"}</div>
+                                        {p.project_type === 'transcript' && (
+                                            <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded ml-1">Transcript</span>
+                                        )}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="text-sm text-gray-500">{p.pages.length} pages</div>
@@ -141,40 +145,57 @@ export default function ProjectCreationPage() {
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g. Sermon on the Mount: The Beatitudes"
                 />
+
+                <label className="block text-sm font-medium text-gray-700 mb-2 mt-4">Project Type</label>
+                <select
+                    className="w-full p-2 border rounded bg-white"
+                    value={projectType}
+                    onChange={e => setProjectType(e.target.value)}
+                >
+                    <option value="sermon_note">Sermon Note (Scanned Images)</option>
+                    <option value="transcript">Fellowship Transcript (Raw Text)</option>
+                </select>
             </div>
 
-            <div className="mb-6">
-                <h2 className="text-xl font-semibold mb-3">Select Scan Pages</h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {images.map(img => (
-                        <div
-                            key={img.filename}
-                            className={`border rounded p-2 cursor-pointer transition ${selectedImages.has(img.filename) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'}`}
-                            onClick={() => toggleImage(img.filename)}
-                        >
-                            {/* Thumbnail Placeholder */}
-                            {/* Thumbnail Replaced with Real Image */}
-                            <div className="aspect-[3/4] bg-gray-200 mb-2 overflow-hidden">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                    src={`/api/admin/notes-to-sermon/image/${img.filename}`}
-                                    alt={img.filename}
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                />
-                            </div>
-                            <div className="flex justify-between items-center text-sm">
-                                <span className="truncate">{img.filename}</span>
-                                <input
-                                    type="checkbox"
-                                    checked={selectedImages.has(img.filename)}
-                                    readOnly
-                                />
-                            </div>
-                        </div>
-                    ))}
+            {projectType === 'transcript' ? (
+                <div className="mb-6 p-6 bg-purple-50 rounded border border-purple-200 text-center text-purple-800">
+                    <p className="font-semibold">Transcript Mode</p>
+                    <p className="text-sm mt-1">You will be able to paste the raw script directly in the editor.</p>
                 </div>
-            </div>
+            ) : (
+                <div className="mb-6">
+                    <h2 className="text-xl font-semibold mb-3">Select Scan Pages</h2>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {images.map(img => (
+                            <div
+                                key={img.filename}
+                                className={`border rounded p-2 cursor-pointer transition ${selectedImages.has(img.filename) ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'hover:bg-gray-50'}`}
+                                onClick={() => toggleImage(img.filename)}
+                            >
+                                {/* Thumbnail Placeholder */}
+                                {/* Thumbnail Replaced with Real Image */}
+                                <div className="aspect-[3/4] bg-gray-200 mb-2 overflow-hidden">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                        src={`/api/admin/notes-to-sermon/image/${img.filename}`}
+                                        alt={img.filename}
+                                        className="w-full h-full object-cover"
+                                        loading="lazy"
+                                    />
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="truncate">{img.filename}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedImages.has(img.filename)}
+                                        readOnly
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             <button
                 onClick={createProject}

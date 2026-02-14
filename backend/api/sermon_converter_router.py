@@ -90,13 +90,14 @@ class CreateSermonRequest(BaseModel):
     pages: List[str]
     series_id: Optional[str] = None
     lecture_id: Optional[str] = None
+    project_type: Optional[str] = "sermon_note"
 
 @router.post("/sermon-project", response_model=SermonProject)
 def create_sermon(payload: CreateSermonRequest) -> SermonProject:
     """
     Create a new logical sermon project from a list of pages.
     """
-    return create_sermon_project(payload.title, payload.pages, payload.series_id, payload.lecture_id)
+    return create_sermon_project(payload.title, payload.pages, payload.series_id, payload.lecture_id, payload.project_type)
 
 @router.get("/sermon-project/{sermon_id}/source")
 def get_project_source(sermon_id: str):

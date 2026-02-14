@@ -17,6 +17,7 @@ class CreateSeriesRequest(BaseModel):
     title: str
     description: Optional[str] = None
     folder: Optional[str] = None
+    project_type: Optional[str] = "sermon_note"
 
 class CreateLectureRequest(BaseModel):
     title: str
@@ -39,7 +40,7 @@ def list_series_endpoint():
 
 @router.post("", response_model=LectureSeries)
 def create_series_endpoint(payload: CreateSeriesRequest):
-    return create_series(payload.title, payload.description, payload.folder)
+    return create_series(payload.title, payload.description, payload.folder, payload.project_type)
 
 @router.get("/{series_id}", response_model=LectureSeries)
 def get_series_endpoint(series_id: str):
@@ -50,7 +51,7 @@ def get_series_endpoint(series_id: str):
 
 @router.put("/{series_id}", response_model=LectureSeries)
 def update_series_endpoint(series_id: str, payload: CreateSeriesRequest):
-    series = update_series_metadata(series_id, payload.title, payload.description, payload.folder)
+    series = update_series_metadata(series_id, payload.title, payload.description, payload.folder, payload.project_type)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     return series
