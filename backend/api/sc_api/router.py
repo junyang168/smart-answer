@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import traceback
+import datetime
+
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -261,32 +265,44 @@ def update_header(request: UpdateHeaderRequest):
 @router.post("/generate_metadata")
 def generate_metadata(request: GenerateMetadataRequest):
     try:
-        return sermon_manager.generate_sermon_metadata(
+        data = sermon_manager.generate_sermon_metadata(
             request.user_id or "",
             request.item,
             request.paragraphs,
         )
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - unexpected failure path
-        raise HTTPException(status_code=500, detail="AI 產生講道資訊時發生錯誤") from exc
-
-
-@router.post("/generate_series_metadata")
-def generate_series_metadata(request: GenerateSeriesMetadataRequest):
-    try:
-        return sermon_manager.generate_sermon_series_metadata(
-            request.user_id or "",
-            request.series_id,
-        )
+        # Manually serialize to ensure any encoding errors are caught immediately
+        json_str = json.dumps(jsonable_encoder(data), ensure_ascii=False)
+        return JSONResponse(content=json.loads(json_str))
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="AI 產生系列資訊時發生錯誤") from exc
+        logging.error(f"Error in generate_metadata: {exc}\n{traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "AI 產生講道資訊時發生錯誤", "error": str(exc)},
+        )
+
+
+@router.post("/generate_series_metadata")
+def generate_series_metadata(request: GenerateSeriesMetadataRequest):
+    try:
+        data = sermon_manager.generate_sermon_series_metadata(
+            request.user_id or "",
+            request.series_id,
+        )
+        return JSONResponse(content=jsonable_encoder(data))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logging.error(f"Error in generate_series_metadata: {exc}\n{traceback.format_exc()}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "AI 產生系列資訊時發生錯誤", "error": str(exc)},
+        )
 
 
 @router.post("/generate_subtitles")
