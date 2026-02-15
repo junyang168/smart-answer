@@ -43,3 +43,9 @@ GOOGLE_CLOUD_PROJECT: Final[str] = os.getenv("GOOGLE_CLOUD_PROJECT", "gen-lang-c
 GOOGLE_CLOUD_LOCATION: Final[str] = "europe-west3"
 GOOGLE_DRIVE_FOLDER_ID: Final[str] = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "1ar9kpkbmW0_E-882mjcWJYuG2lZ1XodG")
 RAG_CORPUS_ID: Final[Optional[str]] = os.getenv("RAG_CORPUS_ID")
+
+# Multi-Agent LLM Provider
+MAS_LLM_PROVIDER: Final[str] = os.getenv("MAS_LLM_PROVIDER", "gemini")  # "gemini" or "openai_compatible"
+OPENAI_COMPATIBLE_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_COMPATIBLE_API_KEY")
+OPENAI_COMPATIBLE_BASE_URL: Final[str] = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.moonshot.cn/v1")
+OPENAI_COMPATIBLE_MODEL: Final[str] = os.getenv("OPENAI_COMPATIBLE_MODEL", "kimi-k2-5")

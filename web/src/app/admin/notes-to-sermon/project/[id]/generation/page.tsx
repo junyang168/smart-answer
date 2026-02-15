@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, Circle, Brain, BookOpen, PenTool, MessageSquare, Feather, Layout, RefreshCcw } from "lucide-react";
+import { ArrowLeft, CheckCircle, Circle, Scissors, PenTool, MessageSquare, RefreshCcw } from "lucide-react";
 import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdown";
 
 interface AgentLog {
@@ -19,12 +19,8 @@ interface ProjectStatus {
 }
 
 const AGENTS = [
-    { role: "exegete", label: "Exegetical Scholar", icon: BookOpen, color: "bg-purple-100 text-purple-700" },
-    { role: "theologian", label: "Theologian", icon: Brain, color: "bg-yellow-100 text-yellow-700" },
-    { role: "illustrator", label: "Illustrator", icon: Feather, color: "bg-pink-100 text-pink-700" },
-    { role: "structuring_specialist", label: "Architect", icon: Layout, color: "bg-gray-100 text-gray-700" },
-    { role: "drafter", label: "Homiletician", icon: PenTool, color: "bg-blue-100 text-blue-700" },
-    { role: "critic", label: "Critic", icon: MessageSquare, color: "bg-red-100 text-red-700" },
+    { role: "segmenter", label: "教學單元切割", icon: Scissors, color: "bg-purple-100 text-purple-700" },
+    { role: "expander", label: "逐字稿撰寫", icon: PenTool, color: "bg-blue-100 text-blue-700" },
 ];
 
 export default function GenerationPage({ params }: { params: { id: string } }) {
@@ -87,23 +83,21 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
     const getAgentContent = (role: string) => {
         if (!agentState) return "No data available yet.";
         switch (role) {
-            case "exegete": return agentState.exegetical_notes || "Waiting for output...";
-            case "theologian": return agentState.theological_analysis || "Waiting for output...";
-            case "illustrator": return agentState.illustration_ideas || "Waiting for output...";
-            case "structuring_specialist":
-                const beats = agentState.beats;
-                if (Array.isArray(beats)) {
-                    return beats.map((b: string, i: number) =>
-                        `> [!NOTE]\n> **Macro-Beat ${i + 1}**\n>\n> ${b.replace(/\n/g, "\n> ")}`
-                    ).join("\n\n");
+            case "segmenter":
+                const units = agentState.units;
+                if (Array.isArray(units) && units.length > 0) {
+                    return units.map((u: any, i: number) => {
+                        const title = u.title || `教學單元 ${i + 1}`;
+                        const keypoints = u.keypoints ? `\n>\n> **Keypoints：**\n> ${u.keypoints.replace(/\n/g, "\n> ")}` : "";
+                        const unitType = u.type ? ` (${u.type})` : "";
+                        const content = (u.content || u).toString().replace(/\n/g, "\n> ");
+                        return `> [!NOTE]\n> **${i + 1}. ${title}**${unitType}${keypoints}\n>\n> ${content}`;
+                    }).join("\n\n");
                 }
-                return "Waiting for structure...";
-            case "drafter":
+                return "等待切割中...";
+            case "expander":
                 if (agentState.draft_chunks?.length > 0) return agentState.draft_chunks.join("\n\n");
-                return agentState.full_manuscript || "Drafting in progress...";
-            case "critic":
-                // Return passed beats logs?
-                return logs.filter(l => l.role === "critic").map(l => l.message).join("\n");
+                return agentState.full_manuscript || "等待擴展中...";
             default: return "No specific output for this agent.";
         }
     };
@@ -128,14 +122,10 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         const Icon = agent.icon;
                         const isActive = activeRole === agent.role || (status?.processing_status?.toLowerCase().includes(agent.role));
                         const hasData = (
-                            (agent.role === "critic" && logs.some(l => l.role.toLowerCase() === "critic")) ||
-                            (agentState && (
-                                (agent.role === "exegete" && agentState.exegetical_notes) ||
-                                (agent.role === "theologian" && agentState.theological_analysis) ||
-                                (agent.role === "illustrator" && agentState.illustration_ideas) ||
-                                (agent.role === "structuring_specialist" && agentState.beats) ||
-                                (agent.role === "drafter" && agentState.draft_chunks?.length > 0)
-                            ))
+                            agentState && (
+                                (agent.role === "segmenter" && agentState.units) ||
+                                (agent.role === "expander" && agentState.draft_chunks?.length > 0)
+                            )
                         );
 
                         return (

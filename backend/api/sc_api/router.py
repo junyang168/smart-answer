@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
 from backend.api.config import DATA_BASE_PATH
@@ -287,14 +289,32 @@ def generate_series_metadata(request: GenerateSeriesMetadataRequest):
         raise HTTPException(status_code=500, detail="AI 產生系列資訊時發生錯誤") from exc
 
 
-@router.post("/generate_subtitles", response_model=list[SubtitleInsertion])
-def generate_subtitles(payload: GenerateSubtitlesRequest) -> list[SubtitleInsertion]:
-    from .script_delta import ScriptDelta
-    for p in payload.paragraphs:
-        if p.get('text'):
-            p['text'] = ScriptDelta.remove_format(p['text'])
-    insertions = gemini_client.generate_subtitles(payload.paragraphs)
-    return [SubtitleInsertion(**i) for i in insertions]
+@router.post("/generate_subtitles")
+def generate_subtitles(payload: GenerateSubtitlesRequest):
+    try:
+        from .script_delta import ScriptDelta
+        for p in payload.paragraphs:
+            text = p.get('text')
+            if text is not None:
+                if not isinstance(text, str):
+                    text = str(text)
+                p['text'] = ScriptDelta.remove_format(text)
+        insertions = gemini_client.generate_subtitles(payload.paragraphs)
+        print(f"DEBUG: Gemini insertions raw: {insertions}")
+        valid_insertions = []
+        for i in insertions:
+            try:
+                valid_insertions.append(SubtitleInsertion(**i))
+            except Exception as e:
+                print(f"Skipping invalid subtitle insertion: {i}, error: {e}")
+                continue
+        print(f"DEBUG: Returning {len(valid_insertions)} valid insertions.")
+        return JSONResponse(content=jsonable_encoder(valid_insertions, by_alias=True))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"CRITICAL ERROR in generate_subtitles: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sermon/{user_id}/{item}/{changes}")

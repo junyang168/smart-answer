@@ -22,3 +22,4 @@ google-auth-oauthlib
 cairosvg
 cssutils
 defusedxml
+openai>=1.0
