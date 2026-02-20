@@ -1085,6 +1085,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
         h3 {{ font-size: 14pt; margin-top: 14pt; margin-bottom: 6pt; }}
         ul, ol {{ margin-bottom: 12pt; }}
         li {{ margin-bottom: 4pt; }}
+        blockquote {{ margin-left: 20pt; padding-left: 10pt; border-left: 2pt solid #cccccc; color: #555555; background-color: #f9f9f9; padding: 10pt; font-style: italic; }}
         table {{ border-collapse: collapse; width: 100%; margin-bottom: 12pt; }}
         th, td {{ border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: top; }}
         th {{ background-color: #f0f0f0; font-weight: bold; }}
