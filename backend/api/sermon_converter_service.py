@@ -85,13 +85,24 @@ def list_note_images(folder: str = "") -> List[NoteImage]:
     extensions = {'.jpg', '.jpeg', '.png'}
     images = []
     
-    # Sort alphabetically
-    for f in sorted(list(target_dir.iterdir()), key=lambda p: p.name):
-        if f.is_file() and f.suffix.lower() in extensions:
-            # Construct relative filename
-            rel_filename = f.name
-            if folder:
-                rel_filename = f"{folder}/{f.name}"
+    # Recursively find all images
+    all_files = []
+    for ext in extensions:
+        all_files.extend(target_dir.rglob(f"*{ext}"))
+        all_files.extend(target_dir.rglob(f"*{ext.upper()}"))
+        
+    # Remove duplicates and sort by relative path
+    all_files = sorted(list(set(all_files)), key=lambda p: str(p))
+    
+    for f in all_files:
+        if f.is_file():
+            # Construct relative filename from IMAGES_ROOT
+            try:
+                rel_filename = str(f.relative_to(IMAGES_ROOT))
+            except ValueError:
+                rel_filename = f.name
+                if folder:
+                    rel_filename = f"{folder}/{f.name}"
                 
             # Check flat path using relative filename (folder="" because it's in filename)
             is_processed = get_raw_ocr_path(rel_filename).exists()
