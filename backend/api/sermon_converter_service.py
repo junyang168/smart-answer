@@ -372,15 +372,8 @@ def trigger_project_page_ocr(sermon_id: str, filename: str):
     # 1. Process
     process_note_image(filename)
     
-    # 2. Rebuild Source (to include the new text)
-    # We need to get the current pages list
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
-    meta_file = sermon_dir / "meta.json"
-    if meta_file.exists():
-        import json
-        with open(meta_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        _rebuild_unified_source(sermon_id, data.get("pages", []))
+    # 2. Inject the newly processed text into the existing source
+    _inject_newly_processed_pages(sermon_id, [filename])
 
 def update_sermon_processing_status(sermon_id: str, is_processing: bool, progress: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
     """

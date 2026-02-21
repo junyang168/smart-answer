@@ -131,7 +131,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             try {
                 // Fetch Content based on mode
                 const endpoint = viewMode === 'source' ? 'source' : 'draft';
-                const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`);
+                const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
                 if (srcRes.ok) {
                     const srcData = await srcRes.json();
                     const content = srcData.content || "";
@@ -226,7 +231,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     setProgress(null);
                     // Re-fetch content based on current viewMode
                     const endpoint = viewMode === 'source' ? 'source' : 'draft';
-                    const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`);
+                    const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                        headers: {
+                            'Cache-Control': 'no-cache',
+                            'Pragma': 'no-cache'
+                        }
+                    });
                     const srcData = await srcRes.json();
 
                     const content = srcData.content || "";
@@ -253,7 +263,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 body: JSON.stringify({ filename })
             });
             // Re-fetch source
-            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`);
+            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`, {
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             const srcData = await srcRes.json();
             setMarkdown(srcData.content);
             alert("OCR Complete. Source updated.");
@@ -275,7 +290,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             // Update UI list
             setImages(prev => prev.filter(img => img !== filename));
             // Re-fetch source
-            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`);
+            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`, {
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             const srcData = await srcRes.json();
             setMarkdown(srcData.content);
         } catch (e) {
@@ -293,7 +313,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             // Update UI list
             setImages(prev => [...prev, filename].sort());
             // Re-fetch source
-            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`);
+            const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/source`, {
+                headers: {
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                }
+            });
             const srcData = await srcRes.json();
             setMarkdown(srcData.content);
             setShowAdd(false);
