@@ -869,9 +869,9 @@ def commit_sermon_project(sermon_id: str) -> str:
     return str(commit.hexsha)
 
 
-def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Optional[str] = None) -> SermonProject:
+def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Optional[str] = None, google_doc_link: Optional[str] = None) -> SermonProject:
     """
-    Update the project metadata (title, bible_verse).
+    Update the project metadata (title, bible_verse, google_doc_id).
     """
     sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
     if not sermon_dir.exists():
@@ -898,6 +898,19 @@ def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Opti
         
     # Standardize: Always write what we have
     data["bible_verse"] = bible_verse
+    
+    # Handle google doc link updates
+    if google_doc_link is not None:
+        if google_doc_link.strip() == "":
+            if "google_doc_id" in data:
+                del data["google_doc_id"]
+        else:
+            import re
+            match = re.search(r'/document/d/([a-zA-Z0-9-_]+)', google_doc_link)
+            if match:
+                data["google_doc_id"] = match.group(1)
+            else:
+                raise ValueError("Invalid Google Doc Link format")
     
     # Ensure ID is present (it might be missing in old meta files)
     if "id" not in data:

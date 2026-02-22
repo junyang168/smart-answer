@@ -280,16 +280,17 @@ def refine_draft_endpoint(sermon_id: str, payload: RefineRequest):
 class UpdateMetadataRequest(BaseModel):
     title: str
     bible_verse: Optional[str] = None
+    google_doc_link: Optional[str] = None
 
 @router.post("/sermon-project/{sermon_id}/metadata", response_model=SermonProject)
 def update_project_metadata(sermon_id: str, payload: UpdateMetadataRequest):
     """
-    Update project title and bible verse.
+    Update project title, bible verse, and optionally Google Doc Link.
     """
     try:
         # Import locally to ensure fresh reload during dev
         from backend.api.sermon_converter_service import update_sermon_project_metadata
-        return update_sermon_project_metadata(sermon_id, payload.title, payload.bible_verse)
+        return update_sermon_project_metadata(sermon_id, payload.title, payload.bible_verse, payload.google_doc_link)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Sermon project not found")
     except ValueError as ve:

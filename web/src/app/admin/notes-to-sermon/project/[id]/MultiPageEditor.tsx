@@ -19,7 +19,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [projectTitle, setProjectTitle] = useState(projectId);
     const [bibleVerse, setBibleVerse] = useState("");
     const [showMetaEdit, setShowMetaEdit] = useState(false);
-    const [metaForm, setMetaForm] = useState({ title: "", bibleVerse: "" });
+    const [metaForm, setMetaForm] = useState({ title: "", bibleVerse: "", googleDocLink: "" });
+    const [googleDocLink, setGoogleDocLink] = useState("");
     const [prompts, setPrompts] = useState<any[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<string>("");
     const [usedPromptId, setUsedPromptId] = useState<string>("");
@@ -165,6 +166,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 }
                 if (metaData.bible_verse) {
                     setBibleVerse(metaData.bible_verse);
+                }
+                if (metaData.google_doc_id) {
+                    setGoogleDocLink(`https://docs.google.com/document/d/${metaData.google_doc_id}/edit`);
                 }
                 if (metaData.processing) {
                     setIsProcessing(true);
@@ -425,6 +429,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             const data = await res.json();
             if (res.ok) {
                 if (data.url) {
+                    setGoogleDocLink(data.url);
                     window.open(data.url, "_blank");
                 } else {
                     alert("Export successful but no URL returned.");
@@ -471,7 +476,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     };
 
     const handleOpenMetaEdit = () => {
-        setMetaForm({ title: projectTitle, bibleVerse: bibleVerse });
+        setMetaForm({ title: projectTitle, bibleVerse: bibleVerse, googleDocLink: googleDocLink });
         setShowMetaEdit(true);
     };
 
@@ -484,12 +489,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     title: metaForm.title,
-                    bible_verse: metaForm.bibleVerse
+                    bible_verse: metaForm.bibleVerse,
+                    google_doc_link: metaForm.googleDocLink
                 })
             });
             if (res.ok) {
                 setProjectTitle(metaForm.title);
                 setBibleVerse(metaForm.bibleVerse);
+                setGoogleDocLink(metaForm.googleDocLink);
                 setShowMetaEdit(false);
             } else {
                 const data = await res.json();
@@ -523,7 +530,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 </svg>
                             </button>
                         </div>
-                        {bibleVerse && <p className="text-sm text-gray-600">{bibleVerse}</p>}
+                        <div className="flex items-center space-x-2">
+                            {bibleVerse && <p className="text-sm text-gray-600">{bibleVerse}</p>}
+                            {googleDocLink && (
+                                <a href={googleDocLink} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:text-blue-800 underline">
+                                    Google Doc
+                                </a>
+                            )}
+                        </div>
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -773,6 +787,16 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                     placeholder="e.g. John 3:16"
                                     value={metaForm.bibleVerse}
                                     onChange={e => setMetaForm({ ...metaForm, bibleVerse: e.target.value })}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold mb-1">Google Doc Link</label>
+                                <input
+                                    type="text"
+                                    className="w-full border p-2 rounded"
+                                    placeholder="Optional: https://docs.google.com/document/d/..."
+                                    value={metaForm.googleDocLink}
+                                    onChange={e => setMetaForm({ ...metaForm, googleDocLink: e.target.value })}
                                 />
                             </div>
                             <div className="flex justify-end space-x-2">
