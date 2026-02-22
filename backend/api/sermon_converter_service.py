@@ -1163,8 +1163,13 @@ def export_sermon_to_doc(sermon_id: str) -> str:
                 'name': title,
                 'mimeType': 'application/vnd.google-apps.document'
             }
-            if GOOGLE_DRIVE_FOLDER_ID:
-                file_metadata['parents'] = [GOOGLE_DRIVE_FOLDER_ID]
+            
+            target_folder_id = GOOGLE_DRIVE_FOLDER_ID
+            if meta_data.get("project_type") == "Fellowship Transcript":
+                target_folder_id = "1tizJv2BEql_v0zXehGPSjY2TPnkyGq7t"
+                
+            if target_folder_id:
+                file_metadata['parents'] = [target_folder_id]
                 
             file = drive_service.files().create(
                 body=file_metadata,
