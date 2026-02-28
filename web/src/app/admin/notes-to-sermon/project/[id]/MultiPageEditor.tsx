@@ -691,11 +691,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             />
                         </div>
                     </div>
-                    {viewMode === 'draft' && (
-                        <div className="border-l h-full">
-                            <AiCommandPanel projectId={projectId} />
-                        </div>
-                    )}
+                    <div className={`border-l h-full ${viewMode === 'draft' ? 'block' : 'hidden'}`}>
+                        <AiCommandPanel projectId={projectId} />
+                    </div>
                 </div>
             </div>
             {/* Metadata Modal */}
