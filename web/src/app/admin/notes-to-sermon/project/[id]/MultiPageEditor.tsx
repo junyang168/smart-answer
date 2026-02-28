@@ -36,10 +36,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [showAdd, setShowAdd] = useState(false);
     const [editorInstance, setEditorInstance] = useState<any>(null);
 
-    // AI Refinement State
-    const [selectedText, setSelectedText] = useState("");
-    const [isRefining, setIsRefining] = useState(false);
-    const [selectionRange, setSelectionRange] = useState<any>(null);
+
 
 
     const editorOptions = useMemo(() => ({
@@ -50,36 +47,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         minHeight: "500px",
     }), [viewMode, projectType]);
 
-    // Handle Selection changes
-    useEffect(() => {
-        if (!editorInstance) return;
-        const cm = editorInstance.codemirror;
 
-        const handleSelection = () => {
-            if (viewMode !== 'draft') {
-                setSelectedText("");
-                setSelectionRange(null);
-                return;
-            }
-
-            const selection = cm.getSelection();
-            if (selection) {
-                setSelectedText(selection);
-                // Get range
-                const from = cm.getCursor("from");
-                const to = cm.getCursor("to");
-                setSelectionRange({ from, to });
-            } else {
-                setSelectedText("");
-                setSelectionRange(null);
-            }
-        };
-
-        cm.on("cursorActivity", handleSelection);
-        return () => {
-            cm.off("cursorActivity", handleSelection);
-        };
-    }, [editorInstance, viewMode]);
 
     // Sync: Markdown -> Image
     useEffect(() => {
@@ -442,38 +410,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
     };
 
-    const handleRefine = async (instruction: string) => {
-        if (!editorInstance || !selectionRange) return;
 
-        setIsRefining(true);
-        try {
-            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/refine-draft`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    selection: selectedText,
-                    instruction: instruction
-                })
-            });
-            const data = await res.json();
-
-            if (res.ok && data.refined_text) {
-                // Replace text in editor
-                const cm = editorInstance.codemirror;
-                cm.replaceRange(data.refined_text, selectionRange.from, selectionRange.to);
-                // Clear selection state? Or keep it to show result? 
-                // Let's keep selection but update it to the new range? 
-                // Actually replacing range usually updates cursor. 
-                // We'll trust the cursorActivity handler to update state if selection changes/clears.
-                alert("Refinement complete!");
-            } else {
-                alert("Refinement failed: " + (data.detail || "Unknown error"));
-            }
-        } catch (e) {
-            alert("Refinement failed");
-        }
-        setIsRefining(false);
-    };
 
     const handleOpenMetaEdit = () => {
         setMetaForm({ title: projectTitle, bibleVerse: bibleVerse, googleDocLink: googleDocLink });
@@ -756,11 +693,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     </div>
                     {viewMode === 'draft' && (
                         <div className="border-l h-full">
-                            <AiCommandPanel
-                                selectedText={selectedText}
-                                onRefine={handleRefine}
-                                isRefining={isRefining}
-                            />
+                            <AiCommandPanel projectId={projectId} />
                         </div>
                     )}
                 </div>

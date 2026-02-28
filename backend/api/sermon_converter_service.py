@@ -495,6 +495,17 @@ def get_sermon_source(sermon_id: str) -> str:
     with open(unified_file, "r", encoding="utf-8") as f:
         return f.read()
 
+def extract_processable_content(content: str) -> str:
+    """
+    Extracts content up to the `<!-- Ignore Below-->` marker.
+    If the marker is not found, returns the entire content.
+    """
+    import re
+    match = re.search(r'<!--\s*Ignore Below\s*-->', content, re.IGNORECASE)
+    if match:
+        return content[:match.start()].strip()
+    return content.strip()
+
 def save_sermon_source(sermon_id: str, content: str) -> bool:
     """
     Overwrite the unified source file with new content.
@@ -652,6 +663,8 @@ def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> st
         if not source_content:
             update_sermon_processing_status(sermon_id, False)
             raise ValueError("Unified source is empty. Please process images first.")
+            
+        source_content = extract_processable_content(source_content)
             
         # Init Gemini Client
         client = genai.Client(
@@ -1286,6 +1299,174 @@ def refine_sermon_draft(sermon_id: str, selection: str, instruction: str) -> str
     except Exception as e:
         print(f"Error refining draft for {sermon_id}: {e}")
         raise e
+
+def audit_sermon_draft(sermon_id: str) -> str:
+    """
+    Review the sermon draft against the original notes using OpenAI Structured Outputs.
+    Returns the audit analysis text in Markdown format.
+    """
+    try:
+        source_content = get_sermon_source(sermon_id)
+        draft_content = get_sermon_draft(sermon_id)
+
+        if not source_content:
+            return "Error: Unified source notes are empty."
+            
+        source_content = extract_processable_content(source_content)
+
+        if not draft_content:
+            return "Error: Generated draft is empty. Please generate a draft before auditing."
+
+        import os
+        from openai import OpenAI
+        import json
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        
+        SYSTEM_PROMPT = """你是「释经逐字稿外置审核器（Diff Auditor）」，不是讲道者，不是改写者。
+你只做“检测与列证据”，绝不重写逐字稿。
+
+注意：忽略逐字稿中任何标题为“神学分析”或“简要总结”的段落内容；这些段落不参与对比、不计入新增/删减。
+
+任务：
+A) 覆盖对齐：以【笔记】的自然段/要点为单位，对齐到【逐字稿】对应句子（给出引用片段）。找不到则标记未覆盖。
+B) 差异清单：新增/删除/立场升级/结构重排/术语变化；每条必须给出笔记与逐字稿证据引用。
+C) 风险分级：P0/P1/P2/P3，并给一句仅基于文本的理由。
+D) 给出分数与是否通过。
+
+禁止：改写逐字稿；补充神学；无证据的泛泛结论。
+"""
+
+        AUDIT_SCHEMA = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "matthew_audit_report_v1",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "coverage": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "note_id": {"type": "string"},
+                                    "note_excerpt": {"type": "string"},
+                                    "matched": {"type": "boolean"},
+                                    "transcript_evidence": {"type": "string"}
+                                },
+                                "required": ["note_id", "note_excerpt", "matched", "transcript_evidence"]
+                            }
+                        },
+                        "diffs": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "type": {"type": "string", "enum": ["addition","deletion","stance_upgrade","structure_change","term_change"]},
+                                    "category": {"type": "string", "enum": ["background","explanation","evaluation","inference","term_upgrade","formatting","other"]},
+                                    "risk": {"type": "string", "enum": ["P0","P1","P2","P3"]},
+                                    "note_evidence": {"type": "string"},
+                                    "transcript_evidence": {"type": "string"},
+                                    "reason": {"type": "string"}
+                                },
+                                "required": ["type","category","risk","note_evidence","transcript_evidence","reason"]
+                            }
+                        },
+                        "scores": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "faithfulness": {"type": "number"},
+                                "theology_safety": {"type": "number"}
+                            },
+                            "required": ["faithfulness","theology_safety"]
+                        },
+                        "pass": {"type": "boolean"},
+                        "must_fix": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["coverage","diffs","scores","pass","must_fix"]
+                }
+            }
+        }
+
+        user_prompt = f"【笔记】\n{source_content}\n\n【逐字稿】\n{draft_content}"
+        
+        response = client.chat.completions.create(
+            model="gpt-5.2",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format=AUDIT_SCHEMA,
+            temperature=0
+        )
+        
+        result_text = response.choices[0].message.content
+        
+        # Parse JSON and Format as Markdown
+        try:
+            data = json.loads(result_text)
+            
+            md = []
+            md.append("# 🛡️ AI 審核報告 (AI Audit Report)\n")
+            
+            # Overview
+            status_moji = "✅ 通過 (Pass)" if data.get("pass") else "❌ 未通過 (Fail)"
+            md.append("## 🏆 總體評分 & 狀態")
+            md.append(f"- **審核結果 (Status)**: {status_moji}")
+            
+            scores = data.get("scores", {})
+            md.append(f"- **忠實度 (Faithfulness)**: {scores.get('faithfulness', 'N/A')} / 10")
+            md.append(f"- **神學安全 (Theology Safety)**: {scores.get('theology_safety', 'N/A')} / 10\n")
+            
+            # Coverage
+            md.append("---\n## 🔍 覆蓋率檢查 (Coverage)")
+            coverage = data.get("coverage", [])
+            if not coverage:
+                md.append("- 無紀錄")
+            else:
+                for c in coverage:
+                    matched_str = "✅ 已覆蓋" if c.get("matched") else "❌ 未覆蓋"
+                    md.append(f"- **筆記 [{c.get('note_id', 'N/A')}]**: {c.get('note_excerpt', '')}")
+                    md.append(f"  - **狀態**: {matched_str}")
+                    md.append(f"  - **逐字稿證據 (Evidence)**: {c.get('transcript_evidence', '')}\n")
+            
+            # Diffs
+            md.append("---\n## ⚠️ 差異清單 (Diffs)")
+            diffs = data.get("diffs", [])
+            if not diffs:
+                md.append("- 無明顯差異或風險")
+            else:
+                for d in diffs:
+                    md.append(f"- **類型**: `{d.get('type')}` | **分類**: `{d.get('category')}` | **風險**: `{d.get('risk')}`")
+                    md.append(f"  - **筆記證據**: {d.get('note_evidence', '')}")
+                    md.append(f"  - **逐字稿證據**: {d.get('transcript_evidence', '')}")
+                    md.append(f"  - **理由**: {d.get('reason', '')}\n")
+                    
+            # Must Fix
+            md.append("---\n## 🛠️ 必須修改 (Must Fix)")
+            must_fix = data.get("must_fix", [])
+            if not must_fix:
+                md.append("- 無必須修改項目 ✨")
+            else:
+                for fix in must_fix:
+                    md.append(f"- 🔴 {fix}")
+                    
+            return "\n".join(md)
+            
+        except json.JSONDecodeError:
+            # Fallback if somehow not valid JSON (very rare with structured outputs)
+            return f"Raw output (Failed to parse JSON):\n\n```json\n{result_text}\n```"
+
+    except Exception as e:
+        print(f"Error auditing draft for {sermon_id}: {e}")
+        return f"Error executing audit: {e}"
 
 def _process_images_for_export(html_content: str) -> str:
     """

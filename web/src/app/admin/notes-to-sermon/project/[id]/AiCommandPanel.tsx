@@ -1,78 +1,100 @@
 "use client";
 
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface AiCommandPanelProps {
-    selectedText: string;
-    onRefine: (instruction: string) => Promise<void>;
-    isRefining: boolean;
+    projectId: string;
 }
 
-export default function AiCommandPanel({ selectedText, onRefine, isRefining }: AiCommandPanelProps) {
-    const [instruction, setInstruction] = useState("");
+export default function AiCommandPanel({ projectId }: AiCommandPanelProps) {
+    const [isAuditing, setIsAuditing] = useState(false);
+    const [auditResult, setAuditResult] = useState<string | null>(null);
 
-    const handleRefineClick = () => {
-        if (!instruction.trim()) return;
-        onRefine(instruction);
+    const handleAuditClick = async () => {
+        setIsAuditing(true);
+        setAuditResult(null);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/audit-draft`, {
+                method: "POST",
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            let data;
+            try {
+                data = await res.json();
+            } catch (err) {
+                setAuditResult(`Audit failed: Invalid JSON response (Status: ${res.status})`);
+                setIsAuditing(false);
+                return;
+            }
+
+            if (res.ok && data.audit_result) {
+                setAuditResult(data.audit_result);
+            } else {
+                setAuditResult("Audit failed: " + (data.detail || "Unknown error"));
+            }
+        } catch (e: any) {
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError') {
+                setAuditResult("Request timed out after 80 seconds. Please try again.");
+            } else {
+                setAuditResult("An error occurred during the audit process: " + e.message);
+            }
+        }
+        setIsAuditing(false);
     };
 
-    if (!selectedText) {
-        return (
-            <div className="bg-gray-50 border-l h-full p-4 w-[350px] flex flex-col items-center justify-center text-gray-400 text-sm text-center">
-                <p>Select text in the editor to refine it with AI.</p>
-            </div>
-        );
-    }
-
     return (
-        <div className="bg-white border-l h-full flex flex-col w-[350px] shadow-xl z-20">
-            <div className="p-4 bg-indigo-50 border-b">
+        <div className="bg-white border-l h-full flex flex-col w-[350px] md:w-[450px] shadow-xl z-20 overflow-hidden">
+            <div className="p-4 bg-indigo-50 border-b flex justify-between items-center">
                 <h3 className="font-bold text-indigo-900 flex items-center gap-2">
-                    ✨ AI Refinement
+                    🛡️ AI 審核 (Audit)
                 </h3>
             </div>
 
             <div className="flex-1 overflow-auto p-4 space-y-4">
-                {/* Context Preview */}
-                <div className="bg-white border rounded p-3 text-xs text-gray-500 max-h-[150px] overflow-y-auto italic">
-                    <span className="font-bold text-gray-700 not-italic block mb-1">Selected Context:</span>
-                    &quot;{selectedText}&quot;
+                <div className="text-sm text-gray-600 mb-2">
+                    <p>點擊下方按鈕，AI 將對照「原始筆記」與「生成的講章草稿」，檢查草稿是否遺漏核心要點，或是否有過度延伸的內容。</p>
                 </div>
 
-                {/* Instruction Input */}
-                <div className="space-y-2">
-                    <label className="text-sm font-semibold text-gray-700">Instruction:</label>
-                    <textarea
-                        className="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none min-h-[120px]"
-                        placeholder="e.g., Make this more concise, or Integrate these notes: [Paste Content]..."
-                        value={instruction}
-                        onChange={(e) => setInstruction(e.target.value)}
-                        disabled={isRefining}
-                    />
-                </div>
+                {auditResult && (
+                    <div className="bg-gray-50 border rounded p-3 text-sm text-gray-800 prose prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {auditResult}
+                        </ReactMarkdown>
+                    </div>
+                )}
 
-                {/* Hints */}
-                <div className="text-xs text-gray-400 space-y-1">
-                    <p>Tip: You can paste new content into the instruction box to merge it.</p>
-                </div>
+                {!auditResult && !isAuditing && (
+                    <div className="flex flex-col items-center justify-center text-gray-400 text-sm h-32">
+                        <p>尚無審核結果</p>
+                    </div>
+                )}
             </div>
 
-            <div className="p-4 border-t bg-gray-50">
+            <div className="p-4 border-t bg-gray-50 shrink-0">
                 <button
-                    onClick={handleRefineClick}
-                    disabled={isRefining || !instruction.trim()}
+                    onClick={handleAuditClick}
+                    disabled={isAuditing}
                     className={`w-full py-2 px-4 rounded font-bold text-white transition-all
-                        ${isRefining || !instruction.trim()
+                        ${isAuditing
                             ? 'bg-gray-400 cursor-not-allowed'
                             : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg'}`}
                 >
-                    {isRefining ? (
+                    {isAuditing ? (
                         <span className="flex items-center justify-center gap-2">
                             <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
-                            Refining...
+                            審核中...
                         </span>
                     ) : (
-                        "Refine Selection"
+                        "審核 (Audit Draft)"
                     )}
                 </button>
             </div>

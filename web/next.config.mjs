@@ -4,6 +4,9 @@ export default (phase, { defaultConfig }) => {
    * @type {import("next").NextConfig}
    */
   return {
+    experimental: {
+      proxyTimeout: 120000,
+    },
     images: {
       remotePatterns: [
         {

@@ -23,7 +23,7 @@ from backend.api.sermon_converter_service import (
     save_sermon_draft,
     commit_sermon_project,
     export_sermon_to_doc,
-    refine_sermon_draft,
+    audit_sermon_draft,
     update_sermon_project_metadata,
     NoteImage,
     Segment,
@@ -262,18 +262,14 @@ def get_projects() -> List[SermonProject]:
     """
     return list_sermon_projects()
 
-class RefineRequest(BaseModel):
-    selection: str
-    instruction: str
-
-@router.post("/sermon-project/{sermon_id}/refine-draft")
-def refine_draft_endpoint(sermon_id: str, payload: RefineRequest):
+@router.post("/sermon-project/{sermon_id}/audit-draft")
+def audit_draft_endpoint(sermon_id: str):
     """
-    Refine a specific part of the draft based on user instruction.
+    Review the sermon draft against the original notes using Gemini.
     """
     try:
-        refined_text = refine_sermon_draft(sermon_id, payload.selection, payload.instruction)
-        return {"status": "success", "refined_text": refined_text}
+        audit_result = audit_sermon_draft(sermon_id)
+        return {"status": "success", "audit_result": audit_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
