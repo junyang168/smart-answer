@@ -274,6 +274,19 @@ def audit_draft_endpoint(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/sermon-project/{project_id}/force-audit-pass")
+def force_audit_pass_endpoint(project_id: str):
+    """
+    Manually force the audit to pass.
+    """
+    from backend.api.sermon_converter_service import force_audit_pass
+    try:
+        force_audit_pass(project_id)
+        return {"status": "success", "message": "Audit forcefully passed."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/sermon-project/{project_id}/audit-result")
 def get_audit_result_endpoint(project_id: str):
     """
@@ -284,6 +297,53 @@ def get_audit_result_endpoint(project_id: str):
         audit_result = get_sermon_audit_result(project_id)
         if not audit_result:
             return {"status": "success", "audit_result": None, "message": "No audit result found."}
+        return {"status": "success", "audit_result": audit_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sermon-project/{project_id}/start-review")
+def start_review_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import start_theological_review
+    try:
+        start_theological_review(project_id)
+        return {"status": "success", "message": "Theological review started. final.md created."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sermon-project/{project_id}/final")
+def get_project_final(project_id: str):
+    from backend.api.sermon_converter_service import get_sermon_final
+    try:
+        content = get_sermon_final(project_id)
+        return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sermon-project/{project_id}/final")
+def save_project_final(project_id: str, payload: SaveSourceRequest):
+    from backend.api.sermon_converter_service import save_sermon_final
+    try:
+        save_sermon_final(project_id, payload.content)
+        return {"status": "success", "message": "Final master text saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sermon-project/{project_id}/theological-audit")
+def theological_audit_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import audit_theological_boundary
+    try:
+        audit_result = audit_theological_boundary(project_id)
+        return {"status": "success", "audit_result": audit_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sermon-project/{project_id}/theological-audit-result")
+def get_theological_audit_result_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import get_theological_audit_result
+    try:
+        audit_result = get_theological_audit_result(project_id)
+        if not audit_result:
+            return {"status": "success", "audit_result": None, "message": "No theological audit result found."}
         return {"status": "success", "audit_result": audit_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

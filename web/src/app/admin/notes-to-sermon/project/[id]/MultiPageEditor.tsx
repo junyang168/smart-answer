@@ -12,9 +12,12 @@ const SimpleMDE = dynamic(() => import("react-simplemde-editor"), {
     ssr: false,
 });
 
+import TheologicalAuditPanel from "./TheologicalAuditPanel";
+
 export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const router = useRouter();
-    const [viewMode, setViewMode] = useState<'source' | 'draft'>('source');
+    const [viewMode, setViewMode] = useState<'source' | 'draft' | 'final'>('source');
+    const [hasFinal, setHasFinal] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [projectTitle, setProjectTitle] = useState(projectId);
     const [bibleVerse, setBibleVerse] = useState("");
@@ -37,14 +40,11 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [showAdd, setShowAdd] = useState(false);
     const [editorInstance, setEditorInstance] = useState<any>(null);
 
-
-
-
     const editorOptions = useMemo(() => ({
         spellChecker: false,
         status: false,
-
-        placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : "Generated Draft will appear here...",
+        previewClass: ["editor-preview", "prose", "prose-indigo", "max-w-none", "prose-p:leading-relaxed", "prose-headings:font-bold"],
+        placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : (viewMode === 'draft' ? "Generated Draft will appear here..." : "Master Text will appear here..."),
         minHeight: "500px",
     }), [viewMode, projectType]);
 
@@ -150,6 +150,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 }
                 if (metaData.audit_passed !== undefined) {
                     setAuditPassed(metaData.audit_passed);
+                }
+
+                const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final`);
+                if (finalRes.ok) {
+                    const finalData = await finalRes.json();
+                    if (finalData.content) {
+                        setHasFinal(true);
+                    }
                 }
 
                 setLoading(false);
@@ -338,18 +346,37 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
     };
 
-    const handleViewSwitch = async (newMode: 'source' | 'draft') => {
+    const handleViewSwitch = async (newMode: 'source' | 'draft' | 'final') => {
         if (newMode === viewMode) return;
 
         // Auto-Save if dirty
-        if (markdown !== originalMarkdown) {
+        if (markdown !== originalMarkdown && !isProcessing) {
             const saved = await handleSave();
             if (!saved) return; // Stop switch if save failed
         }
 
         setViewMode(newMode);
+        setIsProcessing(true);
         // Effects will trigger re-fetch based on viewMode
     };
+
+    // Auto-toggle Preview mode for Master Text
+    useEffect(() => {
+        if (!editorInstance) return;
+
+        // Wait for next tick to ensure DOM is ready for togglePreview
+        const timer = setTimeout(() => {
+            const isPreviewActive = editorInstance.isPreviewActive();
+
+            if (viewMode === 'final' && !isPreviewActive) {
+                editorInstance.togglePreview();
+            } else if (viewMode !== 'final' && isPreviewActive) {
+                editorInstance.togglePreview();
+            }
+        }, 50);
+
+        return () => clearTimeout(timer);
+    }, [viewMode, editorInstance]);
 
     const handleGenerate = async () => {
         // 1. Ensure Source is saved
@@ -373,6 +400,24 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             alert("Failed to start generation");
         }
         setIsGenerating(false);
+    };
+
+    const handleStartTheologicalReview = async () => {
+        if (!confirm("Start Theological Review? This will create a final text copy of the current draft.")) return;
+        try {
+            if (markdown !== originalMarkdown) {
+                await handleSave();
+            }
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/start-review`, { method: "POST" });
+            if (res.ok) {
+                setHasFinal(true);
+                setViewMode('final');
+            } else {
+                alert("Failed to start review.");
+            }
+        } catch (e) {
+            alert("Error starting review");
+        }
     };
 
 
@@ -586,6 +631,15 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     >
                         {isGenerating ? "Generating..." : "Generate Draft"}
                     </button>
+                    {!hasFinal && auditPassed === true && (
+                        <button
+                            onClick={handleStartTheologicalReview}
+                            className={`px-3 py-1 rounded font-bold text-sm text-white bg-green-600 hover:bg-green-700`}
+                            title="Start Theological Review"
+                        >
+                            Start Theological Review
+                        </button>
+                    )}
                     <button
                         onClick={() => handleSave()}
                         className={`px-4 py-1 rounded font-bold text-white ${markdown !== originalMarkdown ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
@@ -753,12 +807,20 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                         >
                                             Generated Draft
                                         </button>
+                                        {hasFinal && (
+                                            <button
+                                                className={`px-3 py-1 text-sm rounded ${viewMode === 'final' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                                onClick={() => handleViewSwitch('final')}
+                                            >
+                                                Master Text (Final)
+                                            </button>
+                                        )}
                                     </div>
-                                    <span>{viewMode === 'source' ? 'Unified Manuscript' : 'Sermon Draft'} ({markdown.length} chars)</span>
+                                    <span>{viewMode === 'source' ? 'Unified Manuscript' : viewMode === 'draft' ? 'Sermon Draft' : 'Master Text Final'} ({markdown.length} chars)</span>
                                 </div>
                             </div>
                         </div>
-                        <div className="flex-1 overflow-y-auto">
+                        <div className="flex-1 overflow-y-auto prose-editor-container">
                             <SimpleMDE
                                 value={markdown}
                                 onChange={(value) => setMarkdown(value)}
@@ -768,12 +830,19 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             />
                         </div>
                     </div>
-                    <div className={`border-l h-full ${viewMode === 'draft' ? 'block' : 'hidden'}`}>
-                        <AiCommandPanel
-                            projectId={projectId}
-                            onAuditComplete={handleAuditComplete}
-                            onHighlightText={handleHighlightText}
-                        />
+                    <div className={`border-l h-full ${viewMode === 'draft' || viewMode === 'final' ? 'block' : 'hidden'}`}>
+                        {viewMode === 'draft' ? (
+                            <AiCommandPanel
+                                projectId={projectId}
+                                onAuditComplete={handleAuditComplete}
+                                onHighlightText={handleHighlightText}
+                            />
+                        ) : viewMode === 'final' ? (
+                            <TheologicalAuditPanel
+                                projectId={projectId}
+                                onHighlightText={handleHighlightText}
+                            />
+                        ) : null}
                     </div>
                 </div>
             </div>

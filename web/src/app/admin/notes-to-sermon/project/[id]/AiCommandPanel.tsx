@@ -10,6 +10,7 @@ interface AiCommandPanelProps {
 
 export default function AiCommandPanel({ projectId, onAuditComplete, onHighlightText }: AiCommandPanelProps) {
     const [isAuditing, setIsAuditing] = useState(false);
+    const [isForcingPass, setIsForcingPass] = useState(false);
     const [auditResult, setAuditResult] = useState<any | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -82,6 +83,31 @@ export default function AiCommandPanel({ projectId, onAuditComplete, onHighlight
         setIsAuditing(false);
     };
 
+    const handleForcePass = async () => {
+        if (!confirm("Are you sure you want to force pass this audit?")) return;
+        setIsForcingPass(true);
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/force-audit-pass`, {
+                method: "POST"
+            });
+            if (res.ok) {
+                // Refresh local state
+                setAuditResult({
+                    ...auditResult,
+                    pass: true,
+                    must_fix: auditResult?.must_fix ? auditResult.must_fix.map((x: string) => "(User Overridden) " + x) : []
+                });
+                if (onAuditComplete) onAuditComplete();
+            } else {
+                const data = await res.json();
+                setErrorMsg("Force pass failed: " + (data.detail || "Unknown error"));
+            }
+        } catch (e: any) {
+            setErrorMsg("An error occurred during force pass: " + e.message);
+        }
+        setIsForcingPass(false);
+    };
+
     return (
         <div className="bg-white border-l h-full flex flex-col w-[350px] md:w-[450px] shadow-xl z-20 overflow-hidden">
             <div className="p-4 bg-indigo-50 border-b flex justify-between items-center">
@@ -105,9 +131,21 @@ export default function AiCommandPanel({ projectId, onAuditComplete, onHighlight
                     <div className="space-y-6 text-sm pb-10">
                         {/* Status block */}
                         <div className="bg-gray-50 border rounded p-4">
-                            <h4 className="font-bold flex items-center gap-2 border-b pb-2 mb-2">
-                                🏆 總體評分 & 狀態
-                            </h4>
+                            <div className="flex justify-between items-start border-b pb-2 mb-2">
+                                <h4 className="font-bold flex items-center gap-2">
+                                    🏆 總體評分 & 狀態
+                                </h4>
+                                {!auditResult.pass && (
+                                    <button
+                                        onClick={handleForcePass}
+                                        disabled={isForcingPass}
+                                        className="text-xs bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded font-bold border border-red-300"
+                                        title="Manually override to Pass"
+                                    >
+                                        {isForcingPass ? "Forcing..." : "強制通過 (Force Pass)"}
+                                    </button>
+                                )}
+                            </div>
                             <p className="mb-1"><strong>審核結果:</strong> {auditResult.pass ? '✅ 通過 (Pass)' : '❌ 未通過 (Fail)'}</p>
                             <p className="mb-1"><strong>忠實度:</strong> {auditResult.scores?.faithfulness} / 100</p>
                         </div>

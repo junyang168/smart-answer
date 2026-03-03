@@ -56,7 +56,40 @@ details[open]>summary .details-open\:rotate-180 {
   transform: rotate(180deg);
 }
 
-
+/* Fix EasyMDE Preview Styling */
+.editor-preview {
+  padding: 2rem !important;
+}
+.editor-preview h1,
+.editor-preview-side h1 {
+  @apply text-3xl font-extrabold mt-8 mb-4 border-b pb-2 !important;
+}
+.editor-preview h2,
+.editor-preview-side h2 {
+  @apply text-2xl font-bold mt-8 mb-4 border-b pb-2 !important;
+}
+.editor-preview h3,
+.editor-preview-side h3 {
+  @apply text-xl font-bold mt-6 mb-3 !important;
+}
+.editor-preview p,
+.editor-preview-side p {
+  @apply leading-relaxed mb-4 text-base !important;
+  font-size: 1rem !important;
+  line-height: 1.75 !important;
+}
+.editor-preview ul,
+.editor-preview-side ul {
+  @apply list-disc pl-6 mb-4 !important;
+}
+.editor-preview ol,
+.editor-preview-side ol {
+  @apply list-decimal pl-6 mb-4 !important;
+}
+.editor-preview blockquote,
+.editor-preview-side blockquote {
+  @apply border-l-4 border-gray-300 pl-4 italic text-gray-700 bg-gray-50 py-2 my-4 !important;
+}
 
 @layer base {
   :root {
