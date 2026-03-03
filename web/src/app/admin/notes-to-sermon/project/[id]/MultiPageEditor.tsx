@@ -23,7 +23,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [googleDocLink, setGoogleDocLink] = useState("");
     const [prompts, setPrompts] = useState<any[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<string>("");
-    const [usedPromptId, setUsedPromptId] = useState<string>("");
+    const [usedPromptId, setUsedPromptId] = useState<string | null>(null);
+    const [auditPassed, setAuditPassed] = useState<boolean | null>(null);
     const [projectType, setProjectType] = useState<string>("sermon_note");
 
     // Content State
@@ -99,7 +100,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         const load = async () => {
             try {
                 // Fetch Content based on mode
-                const endpoint = viewMode === 'source' ? 'source' : 'draft';
+                const endpoint = viewMode;
                 const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
                     headers: {
                         'Cache-Control': 'no-cache',
@@ -146,6 +147,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 }
                 if (metaData.project_type) {
                     setProjectType(metaData.project_type);
+                }
+                if (metaData.audit_passed !== undefined) {
+                    setAuditPassed(metaData.audit_passed);
                 }
 
                 setLoading(false);
@@ -198,11 +202,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     setUsedPromptId(data.prompt_id);
                 }
 
+
                 if (!data.processing) {
                     setIsProcessing(false);
                     setProgress(null);
                     // Re-fetch content based on current viewMode
-                    const endpoint = viewMode === 'source' ? 'source' : 'draft';
+                    const endpoint = viewMode;
                     const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
                         headers: {
                             'Cache-Control': 'no-cache',
@@ -319,7 +324,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const handleSave = async (checkMode?: 'source' | 'draft') => {
         const modeToSave = checkMode || viewMode;
         try {
-            const endpoint = modeToSave === 'source' ? 'source' : 'draft';
+            const endpoint = modeToSave;
             await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -369,6 +374,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
         setIsGenerating(false);
     };
+
+
 
     const handleCheckIn = async () => {
         if (!confirm("Commit current state to local git?")) return;
@@ -445,13 +452,105 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     };
 
 
+
+    // Callback from AiCommandPanel to reload project meta so the lock is lifted
+    const handleAuditComplete = async () => {
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.audit_passed !== undefined) {
+                    setAuditPassed(data.audit_passed);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to reload meta after audit", e);
+        }
+    };
+
+    // Callback from AiCommandPanel to highlight text in the editor
+    const handleHighlightText = (evidence: string) => {
+        if (!editorInstance) return;
+        const cm = editorInstance.codemirror;
+
+        let lines = cm.getValue().split('\n');
+        let textToFind = evidence.trim();
+        if (!textToFind) return;
+
+        // Helper function to search for a specific string in the editor lines
+        const findAndSelect = (searchStr: string, exact: boolean = true) => {
+            if (!searchStr) return false;
+
+            // Handle ellipses: if the LLM used "..." or "…" or "⋯", split by it and find the longest contiguous chunk
+            const ellipsisRegex = /(\.{2,}|…+|⋯+|etc)/i;
+            const parts = searchStr.split(ellipsisRegex)
+                .filter(p => !ellipsisRegex.test(p))
+                .map(p => p.trim())
+                .filter(p => p.length > 0);
+
+            let target = searchStr;
+            if (parts.length > 0) {
+                // Sort parts by length and take the longest one to maximize uniqueness
+                target = parts.sort((a, b) => b.length - a.length)[0];
+            }
+
+            for (let i = 0; i < lines.length; i++) {
+                let lineText = lines[i];
+                let idx = lineText.indexOf(target);
+                if (idx !== -1) {
+                    let startPos = { line: i, ch: idx };
+                    let endPos = { line: i, ch: exact ? idx + target.length : lineText.length };
+                    cm.scrollIntoView(startPos, 150);
+                    cm.setSelection(startPos, endPos);
+                    cm.focus();
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // 1. Try exact full evidence string matching
+        if (findAndSelect(textToFind, true)) return;
+
+        // 2. Try extracting text inside Traditional Chinese or English quotes 
+        // e.g., 引用12:5並連到民28:9-10；說「祭司在殿裡可以超過安息日的律法，殿比安息日更大。」
+        const quoteRegexes = [
+            /「([^」]+)」/,  // Traditional Chinese single quotes
+            /『([^』]+)』/,  // Traditional Chinese double quotes
+            /"([^"]+)"/,    // English double quotes
+            /'([^']+)'/     // English single quotes
+        ];
+
+        for (const regex of quoteRegexes) {
+            const match = textToFind.match(regex);
+            if (match && match[1]) {
+                const extractedText = match[1].trim();
+                // Try to find the exact extracted text
+                if (findAndSelect(extractedText, true)) return;
+
+                // If the extracted text is long, maybe try a partial match on the extracted text
+                if (extractedText.length > 10) {
+                    const partialExtracted = extractedText.substring(0, 10);
+                    if (findAndSelect(partialExtracted, false)) return;
+                }
+            }
+        }
+
+        // 3. Try partial match of the original string (fallback)
+        let partialText = textToFind.substring(0, Math.min(10, textToFind.length)).trim();
+        if (partialText.length > 3 && findAndSelect(partialText, false)) {
+            return;
+        }
+
+        alert("找不到匹配的經文或字串，可能已被手動修改。");
+    };
+
     if (loading) {
         return <div className="p-10 text-center">Loading / Processing Project...</div>;
     }
 
     return (
         <div className="flex flex-col h-full">
-            {/* Header / Tabs */}
             {/* Header / Tabs */}
             <div className="border-b p-4 bg-white flex justify-between items-center">
                 <div className="flex items-center space-x-4">
@@ -478,33 +577,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                    {/* Prompt Selector */}
-                    {/* Prompt Selector */}
-                    <div className="flex items-center space-x-1 mr-2">
-                        <span className="text-xs text-gray-500">Prompt:</span>
-                        <select
-                            className="text-sm border rounded p-1 max-w-[150px]"
-                            value={selectedPromptId}
-                            onChange={(e) => setSelectedPromptId(e.target.value)}
-                        >
-                            {prompts.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                        <Link href="/admin/notes-to-sermon/prompts" target="_blank" className="text-gray-400 hover:text-indigo-600" title="Manage Prompts">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                        </Link>
-                    </div>
-
-                    {viewMode === 'draft' && usedPromptId && (
-                        <div className="flex items-center space-x-1 mr-2 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                            <span>Generated with:</span>
-                            <span className="font-bold">{prompts.find(p => p.id === usedPromptId)?.name || "Unknown Prompt"}</span>
-                        </div>
-                    )}
+                    {/* Prompt Selector Removed */}
 
                     <button
                         onClick={handleGenerate}
@@ -521,15 +594,17 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     </button>
                     <button
                         onClick={handleCheckIn}
-                        className="px-3 py-1 rounded font-bold text-gray-700 bg-gray-200 hover:bg-gray-300 text-sm"
-                        title="Commit to local git"
+                        disabled={auditPassed !== true}
+                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-gray-700 bg-gray-200 hover:bg-gray-300' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
+                        title={auditPassed === true ? "Commit to local git" : "Must pass AI Audit first"}
                     >
                         Check In
                     </button>
                     <button
                         onClick={handleExportDoc}
-                        className="px-3 py-1 rounded font-bold text-blue-700 bg-blue-100 hover:bg-blue-200 text-sm"
-                        title="Export to Google Doc"
+                        disabled={auditPassed !== true}
+                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
+                        title={auditPassed === true ? "Export to Google Doc" : "Must pass AI Audit first"}
                     >
                         Export to Doc
                     </button>
@@ -663,22 +738,24 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 <div className={`${viewMode === 'source' && projectType !== 'transcript' ? 'w-1/2' : 'w-full'} bg-white flex flex-row border-l`}>
                     <div className="flex-1 flex flex-col overflow-hidden p-4">
                         <div className="mb-2 text-sm text-gray-500 flex justify-between items-center">
-                            <div className="flex items-center space-x-4">
-                                <div className="flex bg-gray-200 rounded p-1 inline-flex">
-                                    <button
-                                        className={`px-3 py-1 text-sm rounded ${viewMode === 'source' ? 'bg-white shadow' : 'text-gray-600'}`}
-                                        onClick={() => handleViewSwitch('source')}
-                                    >
-                                        Unified Input
-                                    </button>
-                                    <button
-                                        className={`px-3 py-1 text-sm rounded ${viewMode === 'draft' ? 'bg-white shadow' : 'text-gray-600'}`}
-                                        onClick={() => handleViewSwitch('draft')}
-                                    >
-                                        Generated Draft
-                                    </button>
+                            <div className="flex items-center space-x-4 w-full justify-between">
+                                <div className="flex items-center space-x-4">
+                                    <div className="flex bg-gray-200 rounded p-1 inline-flex items-center">
+                                        <button
+                                            className={`px-3 py-1 text-sm rounded ${viewMode === 'source' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                            onClick={() => handleViewSwitch('source')}
+                                        >
+                                            Unified Input
+                                        </button>
+                                        <button
+                                            className={`px-3 py-1 text-sm rounded ${viewMode === 'draft' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                            onClick={() => handleViewSwitch('draft')}
+                                        >
+                                            Generated Draft
+                                        </button>
+                                    </div>
+                                    <span>{viewMode === 'source' ? 'Unified Manuscript' : 'Sermon Draft'} ({markdown.length} chars)</span>
                                 </div>
-                                <span>{viewMode === 'source' ? 'Unified Manuscript' : 'Sermon Draft'} ({markdown.length} chars)</span>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto">
@@ -692,7 +769,11 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                         </div>
                     </div>
                     <div className={`border-l h-full ${viewMode === 'draft' ? 'block' : 'hidden'}`}>
-                        <AiCommandPanel projectId={projectId} />
+                        <AiCommandPanel
+                            projectId={projectId}
+                            onAuditComplete={handleAuditComplete}
+                            onHighlightText={handleHighlightText}
+                        />
                     </div>
                 </div>
             </div>

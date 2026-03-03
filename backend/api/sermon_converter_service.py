@@ -46,6 +46,7 @@ class SermonProject(BaseModel):
     prompt_id: Optional[str] = None
     series_id: Optional[str] = None
     lecture_id: Optional[str] = None
+    audit_passed: Optional[bool] = None
     project_type: str = "sermon_note" 
 
 def ensure_dirs():
@@ -218,8 +219,8 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
     ensure_dirs()
     
     # Simple ID generation from title
-    sermon_id = title.lower().replace(" ", "_").replace(":", "")
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    project_id = title.lower().replace(" ", "_").replace(":", "")
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     sermon_dir.mkdir(exist_ok=True)
     
     
@@ -228,7 +229,7 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
     # Save metadata
     import json
     metadata = {
-        "id": sermon_id,
+        "id": project_id,
         "title": title,
         "pages": pages,
         "series_id": series_id,
@@ -239,7 +240,7 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
         json.dump(metadata, f, indent=2)
 
     # Build source (without auto-process)
-    _rebuild_unified_source(sermon_id, pages)
+    _rebuild_unified_source(project_id, pages)
     
     # Sync with Lecture Manager if linked
     if series_id and lecture_id:
@@ -256,17 +257,17 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
             # So actually, we don't need to write series_id/lecture_id in the initial dump if we call assign.
             # BUT, if assign fails, we want it recorded? 
             # safely: write it, then call assign. Assign will overwrite meta with same values.
-            assign_project_to_lecture(series_id, lecture_id, sermon_id)
+            assign_project_to_lecture(series_id, lecture_id, project_id)
         except Exception as e:
             print(f"Failed to auto-link project to lecture: {e}")
         
     return SermonProject(**metadata)
 
-def _rebuild_unified_source(sermon_id: str, pages: List[str]):
+def _rebuild_unified_source(project_id: str, pages: List[str]):
     """
     Helper to reconstruct the unified markdown file from current pages.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     # Get title from meta if possible, or parsing not needed if we just overwrite content
     # But we want to keep the Title header.
     # Let's read the current title from meta
@@ -295,13 +296,13 @@ def _rebuild_unified_source(sermon_id: str, pages: List[str]):
     with open(unified_file, "w", encoding="utf-8") as f:
         f.write(unified_content)
 
-def _inject_newly_processed_pages(sermon_id: str, processed_files: List[str]):
+def _inject_newly_processed_pages(project_id: str, processed_files: List[str]):
     """
     Safely injects content for newly processed files into existing unified_source.md
     by replacing the (Not Processed) placeholder.
     Preserves user edits in other parts of the file.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     unified_file = sermon_dir / "unified_source.md"
     
     if not unified_file.exists():
@@ -328,11 +329,11 @@ def _inject_newly_processed_pages(sermon_id: str, processed_files: List[str]):
         with open(unified_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-def update_sermon_pages(sermon_id: str, action: str, filename: str) -> SermonProject:
+def update_sermon_pages(project_id: str, action: str, filename: str) -> SermonProject:
     """
     Add or Remove a page from the project.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
     if not meta_file.exists():
         raise FileNotFoundError("Project not found")
@@ -361,11 +362,11 @@ def update_sermon_pages(sermon_id: str, action: str, filename: str) -> SermonPro
         json.dump(data, f, indent=2)
         
     # Rebuild Source
-    _rebuild_unified_source(sermon_id, pages)
+    _rebuild_unified_source(project_id, pages)
     
     return SermonProject(**data)
 
-def trigger_project_page_ocr(sermon_id: str, filename: str):
+def trigger_project_page_ocr(project_id: str, filename: str):
     """
     Run OCR for a specific page in a project and update the unified source.
     """
@@ -373,13 +374,13 @@ def trigger_project_page_ocr(sermon_id: str, filename: str):
     process_note_image(filename)
     
     # 2. Inject the newly processed text into the existing source
-    _inject_newly_processed_pages(sermon_id, [filename])
+    _inject_newly_processed_pages(project_id, [filename])
 
-def update_sermon_processing_status(sermon_id: str, is_processing: bool, progress: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
+def update_sermon_processing_status(project_id: str, is_processing: bool, progress: Optional[Dict[str, Any]] = None, error: Optional[str] = None):
     """
     Update the processing status in meta.json.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
     if meta_file.exists():
         import json
@@ -429,11 +430,11 @@ def update_sermon_processing_status(sermon_id: str, is_processing: bool, progres
         with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-def trigger_project_batch_ocr(sermon_id: str):
+def trigger_project_batch_ocr(project_id: str):
     """
     Run OCR for ALL unprocessed pages in a project.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
     if not meta_file.exists():
         return
@@ -454,7 +455,7 @@ def trigger_project_batch_ocr(sermon_id: str):
     current_count = 0
 
     # Mark as processing with init progress
-    update_sermon_processing_status(sermon_id, True, {"current": 0, "total": total_files})
+    update_sermon_processing_status(project_id, True, {"current": 0, "total": total_files})
     
     try:
         newly_processed = []
@@ -472,7 +473,7 @@ def trigger_project_batch_ocr(sermon_id: str):
                         current_count += 1
                         # Update progress before starting heavy work? Or after?
                         # Usually user wants to see "Processing 1/5".
-                        update_sermon_processing_status(sermon_id, True, {"current": current_count, "total": total_files})
+                        update_sermon_processing_status(project_id, True, {"current": current_count, "total": total_files})
                         
                         process_note_image(filename)
                         newly_processed.append(filename)
@@ -481,14 +482,14 @@ def trigger_project_batch_ocr(sermon_id: str):
             else:
                 pass
 
-        _inject_newly_processed_pages(sermon_id, pages)
+        _inject_newly_processed_pages(project_id, pages)
 
     finally:
         # Mark as done
-        update_sermon_processing_status(sermon_id, False)
+        update_sermon_processing_status(project_id, False)
 
-def get_sermon_source(sermon_id: str) -> str:
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+def get_sermon_source(project_id: str) -> str:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     unified_file = sermon_dir / "unified_source.md"
     if not unified_file.exists():
         return ""
@@ -506,29 +507,29 @@ def extract_processable_content(content: str) -> str:
         return content[:match.start()].strip()
     return content.strip()
 
-def save_sermon_source(sermon_id: str, content: str) -> bool:
+def save_sermon_source(project_id: str, content: str) -> bool:
     """
     Overwrite the unified source file with new content.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
-        raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
         
     unified_file = sermon_dir / "unified_source.md"
     with open(unified_file, "w", encoding="utf-8") as f:
         f.write(content)
     return True
 
-def get_sermon_draft_path(sermon_id: str) -> Path:
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+def get_sermon_draft_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "draft_v1.md"
 
-def reset_agent_state(sermon_id: str):
+def reset_agent_state(project_id: str):
     """
     Reset the multi-agent system state for a project, allowing a fresh restart.
     Deletes agent_state.json and agent_logs.json, and resets metadata status.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     
     # 1. Delete State File
     state_file = sermon_dir / "agent_state.json"
@@ -541,7 +542,7 @@ def reset_agent_state(sermon_id: str):
         new_logs.unlink()
         
     # 3. Delete Logs (Legacy Path) - cleanup
-    legacy_logs = DATA_BASE_PATH / "sermon_projects" / sermon_id / "agent_logs.json"
+    legacy_logs = DATA_BASE_PATH / "sermon_projects" / project_id / "agent_logs.json"
     if legacy_logs.exists():
         legacy_logs.unlink()
         
@@ -568,11 +569,11 @@ def reset_agent_state(sermon_id: str):
         with open(meta_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-def get_agent_state_data(sermon_id: str) -> Optional[Dict[str, Any]]:
+def get_agent_state_data(project_id: str) -> Optional[Dict[str, Any]]:
     """
     Retrieve the full agent state JSON for inspection.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     state_file = sermon_dir / "agent_state.json"
     if not state_file.exists():
         return None
@@ -583,27 +584,46 @@ def get_agent_state_data(sermon_id: str) -> Optional[Dict[str, Any]]:
     except:
         return None
 
-def get_sermon_draft(sermon_id: str) -> str:
-    draft_file = get_sermon_draft_path(sermon_id)
+def get_sermon_draft(project_id: str) -> str:
+    draft_file = get_sermon_draft_path(project_id)
     if not draft_file.exists():
         return ""
     with open(draft_file, "r", encoding="utf-8") as f:
         return f.read()
 
-def save_sermon_draft(sermon_id: str, content: str) -> bool:
+def save_sermon_draft(project_id: str, content: str) -> bool:
     """
     Overwrite the draft file with new content.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
-        raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
         
-    draft_file = get_sermon_draft_path(sermon_id)
+    draft_file = get_sermon_draft_path(project_id)
     with open(draft_file, "w", encoding="utf-8") as f:
         f.write(content)
     return True
+def get_sermon_audit_result(project_id: str) -> Optional[dict]:
+    """
+    Load the persisted audit result (audit.json) and return it as a dictionary.
+    Returns the dict if it exists, otherwise None.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    audit_file = sermon_dir / "audit.json"
+    
+    if not audit_file.exists():
+        return None
+        
+    try:
+        import json
+        with open(audit_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        print(f"Error reading audit.json: {e}")
+        return None
 
-    return True
+
 
 def split_markdown_by_headings(content: str) -> List[str]:
     """
@@ -638,18 +658,18 @@ def split_markdown_by_headings(content: str) -> List[str]:
     # Filter empty sections
     return [s for s in sections if s.strip()]
 
-def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> str:
+def generate_sermon_draft(project_id: str, prompt_id: Optional[str] = None) -> str:
     """
     Generate the sermon draft using Gemini.
     Uses iterative "Split & Merge" strategy for deep generation.
     """
     try:
         # 1. Mark as processing
-        update_sermon_processing_status(sermon_id, True)
+        update_sermon_processing_status(project_id, True)
 
         # Save used prompt ID to metadata
         if prompt_id:
-            sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+            sermon_dir = NOTES_TO_SERMON_DIR / project_id
             meta_file = sermon_dir / "meta.json"
             if meta_file.exists():
                 import json
@@ -659,9 +679,9 @@ def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> st
                 with open(meta_file, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2)
 
-        source_content = get_sermon_source(sermon_id)
+        source_content = get_sermon_source(project_id)
         if not source_content:
-            update_sermon_processing_status(sermon_id, False)
+            update_sermon_processing_status(project_id, False)
             raise ValueError("Unified source is empty. Please process images first.")
             
         source_content = extract_processable_content(source_content)
@@ -693,7 +713,7 @@ def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> st
         # If too few sections or short content, just do one pass (fallback)
         if len(sections) <= 1:
             total_sections = 1
-            update_sermon_processing_status(sermon_id, True, {"current": 0, "total": 1})
+            update_sermon_processing_status(project_id, True, {"current": 0, "total": 1})
             
             response = client.models.generate_content(
                 model=model_id,
@@ -716,11 +736,11 @@ def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> st
             total_sections = len(sections)
             generated_parts = []
             
-            print(f"Generating draft in {total_sections} sections for {sermon_id}")
+            print(f"Generating draft in {total_sections} sections for {project_id}")
             
             for i, section in enumerate(sections):
                 # Update progress
-                update_sermon_processing_status(sermon_id, True, {"current": i + 1, "total": total_sections})
+                update_sermon_processing_status(project_id, True, {"current": i + 1, "total": total_sections})
                 
                 # Context aware prompt
                 # To maintain context, we provide the FULL notes as reference, 
@@ -778,21 +798,21 @@ def generate_sermon_draft(sermon_id: str, prompt_id: Optional[str] = None) -> st
                 
             draft_content = "\n\n".join(generated_parts)
 
-        save_sermon_draft(sermon_id, draft_content)
+        save_sermon_draft(project_id, draft_content)
         return draft_content
 
     except Exception as e:
-        print(f"Error generating draft for {sermon_id}: {e}")
+        print(f"Error generating draft for {project_id}: {e}")
         raise e
     finally:
         # 2. Mark as done
-        update_sermon_processing_status(sermon_id, False)
+        update_sermon_processing_status(project_id, False)
 
-def get_sermon_images(sermon_id: str) -> List[str]:
+def get_sermon_images(project_id: str) -> List[str]:
     """
     Return ordered list of image filenames for this sermon.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
     if not meta_file.exists():
         return []
@@ -801,11 +821,11 @@ def get_sermon_images(sermon_id: str) -> List[str]:
         data = json.load(f)
     return data.get("pages", [])
 
-def get_sermon_project_metadata(sermon_id: str) -> Optional[SermonProject]:
+def get_sermon_project_metadata(project_id: str) -> Optional[SermonProject]:
     """
     Get full metadata for a sermon project.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
     if not meta_file.exists():
         return None
@@ -836,27 +856,27 @@ def list_sermon_projects() -> List[SermonProject]:
                     
     return sorted(projects, key=lambda p: p.title)
 
-def commit_sermon_project(sermon_id: str) -> str:
+def commit_sermon_project(project_id: str) -> str:
     """
     Commit the sermon project to the local git repository.
     Files committed: meta.json, unified_source.md, draft_v1.md (if exists)
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
-        raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
 
     meta_file = sermon_dir / "meta.json"
     unified_file = sermon_dir / "unified_source.md"
     draft_file = sermon_dir / "draft_v1.md"
     
     # Get title for commit message
-    title = sermon_id
+    title = project_id
     if meta_file.exists():
         import json
         try:
             with open(meta_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                title = data.get("title", sermon_id)
+                title = data.get("title", project_id)
         except:
             pass
 
@@ -882,13 +902,13 @@ def commit_sermon_project(sermon_id: str) -> str:
     return str(commit.hexsha)
 
 
-def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Optional[str] = None, google_doc_link: Optional[str] = None) -> SermonProject:
+def update_sermon_project_metadata(project_id: str, title: str, bible_verse: Optional[str] = None, google_doc_link: Optional[str] = None) -> SermonProject:
     """
     Update the project metadata (title, bible_verse, google_doc_id).
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
-        raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
         
     meta_file = sermon_dir / "meta.json"
     import json
@@ -927,7 +947,7 @@ def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Opti
     
     # Ensure ID is present (it might be missing in old meta files)
     if "id" not in data:
-        data["id"] = sermon_id
+        data["id"] = project_id
     
     # Ensure pages is present
     if "pages" not in data:
@@ -943,11 +963,11 @@ def update_sermon_project_metadata(sermon_id: str, title: str, bible_verse: Opti
         raise ValueError(f"Metadata Validation Error: {e}")
 
 
-def update_sermon_project_type(sermon_id: str, project_type: str) -> bool:
+def update_sermon_project_type(project_id: str, project_type: str) -> bool:
     """
     Update the project type in metadata.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
         return False
         
@@ -965,11 +985,11 @@ def update_sermon_project_type(sermon_id: str, project_type: str) -> bool:
     return True
 
 
-def update_sermon_project_linking(sermon_id: str, series_id: Optional[str], lecture_id: Optional[str]) -> bool:
+def update_sermon_project_linking(project_id: str, series_id: Optional[str], lecture_id: Optional[str]) -> bool:
     """
     Update the linking of a project to a Series/Lecture.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
         return False
         
@@ -988,15 +1008,15 @@ def update_sermon_project_linking(sermon_id: str, series_id: Optional[str], lect
     return True
 
 
-def export_sermon_to_doc(sermon_id: str) -> str:
+def export_sermon_to_doc(project_id: str) -> str:
     """
     Export the sermon draft to a Google Doc in the configured Drive folder.
     Returns the URL of the created document.
     """
     # 1. Read Draft Content + Metadata
-    sermon_dir = NOTES_TO_SERMON_DIR / sermon_id
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
-         raise FileNotFoundError(f"Sermon project {sermon_id} not found")
+         raise FileNotFoundError(f"Sermon project {project_id} not found")
     
     draft_file = sermon_dir / "draft_v1.md"
     if not draft_file.exists():
@@ -1006,7 +1026,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
         draft_content = f.read()
 
     meta_file = sermon_dir / "meta.json"
-    title = f"Sermon Draft: {sermon_id}"
+    title = f"Sermon Draft: {project_id}"
     
     import json
     meta_data = {}
@@ -1245,7 +1265,7 @@ def export_sermon_to_doc(sermon_id: str) -> str:
     return f"https://docs.google.com/document/d/{file_id}/edit"
 
 
-def refine_sermon_draft(sermon_id: str, selection: str, instruction: str) -> str:
+def refine_sermon_draft(project_id: str, selection: str, instruction: str) -> str:
     """
     Refine a specific selection of the sermon draft using Gemini.
     Returns the refined text (only the replacement for the selection).
@@ -1297,17 +1317,17 @@ def refine_sermon_draft(sermon_id: str, selection: str, instruction: str) -> str
         return response.text.strip()
 
     except Exception as e:
-        print(f"Error refining draft for {sermon_id}: {e}")
+        print(f"Error refining draft for {project_id}: {e}")
         raise e
 
-def audit_sermon_draft(sermon_id: str) -> str:
+def audit_sermon_draft(project_id: str) -> dict:
     """
     Review the sermon draft against the original notes using OpenAI Structured Outputs.
-    Returns the audit analysis text in Markdown format.
+    Returns the audit analysis text as a python dictionary (JSON).
     """
     try:
-        source_content = get_sermon_source(sermon_id)
-        draft_content = get_sermon_draft(sermon_id)
+        source_content = get_sermon_source(project_id)
+        draft_content = get_sermon_draft(project_id)
 
         if not source_content:
             return "Error: Unified source notes are empty."
@@ -1325,20 +1345,73 @@ def audit_sermon_draft(sermon_id: str) -> str:
         load_dotenv()
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         
-        SYSTEM_PROMPT = """你是「释经逐字稿外置审核器（Diff Auditor）」，不是讲道者，不是改写者。
-你只做“检测与列证据”，绝不重写逐字稿。
 
-注意：忽略逐字稿中任何标题为“神学分析”或“简要总结”的段落内容；这些段落不参与对比、不计入新增/删减。
+         
+        SYSTEM_PROMPT = """
+        你是「释经逐字稿外置审核器（Diff Auditor）」。
+        你只做“语义层面的检测与列证据”，绝不改写逐字稿。
 
-任务：
-A) 覆盖对齐：以【笔记】的自然段/要点为单位，对齐到【逐字稿】对应句子（给出引用片段）。找不到则标记未覆盖。
-B) 差异清单：新增/删除/立场升级/结构重排/术语变化；每条必须给出笔记与逐字稿证据引用。
-C) 风险分级：P0/P1/P2/P3，并给一句仅基于文本的理由。
-D) 给出分数与是否通过。
+        【审核背景】
 
-禁止：改写逐字稿；补充神学；无证据的泛泛结论。
-"""
+        【逐字稿】是根据【笔记】进行“语义扩展”生成的。
 
+        允许：
+        - 将碎片笔记扩展为完整句子
+        - 补充最小必要的逻辑连接词
+        - 引用笔记中列出的经文内容
+        - 使用系统要求的固定结构标题（如「释经」「神学意义」「生活应用」「附录」）
+
+        禁止：
+        - 引入新的神学观点
+        - 增加笔记未出现的经文或历史材料
+        - 将推测语气强化为断言
+        - 删除任何实质性要点
+
+        【重要说明】
+
+        1. 固定结构标题属于系统格式要求，不属于语义内容，不得列入差异。
+        2. Markdown 排版、编号、分段调整不得列入差异。
+        3. 经文编号的完整引用不得视为新增。
+        4. 若笔记并列列出经文编号，逐字稿以最低限度连接词（如“相似”“呼应”）表达关联，不得视为新增，除非形成新的神学结论。
+
+        【任务】
+
+        A) 覆盖对齐：
+        以笔记要点为单位，对齐逐字稿对应句。
+        找不到则标记「未覆盖」。
+
+        B) 差异清单（仅限语义层面）：
+        列出：
+        - 新增神学命题
+        - 删除实质要点
+        - 立场升级（推测 → 断言）
+        - 语气强化
+        - 新的教义性推论
+
+        每条必须给出笔记与逐字稿证据引用。
+
+        不得列入格式差异、模板标题或排版变化。
+
+        C) 风险分级：
+        - P0：新增或删除核心神学内容
+        - P1：立场升级或明显语气强化
+        - P2：轻微语义偏移
+        - P3：可忽略的小幅表达差异
+
+        D) 总分与结论：
+        - 给出忠实度评分（0–100）
+        - 给出是否通过（Pass / Revise）
+
+        【通过标准】
+
+        - 若存在 P0 或 P1 → 必须 Revise
+        - 若仅存在 P2 或 P3 → 可 Pass
+        - 不得因分数低于主观阈值而判 Revise
+
+        风险分级优先于分数判断。
+
+        你只审语义，不审格式。
+        """
         AUDIT_SCHEMA = {
             "type": "json_schema",
             "json_schema": {
@@ -1404,69 +1477,58 @@ D) 给出分数与是否通过。
                 {"role": "user", "content": user_prompt}
             ],
             response_format=AUDIT_SCHEMA,
-            temperature=0
+            temperature=0.0
         )
         
-        result_text = response.choices[0].message.content
+        result_text = response.choices[0].message.content or ""
         
-        # Parse JSON and Format as Markdown
+        # Parse and save the audit result
+        sermon_dir = NOTES_TO_SERMON_DIR / project_id
+        audit_file = sermon_dir / "audit.json"
+        
+        # Ensure the directory exists
+        sermon_dir.mkdir(parents=True, exist_ok=True)
+        
         try:
-            data = json.loads(result_text)
+            audit_data = json.loads(result_text)
             
-            md = []
-            md.append("# 🛡️ AI 審核報告 (AI Audit Report)\n")
-            
-            # Overview
-            status_moji = "✅ 通過 (Pass)" if data.get("pass") else "❌ 未通過 (Fail)"
-            md.append("## 🏆 總體評分 & 狀態")
-            md.append(f"- **審核結果 (Status)**: {status_moji}")
-            
-            scores = data.get("scores", {})
-            md.append(f"- **忠實度 (Faithfulness)**: {scores.get('faithfulness', 'N/A')} / 10")
-            md.append(f"- **神學安全 (Theology Safety)**: {scores.get('theology_safety', 'N/A')} / 10\n")
-            
-            # Coverage
-            md.append("---\n## 🔍 覆蓋率檢查 (Coverage)")
-            coverage = data.get("coverage", [])
-            if not coverage:
-                md.append("- 無紀錄")
+            # Save raw audit JSON
+            with open(audit_file, "w", encoding="utf-8") as f:
+                json.dump(audit_data, f, indent=2, ensure_ascii=False)
+                
+            # Update meta.json with the pass boolean
+            passed = audit_data.get("pass", False)
+            meta_file = sermon_dir / "meta.json"
+            if meta_file.exists():
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta_data = json.load(f)
+                meta_data["audit_passed"] = passed
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
             else:
-                for c in coverage:
-                    matched_str = "✅ 已覆蓋" if c.get("matched") else "❌ 未覆蓋"
-                    md.append(f"- **筆記 [{c.get('note_id', 'N/A')}]**: {c.get('note_excerpt', '')}")
-                    md.append(f"  - **狀態**: {matched_str}")
-                    md.append(f"  - **逐字稿證據 (Evidence)**: {c.get('transcript_evidence', '')}\n")
-            
-            # Diffs
-            md.append("---\n## ⚠️ 差異清單 (Diffs)")
-            diffs = data.get("diffs", [])
-            if not diffs:
-                md.append("- 無明顯差異或風險")
-            else:
-                for d in diffs:
-                    md.append(f"- **類型**: `{d.get('type')}` | **分類**: `{d.get('category')}` | **風險**: `{d.get('risk')}`")
-                    md.append(f"  - **筆記證據**: {d.get('note_evidence', '')}")
-                    md.append(f"  - **逐字稿證據**: {d.get('transcript_evidence', '')}")
-                    md.append(f"  - **理由**: {d.get('reason', '')}\n")
+                # Create meta.json if it doesn't exist
+                meta_data = {"audit_passed": passed}
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
                     
-            # Must Fix
-            md.append("---\n## 🛠️ 必須修改 (Must Fix)")
-            must_fix = data.get("must_fix", [])
-            if not must_fix:
-                md.append("- 無必須修改項目 ✨")
-            else:
-                for fix in must_fix:
-                    md.append(f"- 🔴 {fix}")
-                    
-            return "\n".join(md)
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse audit JSON for saving: {e}")
+            # If parsing fails here, audit_data won't be available for markdown formatting
+            # The existing markdown formatting block will handle the raw text.
+            
+        # Return JSON Dictionary
+        try:
+            # Use audit_data if successfully parsed above, otherwise re-parse result_text
+            data = audit_data if 'audit_data' in locals() else json.loads(result_text)
+            return data
             
         except json.JSONDecodeError:
             # Fallback if somehow not valid JSON (very rare with structured outputs)
-            return f"Raw output (Failed to parse JSON):\n\n```json\n{result_text}\n```"
+            return {"error": "Failed to parse JSON", "raw": result_text}
 
     except Exception as e:
-        print(f"Error auditing draft for {sermon_id}: {e}")
-        return f"Error executing audit: {e}"
+        print(f"Error auditing draft for {project_id}: {e}")
+        return {"error": f"Error executing audit: {str(e)}"}
 
 def _process_images_for_export(html_content: str) -> str:
     """

@@ -99,23 +99,23 @@ def create_sermon(payload: CreateSermonRequest) -> SermonProject:
     """
     return create_sermon_project(payload.title, payload.pages, payload.series_id, payload.lecture_id, payload.project_type)
 
-@router.get("/sermon-project/{sermon_id}/source")
-def get_project_source(sermon_id: str):
+@router.get("/sermon-project/{project_id}/source")
+def get_project_source(project_id: str):
     """
     Get the Unified Markdown source for the sermon.
     """
-    return {"content": get_sermon_source(sermon_id)}
+    return {"content": get_sermon_source(project_id)}
 
 class SaveSourceRequest(BaseModel):
     content: str
     
-@router.post("/sermon-project/{sermon_id}/source")
-def save_project_source(sermon_id: str, payload: SaveSourceRequest):
+@router.post("/sermon-project/{project_id}/source")
+def save_project_source(project_id: str, payload: SaveSourceRequest):
     """
     Update the Unified Markdown source for the sermon.
     """
     try:
-        save_sermon_source(sermon_id, payload.content)
+        save_sermon_source(project_id, payload.content)
         return {"status": "success", "message": "Source saved."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -127,8 +127,8 @@ class GenerateDraftRequest(BaseModel):
     use_mas: bool = True # Default to Multi-Agent System
     restart: bool = False # Force restart
 
-@router.post("/sermon-project/{sermon_id}/generate-draft")
-def trigger_draft_generation(sermon_id: str, background_tasks: BackgroundTasks, payload: Optional[GenerateDraftRequest] = None):
+@router.post("/sermon-project/{project_id}/generate-draft")
+def trigger_draft_generation(project_id: str, background_tasks: BackgroundTasks, payload: Optional[GenerateDraftRequest] = None):
     """
     Generate the sermon draft in background.
     """
@@ -142,12 +142,12 @@ def trigger_draft_generation(sermon_id: str, background_tasks: BackgroundTasks, 
             
             if payload.restart:
                 from backend.api.sermon_converter_service import reset_agent_state
-                reset_agent_state(sermon_id)
+                reset_agent_state(project_id)
                 
-            background_tasks.add_task(process_project_with_mas, sermon_id)
+            background_tasks.add_task(process_project_with_mas, project_id)
         else:
             # Legacy Single Agent
-            background_tasks.add_task(generate_sermon_draft, sermon_id, payload.prompt_id)
+            background_tasks.add_task(generate_sermon_draft, project_id, payload.prompt_id)
             
         return {"status": "success", "message": "Draft generation started."}
     except Exception as e:
@@ -155,35 +155,36 @@ def trigger_draft_generation(sermon_id: str, background_tasks: BackgroundTasks, 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/sermon-project/{sermon_id}/draft")
-def get_project_draft(sermon_id: str):
+@router.get("/sermon-project/{project_id}/draft")
+def get_project_draft(project_id: str):
     try:
-        content = get_sermon_draft(sermon_id)
+        content = get_sermon_draft(project_id)
         return {"content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/sermon-project/{sermon_id}/draft")
-def save_project_draft(sermon_id: str, payload: SaveSourceRequest):
+@router.post("/sermon-project/{project_id}/draft")
+def save_project_draft(project_id: str, payload: SaveSourceRequest):
     try:
-        save_sermon_draft(sermon_id, payload.content)
+        save_sermon_draft(project_id, payload.content)
         return {"status": "success", "message": "Draft saved."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/sermon-project/{sermon_id}/images")
-def get_project_images(sermon_id: str) -> List[str]:
+
+@router.get("/sermon-project/{project_id}/images")
+def get_project_images(project_id: str) -> List[str]:
     """
     Get the ordered list of pages (filenames) for the sermon.
     """
-    return get_sermon_images(sermon_id)
+    return get_sermon_images(project_id)
 
-@router.get("/sermon-project/{sermon_id}", response_model=SermonProject)
-def get_project_meta(sermon_id: str) -> SermonProject:
+@router.get("/sermon-project/{project_id}", response_model=SermonProject)
+def get_project_meta(project_id: str) -> SermonProject:
     """
     Get full metadata for the sermon project (title, pages, etc).
     """
-    project = get_sermon_project_metadata(sermon_id)
+    project = get_sermon_project_metadata(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Sermon project not found")
     return project
@@ -192,13 +193,13 @@ class UpdatePageRequest(BaseModel):
     action: str # "add" or "remove"
     filename: str
 
-@router.post("/sermon-project/{sermon_id}/page")
-def update_project_page(sermon_id: str, payload: UpdatePageRequest) -> SermonProject:
+@router.post("/sermon-project/{project_id}/page")
+def update_project_page(project_id: str, payload: UpdatePageRequest) -> SermonProject:
     """
     Add or Remove a page from the project and re-sync the source.
     """
     try:
-        return update_sermon_pages(sermon_id, payload.action, payload.filename)
+        return update_sermon_pages(project_id, payload.action, payload.filename)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Project not found")
     except Exception as e:
@@ -207,50 +208,50 @@ def update_project_page(sermon_id: str, payload: UpdatePageRequest) -> SermonPro
 class OcrRequest(BaseModel):
     filename: str
 
-@router.post("/sermon-project/{sermon_id}/ocr")
-def trigger_ocr(sermon_id: str, payload: OcrRequest):
+@router.post("/sermon-project/{project_id}/ocr")
+def trigger_ocr(project_id: str, payload: OcrRequest):
     """
     Trigger manual OCR for a page within a project and update the source.
     """
     try:
-        trigger_project_page_ocr(sermon_id, payload.filename)
+        trigger_project_page_ocr(project_id, payload.filename)
         return {"status": "success", "message": "OCR started and source updated."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/sermon-project/{sermon_id}/ocr-all")
-def trigger_batch_ocr(sermon_id: str, background_tasks: BackgroundTasks):
+@router.post("/sermon-project/{project_id}/ocr-all")
+def trigger_batch_ocr(project_id: str, background_tasks: BackgroundTasks):
     """
     Trigger batch OCR for all unprocessed pages in the project.
     Runs in background to prevent timeout.
     """
     try:
-        background_tasks.add_task(trigger_project_batch_ocr, sermon_id)
+        background_tasks.add_task(trigger_project_batch_ocr, project_id)
         return {"status": "success", "message": "Batch OCR started in background."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/sermon-project/{sermon_id}/check-in")
-def check_in_project(sermon_id: str):
+@router.post("/sermon-project/{project_id}/check-in")
+def check_in_project(project_id: str):
     """
     Commit the sermon project (source, draft, meta) to the local git repo.
     """
     try:
-        commit_hash = commit_sermon_project(sermon_id)
+        commit_hash = commit_sermon_project(project_id)
         return {"status": "success", "commit_hash": commit_hash, "message": "Project checked in successfully."}
     except Exception as e:
         if "Nothing to commit" in str(e):
              return {"status": "success", "message": "Nothing to commit."}
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/sermon-project/{sermon_id}/export-doc")
-def export_project_doc(sermon_id: str):
+@router.post("/sermon-project/{project_id}/export-doc")
+def export_project_doc(project_id: str):
     """
     Export the sermon draft to a Google Doc.
     Returns the URL of the created document.
     """
     try:
-        doc_url = export_sermon_to_doc(sermon_id)
+        doc_url = export_sermon_to_doc(project_id)
         return {"status": "success", "url": doc_url, "message": "Google Doc created."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -262,13 +263,27 @@ def get_projects() -> List[SermonProject]:
     """
     return list_sermon_projects()
 
-@router.post("/sermon-project/{sermon_id}/audit-draft")
-def audit_draft_endpoint(sermon_id: str):
+@router.post("/sermon-project/{project_id}/audit-draft")
+def audit_draft_endpoint(project_id: str):
     """
     Review the sermon draft against the original notes using Gemini.
     """
     try:
-        audit_result = audit_sermon_draft(sermon_id)
+        audit_result = audit_sermon_draft(project_id)
+        return {"status": "success", "audit_result": audit_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sermon-project/{project_id}/audit-result")
+def get_audit_result_endpoint(project_id: str):
+    """
+    Fetch the persisted AI audit result for the sermon draft.
+    """
+    from backend.api.sermon_converter_service import get_sermon_audit_result
+    try:
+        audit_result = get_sermon_audit_result(project_id)
+        if not audit_result:
+            return {"status": "success", "audit_result": None, "message": "No audit result found."}
         return {"status": "success", "audit_result": audit_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -278,15 +293,15 @@ class UpdateMetadataRequest(BaseModel):
     bible_verse: Optional[str] = None
     google_doc_link: Optional[str] = None
 
-@router.post("/sermon-project/{sermon_id}/metadata", response_model=SermonProject)
-def update_project_metadata(sermon_id: str, payload: UpdateMetadataRequest):
+@router.post("/sermon-project/{project_id}/metadata", response_model=SermonProject)
+def update_project_metadata(project_id: str, payload: UpdateMetadataRequest):
     """
     Update project title, bible verse, and optionally Google Doc Link.
     """
     try:
         # Import locally to ensure fresh reload during dev
         from backend.api.sermon_converter_service import update_sermon_project_metadata
-        return update_sermon_project_metadata(sermon_id, payload.title, payload.bible_verse, payload.google_doc_link)
+        return update_sermon_project_metadata(project_id, payload.title, payload.bible_verse, payload.google_doc_link)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Sermon project not found")
     except ValueError as ve:
@@ -335,8 +350,8 @@ def delete_prompt_endpoint(prompt_id: str):
         raise HTTPException(status_code=404, detail="Prompt not found")
     return {"status": "success"}
 
-@router.get("/sermon-project/{sermon_id}/agent-logs")
-def get_agent_logs_endpoint(sermon_id: str):
+@router.get("/sermon-project/{project_id}/agent-logs")
+def get_agent_logs_endpoint(project_id: str):
     """
     Get the execution logs from the multi-agent system.
     """
@@ -346,7 +361,7 @@ def get_agent_logs_endpoint(sermon_id: str):
     logs = []
     
     # 1. Read legacy logs first (older)
-    legacy_log_file = DATA_BASE_PATH / "sermon_projects" / sermon_id / "agent_logs.json"
+    legacy_log_file = DATA_BASE_PATH / "sermon_projects" / project_id / "agent_logs.json"
     if legacy_log_file.exists():
         try:
             with open(legacy_log_file, "r", encoding="utf-8") as f:
@@ -355,7 +370,7 @@ def get_agent_logs_endpoint(sermon_id: str):
             pass
 
     # 2. Read new logs (newer)
-    new_log_file = DATA_BASE_PATH / "notes_to_surmon" / sermon_id / "agent_logs.json"
+    new_log_file = DATA_BASE_PATH / "notes_to_surmon" / project_id / "agent_logs.json"
     if new_log_file.exists():
         try:
             with open(new_log_file, "r", encoding="utf-8") as f:
@@ -369,13 +384,13 @@ def get_agent_logs_endpoint(sermon_id: str):
             
     return logs
 
-@router.get("/sermon-project/{sermon_id}/agent-state")
-def get_agent_state_endpoint(sermon_id: str):
+@router.get("/sermon-project/{project_id}/agent-state")
+def get_agent_state_endpoint(project_id: str):
     """
     Get the full agent state (artifacts).
     """
     from backend.api.sermon_converter_service import get_agent_state_data
-    data = get_agent_state_data(sermon_id)
+    data = get_agent_state_data(project_id)
     if not data:
         # Return 404 so frontend knows to clear the state/icons (it thinks "no file" = "not started")
         # Returning {} makes frontend think "started but empty", which might be confusing.
