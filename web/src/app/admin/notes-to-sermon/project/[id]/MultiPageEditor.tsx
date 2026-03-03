@@ -227,8 +227,6 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     const content = srcData.content || "";
                     setMarkdown(content);
                     setOriginalMarkdown(content);
-
-                    alert("Processing Complete!");
                 }
             }, 3000);
         }
