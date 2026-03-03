@@ -165,7 +165,7 @@ export default function AiCommandPanel({ projectId, onAuditComplete, onHighlight
                                     {auditResult.coverage.map((c: any, i: number) => (
                                         <li key={i} className={`bg-white border p-3 rounded shadow-sm ${!c.matched ? 'border-red-200' : ''}`}>
                                             <p className="font-bold mb-1">筆記 [{c.note_id}]</p>
-                                            <p className="text-gray-700 italic mb-2 border-l-2 pl-2">"{c.note_excerpt}"</p>
+                                            <p className="text-gray-700 italic mb-2 border-l-2 pl-2">&quot;{c.note_excerpt}&quot;</p>
                                             <p className="text-gray-600 mb-2"><strong>狀態:</strong> {c.matched ? '✅ 已覆蓋' : '❌ 未覆蓋'}</p>
 
                                             {c.transcript_evidence && onHighlightText ? (
