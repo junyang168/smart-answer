@@ -652,14 +652,15 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     >
                         Check In
                     </button>
-                    <button
-                        onClick={handleExportDoc}
-                        disabled={auditPassed !== true}
-                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-blue-700 bg-blue-100 hover:bg-blue-200' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
-                        title={auditPassed === true ? "Export to Google Doc" : "Must pass AI Audit first"}
-                    >
-                        Export to Doc
-                    </button>
+                    {hasFinal && viewMode === 'final' && (
+                        <button
+                            onClick={handleExportDoc}
+                            className={`px-3 py-1 rounded font-bold text-sm text-blue-700 bg-blue-100 hover:bg-blue-200`}
+                            title="Export to Google Doc"
+                        >
+                            Export to Doc
+                        </button>
+                    )}
                 </div>
             </div>
 

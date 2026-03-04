@@ -1054,20 +1054,20 @@ def export_sermon_to_doc(project_id: str) -> str:
     Export the sermon draft to a Google Doc in the configured Drive folder.
     Returns the URL of the created document.
     """
-    # 1. Read Draft Content + Metadata
+    # 1. Read Final Content + Metadata
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
          raise FileNotFoundError(f"Sermon project {project_id} not found")
     
-    draft_file = sermon_dir / "draft_v1.md"
+    draft_file = sermon_dir / "final.md"
     if not draft_file.exists():
-        raise ValueError("Draft not found. Please generate a draft first.")
+        raise ValueError("Final Master Text not found. Please Start Theological Review first.")
         
     with open(draft_file, "r", encoding="utf-8") as f:
         draft_content = f.read()
 
     meta_file = sermon_dir / "meta.json"
-    title = f"Sermon Draft: {project_id}"
+    title = f"Master Text: {project_id}"
     
     import json
     meta_data = {}
