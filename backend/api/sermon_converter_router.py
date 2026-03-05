@@ -301,6 +301,24 @@ def get_audit_result_endpoint(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/sermon-project/{project_id}/final/chunks")
+def get_final_chunks_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import get_final_chunks
+    try:
+        chunks = get_final_chunks(project_id)
+        return {"chunks": chunks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sermon-project/{project_id}/final/chunk/{chunk_id}")
+def save_project_final_chunk(project_id: str, chunk_id: str, payload: SaveSourceRequest):
+    from backend.api.sermon_converter_service import update_final_chunk
+    try:
+        update_final_chunk(project_id, chunk_id, payload.content)
+        return {"status": "success", "message": f"Chunk {chunk_id} saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/sermon-project/{project_id}/start-review")
 def start_review_endpoint(project_id: str):
     from backend.api.sermon_converter_service import start_theological_review
@@ -328,20 +346,23 @@ def save_project_final(project_id: str, payload: SaveSourceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class ChunkAuditRequest(BaseModel):
+    chunk_id: str
+
 @router.post("/sermon-project/{project_id}/theological-audit")
-def theological_audit_endpoint(project_id: str):
+def theological_audit_endpoint(project_id: str, payload: ChunkAuditRequest):
     from backend.api.sermon_converter_service import audit_theological_boundary
     try:
-        audit_result = audit_theological_boundary(project_id)
+        audit_result = audit_theological_boundary(project_id, payload.chunk_id)
         return {"status": "success", "audit_result": audit_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sermon-project/{project_id}/theological-audit-result")
-def get_theological_audit_result_endpoint(project_id: str):
+def get_theological_audit_result_endpoint(project_id: str, chunk_id: str):
     from backend.api.sermon_converter_service import get_theological_audit_result
     try:
-        audit_result = get_theological_audit_result(project_id)
+        audit_result = get_theological_audit_result(project_id, chunk_id)
         if not audit_result:
             return {"status": "success", "audit_result": None, "message": "No theological audit result found."}
         return {"status": "success", "audit_result": audit_result}

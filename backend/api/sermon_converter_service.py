@@ -608,13 +608,131 @@ def get_sermon_final_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "final.md"
 
+def get_sermon_chunks_dir(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    chunks_dir = sermon_dir / "chunks"
+    chunks_dir.mkdir(exist_ok=True)
+    return chunks_dir
+
+def get_chunks_meta_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "chunks_meta.json"
+
+import re
+from dataclasses import dataclass
+from typing import Tuple
+
+@dataclass
+class Chunk:
+    id: str
+    title: str
+    level: int                 # heading level (2 for ##, 3 for ###)
+    start_line: int            # 1-based
+    end_line: int              # 1-based, inclusive
+    text: str
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)\s*$")
+
+def _find_heading_level(line: str) -> Optional[Tuple[int, str]]:
+    m = _HEADING_RE.match(line)
+    if not m:
+        return None
+    level = len(m.group(1))
+    title = m.group(2).strip()
+    return level, title
+
+def split_markdown_for_review(
+    md: str,
+    primary_level: int = 2,            # "##"
+    secondary_level: int = 3,          # "###" used if chunk too large
+    max_chars: int = 9000,             # rough size guard for one review request
+    keep_preamble_as_chunk: bool = True
+) -> List[Chunk]:
+    lines = md.splitlines()
+    n = len(lines)
+    primary_idxs: List[int] = []
+    for i, line in enumerate(lines):
+        info = _find_heading_level(line)
+        if info and info[0] == primary_level:
+            primary_idxs.append(i)
+
+    chunks: List[Chunk] = []
+    def emit_chunk(start_i: int, end_i: int, title: str, level: int, chunk_id: str):
+        text = "\n".join(lines[start_i:end_i+1]).strip("\n")
+        if not text.strip():
+            return
+        chunks.append(
+            Chunk(id=chunk_id, title=title, level=level, start_line=start_i + 1, end_line=end_i + 1, text=text)
+        )
+
+    if keep_preamble_as_chunk:
+        if primary_idxs and primary_idxs[0] > 0:
+            pre_text = "\n".join(lines[:primary_idxs[0]]).strip()
+            if pre_text:
+                emit_chunk(0, primary_idxs[0] - 1, "(Preamble / Front Matter)", 1, "chunk_000")
+        elif not primary_idxs:
+            emit_chunk(0, n - 1, "(Whole Document)", 1, "chunk_000")
+            return chunks
+
+    if not primary_idxs:
+        emit_chunk(0, n - 1, "(Whole Document)", 1, "chunk_000")
+        return chunks
+
+    primary_ranges: List[Tuple[int, int]] = []
+    for idx, start_i in enumerate(primary_idxs):
+        end_i = (primary_idxs[idx + 1] - 1) if idx + 1 < len(primary_idxs) else (n - 1)
+        primary_ranges.append((start_i, end_i))
+
+    chunk_counter = 1
+    for start_i, end_i in primary_ranges:
+        info = _find_heading_level(lines[start_i])
+        primary_title = info[1] if info else "(Untitled)"
+        primary_text = "\n".join(lines[start_i:end_i+1])
+        if len(primary_text) <= max_chars:
+            emit_chunk(start_i, end_i, primary_title, primary_level, f"chunk_{chunk_counter:03d}")
+            chunk_counter += 1
+            continue
+        
+        secondary_idxs: List[int] = []
+        for i in range(start_i + 1, end_i + 1):
+            info2 = _find_heading_level(lines[i])
+            if info2 and info2[0] == secondary_level:
+                secondary_idxs.append(i)
+
+        if not secondary_idxs:
+            emit_chunk(start_i, end_i, f"{primary_title} (oversized)", primary_level, f"chunk_{chunk_counter:03d}")
+            chunk_counter += 1
+            continue
+
+        header_end = secondary_idxs[0] - 1
+        emit_chunk(start_i, header_end, f"{primary_title} — (intro)", primary_level, f"chunk_{chunk_counter:03d}")
+        chunk_counter += 1
+
+        for s_idx, s_start in enumerate(secondary_idxs):
+            s_end = (secondary_idxs[s_idx + 1] - 1) if s_idx + 1 < len(secondary_idxs) else end_i
+            s_info = _find_heading_level(lines[s_start])
+            s_title = s_info[1] if s_info else "(Untitled Subsection)"
+            emit_chunk(s_start, s_end, f"{primary_title} — {s_title}", secondary_level, f"chunk_{chunk_counter:03d}")
+            chunk_counter += 1
+    return chunks
+
+def chunks_to_jsonable(chunks: List[Chunk]) -> List[Dict]:
+    return [
+        {
+            "id": c.id, "title": c.title, "level": c.level, 
+            "start_line": c.start_line, "end_line": c.end_line, "char_len": len(c.text)
+        }
+        for c in chunks
+    ]
+
 def start_theological_review(project_id: str) -> bool:
     """
-    Copy draft_v1.md to final.md to start theological review.
-    Returns True if successfully copied or already exists.
+    Copy draft_v1.md to final.md, split into chunks, and save them.
     """
     draft_file = get_sermon_draft_path(project_id)
     final_file = get_sermon_final_path(project_id)
+    meta_file = get_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_chunks_dir(project_id)
     
     if not draft_file.exists():
         raise FileNotFoundError(f"Draft not found for project {project_id}")
@@ -623,6 +741,103 @@ def start_theological_review(project_id: str) -> bool:
         import shutil
         shutil.copy2(draft_file, final_file)
         
+    # Always regenerate chunks if meta_file doesn't exist or we just created final.md
+    if not meta_file.exists() or not final_file.exists():
+        with open(final_file, "r", encoding="utf-8") as f:
+            md_content = f.read()
+            
+        chunks = split_markdown_for_review(md_content)
+        meta_json = chunks_to_jsonable(chunks)
+        
+        import json
+        with open(meta_file, "w", encoding="utf-8") as f:
+            json.dump(meta_json, f, indent=2, ensure_ascii=False)
+            
+        for c in chunks:
+            chunk_path = chunks_dir / f"{c.id}.md"
+            with open(chunk_path, "w", encoding="utf-8") as f:
+                f.write(c.text.strip() + "\n")
+                
+    return True
+
+def rebuild_final_from_chunks(project_id: str):
+    """
+    Reads all chunks from chunks_dir according to chunks_meta.json 
+    and concatenates them to rebuild final.md.
+    """
+    final_file = get_sermon_final_path(project_id)
+    meta_file = get_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    
+    if not meta_file.exists():
+        return
+        
+    import json
+    with open(meta_file, "r", encoding="utf-8") as f:
+        meta_json = json.load(f)
+        
+    rebuilt_content = []
+    for chunk_meta in meta_json:
+        chunk_id = chunk_meta["id"]
+        chunk_path = chunks_dir / f"{chunk_id}.md"
+        if chunk_path.exists():
+            with open(chunk_path, "r", encoding="utf-8") as f:
+                rebuilt_content.append(f.read().strip())
+                
+    with open(final_file, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(rebuilt_content) + "\n")
+
+def get_final_chunks(project_id: str) -> List[Dict]:
+    meta_file = get_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    
+    # Auto-generate chunks if not present but final.md is
+    if not meta_file.exists():
+        final_file = get_sermon_final_path(project_id)
+        if final_file.exists():
+            with open(final_file, "r", encoding="utf-8") as f:
+                md_content = f.read()
+                
+            chunks = split_markdown_for_review(md_content)
+            meta_json = chunks_to_jsonable(chunks)
+            
+            import json
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta_json, f, indent=2, ensure_ascii=False)
+                
+            for c in chunks:
+                chunk_path = chunks_dir / f"{c.id}.md"
+                with open(chunk_path, "w", encoding="utf-8") as f:
+                    f.write(c.text.strip() + "\n")
+        else:
+            return []
+    
+    import json
+    with open(meta_file, "r", encoding="utf-8") as f:
+        meta_json = json.load(f)
+        
+    results = []
+    for m in meta_json:
+        chunk_path = chunks_dir / f"{m['id']}.md"
+        content = ""
+        if chunk_path.exists():
+             with open(chunk_path, "r", encoding="utf-8") as f:
+                 content = f.read()
+        results.append({
+            **m,
+            "content": content
+        })
+    return results
+
+def update_final_chunk(project_id: str, chunk_id: str, content: str) -> bool:
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    chunk_path = chunks_dir / f"{chunk_id}.md"
+    
+    if not chunk_path.exists():
+        raise FileNotFoundError(f"Chunk {chunk_id} not found")
+        
+    with open(chunk_path, "w", encoding="utf-8") as f:
+         f.write(content.strip() + "\n")
     return True
 
 def get_sermon_final(project_id: str) -> str:
@@ -900,8 +1115,10 @@ def list_sermon_projects() -> List[SermonProject]:
 def commit_sermon_project(project_id: str) -> str:
     """
     Commit the sermon project to the local git repository.
-    Files committed: meta.json, unified_source.md, draft_v1.md (if exists)
+    Rebuilds final.md from chunks first.
     """
+    rebuild_final_from_chunks(project_id)
+    
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
         raise FileNotFoundError(f"Sermon project {project_id} not found")
@@ -930,6 +1147,20 @@ def commit_sermon_project(project_id: str) -> str:
         paths_to_add.append(str(unified_file))
     if draft_file.exists():
         paths_to_add.append(str(draft_file))
+        
+    final_file = sermon_dir / "final.md"
+    chunks_meta = sermon_dir / "chunks_meta.json"
+    audit_file = sermon_dir / "theological_audit.json"
+    chunks_dir = sermon_dir / "chunks"
+    
+    if final_file.exists():
+        paths_to_add.append(str(final_file))
+    if chunks_meta.exists():
+        paths_to_add.append(str(chunks_meta))
+    if audit_file.exists():
+        paths_to_add.append(str(audit_file))
+    if chunks_dir.exists():
+        paths_to_add.append(str(chunks_dir))
         
     if not paths_to_add:
         raise ValueError("No files found to commit for this project")
@@ -1054,6 +1285,8 @@ def export_sermon_to_doc(project_id: str) -> str:
     Export the sermon draft to a Google Doc in the configured Drive folder.
     Returns the URL of the created document.
     """
+    rebuild_final_from_chunks(project_id)
+    
     # 1. Read Final Content + Metadata
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
@@ -1613,71 +1846,78 @@ def force_audit_pass(project_id: str) -> bool:
 STEP3_REVIEW_PROMPT_ZH_TW = """
 你是「福音派釋經母本重大邊界審閱器」。
 
-你的任務不是改寫，不是挑風格，不是神學辯論。
-你只負責偵測“明顯且客觀可辨識”的重大邊界問題。
+你不是改寫者，不是風格編輯，不是神學辯論者。
+你只負責偵測「明顯、客觀、可直接核對」的重大邊界問題。
 
-請保持保守原則：
-若有疑慮，但無法確定為明顯錯誤，請不要列為問題。
+總原則（最高優先級）：
+- 不確定 → 不列為問題
+- 只有在“你能指出明確矛盾或明確錯誤”時才出手
+- 你要以“降低誤報率”為首要目標（寧可漏掉，也不要亂報）
 
 ————————————————————
+【硬性閘門：confidence】
+你輸出每一個 issue 時，必須給 0~1 的 confidence。
+只有 confidence >= 0.88 才允許輸出該 issue。
+若達不到 0.88，請不要輸出（直接略過）。
 
-【禁止列為問題的項目】
-
-請不要標記以下內容：
+————————————————————
+【禁止列為問題的項目】（極重要，違反即為失敗）
+以下全部禁止標記為 issue：
 
 - 正常的福音派神學解釋
-- 合理的神學推論
-- 經文完整引用或補充引用
+- 合理的神學推論（與經文方向一致）
+- “可更精確/可補充/可更完整”的學術性建議（這不是錯誤）
+- 平行經文範圍的完整度爭議：
+  只要作者引用的是「常見主要平行段落」，即使還有更廣對應，也不得標記
+- 用語不夠嚴謹但大意正確（例如術語更精確寫法、可改寫更漂亮）：
+  一律不得標記 factual_error
 - 結構模板（釋經／神學意義／生活應用／附錄）
-- 合理的邏輯銜接句
-- 已明確放在「附錄（Appendix）」中的護教、歷史或教會觀察性內容
-
-特別規則：
-凡已放在「附錄（Appendix）」中的內容，
-一律視為結構正確，
-除非該內容直接違反聖經文本本身，
-否則不得因為屬護教或延伸討論而標記為問題。
+- 合理的邏輯銜接句（因此/所以/這顯示…）只要沒有捏造新事實
+- 已放在 Appendix 的護教/歷史/教會觀察：
+  一律視為結構正確；除非“直接違反聖經文本本身”才可標記
 
 ————————————————————
+【只允許標記以下四類問題】（高門檻）
 
-【只允許標記以下類型的問題】
+1) exegesis_error（明顯釋經錯誤）
+僅限：
+- 明確違反該段經文內容（或該段逐字稿直接引用的經文）
+- 將因果關係講反（文本有清楚因果）
+- 誤認人物或事件（可直接核對）
+- 文本內部自相矛盾（釋經層面）
 
-1️⃣ exegesis_error（明顯釋經錯誤）
-- 明確違反經文內容
-- 將因果關係講反
-- 誤認人物或事件
-- 文本內部自相矛盾
+2) factual_error（客觀事實錯誤，超高門檻）
+僅限「客觀且普遍公認，可直接核對」的錯誤：
+- 經文引用錯誤：章/節/內容對不上
+- 明確的人物識別錯誤：把 A 說成 B（可核對）
+- 明確的原文詞義錯誤：把字義講反/杜撰不存在的語義
+注意：
+- “更精確”≠“錯誤”；不得因措辭不夠學術就標記 factual_error。
 
-2️⃣ factual_error（客觀事實錯誤）
-- 經文引用錯誤
-- 歷史事實明顯錯誤
-- 希臘文字義或詞性明顯錯誤
+3) overstatement（明顯過度推論，高門檻）
+僅限：
+- 結論無法從本段文本合理推出，且屬明顯跳躍
+- 把外段/外系統教義硬套為本段直接結論
+注意：
+- 概括性神學總結只要不與經文明顯矛盾，不得標記。
 
-3️⃣ overstatement（明顯過度推論）
-僅在以下情況才可標記：
-- 結論無法從文本合理推導
-- 與文本邏輯明顯脫節
-- 引入該段經文未涉及的外來教義系統
-
-請勿因為“神學結論較強”就標記，
-只在明顯邏輯跳躍時才可標記。
-
-4️⃣ structural_issue（重大結構錯位）
-- 嚴重放錯層級（但不包含 Appendix 內容）
+4) structural_issue（重大結構錯位）
+僅限：
+- 嚴重放錯層級，導致讀者必然把“附錄延伸”誤當“經文直接結論”
+注意：Appendix 本身不列 structural_issue（除非直接違反經文）。
 
 ————————————————————
-
 【定位要求（給 UI 高亮用）】
-
-每個問題必須提供：
-- location：使用輸入文本中可見的段落標題/小節名/經文範圍等線索（不得編造）
-- excerpt：逐字稿中的“原文句子片段”，必須可用字串搜尋定位（建議 20–120 字）
+每個 issue 必須提供：
+- location：使用輸入文本中可見的段落標題/小節名/經文範圍（不得編造）
+- excerpt：逐字稿中可搜尋定位的原句片段（20–120 字）
+- reason：只能基於輸入文本本身（不可引用外部資料/你自己的知識作為判定依據）
+- suggested_fix：用一句話描述“如何改到不越界”（不需要重寫全文，只要方向）
+- confidence：0~1（低於 0.88 禁止輸出）
 
 ————————————————————
-
 【輸出格式】
-
-請只輸出 JSON：
+只輸出 JSON（禁止多餘文字、markdown）：
 
 {
   "issues": [
@@ -1685,25 +1925,23 @@ STEP3_REVIEW_PROMPT_ZH_TW = """
       "type": "exegesis_error | factual_error | overstatement | structural_issue",
       "location": "...",
       "excerpt": "...",
-      "reason": "簡短說明（僅基於文本）"
+      "reason": "...",
+      "suggested_fix": "...",
+      "confidence": 0.0
     }
   ],
   "summary": "總結一句話"
 }
 
-若沒有重大問題，請輸出：
+若沒有重大問題（或不夠確定），請輸出：
 
 {
   "issues": [],
   "summary": "未發現重大邊界問題。"
 }
-
-————————————————————
-
-請務必保持克制。
-只在明顯越界時才出手。
-若不確定，請不要標記。
 """
+
+CONFIDENCE_THRESHOLD = 0.88
 
 REVIEW_SCHEMA = {
     "name": "step3_major_boundary_review",
@@ -1728,8 +1966,10 @@ REVIEW_SCHEMA = {
                         "location": {"type": "string"},
                         "excerpt": {"type": "string"},
                         "reason": {"type": "string"},
+                        "suggested_fix": {"type": "string"},
+                        "confidence": {"type": "number"},
                     },
-                    "required": ["type", "location", "excerpt", "reason"],
+                    "required": ["type", "location", "excerpt", "reason", "suggested_fix", "confidence"],
                     "additionalProperties": False,
                 },
             },
@@ -1740,16 +1980,23 @@ REVIEW_SCHEMA = {
     }
 }
 
-def audit_theological_boundary(project_id: str) -> dict:
+def audit_theological_boundary(project_id: str, chunk_id: str) -> dict:
     """
     Step 3 Review (Major Boundary Review)
-    Input: a markdown manuscript (already layered: Exegesis/Theological Significance/Application/Appendix)
+    Input: a markdown chunk text representing a section of the final text.
     Output: JSON issues list with highlight-friendly location/excerpt.
     """
     try:
-        exegesis_markdown = get_sermon_final(project_id)
-        if not exegesis_markdown:
-            return {"error": "Final draft is empty or not found."}
+        from backend.api.sermon_converter_service import get_sermon_chunks_dir
+        chunk_file = get_sermon_chunks_dir(project_id) / f"{chunk_id}.md"
+        if not chunk_file.exists():
+             return {"error": f"Chunk file {chunk_id}.md not found."}
+             
+        with open(chunk_file, "r", encoding="utf-8") as f:
+             exegesis_markdown = f.read()
+
+        if not exegesis_markdown.strip():
+            return {"summary": "No content to review.", "issues": []}
 
         import os
         from openai import OpenAI
@@ -1760,9 +2007,7 @@ def audit_theological_boundary(project_id: str) -> dict:
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
         resp = client.chat.completions.create(
-            model="gpt-4o",  # usually defaults to 4o but user asked for gpt-5.2 in the script, however, gpt-5.2 is not standard. let's use whatever is appropriate. Actually let's just use what user gave us:
-            # model="gpt-4o-2024-08-06", # gpt-5.2 doesn't exist yet, but wait, the prompt asks for "gpt-5.2". Let me use exactly what they put.
-            # wait, I'll use gpt-4o for safety since it has structured outputs unless they explicitly have a custom model deployed as gpt-5.2
+            model="gpt-5.2",  
             messages=[
                  {"role": "system", "content": STEP3_REVIEW_PROMPT_ZH_TW},
                  {"role": "user", "content": exegesis_markdown},
@@ -1777,12 +2022,40 @@ def audit_theological_boundary(project_id: str) -> dict:
         result_text = resp.choices[0].message.content or ""
         audit_data = json.loads(result_text)
 
-        # Save the result
+        # Post-filter by confidence
+        issues = audit_data.get("issues", [])
+        if not isinstance(issues, list):
+            issues = []
+
+        filtered = []
+        for it in issues:
+            try:
+                conf = float(it.get("confidence", 0.0))
+            except Exception:
+                conf = 0.0
+            if conf >= CONFIDENCE_THRESHOLD:
+                filtered.append(it)
+
+        audit_data["issues"] = filtered
+        if not filtered:
+             if issues:
+                 audit_data["summary"] = "AI 發現了潛在問題，但信心指數未及門檻 (0.88)，因此未列出重大邊界問題。"
+             else:
+                 audit_data["summary"] = "未發現重大邊界問題。"
+
+        # Save the result per chunk
         sermon_dir = NOTES_TO_SERMON_DIR / project_id
         audit_file = sermon_dir / "theological_audit.json"
         
+        existing_audits = {}
+        if audit_file.exists():
+             with open(audit_file, "r", encoding="utf-8") as f:
+                  existing_audits = json.load(f)
+                  
+        existing_audits[chunk_id] = audit_data
+        
         with open(audit_file, "w", encoding="utf-8") as f:
-            json.dump(audit_data, f, indent=2, ensure_ascii=False)
+            json.dump(existing_audits, f, indent=2, ensure_ascii=False)
 
         return audit_data
 
@@ -1790,7 +2063,7 @@ def audit_theological_boundary(project_id: str) -> dict:
         print(f"Error executing theological audit for {project_id}: {e}")
         return {"error": f"Error executing theological audit: {str(e)}"}
 
-def get_theological_audit_result(project_id: str) -> Optional[dict]:
+def get_theological_audit_result(project_id: str, chunk_id: str) -> Optional[dict]:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     audit_file = sermon_dir / "theological_audit.json"
     
@@ -1801,7 +2074,7 @@ def get_theological_audit_result(project_id: str) -> Optional[dict]:
         import json
         with open(audit_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data
+        return data.get(chunk_id)
     except Exception as e:
         print(f"Error reading theological_audit.json: {e}")
         return None

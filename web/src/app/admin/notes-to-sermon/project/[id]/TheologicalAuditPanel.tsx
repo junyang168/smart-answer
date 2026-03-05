@@ -4,28 +4,41 @@ import React, { useState } from 'react';
 
 interface TheologicalAuditPanelProps {
     projectId: string;
+    selectedChunkId?: string | null;
+    selectedChunkText?: string;
     onAuditComplete?: () => void;
     onHighlightText?: (text: string) => void;
 }
 
-export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHighlightText }: TheologicalAuditPanelProps) {
+export default function TheologicalAuditPanel({ projectId, selectedChunkId, selectedChunkText, onAuditComplete, onHighlightText }: TheologicalAuditPanelProps) {
     const [isAuditing, setIsAuditing] = useState(false);
     const [auditResult, setAuditResult] = useState<any | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [expandedIssue, setExpandedIssue] = useState<number | null>(null);
 
     // Fetch existing audit result on mount if available
     React.useEffect(() => {
+        if (!selectedChunkId) {
+            setAuditResult(null);
+            setErrorMsg(null);
+            return;
+        }
         const fetchAudit = async () => {
             try {
-                const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/theological-audit-result`);
+                const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/theological-audit-result?chunk_id=${selectedChunkId}`);
                 if (res.ok) {
                     const data = await res.json();
                     if (data.audit_result) {
                         if (data.audit_result.error) {
                             setErrorMsg(data.audit_result.error);
+                            setAuditResult(null);
                         } else {
+                            setErrorMsg(null);
                             setAuditResult(data.audit_result);
                         }
+                    } else {
+                        setAuditResult(null);
+                        setErrorMsg(null);
                     }
                 }
             } catch (e) {
@@ -33,9 +46,10 @@ export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHi
             }
         };
         fetchAudit();
-    }, [projectId]);
+    }, [projectId, selectedChunkId]);
 
     const handleAuditClick = async () => {
+        if (!selectedChunkId) return;
         setIsAuditing(true);
         setAuditResult(null);
         setErrorMsg(null);
@@ -46,6 +60,8 @@ export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHi
         try {
             const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/theological-audit`, {
                 method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chunk_id: selectedChunkId }),
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -125,28 +141,50 @@ export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHi
                                 <h4 className="font-bold text-red-800 border-b border-red-200 pb-2 mb-3">🔥 發現問題 ({auditResult.issues.length})</h4>
                                 <ul className="space-y-4">
                                     {auditResult.issues.map((issue: any, i: number) => (
-                                        <li key={i} className="bg-white border p-3 rounded shadow-sm">
-                                            <p className="font-bold text-red-800 mb-1 flex items-center gap-1">
-                                                <span>⚠️</span> {getTypeLabel(issue.type)}
-                                            </p>
-                                            <p className="mb-2 text-gray-700"><strong>說明:</strong> {issue.reason}</p>
-                                            {issue.location && <p className="mb-2 text-gray-600 border-l-2 border-gray-300 pl-2"><strong>位置:</strong> {issue.location}</p>}
-                                            {issue.excerpt && onHighlightText ? (
-                                                <button
-                                                    onClick={() => onHighlightText(issue.excerpt)}
-                                                    className="text-left w-full text-purple-800 bg-purple-50 hover:bg-purple-100 p-2 rounded border border-purple-200 transition-colors shadow-sm"
-                                                    title="在編輯器中定位"
-                                                >
-                                                    <span className="font-semibold block mb-1">原文片段 (點擊定位):</span>
-                                                    {issue.excerpt}
-                                                </button>
-                                            ) : (
-                                                issue.excerpt && (
-                                                    <div className="bg-purple-50 p-2 rounded border border-purple-200 text-purple-800">
-                                                        <span className="font-semibold block mb-1">原文片段:</span>
-                                                        {issue.excerpt}
+                                        <li key={i} className="bg-white border rounded shadow-sm overflow-hidden">
+                                            <div
+                                                className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                                                onClick={() => setExpandedIssue(expandedIssue === i ? null : i)}
+                                            >
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <p className="font-bold text-red-800 flex items-center gap-1">
+                                                        <span>⚠️</span> {getTypeLabel(issue.type)}
+                                                    </p>
+                                                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                        {issue.confidence && <span>信心: {Math.round(issue.confidence * 100)}%</span>}
+                                                        <span>{expandedIssue === i ? '▲' : '▼'}</span>
                                                     </div>
-                                                )
+                                                </div>
+                                                <p className="text-gray-700 text-sm"><strong>說明:</strong> {issue.reason}</p>
+                                                {issue.location && <p className="mt-2 text-gray-500 text-xs border-l-2 border-gray-300 pl-2"><strong>位置:</strong> {issue.location}</p>}
+                                            </div>
+
+                                            {expandedIssue === i && (
+                                                <div className="p-3 pt-0 border-t bg-gray-50 space-y-3 mt-3">
+                                                    {issue.suggested_fix && (
+                                                        <div className="bg-green-50 border border-green-200 p-2 rounded">
+                                                            <p className="text-green-800 text-sm font-bold mb-1">💡 建議修正方向:</p>
+                                                            <p className="text-green-700 text-sm">{issue.suggested_fix}</p>
+                                                        </div>
+                                                    )}
+                                                    {issue.excerpt && onHighlightText ? (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); onHighlightText(issue.excerpt); }}
+                                                            className="text-left w-full text-purple-800 bg-purple-50 hover:bg-purple-100 p-2 rounded border border-purple-200 transition-colors shadow-sm"
+                                                            title="在編輯器中定位"
+                                                        >
+                                                            <span className="font-semibold block mb-1">原文片段 (點擊定位):</span>
+                                                            {issue.excerpt}
+                                                        </button>
+                                                    ) : (
+                                                        issue.excerpt && (
+                                                            <div className="bg-purple-50 p-2 rounded border border-purple-200 text-purple-800">
+                                                                <span className="font-semibold block mb-1">原文片段:</span>
+                                                                {issue.excerpt}
+                                                            </div>
+                                                        )
+                                                    )}
+                                                </div>
                                             )}
                                         </li>
                                     ))}
@@ -166,9 +204,9 @@ export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHi
             <div className="p-4 bg-gray-50 border-t flex-shrink-0">
                 <button
                     onClick={handleAuditClick}
-                    disabled={isAuditing}
+                    disabled={isAuditing || !selectedChunkId}
                     className={`w-full py-3 rounded font-bold text-white shadow transition-colors flex justify-center items-center gap-2 
-                        ${isAuditing ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'}`}
+                        ${isAuditing || !selectedChunkId ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'}`}
                 >
                     {isAuditing ? (
                         <>
@@ -179,7 +217,7 @@ export default function TheologicalAuditPanel({ projectId, onAuditComplete, onHi
                             神學審閱中 (約 30 秒)...
                         </>
                     ) : (
-                        "🚀 執行神學邊界審閱"
+                        selectedChunkId ? "🚀 執行神學邊界審閱" : "請先選擇 Review Chunk"
                     )}
                 </button>
             </div>

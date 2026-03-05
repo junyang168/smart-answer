@@ -40,13 +40,18 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [showAdd, setShowAdd] = useState(false);
     const [editorInstance, setEditorInstance] = useState<any>(null);
 
+    // Chunking State
+    const [chunks, setChunks] = useState<any[]>([]);
+    const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
+
     const editorOptions = useMemo(() => ({
         spellChecker: false,
         status: false,
         previewClass: ["editor-preview", "prose", "prose-indigo", "max-w-none", "prose-p:leading-relaxed", "prose-headings:font-bold"],
         placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : (viewMode === 'draft' ? "Generated Draft will appear here..." : "Master Text will appear here..."),
         minHeight: "500px",
-    }), [viewMode, projectType]);
+        readOnly: activeChunkId === 'FULL_DOC',
+    }), [viewMode, projectType, activeChunkId]);
 
 
 
@@ -101,20 +106,43 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             try {
                 // Fetch Content based on mode
                 const endpoint = viewMode;
-                const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
-                    headers: {
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache'
+                if (endpoint === 'final') {
+                    const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunks`, {
+                        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+                    });
+                    if (finalRes.ok) {
+                        const finalData = await finalRes.json();
+                        const loadedChunks = finalData.chunks || [];
+                        setChunks(loadedChunks);
+                        if (loadedChunks.length > 0) {
+                            // If we already have an active chunk, try to keep it, else pick the first
+                            setActiveChunkId((currentActive) => {
+                                const target = currentActive ? (loadedChunks.find((c: any) => c.id === currentActive) || loadedChunks[0]) : loadedChunks[0];
+                                setMarkdown(target.content || "");
+                                setOriginalMarkdown(target.content || "");
+                                return target.id;
+                            });
+                        } else {
+                            setMarkdown("");
+                            setOriginalMarkdown("");
+                        }
                     }
-                });
-                if (srcRes.ok) {
-                    const srcData = await srcRes.json();
-                    const content = srcData.content || "";
-                    setMarkdown(content);
-                    setOriginalMarkdown(content);
                 } else {
-                    setMarkdown("");
-                    setOriginalMarkdown("");
+                    const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                        headers: {
+                            'Cache-Control': 'no-cache',
+                            'Pragma': 'no-cache'
+                        }
+                    });
+                    if (srcRes.ok) {
+                        const srcData = await srcRes.json();
+                        const content = srcData.content || "";
+                        setMarkdown(content);
+                        setOriginalMarkdown(content);
+                    } else {
+                        setMarkdown("");
+                        setOriginalMarkdown("");
+                    }
                 }
 
                 // Fetch Images List
@@ -216,17 +244,35 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     setProgress(null);
                     // Re-fetch content based on current viewMode
                     const endpoint = viewMode;
-                    const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
-                        headers: {
-                            'Cache-Control': 'no-cache',
-                            'Pragma': 'no-cache'
+                    if (endpoint === 'final') {
+                        const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunks`, {
+                            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+                        });
+                        if (finalRes.ok) {
+                            const finalData = await finalRes.json();
+                            const loadedChunks = finalData.chunks || [];
+                            setChunks(loadedChunks);
+                            if (loadedChunks.length > 0) {
+                                setActiveChunkId((currentActive) => {
+                                    const target = currentActive ? (loadedChunks.find((c: any) => c.id === currentActive) || loadedChunks[0]) : loadedChunks[0];
+                                    setMarkdown(target.content || "");
+                                    setOriginalMarkdown(target.content || "");
+                                    return target.id;
+                                });
+                            }
                         }
-                    });
-                    const srcData = await srcRes.json();
-
-                    const content = srcData.content || "";
-                    setMarkdown(content);
-                    setOriginalMarkdown(content);
+                    } else {
+                        const srcRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                            headers: {
+                                'Cache-Control': 'no-cache',
+                                'Pragma': 'no-cache'
+                            }
+                        });
+                        const srcData = await srcRes.json();
+                        const content = srcData.content || "";
+                        setMarkdown(content);
+                        setOriginalMarkdown(content);
+                    }
                 }
             }, 3000);
         }
@@ -327,16 +373,30 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     }
 
 
-    const handleSave = async (checkMode?: 'source' | 'draft') => {
+    const handleSave = async (checkMode?: 'source' | 'draft' | 'final') => {
         const modeToSave = checkMode || viewMode;
         try {
-            const endpoint = modeToSave;
-            await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: markdown })
-            });
+            if (modeToSave === 'final' && activeChunkId) {
+                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunk/${activeChunkId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: markdown })
+                });
+            } else {
+                const endpoint = modeToSave;
+                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: markdown })
+                });
+            }
             setOriginalMarkdown(markdown); // Reset dirty flag
+
+            // Sync local chunk state
+            if (modeToSave === 'final' && activeChunkId) {
+                setChunks(prev => prev.map(c => c.id === activeChunkId ? { ...c, content: markdown } : c));
+            }
+
             return true;
         } catch (e) {
             alert("Failed to save");
@@ -638,12 +698,14 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             Start Theological Review
                         </button>
                     )}
-                    <button
-                        onClick={() => handleSave()}
-                        className={`px-4 py-1 rounded font-bold text-white ${markdown !== originalMarkdown ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
-                    >
-                        {markdown !== originalMarkdown ? 'Save*' : 'Saved'}
-                    </button>
+                    {activeChunkId !== 'FULL_DOC' && (
+                        <button
+                            onClick={() => handleSave()}
+                            className={`px-4 py-1 rounded font-bold text-white ${markdown !== originalMarkdown ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
+                        >
+                            {markdown !== originalMarkdown ? 'Save*' : 'Saved'}
+                        </button>
+                    )}
                     <button
                         onClick={handleCheckIn}
                         disabled={auditPassed !== true}
@@ -819,6 +881,46 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 </div>
                             </div>
                         </div>
+
+                        {viewMode === 'final' && chunks.length > 0 && (
+                            <div className="mb-2 w-full flex items-center bg-indigo-50 p-2 rounded border border-indigo-100">
+                                <label className="text-sm font-bold text-indigo-900 mr-2 whitespace-nowrap">Review Chunk:</label>
+                                <select
+                                    className="flex-1 border-gray-300 rounded shadow-sm text-sm p-1"
+                                    value={activeChunkId || ""}
+                                    onChange={(e) => {
+                                        const newChunkId = e.target.value;
+                                        if (markdown !== originalMarkdown && activeChunkId !== "FULL_DOC") {
+                                            if (!confirm("You have unsaved changes in this chunk. Press OK to discard changes and switch chunks.")) {
+                                                return; // Cancelled
+                                            }
+                                        }
+
+                                        if (newChunkId === "FULL_DOC") {
+                                            setActiveChunkId("FULL_DOC");
+                                            const fullText = chunks.map(c => c.content).join("\n\n");
+                                            setMarkdown(fullText);
+                                            setOriginalMarkdown(fullText);
+                                        } else {
+                                            const target = chunks.find(c => c.id === newChunkId);
+                                            if (target) {
+                                                setActiveChunkId(target.id);
+                                                setMarkdown(target.content || "");
+                                                setOriginalMarkdown(target.content || "");
+                                            }
+                                        }
+                                    }}
+                                >
+                                    <option value="FULL_DOC">🌟 Preview Full Document (Read-Only)</option>
+                                    {chunks.map(c => (
+                                        <option key={c.id} value={c.id}>
+                                            {c.title} — ({c.char_len} chars)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         <div className="flex-1 overflow-y-auto prose-editor-container">
                             <SimpleMDE
                                 value={markdown}
@@ -839,6 +941,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                         ) : viewMode === 'final' ? (
                             <TheologicalAuditPanel
                                 projectId={projectId}
+                                selectedChunkId={activeChunkId}
+                                selectedChunkText={markdown}
                                 onHighlightText={handleHighlightText}
                             />
                         ) : null}
