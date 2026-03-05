@@ -418,23 +418,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         // Effects will trigger re-fetch based on viewMode
     };
 
-    // Auto-toggle Preview mode for Master Text
-    useEffect(() => {
-        if (!editorInstance) return;
-
-        // Wait for next tick to ensure DOM is ready for togglePreview
-        const timer = setTimeout(() => {
-            const isPreviewActive = editorInstance.isPreviewActive();
-
-            if (viewMode === 'final' && !isPreviewActive) {
-                editorInstance.togglePreview();
-            } else if (viewMode !== 'final' && isPreviewActive) {
-                editorInstance.togglePreview();
-            }
-        }, 50);
-
-        return () => clearTimeout(timer);
-    }, [viewMode, editorInstance]);
+    // Removed auto-toggle preview logic for draft mode, defaulting to standard markdown editor
 
     const handleGenerate = async () => {
         // 1. Ensure Source is saved
@@ -873,7 +857,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                                 className={`px-3 py-1 text-sm rounded ${viewMode === 'final' ? 'bg-white shadow' : 'text-gray-600'}`}
                                                 onClick={() => handleViewSwitch('final')}
                                             >
-                                                Master Text (Final)
+                                                Master Text
                                             </button>
                                         )}
                                     </div>

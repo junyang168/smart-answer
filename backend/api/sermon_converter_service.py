@@ -1612,15 +1612,8 @@ def audit_sermon_draft(project_id: str) -> dict:
             return "Error: Generated draft is empty. Please generate a draft before auditing."
 
         import os
-        from openai import OpenAI
         import json
-        from dotenv import load_dotenv
-
-        load_dotenv()
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-        
-
-         
+        from backend.api.openai_client import generate_structured_json
         SYSTEM_PROMPT = """
         你是「释经逐字稿外置审核器（Diff Auditor）」。
         你只做“语义层面的检测与列证据”，绝不改写逐字稿。
@@ -1744,17 +1737,13 @@ def audit_sermon_draft(project_id: str) -> dict:
 
         user_prompt = f"【笔记】\n{source_content}\n\n【逐字稿】\n{draft_content}"
         
-        response = client.chat.completions.create(
+        audit_data = generate_structured_json(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            json_schema=AUDIT_SCHEMA["json_schema"] if "json_schema" in AUDIT_SCHEMA else AUDIT_SCHEMA,
             model="gpt-5.2",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format=AUDIT_SCHEMA,
             temperature=0.0
         )
-        
-        result_text = response.choices[0].message.content or ""
         
         # Parse and save the audit result
         sermon_dir = NOTES_TO_SERMON_DIR / project_id
@@ -1764,8 +1753,6 @@ def audit_sermon_draft(project_id: str) -> dict:
         sermon_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            audit_data = json.loads(result_text)
-            
             # Save raw audit JSON
             with open(audit_file, "w", encoding="utf-8") as f:
                 json.dump(audit_data, f, indent=2, ensure_ascii=False)
@@ -1785,20 +1772,10 @@ def audit_sermon_draft(project_id: str) -> dict:
                 with open(meta_file, "w", encoding="utf-8") as f:
                     json.dump(meta_data, f, indent=2, ensure_ascii=False)
                     
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse audit JSON for saving: {e}")
-            # If parsing fails here, audit_data won't be available for markdown formatting
-            # The existing markdown formatting block will handle the raw text.
-            
-        # Return JSON Dictionary
-        try:
-            # Use audit_data if successfully parsed above, otherwise re-parse result_text
-            data = audit_data if 'audit_data' in locals() else json.loads(result_text)
-            return data
-            
-        except json.JSONDecodeError:
-            # Fallback if somehow not valid JSON (very rare with structured outputs)
-            return {"error": "Failed to parse JSON", "raw": result_text}
+        except Exception as e:
+            print(f"Failed to process audit result for saving: {e}")
+            # If processing fails here, audit_data won't be available
+            return {"error": "Failed to process JSON", "raw": str(e)}
 
     except Exception as e:
         print(f"Error auditing draft for {project_id}: {e}")
@@ -1999,28 +1976,16 @@ def audit_theological_boundary(project_id: str, chunk_id: str) -> dict:
             return {"summary": "No content to review.", "issues": []}
 
         import os
-        from openai import OpenAI
         import json
-        from dotenv import load_dotenv
+        from backend.api.openai_client import generate_structured_json
 
-        load_dotenv()
-        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-        resp = client.chat.completions.create(
-            model="gpt-5.2",  
-            messages=[
-                 {"role": "system", "content": STEP3_REVIEW_PROMPT_ZH_TW},
-                 {"role": "user", "content": exegesis_markdown},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": REVIEW_SCHEMA,
-            },
-            temperature=0
+        audit_data = generate_structured_json(
+            system_prompt=STEP3_REVIEW_PROMPT_ZH_TW,
+            user_prompt=exegesis_markdown,
+            json_schema=REVIEW_SCHEMA,
+            model="gpt-5.2",
+            temperature=0.0
         )
-
-        result_text = resp.choices[0].message.content or ""
-        audit_data = json.loads(result_text)
 
         # Post-filter by confidence
         issues = audit_data.get("issues", [])
