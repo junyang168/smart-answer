@@ -593,7 +593,7 @@ def get_sermon_draft(project_id: str) -> str:
 
 def save_sermon_draft(project_id: str, content: str) -> bool:
     """
-    Overwrite the draft file with new content.
+    Overwrite the draft file with new content, and simultaneously split into chunks.
     """
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
@@ -602,7 +602,94 @@ def save_sermon_draft(project_id: str, content: str) -> bool:
     draft_file = get_sermon_draft_path(project_id)
     with open(draft_file, "w", encoding="utf-8") as f:
         f.write(content)
+        
+    # Also chunk the draft immediately
+    chunks = split_markdown_for_review(content)
+    meta_json = chunks_to_jsonable(chunks)
+    
+    meta_file = get_draft_chunks_meta_path(project_id)
+    import json
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_json, f, indent=2, ensure_ascii=False)
+        
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    for c in chunks:
+        c_file = chunks_dir / f"{c.id}.md"
+        with open(c_file, "w", encoding="utf-8") as f:
+            f.write(c.text)
+            
     return True
+
+def get_sermon_draft_chunks_dir(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    chunks_dir = sermon_dir / "draft_chunks"
+    chunks_dir.mkdir(exist_ok=True)
+    return chunks_dir
+
+def get_draft_chunks_meta_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "draft_chunks_meta.json"
+
+def get_draft_chunks(project_id: str) -> list[dict]:
+    meta_file = get_draft_chunks_meta_path(project_id)
+    if not meta_file.exists():
+        # Fallback if draft exists but no chunks (e.g., legacy drafts)
+        draft_content = get_sermon_draft(project_id)
+        if draft_content:
+            save_sermon_draft(project_id, draft_content)
+        else:
+            return []
+            
+    import json
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    # read meta
+    with open(meta_file, "r", encoding="utf-8") as f:
+        meta_data = json.load(f)
+        
+    for item in meta_data:
+        c_file = chunks_dir / f"{item['id']}.md"
+        if c_file.exists():
+            with open(c_file, "r", encoding="utf-8") as f:
+                item["content"] = f.read()
+        else:
+            item["content"] = ""
+    return meta_data
+
+def update_draft_chunk(project_id: str, chunk_id: str, new_text: str) -> bool:
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    c_file = chunks_dir / f"{chunk_id}.md"
+    if not c_file.exists():
+        raise FileNotFoundError(f"Draft chunk {chunk_id} not found")
+        
+    with open(c_file, "w", encoding="utf-8") as f:
+        f.write(new_text)
+        
+    # Rebuild draft
+    rebuild_draft_from_chunks(project_id)
+    return True
+
+def rebuild_draft_from_chunks(project_id: str):
+    meta_file = get_draft_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    if not meta_file.exists():
+        return
+        
+    import json
+    with open(meta_file, "r", encoding="utf-8") as f:
+        meta_data = json.load(f)
+        
+    full_text = []
+    for item in meta_data:
+        c_file = chunks_dir / f"{item['id']}.md"
+        if c_file.exists():
+            with open(c_file, "r", encoding="utf-8") as f:
+                full_text.append(f.read())
+                
+    content = "\n\n".join(full_text)
+    draft_file = get_sermon_draft_path(project_id)
+    with open(draft_file, "w", encoding="utf-8") as f:
+        f.write(content)
+
 
 def get_sermon_final_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
@@ -859,13 +946,13 @@ def save_sermon_final(project_id: str, content: str) -> bool:
     with open(final_file, "w", encoding="utf-8") as f:
         f.write(content)
     return True
-def get_sermon_audit_result(project_id: str) -> Optional[dict]:
+def get_sermon_audit_result(project_id: str, chunk_id: str) -> Optional[dict]:
     """
-    Load the persisted audit result (audit.json) and return it as a dictionary.
+    Load the persisted fidelity audit result (fidelity_audit.json) and return it as a dictionary for a specific chunk.
     Returns the dict if it exists, otherwise None.
     """
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
-    audit_file = sermon_dir / "audit.json"
+    audit_file = sermon_dir / "fidelity_audit.json"
     
     if not audit_file.exists():
         return None
@@ -874,9 +961,9 @@ def get_sermon_audit_result(project_id: str) -> Optional[dict]:
         import json
         with open(audit_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data
+        return data.get(chunk_id)
     except Exception as e:
-        print(f"Error reading audit.json: {e}")
+        print(f"Error reading fidelity_audit.json: {e}")
         return None
 
 
@@ -1594,90 +1681,239 @@ def refine_sermon_draft(project_id: str, selection: str, instruction: str) -> st
         print(f"Error refining draft for {project_id}: {e}")
         raise e
 
-def audit_sermon_draft(project_id: str) -> dict:
+def run_structured_chunk_audit(
+    project_id: str,
+    chunk_id: str,
+    input_text: str,
+    system_prompt: str,
+    json_schema: dict,
+    output_filename: str,
+    post_process_hook=None
+) -> dict:
     """
-    Review the sermon draft against the original notes using OpenAI Structured Outputs.
-    Returns the audit analysis text as a python dictionary (JSON).
+    Generic helper to run structured audits (Fidelity or Theological) on chunks.
+    Handles the common logic: structured JSON generation, file saving, and error handling.
+    """
+    import json
+    from backend.api.openai_client import generate_structured_json
+    
+    try:
+        sermon_dir = NOTES_TO_SERMON_DIR / project_id
+        audit_file = sermon_dir / output_filename
+        sermon_dir.mkdir(parents=True, exist_ok=True)
+        
+        audit_data = generate_structured_json(
+            system_prompt=system_prompt,
+            user_prompt=input_text,
+            json_schema=json_schema.get("json_schema", json_schema),
+            model="gpt-5.2",
+            temperature=0.0
+        )
+        
+        if post_process_hook:
+            audit_data = post_process_hook(audit_data)
+            
+        try:
+            existing_audits = {}
+            if audit_file.exists():
+                 with open(audit_file, "r", encoding="utf-8") as f:
+                      existing_audits = json.load(f)
+                      
+            existing_audits[chunk_id] = audit_data
+            
+            with open(audit_file, "w", encoding="utf-8") as f:
+                json.dump(existing_audits, f, indent=2, ensure_ascii=False)
+                
+        except Exception as e:
+            print(f"Failed to process audit result for saving ({output_filename}): {e}")
+            return {"error": "Failed to process JSON", "raw": str(e)}
+
+        return audit_data
+
+    except Exception as e:
+        print(f"Error executing audit for chunk {chunk_id} in {project_id}: {e}")
+        return {"error": f"Error executing audit: {str(e)}"}
+
+def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
+    """
+    Review a specific final chunk against the original notes using OpenAI Structured Outputs.
+    Returns the fidelity analysis text as a python dictionary (JSON).
     """
     try:
         source_content = get_sermon_source(project_id)
-        draft_content = get_sermon_draft(project_id)
+        
+        chunk_file = get_sermon_draft_chunks_dir(project_id) / f"{chunk_id}.md"
+        if not chunk_file.exists():
+             return {"error": f"Chunk file {chunk_id}.md not found."}
+             
+        with open(chunk_file, "r", encoding="utf-8") as f:
+             draft_content = f.read()
 
         if not source_content:
             return "Error: Unified source notes are empty."
             
         source_content = extract_processable_content(source_content)
 
-        if not draft_content:
-            return "Error: Generated draft is empty. Please generate a draft before auditing."
+        if not draft_content.strip():
+            return "Error: Chunk content is empty. Please edit the chunk before auditing."
 
         import os
         import json
         from backend.api.openai_client import generate_structured_json
         SYSTEM_PROMPT = """
-        你是「释经逐字稿外置审核器（Diff Auditor）」。
-        你只做“语义层面的检测与列证据”，绝不改写逐字稿。
+        你是「释经逐字稿语义忠实度审核器（Diff Auditor）」。
+
+        你的职责只有一个：
+        检测【逐字稿】是否忠实于【笔记】的语义内容。
+
+        你不是讲道者，不是改写者，不进行神学评论。
+
+        你只做：
+        语义层面的检测与证据列举。
+
+        ────────────────
 
         【审核背景】
 
-        【逐字稿】是根据【笔记】进行“语义扩展”生成的。
+        【逐字稿】是根据【笔记】进行语义扩展生成的。
 
-        允许：
+        允许的扩展：
+
         - 将碎片笔记扩展为完整句子
-        - 补充最小必要的逻辑连接词
+        - 添加最小必要的逻辑连接词
         - 引用笔记中列出的经文内容
-        - 使用系统要求的固定结构标题（如「释经」「神学意义」「生活应用」「附录」）
+        - 使用系统固定结构标题：
+        「释经」「神学意义」「生活应用」「附录」
 
-        禁止：
-        - 引入新的神学观点
-        - 增加笔记未出现的经文或历史材料
-        - 将推测语气强化为断言
-        - 删除任何实质性要点
+        ────────────────
 
-        【重要说明】
+        【不得视为差异】
 
-        1. 固定结构标题属于系统格式要求，不属于语义内容，不得列入差异。
-        2. Markdown 排版、编号、分段调整不得列入差异。
-        3. 经文编号的完整引用不得视为新增。
-        4. 若笔记并列列出经文编号，逐字稿以最低限度连接词（如“相似”“呼应”）表达关联，不得视为新增，除非形成新的神学结论。
+        以下内容不得列入差异：
 
-        【任务】
+        - 固定结构标题
+        - Markdown 排版
+        - 分段变化
+        - 编号变化
+        - 经文编号引用
+        - 最小必要逻辑连接词
 
-        A) 覆盖对齐：
-        以笔记要点为单位，对齐逐字稿对应句。
-        找不到则标记「未覆盖」。
+        这些属于格式或表达层面。
 
-        B) 差异清单（仅限语义层面）：
-        列出：
-        - 新增神学命题
-        - 删除实质要点
-        - 立场升级（推测 → 断言）
-        - 语气强化
-        - 新的教义性推论
+        你只审语义。
 
-        每条必须给出笔记与逐字稿证据引用。
+        ────────────────
 
-        不得列入格式差异、模板标题或排版变化。
+        【只允许标记三类语义差异】
 
-        C) 风险分级：
-        - P0：新增或删除核心神学内容
-        - P1：立场升级或明显语气强化
-        - P2：轻微语义偏移
-        - P3：可忽略的小幅表达差异
+        1️⃣ addition  
+        逐字稿新增笔记未包含的神学命题或事实内容。
 
-        D) 总分与结论：
-        - 给出忠实度评分（0–100）
-        - 给出是否通过（Pass / Revise）
+        2️⃣ deletion  
+        笔记中的实质要点在逐字稿中消失。
+
+        3️⃣ stance_upgrade  
+        笔记中的推测、可能、提示，
+        在逐字稿中被强化为确定断言。
+
+        ────────────────
+
+        【审核步骤（必须按顺序执行）】
+
+        请依序执行以下步骤：
+
+        STEP 1  
+        逐条检查【笔记要点】，确认逐字稿是否覆盖。
+
+        STEP 2  
+        检查逐字稿是否新增笔记未出现的神学命题。
+
+        STEP 3  
+        检查逐字稿是否删除笔记的实质要点。
+
+        STEP 4  
+        检查逐字稿是否将推测语气强化为断言。
+
+        每一步都必须重新扫描全文。
+
+        ────────────────
+
+        【证据要求】
+
+        每个问题必须提供：
+
+        - 笔记证据
+        - 逐字稿证据
+
+        若无法提供明确文本证据，
+        请不要标记。
+
+        ────────────────
+
+        【风险分级】
+
+        P0  
+        新增或删除核心神学内容
+
+        P1  
+        立场升级或明显语气强化
+
+        P2  
+        轻微语义偏移
+
+        P3  
+        可忽略表达差异
+
+        ────────────────
 
         【通过标准】
 
-        - 若存在 P0 或 P1 → 必须 Revise
-        - 若仅存在 P2 或 P3 → 可 Pass
-        - 不得因分数低于主观阈值而判 Revise
+        若存在 P0 或 P1  
+        → Revise
 
-        风险分级优先于分数判断。
+        若仅存在 P2 或 P3  
+        → Pass
 
-        你只审语义，不审格式。
+        风险等级优先于评分。
+
+        ────────────────
+
+        你只审语义。
+        不审格式。
+        不进行神学评价。
+
+        ────────────────
+
+        【定位要求（用于 UI 高亮）】
+
+        每个问题必须提供：
+
+        location  
+        使用文本中已有的段落标题或经文范围。
+
+        excerpt  
+        逐字稿中的原文片段（20–120 字），
+        必须可以通过字符串搜索定位。
+
+        ────────────────
+
+        【修改建议】
+
+        每个问题必须提供 proposed_fix。
+
+        修改建议必须遵循：
+
+        - 最小修改原则
+        - 不新增神学内容
+        - 不改变原意
+        - 只修复语义差异
+
+        修改建议可以是：
+
+        - 删除新增内容
+        - 恢复被删除要点
+        - 调整语气强度
+        
         """
         AUDIT_SCHEMA = {
             "type": "json_schema",
@@ -1708,16 +1944,55 @@ def audit_sermon_draft(project_id: str) -> dict:
                                 "type": "object",
                                 "additionalProperties": False,
                                 "properties": {
-                                    "type": {"type": "string", "enum": ["addition","deletion","stance_upgrade","structure_change","term_change"]},
-                                    "category": {"type": "string", "enum": ["background","explanation","evaluation","inference","term_upgrade","formatting","other"]},
-                                    "risk": {"type": "string", "enum": ["P0","P1","P2","P3"]},
-                                    "note_evidence": {"type": "string"},
-                                    "transcript_evidence": {"type": "string"},
-                                    "reason": {"type": "string"}
+
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["addition","deletion","stance_upgrade"]
+                                    },
+
+                                    "risk": {
+                                        "type": "string",
+                                        "enum": ["P0","P1","P2","P3"]
+                                    },
+
+                                    "location": {
+                                        "type": "string"
+                                    },
+
+                                    "excerpt": {
+                                        "type": "string"
+                                    },
+
+                                    "note_evidence": {
+                                        "type": "string"
+                                    },
+
+                                    "transcript_evidence": {
+                                        "type": "string"
+                                    },
+
+                                    "reason": {
+                                        "type": "string"
+                                    },
+
+                                    "proposed_fix": {
+                                        "type": "string"
+                                    }
+
                                 },
-                                "required": ["type","category","risk","note_evidence","transcript_evidence","reason"]
+
+                                "required": [
+                                    "type",
+                                    "risk",
+                                    "location",
+                                    "excerpt",
+                                    "note_evidence",
+                                    "transcript_evidence",
+                                    "reason",
+                                    "proposed_fix"
+                                ]
                             }
-                        },
+                        },                        
                         "scores": {
                             "type": "object",
                             "additionalProperties": False,
@@ -1737,82 +2012,47 @@ def audit_sermon_draft(project_id: str) -> dict:
 
         user_prompt = f"【笔记】\n{source_content}\n\n【逐字稿】\n{draft_content}"
         
-        audit_data = generate_structured_json(
+        return run_structured_chunk_audit(
+            project_id=project_id,
+            chunk_id=chunk_id,
+            input_text=user_prompt,
             system_prompt=SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            json_schema=AUDIT_SCHEMA["json_schema"] if "json_schema" in AUDIT_SCHEMA else AUDIT_SCHEMA,
-            model="gpt-5.2",
-            temperature=0.0
+            json_schema=AUDIT_SCHEMA,
+            output_filename="fidelity_audit.json"
         )
-        
-        # Parse and save the audit result
-        sermon_dir = NOTES_TO_SERMON_DIR / project_id
-        audit_file = sermon_dir / "audit.json"
-        
-        # Ensure the directory exists
-        sermon_dir.mkdir(parents=True, exist_ok=True)
-        
-        try:
-            # Save raw audit JSON
-            with open(audit_file, "w", encoding="utf-8") as f:
-                json.dump(audit_data, f, indent=2, ensure_ascii=False)
-                
-            # Update meta.json with the pass boolean
-            passed = audit_data.get("pass", False)
-            meta_file = sermon_dir / "meta.json"
-            if meta_file.exists():
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    meta_data = json.load(f)
-                meta_data["audit_passed"] = passed
-                with open(meta_file, "w", encoding="utf-8") as f:
-                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
-            else:
-                # Create meta.json if it doesn't exist
-                meta_data = {"audit_passed": passed}
-                with open(meta_file, "w", encoding="utf-8") as f:
-                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
-                    
-        except Exception as e:
-            print(f"Failed to process audit result for saving: {e}")
-            # If processing fails here, audit_data won't be available
-            return {"error": "Failed to process JSON", "raw": str(e)}
 
     except Exception as e:
-        print(f"Error auditing draft for {project_id}: {e}")
+        print(f"Error loading source data for fidelity audit {chunk_id} in {project_id}: {e}")
         return {"error": f"Error executing audit: {str(e)}"}
 
-def force_audit_pass(project_id: str) -> bool:
+def force_audit_pass(project_id: str, chunk_id: str) -> bool:
     """
-    Manually override the fidelity audit status to Passed.
-    Updates in both meta.json and audit.json.
+    Manually override the fidelity audit status to Passed for a specific chunk.
+    Updates fidelity_audit.json.
     """
     import json
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
         raise FileNotFoundError(f"Project not found: {project_id}")
 
-    # Update meta.json
-    meta_file = sermon_dir / "meta.json"
-    if meta_file.exists():
-        with open(meta_file, "r", encoding="utf-8") as f:
-            meta_data = json.load(f)
-        meta_data["audit_passed"] = True
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump(meta_data, f, indent=2, ensure_ascii=False)
-            
-    # Update audit.json if it exists so the UI reflects it
-    audit_file = sermon_dir / "audit.json"
+    # Update fidelity_audit.json if it exists so the UI reflects it
+    audit_file = sermon_dir / "fidelity_audit.json"
     if audit_file.exists():
         with open(audit_file, "r", encoding="utf-8") as f:
-            audit_data = json.load(f)
-        audit_data["pass"] = True
-        
-        # Optionally overwrite must_fix to show why it passed
-        if audit_data.get("must_fix") and len(audit_data["must_fix"]) > 0:
-            audit_data["must_fix"] = ["(User Overridden) " + x for x in audit_data["must_fix"]]
+            existing_audits = json.load(f)
+            
+        if chunk_id in existing_audits:
+            audit_data = existing_audits[chunk_id]
+            audit_data["pass"] = True
+            
+            # Optionally overwrite must_fix to show why it passed
+            if audit_data.get("must_fix") and len(audit_data["must_fix"]) > 0:
+                audit_data["must_fix"] = ["(User Overridden) " + x for x in audit_data["must_fix"]]
+                
+            existing_audits[chunk_id] = audit_data
             
         with open(audit_file, "w", encoding="utf-8") as f:
-            json.dump(audit_data, f, indent=2, ensure_ascii=False)
+            json.dump(existing_audits, f, indent=2, ensure_ascii=False)
             
     return True
 
@@ -1975,57 +2215,40 @@ def audit_theological_boundary(project_id: str, chunk_id: str) -> dict:
         if not exegesis_markdown.strip():
             return {"summary": "No content to review.", "issues": []}
 
-        import os
-        import json
-        from backend.api.openai_client import generate_structured_json
+        def _filter_confidence(data: dict) -> dict:
+            issues = data.get("issues", [])
+            if not isinstance(issues, list):
+                issues = []
+            
+            filtered = []
+            for it in issues:
+                try:
+                    conf = float(it.get("confidence", 0.0))
+                except Exception:
+                    conf = 0.0
+                if conf >= CONFIDENCE_THRESHOLD:
+                    filtered.append(it)
 
-        audit_data = generate_structured_json(
+            data["issues"] = filtered
+            if not filtered:
+                 if issues:
+                     data["summary"] = "AI 發現了潛在問題，但信心指數未及門檻 (0.88)，因此未列出重大邊界問題。"
+                 else:
+                     data["summary"] = "未發現重大邊界問題。"
+            return data
+
+        return run_structured_chunk_audit(
+            project_id=project_id,
+            chunk_id=chunk_id,
+            input_text=exegesis_markdown,
             system_prompt=STEP3_REVIEW_PROMPT_ZH_TW,
-            user_prompt=exegesis_markdown,
             json_schema=REVIEW_SCHEMA,
-            model="gpt-5.2",
-            temperature=0.0
+            output_filename="theological_audit.json",
+            post_process_hook=_filter_confidence
         )
 
-        # Post-filter by confidence
-        issues = audit_data.get("issues", [])
-        if not isinstance(issues, list):
-            issues = []
-
-        filtered = []
-        for it in issues:
-            try:
-                conf = float(it.get("confidence", 0.0))
-            except Exception:
-                conf = 0.0
-            if conf >= CONFIDENCE_THRESHOLD:
-                filtered.append(it)
-
-        audit_data["issues"] = filtered
-        if not filtered:
-             if issues:
-                 audit_data["summary"] = "AI 發現了潛在問題，但信心指數未及門檻 (0.88)，因此未列出重大邊界問題。"
-             else:
-                 audit_data["summary"] = "未發現重大邊界問題。"
-
-        # Save the result per chunk
-        sermon_dir = NOTES_TO_SERMON_DIR / project_id
-        audit_file = sermon_dir / "theological_audit.json"
-        
-        existing_audits = {}
-        if audit_file.exists():
-             with open(audit_file, "r", encoding="utf-8") as f:
-                  existing_audits = json.load(f)
-                  
-        existing_audits[chunk_id] = audit_data
-        
-        with open(audit_file, "w", encoding="utf-8") as f:
-            json.dump(existing_audits, f, indent=2, ensure_ascii=False)
-
-        return audit_data
-
     except Exception as e:
-        print(f"Error executing theological audit for {project_id}: {e}")
+        print(f"Error loading final text chunk for theological audit {project_id}: {e}")
         return {"error": f"Error executing theological audit: {str(e)}"}
 
 def get_theological_audit_result(project_id: str, chunk_id: str) -> Optional[dict]:

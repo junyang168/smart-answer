@@ -23,7 +23,6 @@ from backend.api.sermon_converter_service import (
     save_sermon_draft,
     commit_sermon_project,
     export_sermon_to_doc,
-    audit_sermon_draft,
     update_sermon_project_metadata,
     NoteImage,
     Segment,
@@ -264,40 +263,59 @@ def get_projects() -> List[SermonProject]:
     return list_sermon_projects()
 
 @router.post("/sermon-project/{project_id}/audit-draft")
-def audit_draft_endpoint(project_id: str):
+def audit_draft_endpoint(project_id: str, payload: ChunkAuditRequest):
     """
-    Review the sermon draft against the original notes using Gemini.
+    Review a specific final chunk against the original notes using OpenAI structured outputs to determine fidelity.
     """
+    from backend.api.sermon_converter_service import fidelity_audit_chunk
     try:
-        audit_result = audit_sermon_draft(project_id)
+        audit_result = fidelity_audit_chunk(project_id, payload.chunk_id)
         return {"status": "success", "audit_result": audit_result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/sermon-project/{project_id}/force-audit-pass")
-def force_audit_pass_endpoint(project_id: str):
+def force_audit_pass_endpoint(project_id: str, payload: ChunkAuditRequest):
     """
-    Manually force the audit to pass.
+    Manually force the fidelity audit to pass for a specific chunk.
     """
     from backend.api.sermon_converter_service import force_audit_pass
     try:
-        force_audit_pass(project_id)
+        force_audit_pass(project_id, payload.chunk_id)
         return {"status": "success", "message": "Audit forcefully passed."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sermon-project/{project_id}/audit-result")
-def get_audit_result_endpoint(project_id: str):
+def get_audit_result_endpoint(project_id: str, chunk_id: str):
     """
-    Fetch the persisted AI audit result for the sermon draft.
+    Fetch the persisted AI fidelity audit result for the specific chunk.
     """
     from backend.api.sermon_converter_service import get_sermon_audit_result
     try:
-        audit_result = get_sermon_audit_result(project_id)
+        audit_result = get_sermon_audit_result(project_id, chunk_id)
         if not audit_result:
-            return {"status": "success", "audit_result": None, "message": "No audit result found."}
+             return {"status": "success", "audit_result": None, "message": "No audit result found."}
         return {"status": "success", "audit_result": audit_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sermon-project/{project_id}/draft/chunks")
+def get_draft_chunks_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import get_draft_chunks
+    try:
+        chunks = get_draft_chunks(project_id)
+        return {"chunks": chunks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sermon-project/{project_id}/draft/chunk/{chunk_id}")
+def save_project_draft_chunk(project_id: str, chunk_id: str, payload: SaveSourceRequest):
+    from backend.api.sermon_converter_service import update_draft_chunk
+    try:
+        update_draft_chunk(project_id, chunk_id, payload.content)
+        return {"status": "success", "message": f"Draft chunk {chunk_id} saved."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

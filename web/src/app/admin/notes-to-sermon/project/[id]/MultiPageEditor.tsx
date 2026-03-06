@@ -6,7 +6,6 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import "easymde/dist/easymde.min.css";
 
-import AiCommandPanel from "./AiCommandPanel";
 
 const SimpleMDE = dynamic(() => import("react-simplemde-editor"), {
     ssr: false,
@@ -106,16 +105,15 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             try {
                 // Fetch Content based on mode
                 const endpoint = viewMode;
-                if (endpoint === 'final') {
-                    const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunks`, {
+                if (endpoint === 'final' || endpoint === 'draft') {
+                    const chunkRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}/chunks`, {
                         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
                     });
-                    if (finalRes.ok) {
-                        const finalData = await finalRes.json();
-                        const loadedChunks = finalData.chunks || [];
+                    if (chunkRes.ok) {
+                        const chunkData = await chunkRes.json();
+                        const loadedChunks = chunkData.chunks || [];
                         setChunks(loadedChunks);
                         if (loadedChunks.length > 0) {
-                            // If we already have an active chunk, try to keep it, else pick the first
                             setActiveChunkId((currentActive) => {
                                 const target = currentActive ? (loadedChunks.find((c: any) => c.id === currentActive) || loadedChunks[0]) : loadedChunks[0];
                                 setMarkdown(target.content || "");
@@ -123,8 +121,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 return target.id;
                             });
                         } else {
-                            setMarkdown("");
-                            setOriginalMarkdown("");
+                            const fallbackRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`);
+                            if (fallbackRes.ok) {
+                                const fallbackData = await fallbackRes.json();
+                                setMarkdown(fallbackData.content || "");
+                                setOriginalMarkdown(fallbackData.content || "");
+                            }
                         }
                     }
                 } else {
@@ -244,13 +246,13 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     setProgress(null);
                     // Re-fetch content based on current viewMode
                     const endpoint = viewMode;
-                    if (endpoint === 'final') {
-                        const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunks`, {
+                    if (endpoint === 'final' || endpoint === 'draft') {
+                        const chunkRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}/chunks`, {
                             headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
                         });
-                        if (finalRes.ok) {
-                            const finalData = await finalRes.json();
-                            const loadedChunks = finalData.chunks || [];
+                        if (chunkRes.ok) {
+                            const chunkData = await chunkRes.json();
+                            const loadedChunks = chunkData.chunks || [];
                             setChunks(loadedChunks);
                             if (loadedChunks.length > 0) {
                                 setActiveChunkId((currentActive) => {
@@ -376,8 +378,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const handleSave = async (checkMode?: 'source' | 'draft' | 'final') => {
         const modeToSave = checkMode || viewMode;
         try {
-            if (modeToSave === 'final' && activeChunkId) {
-                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final/chunk/${activeChunkId}`, {
+            if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId && activeChunkId !== "FULL_DOC") {
+                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${modeToSave}/chunk/${activeChunkId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ content: markdown })
@@ -393,7 +395,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             setOriginalMarkdown(markdown); // Reset dirty flag
 
             // Sync local chunk state
-            if (modeToSave === 'final' && activeChunkId) {
+            if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId) {
                 setChunks(prev => prev.map(c => c.id === activeChunkId ? { ...c, content: markdown } : c));
             }
 
@@ -866,7 +868,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             </div>
                         </div>
 
-                        {viewMode === 'final' && chunks.length > 0 && (
+                        {(viewMode === 'final' || viewMode === 'draft') && chunks.length > 0 && (
                             <div className="mb-2 w-full flex items-center bg-indigo-50 p-2 rounded border border-indigo-100">
                                 <label className="text-sm font-bold text-indigo-900 mr-2 whitespace-nowrap">Review Chunk:</label>
                                 <select
@@ -917,10 +919,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     </div>
                     <div className={`border-l h-full ${viewMode === 'draft' || viewMode === 'final' ? 'block' : 'hidden'}`}>
                         {viewMode === 'draft' ? (
-                            <AiCommandPanel
+                            <TheologicalAuditPanel
                                 projectId={projectId}
-                                onAuditComplete={handleAuditComplete}
+                                selectedChunkId={activeChunkId}
+                                selectedChunkText={markdown}
                                 onHighlightText={handleHighlightText}
+                                mode="fidelity"
                             />
                         ) : viewMode === 'final' ? (
                             <TheologicalAuditPanel
@@ -928,6 +932,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 selectedChunkId={activeChunkId}
                                 selectedChunkText={markdown}
                                 onHighlightText={handleHighlightText}
+                                mode="theological"
                             />
                         ) : null}
                     </div>
