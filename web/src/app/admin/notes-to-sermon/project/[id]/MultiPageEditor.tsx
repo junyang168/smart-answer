@@ -474,8 +474,6 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
     };
 
-
-
     const handleCheckIn = async () => {
         if (!confirm("Commit current state to local git?")) return;
         try {
@@ -493,6 +491,25 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             }
         } catch (e) {
             alert("Check-in failed");
+        }
+    };
+
+    const handleSaveOriginal = async () => {
+        if (!confirm("Save these notes as the 'Original Notes' (original_notes.md)? This does not generate a draft.")) return;
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/original-notes`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: markdown })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                alert("Saved as Original Notes successfully!");
+            } else {
+                alert("Failed to save as original: " + (data.detail || "Unknown error"));
+            }
+        } catch (e) {
+            alert("Error saving as original notes");
         }
     };
 
@@ -873,6 +890,18 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                     </div>
                                     <span>{viewMode === 'source' ? 'Unified Manuscript' : viewMode === 'draft' ? 'Sermon Draft' : 'Master Text Final'} ({markdown.length} chars)</span>
                                 </div>
+                                {viewMode === 'source' && (
+                                    <button
+                                        onClick={handleSaveOriginal}
+                                        className="bg-purple-100 text-purple-700 hover:bg-purple-200 px-3 py-1 rounded text-sm font-bold shadow-sm flex items-center gap-1"
+                                        title="Save this text purely as original notes"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                        </svg>
+                                        Save as Original
+                                    </button>
+                                )}
                             </div>
                         </div>
 

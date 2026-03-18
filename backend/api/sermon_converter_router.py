@@ -119,6 +119,18 @@ def save_project_source(project_id: str, payload: SaveSourceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/sermon-project/{project_id}/original-notes")
+def save_project_original_notes(project_id: str, payload: SaveSourceRequest):
+    """
+    Save the given text directly as original_notes.md
+    """
+    try:
+        from backend.api.sermon_converter_service import save_sermon_original_notes
+        save_sermon_original_notes(project_id, payload.content)
+        return {"status": "success", "message": "Original notes saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Draft Generation Endpoints ---
 
 class GenerateDraftRequest(BaseModel):

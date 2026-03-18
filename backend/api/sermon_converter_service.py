@@ -209,6 +209,24 @@ def get_page_segments(filename: str) -> List[Segment]:
         )
     ]
 
+def save_sermon_source(project_id: str, content: str):
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    sermon_dir.mkdir(parents=True, exist_ok=True)
+    source_file = sermon_dir / "unified_source.md"
+    with open(source_file, "w", encoding="utf-8") as f:
+        f.write(content)
+
+def save_sermon_original_notes(project_id: str, content: str):
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    sermon_dir.mkdir(parents=True, exist_ok=True)
+    original_file = sermon_dir / "original_notes.md"
+    with open(original_file, "w", encoding="utf-8") as f:
+        f.write(content)
+
+def get_sermon_draft_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "draft.md"
+
 def create_sermon_project(title: str, pages: List[str], series_id: Optional[str] = None, lecture_id: Optional[str] = None, project_type: str = "sermon_note") -> SermonProject:
     """
     Create a new sermon project.
