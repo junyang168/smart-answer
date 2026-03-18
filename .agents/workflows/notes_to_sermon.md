@@ -30,6 +30,16 @@ Targeted Workflow(Planned)
 
 ⸻
 
+Step 0: Notes Preparation & Source Corroboration
+
+Objective
+
+After paper notes are scanned and OCRed, manually review the extracted raw text to ensure accuracy. Corroborate the digital text against another copy of the manual notes if necessary. 
+
+Modify the text to add logical flow and explicit structure so that the AI can more easily understand the theological progression before generating the exegesis manuscript.
+
+⸻
+
 Step 1: Reconstruction & Structural Stabilization Layer
 
 Objective
@@ -111,7 +121,9 @@ Prohibited After Finalization
 
 Engineering Flow Model
 
-Notes
+Notes (Raw OCR)
+  ↓
+Manual Preparation & Structural Flow Fixes (Step 0)
   ↓
 Reconstructed & Stabilized Manuscript
   ↓
@@ -164,6 +176,7 @@ The **Notes to Sermon** module (`/admin/notes-to-sermon/project/`) is designed t
 - A project is created (stored in a JSON metadata file). 
 - Images of notes can be uploaded and processed (OCR).
 - The raw transcriptions are compiled into a unified markdown file (`unified_source.md`).
+- before manual review, user will save the original notes into original_notes.md
 
 #### Step 2: Reconstruct and Stabilize the manuscript draft
 - This is done using kimi k2.5 manually outside of the system. It combines creating the manuscript and separating the content into structured categories.
