@@ -1475,7 +1475,7 @@ def export_sermon_to_doc(project_id: str) -> str:
     # Regex: Start of line, optional whitespace, >, then content.
     draft_content = re.sub(r'^\s*>.*$', preserve_blockquote_lines, draft_content, flags=re.MULTILINE)
     
-    html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes'])
+    html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes', 'fenced_code'])
     
     # Process Images (SVG -> PNG, Local -> Base64)
     html_body = _process_images_for_export(html_body)
@@ -1500,6 +1500,8 @@ def export_sermon_to_doc(project_id: str) -> str:
         table {{ border-collapse: collapse; width: 100%; margin-bottom: 12pt; }}
         th, td {{ border: 1px solid #000000; padding: 6pt 8pt; text-align: left; vertical-align: top; }}
         th {{ background-color: #f0f0f0; font-weight: bold; }}
+        pre {{ background-color: #f4f4f4; padding: 10pt; font-family: 'Courier New', Courier, monospace; white-space: pre-wrap; margin-bottom: 12pt; border-radius: 4pt; }}
+        code {{ font-family: 'Courier New', Courier, monospace; background-color: #f4f4f4; padding: 2pt 4pt; border-radius: 2pt; }}
     </style>
     </head>
     <body>
