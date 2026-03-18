@@ -49,7 +49,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         previewClass: ["editor-preview", "prose", "prose-indigo", "max-w-none", "prose-p:leading-relaxed", "prose-headings:font-bold"],
         placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : (viewMode === 'draft' ? "Generated Draft will appear here..." : "Master Text will appear here..."),
         minHeight: "500px",
-        readOnly: activeChunkId === 'FULL_DOC',
+        readOnly: false,
     }), [viewMode, projectType, activeChunkId]);
 
 
@@ -396,7 +396,17 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
 
             // Sync local chunk state
             if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId) {
-                setChunks(prev => prev.map(c => c.id === activeChunkId ? { ...c, content: markdown } : c));
+                if (activeChunkId !== "FULL_DOC") {
+                    setChunks(prev => prev.map(c => c.id === activeChunkId ? { ...c, content: markdown } : c));
+                } else {
+                    const chunkRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${modeToSave}/chunks`, {
+                        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+                    });
+                    if (chunkRes.ok) {
+                        const chunkData = await chunkRes.json();
+                        setChunks(chunkData.chunks || []);
+                    }
+                }
             }
 
             return true;
@@ -684,18 +694,16 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             Start Theological Review
                         </button>
                     )}
-                    {activeChunkId !== 'FULL_DOC' && (
-                        <button
-                            onClick={() => handleSave()}
-                            className={`px-4 py-1 rounded font-bold text-white ${markdown !== originalMarkdown ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
-                        >
-                            {markdown !== originalMarkdown ? 'Save*' : 'Saved'}
-                        </button>
-                    )}
+                    <button
+                        onClick={() => handleSave()}
+                        className={`px-4 py-1 rounded font-bold text-white ${markdown !== originalMarkdown ? 'bg-red-500 hover:bg-red-600' : 'bg-green-600 hover:bg-green-700'}`}
+                    >
+                        {markdown !== originalMarkdown ? 'Save*' : 'Saved'}
+                    </button>
                     <button
                         onClick={handleCheckIn}
                         disabled={auditPassed !== true}
-                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-gray-700 bg-gray-200 hover:bg-gray-300' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
+                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-white bg-gray-800 hover:bg-gray-900' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
                         title={auditPassed === true ? "Commit to local git" : "Must pass AI Audit first"}
                     >
                         Check In
@@ -897,7 +905,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                         }
                                     }}
                                 >
-                                    <option value="FULL_DOC">🌟 Preview Full Document (Read-Only)</option>
+                                    <option value="FULL_DOC">🌟 Full Document</option>
                                     {chunks.map(c => (
                                         <option key={c.id} value={c.id}>
                                             {c.title} — ({c.char_len} chars)

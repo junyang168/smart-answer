@@ -2012,7 +2012,7 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
 
         user_prompt = f"【笔记】\n{source_content}\n\n【逐字稿】\n{draft_content}"
         
-        return run_structured_chunk_audit(
+        result = run_structured_chunk_audit(
             project_id=project_id,
             chunk_id=chunk_id,
             input_text=user_prompt,
@@ -2020,6 +2020,11 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
             json_schema=AUDIT_SCHEMA,
             output_filename="fidelity_audit.json"
         )
+        
+        # After completing the audit, check if we need to update the global project flag
+        check_and_update_project_audit_status(project_id)
+        
+        return result
 
     except Exception as e:
         print(f"Error loading source data for fidelity audit {chunk_id} in {project_id}: {e}")
@@ -2054,7 +2059,57 @@ def force_audit_pass(project_id: str, chunk_id: str) -> bool:
         with open(audit_file, "w", encoding="utf-8") as f:
             json.dump(existing_audits, f, indent=2, ensure_ascii=False)
             
+    # Re-evaluate global project audit status
+    check_and_update_project_audit_status(project_id)
+            
     return True
+
+def check_and_update_project_audit_status(project_id: str) -> bool:
+    """
+    Checks if all draft chunks have a passed fidelity audit.
+    If so, sets the project's meta.json `audit_passed` flag to True.
+    """
+    import json
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    if not sermon_dir.exists():
+        return False
+        
+    meta_file = sermon_dir / "meta.json"
+    audit_file = sermon_dir / "fidelity_audit.json"
+    chunks_meta_file = sermon_dir / "draft_chunks_meta.json"
+    
+    if not (meta_file.exists() and audit_file.exists() and chunks_meta_file.exists()):
+        return False
+        
+    try:
+        with open(chunks_meta_file, "r", encoding="utf-8") as f:
+            chunks = json.load(f)
+            
+        with open(audit_file, "r", encoding="utf-8") as f:
+            audits = json.load(f)
+            
+        all_passed = True
+        for chunk in chunks:
+            chunk_id = chunk.get("id")
+            if not chunk_id:
+                continue
+            audit = audits.get(chunk_id)
+            if not audit or not audit.get("pass"):
+                all_passed = False
+                break
+                
+        with open(meta_file, "r", encoding="utf-8") as f:
+            meta_data = json.load(f)
+            
+        if meta_data.get("audit_passed") != all_passed:
+            meta_data["audit_passed"] = all_passed
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, indent=2)
+                
+        return all_passed
+    except Exception as e:
+        print(f"Error checking project audit status for {project_id}: {e}")
+        return False
 
 
 # ======================

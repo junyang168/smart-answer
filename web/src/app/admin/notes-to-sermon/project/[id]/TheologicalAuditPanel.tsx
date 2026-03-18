@@ -366,9 +366,9 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                 {activeTab === 'theological' ? (
                     <button
                         onClick={() => handleAuditClick('theological')}
-                        disabled={isTheoAuditing || !selectedChunkId}
+                        disabled={isTheoAuditing || !selectedChunkId || selectedChunkId === 'FULL_DOC'}
                         className={`w-full py-3 rounded font-bold text-white shadow transition-colors flex justify-center items-center gap-2 
-                        ${isTheoAuditing || !selectedChunkId ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'}`}
+                        ${isTheoAuditing || !selectedChunkId || selectedChunkId === 'FULL_DOC' ? 'bg-purple-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700'}`}
                     >
                         {isTheoAuditing ? (
                             <>
@@ -379,15 +379,15 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                                 神學審閱中 (約 30 秒)...
                             </>
                         ) : (
-                            selectedChunkId ? "🚀 執行神學邊界審閱" : "請先選擇 Review Chunk"
+                            selectedChunkId && selectedChunkId !== 'FULL_DOC' ? "🚀 執行神學邊界審閱" : "請先選擇 Review Chunk"
                         )}
                     </button>
                 ) : (
                     <button
                         onClick={() => handleAuditClick('fidelity')}
-                        disabled={isFidelityAuditing || !selectedChunkId}
+                        disabled={isFidelityAuditing || !selectedChunkId || selectedChunkId === 'FULL_DOC'}
                         className={`w-full py-3 rounded font-bold text-white shadow transition-colors flex justify-center items-center gap-2 
-                        ${isFidelityAuditing || !selectedChunkId ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                        ${isFidelityAuditing || !selectedChunkId || selectedChunkId === 'FULL_DOC' ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                     >
                         {isFidelityAuditing ? (
                             <>
@@ -398,7 +398,7 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                                 忠實度審核中 (約 30 秒)...
                             </>
                         ) : (
-                            selectedChunkId ? "🛡️ 執行忠實度審核" : "請先選擇 Review Chunk"
+                            selectedChunkId && selectedChunkId !== 'FULL_DOC' ? "🛡️ 執行忠實度審核" : "請先選擇 Review Chunk"
                         )}
                     </button>
                 )}
