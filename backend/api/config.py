@@ -34,9 +34,10 @@ PPT_TEMPLATE_FILE: Final[Path] = SUNDAY_WORSHIP_DIR / "template.pptx"
 
 WEBCAST_DIR: Final[Path] = DATA_BASE_PATH / "webcast"
 DEPTH_OF_FAITH_FILE: Final[Path] = WEBCAST_DIR / "depth_of_faith.json"
+SERMON_TO_VIDEO_DIR: Final[Path] = DATA_BASE_PATH / "sermon_to_video"
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
-GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY1")
 
 # RAG Configuration
 GOOGLE_CLOUD_PROJECT: Final[str] = os.getenv("GOOGLE_CLOUD_PROJECT", "gen-lang-client-0011233318")
@@ -49,3 +50,7 @@ MAS_LLM_PROVIDER: Final[str] = os.getenv("MAS_LLM_PROVIDER", "gemini")  # "gemin
 OPENAI_COMPATIBLE_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_COMPATIBLE_API_KEY")
 OPENAI_COMPATIBLE_BASE_URL: Final[str] = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.moonshot.cn/v1")
 OPENAI_COMPATIBLE_MODEL: Final[str] = os.getenv("OPENAI_COMPATIBLE_MODEL", "kimi-k2-5")
+
+# Azure TTS Configuration
+AZURE_SPEECH_KEY: Final[Optional[str]] = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION: Final[Optional[str]] = os.getenv("AZURE_SPEECH_REGION")

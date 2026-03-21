@@ -12,11 +12,11 @@ from .config import GENERATION_MODEL, GEMINI_API_KEY, GOOGLE_CLOUD_PROJECT
 
 class GeminiClient:
     def __init__(self) -> None:
-        # 1. Standard Client (Gemini 1.5/2.0 Pro/Flash etc via AI Studio or Default ADC)
+        # 1. Standard Client (Gemini 1.5/2.0 Pro/Flash etc via AI Studio)
         if GEMINI_API_KEY:
-            self._client = genai.Client(api_key=GEMINI_API_KEY)
+            self._client = genai.Client(api_key=GEMINI_API_KEY, vertexai=False)
         else:
-            self._client = genai.Client()
+            self._client = genai.Client(vertexai=False)
             
         # 2. Vertex Client (For Gemini 3.0 Pro Preview)
         # Gemini 3 is strictly locked to global region on Vertex currently
@@ -33,10 +33,8 @@ class GeminiClient:
     def _get_client_for_model(self, model: str):
         """
         Selects the appropriate client based on the model.
-        Gemini 3 Pro Preview requires Vertex AI.
+        Gemini 3 Pro Preview is available natively on AI Studio.
         """
-        if "gemini-3" in model and self._vertex_client:
-            return self._vertex_client
         return self._client
 
     def generate_raw(self, contents, config=None, model=GENERATION_MODEL):

@@ -23,3 +23,8 @@ cairosvg
 cssutils
 defusedxml
 openai>=1.0
+typer[all]
+rich
+azure-cognitiveservices-speech
+moviepy
+mutagen
