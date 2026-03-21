@@ -31,21 +31,23 @@ A pure Python Console App. Core functionality: Read a literal transcript (markdo
 - Generates Images/Videos for each scene.
 - Automatically handles **Slow Motion**: If a video source is shorter than its audio, it is slowed down to match exactly.
 
-### Phase 4: Assembly & Advanced Typography
+### Phase 4: Assembly, Animation & Typography
 - **Resolution**: Enforces global **1920x1080** (Full HD) via aspect-ratio-preserving center-crop.
-- **Title Mode**: Text prefixed with `#` (e.g., `"#Welcome"`) renders as a **130px** centered title with thick stroke.
-- **Bible Verse Mode**: Detects multi-line verses, providing **18px interline** spacing and auto-scaling.
-- **Subtitles**: Standard 70px centered captions for regular overlay text.
+- **Ken Burns Animation**: Reads `motions.json` to dynamically scale and pan still images.
+- **Title Mode**: Text prefixed with `#` renders as a **130px** centered title with thick stroke.
 
-### Phase 5: Final Concatenation
-- Joins all scenes using **Hard Cuts** to preserve A/V sync (Dissolve crossfades are avoided to prevent progressive audio drift).
+### Phase 5: Final Concatenation & Transitions
+- Joins all scenes chronologically using pure FFmpeg `subprocess` execution.
+- Resolves `motions.json` dissolve transitions by injecting explicit `xfade` overlap lengths into an advanced FFmpeg Complex Filtergraph.
+- Applies strict 24fps CFR and `1/1000000` timebase normalization to ensure perfect Audio/Video sync.
 
-### Phase 6: Closed Captioning (SRT)
-- Uses `opencc` to convert voiceover text to **Traditional Chinese**.
-- Generates a `.srt` sidecar file with timestamps synced to the master audio.
+### Phase 6: Subtitles (Whisper AI)
+- Uses `Whisper` and `gpt-5.4-mini` to transcribe and convert voiceover to **Traditional Chinese**.
+- Subdivides generated blocks mathematically into rapid-reading, single-line (max 15 characters) sequential SRT entries.
+- **Human-in-the-Loop Override**: Bypasses AI generation entirely if it detects an existing `.srt` file, protecting user's manual typo corrections.
 
-### Phase 7: Subtitle Muxing
-- Uses `ffmpeg` to embed the SRT as a **Soft Subtitle Track** (mov_text) into the MP4 container.
+### Phase 7: Subtitle Hardsub Muxing
+- Uses `ffmpeg -vf subtitles` to permanently burn the finalized SRT text directly onto the H.264 pixels as cinematic hardsubs.
 
 ## 5. Usage & Selective Execution
 The `render` command supports skipping to specific phases:

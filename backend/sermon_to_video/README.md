@@ -47,16 +47,25 @@ Skip time-consuming steps (like TTS or AI Image generation) if you are just twea
 python -m backend.sermon_to_video.cli render ... --start-phase 4
 ```
 
+### Dissolve Transitions (Xfade)
+In `motions.json`, add a transition parameter to seamlessly crossfade between scenes via FFmpeg without losing audio sync:
+```json
+"transition": {"type": "dissolve", "duration": 1.0}
+```
+
+### Manual Subtitle Override (Phase 6)
+If you spot a typo in the generated `.srt` file, simply fix it in your text editor and save. Phase 6 will now **automatically skip** AI generation if an `.srt` file already exists! Then, run `--start-phase 5` to quickly merge the video and burn your fixed text gracefully.
+
 ---
 
 ## 🏗️ The 7-Phase Pipeline
 1. **Setup**: Initialize environment and read storyboard.
-2. **Audio (TTS)**: Synthesize voiceover via Azure TTS.
+2. **Audio (TTS)**: Synthesize Azure TTS and auto-save extracted `duration_sec` back into JSON to prevent drift.
 3. **Visuals (AI)**: Generate B-Roll via Imagen 3 (Nano Banana 2).
-4. **Assembly**: Render individual scenes with advanced typography.
-5. **Concat**: Merge scenes into a unified video (Hard Cuts for A/V sync).
-6. **SRT**: Generate Traditional Chinese Closed Caption file.
-7. **Mux**: Embed the SRT into the MP4 container as softsubs.
+4. **Assembly**: Render scenes natively applying typography and Ken Burns (`vfx.resize`) animations.
+5. **Concat**: Build dynamic FFmpeg graphs to merge all scenes (Hard Cuts & Xfade Dissolves).
+6. **SRT**: Generate Traditional Chinese Captions (Whisper AI + Math single-line split) or preserve manual edits.
+7. **Mux**: Permanently burn (Hardsub) the SRT directly into the 1080p MP4.
 
 ## 📂 Project Structure
 - `cli.py`: The main entry point.

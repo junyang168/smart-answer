@@ -95,17 +95,60 @@ def generate_srt(storyboard: list, output_path: Path) -> Path:
             
         refined_dict = json.loads(raw_output.strip())
         
-        # Step 4: Reconstruct SRT
+        # Time parsing helpers
+        def parse_srt_time(time_str):
+            h, m, s_ms = time_str.split(':')
+            s, ms = s_ms.split(',')
+            return int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(ms)
+
+        def format_srt_time(ms_time):
+            ms_time = int(ms_time)
+            h = ms_time // 3600000
+            m = (ms_time % 3600000) // 60000
+            s = (ms_time % 60000) // 1000
+            ms = ms_time % 1000
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+        # Step 4: Reconstruct SRT with mathematical multi-line chunking
         final_srt_lines = []
+        current_idx = 1
+        
         for item in srt_data:
             idx = item["id"]
-            final_srt_lines.append(idx)
-            final_srt_lines.append(item["time"])
-            
-            # Use refined text if available, fallback to original
-            final_text = refined_dict.get(idx, item["text"])
-            final_srt_lines.append(final_text)
-            final_srt_lines.append("") # Blank line separator
+            if idx in refined_dict:
+                text_content = refined_dict[idx].strip()
+                lines = text_content.split('\n')
+                
+                # We want exactly 1 line per SRT chunk for modern fast-paced reading
+                chunks = []
+                for line in lines:
+                    line = line.strip()
+                    if line:
+                        chunks.append(line)
+                
+                time_str = item["time"]
+                start_str, end_str = time_str.split(' --> ')
+                start_ms = parse_srt_time(start_str.strip())
+                end_ms = parse_srt_time(end_str.strip())
+                
+                chunk_duration = (end_ms - start_ms) / len(chunks)
+                
+                for i, chunk in enumerate(chunks):
+                    c_start_ms = start_ms + i * chunk_duration
+                    c_end_ms = start_ms + (i + 1) * chunk_duration
+                    c_time_str = f"{format_srt_time(c_start_ms)} --> {format_srt_time(c_end_ms)}"
+                    
+                    final_srt_lines.append(str(current_idx))
+                    final_srt_lines.append(c_time_str)
+                    final_srt_lines.append(chunk)
+                    final_srt_lines.append("")
+                    current_idx += 1
+            else: # Fallback to original Whisper text if GPT-5.4 didn't process it
+                final_srt_lines.append(str(current_idx))
+                final_srt_lines.append(item["time"])
+                final_srt_lines.append(item["text"])
+                final_srt_lines.append("")
+                current_idx += 1
             
         final_srt_str = "\n".join(final_srt_lines).strip()
         

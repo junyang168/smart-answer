@@ -68,6 +68,10 @@ def render(
     if start_phase <= 2:
         with console.status("[bold yellow]Phase 2: Synthesizing Voiceover Audio with Azure TTS..."):
             storyboard_data = process_audio_for_scenes(storyboard_data, work_dir)
+            
+            # CRITICAL: Save exact calculated durations to JSON so phase skipping doesn't break A/V sync!
+            with open(input_file, "w", encoding="utf-8") as f:
+                json.dump(storyboard_data, f, indent=4, ensure_ascii=False)
     else:
         # Load pre-existing audio data if skipped
         audio_filepath = work_dir / "full_audio.mp3"
@@ -83,52 +87,125 @@ def render(
     # Phase 4: Assembly
     if start_phase <= 4:
         with console.status("[bold magenta]Phase 4: Assembling Scenes and Syncing text..."):
+            motions_file = work_dir / "motions.json"
+            motions_data = {}
+            if motions_file.exists():
+                try:
+                    with open(motions_file, "r", encoding="utf-8") as f:
+                        md = json.load(f)
+                        for m in md.get("motions", []):
+                            motions_data[m.get("scene_id")] = m
+                except Exception as e:
+                    console.print(f"[bold yellow]Warning: Could not parse motions.json: {e}[/bold yellow]")
+                    
             for item in storyboard_data:
                 scene_id = item.get("scene_id")
-                scene_output = work_dir / f"scene_{scene_id}_final.mp4"
                 
-                console.print(f"  -> Assembling Scene {scene_id} ({item.get('duration_sec')}s)...")
-                final_scene_path = assemble_scene(item, str(scene_output), font_path=str(font_path) if font_path else None)
+                # Auto-discover visual_filepath if skipped Phase 3
+                if not item.get("visual_filepath") and not item.get("visual_source"):
+                    jpg_path = work_dir / f"scene_{scene_id}_visual.jpg"
+                    png_path = work_dir / f"scene_{scene_id}_visual.png"
+                    if jpg_path.exists():
+                        item["visual_filepath"] = str(jpg_path)
+                    elif png_path.exists():
+                        item["visual_filepath"] = str(png_path)
+                        
+                scene_output = work_dir / f"scene_{scene_id}_final.mp4"
+                scene_motion = motions_data.get(scene_id)
+                
+                # Extract transition to extend duration_sec
+                trans_dur = 0.0
+                if scene_motion and "transition" in scene_motion:
+                    trans = scene_motion["transition"]
+                    if trans.get("type") == "dissolve":
+                        trans_dur = float(trans.get("duration", 0.0))
+                
+                item["transition_duration"] = trans_dur
+                item["render_duration"] = item.get("duration_sec", 5.0) + trans_dur
+                
+                if trans_dur > 0:
+                    console.print(f"  -> Assembling Scene {scene_id} ({item.get('duration_sec'):.2f}s + {trans_dur}s xfade padding)...")
+                else:
+                    console.print(f"  -> Assembling Scene {scene_id} ({item.get('duration_sec'):.2f}s)...")
+                    
+                final_scene_path = assemble_scene(item, str(scene_output), font_path=str(font_path) if font_path else None, motion_data=scene_motion)
                 item["final_scene_filepath"] = final_scene_path
             
     # Phase 5: Concat
     if start_phase <= 5:
         with console.status("[bold green]Phase 5: Concatenating all scenes into Final Video..."):
+            from backend.sermon_to_video.core.concat import concatenate_and_cleanup
+            
+            # Reattach motions_data
+            motions_data = {}
+            motions_path = work_dir / "motions.json"
+            if motions_path.exists():
+                with open(motions_path, "r", encoding="utf-8") as f:
+                    md = json.load(f)
+                    for m in md.get("motions", []):
+                        motions_data[m.get("scene_id")] = m
+                        
+            for item in storyboard_data:
+                scene_id = item.get("scene_id")
+                if 'final_scene_filepath' not in item:
+                    item['final_scene_filepath'] = str(work_dir / f"scene_{scene_id}_final.mp4")
+                
+                # Reattach transition duration
+                scene_motion = motions_data.get(scene_id)
+                trans_dur = 0.0
+                if scene_motion and "transition" in scene_motion:
+                    trans = scene_motion["transition"]
+                    if trans.get("type") == "dissolve":
+                        trans_dur = float(trans.get("duration", 0.0))
+                item["transition_duration"] = trans_dur
+                    
             concatenate_and_cleanup(storyboard_data, output_file, work_dir)
     
     # Phase 6: Generate Closed Captions (Traditional Chinese SRT)
     srt_path = output_file.with_suffix(".srt")
     if start_phase <= 6:
-        with console.status("[bold yellow]Phase 6: Generating Closed Captions (Traditional Chinese)..."):
-            from backend.sermon_to_video.core.subtitle import generate_srt
-            generate_srt(storyboard_data, srt_path)
+        if srt_path.exists():
+            console.print(f"[bold green]Phase 6 Skipped: Found existing {srt_path.name}, preserving your manual edits![/bold green]")
+        else:
+            with console.status("[bold yellow]Phase 6: Generating Closed Captions (Traditional Chinese)..."):
+                from backend.sermon_to_video.core.subtitle import generate_srt
+                generate_srt(storyboard_data, srt_path)
     
-    # Phase 7: Embed Subtitles into MP4 (Softsubs)
+    # Phase 7: Burn Subtitles into MP4 (Hardsubs)
     final_output = output_file
     if start_phase <= 7 and srt_path.exists():
-        with console.status("[bold blue]Phase 7: Embedding Subtitles into MP4..."):
+        with console.status("[bold blue]Phase 7: Burning Subtitles into MP4 (Hardsubs)..."):
             import subprocess
+            import shutil
             temp_output = output_file.parent / f"temp_{output_file.name}"
-            # Mux SRT into MP4 as mov_text stream
+            
+            # Avoid ffmpeg string escaping issues by copying SRT to a simple local name
+            safe_srt = srt_path.name.replace(" ", "_")
+            safe_srt_path = output_file.parent / safe_srt
+            if str(srt_path) != str(safe_srt_path):
+                shutil.copy(srt_path, safe_srt_path)
+                
+            # Burn SRT into MP4 pixels
             cmd = [
                 "ffmpeg", "-y",
-                "-i", str(output_file),
-                "-i", str(srt_path),
-                "-map", "0:v",
-                "-map", "0:a",
-                "-map", "1:s",
-                "-c", "copy",
-                "-c:s", "mov_text",
-                "-metadata:s:s:0", "language=chi",
-                "-metadata:s:s:0", "title=Traditional Chinese CC",
-                str(temp_output)
+                "-i", str(output_file.name),
+                "-vf", f"subtitles={safe_srt}:force_style='Fontname=Arial,Fontsize=16,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=1,Outline=1,Alignment=2,MarginV=30'",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-c:a", "copy",
+                str(temp_output.name)
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, cwd=str(output_file.parent), capture_output=True, text=True)
+            
+            # Cleanup safe copy
+            if str(srt_path) != str(safe_srt_path) and safe_srt_path.exists():
+                safe_srt_path.unlink()
+                
             if result.returncode == 0:
                 temp_output.replace(output_file)
-                console.print(f"🎬 [bold blue]Subtitles embedded into MP4 container![/bold blue]")
+                console.print(f"🎬 [bold blue]Subtitles permanently burned into video![/bold blue]")
             else:
-                console.print(f"⚠️ [bold red]Failed to embed subtitles:[/bold red] {result.stderr}")
+                console.print(f"⚠️ [bold red]Failed to burn subtitles:[/bold red] {result.stderr}")
             
     console.print(f"\n[bold green]Successfully Generated Video:[/bold green] {output_file}")
 

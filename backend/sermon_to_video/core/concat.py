@@ -1,73 +1,112 @@
 import os
+import subprocess
 from pathlib import Path
-from moviepy import VideoFileClip, concatenate_videoclips
-
+from moviepy import VideoFileClip
 
 def concatenate_and_cleanup(storyboard: list, output_file: Path, work_dir: Path):
     """
-    Concatenates all final scene clips into one output file and cleans up temporary files.
+    Concatenates all final scene clips into one output file using FFmpeg complex filtergraphs.
+    Supports both hard cuts (concat) and dissolves (xfade) natively while keeping global A/V sync.
     """
-    # 1. Gather scene clips
-    clips = []
     scene_files = []
     
     for item in sorted(storyboard, key=lambda x: x.get("scene_id", 0)):
         scene_mp4 = item.get("final_scene_filepath")
         if scene_mp4 and os.path.exists(scene_mp4):
-            clips.append(VideoFileClip(scene_mp4))
-            scene_files.append(scene_mp4)
+            scene_files.append((item, scene_mp4))
             
-    if not clips:
+    if not scene_files:
         print("No scenes generated to concatenate.")
         return
         
-    print(f"Concatenating {len(clips)} scenes with hard cuts (audio-safe)...")
-    final_video = concatenate_videoclips(clips, method="compose")
+    if len(scene_files) == 1:
+        import shutil
+        shutil.copy(scene_files[0][1], str(output_file))
+        return
+
+    print(f"Building FFmpeg complex filtergraph for {len(scene_files)} scenes...")
     
-    # Apply the global audio track to the entirely concatenated video
-    full_audio_path = work_dir / "full_audio.mp3"
-    if full_audio_path.exists():
-        from moviepy import AudioFileClip
-        full_audio_clip = AudioFileClip(str(full_audio_path))
+    inputs = []
+    for _, mp4_path in scene_files:
+        inputs.extend(["-i", str(mp4_path)])
         
-        # Check for BGM manually placed in the project directory
-        bgm_path = work_dir / "bgm.mp3"
-        if not bgm_path.exists():
-            bgm_path = work_dir / "bgm.wav"
+    norm_filters = []
+    for idx in range(len(scene_files)):
+        norm_filters.append(f"[{idx}:v]format=yuv420p,setpts=PTS-STARTPTS,fps=24,settb=1/1000000[norm{idx}]")
+        
+    filter_graph = ";".join(norm_filters) + ";"
+    current_v = "[norm0]"
+    accumulated_offset = 0.0
+    
+    for i in range(1, len(scene_files)):
+        prev_item, prev_mp4 = scene_files[i-1]
+        next_v = f"[norm{i}]"
+        out_v = f"[v{i}]"
+        
+        # Determine if there is a transition from i-1 to i
+        trans_dur = float(prev_item.get("transition_duration", 0.0))
+        
+        # Read actual rendered duration accurately
+        clip = VideoFileClip(str(prev_mp4))
+        actual_dur = clip.duration
+        clip.close()
             
-        if bgm_path.exists():
-            from moviepy import CompositeAudioClip
-            from moviepy.audio.fx import MultiplyVolume, AudioLoop
-            print(f"🎵 Found BGM at {bgm_path.name}, mixing with voiceover...")
-            
-            bgm_clip = AudioFileClip(str(bgm_path))
-            bgm_clip = bgm_clip.with_effects([
-                AudioLoop(duration=full_audio_clip.duration),
-                MultiplyVolume(0.12)  # 12% max master volume
-            ])
-            
-            final_audio = CompositeAudioClip([full_audio_clip, bgm_clip])
-            final_video = final_video.with_audio(final_audio)
+        if trans_dur > 0:
+            accumulated_offset += (actual_dur - trans_dur)
+            filter_graph += f"{current_v}{next_v}xfade=transition=fade:duration={trans_dur}:offset={accumulated_offset},fps=24,settb=1/1000000[v{i}];"
         else:
-            final_video = final_video.with_audio(full_audio_clip)
+            filter_graph += f"{current_v}{next_v}concat=n=2:v=1:a=0,fps=24,settb=1/1000000[v{i}];"
+            accumulated_offset += actual_dur
+            
+        current_v = out_v
         
-    # Write final
-    output_path = str(output_file)
-    print(f"MoviePy - Writing video {output_path}")
-    final_video.write_videofile(
-        output_path,
-        fps=24,
-        codec="libx264",
-        audio_codec="aac",
-        ffmpeg_params=["-pix_fmt", "yuv420p"]
-    )
+    filter_graph = filter_graph.rstrip(";")
     
-    # Close clips
-    final_video.close()
-    if 'full_audio_clip' in locals():
-        full_audio_clip.close()
-    for c in clips:
-        c.close()
+    # Audio mapping
+    full_audio_path = work_dir / "full_audio.mp3"
+    bgm_path = work_dir / "bgm.mp3"
+    if not bgm_path.exists():
+        bgm_path = work_dir / "bgm.wav"
         
-    print("Concatenation complete. Temporary files are preserved in the working directory.")
-    # Cleanup disabled as per user request to preserve all data files
+    audio_filter = ""
+    audio_map = ""
+    
+    if full_audio_path.exists():
+        inputs.extend(["-i", str(full_audio_path)])
+        audio_idx = len(scene_files)
+        
+        if bgm_path.exists():
+            inputs.extend(["-i", str(bgm_path)])
+            bgm_idx = audio_idx + 1
+            audio_filter = f"[{bgm_idx}:a]volume=0.12[bgm];[{audio_idx}:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+            audio_map = "[aout]"
+        else:
+            audio_map = f"{audio_idx}:a"
+            
+    cmd = [
+        "ffmpeg", "-y"
+    ] + inputs + [
+        "-filter_complex", filter_graph + (";" + audio_filter if audio_filter else ""),
+        "-map", current_v
+    ]
+    
+    if audio_map:
+        cmd.extend(["-map", audio_map])
+        
+    cmd.extend([
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-pix_fmt", "yuv420p",
+        "-r", "24",
+        "-preset", "fast",
+        str(output_file)
+    ])
+    
+    print(f"🎬 Executing pure FFmpeg Concat & Xfade...")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"🛑 FFmpeg Xfade failed:\n{result.stderr}")
+        raise RuntimeError("FFmpeg xfade processing failed.")
+    
+    print("✅ Concatenation and Xfade natively processed in C!")
