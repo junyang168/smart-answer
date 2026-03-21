@@ -51,6 +51,9 @@ OPENAI_COMPATIBLE_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_COMPATIBLE_A
 OPENAI_COMPATIBLE_BASE_URL: Final[str] = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.moonshot.cn/v1")
 OPENAI_COMPATIBLE_MODEL: Final[str] = os.getenv("OPENAI_COMPATIBLE_MODEL", "kimi-k2-5")
 
+# Standard OpenAI Key for Whisper and GPT-4o
+OPENAI_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_API_KEY")
+
 # Azure TTS Configuration
 AZURE_SPEECH_KEY: Final[Optional[str]] = os.getenv("AZURE_SPEECH_KEY")
 AZURE_SPEECH_REGION: Final[Optional[str]] = os.getenv("AZURE_SPEECH_REGION")

@@ -1,75 +1,120 @@
 """
-subtitle.py - Generate SRT Closed Caption files in Traditional Chinese
-Uses opencc to convert Simplified Chinese voiceover text, and Azure TTS scene
-bookmarks for timing alignment.
+subtitle.py - Generate natural, organic SRT Closed Captions
+Uses OpenAI Whisper on the actual audio file to get phrase-level timestamps, 
+and OpenAI GPT-4o to dynamically restructure line breaks and output Traditional Chinese.
 """
 from pathlib import Path
-
-
-def seconds_to_srt_time(t: float) -> str:
-    """Convert float seconds to SRT timestamp format: HH:MM:SS,mmm"""
-    h = int(t // 3600)
-    m = int((t % 3600) // 60)
-    s = int(t % 60)
-    ms = int(round((t - int(t)) * 1000))
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
+from openai import OpenAI
+from backend.api.config import OPENAI_API_KEY
 
 def generate_srt(storyboard: list, output_path: Path) -> Path:
     """
-    Generate a .srt subtitle file from scene timestamps and voiceover text.
-    Converts Simplified Chinese → Traditional Chinese via opencc.
+    Extract perfectly timed, organically structured traditional Chinese SRT.
     
     Args:
-        storyboard: List of scene dicts, each must have:
-                    - duration_sec (float)
-                    - voiceover_text (str, Simplified Chinese)
-                    - scene_id (int)
-        output_path: Where to write the .srt file (e.g., work_dir / "captions.srt")
+        storyboard: The storyboard (used simply to locate the audio files directory)
+        output_path: Where to save the final SRT
     Returns:
         Path to the generated .srt file
     """
-    try:
-        import opencc
-        converter = opencc.OpenCC('s2t')  # Simplified → Traditional
-    except ImportError:
-        print("⚠️  opencc not installed. Skipping CC generation. Run: pip install opencc-python-reimplemented")
+    if not OPENAI_API_KEY:
+        print("⚠️ OPENAI_API_KEY is missing from .env. Skipping advanced CC generation.")
         return None
-
-    entries = []
-    accumulated_time = 0.0
+        
+    client = OpenAI(api_key=OPENAI_API_KEY, timeout=45.0)
     
-    for item in sorted(storyboard, key=lambda x: x.get("scene_id", 0)):
-        duration = item.get("duration_sec", 0.0)
-        simplified_text = item.get("voiceover_text", "").strip()
+    # Locate the combined audio file produced in Phase 2
+    work_dir = output_path.parent
+    audio_file_path = work_dir / "full_audio.mp3"
+    
+    if not audio_file_path.exists():
+        print("⚠️ full_audio.mp3 not found! Cannot generate subtitles.")
+        return None
         
-        if not simplified_text or duration <= 0:
-            accumulated_time += duration
-            continue
+    # Step 1: Extract timing via Whisper API
+    print("🎙️ Sending audio to OpenAI Whisper for precision timing...")
+    with open(audio_file_path, "rb") as audio_file:
+        raw_srt = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            response_format="srt"
+        )
         
-        # Convert to Traditional Chinese
-        traditional_text = converter.convert(simplified_text)
+    if not raw_srt:
+        print("⚠️ Whisper returned empty SRT.")
+        return None
         
-        start_t = accumulated_time
-        end_t = accumulated_time + duration
-        
-        entries.append({
-            "start": start_t,
-            "end": end_t,
-            "text": traditional_text,
-        })
-        
-        accumulated_time += duration
+    # Step 2: Parse raw SRT to isolate text
+    import re
+    import json
+    
+    # Simple SRT parser
+    blocks = raw_srt.strip().split('\n\n')
+    srt_data = []
+    text_dict = {}
+    
+    for block in blocks:
+        lines = block.split('\n')
+        if len(lines) >= 3:
+            idx = lines[0]
+            timestamp = lines[1]
+            text = " ".join(lines[2:])
+            srt_data.append({"id": idx, "time": timestamp, "text": text})
+            text_dict[idx] = text
+            
+    # Step 3: Use OpenAI's GPT-5.4-Mini to format the text only (JSON mode)
+    print("🧠 Using OpenAI GPT-5.4-Mini to organically format and translate SRT text...")
 
-    # Write SRT format
-    srt_lines = []
-    for i, entry in enumerate(entries, start=1):
-        srt_lines.append(str(i))
-        srt_lines.append(f"{seconds_to_srt_time(entry['start'])} --> {seconds_to_srt_time(entry['end'])}")
-        srt_lines.append(entry['text'])
-        srt_lines.append("")  # blank line between entries
+    sys_prompt = (
+        "你是一位專業的 YouTube 影片字幕編輯專家。\n"
+        "請將以下收到的 JSON 字典中的所有文字，進行地道的「繁體中文」轉換，並遵循以下排版規則：\n"
+        "1. 每行字幕不可超過 15 個中文字。\n"
+        "2. 如果句子過長，請在同一個區塊內自然換行（使用 \\n）。\n"
+        "3. 根據上下文修復同音字或辨識錯誤。\n"
+        "4. 你必須返回一個合法的 JSON 格式，Key 保持完全一樣，Value 是處理後的文字。"
+    )
 
-    srt_content = "\n".join(srt_lines)
-    output_path.write_text(srt_content, encoding="utf-8-sig")  # utf-8-sig for YouTube CC compatibility
-    print(f"✅ Closed Captions (Traditional Chinese) saved → {output_path}")
-    return output_path
+    try:
+        response = client.responses.create(
+            model="gpt-5.4-mini",
+            input=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": json.dumps(text_dict, ensure_ascii=False)}
+            ]
+        )
+        
+        raw_output = response.output[0].content[0].text.strip()
+        
+        # Strip potential markdown wrapping from GPT-5.4
+        if raw_output.startswith("```json"):
+            raw_output = raw_output[7:]
+        elif raw_output.startswith("```"):
+            raw_output = raw_output[3:]
+        if raw_output.endswith("```"):
+            raw_output = raw_output[:-3]
+            
+        refined_dict = json.loads(raw_output.strip())
+        
+        # Step 4: Reconstruct SRT
+        final_srt_lines = []
+        for item in srt_data:
+            idx = item["id"]
+            final_srt_lines.append(idx)
+            final_srt_lines.append(item["time"])
+            
+            # Use refined text if available, fallback to original
+            final_text = refined_dict.get(idx, item["text"])
+            final_srt_lines.append(final_text)
+            final_srt_lines.append("") # Blank line separator
+            
+        final_srt_str = "\n".join(final_srt_lines).strip()
+        
+        output_path.write_text(final_srt_str, encoding="utf-8")
+        print(f"✅ Closed Captions (Structured Traditional Chinese via OpenAI) saved → {output_path}")
+        return output_path
+        
+    except Exception as e:
+        print(f"⚠️ Error during LLM restructuring: {e}")
+        output_path.write_text(raw_srt, encoding="utf-8")
+        print(f"✅ Fallback to raw Whisper SRT saved → {output_path}")
+        return output_path

@@ -179,7 +179,7 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None) ->
                     # Regular subtitle mode: 70px
                     txt_clip = TextClip(
                         text=clean_text,
-                        font_size=int(70 * font_scale),
+                        font_size=int(55 * font_scale),
                         color='white',
                         font=resolved_font,
                         stroke_color='black',
