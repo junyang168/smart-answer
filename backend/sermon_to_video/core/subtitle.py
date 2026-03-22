@@ -65,13 +65,18 @@ def generate_srt(storyboard: list, output_path: Path) -> Path:
     # Step 3: Use OpenAI's GPT-5.4-Mini to format the text only (JSON mode)
     print("🧠 Using OpenAI GPT-5.4-Mini to organically format and translate SRT text...")
 
+    # Extract ground-truth original script from storyboard
+    original_script = " ".join([item.get("voiceover_text", "") for item in storyboard if item.get("voiceover_text")])
+
     sys_prompt = (
         "你是一位專業的 YouTube 影片字幕編輯專家。\n"
-        "請將以下收到的 JSON 字典中的所有文字，進行地道的「繁體中文」轉換，並遵循以下排版規則：\n"
+        "請將以下收到的 JSON 字典中的語音辨識字幕（包含錯字），根據我提供的【原始正確講稿】進行全面修正與「繁體中文」轉換。\n"
+        "你的目標是：讓字幕 100% 符合原始講稿的用詞，絕不能有辨識錯誤或同音字錯誤（例如：將『實實』修正回『時時』）。\n\n"
+        "【排版規則】\n"
         "1. 每行字幕不可超過 15 個中文字。\n"
         "2. 如果句子過長，請在同一個區塊內自然換行（使用 \\n）。\n"
-        "3. 根據上下文修復同音字或辨識錯誤。\n"
-        "4. 你必須返回一個合法的 JSON 格式，Key 保持完全一樣，Value 是處理後的文字。"
+        "3. 你必須返回一個合法的 JSON 格式，Key 保持與輸入的 JSON 完全一樣，Value 是精準備份原始講稿的處理後文字。\n\n"
+        f"【原始正確講稿】\n{original_script}"
     )
 
     try:

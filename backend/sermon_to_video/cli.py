@@ -86,7 +86,8 @@ def render(
         
     # Phase 4: Assembly
     if start_phase <= 4:
-        with console.status("[bold magenta]Phase 4: Assembling Scenes and Syncing text..."):
+        console.print("[bold magenta]▶ Phase 4: Assembling Scenes and Syncing text...[/bold magenta]")
+        if True:
             motions_file = work_dir / "motions.json"
             motions_data = {}
             if motions_file.exists():
