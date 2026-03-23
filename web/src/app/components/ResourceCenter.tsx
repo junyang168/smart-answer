@@ -9,7 +9,7 @@ import ResourceCard from '@/app/components/resources/ResourceCard';
 import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
 import FeaturedPostItem from '@/app/components/resources/FeaturedPostItem';
 
-import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio } from 'lucide-react';
+import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio, Play } from 'lucide-react';
 
 import type { NextPage } from 'next';
 import { apiToUiSermon} from '@/app/utils/converter'
@@ -31,11 +31,11 @@ const resourceCardsData = [
     linkLabel: '進入講道中心',
   },
   {
-    icon: BookOpen,
-    title: '團契分享',
-    description: `我們的文章源自**團契查經的講稿**。在經過弟兄姐妹們的熱烈討論後，其精華內容再由 AI 輔助潤色成稿。`,
-    link: '/resources/articles',
-    linkLabel: '瀏覽所有分享',
+    icon: Play,
+    title: '微講道',
+    description: `用簡短、清晰的內容，幫助你理解神的話語，並在生活中經歷祂的同在。這是一個安靜、專注的靈修空間。`,
+    link: '/resources/micro-sermon',
+    linkLabel: '開始觀看',
   },
   {
     icon: Radio,
@@ -43,13 +43,6 @@ const resourceCardsData = [
     description: `透過網播隨時隨地聆聽王守仁教授的聖經教導，讓信仰在日常生活中扎根、深化。`,
     link: '/resources/depth_of_faith',
     linkLabel: '開始聆聽',
-  },
-  {
-    icon: MessageCircleQuestion,
-    title: '信仰問答',
-    description: `這裡的每一個問題，都源自**弟兄姐妹在團契查經中的真實探討**。我們利用 AI 技術將這些寶貴的討論整理、潤色，形成了一份真實、貼近生活的問答集。`,
-    link: '/resources/qa',
-    linkLabel: '尋找答案',
   },
 ];
 
@@ -59,8 +52,6 @@ const resourceCardsData = [
 export const ResourceCenter = () => {
   // --- State Management ---
   const [topSermons, setTopSermons] = useState<Sermon[]>([]);
-  const [topArticles, setTopArticles] = useState<any[]>([]);
-  const [topQAs, setTopQAs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,23 +69,6 @@ export const ResourceCenter = () => {
         const apiData = await res.json();
         const transformedSermons = apiData.sermons.map(apiToUiSermon);
         setTopSermons(transformedSermons);
-        const transformedArticles = apiData.articles.map((article: any) => ({
-          title: article.title,
-          category: '團契講稿',
-          date: article.deliver_date,
-          link: `/resources/articles/${article.item}`,
-          author: article.author_name || '',
-        }));
-        setTopArticles(transformedArticles);
-
-        const topQAS = apiData.qas.map((qa: any) => ({
-          title: qa.question,
-          category: '',
-          date : qa.date_asked,
-          link: `/resources/qa/${qa.id}`,
-          author: qa.author_name || '',
-        }));
-        setTopQAs(topQAS);
 
       } catch (err: any) {
         setError(err.message || 'An unknown error occurred.');
@@ -163,27 +137,6 @@ export const ResourceCenter = () => {
             </div>
         </div>
 
-        {/* 精選文章與問答區 */}
-        <div className="container mx-auto px-6 mb-16">
-            <h2 className="text-3xl font-bold font-display text-center text-gray-800 mb-8">最新團契分享與問答</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12 max-w-5xl mx-auto">
-                {/* 文章欄 */}
-                <div className="bg-white p-6 rounded-lg shadow-sm">
-                    <h3 className="text-xl font-bold mb-4">團契分享</h3>
-                    <ul className="list-none p-0">
-                        {topArticles.map(post => <FeaturedPostItem key={post.title} { ... post } />)}
-                    </ul>
-                </div>
-                {/* 問答欄 */}
-                <div className="bg-white p-6 rounded-lg shadow-sm">
-                    <h3 className="text-xl font-bold mb-4">問答</h3>
-                    <ul className="list-none p-0">
-                        {topQAs.map(post => <FeaturedPostItem key={post.title} {...post} />)}
-                    </ul>
-                </div>
-            </div>
-        </div>
-      
       </section>
       
     </div>
