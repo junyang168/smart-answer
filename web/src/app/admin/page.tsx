@@ -41,6 +41,11 @@ const cards = [
     description: "從手寫筆記圖像生成結構化講章草稿，並支援 AI 協作修訂。",
     href: "/admin/notes-to-sermon/series",
   },
+  {
+    title: "新朋友信息",
+    description: "查看從網站首頁聯絡我們表單提交的新朋友信息與留言。",
+    href: "/admin/contacts",
+  },
 ];
 
 export default function AdminHomePage() {
