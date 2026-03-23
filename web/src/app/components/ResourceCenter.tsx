@@ -9,7 +9,7 @@ import ResourceCard from '@/app/components/resources/ResourceCard';
 import LatestSermonCard from '@/app/components/resources/LatestSermonCard';
 import FeaturedPostItem from '@/app/components/resources/FeaturedPostItem';
 
-import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio, Play } from 'lucide-react';
+import { BookOpen, BrainCircuit, Mic, FileSignature, Users, MessageCircleQuestion, Search, ArrowRight, ChevronRight, Radio, Video } from 'lucide-react';
 
 import type { NextPage } from 'next';
 import { apiToUiSermon} from '@/app/utils/converter'
@@ -31,7 +31,7 @@ const resourceCardsData = [
     linkLabel: '進入講道中心',
   },
   {
-    icon: Play,
+    icon: Video,
     title: '微講道',
     description: `用簡短、清晰的內容，幫助你理解神的話語，並在生活中經歷祂的同在。這是一個安靜、專注的靈修空間。`,
     link: '/resources/micro-sermon',
