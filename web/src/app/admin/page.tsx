@@ -51,6 +51,11 @@ const cards = [
     description: "查看並管理網站後台使用者名單及其權限角色。",
     href: "/admin/users",
   },
+  {
+    title: "微講道管理",
+    description: "管理微講道視頻內容，維護標題、系列、YouTube 連結和描述。",
+    href: "/admin/micro-sermon",
+  },
 ];
 
 export default function AdminHomePage() {

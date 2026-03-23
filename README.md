@@ -31,7 +31,7 @@ The application follows a microservices-like architecture with a Next.js fronten
     -   **Description**: The core application backend for the **new Smart Answer UI**. Handles:
         -   Church management (fellowships, sermons, Sunday services).
         -   Webcast and slide management.
-        -   API endpoints under `/sc_api` and `/admin`.
+        -   API endpoints under  `/sc_api` and `/admin`.
 
 3.  **Legacy Web Application**:
     -   **Path**: `/web` (URL path), served from static files. Source code not included.

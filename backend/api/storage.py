@@ -18,6 +18,7 @@ from .config import (
     FULL_ARTICLE_ROOT,
     HYMNS_FILE,
     METADATA_FILE,
+    MICRO_SERMONS_FILE,
     PROMPT_FILE,
     SCRIPTS_DIR,
     SERMON_SERIES_FILE,
@@ -35,6 +36,9 @@ from .models import (
     DepthOfFaithEpisode,
     DepthOfFaithEpisodeCreate,
     DepthOfFaithEpisodeUpdate,
+    MicroSermon,
+    MicroSermonCreate,
+    MicroSermonUpdate,
     SaveArticleRequest,
     SaveArticleResponse,
     FellowshipEntry,
@@ -1286,6 +1290,108 @@ class ArticleRepository:
             shutil.copyfileobj(file_obj, buffer)
         file_obj.seek(0)
         return candidate
+
+    # Micro Sermon operations
+    def _load_micro_sermons(self) -> list[MicroSermon]:
+        if not MICRO_SERMONS_FILE.exists():
+            return []
+        try:
+            raw = json.loads(MICRO_SERMONS_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Unable to parse micro_sermons.json") from exc
+        if not isinstance(raw, list):
+            raise ValueError("micro_sermons.json must contain a list")
+        sermons: list[MicroSermon] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                sermons.append(MicroSermon.model_validate(item))
+            except Exception:
+                continue
+        return sermons
+
+    def _save_micro_sermons(self, sermons: list[MicroSermon]) -> None:
+        MICRO_SERMONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = MICRO_SERMONS_FILE.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(
+                [s.model_dump(by_alias=True) for s in sermons],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        tmp_path.replace(MICRO_SERMONS_FILE)
+
+    def list_micro_sermons(self) -> list[MicroSermon]:
+        return self._load_micro_sermons()
+
+    def get_featured_micro_sermon(self) -> MicroSermon | None:
+        sermons = self._load_micro_sermons()
+        for s in sermons:
+            if s.is_featured:
+                return s
+        return sermons[0] if sermons else None
+
+    def create_micro_sermon(self, payload: MicroSermonCreate) -> MicroSermon:
+        title = payload.title.strip()
+        if not title:
+            raise ValueError("需提供視頻標題")
+        sermons = self._load_micro_sermons()
+        if payload.id and payload.id.strip():
+            sermon_id = payload.id.strip()
+            if any(s.id == sermon_id for s in sermons):
+                raise ValueError(f"視頻代號 {sermon_id} 已存在")
+        else:
+            sermon_id = self._generate_episode_id(title, [])
+        sermon = MicroSermon(
+            id=sermon_id,
+            title=title,
+            series=(payload.series or "").strip() or None,
+            seriesNumber=payload.series_number,
+            youtubeUrl=(payload.youtube_url or "").strip(),
+            intro=(payload.intro or "").strip() or None,
+            description=(payload.description or "").strip(),
+            tag=(payload.tag or "").strip() or None,
+            isFeatured=payload.is_featured,
+            publishedAt=(payload.published_at or "").strip() or None,
+        )
+        sermons.append(sermon)
+        self._save_micro_sermons(sermons)
+        return sermon
+
+    def update_micro_sermon(self, sermon_id: str, payload: MicroSermonUpdate) -> MicroSermon:
+        sermons = self._load_micro_sermons()
+        target_index = next((i for i, s in enumerate(sermons) if s.id == sermon_id), None)
+        if target_index is None:
+            raise ValueError(f"Micro sermon {sermon_id} not found")
+        current = sermons[target_index]
+        title = payload.title.strip() if payload.title is not None else current.title
+        if not title:
+            raise ValueError("需提供視頻標題")
+        updated = MicroSermon(
+            id=current.id,
+            title=title,
+            series=(payload.series.strip() if payload.series is not None else current.series) or None,
+            seriesNumber=payload.series_number if payload.series_number is not None else current.series_number,
+            youtubeUrl=(payload.youtube_url.strip() if payload.youtube_url is not None else current.youtube_url),
+            intro=(payload.intro.strip() if payload.intro is not None else current.intro) or None,
+            description=(payload.description.strip() if payload.description is not None else current.description),
+            tag=(payload.tag.strip() if payload.tag is not None else current.tag) or None,
+            isFeatured=payload.is_featured if payload.is_featured is not None else current.is_featured,
+            publishedAt=(payload.published_at.strip() if payload.published_at is not None else current.published_at) or None,
+        )
+        sermons[target_index] = updated
+        self._save_micro_sermons(sermons)
+        return updated
+
+    def delete_micro_sermon(self, sermon_id: str) -> None:
+        sermons = self._load_micro_sermons()
+        new_sermons = [s for s in sermons if s.id != sermon_id]
+        if len(new_sermons) == len(sermons):
+            raise ValueError(f"Micro sermon {sermon_id} not found")
+        self._save_micro_sermons(new_sermons)
 
 
 repository = ArticleRepository()

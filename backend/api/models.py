@@ -403,3 +403,47 @@ class GenerateSubtitlesRequest(BaseModel):
     paragraphs: List[dict]
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class MicroSermon(BaseModel):
+    id: str
+    title: str
+    series: Optional[str] = None
+    series_number: Optional[int] = Field(None, alias="seriesNumber")
+    youtube_url: str = Field("", alias="youtubeUrl")
+    intro: Optional[str] = None
+    description: str = ""
+    tag: Optional[str] = None
+    is_featured: bool = Field(False, alias="isFeatured")
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MicroSermonCreate(BaseModel):
+    id: Optional[str] = None
+    title: str
+    series: Optional[str] = None
+    series_number: Optional[int] = Field(None, alias="seriesNumber")
+    youtube_url: str = Field("", alias="youtubeUrl")
+    intro: Optional[str] = None
+    description: str = ""
+    tag: Optional[str] = None
+    is_featured: bool = Field(False, alias="isFeatured")
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MicroSermonUpdate(BaseModel):
+    title: Optional[str] = None
+    series: Optional[str] = None
+    series_number: Optional[int] = Field(None, alias="seriesNumber")
+    youtube_url: Optional[str] = Field(None, alias="youtubeUrl")
+    intro: Optional[str] = None
+    description: Optional[str] = None
+    tag: Optional[str] = None
+    is_featured: Optional[bool] = Field(None, alias="isFeatured")
+    published_at: Optional[str] = Field(None, alias="publishedAt")
+
+    model_config = ConfigDict(populate_by_name=True)

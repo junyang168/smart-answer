@@ -28,6 +28,9 @@ from .models import (
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
+    MicroSermon,
+    MicroSermonCreate,
+    MicroSermonUpdate,
     PromptResponse,
     SaveArticleRequest,
     SaveArticleResponse,
@@ -376,6 +379,43 @@ def upload_depth_of_faith_audio(file: UploadFile) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+# Micro Sermon operations
+
+def list_micro_sermons() -> list[MicroSermon]:
+    try:
+        return repository.list_micro_sermons()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+def get_featured_micro_sermon() -> MicroSermon | None:
+    try:
+        return repository.get_featured_micro_sermon()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+def create_micro_sermon(payload: MicroSermonCreate) -> MicroSermon:
+    try:
+        return repository.create_micro_sermon(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def update_micro_sermon(sermon_id: str, payload: MicroSermonUpdate) -> MicroSermon:
+    try:
+        return repository.update_micro_sermon(sermon_id, payload)
+    except ValueError as exc:
+        _raise_value_error(exc)
+
+
+def delete_micro_sermon(sermon_id: str) -> None:
+    try:
+        repository.delete_micro_sermon(sermon_id)
+    except ValueError as exc:
+        _raise_value_error(exc)
 
 
 def generate_sunday_service_ppt(date: str) -> Path:

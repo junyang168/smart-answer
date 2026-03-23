@@ -16,6 +16,9 @@ from .models import (
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
+    MicroSermon,
+    MicroSermonCreate,
+    MicroSermonUpdate,
     PromptResponse,
     SaveArticleRequest,
     SaveArticleResponse,
@@ -78,6 +81,11 @@ from .service import (
     get_depth_of_faith_audio,
     get_hymn_metadata,
     generate_hymn_lyrics,
+    list_micro_sermons,
+    get_featured_micro_sermon,
+    create_micro_sermon,
+    update_micro_sermon,
+    delete_micro_sermon,
 )
 from backend.api.sunday_service_email import (
     send_email,
@@ -399,3 +407,41 @@ def send_custom_email(req: EmailRequest):
         return {"status": "success", "recipient_count": len(recipient_list)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Micro Sermon Admin Router
+micro_sermon_admin_router = APIRouter(prefix="/admin/micro-sermons", tags=["micro-sermons-admin"])
+
+
+@micro_sermon_admin_router.get("", response_model=list[MicroSermon])
+def admin_list_micro_sermons() -> list[MicroSermon]:
+    return list_micro_sermons()
+
+
+@micro_sermon_admin_router.post("", response_model=MicroSermon)
+def admin_create_micro_sermon(payload: MicroSermonCreate) -> MicroSermon:
+    return create_micro_sermon(payload)
+
+
+@micro_sermon_admin_router.put("/{sermon_id}", response_model=MicroSermon)
+def admin_update_micro_sermon(sermon_id: str, payload: MicroSermonUpdate) -> MicroSermon:
+    return update_micro_sermon(sermon_id, payload)
+
+
+@micro_sermon_admin_router.delete("/{sermon_id}")
+def admin_delete_micro_sermon(sermon_id: str) -> None:
+    delete_micro_sermon(sermon_id)
+
+
+# Micro Sermon Public Router
+micro_sermon_public_router = APIRouter(prefix="/micro-sermons", tags=["micro-sermons"])
+
+
+@micro_sermon_public_router.get("", response_model=list[MicroSermon])
+def public_list_micro_sermons() -> list[MicroSermon]:
+    return list_micro_sermons()
+
+
+@micro_sermon_public_router.get("/featured", response_model=MicroSermon | None)
+def public_get_featured_micro_sermon() -> MicroSermon | None:
+    return get_featured_micro_sermon()
