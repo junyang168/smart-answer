@@ -47,9 +47,15 @@ def concatenate_and_cleanup(storyboard: list, output_file: Path, work_dir: Path)
         trans_dur = float(prev_item.get("transition_duration", 0.0))
         
         # Read actual rendered duration accurately
-        clip = VideoFileClip(str(prev_mp4))
-        actual_dur = clip.duration
-        clip.close()
+        try:
+            clip = VideoFileClip(str(prev_mp4))
+            actual_dur = clip.duration
+            clip.close()
+        except Exception as e:
+            print(f"\n❌ ERROR: Scene {prev_item.get('scene_id')} file is corrupted or unreadable: {prev_mp4}")
+            print(f"Error details: {e}")
+            print("💡 Suggestion: Delete this file and re-run with --start-phase 4 to regenerate it.")
+            return
             
         if trans_dur > 0:
             accumulated_offset += (actual_dur - trans_dur)
