@@ -22,6 +22,10 @@ type CachedUser = {
 
 let cachedUsers: CachedUser[] | null = null;
 
+export function clearUserCache() {
+  cachedUsers = null;
+}
+
 async function loadUsers(): Promise<CachedUser[]> {
   if (cachedUsers) {
     return cachedUsers;

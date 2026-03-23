@@ -46,6 +46,11 @@ const cards = [
     description: "查看從網站首頁聯絡我們表單提交的新朋友信息與留言。",
     href: "/admin/contacts",
   },
+  {
+    title: "使用者管理",
+    description: "查看並管理網站後台使用者名單及其權限角色。",
+    href: "/admin/users",
+  },
 ];
 
 export default function AdminHomePage() {
