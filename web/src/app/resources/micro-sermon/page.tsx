@@ -3,9 +3,9 @@ import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 import { VideoThumbnail } from "@/app/components/resources/micro-sermon/VideoThumbnail";
 import {
   MICRO_SERMON_REVALIDATE,
-  fetchFeaturedMicroSermon,
   fetchMicroSermons,
 } from "./sermons";
+import type { MicroSermonData } from "./sermons";
 
 export const metadata: Metadata = {
   title: "微讲道 | 達拉斯聖道教會",
@@ -32,6 +32,12 @@ function extractYoutubeId(url: string): string | null {
   return null;
 }
 
+function getPublishedAtTimestamp(sermon: MicroSermonData): number | null {
+  if (!sermon.publishedAt) return null;
+  const timestamp = Date.parse(sermon.publishedAt);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
 export default async function MicroSermonPage() {
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
@@ -39,19 +45,33 @@ export default async function MicroSermonPage() {
     { name: "微讲道" },
   ];
 
-  const featured = await fetchFeaturedMicroSermon();
   const allSermons = await fetchMicroSermons();
-  const otherSermons = allSermons.filter((s) => s.id !== featured?.id);
-  const videoId = featured ? extractYoutubeId(featured.youtubeUrl) : null;
+  const featuredSermons = allSermons
+    .map((sermon, index) => ({ sermon, index }))
+    .filter(({ sermon }) => sermon.isFeatured)
+    .sort((a, b) => {
+      const aTimestamp = getPublishedAtTimestamp(a.sermon);
+      const bTimestamp = getPublishedAtTimestamp(b.sermon);
+
+      if (aTimestamp !== null && bTimestamp !== null && aTimestamp !== bTimestamp) {
+        return bTimestamp - aTimestamp;
+      }
+      if (aTimestamp !== null) return -1;
+      if (bTimestamp !== null) return 1;
+      return a.index - b.index;
+    })
+    .slice(0, 3)
+    .map(({ sermon }) => sermon);
+  const featuredIds = new Set(featuredSermons.map((sermon) => sermon.id));
+  const otherSermons = allSermons.filter((sermon) => !featuredIds.has(sermon.id));
 
   return (
     <div className="bg-gray-50 min-h-screen pb-20">
       <Breadcrumb links={breadcrumbLinks} />
 
-      {/* Main content area: calm, centered, max-width ~800px */}
-      <div className="mx-auto max-w-[800px] px-6 pt-12 md:pt-16">
+      <div className="container mx-auto px-6 pt-12 md:pt-16">
         {/* ── Title Block ──────────────────────────────── */}
-        <header className="text-center mb-12 md:mb-16">
+        <header className="mx-auto mb-12 max-w-4xl text-center md:mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight">
             微讲道
           </h1>
@@ -60,46 +80,58 @@ export default async function MicroSermonPage() {
           </p>
         </header>
 
-        {featured ? (
+        {featuredSermons.length > 0 ? (
           <>
-            {/* ── Video Title ──────────────────────────── */}
-            <div className="mb-6">
-              <h2 className="text-2xl md:text-3xl font-bold text-slate-900 leading-snug">
-                {featured.title}
-              </h2>
-              {featured.series && (
-                <p className="mt-2 text-sm font-medium text-amber-600 tracking-wide">
-                  {featured.series}
-                  {featured.seriesNumber
-                    ? ` ${String(featured.seriesNumber).padStart(2, "0")}`
-                    : ""}
-                </p>
-              )}
-            </div>
+            <section>
+              <div className="grid gap-8 md:grid-cols-3">
+                {featuredSermons.map((sermon) => {
+                  const videoId = extractYoutubeId(sermon.youtubeUrl);
 
-            {/* ── YouTube Thumbnail Link ────────────────── */}
-            {videoId ? (
-              <VideoThumbnail videoId={videoId} title={featured.title} />
-            ) : (
-              <div className="w-full rounded-2xl bg-slate-200 flex items-center justify-center text-slate-500 aspect-video">
-                视频准备中
+                  return (
+                    <article key={sermon.id} className="space-y-4">
+                      <div className="overflow-hidden rounded-2xl">
+                        {videoId ? (
+                          <VideoThumbnail videoId={videoId} title={sermon.title} />
+                        ) : (
+                          <div className="w-full rounded-2xl bg-slate-200 flex items-center justify-center text-slate-500 aspect-video">
+                            视频准备中
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-900 leading-snug">
+                          {sermon.title}
+                        </h3>
+                        {sermon.series && (
+                          <p className="mt-2 text-sm font-medium text-amber-600 tracking-wide">
+                            {sermon.series}
+                            {sermon.seriesNumber
+                              ? ` ${String(sermon.seriesNumber).padStart(2, "0")}`
+                              : ""}
+                          </p>
+                        )}
+                        {sermon.intro && (
+                          <p className="mt-3 text-base text-slate-700 leading-relaxed">
+                            {sermon.intro}
+                          </p>
+                        )}
+                        {sermon.description && (
+                          <p className="mt-2 text-sm text-slate-500 leading-relaxed line-clamp-4">
+                            {sermon.description}
+                          </p>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
-            )}
-
-            {/* ── Intro + Description ─────────────────── */}
-            <div className="mt-8 md:mt-10 space-y-4">
-              {featured.intro && (
-                <p className="text-lg md:text-xl text-slate-700 font-medium leading-relaxed">
-                  {featured.intro}
-                </p>
-              )}
-              {featured.description && (
-                <p className="text-base text-slate-500 leading-relaxed">
-                  {featured.description}
-                </p>
-              )}
-            </div>
+            </section>
           </>
+        ) : allSermons.length > 0 ? (
+          <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50 px-6 py-8 text-center text-amber-700">
+            目前尚未設定精選微講道。
+          </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-gray-500">
             微講道內容建置中，敬請期待。
