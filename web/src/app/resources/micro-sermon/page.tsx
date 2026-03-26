@@ -60,7 +60,7 @@ export default async function MicroSermonPage() {
       if (bTimestamp !== null) return 1;
       return a.index - b.index;
     })
-    .slice(0, 3)
+    .slice(0, 2)
     .map(({ sermon }) => sermon);
   const featuredIds = new Set(featuredSermons.map((sermon) => sermon.id));
   const otherSermons = allSermons.filter((sermon) => !featuredIds.has(sermon.id));
@@ -83,12 +83,12 @@ export default async function MicroSermonPage() {
         {featuredSermons.length > 0 ? (
           <>
             <section>
-              <div className="grid gap-8 md:grid-cols-3">
+              <div className="grid gap-8 lg:grid-cols-2">
                 {featuredSermons.map((sermon) => {
                   const videoId = extractYoutubeId(sermon.youtubeUrl);
 
                   return (
-                    <article key={sermon.id} className="space-y-4">
+                    <article key={sermon.id} className="flex h-full flex-col">
                       <div className="overflow-hidden rounded-2xl">
                         {videoId ? (
                           <VideoThumbnail videoId={videoId} title={sermon.title} />
@@ -99,25 +99,29 @@ export default async function MicroSermonPage() {
                         )}
                       </div>
 
-                      <div>
-                        <h3 className="text-xl font-bold text-slate-900 leading-snug">
+                      <div className="flex flex-1 flex-col pt-5">
+                        <h3 className="min-h-[5rem] text-xl font-bold leading-tight text-slate-900 md:text-2xl line-clamp-2">
                           {sermon.title}
                         </h3>
-                        {sermon.series && (
-                          <p className="mt-2 text-sm font-medium text-amber-600 tracking-wide">
+                        <div className="mt-2 min-h-[2rem]">
+                          {sermon.series && (
+                            <p className="text-sm font-medium tracking-wide text-amber-600">
                             {sermon.series}
                             {sermon.seriesNumber
                               ? ` ${String(sermon.seriesNumber).padStart(2, "0")}`
                               : ""}
-                          </p>
-                        )}
-                        {sermon.intro && (
-                          <p className="mt-3 text-base text-slate-700 leading-relaxed">
-                            {sermon.intro}
-                          </p>
-                        )}
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-3 min-h-[5.5rem]">
+                          {sermon.intro && (
+                            <p className="text-base leading-relaxed text-slate-700 line-clamp-3">
+                              {sermon.intro}
+                            </p>
+                          )}
+                        </div>
                         {sermon.description && (
-                          <p className="mt-2 text-sm text-slate-500 leading-relaxed line-clamp-4">
+                          <p className="mt-2 text-sm leading-relaxed text-slate-500 line-clamp-6">
                             {sermon.description}
                           </p>
                         )}
