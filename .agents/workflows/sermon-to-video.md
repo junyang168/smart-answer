@@ -35,6 +35,11 @@ A pure Python Console App. Core functionality: Read a literal transcript (markdo
 - **Resolution**: Enforces global **1920x1080** (Full HD) via aspect-ratio-preserving center-crop.
 - **Ken Burns Animation**: Reads `motions.json` to dynamically scale and pan still images.
 - **Title Mode**: Text prefixed with `#` renders as a **130px** centered title with thick stroke.
+- **Dynamic & Cue-Driven Overlays**: Supports complex, multi-line overlays triggered by Azure TTS bookmarks (`trigger_cue`).
+    - **Pillow-Based Rendering**: Overlays are rendered as full-frame (1920x1080) transparent PNG snapshots to ensure pixel-perfect positioning and avoid MoviePy scaling artifacts.
+    - **Type: `definition_parallel`**: A structured layout for theological definitions with a header and progressively revealed cumulative items.
+    - **Cumulative Logic**: Each trigger event generates a new snapshot containing all active lines plus the new one, maintaining visual state without doubling.
+    - **Subtitle Suppression**: Optional `hide_subtitle_when_overlay_active` flag to prevent visual clutter.
 
 ### Phase 5: Final Concatenation & Transitions
 - Joins all scenes chronologically using pure FFmpeg `subprocess` execution.
@@ -42,7 +47,7 @@ A pure Python Console App. Core functionality: Read a literal transcript (markdo
 - Applies strict 24fps CFR and `1/1000000` timebase normalization to ensure perfect Audio/Video sync.
 
 ### Phase 6: Subtitles (Whisper AI)
-- Uses `Whisper` and `gpt-5.4-mini` to transcribe and convert voiceover to **Traditional Chinese**.
+- Uses `Whisper` and `gpt-5.4` to transcribe and convert voiceover to **Traditional Chinese**.
 - Subdivides generated blocks mathematically into rapid-reading, single-line (max 15 characters) sequential SRT entries.
 - **Human-in-the-Loop Override**: Bypasses AI generation entirely if it detects an existing `.srt` file, protecting user's manual typo corrections.
 
@@ -56,4 +61,3 @@ python -m backend.sermon_to_video.cli render -i <json> -o <mp4> --start-phase 4
 ```
 - **Use Phase 4** to fix typos or font styles without re-generating audio/images.
 - **Use Phase 6** to regenerate only the CC/SRT files.
-

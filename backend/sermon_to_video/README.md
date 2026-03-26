@@ -56,6 +56,23 @@ In `motions.json`, add a transition parameter to seamlessly crossfade between sc
 ### Manual Subtitle Override (Phase 6)
 If you spot a typo in the generated `.srt` file, simply fix it in your text editor and save. Phase 6 will now **automatically skip** AI generation if an `.srt` file already exists! Then, run `--start-phase 5` to quickly merge the video and burn your fixed text gracefully.
 
+### Dynamic & Cue-Driven Overlays
+The system supports advanced, hierarchical overlays triggered by Azure bookmarks. 
+- **Trigger Cues**: Link overlay items to specific timestamps in the voiceover (e.g., `s10_1`).
+- **`definition_parallel`**: A dedicated layout for theological concepts with a persistent header and progressively appearing definition lines.
+- **Pillow Rendering**: Bypasses MoviePy's internal text scaling to provide high-fidelity typography with drop shadows and precise alignment.
+- **Schema Example**:
+```json
+"overlay": {
+  "type": "definition_parallel",
+  "anchor": { "x_ratio": 0.15, "y_ratio": 0.30 },
+  "items": [
+    { "trigger_cue": "s10_1", "text": "Point A" },
+    { "trigger_cue": "s10_2", "text": "Point B" }
+  ]
+}
+```
+
 ---
 
 ## 🏗️ The 7-Phase Pipeline
