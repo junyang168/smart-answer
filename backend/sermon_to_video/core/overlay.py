@@ -49,6 +49,93 @@ TEXT_FILL = (255, 255, 255, 255)
 REF_FILL = (240, 240, 240, 240)
 SHADOW_FILL = (0, 0, 0, 140)
 
+DARK_OVERLAY_DEFAULTS = {
+    "mode": "gradient_left",
+    "opacity": 0.4,
+    "padding_x": 24,
+    "padding_y": 18,
+    "radius": 12,
+}
+
+
+def resolve_dark_overlay_config(overlay_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(overlay_data, dict):
+        return None
+
+    raw = overlay_data.get("dark_overlay", False)
+    if not raw:
+        return None
+
+    cfg = dict(DARK_OVERLAY_DEFAULTS)
+    if isinstance(raw, dict):
+        cfg.update({k: raw[k] for k in DARK_OVERLAY_DEFAULTS if k in raw})
+
+    if "dark_overlay_mode" in overlay_data:
+        cfg["mode"] = overlay_data["dark_overlay_mode"]
+    if "dark_overlay_opacity" in overlay_data:
+        cfg["opacity"] = overlay_data["dark_overlay_opacity"]
+    if "dark_overlay_padding_x" in overlay_data:
+        cfg["padding_x"] = overlay_data["dark_overlay_padding_x"]
+    if "dark_overlay_padding_y" in overlay_data:
+        cfg["padding_y"] = overlay_data["dark_overlay_padding_y"]
+    if "dark_overlay_radius" in overlay_data:
+        cfg["radius"] = overlay_data["dark_overlay_radius"]
+
+    cfg["mode"] = "box" if str(cfg.get("mode", "")).strip().lower() == "box" else "gradient_left"
+    cfg["opacity"] = max(0.0, min(1.0, float(cfg.get("opacity", 0.4))))
+    cfg["padding_x"] = max(0, int(cfg.get("padding_x", 24)))
+    cfg["padding_y"] = max(0, int(cfg.get("padding_y", 18)))
+    cfg["radius"] = max(0, int(cfg.get("radius", 12)))
+    return cfg
+
+
+def create_text_background_overlay(
+    frame_size: Tuple[int, int],
+    text_box: Tuple[int, int, int, int],
+    mode: str = "gradient_left",
+    opacity: float = 0.4,
+    padding_x: int = 24,
+    padding_y: int = 18,
+    radius: int = 12,
+) -> Image.Image:
+    frame_w, frame_h = frame_size
+    x, y, w, h = text_box
+    overlay = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
+    if w <= 0 or h <= 0:
+        return overlay
+
+    left = max(0, int(x - padding_x))
+    top = max(0, int(y - padding_y))
+    right = min(frame_w, int(x + w + padding_x))
+    bottom = min(frame_h, int(y + h + padding_y))
+    if right <= left or bottom <= top:
+        return overlay
+
+    alpha = int(max(0.0, min(1.0, opacity)) * 255)
+    if mode == "box":
+        draw = ImageDraw.Draw(overlay)
+        box_radius = min(radius, max(0, (right - left) // 2), max(0, (bottom - top) // 2))
+        draw.rounded_rectangle(
+            (left, top, right, bottom),
+            radius=box_radius,
+            fill=(0, 0, 0, alpha),
+        )
+        return overlay
+
+    box_w = right - left
+    box_h = bottom - top
+    gradient_alpha = Image.new("L", (box_w, box_h), 0)
+    if box_w == 1:
+        column = [alpha]
+    else:
+        column = [int(alpha * (1.0 - (idx / (box_w - 1)))) for idx in range(box_w)]
+    gradient_alpha.putdata(column * box_h)
+
+    gradient = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+    gradient.putalpha(gradient_alpha)
+    overlay.alpha_composite(gradient, (left, top))
+    return overlay
+
 # =========================
 # Overlay Renderer
 # =========================
@@ -141,6 +228,7 @@ class OverlayRenderer:
         text = self.to_traditional(overlay_data.get("text", ""))
         reference = self.to_traditional(overlay_data.get("reference", ""))
         position = overlay_data.get("position", "left-center")
+        dark_overlay_cfg = resolve_dark_overlay_config(overlay_data)
         
         # Configuration
         cfg = TYPOGRAPHY.get(kind, TYPOGRAPHY["concept"])
@@ -179,8 +267,10 @@ class OverlayRenderer:
         # Height computation
         total_h = 0
         line_heights = []
+        line_widths = []
         for line in lines:
-            _, lh = self.get_text_bbox(draw, line, font)
+            lw, lh = self.get_text_bbox(draw, line, font)
+            line_widths.append(lw)
             line_heights.append(lh)
             total_h += lh
         
@@ -188,8 +278,9 @@ class OverlayRenderer:
             total_h += int(sum(line_heights[:-1]) * (line_spacing - 1.0))
             
         ref_h = 0
+        ref_w = 0
         if reference and ref_font:
-            _, ref_h = self.get_text_bbox(draw, reference, ref_font)
+            ref_w, ref_h = self.get_text_bbox(draw, reference, ref_font)
             total_h += int(ref_h * 1.6) # Padding
             
         # Vertical alignment within zone
@@ -204,6 +295,16 @@ class OverlayRenderer:
             # Fully centered text needs horizontal offset
             pass # wrap_text currently left-aligns in the zone. 
                  # For 'center' zone, we'll keep it left-aligned within that central block for readability.
+
+        block_w = max(line_widths + ([ref_w] if ref_w else [0]))
+        if dark_overlay_cfg and block_w > 0 and total_h > 0:
+            overlay_layer = create_text_background_overlay(
+                frame_size=(frame_w, frame_h),
+                text_box=(x_cursor, y_cursor, block_w, total_h),
+                **dark_overlay_cfg,
+            )
+            canvas = Image.alpha_composite(canvas, overlay_layer)
+            draw = ImageDraw.Draw(canvas)
 
         # Draw Shadow & Text
         def draw_shadowed(draw_ptr, xy, txt, fnt, fill, shadow_fill=SHADOW_FILL):

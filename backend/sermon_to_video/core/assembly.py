@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, ImageClip
+from opencc import OpenCC
 try:
     from moviepy.video.fx import CrossFadeIn
 except ImportError:
@@ -20,7 +21,41 @@ DEFAULT_OVERLAY_CONFIG = {
     "color": "white",
     "fade_duration": 0.3
 }
-from backend.sermon_to_video.core.overlay import OverlayRenderer
+from backend.sermon_to_video.core.overlay import (
+    OverlayRenderer,
+    create_text_background_overlay,
+    resolve_dark_overlay_config,
+)
+
+
+_ASSEMBLY_OPENCC = OpenCC("s2t")
+
+
+def _to_traditional_text(text: str) -> str:
+    if not text:
+        return ""
+    return _ASSEMBLY_OPENCC.convert(str(text))
+
+
+def _update_text_bounds(bounds, x: int, y: int, w: int, h: int):
+    if w <= 0 or h <= 0:
+        return bounds
+
+    x1, y1, x2, y2 = x, y, x + w, y + h
+    if bounds is None:
+        return [x1, y1, x2, y2]
+
+    bounds[0] = min(bounds[0], x1)
+    bounds[1] = min(bounds[1], y1)
+    bounds[2] = max(bounds[2], x2)
+    bounds[3] = max(bounds[3], y2)
+    return bounds
+
+
+def _bounds_to_box(bounds):
+    if not bounds:
+        return None
+    return (bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1])
 
 def resolve_overlay_times(overlays: list, cue_time_map: dict, scene_start_abs: float) -> list:
     """
@@ -61,6 +96,7 @@ def render_scene_with_overlays(base_clip, overlays: list, config: dict, duration
     cfg = {**DEFAULT_OVERLAY_CONFIG, **config}
     frame_w, frame_h = base_clip.size if hasattr(base_clip, 'size') else (1920, 1080)
     is_centered = cfg.get("center", False)
+    dark_overlay_cfg = resolve_dark_overlay_config(cfg)
     
     # Load font via Pillow
     font_path = cfg["font"]
@@ -84,7 +120,7 @@ def render_scene_with_overlays(base_clip, overlays: list, config: dict, duration
     # Flatten overlays into renderable lines (text + optional reference)
     lines = []
     for ov in overlays:
-        txt = ov.get("text", "")
+        txt = _to_traditional_text(ov.get("text", ""))
         if not txt: continue
         lines.append({
             "text": txt,
@@ -92,7 +128,7 @@ def render_scene_with_overlays(base_clip, overlays: list, config: dict, duration
             "trigger_time": ov.get("trigger_time", 0.0),
             "indent": ov.get("indent_level", 0),
         })
-        ref = ov.get("reference")
+        ref = _to_traditional_text(ov.get("reference", ""))
         if ref:
             lines.append({
                 "text": f"({ref})",
@@ -131,6 +167,8 @@ def render_scene_with_overlays(base_clip, overlays: list, config: dict, duration
         # Create a full-frame transparent PNG
         canvas = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
+        positioned_lines = []
+        text_bounds = None
         
         for vl in visible_lines:
             txt = vl["text"]
@@ -143,7 +181,19 @@ def render_scene_with_overlays(base_clip, overlays: list, config: dict, duration
                 x = (frame_w - vl["text_w"]) // 2
             else:
                 x = cfg["base_x"] + (indent * cfg["indent_px"])
-            
+
+            positioned_lines.append((x, y, txt, font))
+            text_bounds = _update_text_bounds(text_bounds, x, y, vl["text_w"], vl["text_h"])
+
+        text_box = _bounds_to_box(text_bounds)
+        if dark_overlay_cfg and text_box:
+            canvas = Image.alpha_composite(
+                canvas,
+                create_text_background_overlay((frame_w, frame_h), text_box, **dark_overlay_cfg),
+            )
+            draw = ImageDraw.Draw(canvas)
+
+        for x, y, txt, font in positioned_lines:
             # Draw shadow
             draw.text((x + 3, y + 3), txt, font=font, fill=(0, 0, 0, 160))
             draw.text((x + 1, y + 1), txt, font=font, fill=(0, 0, 0, 120))
@@ -256,6 +306,7 @@ def render_definition_parallel(
     header_cfg  = overlay_cfg.get("header", {})
     items       = overlay_cfg.get("items", [])
     behavior    = overlay_cfg.get("behavior", {})
+    dark_overlay_cfg = resolve_dark_overlay_config(overlay_cfg)
 
     # --- Anchor ---------------------------------------------------------------
     x0 = int(anchor.get("x_ratio", 0.12) * frame_w)
@@ -285,17 +336,22 @@ def render_definition_parallel(
         h_opacity = h_style.get("opacity", 0.72)
         h_font   = _load_pil_font(h_size)
 
-        for raw_line in _wrap_text(header_cfg.get("text", ""), h_font, max_w):
-            _, lh = _measure_text(raw_line, h_font)
-            header_lines.append({"text": raw_line, "font": h_font, "y": cursor_y, "opacity": h_opacity})
+        header_text = _to_traditional_text(header_cfg.get("text", ""))
+        for raw_line in _wrap_text(header_text, h_font, max_w):
+            lw, lh = _measure_text(raw_line, h_font)
+            header_lines.append(
+                {"text": raw_line, "font": h_font, "y": cursor_y, "opacity": h_opacity, "text_w": lw, "text_h": lh}
+            )
             cursor_y += int(lh * h_gap)
 
-        ref_text = header_cfg.get("reference", "")
+        ref_text = _to_traditional_text(header_cfg.get("reference", ""))
         if ref_text:
             ref_size = max(22, int(h_size * 0.72))
             ref_font = _load_pil_font(ref_size)
-            _, lh = _measure_text(ref_text, ref_font)
-            header_lines.append({"text": ref_text, "font": ref_font, "y": cursor_y, "opacity": h_opacity * 0.85})
+            lw, lh = _measure_text(ref_text, ref_font)
+            header_lines.append(
+                {"text": ref_text, "font": ref_font, "y": cursor_y, "opacity": h_opacity * 0.85, "text_w": lw, "text_h": lh}
+            )
             cursor_y += int(lh * h_gap)
 
         cursor_y += int(h_size * 0.6)   # fixed gap below header block
@@ -310,10 +366,20 @@ def render_definition_parallel(
         i_font    = _load_pil_font(i_size)
 
         group = []
-        for raw_line in _wrap_text(res.get("text", ""), i_font, max_w):
-            _, lh = _measure_text(raw_line, i_font)
-            group.append({"text": raw_line, "font": i_font, "y": cursor_y, "opacity": i_opacity,
-                          "trigger_time": res["trigger_time"]})
+        item_text = _to_traditional_text(res.get("text", ""))
+        for raw_line in _wrap_text(item_text, i_font, max_w):
+            lw, lh = _measure_text(raw_line, i_font)
+            group.append(
+                {
+                    "text": raw_line,
+                    "font": i_font,
+                    "y": cursor_y,
+                    "opacity": i_opacity,
+                    "trigger_time": res["trigger_time"],
+                    "text_w": lw,
+                    "text_h": lh,
+                }
+            )
             cursor_y += int(lh * i_gap)
 
         item_line_groups.append(group)
@@ -334,17 +400,32 @@ def render_definition_parallel(
     for idx, t_start in enumerate(trigger_times):
         canvas = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
         draw   = ImageDraw.Draw(canvas)
+        render_lines = []
+        text_bounds = None
 
         # Always draw header
         for hl in header_lines:
-            _draw_text_shadowed(draw, x0, hl["y"], hl["text"], hl["font"], hl["opacity"])
+            render_lines.append((x0, hl["y"], hl["text"], hl["font"], hl["opacity"]))
+            text_bounds = _update_text_bounds(text_bounds, x0, hl["y"], hl["text_w"], hl["text_h"])
 
         # Draw items up to this trigger
         for grp in item_line_groups:
             if not grp: continue
             if grp[0]["trigger_time"] <= t_start:
                 for il in grp:
-                    _draw_text_shadowed(draw, x0, il["y"], il["text"], il["font"], il["opacity"])
+                    render_lines.append((x0, il["y"], il["text"], il["font"], il["opacity"]))
+                    text_bounds = _update_text_bounds(text_bounds, x0, il["y"], il["text_w"], il["text_h"])
+
+        text_box = _bounds_to_box(text_bounds)
+        if dark_overlay_cfg and text_box:
+            canvas = Image.alpha_composite(
+                canvas,
+                create_text_background_overlay((frame_w, frame_h), text_box, **dark_overlay_cfg),
+            )
+            draw = ImageDraw.Draw(canvas)
+
+        for x, y, text, font, opacity in render_lines:
+            _draw_text_shadowed(draw, x, y, text, font, opacity)
 
         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False,
                                           prefix=f"defpar_t{t_start:.1f}_")
@@ -397,6 +478,7 @@ def render_multi_cue_concepts(
     mode      = behavior.get("mode", "cumulative")
     fade_dur  = behavior.get("fade_in_sec", 0.3)
     hide_sub  = behavior.get("hide_subtitle_when_overlay_active", False)
+    dark_overlay_cfg = resolve_dark_overlay_config(overlay_cfg)
 
     if not items:
         return [], False
@@ -440,7 +522,7 @@ def render_multi_cue_concepts(
     item_groups = []  # each group: list of {text, font, text_w, text_h, trigger_time, ...}
     for res in resolved:
         group = []
-        raw_text = str(res.get("text", "")).strip()
+        raw_text = _to_traditional_text(res.get("text", "")).strip()
         if not raw_text:
             item_groups.append(group)
             continue
@@ -480,7 +562,7 @@ def render_multi_cue_concepts(
 
         # Support verse reference line in multi_cue_concepts.
         if kind == "verse":
-            ref_text = str(res.get("reference", "")).strip()
+            ref_text = _to_traditional_text(res.get("reference", "")).strip()
             if ref_text:
                 rw, rh = _measure_text(ref_text, verse_ref_font)
                 group.append({
@@ -526,6 +608,8 @@ def render_multi_cue_concepts(
         canvas = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
         cursor_y = start_y
+        render_lines = []
+        text_bounds = None
 
         for grp in visible_groups:
             for line in grp:
@@ -534,14 +618,26 @@ def render_multi_cue_concepts(
                     x = (frame_w - line["text_w"]) // 2
                 else:
                     x = base_x
-                if line.get("is_title"):
-                    # Stronger title rendering to match documented title card feel.
-                    draw.text((x + 4, cursor_y + 4), line["text"], font=line["font"], fill=(0, 0, 0, 180))
-                    draw.text((x + 2, cursor_y + 2), line["text"], font=line["font"], fill=(0, 0, 0, 140))
-                    draw.text((x, cursor_y), line["text"], font=line["font"], fill=(255, 255, 255, 255))
-                else:
-                    _draw_text_shadowed(draw, x, cursor_y, line["text"], line["font"])
+                render_lines.append((x, cursor_y, line))
+                text_bounds = _update_text_bounds(text_bounds, x, cursor_y, line["text_w"], line["text_h"])
                 cursor_y += int(line["text_h"] * line.get("line_gap", line_gap))
+
+        text_box = _bounds_to_box(text_bounds)
+        if dark_overlay_cfg and text_box:
+            canvas = Image.alpha_composite(
+                canvas,
+                create_text_background_overlay((frame_w, frame_h), text_box, **dark_overlay_cfg),
+            )
+            draw = ImageDraw.Draw(canvas)
+
+        for x, y, line in render_lines:
+            if line.get("is_title"):
+                # Stronger title rendering to match documented title card feel.
+                draw.text((x + 4, y + 4), line["text"], font=line["font"], fill=(0, 0, 0, 180))
+                draw.text((x + 2, y + 2), line["text"], font=line["font"], fill=(0, 0, 0, 140))
+                draw.text((x, y), line["text"], font=line["font"], fill=(255, 255, 255, 255))
+            else:
+                _draw_text_shadowed(draw, x, y, line["text"], line["font"])
 
         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False,
                                           prefix=f"mcc_{mode}_t{t_start:.1f}_")
@@ -685,19 +781,37 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
         for i, seg in enumerate(segments):
             seg_type = seg.get("type", "video")
             seg_motion = seg.get("motion")
+            remaining_scene_dur = max(0.0, duration_sec - consumed_time)
+            source_duration = float(normalized_source.duration or 0.0)
+            video_start_sec = 0.0
+
+            if seg_type == "video":
+                try:
+                    video_start_sec = max(0.0, float(seg.get("start_sec", 0.0)))
+                except (TypeError, ValueError):
+                    video_start_sec = 0.0
+                video_start_sec = min(video_start_sec, source_duration)
             
             # Determine segment duration
-            if "range_sec" in seg:
+            if seg_type == "video":
+                available_video_dur = max(0.0, source_duration - video_start_sec)
+                if "range_sec" in seg:
+                    try:
+                        seg_dur = max(0.0, float(seg["range_sec"]))
+                    except (TypeError, ValueError):
+                        seg_dur = 0.0
+                    seg_dur = min(seg_dur, available_video_dur)
+                else:
+                    # Default video behavior: play from start_sec until source end.
+                    seg_dur = available_video_dur
+                seg_dur = min(seg_dur, remaining_scene_dur)
+            elif "range_sec" in seg:
                 seg_dur = float(seg["range_sec"])
             elif i == len(segments) - 1:
-                # Last segment fills the remaining time
-                seg_dur = max(0.0, duration_sec - consumed_time)
+                # Last non-video segment fills the remaining time.
+                seg_dur = remaining_scene_dur
             else:
-                # Fallback for video segments without explicit range
-                if seg_type == "video":
-                    seg_dur = min(normalized_source.duration, max(0.0, duration_sec - consumed_time))
-                else:
-                    seg_dur = 0.0
+                seg_dur = 0.0
             
             if seg_dur <= 0: continue
             
@@ -708,11 +822,11 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
                 frame = normalized_source.get_frame(t)
                 seg_clip = ImageClip(frame).with_duration(seg_dur)
             else: # video playback
-                # Play from the beginning up to the duration
+                video_end_sec = min(source_duration, video_start_sec + seg_dur)
                 if hasattr(normalized_source, 'subclipped'):
-                    seg_clip = normalized_source.subclipped(0, min(normalized_source.duration, seg_dur))
+                    seg_clip = normalized_source.subclipped(video_start_sec, video_end_sec)
                 else:
-                    seg_clip = normalized_source.subclip(0, min(normalized_source.duration, seg_dur))
+                    seg_clip = normalized_source.subclip(video_start_sec, video_end_sec)
                 seg_clip = seg_clip.with_duration(seg_dur)
             
             # Apply individual segment motion
@@ -816,6 +930,17 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
         if first_ov.get("position") == "left-top":
             config["base_x"] = 100
             config["base_y"] = 100
+        if first_ov.get("dark_overlay"):
+            config["dark_overlay"] = first_ov.get("dark_overlay")
+            for key in (
+                "dark_overlay_mode",
+                "dark_overlay_opacity",
+                "dark_overlay_padding_x",
+                "dark_overlay_padding_y",
+                "dark_overlay_radius",
+            ):
+                if key in first_ov:
+                    config[key] = first_ov[key]
         text_clips = render_scene_with_overlays(video_clip, resolved_overlays, config, duration_sec)
         clips_to_compose.extend(text_clips)
     
@@ -831,14 +956,26 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
                     "kind": vt_overlay.get("kind", "verse"),
                     "text": overlay_text.get("verse", ""),
                     "reference": overlay_text.get("reference", ""),
-                    "position": vt_overlay.get("position", "left-center")
+                    "position": vt_overlay.get("position", "left-center"),
+                    "dark_overlay": vt_overlay.get("dark_overlay", False),
                 }
             else:
                 overlay_input = {
                     "kind": vt_overlay.get("kind", "concept"),
                     "text": str(overlay_text),
-                    "position": vt_overlay.get("position", "left-center")
+                    "position": vt_overlay.get("position", "left-center"),
+                    "dark_overlay": vt_overlay.get("dark_overlay", False),
                 }
+
+            for key in (
+                "dark_overlay_mode",
+                "dark_overlay_opacity",
+                "dark_overlay_padding_x",
+                "dark_overlay_padding_y",
+                "dark_overlay_radius",
+            ):
+                if key in vt_overlay:
+                    overlay_input[key] = vt_overlay[key]
             
             overlay_png = renderer.render_to_png(
                 scene_id=scene_data.get("scene_id", 0),

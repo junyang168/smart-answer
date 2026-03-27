@@ -54,3 +54,18 @@ def test_build_script_text_removes_cue_markers():
     assert "[s7_1]" not in script_text
     assert "[s7_2]" not in script_text
     assert script_text == "第一句。第二句。第三句。"
+
+
+def test_build_script_text_removes_ssml_phoneme_tags_but_keeps_text():
+    cc = OpenCC("s2t")
+    storyboard = {
+        "scenes": [
+            {"voiceover_text": '我就使你們<phoneme alphabet="sapi" ph="de2">得</phoneme>安息。'},
+        ]
+    }
+
+    script_text = _build_script_text(storyboard, cc)
+
+    assert "<phoneme" not in script_text
+    assert "</phoneme>" not in script_text
+    assert script_text == "我就使你們得安息。"

@@ -19,6 +19,7 @@ from backend.api.config import OPENAI_API_KEY
 
 
 _CUE_MARKER_RE = re.compile(r"\[[^\[\]]+\]")
+_SSML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*?>")
 _PUNCTUATION = set("，。！？；：、")
 
 
@@ -26,8 +27,13 @@ def _strip_cue_markers(text: str) -> str:
     return _CUE_MARKER_RE.sub("", text or "")
 
 
+def _strip_ssml_tags(text: str) -> str:
+    return _SSML_TAG_RE.sub("", text or "")
+
+
 def _to_caption_text(text: str, cc: OpenCC) -> str:
     cleaned = _strip_cue_markers(text)
+    cleaned = _strip_ssml_tags(cleaned)
     cleaned = cc.convert(cleaned)
     return re.sub(r"\s+", "", cleaned.strip())
 
@@ -241,7 +247,7 @@ def generate_srt(storyboard: dict, output_path: Path) -> Path | None:
     Extract timed, Traditional Chinese SRT captions.
 
     Whisper provides timing. storyboard.scene.voiceover_text provides the
-    caption text, with cue markers stripped before alignment/output.
+    caption text, with cue markers and SSML tags stripped before alignment/output.
     """
     if not OPENAI_API_KEY:
         print("⚠️ OPENAI_API_KEY is missing from .env. Cannot call Whisper for timing.")
