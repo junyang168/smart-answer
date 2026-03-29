@@ -1,16 +1,30 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { useSession } from 'next-auth/react';
 import dynamic from 'next/dynamic';
 import 'react-quill/dist/quill.snow.css';
 
 const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
 
+type ComposeMode = 'rich' | 'html';
+
+function looksLikeHtmlDocument(value: string): boolean {
+    return /<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]/i.test(value);
+}
+
+function extractTitleFromHtml(value: string): string {
+    const match = value.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if (!match?.[1]) {
+        return '';
+    }
+    return match[1].replace(/\s+/g, ' ').trim();
+}
+
 export default function EmailSender() {
-    const { data: session } = useSession();
     const [subject, setSubject] = useState('');
-    const [body, setBody] = useState('');
+    const [richBody, setRichBody] = useState('');
+    const [htmlBody, setHtmlBody] = useState('');
+    const [composeMode, setComposeMode] = useState<ComposeMode>('html');
     const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');
 
@@ -31,9 +45,16 @@ export default function EmailSender() {
         'link', 'image'
     ];
 
+    const activeBody = composeMode === 'html' ? htmlBody : richBody;
+    const previewInFrame = composeMode === 'html' || looksLikeHtmlDocument(activeBody);
+
     const handleSend = async () => {
-        if (!subject || !body) {
+        const trimmedBody = activeBody.trim();
+        const resolvedSubject = subject.trim() || (composeMode === 'html' ? extractTitleFromHtml(activeBody) : '');
+
+        if (!resolvedSubject || !trimmedBody) {
             setMessage('Please fill in both subject and body.');
+            setStatus('error');
             return;
         }
 
@@ -51,8 +72,8 @@ export default function EmailSender() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    subject,
-                    body,
+                    subject: resolvedSubject,
+                    body: trimmedBody,
                     recipients_type: 'congregation',
                 }),
             });
@@ -66,7 +87,8 @@ export default function EmailSender() {
             setStatus('success');
             setMessage(`Email sent successfully to ${data.recipient_count} recipients.`);
             setSubject('');
-            setBody('');
+            setRichBody('');
+            setHtmlBody('');
         } catch (error: any) {
             setStatus('error');
             setMessage(error.message);
@@ -84,21 +106,59 @@ export default function EmailSender() {
                     className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
-                    placeholder="Enter email subject"
+                    placeholder={composeMode === 'html' ? 'Enter email subject, or leave blank to use <title>' : 'Enter email subject'}
                 />
             </div>
 
             <div className="mb-6">
+                <div className="mb-3 flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setComposeMode('html')}
+                        className={`rounded-md px-3 py-1.5 text-sm font-medium ${composeMode === 'html'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                    >
+                        Raw HTML
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setComposeMode('rich')}
+                        className={`rounded-md px-3 py-1.5 text-sm font-medium ${composeMode === 'rich'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                    >
+                        Rich Editor
+                    </button>
+                </div>
+
                 <label className="block text-sm font-medium text-gray-700 mb-1">Body</label>
+                <p className="mb-3 text-sm text-gray-500">
+                    {composeMode === 'html'
+                        ? 'Paste the full email HTML here. Full documents with <!DOCTYPE>, <head>, and inline styles are sent as-is.'
+                        : 'Compose the email visually. This editor outputs HTML that will be sent as the email body.'}
+                </p>
                 <div className="bg-white">
-                    <ReactQuill
-                        theme="snow"
-                        value={body}
-                        onChange={setBody}
-                        modules={modules}
-                        formats={formats}
-                        className="h-64 mb-12" // Add margin bottom to account for toolbar
-                    />
+                    {composeMode === 'html' ? (
+                        <textarea
+                            className="min-h-[22rem] w-full rounded-md border border-gray-300 p-3 font-mono text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            value={htmlBody}
+                            onChange={(e) => setHtmlBody(e.target.value)}
+                            placeholder="Paste your full HTML email here"
+                            spellCheck={false}
+                        />
+                    ) : (
+                        <ReactQuill
+                            theme="snow"
+                            value={richBody}
+                            onChange={setRichBody}
+                            modules={modules}
+                            formats={formats}
+                            className="h-64 mb-12"
+                        />
+                    )}
                 </div>
             </div>
 
@@ -127,9 +187,18 @@ export default function EmailSender() {
             {/* Preview Section */}
             <div className="mt-8 border-t pt-6">
                 <h2 className="text-lg font-semibold mb-4">Preview</h2>
-                <div className="border border-gray-200 rounded-md p-4 min-h-[200px] bg-white prose max-w-none">
-                    <div dangerouslySetInnerHTML={{ __html: body }} />
-                </div>
+                {previewInFrame ? (
+                    <iframe
+                        title="HTML email preview"
+                        srcDoc={activeBody}
+                        className="min-h-[420px] w-full rounded-md border border-gray-200 bg-white"
+                        sandbox=""
+                    />
+                ) : (
+                    <div className="border border-gray-200 rounded-md p-4 min-h-[200px] bg-white prose max-w-none">
+                        <div dangerouslySetInnerHTML={{ __html: activeBody }} />
+                    </div>
+                )}
             </div>
         </div>
     );
