@@ -352,6 +352,12 @@ def render(
             with console.status("[bold yellow]Phase 6: Generating Closed Captions (Traditional Chinese)..."):
                 from backend.sermon_to_video.core.subtitle import generate_srt
                 generate_srt(storyboard_data, srt_path, audio_dir=work_dir)
+    if srt_path.exists():
+        from backend.sermon_to_video.core.subtitle import sanitize_srt_file
+
+        with console.status("[bold yellow]Normalizing subtitle punctuation boundaries..."):
+            if sanitize_srt_file(srt_path):
+                console.print(f"[bold green]Subtitle punctuation normalized in {srt_path.name}[/bold green]")
 
     # Phase 7: Burn Subtitles into MP4 (Hardsubs)
     final_output = output_file

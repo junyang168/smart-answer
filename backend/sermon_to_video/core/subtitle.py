@@ -21,6 +21,21 @@ from backend.api.config import OPENAI_API_KEY
 _CUE_MARKER_RE = re.compile(r"\[[^\[\]]+\]")
 _SSML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*?>")
 _PUNCTUATION = set("，。！？；：、")
+_NO_END_CHARS = set("“‘「『《〈（【〔〖")
+_NO_START_CHARS = set("，。！？；：、」』》〉）】〕〗”’")
+_OPEN_TO_CLOSE = {
+    "“": "”",
+    "‘": "’",
+    "「": "」",
+    "『": "』",
+    "《": "》",
+    "〈": "〉",
+    "（": "）",
+    "【": "】",
+    "〔": "〕",
+    "〖": "〗",
+}
+_CLOSE_TO_OPEN = {close: open_ for open_, close in _OPEN_TO_CLOSE.items()}
 
 
 def _strip_cue_markers(text: str) -> str:
@@ -108,7 +123,172 @@ def _split_for_srt(text: str, target_max_chars: int = 18, min_chunk_chars: int =
         merged[1] = merged[0] + merged[1]
         merged = merged[1:]
 
-    return [c for c in merged if c]
+    return _fix_chunk_boundaries(merged)
+
+
+def _fix_chunk_boundaries(chunks: list[str]) -> list[str]:
+    fixed = [chunk for chunk in chunks if chunk]
+    idx = 1
+    while idx < len(fixed):
+        prev = fixed[idx - 1]
+        curr = fixed[idx]
+
+        split_idx = _find_trailing_unmatched_opener(prev)
+        if split_idx is not None:
+            curr = prev[split_idx:] + curr
+            prev = prev[:split_idx]
+
+        while curr and curr[0] in _NO_START_CHARS:
+            prev += curr[0]
+            curr = curr[1:]
+
+        if prev:
+            fixed[idx - 1] = prev
+        else:
+            fixed.pop(idx - 1)
+            idx -= 1
+
+        if curr:
+            fixed[idx] = curr
+            idx += 1
+        else:
+            fixed.pop(idx)
+
+    return fixed
+
+
+def _find_trailing_unmatched_opener(text: str) -> int | None:
+    stack: list[tuple[str, int]] = []
+    for idx, ch in enumerate(text):
+        if ch in _OPEN_TO_CLOSE:
+            stack.append((ch, idx))
+        elif ch in _CLOSE_TO_OPEN:
+            expected_open = _CLOSE_TO_OPEN[ch]
+            for pos in range(len(stack) - 1, -1, -1):
+                if stack[pos][0] == expected_open:
+                    del stack[pos]
+                    break
+
+    if not stack:
+        return None
+    return stack[-1][1]
+
+
+def _pop_first_caption_char(lines: list[str]) -> str:
+    while lines:
+        if lines[0]:
+            ch = lines[0][0]
+            lines[0] = lines[0][1:]
+            if not lines[0]:
+                lines.pop(0)
+            return ch
+        lines.pop(0)
+    return ""
+
+
+def _pop_last_caption_char(lines: list[str]) -> str:
+    while lines:
+        last_idx = len(lines) - 1
+        if lines[last_idx]:
+            ch = lines[last_idx][-1]
+            lines[last_idx] = lines[last_idx][:-1]
+            if not lines[last_idx]:
+                lines.pop(last_idx)
+            return ch
+        lines.pop()
+    return ""
+
+
+def _peek_first_caption_char(lines: list[str]) -> str:
+    for line in lines:
+        if line:
+            return line[0]
+    return ""
+
+
+def _peek_last_caption_char(lines: list[str]) -> str:
+    for line in reversed(lines):
+        if line:
+            return line[-1]
+    return ""
+
+
+def _peek_last_caption_line_index(lines: list[str]) -> int | None:
+    for idx in range(len(lines) - 1, -1, -1):
+        if lines[idx]:
+            return idx
+    return None
+
+
+def sanitize_srt_text(raw_srt: str) -> str:
+    blocks = [block for block in str(raw_srt).strip().split("\n\n") if block.strip()]
+    if not blocks:
+        return str(raw_srt).strip()
+
+    parsed_blocks: list[list[str]] = [block.splitlines() for block in blocks]
+
+    for idx in range(1, len(parsed_blocks)):
+        prev_lines = parsed_blocks[idx - 1]
+        curr_lines = parsed_blocks[idx]
+        if len(prev_lines) < 3 or len(curr_lines) < 3:
+            continue
+
+        prev_caption_lines = prev_lines[2:]
+        curr_caption_lines = curr_lines[2:]
+
+        while prev_caption_lines and curr_caption_lines:
+            prev_last = _peek_last_caption_char(prev_caption_lines)
+            curr_first = _peek_first_caption_char(curr_caption_lines)
+            if not prev_last and not curr_first:
+                break
+
+            adjusted = False
+
+            prev_line_idx = _peek_last_caption_line_index(prev_caption_lines)
+            if prev_line_idx is not None:
+                split_idx = _find_trailing_unmatched_opener(prev_caption_lines[prev_line_idx])
+            else:
+                split_idx = None
+            if prev_line_idx is not None and split_idx is not None:
+                moved = prev_caption_lines[prev_line_idx][split_idx:]
+                prev_caption_lines[prev_line_idx] = prev_caption_lines[prev_line_idx][:split_idx]
+                if not prev_caption_lines[prev_line_idx]:
+                    prev_caption_lines.pop(prev_line_idx)
+                if curr_caption_lines:
+                    curr_caption_lines[0] = moved + curr_caption_lines[0]
+                else:
+                    curr_caption_lines = [moved]
+                adjusted = True
+
+            curr_first = _peek_first_caption_char(curr_caption_lines)
+            while curr_first in _NO_START_CHARS:
+                moved = _pop_first_caption_char(curr_caption_lines)
+                if not moved:
+                    break
+                if prev_caption_lines:
+                    prev_caption_lines[-1] += moved
+                else:
+                    prev_caption_lines = [moved]
+                adjusted = True
+                curr_first = _peek_first_caption_char(curr_caption_lines)
+
+            if adjusted:
+                continue
+            break
+
+        prev_lines[2:] = prev_caption_lines
+        curr_lines[2:] = curr_caption_lines if curr_caption_lines else [""]
+
+    return "\n\n".join("\n".join(lines) for lines in parsed_blocks).strip()
+
+
+def sanitize_srt_file(path: Path) -> bool:
+    original = path.read_text(encoding="utf-8")
+    sanitized = sanitize_srt_text(original)
+    if sanitized == original.strip():
+        return False
+    path.write_text(sanitized + "\n", encoding="utf-8")
+    return True
 
 
 def _allocate_chunk_times(start_ms: int, end_ms: int, chunks: list[str]) -> list[tuple[int, int]]:
