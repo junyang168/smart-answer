@@ -46,9 +46,8 @@ export default async function MicroSermonPage() {
   ];
 
   const allSermons = await fetchMicroSermons();
-  const featuredSermons = allSermons
+  const sortedSermons = allSermons
     .map((sermon, index) => ({ sermon, index }))
-    .filter(({ sermon }) => sermon.isFeatured)
     .sort((a, b) => {
       const aTimestamp = getPublishedAtTimestamp(a.sermon);
       const bTimestamp = getPublishedAtTimestamp(b.sermon);
@@ -60,10 +59,9 @@ export default async function MicroSermonPage() {
       if (bTimestamp !== null) return 1;
       return a.index - b.index;
     })
-    .slice(0, 2)
     .map(({ sermon }) => sermon);
-  const featuredIds = new Set(featuredSermons.map((sermon) => sermon.id));
-  const otherSermons = allSermons.filter((sermon) => !featuredIds.has(sermon.id));
+  const topSermons = sortedSermons.slice(0, 3);
+  const otherSermons = sortedSermons.slice(3);
 
   return (
     <div className="bg-gray-50 min-h-screen pb-20">
@@ -80,11 +78,11 @@ export default async function MicroSermonPage() {
           </p>
         </header>
 
-        {featuredSermons.length > 0 ? (
+        {topSermons.length > 0 ? (
           <>
             <section>
-              <div className="grid gap-8 lg:grid-cols-2">
-                {featuredSermons.map((sermon) => {
+              <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-3">
+                {topSermons.map((sermon) => {
                   const videoId = extractYoutubeId(sermon.youtubeUrl);
 
                   return (
@@ -134,7 +132,7 @@ export default async function MicroSermonPage() {
           </>
         ) : allSermons.length > 0 ? (
           <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50 px-6 py-8 text-center text-amber-700">
-            目前尚未設定精選微講道。
+            目前尚無可顯示的微講道影片。
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center text-gray-500">
