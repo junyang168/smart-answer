@@ -2,62 +2,266 @@
 description: Sermon-to-Video Workflow and Architecture
 ---
 
-# Project: Sermon-to-Video (查经视频自动化生成工具)
+# Project: Sermon-to-Video
 
-## 1. Project Overview
-A pure Python Console App. Core functionality: Read a literal transcript (markdown) of a Bible study/sermon and automatically generate an MP4 video with voiceover, imagery B-Roll, and precise traditional Chinese subtitles, ready for YouTube publishing via a series of API pipelines.
+## Overview
+This project renders a sermon or Bible-study project folder into a narrated MP4 with scene timing, visual overlays, captions, and subtitle burn-in.
 
-## 2. Core Architecture Principle: Audio-Driven Pipeline
-**Absolute Constraint**: Must use an "Audio-Driven" architecture. The system first generates TTS audio, extracts the exact physical duration (`duration_sec`), and passes this duration as a strict parameter to downstream video generation and MoviePy synthesis modules.
+The current system is project-oriented, not single-file oriented.
 
-## 3. Tech Stack
-*   **LLM**: Gemini 3.1 for Storyboard Generation.
-*   **TTS**: Azure TTS (SSML-based with bookmark sync).
-*   **Visuals**: Google Imagen 3 (Nano Banana 2) or local Video files.
-*   **CLI**: `typer` + `rich`.
-*   **Core Processing**: `moviepy` (Assembly), `opencc` (Traditional Chinese conversion), `ffmpeg` (Muxing).
+Primary project inputs:
+- `storyboard.json`
+- `visual_track.json`
+- optional `motions.json`
+- optional `assets/`
+- optional `bgm.mp3` / `bgm.wav`
 
-## 4. Functional Specification (The 7-Phase Pipeline)
+Primary generated outputs:
+- `<project>/build/*`
+- `<project>/final_video.mp4`
+- `<project>/final_video.srt`
 
-### Phase 1: Local Setup & Storyboard
-- Reads `storyboard.json`.
-- Supports **Continuous Slicing**: If `visual_source` points to a long video (e.g., `S18.mp4`), the system sub-clips it based on accumulated scene durations.
+## Architecture Principle
 
-### Phase 2: Audio Synthesis (The Anchor)
-- Generates `full_audio.mp3` and `full_sermon.ssml`.
-- Calculates precise `duration_sec` for each scene via Azure bookmark events.
+The pipeline remains audio-driven:
+- Azure TTS establishes cue timing and scene duration.
+- Scene assembly uses that timing as the anchor for overlays and synchronization.
+- Visual track data decorates scenes in memory; it does not replace scene timing as the master timeline.
 
-### Phase 3: Visual Generation
-- Generates Images/Videos for each scene.
-- Automatically handles **Slow Motion**: If a video source is shorter than its audio, it is slowed down to match exactly.
+Runtime mental model:
+- `scene`: audio/subtitle sync unit
+- `visual`: macro scheduling unit
+- `clip`: selected asset and motion unit within a visual
 
-### Phase 4: Assembly, Animation & Typography
-- **Resolution**: Enforces global **1920x1080** (Full HD) via aspect-ratio-preserving center-crop.
-- **Ken Burns Animation**: Reads `motions.json` to dynamically scale and pan still images.
-- **Title Mode**: Text prefixed with `#` renders as a **130px** centered title with thick stroke.
-- **Dynamic & Cue-Driven Overlays**: Supports complex, multi-line overlays triggered by Azure TTS bookmarks (`trigger_cue`).
-    - **Pillow-Based Rendering**: Overlays are rendered as full-frame (1920x1080) transparent PNG snapshots to ensure pixel-perfect positioning and avoid MoviePy scaling artifacts.
-    - **Type: `definition_parallel`**: A structured layout for theological definitions with a header and progressively revealed cumulative items.
-    - **Cumulative Logic**: Each trigger event generates a new snapshot containing all active lines plus the new one, maintaining visual state without doubling.
-    - **Subtitle Suppression**: Optional `hide_subtitle_when_overlay_active` flag to prevent visual clutter.
+## CLI Contract
 
-### Phase 5: Final Concatenation & Transitions
-- Joins all scenes chronologically using pure FFmpeg `subprocess` execution.
-- Resolves `motions.json` dissolve transitions by injecting explicit `xfade` overlap lengths into an advanced FFmpeg Complex Filtergraph.
-- Applies strict 24fps CFR and `1/1000000` timebase normalization to ensure perfect Audio/Video sync.
+Render always starts from a project folder:
 
-### Phase 6: Subtitles (Whisper AI)
-- Uses `Whisper` and `gpt-5.4` to transcribe and convert voiceover to **Traditional Chinese**.
-- Subdivides generated blocks mathematically into rapid-reading, single-line (max 15 characters) sequential SRT entries.
-- **Human-in-the-Loop Override**: Bypasses AI generation entirely if it detects an existing `.srt` file, protecting user's manual typo corrections.
-
-### Phase 7: Subtitle Hardsub Muxing
-- Uses `ffmpeg -vf subtitles` to permanently burn the finalized SRT text directly onto the H.264 pixels as cinematic hardsubs.
-
-## 5. Usage & Selective Execution
-The `render` command supports skipping to specific phases:
 ```bash
-python -m backend.sermon_to_video.cli render -i <json> -o <mp4> --start-phase 4
+python -m backend.sermon_to_video.cli render \
+  --project <project_dir> \
+  [--output <mp4>] \
+  [--font <ttf>] \
+  [--start-phase <1-7>] \
+  [--scene-id <id>] \
+  [--cache | --no-cache]
 ```
-- **Use Phase 4** to fix typos or font styles without re-generating audio/images.
-- **Use Phase 6** to regenerate only the CC/SRT files.
+
+Current defaults:
+- `--output` defaults to `<project>/final_video.mp4`
+- build artifacts go to `<project>/build`
+- cache is on by default
+
+## Pipeline
+
+### Phase 1: Storyboard
+- Creates or updates `storyboard.json` from transcript input.
+
+### Phase 2: Audio
+- Generates Azure TTS SSML and `build/full_audio.mp3`
+- Emits `build/cue_points.json`
+- Populates `duration_sec`
+
+### Phase 3: Visuals
+- Currently bypassed in the render command.
+- Visual generation is temporarily disabled in the active render path.
+- Do not rely on phase 3 to produce runtime visuals right now.
+
+### Phase 4: Assembly
+- Loads scene data and runtime overlay metadata
+- Resolves assets from:
+  - `visual_track.json`
+  - project `assets/`
+  - previously generated `build/scene_*_visual.*`
+  - blank fallback visuals
+- Renders `build/scene_<id>_final.mp4`
+
+### Phase 5: Concat
+- Concatenates assembled scenes in order
+- Supports dissolve transitions from `motions.json`
+- With `--no-cache`, stale phase-4 scene finals must not be silently reused
+
+### Phase 6: SRT
+- Generates or preserves final SRT captions
+
+### Phase 7: Burn-In
+- Burns subtitles into final MP4 with FFmpeg
+
+## Visual Track
+
+The new `visual_track.json` schema is first-class.
+
+Top-level shape:
+
+```json
+{
+  "title": "...",
+  "mode": "exegesis_teaching",
+  "visual_track": [
+    {
+      "visual_id": 1,
+      "time_range": [0.0, 57.0],
+      "covered_scenes": [1, 2, 3],
+      "shots": [
+        {
+          "shot_id": "V1_S1",
+          "clips": [
+            {
+              "clip_id": "IMG_1",
+              "type": "image",
+              "trigger_scene_cue": "scene_1"
+            }
+          ]
+        }
+      ],
+      "overlay": {}
+    }
+  ]
+}
+```
+
+Current implementation details:
+- `visual_id` replaces old `scene_id` assumptions at the visual-track layer
+- one visual can cover multiple scenes via `covered_scenes`
+- clips are resolved by `trigger_scene_cue`
+- overlays live at the visual level and are projected into scenes
+- old scene-based visual-track formats are normalized through an adapter layer
+
+## Overlay System
+
+Supported overlay families:
+- simple `verse` / `concept`
+- `multi_cue_concepts`
+- `definition_parallel`
+- `multi_layer`
+- `exegesis_persistent`
+
+### `multi_layer`
+Used to combine multiple overlay layers under a single visual.
+
+Typical pattern:
+- `opening_prompt` as `multi_cue_concepts`
+- `scripture_anchor` as `exegesis_persistent`
+
+### `multi_cue_concepts`
+- cue-driven prompt or concept overlays
+- supports replace/cumulative behavior
+- scene-local timing is projected from Azure cue marks
+
+### `exegesis_persistent`
+Used for stable scripture exposition blocks across scenes.
+
+Supported fields:
+- `anchor`
+- `header`
+- `verse_block`
+- `visible_from_cue`
+- `visible_to_cue`
+- `highlights`
+- `dim_others`
+- `dark_overlay`
+- `behavior`
+
+Current rules:
+- layout stays stable across scenes
+- highlight changes do not cause reflow or movement
+- dimmed text stays opaque; dimming is done by color darkening, not alpha reduction
+
+## Global Exegesis Defaults
+
+Global defaults are loaded from:
+
+```text
+DATA_DIR/sermon_to_video/config.json
+```
+
+Key:
+
+```json
+{
+  "exegesis_persistent_defaults": {}
+}
+```
+
+This centralizes the baseline for:
+- `anchor`
+- `header.style`
+- `verse_block.style`
+- `highlight_style`
+- `dim_others`
+- `behavior`
+- `dark_overlay`
+
+Per-overlay settings in `visual_track.json` override these defaults.
+
+## Highlight Matching
+
+Exact substring matching is used.
+
+Current authoring syntax:
+- `"父"`: highlight all matches
+- `"父[2]"`: highlight the second match
+- `"父[-1]"`: highlight the last match
+
+Occurrence targeting is counted across the full rendered verse block, not just within one wrapped line.
+
+## Dark Overlay
+
+Use the term `dark_overlay`.
+
+Supported modes:
+- text-box overlay
+- frame-band gradient overlay
+
+Supported keys include:
+- `mode`
+- `opacity`
+- `padding_x`
+- `padding_y`
+- `radius`
+- `blur`
+- `feather`
+- `direction`
+- `start_opacity`
+- `end_opacity`
+- `width_ratio`
+
+## Motion and Face Anchor
+
+`motion.anchor = "face"` is supported for still-image zooms.
+
+Implementation:
+- OpenCV Haar cascade face detection
+- cached per source image
+- normalized anchor ratios
+- fallback to center when no face is found
+
+Important implementation detail:
+- face-anchored zoom uses a cropped viewport on the scaled frame
+- not absolute positioning on a fixed canvas
+- this prevents black borders
+
+## Cache and Build Semantics
+
+Default build directory:
+
+```text
+<project>/build
+```
+
+Default final video:
+
+```text
+<project>/final_video.mp4
+```
+
+Cache behavior:
+- `--cache` is default
+- `--no-cache` forces regeneration for the current run
+- when phase 4 ran with cache disabled, phase 5 must not silently reuse stale `scene_*_final.mp4` files
+
+## Current Constraints
+
+- Phase 3 visual generation is intentionally bypassed for now.
+- Blank visuals are used when no asset is available.
+- The active pipeline is optimized for reliable local rendering and visual-track-driven assembly, not AI generation during render.

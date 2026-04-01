@@ -242,7 +242,7 @@ def _align_segments_to_script(segments: list[dict[str, Any]], script_text: str) 
     return aligned_segments
 
 
-def generate_srt(storyboard: dict, output_path: Path) -> Path | None:
+def generate_srt(storyboard: dict, output_path: Path, audio_dir: Path | None = None) -> Path | None:
     """
     Extract timed, Traditional Chinese SRT captions.
 
@@ -253,7 +253,7 @@ def generate_srt(storyboard: dict, output_path: Path) -> Path | None:
         print("⚠️ OPENAI_API_KEY is missing from .env. Cannot call Whisper for timing.")
         return None
 
-    work_dir = output_path.parent
+    work_dir = audio_dir or output_path.parent
     audio_file_path = work_dir / "full_audio.mp3"
     if not audio_file_path.exists():
         print("⚠️ full_audio.mp3 not found! Cannot generate subtitles.")

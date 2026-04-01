@@ -10,6 +10,19 @@ from google.genai import types
 
 import time
 
+
+def ensure_blank_visual(scene_id: int, work_dir: Path) -> Path:
+    visual_filepath = work_dir / f"scene_{scene_id}_visual.jpg"
+    if visual_filepath.exists():
+        return visual_filepath
+
+    from PIL import Image
+
+    img = Image.new("RGB", (1920, 1080), color=(30, 30, 30))
+    img.save(str(visual_filepath))
+    return visual_filepath
+
+
 def call_google_nano_banana_2(prompt: str, output_image_path: str, max_retries: int = 3) -> bool:
     """
     Highly advanced integration with Google Nano Banana 2 (via Gemini Imagen 3).
@@ -46,7 +59,12 @@ def call_google_nano_banana_2(prompt: str, output_image_path: str, max_retries: 
     console.print(f"[bold red]Failed after {max_retries} retries.[/bold red]")
     return False
 
-def process_visuals_for_scenes(storyboard_data: Any, work_dir: Path, no_ai: bool = False) -> Any:
+def process_visuals_for_scenes(
+    storyboard_data: Any,
+    work_dir: Path,
+    no_ai: bool = False,
+    use_cache: bool = True,
+) -> Any:
     """
     Iterates over the storyboard, selecting visual assets. 
     If no_ai is True, it bypasses AI generation and uses a blank image fallback.
@@ -68,20 +86,17 @@ def process_visuals_for_scenes(storyboard_data: Any, work_dir: Path, no_ai: bool
             console.print(f"[dim]Skipping image generation for Scene {scene_id}, driven by continuous video source: {item['visual_source']}[/dim]")
             continue
             
-        if not visual_filepath.exists():
+        should_generate = (not use_cache) or (not visual_filepath.exists())
+        if should_generate:
             if no_ai:
                 console.print(f"⬜ [bold white]No-AI Mode:[/bold white] Creating blank fallback for Scene {scene_id}")
-                from PIL import Image
-                img = Image.new('RGB', (1920, 1080), color=(30, 30, 30)) # Dark blank
-                img.save(str(visual_filepath))
+                ensure_blank_visual(scene_id, work_dir)
                 success = True
             else:
                 success = call_google_nano_banana_2(prompt, str(visual_filepath))
                 if not success:
                     # Create a fallback placeholder image if generation fails
-                    from PIL import Image
-                    img = Image.new('RGB', (1920, 1080), color=(50, 50, 50))
-                    img.save(str(visual_filepath))
+                    ensure_blank_visual(scene_id, work_dir)
                     console.print(f"[dim]Generated fallback solid image for Nano Banana.[/dim]")
         else:
             console.print(f"[dim]Cache hit for Visual asset: {visual_filename}[/dim]")

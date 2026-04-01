@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from moviepy import VideoFileClip
 
-def concatenate_and_cleanup(storyboard: list, output_file: Path, work_dir: Path):
+def concatenate_and_cleanup(storyboard: list, output_file: Path, work_dir: Path, project_dir: Path | None = None):
     """
     Concatenates all final scene clips into one output file using FFmpeg complex filtergraphs.
     Supports both hard cuts (concat) and dissolves (xfade) natively while keeping global A/V sync.
@@ -70,9 +70,10 @@ def concatenate_and_cleanup(storyboard: list, output_file: Path, work_dir: Path)
     
     # Audio mapping
     full_audio_path = work_dir / "full_audio.mp3"
-    bgm_path = work_dir / "bgm.mp3"
+    bgm_base_dir = project_dir or work_dir
+    bgm_path = bgm_base_dir / "bgm.mp3"
     if not bgm_path.exists():
-        bgm_path = work_dir / "bgm.wav"
+        bgm_path = bgm_base_dir / "bgm.wav"
         
     audio_filter = ""
     audio_map = ""

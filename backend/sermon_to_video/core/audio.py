@@ -241,9 +241,9 @@ PROMPT_SSML_EXEGESIS = """
 
 ## 带 cue 的文本处理规则（非常重要）
 
-输入中的 `voiceover_text_marked` 可能包含类似：
+输入中的 `voiceover_text` 可能包含类似：
 
-那接下来这句话就更关键了：“我就使你们得安息。”[scene_10_cue_1]安息不是简单的休息，[scene_10_cue_2]而是……[scene_10_cue_3]在……
+那接下来这句话就更关键了：“我就使你们得安息。”[s10_c1]安息不是简单的休息，[s0_c2]而是……[s10_c3]在……
 
 处理规则：
 
@@ -260,7 +260,7 @@ PROMPT_SSML_EXEGESIS = """
 每个 scene 必须严格符合下面的结构：
 
 <mark name="scene_X" />
-[该 scene 的 voiceover_text_marked 转换后的朗读内容，包含内部 break、必要 emphasis、以及可能出现的 cue mark]
+[该 scene 的 voiceover_text 转换后的朗读内容，包含内部 break、必要 emphasis、以及可能出现的 cue mark]
 <break time="900ms"/>
 
 ---
@@ -360,7 +360,7 @@ def generate_ssml(storyboard: List[Dict[str, Any]], mode: str = "Short Sermon") 
         print(f"Error calling AI for SSML: {e}")
         return fallback_generate_ssml(storyboard)
 
-def process_audio_for_scenes(storyboard_data: Any, work_dir: Path) -> Any:
+def process_audio_for_scenes(storyboard_data: Any, work_dir: Path, project_dir: Path | None = None) -> Any:
     """
     Synthesizes the entire storyboard as a single SSML file to preserve prosody.
     Handles both dict (new format) and list (legacy) storyboard data.
@@ -378,7 +378,7 @@ def process_audio_for_scenes(storyboard_data: Any, work_dir: Path) -> Any:
     audio_filepath = work_dir / "full_audio.mp3"
     
     # Look for a custom user-provided SSML first
-    custom_ssml = work_dir / f"{work_dir.name}.ssml"
+    custom_ssml = (project_dir or work_dir) / f"{(project_dir or work_dir).name}.ssml"
     if custom_ssml.exists():
         print(f"🎵 [AzureTTS] Found Custom SSML: {custom_ssml}! Using this instead of auto-generation.")
         with open(custom_ssml, "r", encoding="utf-8") as f:

@@ -2,7 +2,7 @@ import os
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from opencc import OpenCC
 
 # =========================
@@ -50,11 +50,18 @@ REF_FILL = (240, 240, 240, 240)
 SHADOW_FILL = (0, 0, 0, 140)
 
 DARK_OVERLAY_DEFAULTS = {
+    "type": "text_box",
     "mode": "gradient_left",
     "opacity": 0.4,
     "padding_x": 24,
     "padding_y": 18,
     "radius": 12,
+    "blur": 0.0,
+    "feather": 0.0,
+    "direction": "left_to_right",
+    "start_opacity": 0.4,
+    "end_opacity": 0.0,
+    "width_ratio": 0.35,
 }
 
 
@@ -80,27 +87,125 @@ def resolve_dark_overlay_config(overlay_data: Optional[Dict[str, Any]]) -> Optio
         cfg["padding_y"] = overlay_data["dark_overlay_padding_y"]
     if "dark_overlay_radius" in overlay_data:
         cfg["radius"] = overlay_data["dark_overlay_radius"]
+    if "dark_overlay_blur" in overlay_data:
+        cfg["blur"] = overlay_data["dark_overlay_blur"]
+    if "dark_overlay_feather" in overlay_data:
+        cfg["feather"] = overlay_data["dark_overlay_feather"]
+    if "dark_overlay_type" in overlay_data:
+        cfg["type"] = overlay_data["dark_overlay_type"]
+    if "dark_overlay_direction" in overlay_data:
+        cfg["direction"] = overlay_data["dark_overlay_direction"]
+    if "dark_overlay_start_opacity" in overlay_data:
+        cfg["start_opacity"] = overlay_data["dark_overlay_start_opacity"]
+    if "dark_overlay_end_opacity" in overlay_data:
+        cfg["end_opacity"] = overlay_data["dark_overlay_end_opacity"]
+    if "dark_overlay_width_ratio" in overlay_data:
+        cfg["width_ratio"] = overlay_data["dark_overlay_width_ratio"]
 
+    cfg["type"] = "gradient" if str(cfg.get("type", "")).strip().lower() == "gradient" else "text_box"
     cfg["mode"] = "box" if str(cfg.get("mode", "")).strip().lower() == "box" else "gradient_left"
     cfg["opacity"] = max(0.0, min(1.0, float(cfg.get("opacity", 0.4))))
     cfg["padding_x"] = max(0, int(cfg.get("padding_x", 24)))
     cfg["padding_y"] = max(0, int(cfg.get("padding_y", 18)))
     cfg["radius"] = max(0, int(cfg.get("radius", 12)))
+    cfg["blur"] = max(0.0, float(cfg.get("blur", 0.0)))
+    cfg["feather"] = max(0.0, min(1.0, float(cfg.get("feather", 0.0))))
+    cfg["direction"] = str(cfg.get("direction", "left_to_right")).strip().lower() or "left_to_right"
+    cfg["start_opacity"] = max(0.0, min(1.0, float(cfg.get("start_opacity", cfg["opacity"]))))
+    cfg["end_opacity"] = max(0.0, min(1.0, float(cfg.get("end_opacity", 0.0))))
+    cfg["width_ratio"] = max(0.0, min(1.0, float(cfg.get("width_ratio", 0.35))))
     return cfg
+
+
+def _soften_overlay_alpha(alpha_mask: Image.Image, target_alpha: int, blur: float, feather: float) -> Image.Image:
+    blur_radius = max(0.0, float(blur))
+    if feather > 0:
+        blur_radius += max(1.0, min(alpha_mask.size) * float(feather) * 0.12)
+
+    if blur_radius <= 0:
+        return alpha_mask
+
+    softened = alpha_mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    _, max_alpha = softened.getextrema()
+    if not max_alpha:
+        return softened
+
+    if max_alpha != target_alpha:
+        scale = target_alpha / float(max_alpha)
+        softened = softened.point(lambda px: max(0, min(255, int(round(px * scale)))))
+    return softened
 
 
 def create_text_background_overlay(
     frame_size: Tuple[int, int],
     text_box: Tuple[int, int, int, int],
+    type: str = "text_box",
     mode: str = "gradient_left",
     opacity: float = 0.4,
     padding_x: int = 24,
     padding_y: int = 18,
     radius: int = 12,
+    blur: float = 0.0,
+    feather: float = 0.0,
+    direction: str = "left_to_right",
+    start_opacity: float = 0.4,
+    end_opacity: float = 0.0,
+    width_ratio: float = 0.35,
 ) -> Image.Image:
     frame_w, frame_h = frame_size
-    x, y, w, h = text_box
     overlay = Image.new("RGBA", (frame_w, frame_h), (0, 0, 0, 0))
+    if type == "gradient":
+        band_alpha = Image.new("L", (frame_w, frame_h), 0)
+        width_ratio = max(0.0, min(1.0, float(width_ratio)))
+        direction = str(direction or "left_to_right").strip().lower()
+        start_alpha = int(max(0.0, min(1.0, start_opacity)) * 255)
+        end_alpha = int(max(0.0, min(1.0, end_opacity)) * 255)
+
+        if direction in {"left_to_right", "right_to_left"}:
+            band_w = max(1, int(round(frame_w * width_ratio))) if width_ratio > 0 else 0
+            if band_w <= 0:
+                return overlay
+            if band_w == 1:
+                column = [start_alpha]
+            else:
+                column = [
+                    int(round(start_alpha + (end_alpha - start_alpha) * (idx / (band_w - 1))))
+                    for idx in range(band_w)
+                ]
+            if direction == "right_to_left":
+                column = list(reversed(column))
+                left = max(0, frame_w - band_w)
+            else:
+                left = 0
+            band_alpha.putdata(([0] * left + column + [0] * max(0, frame_w - left - band_w)) * frame_h)
+        else:
+            band_h = max(1, int(round(frame_h * width_ratio))) if width_ratio > 0 else 0
+            if band_h <= 0:
+                return overlay
+            if band_h == 1:
+                row_values = [start_alpha]
+            else:
+                row_values = [
+                    int(round(start_alpha + (end_alpha - start_alpha) * (idx / (band_h - 1))))
+                    for idx in range(band_h)
+                ]
+            if direction == "bottom_to_top":
+                row_values = list(reversed(row_values))
+                top = max(0, frame_h - band_h)
+            else:
+                top = 0
+            alpha_data = [0] * (frame_w * frame_h)
+            for row_offset, row_alpha in enumerate(row_values):
+                row_index = top + row_offset
+                start = row_index * frame_w
+                alpha_data[start:start + frame_w] = [row_alpha] * frame_w
+            band_alpha.putdata(alpha_data)
+
+        band_alpha = _soften_overlay_alpha(band_alpha, max(start_alpha, end_alpha), blur=blur, feather=feather)
+        overlay.putalpha(band_alpha)
+        return overlay
+
+    x, y, w, h = text_box
     if w <= 0 or h <= 0:
         return overlay
 
@@ -113,13 +218,16 @@ def create_text_background_overlay(
 
     alpha = int(max(0.0, min(1.0, opacity)) * 255)
     if mode == "box":
-        draw = ImageDraw.Draw(overlay)
+        box_alpha = Image.new("L", (frame_w, frame_h), 0)
+        draw = ImageDraw.Draw(box_alpha)
         box_radius = min(radius, max(0, (right - left) // 2), max(0, (bottom - top) // 2))
         draw.rounded_rectangle(
             (left, top, right, bottom),
             radius=box_radius,
-            fill=(0, 0, 0, alpha),
+            fill=alpha,
         )
+        box_alpha = _soften_overlay_alpha(box_alpha, alpha, blur=blur, feather=feather)
+        overlay.putalpha(box_alpha)
         return overlay
 
     box_w = right - left
@@ -130,6 +238,7 @@ def create_text_background_overlay(
     else:
         column = [int(alpha * (1.0 - (idx / (box_w - 1)))) for idx in range(box_w)]
     gradient_alpha.putdata(column * box_h)
+    gradient_alpha = _soften_overlay_alpha(gradient_alpha, alpha, blur=blur, feather=feather)
 
     gradient = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
     gradient.putalpha(gradient_alpha)
@@ -217,8 +326,9 @@ class OverlayRenderer:
 
         return lines
 
-    def render_to_png(self, scene_id: int, overlay_data: Dict[str, Any], output_dir: str, 
-                      frame_w=DEFAULT_FRAME_WIDTH, frame_h=DEFAULT_FRAME_HEIGHT) -> str:
+    def render_to_png(self, scene_id: int, overlay_data: Dict[str, Any], output_dir: str,
+                      frame_w=DEFAULT_FRAME_WIDTH, frame_h=DEFAULT_FRAME_HEIGHT,
+                      output_name: Optional[str] = None) -> str:
         """
         Renders a professional transparent PNG overlay based on visual_track parameters.
         """
@@ -321,6 +431,7 @@ class OverlayRenderer:
             y_cursor += 4 # Small gap
             draw_shadowed(draw, (x_cursor, y_cursor), reference, ref_font, REF_FILL)
             
-        output_path = os.path.join(output_dir, f"scene_{scene_id}_overlay.png")
+        filename = output_name or f"scene_{scene_id}_overlay.png"
+        output_path = os.path.join(output_dir, filename)
         canvas.save(output_path)
         return output_path

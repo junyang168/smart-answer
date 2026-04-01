@@ -1,93 +1,343 @@
-# Sermon-to-Video Console App 🎬
+# Sermon-to-Video
 
-A powerful terminal-based automation tool to transform sermon/Bible study transcripts into high-quality YouTube videos with AI-generated visuals, Azure TTS voiceovers, and Traditional Chinese closed captions.
+Project-based CLI for turning a sermon or Bible-study project folder into a narrated video with scene assembly, overlays, subtitles, and final hardsubs.
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Setup Environment
-Ensure you have Python 3.10+ and `ffmpeg` installed on your system.
+### Environment
+Ensure Python 3.10+ and `ffmpeg` are installed.
+
 ```bash
-# Activate the virtual environment
 source backend/.venv/bin/activate
-
-# Install dependencies if needed
 pip install -r backend/requirements.txt
 ```
 
-### 2. Generate Storyboard (Phase 1)
-Convert your raw markdown transcript into a structured JSON storyboard.
+### Phase 1: Create Storyboard
+Generate a project storyboard from a transcript:
+
 ```bash
-python -m backend.sermon_to_video.cli storyboard -i transcript.md -o storyboard.json
+python -m backend.sermon_to_video.cli storyboard -i transcript.md
 ```
-*Note: This is the **Human-in-the-Loop** stage. Open `storyboard.json` to edit prompts, overlay text, or voiceover scripts before rendering.*
 
-### 3. Render Final Video (Phase 2-7)
-Execute the full 7-phase pipeline to generate the MP4 and embedded SRT subtitles.
+This creates a project under `DATA_DIR/sermon_to_video/<project_name>/` and writes `storyboard.json`.
+
+### Render
+Render from a project folder, not from an individual storyboard file:
+
 ```bash
-python -m backend.sermon_to_video.cli render -i storyboard.json -o output.mp4
+python -m backend.sermon_to_video.cli render \
+  --project /opt/homebrew/var/www/church/web/data/sermon_to_video/启示
 ```
 
----
+Default final output:
 
-## 🛠️ Advanced Features
-
-### Title Mode (`#` Prefix)
-In `storyboard.json`, prefix any `overlay_text` with a `#` to render it as a **large (130px), centered title** with thick stroke. Ideal for video hooks or section titles.
-```json
-"overlay_text": "#神為什麼不聽我的禱告？"
+```text
+<project>/final_video.mp4
 ```
 
-### Bible Verse Mode
-The system automatically detects multi-line verses, applying generous line spacing (**18px interline**) and scale constraints to ensure readability.
+Default intermediate build directory:
 
-### Selective Execution (`--start-phase`)
-Skip time-consuming steps (like TTS or AI Image generation) if you are just tweaking font sizes or timings:
+```text
+<project>/build
+```
+
+## Current CLI Contract
+
 ```bash
-# Restart from Phase 4 (MoviePy Assembly)
-python -m backend.sermon_to_video.cli render ... --start-phase 4
+python -m backend.sermon_to_video.cli render \
+  --project <project_dir> \
+  [--output <mp4>] \
+  [--font <ttf>] \
+  [--start-phase 1-7] \
+  [--scene-id <id>] \
+  [--cache | --no-cache]
 ```
 
-### Dissolve Transitions (Xfade)
-In `motions.json`, add a transition parameter to seamlessly crossfade between scenes via FFmpeg without losing audio sync:
-```json
-"transition": {"type": "dissolve", "duration": 1.0}
+Important behavior:
+- `--project` is required.
+- `--output` is optional. If omitted, output defaults to `<project>/final_video.mp4`.
+- `--cache` is the default.
+- `--no-cache` forces regeneration for the current run instead of reusing prior stage outputs.
+- `--scene-id` only narrows phase 4 scene assembly.
+
+## Project Layout
+
+Authored inputs stay in the project root:
+
+```text
+<project>/
+  storyboard.json
+  visual_track.json
+  motions.json
+  assets/
+  bgm.mp3 | bgm.wav
 ```
 
-### Manual Subtitle Override (Phase 6)
-If you spot a typo in the generated `.srt` file, simply fix it in your text editor and save. Phase 6 will now **automatically skip** AI generation if an `.srt` file already exists! Then, run `--start-phase 5` to quickly merge the video and burn your fixed text gracefully.
+Generated intermediates go under `build/`:
 
-### Dynamic & Cue-Driven Overlays
-The system supports advanced, hierarchical overlays triggered by Azure bookmarks. 
-- **Trigger Cues**: Link overlay items to specific timestamps in the voiceover (e.g., `s10_1`).
-- **`definition_parallel`**: A dedicated layout for theological concepts with a persistent header and progressively appearing definition lines.
-- **Pillow Rendering**: Bypasses MoviePy's internal text scaling to provide high-fidelity typography with drop shadows and precise alignment.
-- **Schema Example**:
+```text
+<project>/build/
+  full_audio.mp3
+  cue_points.json
+  scene_*_visual.jpg
+  scene_*_final.mp4
+  overlays/
+```
+
+Global sermon-to-video defaults live in:
+
+```text
+DATA_DIR/sermon_to_video/config.json
+```
+
+At the moment this file is used for `exegesis_persistent_defaults`.
+
+## Pipeline
+
+### Phase 1: Storyboard
+- Creates the project folder.
+- Writes `storyboard.json`.
+
+### Phase 2: Audio
+- Builds Azure TTS SSML.
+- Generates `build/full_audio.mp3`.
+- Extracts cue timing into `build/cue_points.json`.
+- Stores per-scene `duration_sec`.
+
+### Phase 3: Visuals
+- Currently bypassed in the render flow.
+- Visual generation is temporarily disabled.
+- Phase 4 resolves project assets, existing generated visuals, or blank fallbacks.
+
+### Phase 4: Assembly
+- Main scene render phase.
+- Uses 1920x1080 output.
+- Applies Ken Burns motion for stills.
+- Supports face-aware anchor resolution.
+- Renders overlays as transparent snapshots.
+- Writes `build/scene_<id>_final.mp4`.
+
+### Phase 5: Concat
+- Concatenates scene finals with FFmpeg.
+- Supports dissolve transitions from `motions.json`.
+- With `--no-cache`, concat no longer silently falls back to stale phase-4 scene finals from previous runs.
+
+### Phase 6: SRT
+- Generates or preserves `final_video.srt`.
+- Existing `.srt` files are preserved when cache is on.
+
+### Phase 7: Hardsub Burn-In
+- Uses `ffmpeg -vf subtitles`.
+- Burns the final SRT into the MP4.
+
+## Visual Track Schema
+
+The renderer now treats the new `visual_track.json` schema as first-class:
+
 ```json
-"overlay": {
-  "type": "definition_parallel",
-  "anchor": { "x_ratio": 0.15, "y_ratio": 0.30 },
-  "items": [
-    { "trigger_cue": "s10_1", "text": "Point A" },
-    { "trigger_cue": "s10_2", "text": "Point B" }
+{
+  "title": "...",
+  "mode": "exegesis_teaching",
+  "visual_track": [
+    {
+      "visual_id": 1,
+      "time_range": [0.0, 57.0],
+      "covered_scenes": [1, 2, 3],
+      "shots": [
+        {
+          "shot_id": "V1_S1",
+          "clips": [
+            {
+              "clip_id": "IMG_1",
+              "type": "image",
+              "trigger_scene_cue": "scene_1",
+              "duration": 10.8,
+              "motion": {
+                "type": "zoom_in",
+                "anchor": "face"
+              }
+            }
+          ]
+        }
+      ],
+      "overlay": {
+        "type": "multi_layer",
+        "layers": []
+      }
+    }
   ]
 }
 ```
 
----
+Current runtime model:
+- `scene` is still the audio/subtitle sync unit.
+- `visual` is the macro scheduling unit.
+- `clip` is the asset and motion unit selected inside a visual.
+- `covered_scenes` binds one visual to multiple scenes.
+- `trigger_scene_cue` chooses the active clip for a scene.
+- visual-level `overlay` is projected into each covered scene using cue timing.
 
-## 🏗️ The 7-Phase Pipeline
-1. **Setup**: Initialize environment and read storyboard.
-2. **Audio (TTS)**: Synthesize Azure TTS and auto-save extracted `duration_sec` back into JSON to prevent drift.
-3. **Visuals (AI)**: Generate B-Roll via Imagen 3 (Nano Banana 2).
-4. **Assembly**: Render scenes natively applying typography and Ken Burns (`vfx.resize`) animations.
-5. **Concat**: Build dynamic FFmpeg graphs to merge all scenes (Hard Cuts & Xfade Dissolves).
-6. **SRT**: Generate Traditional Chinese Captions (Whisper AI + Math single-line split) or preserve manual edits.
-7. **Mux**: Permanently burn (Hardsub) the SRT directly into the 1080p MP4.
+Legacy scene-based visual-track formats are still normalized through an adapter layer.
 
-## 📂 Project Structure
-- `cli.py`: The main entry point.
-- `core/audio.py`: Azure TTS integration and bookmark sync.
-- `core/visual.py`: AI Image generation.
-- `core/assembly.py`: MoviePy scene composition & 1080p normalization.
-- `core/concat.py`: Final video merging.
-- `core/subtitle.py`: opencc conversion and SRT generation.
+## Overlay Types
+
+Supported overlay forms include:
+- simple `verse` / `concept`
+- `multi_cue_concepts`
+- `definition_parallel`
+- `multi_layer`
+- `exegesis_persistent`
+
+### `multi_layer`
+Lets one visual own multiple independent overlay layers.
+
+Common pattern:
+- opening prompt layer as `multi_cue_concepts`
+- scripture anchor layer as `exegesis_persistent`
+
+### `exegesis_persistent`
+Designed for stable scripture exposition blocks across multiple scenes.
+
+Supported fields:
+- `anchor`
+- `header`
+- `verse_block`
+- `visible_from_cue`
+- `visible_to_cue`
+- `highlights`
+- `dim_others`
+- `dark_overlay`
+- `behavior`
+
+Current behavior:
+- stable verse block layout across scenes
+- no reflow or movement between highlight changes
+- highlight matching by exact substring
+- occurrence targeting via suffix syntax:
+  - `"父"`: all matches
+  - `"父[2]"`: second match
+  - `"父[-1]"`: last match
+- occurrence counting works across the full rendered verse block, not just per line
+
+### Global `exegesis_persistent` Defaults
+Global defaults are loaded from:
+
+[`config.json`](/opt/homebrew/var/www/church/web/data/sermon_to_video/config.json)
+
+Specifically:
+
+```json
+{
+  "exegesis_persistent_defaults": {
+    "...": "..."
+  }
+}
+```
+
+These defaults currently cover:
+- `anchor`
+- `header.style`
+- `verse_block.style`
+- `highlight_style`
+- `dim_others`
+- `behavior`
+- `dark_overlay`
+
+Per-overlay values in `visual_track.json` still override the global defaults.
+
+## `dark_overlay`
+
+Keep using the term `dark_overlay`.
+
+Supported forms:
+- `dark_overlay: true`
+- text-box overlay config
+- frame-band gradient config
+
+Text-box example:
+
+```json
+"dark_overlay": {
+  "type": "text_box",
+  "mode": "box",
+  "opacity": 0.82,
+  "padding_x": 44,
+  "padding_y": 34,
+  "radius": 20,
+  "blur": 2,
+  "feather": 0.02
+}
+```
+
+Gradient example:
+
+```json
+"dark_overlay": {
+  "type": "gradient",
+  "direction": "left_to_right",
+  "start_opacity": 0.62,
+  "end_opacity": 0.18,
+  "width_ratio": 0.6,
+  "blur": 6,
+  "feather": 0.06
+}
+```
+
+Supported keys now include:
+- `mode`
+- `opacity`
+- `padding_x`
+- `padding_y`
+- `radius`
+- `blur`
+- `feather`
+- `direction`
+- `start_opacity`
+- `end_opacity`
+- `width_ratio`
+
+## Motion and Face Anchor
+
+`motion.anchor = "face"` is supported for still-image Ken Burns motion.
+
+Implementation details:
+- face detection uses OpenCV Haar cascade
+- detection result is cached per source image
+- primary face is selected from detections
+- anchor is normalized to `(x_ratio, y_ratio)`
+- if no valid face is found, motion falls back to center
+
+Important rendering detail:
+- face-anchored zoom uses `resize + crop/viewport`
+- it no longer uses `resize + absolute position on fixed canvas`
+- this avoids black borders when the face is near the top or edge of frame
+
+## Cache Behavior
+
+Default is cache on:
+
+```bash
+python -m backend.sermon_to_video.cli render --project <project>
+```
+
+Disable cache with:
+
+```bash
+python -m backend.sermon_to_video.cli render --project <project> --no-cache
+```
+
+Current cache model:
+- phase 2 can reuse audio and cue points
+- phase 4 can reuse scene finals only when cache is on
+- phase 5 can reuse the final output only when cache is on
+- phase 6 preserves an existing `.srt` when cache is on
+
+Important fix:
+- with `--no-cache`, phase 5 no longer silently pulls stale `build/scene_*_final.mp4` files into concat after a phase-4 run
+
+## Notes
+
+- Missing assets now fall back to blank visuals instead of aborting assembly.
+- Project assets can be provided directly under `assets/`.
+- `visial_track.json` is still accepted as a typo-compatible fallback name.
+- The render path is currently optimized for deterministic local assembly, not AI image generation during render.
