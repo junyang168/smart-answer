@@ -1623,19 +1623,19 @@ export function SundayServiceManager() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">證道講員</label>
-                <input
+                <select
                   className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
-                  placeholder="講員姓名"
                   value={form.sermonSpeaker}
                   onChange={handleInputChange("sermonSpeaker")}
                   disabled={saving}
-                  list="worker-options"
-                />
-                <datalist id="worker-options">
+                >
+                  <option value="">未指定</option>
                   {sermonSpeakerOptions.map((name) => (
-                    <option key={`speaker-${name}`} value={name} />
+                    <option key={`speaker-${name}`} value={name}>
+                      {name}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
