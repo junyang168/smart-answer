@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from copy import deepcopy
-from typing import Iterable, Mapping, Optional
+from typing import Iterable, Mapping, Optional, Sequence
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -22,6 +22,7 @@ def generate_presentation_from_template(
     section_configs: Mapping[str, dict[str, object]] | None = None,
     scripture_summary: list[dict[str, str]] | None = None,
     holy_communion: Optional[Mapping[str, str]] = None,
+    hidden_slide_numbers: Sequence[int] | None = None,
 ) -> Path:
     """Populate placeholders in a PPTX template and save to output_path."""
     normalized = {key: str(value) for key, value in replacements.items()}
@@ -32,6 +33,7 @@ def generate_presentation_from_template(
         _insert_holy_communion_row(presentation, holy_communion)
     else:
         _remove_slides_by_note_keyword(presentation, "守聖餐")
+    _hide_slides_by_number(presentation, hidden_slide_numbers or [])
 
     _apply_replacements(presentation, normalized)
     presentation.save(output_path)
@@ -391,14 +393,25 @@ def _remove_slides_by_note_keyword(presentation: Presentation, keyword: str) -> 
 
     if not slides_to_remove:
         return
+    _hide_slides_by_index(presentation, slides_to_remove)
 
-    slide_id_list = presentation.slides._sldIdLst
-    slide_ids = list(slide_id_list)
-    
-    # Switch to HIDING slides prevents corruption issues with Sections/Custom Shows
-    for i in sorted(slides_to_remove, reverse=True):
-        slide = presentation.slides[i]
-        slide.element.set("show", "0")
+
+def _hide_slides_by_number(presentation: Presentation, slide_numbers: Sequence[int]) -> None:
+    slide_indexes = []
+    for slide_number in slide_numbers:
+        if slide_number <= 0:
+            continue
+        slide_indexes.append(slide_number - 1)
+    _hide_slides_by_index(presentation, slide_indexes)
+
+
+def _hide_slides_by_index(presentation: Presentation, slide_indexes: Iterable[int]) -> None:
+    total = len(presentation.slides)
+    for index in sorted(set(slide_indexes), reverse=True):
+        if index < 0 or index >= total:
+            continue
+        # Hiding preserves section/custom show integrity better than deletion.
+        presentation.slides[index].element.set("show", "0")
 
 def _render_section(
     slide,

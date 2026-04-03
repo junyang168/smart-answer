@@ -1,4 +1,13 @@
 export type SundaySongSource = "custom" | "hymnal";
+export type SundayWorkerRole = "司會" | "領詩" | "證道講員" | "讀經經文" | "司琴";
+
+export const SUNDAY_WORKER_ROLE_OPTIONS: SundayWorkerRole[] = [
+  "司會",
+  "領詩",
+  "證道講員",
+  "讀經經文",
+  "司琴",
+];
 
 export interface UnavailableDateRange {
   startDate: string;
@@ -9,6 +18,7 @@ export interface SundayWorker {
   name: string;
   email?: string | null;
   unavailableRanges?: UnavailableDateRange[];
+  preferredRoles?: SundayWorkerRole[];
 }
 
 export interface SundayServiceEmailResult {

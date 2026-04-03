@@ -17,11 +17,14 @@ import {
   updateSundayServiceEmailBody,
   fetchSundayServiceEmailBody,
 } from "@/app/admin/sunday-service/api";
+import { SundaySongPicker } from "@/app/components/admin/sundayService/SundaySongPicker";
 import {
+  SUNDAY_WORKER_ROLE_OPTIONS,
   SundayServiceEntry,
   SundayServiceResources,
   SundaySong,
   SundayWorker,
+  SundayWorkerRole,
   UnavailableDateRange,
   ScriptureBook,
 } from "@/app/types/sundayService";
@@ -199,6 +202,32 @@ const isWorkerUnavailableOnDate = (worker: SundayWorker, date: string): boolean 
   return getWorkerUnavailableRanges(worker).some((range) => isRangeActiveOnDate(range, date));
 };
 
+const getWorkerPreferredRoles = (worker: SundayWorker): SundayWorkerRole[] => {
+  const legacy = worker as {
+    preferred_roles?: SundayWorkerRole[] | SundayWorkerRole | null;
+    preferredRole?: SundayWorkerRole | null;
+    preferred_role?: SundayWorkerRole | null;
+  };
+  const raw =
+    worker.preferredRoles ??
+    legacy.preferred_roles ??
+    legacy.preferredRole ??
+    legacy.preferred_role ??
+    [];
+  const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return SUNDAY_WORKER_ROLE_OPTIONS.filter((role) => values.includes(role));
+};
+
+const workerSupportsRole = (worker: SundayWorker, role: SundayWorkerRole): boolean =>
+  getWorkerPreferredRoles(worker).includes(role);
+
+const WORKER_ROLE_FIELD_MAP = {
+  presider: "司會",
+  worshipLeader: "領詩",
+  pianist: "司琴",
+  sermonSpeaker: "證道講員",
+} satisfies Record<"presider" | "worshipLeader" | "pianist" | "sermonSpeaker", SundayWorkerRole>;
+
 const parseServiceDateValue = (value: string | null | undefined): number | null => {
   if (!value) {
     return null;
@@ -312,15 +341,6 @@ function parseDonationInput(value: string): number | null {
     return null;
   }
   return Math.round(parsed * 100) / 100;
-}
-
-function renderSongLabel(song: SundaySong): string {
-  if (song.source === "hymnal") {
-    const indexText = song.hymnalIndex != null ? `第 ${song.hymnalIndex} 首` : "";
-    const prefix = indexText ? `教會聖詩${indexText}` : "教會聖詩";
-    return `${prefix}：${song.title}`;
-  }
-  return song.title;
 }
 
 function validateScripture(form: FormState): string | null {
@@ -537,9 +557,27 @@ export function SundayServiceManager() {
     }
   }, [status, initialize]);
 
-  const sortedSongs = useMemo(() => {
-    return [...resources.songs].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
+  const songPickerSongs = useMemo(() => {
+    const hymnalSongs = resources.songs
+      .filter((song) => song.source === "hymnal")
+      .sort((a, b) => {
+        const aIndex = a.hymnalIndex ?? Number.MAX_SAFE_INTEGER;
+        const bIndex = b.hymnalIndex ?? Number.MAX_SAFE_INTEGER;
+        if (aIndex !== bIndex) {
+          return aIndex - bIndex;
+        }
+        return a.title.localeCompare(b.title, "zh-Hant");
+      });
+    const customSongs = resources.songs
+      .filter((song) => song.source !== "hymnal")
+      .sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
+    return [...hymnalSongs, ...customSongs];
   }, [resources.songs]);
+
+  const recentlyEnteredSongs = useMemo(
+    () => [...resources.songs.slice(-2)].reverse(),
+    [resources.songs],
+  );
 
   const currentService = useMemo(() => {
     if (!editingDate) {
@@ -652,12 +690,6 @@ export function SundayServiceManager() {
     return resources.workers.filter((worker) => !unavailableWorkerNames.has(worker.name));
   }, [resources.workers, unavailableWorkerNames]);
 
-  const workerNames = useMemo(
-    () =>
-      availableWorkers.map((worker) => worker.name).filter((name) => name.trim().length > 0),
-    [availableWorkers],
-  );
-
   const workerAssignmentFields: Array<"presider" | "worshipLeader" | "pianist" | "sermonSpeaker"> = [
     "presider",
     "worshipLeader",
@@ -690,15 +722,61 @@ export function SundayServiceManager() {
       return changed ? next : prev;
     });
   }, [unavailableWorkerNames]);
-  const readerOptions = useMemo(() => {
-    const set = new Set(workerNames);
-    form.scriptureReaders.forEach((reader) => {
-      if (reader.trim() && !set.has(reader)) {
-        set.add(reader);
-      }
+
+  const roleFilteredWorkerOptions = useMemo(() => {
+    const options = new Map<SundayWorkerRole, string[]>();
+    SUNDAY_WORKER_ROLE_OPTIONS.forEach((role) => {
+      const names = availableWorkers
+        .filter((worker) => workerSupportsRole(worker, role))
+        .map((worker) => worker.name.trim())
+        .filter((name) => name.length > 0);
+      options.set(role, names);
     });
-    return Array.from(set);
-  }, [workerNames, form.scriptureReaders]);
+    return options;
+  }, [availableWorkers]);
+
+  const resolveWorkerOptionsForRole = useCallback(
+    (role: SundayWorkerRole, currentValues: string[] = []) => {
+      const names = [...(roleFilteredWorkerOptions.get(role) ?? [])];
+      const seen = new Set(names);
+      currentValues
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+        .forEach((value) => {
+          if (!seen.has(value)) {
+            names.push(value);
+            seen.add(value);
+          }
+        });
+      return names;
+    },
+    [roleFilteredWorkerOptions],
+  );
+
+  const presiderOptions = useMemo(
+    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.presider, [form.presider]),
+    [form.presider, resolveWorkerOptionsForRole],
+  );
+
+  const worshipLeaderOptions = useMemo(
+    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.worshipLeader, [form.worshipLeader]),
+    [form.worshipLeader, resolveWorkerOptionsForRole],
+  );
+
+  const pianistOptions = useMemo(
+    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.pianist, [form.pianist]),
+    [form.pianist, resolveWorkerOptionsForRole],
+  );
+
+  const sermonSpeakerOptions = useMemo(
+    () => resolveWorkerOptionsForRole(WORKER_ROLE_FIELD_MAP.sermonSpeaker, [form.sermonSpeaker]),
+    [form.sermonSpeaker, resolveWorkerOptionsForRole],
+  );
+
+  const readerOptions = useMemo(
+    () => resolveWorkerOptionsForRole("讀經經文", form.scriptureReaders),
+    [form.scriptureReaders, resolveWorkerOptionsForRole],
+  );
 
   const handleInputChange = (field: keyof FormState) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -1504,9 +1582,9 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {availableWorkers.map((worker) => (
-                    <option key={worker.name} value={worker.name}>
-                      {worker.name}
+                  {presiderOptions.map((name) => (
+                    <option key={`presider-${name}`} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -1520,9 +1598,9 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {availableWorkers.map((worker) => (
-                    <option key={worker.name} value={worker.name}>
-                      {worker.name}
+                  {worshipLeaderOptions.map((name) => (
+                    <option key={`worship-leader-${name}`} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -1536,9 +1614,9 @@ export function SundayServiceManager() {
                   disabled={saving}
                 >
                   <option value="">未指定</option>
-                  {availableWorkers.map((worker) => (
-                    <option key={worker.name} value={worker.name}>
-                      {worker.name}
+                  {pianistOptions.map((name) => (
+                    <option key={`pianist-${name}`} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -1554,8 +1632,8 @@ export function SundayServiceManager() {
                   list="worker-options"
                 />
                 <datalist id="worker-options">
-                  {resources.workers.map((worker) => (
-                    <option key={`speaker-${worker.name}`} value={worker.name} />
+                  {sermonSpeakerOptions.map((name) => (
+                    <option key={`speaker-${name}`} value={name} />
                   ))}
                 </datalist>
               </div>
@@ -1563,35 +1641,25 @@ export function SundayServiceManager() {
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">詩歌</label>
-                <select
-                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                <SundaySongPicker
                   value={form.hymn}
-                  onChange={handleInputChange("hymn")}
+                  songs={songPickerSongs}
+                  recentSongs={recentlyEnteredSongs}
+                  onChange={(value) => setForm((prev) => ({ ...prev, hymn: value }))}
                   disabled={saving}
-                >
-                  <option value="">未指定</option>
-                  {sortedSongs.map((song) => (
-                    <option key={song.id} value={song.title}>
-                      {renderSongLabel(song)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="未指定"
+                />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-semibold text-gray-700">回應詩歌</label>
-                <select
-                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                <SundaySongPicker
                   value={form.responseHymn}
-                  onChange={handleInputChange("responseHymn")}
+                  songs={songPickerSongs}
+                  recentSongs={recentlyEnteredSongs}
+                  onChange={(value) => setForm((prev) => ({ ...prev, responseHymn: value }))}
                   disabled={saving}
-                >
-                  <option value="">未指定</option>
-                  {sortedSongs.map((song) => (
-                    <option key={`${song.id}-response`} value={song.title}>
-                      {renderSongLabel(song)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="未指定"
+                />
               </div>
             </div>
             <div>

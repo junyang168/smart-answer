@@ -112,6 +112,7 @@ class FellowshipEntry(BaseModel):
 
 
 SongSource = Literal["custom", "hymnal"]
+SundayWorkerRole = Literal["司會", "領詩", "證道講員", "讀經經文", "司琴"]
 
 
 class SundaySong(BaseModel):
@@ -184,6 +185,7 @@ class SundayWorker(BaseModel):
     unavailable_ranges: List[UnavailableDateRange] = Field(
         default_factory=list, alias="unavailableRanges"
     )
+    preferred_roles: List[SundayWorkerRole] = Field(default_factory=list, alias="preferredRoles")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -203,6 +205,15 @@ class SundayWorker(BaseModel):
                     if ranges:
                         data = dict(data)
                         data["unavailableRanges"] = ranges
+            if "preferredRoles" not in data:
+                legacy_roles = (
+                    data.get("preferred_roles")
+                    or data.get("preferredRole")
+                    or data.get("preferred_role")
+                )
+                if legacy_roles:
+                    data = dict(data)
+                    data["preferredRoles"] = legacy_roles
         return data
 
     @field_validator("name")
@@ -220,6 +231,28 @@ class SundayWorker(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator("preferred_roles", mode="before")
+    @classmethod
+    def _normalize_preferred_roles(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, Sequence):
+            items = list(value)
+        else:
+            raise ValueError("Preferred roles must be a list")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            text = str(item).strip()
+            if not text or text in seen:
+                continue
+            normalized.append(text)
+            seen.add(text)
+        return normalized
 
     def is_available_on(self, date: Optional[str]) -> bool:
         if not date:

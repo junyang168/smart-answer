@@ -6,7 +6,12 @@ import {
   deleteSundayWorker,
   updateSundayWorker,
 } from "@/app/admin/sunday-service/api";
-import { SundayWorker, UnavailableDateRange } from "@/app/types/sundayService";
+import {
+  SUNDAY_WORKER_ROLE_OPTIONS,
+  SundayWorker,
+  SundayWorkerRole,
+  UnavailableDateRange,
+} from "@/app/types/sundayService";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -48,6 +53,7 @@ const resolveWorkerRanges = (worker: SundayWorker): UnavailableDateRange[] => {
 export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerManagerProps) {
   const [newWorkerName, setNewWorkerName] = useState("");
   const [newWorkerEmail, setNewWorkerEmail] = useState("");
+  const [newWorkerPreferredRoles, setNewWorkerPreferredRoles] = useState<SundayWorkerRole[]>([]);
   const [newWorkerUnavailableRanges, setNewWorkerUnavailableRanges] = useState<
     UnavailableDateRange[]
   >([]);
@@ -56,6 +62,7 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingEmail, setEditingEmail] = useState("");
+  const [editingPreferredRoles, setEditingPreferredRoles] = useState<SundayWorkerRole[]>([]);
   const [editingUnavailableRanges, setEditingUnavailableRanges] = useState<
     UnavailableDateRange[]
   >([]);
@@ -141,6 +148,19 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
     setEditingUnavailableRanges((prev) => prev.filter((value) => !rangesEqual(value, range)));
   };
 
+  const sortPreferredRoles = (roles: SundayWorkerRole[]) =>
+    SUNDAY_WORKER_ROLE_OPTIONS.filter((role) => roles.includes(role));
+
+  const toggleRoleSelection = (
+    currentRoles: SundayWorkerRole[],
+    role: SundayWorkerRole,
+  ): SundayWorkerRole[] => {
+    if (currentRoles.includes(role)) {
+      return currentRoles.filter((value) => value !== role);
+    }
+    return sortPreferredRoles([...currentRoles, role]);
+  };
+
   const handleAdd = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = newWorkerName.trim();
@@ -155,10 +175,12 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
       await createSundayWorker({
         name: trimmed,
         email: email || undefined,
+        preferredRoles: newWorkerPreferredRoles,
         unavailableRanges: newWorkerUnavailableRanges,
       });
       setNewWorkerName("");
       setNewWorkerEmail("");
+      setNewWorkerPreferredRoles([]);
       setNewWorkerUnavailableRanges([]);
       setNewRangeStart("");
       setNewRangeEnd("");
@@ -176,6 +198,7 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
     setEditingName(worker.name);
     setEditingValue(worker.name);
     setEditingEmail(worker.email ?? "");
+    setEditingPreferredRoles(sortPreferredRoles(worker.preferredRoles ?? []));
     setEditingUnavailableRanges(resolveWorkerRanges(worker));
     setEditingRangeStart("");
     setEditingRangeEnd("");
@@ -186,6 +209,7 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
     setEditingName(null);
     setEditingValue("");
     setEditingEmail("");
+    setEditingPreferredRoles([]);
     setEditingUnavailableRanges([]);
     setEditingRangeStart("");
     setEditingRangeEnd("");
@@ -207,6 +231,7 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
       await updateSundayWorker(editingName, {
         name: trimmed,
         email: email || undefined,
+        preferredRoles: editingPreferredRoles,
         unavailableRanges: editingUnavailableRanges,
       });
       setFeedback("已更新同工資訊");
@@ -269,6 +294,38 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
         >
           新增
         </button>
+        <div className="sm:col-span-3 rounded border border-dashed border-gray-300 px-3 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-600">偏好服事角色</span>
+            <span className="text-xs text-gray-400">可複選</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {SUNDAY_WORKER_ROLE_OPTIONS.map((role) => {
+              const checked = newWorkerPreferredRoles.includes(role);
+              return (
+                <label
+                  key={`new-role-${role}`}
+                  className={`inline-flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium ${
+                    checked
+                      ? "border-blue-300 bg-blue-50 text-blue-800"
+                      : "border-gray-200 bg-white text-gray-700"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    checked={checked}
+                    onChange={() =>
+                      setNewWorkerPreferredRoles((prev) => toggleRoleSelection(prev, role))
+                    }
+                    disabled={saving}
+                  />
+                  {role}
+                </label>
+              );
+            })}
+          </div>
+        </div>
         <div className="sm:col-span-3 rounded border border-dashed border-gray-300 px-3 py-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-600">不可服事日期區間</span>
@@ -372,6 +429,38 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
                   </div>
                   <div className="rounded border border-dashed border-gray-300 px-3 py-3">
                     <div className="mb-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-600">偏好服事角色</span>
+                      <span className="text-xs text-gray-400">可複選</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {SUNDAY_WORKER_ROLE_OPTIONS.map((role) => {
+                        const checked = editingPreferredRoles.includes(role);
+                        return (
+                          <label
+                            key={`edit-role-${worker.name}-${role}`}
+                            className={`inline-flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium ${
+                              checked
+                                ? "border-blue-300 bg-blue-50 text-blue-800"
+                                : "border-gray-200 bg-white text-gray-700"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              checked={checked}
+                              onChange={() =>
+                                setEditingPreferredRoles((prev) => toggleRoleSelection(prev, role))
+                              }
+                              disabled={saving}
+                            />
+                            {role}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded border border-dashed border-gray-300 px-3 py-3">
+                    <div className="mb-2 flex items-center justify-between">
                       <span className="text-xs font-semibold text-gray-600">不可服事日期區間</span>
                       <span className="text-xs text-gray-400">點擊 × 移除</span>
                     </div>
@@ -433,6 +522,18 @@ export function SundayWorkerManager({ workers, onWorkersChanged }: SundayWorkerM
                     <span className="text-sm font-medium text-gray-800">{worker.name}</span>
                     {worker.email && (
                       <span className="text-xs text-gray-500">{worker.email}</span>
+                    )}
+                    {worker.preferredRoles && worker.preferredRoles.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {sortPreferredRoles(worker.preferredRoles).map((role) => (
+                          <span
+                            key={`${worker.name}-role-${role}`}
+                            className="inline-flex items-center rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-800"
+                          >
+                            {role}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     {unavailableRanges.length > 0 && (
                       <span className="text-xs text-amber-600">

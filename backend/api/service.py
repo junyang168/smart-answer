@@ -502,6 +502,9 @@ def generate_sunday_service_ppt(date: str) -> Path:
             "scripture_text": "林前11:23-29",
             "speaker_placeholder": "{sermonSpeaker}",
         }
+    hidden_slide_numbers: list[int] = []
+    if not _sermon_speaker_has_pastor_title(service.sermon_speaker):
+        hidden_slide_numbers.append(21)
 
     generate_presentation_from_template(
         PPT_TEMPLATE_FILE,
@@ -510,6 +513,7 @@ def generate_sunday_service_ppt(date: str) -> Path:
         section_configs=section_configs,
         scripture_summary=summary_data,
         holy_communion=holy_comm_config,
+        hidden_slide_numbers=hidden_slide_numbers,
     )
     return output_path
 
@@ -710,6 +714,11 @@ def _build_ppt_replacements(
     _populate_fellowship_replacements(replacements, service_date)
 
     return replacements
+
+
+def _sermon_speaker_has_pastor_title(speaker: str | None) -> bool:
+    normalized = _normalize_text(speaker)
+    return "牧師" in normalized or "牧师" in normalized
 
 
 def _apply_song_replacements(

@@ -645,12 +645,28 @@ class ArticleRepository:
                 except Exception:
                     name = data.get("name")
                     email = data.get("email")
+                    preferred_roles = (
+                        data.get("preferredRoles")
+                        or data.get("preferred_roles")
+                        or data.get("preferredRole")
+                        or data.get("preferred_role")
+                    )
                     unavailable = (
                         data.get("unavailableRanges")
                         or data.get("unavailable_ranges")
                         or data.get("unavailable_dates")
                         or data.get("unavailableDates")
                     )
+                    roles: list[str] = []
+                    if isinstance(preferred_roles, Sequence) and not isinstance(preferred_roles, (str, bytes)):
+                        for raw_role in preferred_roles:
+                            text = str(raw_role).strip()
+                            if text:
+                                roles.append(text)
+                    elif preferred_roles:
+                        text = str(preferred_roles).strip()
+                        if text:
+                            roles.append(text)
                     ranges: list[dict] = []
                     if isinstance(unavailable, Sequence) and not isinstance(unavailable, (str, bytes)):
                         for raw_range in unavailable:
@@ -674,11 +690,18 @@ class ArticleRepository:
                                     name=name,
                                     email=email,
                                     unavailable_ranges=ranges,
+                                    preferred_roles=roles,
                                 )
                             )
                         except ValueError:
                             try:
-                                workers.append(SundayWorker(name=name, email=email))
+                                workers.append(
+                                    SundayWorker(
+                                        name=name,
+                                        email=email,
+                                        preferred_roles=roles,
+                                    )
+                                )
                             except ValueError:
                                 continue
         return workers
@@ -709,6 +732,7 @@ class ArticleRepository:
             name=name,
             email=worker.email,
             unavailable_ranges=worker.unavailable_ranges,
+            preferred_roles=worker.preferred_roles,
         )
         workers.append(new_worker)
         workers.sort(key=lambda value: value.name.casefold())
@@ -733,6 +757,7 @@ class ArticleRepository:
             name=new_name,
             email=worker.email,
             unavailable_ranges=worker.unavailable_ranges,
+            preferred_roles=worker.preferred_roles,
         )
         workers[index] = updated_worker
         workers.sort(key=lambda value: value.name.casefold())
@@ -836,8 +861,7 @@ class ArticleRepository:
         tmp_path.replace(SUNDAY_SONGS_FILE)
 
     def list_sunday_songs(self) -> list[SundaySong]:
-        songs = self._load_sunday_songs()
-        return sorted(songs, key=lambda song: song.title.casefold())
+        return self._load_sunday_songs()
 
     def create_sunday_song(self, payload: SundaySongCreate) -> SundaySong:
         title = payload.title.strip()
@@ -860,7 +884,6 @@ class ArticleRepository:
             hymnal_index=payload.hymnal_index,
         )
         songs.append(new_song)
-        songs.sort(key=lambda song: song.title.casefold())
         self._save_sunday_songs(songs)
         return new_song
 
@@ -897,7 +920,6 @@ class ArticleRepository:
             hymnal_index=payload.hymnal_index,
         )
         songs[target] = updated_song
-        songs.sort(key=lambda song: song.title.casefold())
         self._save_sunday_songs(songs)
 
         if previous_title != title:
