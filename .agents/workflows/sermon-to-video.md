@@ -29,9 +29,9 @@ The pipeline remains audio-driven:
 - Visual track data decorates scenes in memory; it does not replace scene timing as the master timeline.
 
 Runtime mental model:
-- `scene`: audio/subtitle sync unit
-- `visual`: macro scheduling unit
-- `clip`: selected asset and motion unit within a visual
+- `scene`: audio/subtitle sync unit and current export unit for phase 4 outputs
+- `visual`: macro scheduling and overlay ownership unit
+- `clip`: smallest visual render unit within a visual
 
 ## CLI Contract
 
@@ -44,6 +44,7 @@ python -m backend.sermon_to_video.cli render \
   [--font <ttf>] \
   [--start-phase <1-7>] \
   [--scene-id <id>] \
+  [--phase4-workers <n>] \
   [--cache | --no-cache]
 ```
 
@@ -51,6 +52,7 @@ Current defaults:
 - `--output` defaults to `<project>/final_video.mp4`
 - build artifacts go to `<project>/build`
 - cache is on by default
+- `--phase4-workers` bounds phase 4 concurrency; use `1` for sequential assembly
 
 ## Pipeline
 
@@ -69,11 +71,15 @@ Current defaults:
 
 ### Phase 4: Assembly
 - Loads scene data and runtime overlay metadata
+- Resolves clip schedules per scene from cue anchors and relative chaining
 - Resolves assets from:
   - `visual_track.json`
   - project `assets/`
   - previously generated `build/scene_*_visual.*`
   - blank fallback visuals
+- Renders clips as the smallest visual units inside the current scene window
+- Projects visual-level overlays into that scene window after clip assembly
+- Can assemble multiple scenes in parallel with a bounded worker pool
 - Renders `build/scene_<id>_final.mp4`
 
 ### Phase 5: Concat
@@ -110,6 +116,12 @@ Top-level shape:
               "clip_id": "IMG_1",
               "type": "image",
               "trigger_scene_cue": "scene_1"
+            },
+            {
+              "clip_id": "IMG_2",
+              "type": "image",
+              "trigger_mode": "after_previous",
+              "duration": 2.5
             }
           ]
         }
@@ -123,9 +135,16 @@ Top-level shape:
 Current implementation details:
 - `visual_id` replaces old `scene_id` assumptions at the visual-track layer
 - one visual can cover multiple scenes via `covered_scenes`
-- clips are resolved by `trigger_scene_cue`
+- clips are resolved into a cue-aware `clip_schedule` per scene
+- `trigger_scene_cue` starts a clip from an absolute scene/cue anchor
+- `trigger_mode: "after_previous"` starts a clip immediately after the previous resolved clip ends
 - overlays live at the visual level and are projected into scenes
 - old scene-based visual-track formats are normalized through an adapter layer
+
+Authoring rules:
+- use explicit cues when the visual must sync to a narration beat
+- use `after_previous` when the next clip should simply continue after the prior clip
+- relative chains should usually include `duration` on the preceding clip, otherwise they run until the next explicit cue-triggered clip or scene end
 
 ## Overlay System
 
@@ -258,6 +277,7 @@ Default final video:
 Cache behavior:
 - `--cache` is default
 - `--no-cache` forces regeneration for the current run
+- phase 4 parallelism does not change cache ownership; each worker writes one scene output path
 - when phase 4 ran with cache disabled, phase 5 must not silently reuse stale `scene_*_final.mp4` files
 
 ## Current Constraints

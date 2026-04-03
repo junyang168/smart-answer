@@ -50,6 +50,7 @@ python -m backend.sermon_to_video.cli render \
   [--font <ttf>] \
   [--start-phase 1-7] \
   [--scene-id <id>] \
+  [--phase4-workers <n>] \
   [--cache | --no-cache]
 ```
 
@@ -59,6 +60,7 @@ Important behavior:
 - `--cache` is the default.
 - `--no-cache` forces regeneration for the current run instead of reusing prior stage outputs.
 - `--scene-id` only narrows phase 4 scene assembly.
+- `--phase4-workers` bounds phase 4 scene assembly concurrency. `1` forces sequential assembly.
 
 ## Project Layout
 
@@ -111,10 +113,15 @@ At the moment this file is used for `exegesis_persistent_defaults`.
 
 ### Phase 4: Assembly
 - Main scene render phase.
+- Phase 4 scene assembly can run in parallel with a bounded worker pool via `--phase4-workers`.
 - Uses 1920x1080 output.
+- Renders clips as the smallest visual unit.
+- Resolves clip start times from cue anchors or relative `after_previous` chaining.
+- Assembles the resolved clip timeline into each scene window.
 - Applies Ken Burns motion for stills.
 - Supports face-aware anchor resolution.
-- Renders overlays as transparent snapshots.
+- Projects visual-level overlays into the current scene window, then composites them above the assembled clip result.
+- Subtitles remain a later burn-in stage, not part of clip scheduling.
 - Writes `build/scene_<id>_final.mp4`.
 
 ### Phase 5: Concat
@@ -156,6 +163,12 @@ The renderer now treats the new `visual_track.json` schema as first-class:
                 "type": "zoom_in",
                 "anchor": "face"
               }
+            },
+            {
+              "clip_id": "IMG_2",
+              "type": "image",
+              "trigger_mode": "after_previous",
+              "duration": 2.5
             }
           ]
         }
@@ -170,14 +183,21 @@ The renderer now treats the new `visual_track.json` schema as first-class:
 ```
 
 Current runtime model:
-- `scene` is still the audio/subtitle sync unit.
-- `visual` is the macro scheduling unit.
-- `clip` is the asset and motion unit selected inside a visual.
+- `scene` is still the audio/subtitle sync unit and the current export unit: phase 4 still writes `build/scene_<id>_final.mp4`.
+- `visual` is the macro scheduling and overlay ownership unit.
+- `clip` is the smallest visual render unit.
 - `covered_scenes` binds one visual to multiple scenes.
-- `trigger_scene_cue` chooses the active clip for a scene.
+- `trigger_scene_cue` starts a clip from an absolute scene/cue anchor.
+- `trigger_mode: "after_previous"` starts a clip immediately after the previous resolved clip ends.
+- per-scene runtime metadata now includes a cue-aware `clip_schedule`, not just one selected clip.
 - visual-level `overlay` is projected into each covered scene using cue timing.
 
 Legacy scene-based visual-track formats are still normalized through an adapter layer.
+
+Authoring note:
+- use explicit cues when the visual should sync to narration
+- use `trigger_mode: "after_previous"` when a clip should simply continue the visual chain after the prior clip
+- for relative chains, `duration` controls when the next `after_previous` clip starts; without `duration`, the clip extends until the next explicit cue-triggered clip or scene end
 
 ## Overlay Types
 
@@ -329,6 +349,7 @@ python -m backend.sermon_to_video.cli render --project <project> --no-cache
 Current cache model:
 - phase 2 can reuse audio and cue points
 - phase 4 can reuse scene finals only when cache is on
+- phase 4 parallelism does not change cache semantics; each worker still owns one scene output path
 - phase 5 can reuse the final output only when cache is on
 - phase 6 preserves an existing `.srt` when cache is on
 

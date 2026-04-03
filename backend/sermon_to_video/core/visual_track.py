@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Any, Optional
 
 
@@ -15,6 +16,7 @@ class VisualClip:
     clip_id: str
     clip_type: str
     trigger_scene_cue: Optional[str] = None
+    trigger_mode: Optional[str] = None
     duration: Optional[float] = None
     description: str = ""
     motion: dict[str, Any] = field(default_factory=dict)
@@ -59,6 +61,7 @@ class SceneVisualBinding:
     shot: Optional[VisualShot]
     clip: Optional[VisualClip]
     asset_path: Optional[Path]
+    clip_schedule: tuple[tuple[Optional[VisualShot], VisualClip, Optional[Path]], ...] = ()
 
     def to_runtime_metadata(self) -> dict[str, Any]:
         clip = self.clip
@@ -79,7 +82,27 @@ class SceneVisualBinding:
             "clip_type": clip.clip_type if clip else None,
             "clip_duration": clip.duration if clip else None,
             "clip_trigger_scene_cue": clip.trigger_scene_cue if clip else None,
+            "clip_trigger_mode": clip.trigger_mode if clip else None,
             "clip_description": clip.description if clip else "",
+            "clip_schedule": [
+                {
+                    "shot_id": scheduled_shot.shot_id if scheduled_shot else None,
+                    "clip_id": scheduled_clip.clip_id,
+                    "clip_type": scheduled_clip.clip_type,
+                    "trigger_scene_cue": scheduled_clip.trigger_scene_cue,
+                    "trigger_mode": scheduled_clip.trigger_mode,
+                    "clip_duration": scheduled_clip.duration,
+                    "clip_description": scheduled_clip.description,
+                    "motion": deepcopy(scheduled_clip.motion),
+                    "playback_plan": deepcopy(scheduled_clip.playback_plan),
+                    "asset_ref": (
+                        _relative_or_absolute(scheduled_asset_path, scheduled_asset_path.parent.parent)
+                        if scheduled_asset_path
+                        else None
+                    ),
+                }
+                for scheduled_shot, scheduled_clip, scheduled_asset_path in self.clip_schedule
+            ],
         }
 
 
@@ -105,15 +128,30 @@ def build_scene_visual_bindings(
     work_dir: Path,
 ) -> dict[int, SceneVisualBinding]:
     bindings: dict[int, SceneVisualBinding] = {}
+    scene_index = {
+        scene_id: scene
+        for scene in scenes
+        if (scene_id := _coerce_scene_id(scene.get("scene_id"))) is not None
+    }
     for visual in document.visual_track:
         for scene_id in visual.covered_scenes:
+            scene = scene_index.get(scene_id, {"scene_id": scene_id})
+            clip_schedule = _select_clip_schedule_for_scene(visual, scene)
             shot, clip = _select_clip_for_scene(visual, scene_id)
+            if clip_schedule:
+                primary_shot, primary_clip = clip_schedule[0]
+                shot = primary_shot or shot
+                clip = primary_clip or clip
             bindings[scene_id] = SceneVisualBinding(
                 scene_id=scene_id,
                 visual=visual,
                 shot=shot,
                 clip=clip,
                 asset_path=_resolve_asset_path(work_dir, clip) if clip else None,
+                clip_schedule=tuple(
+                    (scheduled_shot, scheduled_clip, _resolve_asset_path(work_dir, scheduled_clip))
+                    for scheduled_shot, scheduled_clip in clip_schedule
+                ),
             )
     return bindings
 
@@ -376,6 +414,7 @@ def _parse_visual_entry(entry: dict[str, Any], index: int) -> VisualTrackEntry:
                     clip_id=str(clip.get("clip_id") or f"{visual_id}_clip_{clip_index}"),
                     clip_type=str(clip.get("type", "image")),
                     trigger_scene_cue=_clean_optional_str(clip.get("trigger_scene_cue")),
+                    trigger_mode=_clean_optional_str(clip.get("trigger_mode")),
                     duration=_coerce_float(clip.get("duration")),
                     description=str(clip.get("description", "")),
                     motion=deepcopy(clip.get("motion", {}) or {}),
@@ -419,6 +458,7 @@ def _parse_legacy_visual_entry(entry: dict[str, Any], index: int) -> VisualTrack
         clip_id=str(asset.get("clip_id") or asset.get("asset_id") or fallback_clip_id),
         clip_type=clip_type,
         trigger_scene_cue=scene_cue,
+        trigger_mode=None,
         duration=_coerce_float(entry.get("duration")),
         description=str(asset.get("description", "")),
         motion=deepcopy(entry.get("motion", {}) or {}),
@@ -459,6 +499,42 @@ def _select_clip_for_scene(
         return shot, clips[0]
 
     return (visual.shots[0], visual.shots[0].clips[0]) if visual.shots and visual.shots[0].clips else (None, None)
+
+
+def _select_clip_schedule_for_scene(
+    visual: VisualTrackEntry,
+    scene: dict[str, Any],
+) -> list[tuple[Optional[VisualShot], VisualClip]]:
+    scene_id = _coerce_scene_id(scene.get("scene_id"))
+    if scene_id is None:
+        return []
+
+    scene_triggers = {f"scene_{scene_id}", *_extract_scene_markers(scene.get("voiceover_text", ""))}
+    flattened_clips = [
+        (shot, clip)
+        for shot in visual.shots
+        for clip in shot.clips
+    ]
+    schedule: list[tuple[Optional[VisualShot], VisualClip]] = []
+    include_followups = False
+    for shot, clip in flattened_clips:
+        cue_key = _clean_optional_str(clip.trigger_scene_cue)
+        trigger_mode = _clean_optional_str(clip.trigger_mode)
+        if cue_key:
+            include_followups = cue_key in scene_triggers
+            if include_followups:
+                schedule.append((shot, clip))
+            continue
+        if include_followups and trigger_mode == "after_previous":
+            schedule.append((shot, clip))
+
+    if schedule:
+        return schedule
+
+    fallback_shot, fallback_clip = _select_clip_for_scene(visual, scene_id)
+    if fallback_clip:
+        return [(fallback_shot, fallback_clip)]
+    return []
 
 
 def _resolve_asset_path(work_dir: Path, clip: VisualClip) -> Optional[Path]:
@@ -642,3 +718,9 @@ def _clean_optional_str(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _extract_scene_markers(text: Any) -> tuple[str, ...]:
+    if text is None:
+        return ()
+    return tuple(match.group(1).strip() for match in re.finditer(r"\[([^\[\]]+)\]", str(text)) if match.group(1).strip())

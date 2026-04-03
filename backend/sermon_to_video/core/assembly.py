@@ -3,7 +3,8 @@ import json
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, ImageClip
+from typing import Any
+from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, ImageClip, ColorClip
 from opencc import OpenCC
 try:
     from moviepy.video.fx import CrossFadeIn
@@ -1580,6 +1581,219 @@ def apply_ken_burns(clip, motion_data, duration, source_key: str | None = None):
     )
     return clip
 
+
+def _load_visual_source_clip(source_ref: str, project_dir: Path):
+    source_path = Path(source_ref)
+    source_fp = str(source_path if source_path.is_absolute() else (project_dir / source_path))
+    if source_fp.endswith((".jpg", ".jpeg", ".png", ".webp")):
+        clip = ImageClip(source_fp)
+    else:
+        clip = VideoFileClip(source_fp)
+
+    if hasattr(clip, "without_audio"):
+        clip = clip.without_audio()
+    else:
+        clip = clip.set_audio(None)
+    return clip, source_fp
+
+
+def _build_video_clip_from_source(
+    raw_video_clip,
+    *,
+    duration_sec: float,
+    playback_plan: dict[str, Any] | None,
+    motion_data: dict[str, Any] | None,
+    source_key: str,
+):
+    playback_plan = playback_plan or {}
+    segments = playback_plan.get("segments", [])
+
+    if segments:
+        print(f"  🎬 Executing playback plan with {len(segments)} segments...")
+        normalized_source = normalize_resolution(raw_video_clip)
+
+        segment_clips = []
+        consumed_time = 0.0
+        for i, seg in enumerate(segments):
+            seg_type = seg.get("type", "video")
+            seg_motion = seg.get("motion")
+            remaining_scene_dur = max(0.0, duration_sec - consumed_time)
+            source_duration = float(normalized_source.duration or 0.0)
+            video_start_sec = 0.0
+
+            if seg_type == "video":
+                try:
+                    video_start_sec = max(0.0, float(seg.get("start_sec", 0.0)))
+                except (TypeError, ValueError):
+                    video_start_sec = 0.0
+                video_start_sec = min(video_start_sec, source_duration)
+
+            if seg_type == "video":
+                available_video_dur = max(0.0, source_duration - video_start_sec)
+                if "range_sec" in seg:
+                    try:
+                        seg_dur = max(0.0, float(seg["range_sec"]))
+                    except (TypeError, ValueError):
+                        seg_dur = 0.0
+                    seg_dur = min(seg_dur, available_video_dur)
+                else:
+                    seg_dur = available_video_dur
+                seg_dur = min(seg_dur, remaining_scene_dur)
+            elif "range_sec" in seg:
+                seg_dur = float(seg["range_sec"])
+            elif i == len(segments) - 1:
+                seg_dur = remaining_scene_dur
+            else:
+                seg_dur = 0.0
+
+            if seg_dur <= 0:
+                continue
+
+            if seg_type == "freeze":
+                source = seg.get("source_frame", "first")
+                t = 0 if source == "first" else normalized_source.duration - 0.1
+                frame = normalized_source.get_frame(t)
+                seg_clip = ImageClip(frame).with_duration(seg_dur)
+                seg_source_key = f"{source_key}#freeze:{source}:{t:.2f}"
+            else:
+                video_end_sec = min(source_duration, video_start_sec + seg_dur)
+                if hasattr(normalized_source, "subclipped"):
+                    seg_clip = normalized_source.subclipped(video_start_sec, video_end_sec)
+                else:
+                    seg_clip = normalized_source.subclip(video_start_sec, video_end_sec)
+                seg_clip = seg_clip.with_duration(seg_dur)
+                seg_source_key = f"{source_key}#video:{video_start_sec:.2f}"
+
+            if seg_motion:
+                seg_clip = apply_ken_burns(seg_clip, seg_motion, seg_dur, source_key=seg_source_key)
+
+            segment_clips.append(seg_clip)
+            consumed_time += seg_dur
+            if consumed_time >= duration_sec:
+                break
+
+        if not segment_clips:
+            raise RuntimeError(f"Playback plan produced no segments for {source_key}")
+        if len(segment_clips) == 1:
+            return segment_clips[0].with_duration(duration_sec)
+
+        from moviepy import concatenate_videoclips
+
+        return concatenate_videoclips(segment_clips, method="compose").with_duration(duration_sec)
+
+    video_clip = raw_video_clip
+    actual_duration = video_clip.duration or duration_sec
+
+    if actual_duration < duration_sec:
+        speed_factor = actual_duration / duration_sec
+        print(f"  🐢 Auto-slow motion: {actual_duration:.1f}s → {duration_sec:.1f}s")
+        if hasattr(video_clip, "with_speed_scaled"):
+            video_clip = video_clip.with_speed_scaled(speed_factor)
+        elif hasattr(video_clip, "fx"):
+            from moviepy.video.fx.speedx import speedx
+
+            video_clip = video_clip.fx(speedx, speed_factor).with_duration(duration_sec)
+        else:
+            raise RuntimeError("Clip has neither with_speed_scaled() nor fx()")
+    elif actual_duration > duration_sec:
+        if hasattr(video_clip, "subclipped"):
+            video_clip = video_clip.subclipped(0, duration_sec)
+        else:
+            video_clip = video_clip.subclip(0, duration_sec)
+
+    video_clip = normalize_resolution(video_clip)
+    return apply_ken_burns(video_clip, motion_data, duration_sec, source_key=source_key)
+
+
+def _resolve_scene_clip_schedule(scene_data: dict[str, Any]) -> list[dict[str, Any]]:
+    vt_metadata = scene_data.get("visual_track_metadata", {})
+    clip_schedule = vt_metadata.get("clip_schedule") or []
+    if not clip_schedule:
+        return []
+
+    scene_id = scene_data.get("scene_id")
+    cue_map = scene_data.get("storyboard_metadata", {}).get("cue_points", {})
+    scene_start_abs = cue_map.get(f"scene_{scene_id}", scene_data.get("audio_start_offset", 0.0))
+    render_duration = float(scene_data.get("render_duration", scene_data.get("duration_sec", 5.0)))
+    scene_end_abs = scene_start_abs + render_duration
+
+    def _coerce_positive_float(value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    entries: list[dict[str, Any]] = []
+    for index, clip_entry in enumerate(clip_schedule):
+        cue_key = clip_entry.get("trigger_scene_cue")
+        trigger_mode = str(clip_entry.get("trigger_mode") or "").strip().lower() or None
+
+        explicit_abs = None
+        if cue_key == f"scene_{scene_id}":
+            explicit_abs = scene_start_abs
+        elif cue_key:
+            trigger_abs = cue_map.get(cue_key)
+            if trigger_abs is not None:
+                explicit_abs = max(scene_start_abs, float(trigger_abs))
+        elif index == 0 and trigger_mode != "after_previous":
+            explicit_abs = scene_start_abs
+
+        entries.append(
+            {
+                **deepcopy(clip_entry),
+                "_order": index,
+                "_trigger_mode": trigger_mode,
+                "_explicit_abs": explicit_abs,
+            }
+        )
+
+    next_explicit_abs_after: list[float | None] = [None] * len(entries)
+    next_explicit_abs = None
+    for index in range(len(entries) - 1, -1, -1):
+        next_explicit_abs_after[index] = next_explicit_abs
+        explicit_abs = entries[index].get("_explicit_abs")
+        if explicit_abs is not None:
+            next_explicit_abs = float(explicit_abs)
+
+    scheduled = []
+    previous_end_abs = None
+    for index, clip_entry in enumerate(entries):
+        trigger_mode = clip_entry.get("_trigger_mode")
+        explicit_abs = clip_entry.get("_explicit_abs")
+
+        if trigger_mode == "after_previous":
+            if previous_end_abs is None:
+                continue
+            start_abs = previous_end_abs
+        else:
+            if explicit_abs is None:
+                continue
+            start_abs = float(explicit_abs)
+
+        if start_abs >= scene_end_abs:
+            continue
+
+        duration_hint = _coerce_positive_float(clip_entry.get("clip_duration"))
+        next_explicit_abs = next_explicit_abs_after[index]
+        end_abs = scene_end_abs
+        if next_explicit_abs is not None and next_explicit_abs > start_abs:
+            end_abs = min(end_abs, next_explicit_abs)
+        if duration_hint is not None:
+            end_abs = min(end_abs, start_abs + duration_hint)
+
+        local_duration = max(0.0, end_abs - start_abs)
+        if local_duration <= 0:
+            continue
+
+        enriched = deepcopy(clip_entry)
+        enriched["local_start"] = max(0.0, start_abs - scene_start_abs)
+        enriched["local_duration"] = local_duration
+        scheduled.append(enriched)
+        previous_end_abs = end_abs
+
+    return scheduled
+
 def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, motion_data: dict = None) -> str:
     """
     Assembles a single scene with B-Roll, Voiceover, and precise Subtitle overlays.
@@ -1598,128 +1812,70 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
     vt_overlay = vt_metadata.get("overlay", {})
     vt_motion = vt_metadata.get("motion", {})
     playback_plan = vt_metadata.get("playback_plan", {})
-    segments = playback_plan.get("segments", [])
-    
-    # Load Master Video Clip
-    raw_video_clip = None
-    if visual_source_override:
-        source_path = Path(visual_source_override)
-        source_fp = str(source_path if source_path.is_absolute() else (project_dir / source_path))
-        raw_video_clip = VideoFileClip(source_fp)
-    elif visual_path and (visual_path.endswith('.jpg') or visual_path.endswith('.png')):
-        raw_video_clip = ImageClip(visual_path)
-    elif visual_path:
-        raw_video_clip = VideoFileClip(visual_path)
-    else:
-        raise ValueError(f"Neither visual_filepath nor visual_source provided for scene {scene_data.get('scene_id')}")
 
-    # Remove audio from source video
-    if hasattr(raw_video_clip, 'without_audio'):
-        raw_video_clip = raw_video_clip.without_audio()
-    else:
-        raw_video_clip = raw_video_clip.set_audio(None)
+    _scene_id = scene_data.get("scene_id")
+    _sb_meta = scene_data.get("storyboard_metadata", {})
+    _cue_map = _sb_meta.get("cue_points", {})
+    _scene_start = _cue_map.get(
+        f"scene_{_scene_id}",
+        scene_data.get("audio_start_offset", 0.0),
+    )
+    _scene_audio_duration = float(scene_data.get("duration_sec", duration_sec))
+    _scene_end = _scene_start + _scene_audio_duration
 
-    # --- THE CORE ASSEMBLY LOGIC ---
-    if segments:
-        print(f"  🎬 Executing playback plan with {len(segments)} segments...")
-        # Normalize resolution BEFORE segmenting/frame-extraction
-        normalized_source = normalize_resolution(raw_video_clip)
-        
-        segment_clips = []
-        consumed_time = 0.0
-        
-        for i, seg in enumerate(segments):
-            seg_type = seg.get("type", "video")
-            seg_motion = seg.get("motion")
-            remaining_scene_dur = max(0.0, duration_sec - consumed_time)
-            source_duration = float(normalized_source.duration or 0.0)
-            video_start_sec = 0.0
+    clips_to_close = []
+    scheduled_clip_entries = _resolve_scene_clip_schedule(scene_data)
 
-            if seg_type == "video":
-                try:
-                    video_start_sec = max(0.0, float(seg.get("start_sec", 0.0)))
-                except (TypeError, ValueError):
-                    video_start_sec = 0.0
-                video_start_sec = min(video_start_sec, source_duration)
-            
-            # Determine segment duration
-            if seg_type == "video":
-                available_video_dur = max(0.0, source_duration - video_start_sec)
-                if "range_sec" in seg:
-                    try:
-                        seg_dur = max(0.0, float(seg["range_sec"]))
-                    except (TypeError, ValueError):
-                        seg_dur = 0.0
-                    seg_dur = min(seg_dur, available_video_dur)
-                else:
-                    # Default video behavior: play from start_sec until source end.
-                    seg_dur = available_video_dur
-                seg_dur = min(seg_dur, remaining_scene_dur)
-            elif "range_sec" in seg:
-                seg_dur = float(seg["range_sec"])
-            elif i == len(segments) - 1:
-                # Last non-video segment fills the remaining time.
-                seg_dur = remaining_scene_dur
-            else:
-                seg_dur = 0.0
-            
-            if seg_dur <= 0: continue
-            
-            # Create segment clip
-            if seg_type == "freeze":
-                source = seg.get("source_frame", "first")
-                t = 0 if source == "first" else normalized_source.duration - 0.1
-                frame = normalized_source.get_frame(t)
-                seg_clip = ImageClip(frame).with_duration(seg_dur)
-                seg_source_key = f"{visual_source_override or visual_path or output_path}#freeze:{source}:{t:.2f}"
-            else: # video playback
-                video_end_sec = min(source_duration, video_start_sec + seg_dur)
-                if hasattr(normalized_source, 'subclipped'):
-                    seg_clip = normalized_source.subclipped(video_start_sec, video_end_sec)
-                else:
-                    seg_clip = normalized_source.subclip(video_start_sec, video_end_sec)
-                seg_clip = seg_clip.with_duration(seg_dur)
-                seg_source_key = f"{visual_source_override or visual_path or output_path}#video:{video_start_sec:.2f}"
-            
-            # Apply individual segment motion
-            if seg_motion:
-                seg_clip = apply_ken_burns(seg_clip, seg_motion, seg_dur, source_key=seg_source_key)
-            
-            segment_clips.append(seg_clip)
-            consumed_time += seg_dur
-            if consumed_time >= duration_sec: break
+    if len(scheduled_clip_entries) > 1:
+        rendered_scene_segments = []
+        cursor = 0.0
+        for clip_entry in scheduled_clip_entries:
+            asset_ref = clip_entry.get("asset_ref")
+            if not asset_ref:
+                raise ValueError(
+                    f"Scheduled clip '{clip_entry.get('clip_id')}' for scene {_scene_id} has no resolved asset_ref"
+                )
 
+            local_start = float(clip_entry.get("local_start", 0.0))
+            if local_start > cursor:
+                rendered_scene_segments.append(ColorClip(size=(1920, 1080), color=(0, 0, 0)).with_duration(local_start - cursor))
+                cursor = local_start
+
+            raw_video_clip, source_key = _load_visual_source_clip(asset_ref, project_dir)
+            clips_to_close.append(raw_video_clip)
+            rendered_segment = _build_video_clip_from_source(
+                raw_video_clip,
+                duration_sec=float(clip_entry.get("local_duration", 0.0)),
+                playback_plan=clip_entry.get("playback_plan", {}),
+                motion_data=clip_entry.get("motion", {}) or motion_data,
+                source_key=source_key,
+            )
+            rendered_scene_segments.append(rendered_segment)
+            cursor += float(clip_entry.get("local_duration", 0.0))
+
+        if not rendered_scene_segments:
+            raise RuntimeError(f"Scene {_scene_id} clip schedule resolved to no renderable segments")
+        if cursor < duration_sec:
+            rendered_scene_segments.append(ColorClip(size=(1920, 1080), color=(0, 0, 0)).with_duration(duration_sec - cursor))
         from moviepy import concatenate_videoclips
-        video_clip = concatenate_videoclips(segment_clips)
-        # Final safety duration check
-        video_clip = video_clip.with_duration(duration_sec)
+        video_clip = concatenate_videoclips(rendered_scene_segments, method="compose").with_duration(duration_sec)
     else:
-        # LEGACY / DEFAULT: Simple single-clip assembly
-        video_clip = raw_video_clip
-        actual_duration = video_clip.duration or duration_sec
-        
-        # Match audio duration
-        if actual_duration < duration_sec:
-            speed_factor = actual_duration / duration_sec
-            print(f"  🐢 Auto-slow motion: {actual_duration:.1f}s → {duration_sec:.1f}s")
-            if hasattr(video_clip, "with_speed_scaled"):
-                video_clip = video_clip.with_speed_scaled(speed_factor)
-            elif hasattr(video_clip, "fx"):
-                from moviepy.video.fx.speedx import speedx
-                video_clip = video_clip.fx(speedx, speed_factor).with_duration(duration_sec)
-            else:
-                raise RuntimeError("Clip has neither with_speed_scaled() nor fx()")
-        elif actual_duration > duration_sec:
-            if hasattr(video_clip, 'subclipped'):
-                video_clip = video_clip.subclipped(0, duration_sec)
-            else:
-                video_clip = video_clip.subclip(0, duration_sec)
-        
-        # Normalize and apply master motion
-        video_clip = normalize_resolution(video_clip)
+        source_ref = visual_source_override or visual_path
+        if not source_ref and scheduled_clip_entries:
+            source_ref = scheduled_clip_entries[0].get("asset_ref")
+        if not source_ref:
+            raise ValueError(f"Neither visual_filepath nor visual_source provided for scene {scene_data.get('scene_id')}")
+
+        raw_video_clip, source_key = _load_visual_source_clip(str(source_ref), project_dir)
+        clips_to_close.append(raw_video_clip)
         master_motion = vt_motion if vt_motion else motion_data
-        source_key = visual_source_override or visual_path or output_path
-        video_clip = apply_ken_burns(video_clip, master_motion, duration_sec, source_key=source_key)
+        video_clip = _build_video_clip_from_source(
+            raw_video_clip,
+            duration_sec=duration_sec,
+            playback_plan=playback_plan,
+            motion_data=master_motion,
+            source_key=source_key,
+        )
 
     # --- OVERLAYS & COMPOSITING ---
     clips_to_compose = [video_clip]
@@ -1728,15 +1884,6 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
     visual_track = scene_data.get("visual_track_metadata", {})
     overlays_raw = visual_track.get("overlay")
     
-    _scene_id    = scene_data.get("scene_id")
-    _sb_meta     = scene_data.get("storyboard_metadata", {})
-    _cue_map     = _sb_meta.get("cue_points", {})
-    _scene_start = _cue_map.get(f"scene_{_scene_id}",
-                       scene_data.get("audio_start_offset", 0.0))
-
-    _scene_audio_duration = float(scene_data.get("duration_sec", duration_sec))
-    _scene_end = _scene_start + _scene_audio_duration
-
     if overlays_raw:
         overlay_type = infer_overlay_type(overlays_raw)
         if overlay_type == "definition_parallel":
@@ -1830,9 +1977,9 @@ def assemble_scene(scene_data: dict, output_path: str, font_path: str = None, mo
     
     # Cleanup
     try:
-        raw_video_clip.close()
         video_clip.close()
         for c in clips_to_compose[1:]: c.close()
+        for c in clips_to_close: c.close()
         final_clip.close()
     except: pass
         

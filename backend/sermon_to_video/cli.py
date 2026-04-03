@@ -1,6 +1,7 @@
 import os
 import tempfile
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 from pathlib import Path
 
@@ -97,6 +98,7 @@ def render(
     no_ai: bool = typer.Option(True, "--no-ai", help="If True, bypass AI visual generation and use black images for missing assets"),
     scene_id: Optional[int] = typer.Option(None, "--scene-id", "-s", help="Render only a specific scene ID (Phase 4 only)"),
     use_cache: bool = typer.Option(True, "--cache/--no-cache", help="Reuse existing stage outputs when available"),
+    phase4_workers: int = typer.Option(2, "--phase4-workers", min=1, help="Max concurrent scene assemblies in phase 4"),
 ):
     """
     Phases 1-7: Renders the final video using the project directory.
@@ -218,14 +220,12 @@ def render(
                 except Exception as e:
                     console.print(f"[bold yellow]Warning: Could not parse motions.json: {e}[/bold yellow]")
                     
-            for item in scenes:
+            def _prepare_scene_for_assembly(item: dict) -> tuple[dict, Path, dict | None] | None:
                 current_scene_id = item.get("scene_id")
-                
-                # Filter by scene_id if specified
+
                 if scene_id is not None and current_scene_id != scene_id:
-                    continue
-                
-                # Priority 1: assets/ folder from visual_track.json refactor
+                    return None
+
                 assets_dir = project_dir / "assets"
                 if assets_dir.exists() and not item.get("visual_source") and not item.get("visual_filepath"):
                     v_mp4 = assets_dir / f"scene_{current_scene_id}.mp4"
@@ -235,7 +235,6 @@ def render(
                     elif v_png.exists():
                         item["visual_filepath"] = str(v_png)
 
-                # Priority 2: Auto-discover visual_filepath if skipped Phase 3
                 if not item.get("visual_filepath") and not item.get("visual_source"):
                     jpg_path = work_dir / f"scene_{current_scene_id}_visual.jpg"
                     png_path = work_dir / f"scene_{current_scene_id}_visual.png"
@@ -250,31 +249,27 @@ def render(
                             item["visual_filepath"] = str(project_jpg_path)
                         elif project_png_path.exists():
                             item["visual_filepath"] = str(project_png_path)
-                        
+
                 scene_output = work_dir / f"scene_{current_scene_id}_final.mp4"
                 if use_cache and scene_output.exists():
                     console.print(f"  -> Reusing cached scene output for Scene {current_scene_id}")
                     item["final_scene_filepath"] = str(scene_output)
-                    continue
+                    return None
 
                 scene_motion = motions_data.get(current_scene_id)
-                
-                # Extract transition to extend duration_sec
                 trans_dur = 0.0
                 if scene_motion and "transition" in scene_motion:
                     trans = scene_motion["transition"]
                     if trans.get("type") == "dissolve":
                         trans_dur = float(trans.get("duration", 0.0))
-                
+
                 item["transition_duration"] = trans_dur
                 item["render_duration"] = item.get("duration_sec", 5.0) + trans_dur
-                
-                # Auto-resolve missing visual asset paths
+
                 if not item.get("visual_filepath") and not item.get("visual_source"):
                     sb_dir = project_dir
                     assets_dir = sb_dir / "assets"
                     if assets_dir.exists():
-                        # Try png for images, then mp4 for videos
                         png_path = assets_dir / f"scene_{current_scene_id}.png"
                         mp4_path = assets_dir / f"scene_{current_scene_id}.mp4"
                         jpg_path = assets_dir / f"scene_{current_scene_id}.jpg"
@@ -289,15 +284,47 @@ def render(
                     blank_visual_path = ensure_blank_visual(current_scene_id, work_dir)
                     item["visual_filepath"] = str(blank_visual_path)
                     console.print(f"  -> Missing visual asset for Scene {current_scene_id}, using blank fallback")
-                            
+
                 if trans_dur > 0:
-                    console.print(f"  -> Assembling Scene {current_scene_id} ({item.get('duration_sec'):.2f}s + {trans_dur}s xfade padding)...")
+                    console.print(
+                        f"  -> Assembling Scene {current_scene_id} ({item.get('duration_sec'):.2f}s + {trans_dur}s xfade padding)..."
+                    )
                 else:
                     console.print(f"  -> Assembling Scene {current_scene_id} ({item.get('duration_sec'):.2f}s)...")
 
                 item["project_dir"] = str(project_dir)
-                final_scene_path = assemble_scene(item, str(scene_output), font_path=str(font_path) if font_path else None, motion_data=scene_motion)
-                item["final_scene_filepath"] = final_scene_path
+                return item, scene_output, scene_motion
+
+            def _assemble_prepared_scene(item: dict, scene_output: Path, scene_motion: dict | None) -> str:
+                return assemble_scene(
+                    item,
+                    str(scene_output),
+                    font_path=str(font_path) if font_path else None,
+                    motion_data=scene_motion,
+                )
+
+            prepared_jobs = []
+            for item in scenes:
+                prepared = _prepare_scene_for_assembly(item)
+                if prepared is not None:
+                    prepared_jobs.append(prepared)
+
+            scene_worker_count = min(max(1, phase4_workers), max(1, len(prepared_jobs))) if prepared_jobs else 1
+            console.print(f"[dim]Phase 4 workers: {scene_worker_count}[/dim]")
+
+            if scene_worker_count == 1:
+                for item, scene_output, scene_motion in prepared_jobs:
+                    final_scene_path = _assemble_prepared_scene(item, scene_output, scene_motion)
+                    item["final_scene_filepath"] = final_scene_path
+            else:
+                with ThreadPoolExecutor(max_workers=scene_worker_count) as executor:
+                    future_map = {
+                        executor.submit(_assemble_prepared_scene, item, scene_output, scene_motion): item
+                        for item, scene_output, scene_motion in prepared_jobs
+                    }
+                    for future in as_completed(future_map):
+                        item = future_map[future]
+                        item["final_scene_filepath"] = future.result()
             
     # Phase 5: Concat
     phase5_reused = False

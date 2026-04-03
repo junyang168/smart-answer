@@ -18,6 +18,7 @@ from backend.sermon_to_video.core.assembly import (
     _compute_scaled_text_origin,
     _compute_viewport_origin,
     _crop_viewport_frame,
+    _resolve_scene_clip_schedule,
     _resolve_face_anchor_point,
     _resolve_motion_anchor_ratios,
     render_multi_cue_concepts,
@@ -155,6 +156,158 @@ class VisualTrackRuntimeTests(unittest.TestCase):
 
             self.assertTrue(blank_path.exists())
             self.assertEqual(blank_path.name, "scene_9_visual.jpg")
+
+    def test_apply_visual_track_to_scenes_builds_cue_level_clip_schedule(self):
+        payload = {
+            "title": "Cue-level schedule",
+            "mode": "exegesis_teaching",
+            "visual_track": [
+                {
+                    "visual_id": 1,
+                    "covered_scenes": [7],
+                    "shots": [
+                        {
+                            "shot_id": "V7_S1",
+                            "clips": [
+                                {"clip_id": "scene_7A", "type": "video", "trigger_scene_cue": "scene_7"},
+                                {"clip_id": "scene_7B", "type": "video", "trigger_scene_cue": "s7_1"},
+                                {"clip_id": "scene_7C", "type": "video", "trigger_scene_cue": "s7_2"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        scenes = [
+            {
+                "scene_id": 7,
+                "voiceover_text": "Alpha [s7_1] Beta [s7_2] Gamma",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            work_dir = Path(tmp_dir)
+            assets_dir = work_dir / "assets"
+            assets_dir.mkdir()
+            (assets_dir / "scene_7A.mp4").write_bytes(b"a")
+            (assets_dir / "scene_7B.mp4").write_bytes(b"b")
+            (assets_dir / "scene_7C.mp4").write_bytes(b"c")
+
+            apply_visual_track_to_scenes(scenes, payload, work_dir)
+
+        metadata = scenes[0]["visual_track_metadata"]
+        self.assertEqual(metadata["clip_id"], "scene_7A")
+        self.assertEqual(
+            [entry["clip_id"] for entry in metadata["clip_schedule"]],
+            ["scene_7A", "scene_7B", "scene_7C"],
+        )
+        self.assertEqual(metadata["clip_schedule"][1]["trigger_scene_cue"], "s7_1")
+        self.assertEqual(metadata["clip_schedule"][2]["trigger_scene_cue"], "s7_2")
+
+    def test_apply_visual_track_to_scenes_includes_after_previous_followups(self):
+        payload = {
+            "title": "Relative follow-ups",
+            "mode": "exegesis_teaching",
+            "visual_track": [
+                {
+                    "visual_id": 1,
+                    "covered_scenes": [7, 8],
+                    "shots": [
+                        {
+                            "shot_id": "V7_S1",
+                            "clips": [
+                                {"clip_id": "scene_7A", "type": "video", "trigger_scene_cue": "scene_7", "duration": 3.0},
+                                {"clip_id": "scene_7B", "type": "video", "trigger_mode": "after_previous", "duration": 2.0},
+                                {"clip_id": "scene_7C", "type": "video", "trigger_scene_cue": "s7_2", "duration": 4.0},
+                                {"clip_id": "scene_8A", "type": "video", "trigger_scene_cue": "scene_8", "duration": 5.0},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        scenes = [
+            {
+                "scene_id": 7,
+                "voiceover_text": "Alpha [s7_2] Gamma",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            work_dir = Path(tmp_dir)
+            assets_dir = work_dir / "assets"
+            assets_dir.mkdir()
+            for clip_id in ("scene_7A", "scene_7B", "scene_7C", "scene_8A"):
+                (assets_dir / f"{clip_id}.mp4").write_bytes(b"x")
+
+            apply_visual_track_to_scenes(scenes, payload, work_dir)
+
+        metadata = scenes[0]["visual_track_metadata"]
+        self.assertEqual(
+            [entry["clip_id"] for entry in metadata["clip_schedule"]],
+            ["scene_7A", "scene_7B", "scene_7C"],
+        )
+        self.assertEqual(metadata["clip_schedule"][1]["trigger_mode"], "after_previous")
+
+    def test_resolve_scene_clip_schedule_uses_cue_points_for_local_timing(self):
+        scene = {
+            "scene_id": 7,
+            "duration_sec": 12.0,
+            "render_duration": 12.5,
+            "audio_start_offset": 100.0,
+            "storyboard_metadata": {
+                "cue_points": {"scene_7": 100.0, "s7_1": 103.5, "s7_2": 108.0}
+            },
+            "visual_track_metadata": {
+                "clip_schedule": [
+                    {"clip_id": "scene_7A", "trigger_scene_cue": "scene_7", "asset_ref": "assets/scene_7A.mp4"},
+                    {"clip_id": "scene_7B", "trigger_scene_cue": "s7_1", "asset_ref": "assets/scene_7B.mp4"},
+                    {"clip_id": "scene_7C", "trigger_scene_cue": "s7_2", "asset_ref": "assets/scene_7C.mp4"},
+                ]
+            },
+        }
+
+        schedule = _resolve_scene_clip_schedule(scene)
+
+        self.assertEqual([entry["clip_id"] for entry in schedule], ["scene_7A", "scene_7B", "scene_7C"])
+        self.assertEqual([entry["local_start"] for entry in schedule], [0.0, 3.5, 8.0])
+        self.assertEqual([entry["local_duration"] for entry in schedule], [3.5, 4.5, 4.5])
+
+    def test_resolve_scene_clip_schedule_supports_after_previous(self):
+        scene = {
+            "scene_id": 7,
+            "duration_sec": 12.0,
+            "render_duration": 12.0,
+            "audio_start_offset": 100.0,
+            "storyboard_metadata": {
+                "cue_points": {"scene_7": 100.0, "s7_2": 108.0}
+            },
+            "visual_track_metadata": {
+                "clip_schedule": [
+                    {
+                        "clip_id": "scene_7A",
+                        "trigger_scene_cue": "scene_7",
+                        "clip_duration": 3.0,
+                        "asset_ref": "assets/scene_7A.mp4",
+                    },
+                    {
+                        "clip_id": "scene_7B",
+                        "trigger_mode": "after_previous",
+                        "clip_duration": 2.5,
+                        "asset_ref": "assets/scene_7B.mp4",
+                    },
+                    {
+                        "clip_id": "scene_7C",
+                        "trigger_scene_cue": "s7_2",
+                        "asset_ref": "assets/scene_7C.mp4",
+                    },
+                ]
+            },
+        }
+
+        schedule = _resolve_scene_clip_schedule(scene)
+
+        self.assertEqual([entry["clip_id"] for entry in schedule], ["scene_7A", "scene_7B", "scene_7C"])
+        self.assertEqual([entry["local_start"] for entry in schedule], [0.0, 3.0, 8.0])
+        self.assertEqual([entry["local_duration"] for entry in schedule], [3.0, 2.5, 4.0])
 
     def test_project_visual_level_overlay_keeps_carryover_and_scene_trigger_timing(self):
         overlay = NEW_VISUAL_TRACK["visual_track"][0]["overlay"]
