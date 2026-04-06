@@ -4,7 +4,38 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Film, Mic, PenSquare,Search, BrainCircuit,Users, Church  } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Search, BrainCircuit, Users, Church } from 'lucide-react';
+
+interface FeaturedHeroItem {
+    id: string;
+    eyebrow: string;
+    title: string;
+    description: string;
+    imageSrc: string;
+    href: string;
+    ctaLabel: string;
+}
+
+const featuredHeroItems: FeaturedHeroItem[] = [
+    {
+        id: "welcome",
+        eyebrow: "達拉斯聖道教會",
+        title: "在真理中生根建造",
+        description: "達拉斯聖道教會 (Dallas Holy Logos Church) 歡迎您！",
+        imageSrc: "/images/church.jpeg",
+        href: "/resources",
+        ctaLabel: "探索神的真理",
+    },
+    {
+        id: "good-friday",
+        eyebrow: "受難節專題",
+        title: "十字架上的七句話",
+        description: "藉著主在十字架上的七句話，一同思想救恩最深的意義。",
+        imageSrc: "https://dallas-hlc.org/web/data/full_article/images/good_friday.png",
+        href: "/good-friday",
+        ctaLabel: "閱讀受難節專題",
+    },
+];
 
 // --- 模擬數據獲取 (在真實應用中替換為 API 調用) ---
 async function fetchHomePageData() {
@@ -18,6 +49,7 @@ async function fetchHomePageData() {
 export const HomePageView = () => {
     const [fellowshipData, setFellowshipData] = useState<any>('');
     const [isLoading, setIsLoading] = useState(true);
+    const [activeHeroIndex, setActiveHeroIndex] = useState(0);
 
     useEffect(() => {
         fetchHomePageData().then(data => {
@@ -26,23 +58,100 @@ export const HomePageView = () => {
         });
     }, []);
 
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setActiveHeroIndex((currentIndex) => (currentIndex + 1) % featuredHeroItems.length);
+        }, 8000);
+
+        return () => window.clearInterval(intervalId);
+    }, []);
+
     if (isLoading) {
         return <div className="h-screen w-full bg-gray-200 animate-pulse"></div>;
     }
 
+    const activeHero = featuredHeroItems[activeHeroIndex];
+
+    const showPreviousHero = () => {
+        setActiveHeroIndex((currentIndex) =>
+            currentIndex === 0 ? featuredHeroItems.length - 1 : currentIndex - 1
+        );
+    };
+
+    const showNextHero = () => {
+        setActiveHeroIndex((currentIndex) => (currentIndex + 1) % featuredHeroItems.length);
+    };
+
     return (
         <div>
             {/* 1. 英雄區 (Hero Section) */}
-            <section className="relative h-[60vh] md:h-[70vh] flex items-center justify-center text-white text-center bg-gray-800">
-                <Image src="/images/church.jpeg" alt="教會歡迎圖" layout="fill" objectFit="cover" className="opacity-40" />
-                <div className="relative z-10 p-6">
-                    <h1 className="text-4xl md:text-6xl font-bold !leading-tight">在真理中生根建造</h1>
-                    <p className="mt-4 text-lg md:text-xl max-w-2xl">
-                        達拉斯聖道教會 (Dallas Holy Logos Church) 歡迎您！
-                    </p>
-                    <Link href="/resources" className="mt-8 inline-block bg-[#D4AF37] text-gray-900 font-bold py-3 px-8 rounded-full hover:bg-opacity-90 transition-transform hover:scale-105">
-                        探索神的真理
-                    </Link>
+            <section className="relative h-[60vh] min-h-[520px] overflow-hidden bg-gray-800 text-white md:h-[70vh]">
+                <div
+                    className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-700"
+                    style={{ backgroundImage: `url(${activeHero.imageSrc})` }}
+                />
+                <div className="absolute inset-0 bg-black/45" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/30 to-black/55" />
+
+                <div className="relative z-10 flex h-full items-center justify-center px-6 text-center">
+                    <div className="max-w-4xl">
+                        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-stone-200">
+                            {activeHero.eyebrow}
+                        </p>
+                        <h1 className="mt-6 text-4xl font-bold !leading-tight md:text-6xl">
+                            {activeHero.title}
+                        </h1>
+                        <p className="mx-auto mt-4 max-w-2xl text-lg md:text-xl">
+                            {activeHero.description}
+                        </p>
+                        <Link
+                            href={activeHero.href}
+                            className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#D4AF37] px-8 py-3 font-bold text-gray-900 transition-transform hover:scale-105 hover:bg-opacity-90"
+                        >
+                            {activeHero.ctaLabel}
+                            <ArrowRight className="h-5 w-5" />
+                        </Link>
+                    </div>
+                </div>
+
+                <div className="absolute inset-x-0 bottom-0 z-10">
+                    <div className="container mx-auto px-6 pb-6">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                                {featuredHeroItems.map((item, index) => (
+                                    <button
+                                        key={item.id}
+                                        type="button"
+                                        onClick={() => setActiveHeroIndex(index)}
+                                        aria-label={`切換到 ${item.title}`}
+                                        className={`h-2.5 rounded-full transition-all ${
+                                            index === activeHeroIndex
+                                                ? "w-10 bg-white"
+                                                : "w-2.5 bg-white/45 hover:bg-white/70"
+                                        }`}
+                                    />
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={showPreviousHero}
+                                    aria-label="上一個焦點內容"
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/20 text-white backdrop-blur-sm transition-colors hover:bg-black/35"
+                                >
+                                    <ChevronLeft className="h-5 w-5" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={showNextHero}
+                                    aria-label="下一個焦點內容"
+                                    className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/20 text-white backdrop-blur-sm transition-colors hover:bg-black/35"
+                                >
+                                    <ChevronRight className="h-5 w-5" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
