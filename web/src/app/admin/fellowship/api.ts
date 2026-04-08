@@ -1,4 +1,8 @@
-import { FellowshipEntry } from "@/app/types/fellowship";
+import {
+  FellowshipEmailContent,
+  FellowshipEmailResult,
+  FellowshipEntry,
+} from "@/app/types/fellowship";
 
 const API_BASE_PATH = "/api/admin/fellowships";
 
@@ -62,4 +66,39 @@ export async function deleteFellowship(date: string): Promise<void> {
     const message = await response.text();
     throw new Error(message || `Request failed with status ${response.status}`);
   }
+}
+
+export async function fetchFellowshipEmailContent(
+  date: string,
+): Promise<FellowshipEmailContent> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    { cache: "no-store" },
+  );
+  return parseJson(response);
+}
+
+export async function updateFellowshipEmailContent(
+  date: string,
+  content: FellowshipEmailContent,
+): Promise<FellowshipEmailContent> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(content),
+    },
+  );
+  return parseJson(response);
+}
+
+export async function sendFellowshipEmail(date: string): Promise<FellowshipEmailResult> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email`),
+    {
+      method: "POST",
+    },
+  );
+  return parseJson(response);
 }

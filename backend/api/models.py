@@ -107,8 +107,24 @@ class FellowshipEntry(BaseModel):
     title: Optional[str] = None
     series: Optional[str] = None
     sequence: Optional[int] = None
+    email_subject: Optional[str] = Field(None, alias="emailSubject")
+    email_body_html: Optional[str] = Field(None, alias="emailBodyHtml")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipEmailResult(BaseModel):
+    date: str
+    recipients: List[str]
+    subject: str
+    dry_run: bool = Field(False, alias="dryRun")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipEmailContent(BaseModel):
+    subject: str = ""
+    html: str = ""
 
 
 SongSource = Literal["custom", "hymnal"]

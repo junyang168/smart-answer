@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -13,6 +13,8 @@ from .models import (
     DepthOfFaithEpisodeUpdate,
     DepthOfFaithAudioUploadResponse,
     FellowshipEntry,
+    FellowshipEmailContent,
+    FellowshipEmailResult,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -44,6 +46,9 @@ from .service import (
     create_fellowship,
     update_fellowship,
     delete_fellowship,
+    get_fellowship_email_content,
+    update_fellowship_email_content,
+    email_fellowship,
     list_sermon_series,
     create_sermon_series,
     update_sermon_series,
@@ -172,6 +177,24 @@ def create_fellowship_entry(entry: FellowshipEntry) -> FellowshipEntry:
     return create_fellowship(entry)
 
 
+@fellowship_router.get("/{date:path}/email-body", response_model=FellowshipEmailContent)
+def read_fellowship_email_content(date: str) -> FellowshipEmailContent:
+    return get_fellowship_email_content(date)
+
+
+@fellowship_router.put("/{date:path}/email-body", response_model=FellowshipEmailContent)
+def write_fellowship_email_content(
+    date: str,
+    payload: FellowshipEmailContent,
+) -> FellowshipEmailContent:
+    return update_fellowship_email_content(date, payload)
+
+
+@fellowship_router.post("/{date:path}/email", response_model=FellowshipEmailResult)
+def send_fellowship_email(date: str) -> FellowshipEmailResult:
+    return email_fellowship(date)
+
+
 @fellowship_router.put("/{date:path}", response_model=FellowshipEntry)
 def update_fellowship_entry(date: str, entry: FellowshipEntry) -> FellowshipEntry:
     return update_fellowship(date, entry)
@@ -180,6 +203,7 @@ def update_fellowship_entry(date: str, entry: FellowshipEntry) -> FellowshipEntr
 @fellowship_router.delete("/{date:path}")
 def delete_fellowship_entry(date: str) -> None:
     delete_fellowship(date)
+
 
 surmon_series_router = APIRouter(prefix="/admin/surmon-series", tags=["surmon-series"])
 

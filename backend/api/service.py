@@ -25,6 +25,8 @@ from .models import (
     DepthOfFaithEpisodeCreate,
     DepthOfFaithEpisodeUpdate,
     FellowshipEntry,
+    FellowshipEmailContent,
+    FellowshipEmailResult,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -48,6 +50,13 @@ from .storage import repository
 from .sunday_service_email import (
     send_sunday_service_email as _send_sunday_service_email,
     build_sunday_service_email_bodies,
+    send_email,
+    _html_to_text,
+    determine_notification_recipients_file,
+    load_notification_recipients,
+    NOTIFICATION_PRODUCTION,
+    TEST_RECIPIENT,
+    EMAIL_PRODUCTION,
 )
 from .config import SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
 from .ppt_generator import generate_presentation_from_template
@@ -219,6 +228,92 @@ def delete_fellowship(date: str) -> None:
         repository.delete_fellowship(date)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def _build_default_fellowship_email_subject(entry: FellowshipEntry) -> str:
+    title = (entry.title or "").strip()
+    series = (entry.series or "").strip()
+    if title and series:
+        return f"團契通知｜{series}｜{title}"
+    if title:
+        return f"團契通知｜{title}"
+    if series:
+        return f"團契通知｜{series}"
+    return f"團契通知｜{entry.date}"
+
+
+def _build_default_fellowship_email_html(entry: FellowshipEntry) -> str:
+    title = (entry.title or "未定").strip()
+    series = (entry.series or "未定").strip()
+    host = (entry.host or "未定").strip()
+    return f"""
+<div style="font-family:Roboto,Helvetica,Arial,sans-serif;font-size:15px;color:#202124;line-height:1.6;">
+  <p style="margin:0 0 12px 0;">弟兄姊妹平安，</p>
+  <p style="margin:0 0 12px 0;">以下是即將到來的團契資訊，歡迎預留時間參加。</p>
+  <table style="border-collapse:collapse;margin:0 0 16px 0;">
+    <tbody>
+      <tr><td style="padding:4px 24px 4px 0;">日期</td><td style="padding:4px 0;">{entry.date}</td></tr>
+      <tr><td style="padding:4px 24px 4px 0;">主題</td><td style="padding:4px 0;">{title}</td></tr>
+      <tr><td style="padding:4px 24px 4px 0;">系列</td><td style="padding:4px 0;">{series}</td></tr>
+      <tr><td style="padding:4px 24px 4px 0;">主講</td><td style="padding:4px 0;">{host}</td></tr>
+    </tbody>
+  </table>
+  <p style="margin:0;">願主賜福。</p>
+</div>
+""".strip()
+
+
+def get_fellowship_email_content(date: str) -> FellowshipEmailContent:
+    entries = list_fellowships()
+    entry = next((item for item in entries if item.date == date), None)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+    return FellowshipEmailContent(
+        subject=(entry.email_subject or "").strip() or _build_default_fellowship_email_subject(entry),
+        html=(entry.email_body_html or "").strip() or _build_default_fellowship_email_html(entry),
+    )
+
+
+def update_fellowship_email_content(date: str, payload: FellowshipEmailContent) -> FellowshipEmailContent:
+    subject = payload.subject.strip()
+    html = payload.html.strip()
+    if not subject:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email subject is required")
+    if not html:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email HTML body is required")
+    try:
+        updated = repository.set_fellowship_email_content(date, subject, html)
+    except ValueError as exc:
+        _raise_value_error(exc)
+        raise AssertionError("unreachable")
+    return FellowshipEmailContent(
+        subject=updated.email_subject or "",
+        html=updated.email_body_html or "",
+    )
+
+
+def email_fellowship(date: str) -> FellowshipEmailResult:
+    content = get_fellowship_email_content(date)
+    recipients_path = determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
+    recipients = load_notification_recipients(recipients_path)
+    recipient_list = list(recipients)
+    if not EMAIL_PRODUCTION:
+        recipient_list = [TEST_RECIPIENT]
+    try:
+        send_email(
+            recipients=recipient_list,
+            subject=content.subject,
+            text_body=_html_to_text(content.html),
+            html_body=content.html,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    return FellowshipEmailResult(
+        date=date,
+        recipients=recipient_list,
+        subject=content.subject,
+        dryRun=not EMAIL_PRODUCTION,
+    )
 
 
 def get_sunday_service(date: str) -> SundayServiceEntry:

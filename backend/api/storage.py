@@ -423,7 +423,11 @@ class ArticleRepository:
     def _save_fellowship_entries(self, entries: list[FellowshipEntry]) -> None:
         tmp_path = FELLOWSHIP_FILE.with_suffix(".tmp")
         tmp_path.write_text(
-            json.dumps([entry.model_dump() for entry in entries], ensure_ascii=False, indent=2),
+            json.dumps(
+                [entry.model_dump(by_alias=True) for entry in entries],
+                ensure_ascii=False,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         tmp_path.replace(FELLOWSHIP_FILE)
@@ -476,6 +480,26 @@ class ArticleRepository:
         if len(new_entries) == len(entries):
             raise ValueError(f"Fellowship date {date} not found")
         self._save_fellowship_entries(new_entries)
+
+    def set_fellowship_email_content(
+        self,
+        date: str,
+        subject: Optional[str],
+        html: Optional[str],
+    ) -> FellowshipEntry:
+        entries = self._load_fellowship_entries()
+        for index, existing in enumerate(entries):
+            if existing.date == date:
+                updated = existing.model_copy(
+                    update={
+                        "email_subject": subject or "",
+                        "email_body_html": html or "",
+                    }
+                )
+                entries[index] = updated
+                self._save_fellowship_entries(entries)
+                return updated
+        raise ValueError(f"Fellowship date {date} not found")
 
 
     # Sunday worship service operations
