@@ -50,7 +50,7 @@ RAG_CORPUS_ID: Final[Optional[str]] = os.getenv("RAG_CORPUS_ID")
 MAS_LLM_PROVIDER: Final[str] = os.getenv("MAS_LLM_PROVIDER", "gemini")  # "gemini" or "openai_compatible"
 OPENAI_COMPATIBLE_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_COMPATIBLE_API_KEY")
 OPENAI_COMPATIBLE_BASE_URL: Final[str] = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.moonshot.cn/v1")
-OPENAI_COMPATIBLE_MODEL: Final[str] = os.getenv("OPENAI_COMPATIBLE_MODEL", "kimi-k2-5")
+OPENAI_COMPATIBLE_MODEL: Final[str] = os.getenv("OPENAI_COMPATIBLE_MODEL", "kimi-k2.5")
 
 # Standard OpenAI Key for Whisper and GPT-4o
 OPENAI_API_KEY: Final[Optional[str]] = os.getenv("OPENAI_API_KEY")

@@ -24,6 +24,9 @@ from backend.api.sermon_converter_service import (
     commit_sermon_project,
     export_sermon_to_doc,
     update_sermon_project_metadata,
+    get_sermon_master_text_metadata,
+    save_sermon_master_text_metadata,
+    generate_sermon_master_text_metadata,
     NoteImage,
     Segment,
     NoteImage,
@@ -38,7 +41,7 @@ from backend.api.prompt_manager import (
     delete_prompt,
     Prompt
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Use the prefix/tags from the plan
 router = APIRouter(prefix="/admin/notes-to-sermon", tags=["notes-to-sermon"])
@@ -107,6 +110,15 @@ def get_project_source(project_id: str):
 
 class SaveSourceRequest(BaseModel):
     content: str
+
+
+class MasterTextMetadataPayload(BaseModel):
+    title: str = ""
+    subtitle: str = ""
+    summary: str = ""
+    key_bible_verse: str = ""
+    key_exegetical_points: str = ""
+    key_theological_points: str = ""
     
 @router.post("/sermon-project/{project_id}/source")
 def save_project_source(project_id: str, payload: SaveSourceRequest):
@@ -155,7 +167,7 @@ def trigger_draft_generation(project_id: str, background_tasks: BackgroundTasks,
                 from backend.api.sermon_converter_service import reset_agent_state
                 reset_agent_state(project_id)
                 
-            background_tasks.add_task(process_project_with_mas, project_id)
+            background_tasks.add_task(process_project_with_mas, project_id, payload.restart)
         else:
             # Legacy Single Agent
             background_tasks.add_task(generate_sermon_draft, project_id, payload.prompt_id)
@@ -376,6 +388,38 @@ def save_project_final(project_id: str, payload: SaveSourceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/sermon-project/{project_id}/master-text-metadata")
+def get_master_text_metadata_endpoint(project_id: str):
+    try:
+        return {"status": "success", "metadata": get_sermon_master_text_metadata(project_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/master-text-metadata")
+def save_master_text_metadata_endpoint(project_id: str, payload: MasterTextMetadataPayload):
+    try:
+        return {
+            "status": "success",
+            "metadata": save_sermon_master_text_metadata(project_id, payload.model_dump()),
+            "message": "Master text metadata saved.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/generate-master-text-metadata")
+def generate_master_text_metadata_endpoint(project_id: str):
+    try:
+        return {
+            "status": "success",
+            "metadata": generate_sermon_master_text_metadata(project_id),
+            "message": "Master text metadata generated.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 class ChunkAuditRequest(BaseModel):
     chunk_id: str
 
@@ -396,6 +440,14 @@ def get_theological_audit_result_endpoint(project_id: str, chunk_id: str):
         if not audit_result:
             return {"status": "success", "audit_result": None, "message": "No theological audit result found."}
         return {"status": "success", "audit_result": audit_result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sermon-project/{project_id}/fidelity-audit-summary")
+def get_fidelity_audit_summary_endpoint(project_id: str):
+    from backend.api.sermon_converter_service import get_fidelity_audit_summary
+    try:
+        return {"status": "success", "summary": get_fidelity_audit_summary(project_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

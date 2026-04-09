@@ -4,211 +4,424 @@ description: Workflow and Architecture of the Notes-to-Sermon Module
 
 # Notes to Sermon Workflow
 
-This document serves as a persistent guide to how the `notes-to-sermon` module works, its structure, and its features, so the AI and users do not forget the intricate details of the implementation.
+This document is the current source-of-truth for the `notes-to-sermon` module.
+It describes the workflow that is actually implemented now, not the older planned flow.
 
 
-## Exegesis Text Engineering Functional Workflow
+## Objective
 
-⸻
+The module is an exegesis text-engineering pipeline.
 
-🎯 Project Objective
+Its purpose is to transform corrected exegesis lecture notes into:
+- a stable Stage 1 exegesis manuscript draft
+- chunk-level review artifacts
+- a reviewed Master Text
+- export-ready editorial metadata
 
-Build a stable, reusable, and scalable exegesis text engineering system.
-
-The immediate goal is not to produce a devotional reader.
-
-The goal is:
-
-First construct a stable, reviewable, master-level exegesis text from extracted via OCR from images of handwritten or typed notes taken from exegesis class given by a well-known Chinese 基督教福音派神學教授.
-
-In this phase, this is a text-engineering project, not a publishing shortcut.
-
-⸻
-
-Targeted Workflow(Planned)
+This is not a devotional shortcut and not a sermonizer.
+The system is designed to preserve exegetical logic, maintain auditability, and keep every phase explicit.
 
 
-⸻
+## Functional Flow
 
-Step 0: Notes Preparation & Source Corroboration
+### Step 0: Source Preparation
 
-Objective
+Goal:
+- scan notes
+- OCR pages
+- manually correct OCR output
+- save corrected notes into `unified_source.md`
 
-After paper notes are scanned and OCRed, manually review the extracted raw text to ensure accuracy. Corroborate the digital text against another copy of the manual notes if necessary. 
-
-Modify the text to add logical flow and explicit structure so that the AI can more easily understand the theological progression before generating the exegesis manuscript.
-
-⸻
-
-Step 1: Reconstruction & Structural Stabilization Layer
-
-Objective
-
-Reconstruct classroom notes into a complete exegesis manuscript, while simultaneously separating the mixed classroom material into a fixed structural format:
-	•	Exegesis
-	•	Theological Significance
-	•	Application
-	•	Appendix (Apologetics / Historical Extensions)
-
-Principles
-	•	Do not introduce new theology
-	•	Do not systematize prematurely
-	•	Preserve the lecturer’s exegetical logic
-	•	Retain original-language details and technical observations
-	•	Minor sentence smoothing is allowed, but no meaning changes
-
-Output
-
-“Reconstructed Manuscript Draft” (Markdown format, structurally stabilized)
-
-This is the foundational layer.
-All later phases depend on this integrity.
-
-⸻
-
-Step 2: Issue Review Layer
-
-Objective
-
-Conduct theological and structural boundary review.
-
-Method
-
-Issue-based auditing only.
-	•	Do not rewrite
-	•	Do not correct
-	•	Do not resolve
-	•	Only flag issues
-
-Review Categories
-	•	exegesis_error
-	•	factual_error
-	•	overstatement
-	•	imbalance
-	•	apologetics_extension
-	•	structural
-
-Output
-
-Issue Report (Structured JSON mapped to Interactive UI)
-
-Purpose of This Phase
-
-To protect doctrinal and interpretive boundaries without altering the author’s voice.
-
-⸻
-
-Step 3: Master Text Finalization
-
-Objective
-
-Freeze a stable “Master Text” version.
-
-Characteristics
-	•	Structure stabilized
-	•	Theological boundaries reviewed
-	•	Layer separation complete
-	•	Consistent format across chapter
-	•	Suitable for long-term reference
-
-Prohibited After Finalization
-	•	Structural redesign
-	•	Changing editorial standards mid-book
-	•	Adjusting theological tone arbitrarily
+Important:
+- `unified_source.md` is the Stage 1 source of truth
+- with project-id CLI mode, Stage 1 always reads `unified_source.md`
+- if it does not exist, the pipeline throws immediately
 
 
-⸻
+### Step 1: Stage 1 Reconstruction Pipeline
 
-Engineering Flow Model
+Goal:
+- split corrected notes into logical teaching units
+- extract all detailed points per unit
+- generate one structured manuscript per unit
 
-Notes (Raw OCR)
-  ↓
-Manual Preparation & Structural Flow Fixes (Step 0)
-  ↓
-Reconstructed & Stabilized Manuscript
-  ↓
-Issue Review (Interactive Audit)
-  ↓
-Master Text Freeze
+Important constraints:
+- chunked generation only
+- each unit is generated independently
+- every API call is stateless
+- split output contains boundaries and metadata only, never raw note duplication
+- generated units are the source of truth for later draft chunking
 
+Current provider:
+- Anthropic Claude
+- default model: `claude-sonnet-4-6`
 
-⸻
-
-Design Philosophy
-	•	Separate phases strictly
-	•	Do not mix objectives
-	•	Preserve first, evaluate second
-	•	Build master text before reader adaptation
-
+Current implementation:
+- `backend/pipeline/stage1.py`
+- CLI entry: `backend/pipeline/sermon_generation.py`
 
 
----
+### Step 2: Fidelity Audit
+
+Goal:
+- compare each Stage 1 draft chunk against the original corrected note slice
+- detect omissions, additions, unsupported claims, and stance upgrades
+
+Important:
+- fidelity audit is chunk-level
+- it uses source line boundaries inherited from Stage 1 units
+- it slices `unified_source.md` first, then preprocesses the slice
+- it no longer silently falls back to the entire notes file
+
+
+### Step 3: Theological Boundary Audit
+
+Goal:
+- review the final chunk text for theological / exegesis / structural issues
+
+Important:
+- this audit does not need the original notes for its core judgment
+- but it still requires stable chunk lineage
+- final chunks now inherit lineage from draft chunks instead of being re-split from markdown headings alone
+
+
+### Step 4: Master Text Finalization
+
+Goal:
+- create `final.md` from the reviewed draft chunk structure
+- preserve stable chunk identities for final review and export
+
+
+### Step 5: Editorial Metadata + Export
+
+Goal:
+- generate and edit whole-document metadata for Master Text
+- export to Google Docs with clean top-level formatting
+
+Metadata fields:
+- title
+- subtitle
+- summary
+- key_bible_verse
+- key_exegetical_points
+- key_theological_points
+
+Important:
+- `key_exegetical_points` and `key_theological_points` are stored as Markdown bullet lists
+- export uses title/subtitle from Master Text metadata
+
+
+## Current Architecture
+
+### Frontend
+
+Location:
+- `web/src/app/admin/notes-to-sermon/project/[id]/`
+
+Main editor:
+- `MultiPageEditor.tsx`
+
+Views:
+- `Unified Input`
+- `Generated Draft`
+- `Master Text`
+
+Review panels:
+- `TheologicalAuditPanel.tsx`
+
+Current UI behavior:
+- draft and final are edited chunk-by-chunk
+- `FULL_DOC` can still be selected for whole-document viewing
+- Master Text metadata panel only appears in `Master Text` mode when `FULL_DOC` is selected
+
+
+### Backend
+
+Router:
+- `backend/api/sermon_converter_router.py`
+
+Core service:
+- `backend/api/sermon_converter_service.py`
+
+Stage 1 pipeline:
+- `backend/pipeline/stage1.py`
+
+
+## Current File Layout Per Project
+
+Project directory:
+- `DATA_BASE_DIR/notes_to_surmon/<project_id>/`
+
+Primary files:
+- `unified_source.md`
+- `original_notes.md`
+- `stage1_manifest.json`
+- `stage1_units.json`
+- `draft_v1.md`
+- `final.md`
+- `master_text_meta.json`
+
+Stage 1 artifacts:
+- `generated_units/`
+  - one JSON file per unit
+  - one `.points.json` cache per unit for point extraction
+
+Draft review artifacts:
+- `draft_chunks/`
+- `draft_chunks_meta.json`
+
+Final review artifacts:
+- `chunks/`
+- `chunks_meta.json`
+
+Audit artifacts:
+- `fidelity_audit.json`
+- `theological_audit.json`
+
+Logs:
+- `stage1_logs.jsonl`
+- `agent_logs.json`
+
+
+## Stage 1 Technical Design
+
+### 1. Unit Splitting
+
+Input:
+- `unified_source.md`
+
+Output:
+- `stage1_units.json`
+
+Each unit contains:
+- `unit_id`
+- `chapter_title`
+- `section_title`
+- `unit_title`
+- `scripture_range`
+- `start_line`
+- `end_line`
+- `split_reason`
+- `prev_unit_id`
+- `next_unit_id`
+
+Rules:
+- split by exegetical / logical boundaries
+- prioritize scripture-range transitions and discourse transitions
+- do not split just by length
+- do not merge distinct arguments merely to reduce unit count
+
+
+### 2. Point Extraction
+
+Per unit:
+- extract all detailed points from the current unit note slice
+- classify each point into:
+  - `釋經`
+  - `神學`
+  - `應用`
+  - `附錄`
+
+Prompt:
+- `backend/pipeline/prompts/point_extractor.md`
+
+
+### 3. Manuscript Generation
+
+Per unit:
+- second call consumes extracted points plus source slices
+- outputs structured JSON, then markdown is derived from it
+
+Prompt:
+- `backend/pipeline/prompts/unit_generator.md`
+
+Generated fields per unit:
+- `points`
+- `manuscript_sections`
+- `coverage_checks`
+- `coverage_summary`
+- `generated_markdown`
+
+
+### 4. Prompt Files
+
+Current prompt files:
+- `backend/pipeline/prompts/unit_splitter.md`
+- `backend/pipeline/prompts/point_extractor.md`
+- `backend/pipeline/prompts/unit_generator.md`
+- `backend/pipeline/prompts/master_text_metadata.md`
+
+Shared prompt component:
+- `backend/pipeline/prompts/shared/category_definitions.md`
+
+Important:
+- category definitions are maintained once and injected into prompt templates
+
+
+### 5. Stage 1 Output Rendering
+
+Rendered user-facing draft:
+- uses numbered headings such as `一、二、三、...`
+- does not render provenance lines like:
+  - `衝突-11章 | ... | 太 11:1-6 | lines 9-39`
+
+Important:
+- provenance and line boundaries are still preserved in JSON metadata
+- they are hidden from the rendered manuscript body
+
+
+## Chunk Lineage Design
+
+### Source of Truth
+
+For draft chunking:
+- `generated_units/*.json` is the source of truth
+- `draft_v1.md` is a rendered artifact, not the source of truth
+
+For final chunking:
+- final chunks inherit from draft chunks when possible
+- they are not supposed to drift from Stage 1 unit lineage
+
+
+### Draft Chunk Generation
+
+Implemented in:
+- `backend/api/sermon_converter_service.py`
+
+Behavior:
+- build draft chunks directly from `generated_units`
+- preserve:
+  - `unit_id`
+  - `chapter_title`
+  - `section_title`
+  - `scripture_range`
+  - `source_start_line`
+  - `source_end_line`
+
+
+### Final Chunk Generation
+
+Behavior:
+- initialize final chunks from current draft chunk lineage
+- rebuild `final.md` from chunk files
+- keep final chunk identities stable across review/edit cycles
+
+
+## Audit Design
+
+### Fidelity Audit
+
+Endpoint:
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/audit-draft`
+
+Behavior:
+- reads the selected draft chunk
+- resolves its source line boundaries from `draft_chunks_meta.json`
+- slices the raw `unified_source.md`
+- preprocesses the slice
+- runs the fidelity audit against that local source slice
+
+Stored result:
+- `fidelity_audit.json`
+
+Project-level summary:
+- `GET /admin/notes-to-sermon/sermon-project/{project_id}/fidelity-audit-summary`
+
+
+### Theological Audit
+
+Endpoint:
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/theological-audit`
+
+Behavior:
+- audits final chunk text
+- uses stable final chunk lineage inherited from draft chunks
+- does not depend on reparsing `final.md` headings for chunk identity
+
+Stored result:
+- `theological_audit.json`
+
+
+## Master Text Metadata
+
+Stored in:
+- `master_text_meta.json`
+
+Endpoints:
+- `GET /admin/notes-to-sermon/sermon-project/{project_id}/master-text-metadata`
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/master-text-metadata`
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/generate-master-text-metadata`
+
+Generation behavior:
+- reads full `final.md`
+- uses Claude
+- generates:
+  - title
+  - subtitle
+  - summary
+  - key_bible_verse
+  - markdown bullet list of key exegetical points
+  - markdown bullet list of key theological points
+
+
+## Google Doc Export
+
+Implemented in:
+- `export_sermon_to_doc` in `backend/api/sermon_converter_service.py`
+
+Behavior:
+- exports `final.md`
+- prepends title and subtitle from `master_text_meta.json`
+- title and subtitle are left-aligned
+- title is larger/bold
+- subtitle is smaller/muted
+- Drive file name is updated to match the export title
+
+
+## CLI
+
+Stage 1 CLI:
+
+```bash
+python3 -m backend.pipeline.sermon_generation --project-id '衝突與安息-12,13章'
+```
+
+Split only:
+
+```bash
+python3 -m backend.pipeline.sermon_generation --project-id '衝突與安息-12,13章' --split-only
+```
+
+Important:
+- all Stage 1 Python code now lives under `backend/`
+
 
 ## Current Implementation Status
-* ✅ Implemented: Step 1 (OCR → unified_source.md; manual Kimi reconstruction + structural formatting → draft_v1.md; interactive JSON audit endpoint)
-* ⏳ Not implemented: Step 2–3 (issue review, freeze)
 
----
+Implemented:
+- OCR page processing into `unified_source.md`
+- Stage 1 split / point extraction / manuscript generation
+- Claude-based Stage 1 pipeline
+- generated-unit-based draft chunking
+- fidelity audit with note-slice boundaries
+- lineage-preserving theological audit chunks
+- Master Text metadata generation/editing
+- Google Doc export with title/subtitle
 
-## Crrent Technical Design
+Partially implemented / evolving:
+- prompt and chunk rendering refinements
+- UI ergonomics in Master Text mode
 
-### Overview
-The **Notes to Sermon** module (`/admin/notes-to-sermon/project/`) is designed to implement the functional workflow laid out above. It take raw exegesis notes  (extracted via OCR from images of handwritten or typed notes) and convert them into a structured, exegesis lecture. It follows a multi-step methodical process as laied out in the above functional workflow .
-
-### 2. Core Components
-
-### Frontend (Next.js)
-- **Location**: `web/src/app/admin/notes-to-sermon/`
-- **Main Editor**: `MultiPageEditor.tsx` acts as the primary UI. It manages a split-pane view containing:
-  - **Source/Draft View**: A CodeMirror markdown editor (via `ReactSimpleMDE`) to edit either the `Unified Input` (Source) or the `Generated Draft`.
-  - **AI Panel**: Depending on the view, it shows metadata or the `AiCommandPanel`.
-- **AI Audit Panel**: `AiCommandPanel.tsx` is located in the right pane when the user is in "Generated Draft" mode. It triggers the backend audit endpoint and renders the Markdown review. The state is hoisted or preserved via CSS `display: hidden` when switching tabs.
-
-### Backend (FastAPI Python)
-- **Router**: `backend/api/sermon_converter_router.py` (prefix: `/admin/notes-to-sermon/`)
-- **Service**: `backend/api/sermon_converter_service.py`. Contains the core logic.
-
-## 3. The Step-by-Step Workflow
-
-### Implementation of Reconstruction & Stabilization Layer.
-
-#### Step 1: Project Creation & Source Input
-- A project is created (stored in a JSON metadata file). 
-- Images of notes can be uploaded and processed (OCR).
-- The raw transcriptions are compiled into a unified markdown file (`unified_source.md`).
-- before manual review, user will save the original notes into original_notes.md
-
-#### Step 2: Reconstruct and Stabilize the manuscript draft
-- This is done using kimi k2.5 manually outside of the system. It combines creating the manuscript and separating the content into structured categories.
-- The current implementation is to use a multi-agent approach to elaborate on the raw notes and build a full sermon draft. But it's not used.
-- The prompt manager (`prompt_manager.py`) is often used to structure the generation process.
-- The output is saved to the project file structure (e.g., `draft_v1.md`).
-
-#### Step 3: AI Audit to ensure fidelity of reconstruction & structure
-- Detect additions not supported by notes
-* Detect missing points from notes
-* Detect re-ordered logic that changes meaning
-* Detect Unsupported additions( Draft claims not supported by notes)
-
-- **Endpoint**: `POST /admin/notes-to-sermon/sermon-project/{project_id}/audit-draft`
-- **Function**: `audit_sermon_draft` in `sermon_converter_service.py`
-- **Process**:
-  - The backend loads both the original `unified_source.md` and the generated `draft_v1.md`.
-  - It constructs a prompt calling an OpenAI model (e.g., `gpt-5.2`), acting as a "Reconstruction Fidelity Auditor".
-  - The prompt mandates strict adherence to an `AUDIT_SCHEMA` via OpenAI's Structured Outputs (JSON Schema).
-  - It ensures all outputs are evaluated and written in **Traditional Chinese**.
-  - It outputs JSON evaluating coverage, differences, must-fix issues, and a final grade.
-  - The output JSON is returned directly to the frontend.
-  - The frontend maps the JSON to construct a custom React component UI (`AiCommandPanel.tsx`).
-  - Clicking on "Evidence" texts in the UI triggers a search/highlight callback to pinpoint exact or partial matches within the CodeMirror editor (`MultiPageEditor.tsx`) for immediate revision.
-
-#### Step 4: Exporting
-- The final polished draft can be exported to Google Docs.
-- Functions like `export_sermon_to_doc` process the Markdown (handling local images, footnotes, and multi-line quotes) to push to the Google Docs API.
+Not the current source of truth anymore:
+- old “manual Kimi reconstruction” description
+- old prompt-manager-based reconstruction flow
+- old markdown-reparsing chunk logic
 
 
+## Environment Notes
 
+Important environment variables:
+- `ANTHROPIC_API_KEY`
+- Google auth credentials for Docs / Drive export
 
-### Environment and Setup Notes
-- The backend relies heavily on environment variables (loaded via `dotenv`) for external API access, particularly `OPENAI_API_KEY`. Without this, OpenAI SDK requests will crash or hang.
-- API requests from the Next.js frontend to the FastAPI backend use Next.js rewrites (`next.config.mjs`) proxying `/api/*` to the local python server port (e.g., `8222` or `8555` depending on dev/prod).
+The frontend talks to the FastAPI backend through the existing Next.js API proxy setup.

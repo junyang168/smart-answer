@@ -33,6 +33,8 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
     const [isForcingPass, setIsForcingPass] = useState(false);
     const [fidelityResult, setFidelityResult] = useState<any | null>(null);
     const [fidelityError, setFidelityError] = useState<string | null>(null);
+    const [fidelitySummary, setFidelitySummary] = useState<any | null>(null);
+    const [fidelitySummaryError, setFidelitySummaryError] = useState<string | null>(null);
     const [expandedFidelityIssue, setExpandedFidelityIssue] = useState<number | null>(null);
 
     // Fetch existing theological audit result on mount if available
@@ -42,8 +44,42 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
             setTheoError(null);
             setFidelityResult(null);
             setFidelityError(null);
+            setFidelitySummary(null);
+            setFidelitySummaryError(null);
             return;
         }
+
+        if (selectedChunkId === 'FULL_DOC') {
+            setTheoResult(null);
+            setTheoError(null);
+            setFidelityResult(null);
+            setFidelityError(null);
+
+            const fetchFidelitySummary = async () => {
+                try {
+                    const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/fidelity-audit-summary`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        setFidelitySummary(data.summary || null);
+                        setFidelitySummaryError(null);
+                        if (onAuditComplete) onAuditComplete();
+                    } else {
+                        setFidelitySummary(null);
+                        setFidelitySummaryError("無法載入全文忠實度審核摘要。");
+                    }
+                } catch (e) {
+                    console.error("Failed to load fidelity audit summary:", e);
+                    setFidelitySummary(null);
+                    setFidelitySummaryError("無法載入全文忠實度審核摘要。");
+                }
+            };
+
+            fetchFidelitySummary();
+            return;
+        }
+
+        setFidelitySummary(null);
+        setFidelitySummaryError(null);
 
         // Fetch Theological Audit
         const fetchTheo = async () => {
@@ -283,7 +319,52 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                             </div>
                         )}
 
-                        {fidelityResult && !fidelityError && (
+                        {selectedChunkId === 'FULL_DOC' && fidelitySummaryError && (
+                            <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">
+                                {fidelitySummaryError}
+                            </div>
+                        )}
+
+                        {selectedChunkId === 'FULL_DOC' && fidelitySummary && !fidelitySummaryError && (
+                            <div className="space-y-6 text-sm pb-10">
+                                <div className="bg-gray-50 border rounded p-4">
+                                    <h4 className="font-bold flex items-center gap-2 border-b pb-2 mb-2">
+                                        🧾 全文忠實度審核摘要
+                                    </h4>
+                                    <p className="mb-1"><strong>總 Chunk 數:</strong> {fidelitySummary.total_chunks}</p>
+                                    <p className="mb-1"><strong>已通過:</strong> {fidelitySummary.passed_chunks}</p>
+                                    <p className="mb-1"><strong>未通過:</strong> {fidelitySummary.failed_chunks}</p>
+                                    <p className="mb-1"><strong>尚未審核:</strong> {fidelitySummary.missing_chunks}</p>
+                                    <p className="mt-2">
+                                        <strong>整體狀態:</strong> {fidelitySummary.all_passed ? '✅ 全部通過，可 Check In' : '⚠️ 尚未全部通過'}
+                                    </p>
+                                </div>
+
+                                <div className="bg-gray-50 border rounded p-4">
+                                    <h4 className="font-bold border-b pb-2 mb-3">📚 Chunk 狀態</h4>
+                                    <ul className="space-y-2">
+                                        {fidelitySummary.chunks?.map((chunk: any) => (
+                                            <li key={chunk.id} className="bg-white border rounded px-3 py-2 flex items-center justify-between gap-3">
+                                                <div>
+                                                    <div className="font-semibold text-gray-900">{chunk.title}</div>
+                                                    <div className="text-xs text-gray-500">{chunk.id}</div>
+                                                </div>
+                                                <div className="text-right text-sm">
+                                                    <div>
+                                                        {chunk.status === 'passed' ? '✅ 通過' : chunk.status === 'failed' ? '❌ 未通過' : '⏳ 尚未審核'}
+                                                    </div>
+                                                    {chunk.faithfulness != null && (
+                                                        <div className="text-xs text-gray-500">忠實度 {chunk.faithfulness}</div>
+                                                    )}
+                                                </div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedChunkId !== 'FULL_DOC' && fidelityResult && !fidelityError && (
                             <div className="space-y-6 text-sm pb-10">
                                 {/* Status block */}
                                 <div className="bg-gray-50 border rounded p-4">
@@ -352,7 +433,7 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                             </div>
                         )}
 
-                        {!fidelityResult && !isFidelityAuditing && !fidelityError && (
+                        {selectedChunkId !== 'FULL_DOC' && !fidelityResult && !isFidelityAuditing && !fidelityError && (
                             <div className="flex flex-col items-center justify-center text-gray-400 text-sm h-32">
                                 <p>尚無忠實度審核結果</p>
                             </div>

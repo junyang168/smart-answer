@@ -1,17 +1,35 @@
 import asyncio
 import json
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime
 from pathlib import Path
 
 from backend.api.config import DATA_BASE_PATH
 from backend.api.multi_agent.types import AgentState
 
-from backend.api.multi_agent.agents import segment_notes, expand_unit
 from backend.api.sermon_converter_service import (
-    get_sermon_source, get_sermon_draft_path, update_sermon_processing_status
+    get_sermon_source,
+    save_sermon_draft,
+    sync_draft_chunks_from_generated_units,
+    update_sermon_processing_status,
 )
-from backend.api.lecture_manager import get_series, list_series
+from backend.api.lecture_manager import list_series
+from backend.pipeline.stage1 import run_stage1_pipeline
+
+
+def _render_manuscript_sections(sections: dict) -> str:
+    blocks: list[str] = []
+    section_map = [
+        ("exegesis", "釋經"),
+        ("theological_significance", "神學意義"),
+        ("application", "生活應用"),
+        ("appendix", "附錄"),
+    ]
+    for key, label in section_map:
+        value = sections.get(key) if isinstance(sections, dict) else None
+        if isinstance(value, str) and value.strip():
+            blocks.append(f"### {label}\n\n{value.strip()}")
+    return "\n\n".join(blocks).strip()
 
 def _get_agent_state_path(project_id: str) -> Path:
     return DATA_BASE_PATH / "notes_to_surmon" / project_id / "agent_state.json"
@@ -46,26 +64,23 @@ def _load_agent_state(project_id: str) -> Optional[AgentState]:
         print(f"Warning: Failed to load previous state: {e}")
     return None
 
-async def process_project_with_mas(project_id: str):
+async def process_project_with_mas(project_id: str, force_restart: bool = False):
     """
-    Main entry point for 2-Phase Sermon/Exposition Generation.
-    Phase 1: Segment notes into teaching units.
-    Phase 2: Expand each unit into verbatim manuscript.
-    Supports Resumability.
+    Main entry point for the production Stage 1 pipeline.
+    Stage 1A: split corrected notes into metadata-only teaching units.
+    Stage 1B: extract source slices by line range for local context.
+    Stage 1C: generate each unit independently with the strict Stage 1 prompt.
     """
     try:
-        # 0. Setup & Context Loading
         update_sermon_processing_status(project_id, True, {"stage": "Initializing", "progress": 0})
-        
+
         state = _load_agent_state(project_id)
-        
-        # If no state, initialize it
+
         if not state:
             source_content = get_sermon_source(project_id)
             if not source_content:
                 raise ValueError("No source content found")
-            
-            # Resolve Context (Series/Lecture/ProjectType)
+
             series_title = "Unknown Series"
             series_desc = ""
             lecture_title = "Unknown Lecture"
@@ -86,8 +101,7 @@ async def process_project_with_mas(project_id: str):
                         break
                 if found:
                     break
-            
-            # Also try to read project_type from project meta.json
+
             if not found:
                 meta_path = DATA_BASE_PATH / "notes_to_surmon" / project_id / "meta.json"
                 if meta_path.exists():
@@ -108,63 +122,51 @@ async def process_project_with_mas(project_id: str):
                 source_notes=source_content
             )
             _save_agent_state(state)
-
-        # Phase 1: Segmenting
-        if not state.units:
-            update_sermon_processing_status(project_id, True, {"stage": "教學單元切割", "progress": 5})
-            _log_agent_action(project_id, "segmenter", f"開始切割筆記為教學單元（類型：{state.project_type}）...")
-            
-            units = await asyncio.to_thread(segment_notes, state)
-            state.units = units if units else [state.source_notes]
-            _save_agent_state(state)
-            _log_agent_action(project_id, "segmenter", f"切割完成，共 {len(state.units)} 個教學單元。")
         else:
-            _log_agent_action(project_id, "system", f"使用已緩存的 {len(state.units)} 個教學單元。")
-        
-        units = state.units
-        
-        # Phase 2: Expanding each unit (TEMPORARILY DISABLED)
-        # items_done = len(state.draft_chunks)
-        # total_units = len(units)
-        # 
-        # if items_done < total_units:
-        #     full_draft = state.draft_chunks.copy()
-        #     
-        #     for i in range(items_done, total_units):
-        #         unit = units[i]
-        #         unit_content = unit["content"] if isinstance(unit, dict) else unit
-        #         current_draft_context = "\n\n".join(full_draft)
-        #         
-        #         # Progress: 20% to 95%
-        #         progress = 20 + int((i / total_units) * 75)
-        #         update_sermon_processing_status(project_id, True, {
-        #             "stage": f"擴展教學單元 {i+1}/{total_units}",
-        #             "progress": progress
-        #         })
-        #         
-        #         _log_agent_action(project_id, "expander", f"開始擴展教學單元 {i+1}/{total_units}（{len(unit_content)} 字）...")
-        #         
-        #         draft_chunk = await asyncio.to_thread(expand_unit, state, unit_content, current_draft_context)
-        #         
-        #         _log_agent_action(project_id, "expander", f"教學單元 {i+1}/{total_units} 擴展完成（{len(draft_chunk)} 字）。")
-        #         
-        #         # Append and Save immediately (checkpoint)
-        #         full_draft.append(draft_chunk)
-        #         state.draft_chunks.append(draft_chunk)
-        #         _save_agent_state(state)
-        
-        # Finalize
-        state.full_manuscript = "\n\n".join(state.draft_chunks)
+            latest_source = get_sermon_source(project_id)
+            if latest_source:
+                state.source_notes = latest_source
+
+        project_dir = DATA_BASE_PATH / "notes_to_surmon" / project_id
+        input_path = project_dir / "unified_source.md"
+        log_path = project_dir / "stage1_logs.jsonl"
+
+        def on_log(role: str, message: str) -> None:
+            _log_agent_action(project_id, role, message)
+
+        def on_progress(stage: str, progress: int) -> None:
+            update_sermon_processing_status(project_id, True, {"stage": stage, "progress": progress})
+
+        summary = await asyncio.to_thread(
+            run_stage1_pipeline,
+            input_path=input_path,
+            output_dir=project_dir,
+            model="claude-sonnet-4-6",
+            timeout_seconds=90.0,
+            max_retries=3,
+            force=force_restart,
+            log_path=log_path,
+            log_callback=on_log,
+            progress_callback=on_progress,
+        )
+
+        state.units = [unit.__dict__ for unit in summary.units]
+        state.generated_units = [generated_unit.__dict__ for generated_unit in summary.generated_units]
+        state.draft_chunks = [
+            f"## {generated_unit.unit_title}\n\n{_render_manuscript_sections(generated_unit.manuscript_sections)}"
+            for generated_unit in summary.generated_units
+        ]
+        state.failed_units = summary.failed_units
+        state.full_manuscript = summary.combined_markdown
         _save_agent_state(state)
-        
-        # Save Result to Draft File
-        draft_path = get_sermon_draft_path(project_id)
-        with open(draft_path, "w", encoding="utf-8") as f:
-            f.write(state.full_manuscript)
-        
-        update_sermon_processing_status(project_id, False, {"stage": "Complete", "progress": 100})
-        _log_agent_action(project_id, "system", "生成完成。")
-        
+
+        save_sermon_draft(project_id, summary.combined_markdown)
+        sync_draft_chunks_from_generated_units(project_id)
+
+        final_stage = "Complete with failures" if summary.failed_units else "Complete"
+        update_sermon_processing_status(project_id, False, {"stage": final_stage, "progress": 100})
+        _log_agent_action(project_id, "system", "Stage 1 generation completed.")
+
     except Exception as e:
         print(f"MAS Error: {e}")
         _log_agent_action(project_id, "system", f"CRITICAL ERROR: {e}")

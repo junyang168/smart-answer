@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import html
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from anthropic import Anthropic
 
 from google import genai
 from google.genai import types
@@ -48,6 +51,28 @@ class SermonProject(BaseModel):
     lecture_id: Optional[str] = None
     audit_passed: Optional[bool] = None
     project_type: str = "sermon_note" 
+
+
+MASTER_TEXT_METADATA_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": "string"},
+        "subtitle": {"type": "string"},
+        "summary": {"type": "string"},
+        "key_bible_verse": {"type": "string"},
+        "key_exegetical_points": {"type": "string"},
+        "key_theological_points": {"type": "string"},
+    },
+    "required": [
+        "title",
+        "subtitle",
+        "summary",
+        "key_bible_verse",
+        "key_exegetical_points",
+        "key_theological_points",
+    ],
+}
 
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
@@ -558,6 +583,35 @@ def reset_agent_state(project_id: str):
     new_logs = sermon_dir / "agent_logs.json"
     if new_logs.exists():
         new_logs.unlink()
+
+    stage1_logs = sermon_dir / "stage1_logs.jsonl"
+    if stage1_logs.exists():
+        stage1_logs.unlink()
+
+    stage1_manifest = sermon_dir / "stage1_manifest.json"
+    if stage1_manifest.exists():
+        stage1_manifest.unlink()
+
+    stage1_units = sermon_dir / "stage1_units.json"
+    if stage1_units.exists():
+        stage1_units.unlink()
+
+    for draft_name in ["draft_v1.md", "stage1_draft.md"]:
+        draft_file = sermon_dir / draft_name
+        if draft_file.exists():
+            draft_file.unlink()
+
+    generated_units_dir = sermon_dir / "generated_units"
+    if generated_units_dir.exists():
+        shutil.rmtree(generated_units_dir)
+
+    draft_chunks_dir = sermon_dir / "draft_chunks"
+    if draft_chunks_dir.exists():
+        shutil.rmtree(draft_chunks_dir)
+
+    draft_chunks_meta = sermon_dir / "draft_chunks_meta.json"
+    if draft_chunks_meta.exists():
+        draft_chunks_meta.unlink()
         
     # 3. Delete Logs (Legacy Path) - cleanup
     legacy_logs = DATA_BASE_PATH / "sermon_projects" / project_id / "agent_logs.json"
@@ -620,22 +674,8 @@ def save_sermon_draft(project_id: str, content: str) -> bool:
     draft_file = get_sermon_draft_path(project_id)
     with open(draft_file, "w", encoding="utf-8") as f:
         f.write(content)
-        
-    # Also chunk the draft immediately
-    chunks = split_markdown_for_review(content)
-    meta_json = chunks_to_jsonable(chunks)
-    
-    meta_file = get_draft_chunks_meta_path(project_id)
-    import json
-    with open(meta_file, "w", encoding="utf-8") as f:
-        json.dump(meta_json, f, indent=2, ensure_ascii=False)
-        
-    chunks_dir = get_sermon_draft_chunks_dir(project_id)
-    for c in chunks:
-        c_file = chunks_dir / f"{c.id}.md"
-        with open(c_file, "w", encoding="utf-8") as f:
-            f.write(c.text)
-            
+
+    _write_draft_chunks_from_markdown(project_id, content)
     return True
 
 def get_sermon_draft_chunks_dir(project_id: str) -> Path:
@@ -649,17 +689,47 @@ def get_draft_chunks_meta_path(project_id: str) -> Path:
     return sermon_dir / "draft_chunks_meta.json"
 
 def get_draft_chunks(project_id: str) -> list[dict]:
+    draft_file = get_sermon_draft_path(project_id)
     meta_file = get_draft_chunks_meta_path(project_id)
-    if not meta_file.exists():
-        # Fallback if draft exists but no chunks (e.g., legacy drafts)
-        draft_content = get_sermon_draft(project_id)
-        if draft_content:
-            save_sermon_draft(project_id, draft_content)
-        else:
-            return []
-            
-    import json
     chunks_dir = get_sermon_draft_chunks_dir(project_id)
+
+    def _meta_has_structured_lineage() -> bool:
+        if not meta_file.exists():
+            return False
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta_data = json.load(f)
+            if not isinstance(meta_data, list) or not meta_data:
+                return False
+            return all(
+                item.get("unit_id") and item.get("source_start_line") and item.get("source_end_line")
+                for item in meta_data
+            )
+        except Exception:
+            return False
+
+    if _list_generated_unit_paths(project_id):
+        if _should_sync_draft_chunks_from_generated_units(project_id) or not _meta_has_structured_lineage():
+            sync_draft_chunks_from_generated_units(project_id)
+    elif draft_file.exists():
+        needs_rebuild = False
+        if not meta_file.exists():
+            needs_rebuild = True
+        else:
+            draft_mtime = draft_file.stat().st_mtime
+            meta_mtime = meta_file.stat().st_mtime
+            chunk_files = list(chunks_dir.glob("*.md"))
+            latest_chunk_mtime = max((chunk.stat().st_mtime for chunk in chunk_files), default=0.0)
+            if meta_mtime < draft_mtime or latest_chunk_mtime < draft_mtime:
+                needs_rebuild = True
+        if needs_rebuild:
+            draft_content = get_sermon_draft(project_id)
+            if draft_content:
+                _write_draft_chunks_from_markdown(project_id, draft_content)
+    elif not meta_file.exists():
+        return []
+
+    import json
     # read meta
     with open(meta_file, "r", encoding="utf-8") as f:
         meta_data = json.load(f)
@@ -672,6 +742,194 @@ def get_draft_chunks(project_id: str) -> list[dict]:
         else:
             item["content"] = ""
     return meta_data
+
+def _write_draft_chunks_from_markdown(project_id: str, content: str) -> None:
+    chunks = split_markdown_for_review(content)
+    meta_json = chunks_to_jsonable(chunks)
+    _persist_draft_chunks(project_id, meta_json, {c.id: c.text for c in chunks})
+
+def _persist_draft_chunks(project_id: str, meta_json: list[dict], chunk_text_by_id: Dict[str, str]) -> None:
+    meta_file = get_draft_chunks_meta_path(project_id)
+    import json
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_json, f, indent=2, ensure_ascii=False)
+
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    for stale_chunk in chunks_dir.glob("*.md"):
+        stale_chunk.unlink()
+    for chunk_id, text in chunk_text_by_id.items():
+        c_file = chunks_dir / f"{chunk_id}.md"
+        with open(c_file, "w", encoding="utf-8") as f:
+            f.write(text)
+
+def _persist_final_chunks(project_id: str, meta_json: list[dict], chunk_text_by_id: Dict[str, str]) -> None:
+    meta_file = get_chunks_meta_path(project_id)
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_json, f, indent=2, ensure_ascii=False)
+
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    for stale_chunk in chunks_dir.glob("*.md"):
+        stale_chunk.unlink()
+    for chunk_id, text in chunk_text_by_id.items():
+        chunk_path = chunks_dir / f"{chunk_id}.md"
+        with open(chunk_path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+def _get_generated_units_dir(project_id: str) -> Path:
+    return NOTES_TO_SERMON_DIR / project_id / "generated_units"
+
+def _list_generated_unit_paths(project_id: str) -> list[Path]:
+    generated_dir = _get_generated_units_dir(project_id)
+    if not generated_dir.exists():
+        return []
+    paths = [path for path in generated_dir.glob("u*.json") if not path.name.endswith(".points.json")]
+    def sort_key(path: Path) -> tuple[int, str]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return (10**9, path.name)
+        return (int(payload.get("start_line", 10**9)), str(payload.get("unit_id") or path.stem))
+    return sorted(paths, key=sort_key)
+
+def _normalize_generated_unit_section(value: Any, expected_label: str) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    lines = value.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    redundant_heading_re = re.compile(
+        rf"^#{{2,6}}\s*{re.escape(expected_label)}(?:\s*[:：].*)?\s*$"
+    )
+    while lines and redundant_heading_re.fullmatch(lines[0].strip()):
+        lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+    normalized_lines: list[str] = []
+    heading_re = re.compile(r"^(#{1,6})(\s+.*)$")
+    for line in lines:
+        match = heading_re.match(line)
+        if match:
+            level = len(match.group(1))
+            suffix = match.group(2)
+            normalized_level = "#" * max(level, 4)
+            normalized_lines.append(f"{normalized_level}{suffix}")
+        else:
+            normalized_lines.append(line)
+    text = "\n".join(normalized_lines).strip()
+    return text or None
+
+
+def _to_chinese_section_number(value: int) -> str:
+    digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+    if value <= 0:
+        return str(value)
+    if value < 10:
+        return digits[value]
+    if value < 20:
+        return "十" if value == 10 else f"十{digits[value % 10]}"
+    if value < 100:
+        tens, ones = divmod(value, 10)
+        return f"{digits[tens]}十" if ones == 0 else f"{digits[tens]}十{digits[ones]}"
+    return str(value)
+
+def _render_generated_unit_markdown_for_draft(unit_payload: dict, display_index: Optional[int] = None) -> str:
+    title = (unit_payload.get("unit_title") or unit_payload.get("unit_id") or "未命名單元").strip()
+    manuscript_sections = unit_payload.get("manuscript_sections") or {}
+    section_map = [
+        ("exegesis", "釋經"),
+        ("theological_significance", "神學意義"),
+        ("application", "生活應用"),
+        ("appendix", "附錄"),
+    ]
+    section_blocks: list[str] = []
+    for key, label in section_map:
+        cleaned = _normalize_generated_unit_section(manuscript_sections.get(key), label)
+        if cleaned:
+            section_blocks.append(f"### {label}\n\n{cleaned}")
+    if not section_blocks:
+        body = (unit_payload.get("generated_markdown") or "").strip()
+    else:
+        body = "\n\n".join(section_blocks).strip()
+    display_title = f"{_to_chinese_section_number(display_index)}、{title}" if display_index else title
+    parts = [f"## {display_title}"]
+    if body:
+        parts.append(body)
+    return "\n\n".join(parts).strip()
+
+def _build_draft_chunks_from_generated_units(project_id: str) -> tuple[str, list[dict], Dict[str, str]]:
+    chunk_entries: list[dict] = []
+    chunk_text_by_id: Dict[str, str] = {}
+    combined_blocks: list[str] = []
+    for index, path in enumerate(_list_generated_unit_paths(project_id), start=1):
+        unit_payload = json.loads(path.read_text(encoding="utf-8"))
+        chunk_id = f"chunk_{index:03d}"
+        content = _render_generated_unit_markdown_for_draft(unit_payload, display_index=index)
+        chunk_text_by_id[chunk_id] = content
+        combined_blocks.append(content)
+        chunk_entries.append(
+            {
+                "id": chunk_id,
+                "title": (unit_payload.get("unit_title") or unit_payload.get("unit_id") or chunk_id),
+                "level": 2,
+                "char_len": len(content),
+                "unit_id": unit_payload.get("unit_id"),
+                "chapter_title": unit_payload.get("chapter_title"),
+                "section_title": unit_payload.get("section_title"),
+                "scripture_range": unit_payload.get("scripture_range"),
+                "source_start_line": unit_payload.get("start_line"),
+                "source_end_line": unit_payload.get("end_line"),
+            }
+        )
+    return "\n\n".join(block.strip() for block in combined_blocks if block.strip()).strip(), chunk_entries, chunk_text_by_id
+
+def sync_draft_chunks_from_generated_units(project_id: str) -> bool:
+    generated_paths = _list_generated_unit_paths(project_id)
+    if not generated_paths:
+        return False
+    draft_content, chunk_entries, chunk_text_by_id = _build_draft_chunks_from_generated_units(project_id)
+    draft_file = get_sermon_draft_path(project_id)
+    draft_file.write_text(draft_content, encoding="utf-8")
+    _persist_draft_chunks(project_id, chunk_entries, chunk_text_by_id)
+    return True
+
+def _has_final_chunk_bundle(project_id: str) -> bool:
+    meta_file = get_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    return meta_file.exists() and any(chunks_dir.glob("*.md"))
+
+def sync_final_chunks_from_draft_chunks(project_id: str) -> bool:
+    draft_chunks = get_draft_chunks(project_id)
+    if not draft_chunks:
+        return False
+
+    meta_json: list[dict] = []
+    chunk_text_by_id: Dict[str, str] = {}
+    combined_blocks: list[str] = []
+    for item in draft_chunks:
+        chunk_id = item["id"]
+        content = item.get("content") or ""
+        meta_json.append({key: value for key, value in item.items() if key != "content"})
+        chunk_text_by_id[chunk_id] = content
+        if content.strip():
+            combined_blocks.append(content.strip())
+
+    final_file = get_sermon_final_path(project_id)
+    final_file.write_text("\n\n".join(combined_blocks).strip() + "\n", encoding="utf-8")
+    _persist_final_chunks(project_id, meta_json, chunk_text_by_id)
+    return True
+
+def _should_sync_draft_chunks_from_generated_units(project_id: str) -> bool:
+    generated_paths = _list_generated_unit_paths(project_id)
+    if not generated_paths:
+        return False
+    meta_file = get_draft_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    chunk_files = list(chunks_dir.glob("*.md"))
+    latest_generated_mtime = max(path.stat().st_mtime for path in generated_paths)
+    if not meta_file.exists() or not chunk_files:
+        return True
+    latest_chunk_mtime = max([meta_file.stat().st_mtime, *(chunk.stat().st_mtime for chunk in chunk_files)])
+    return latest_generated_mtime > latest_chunk_mtime
 
 def update_draft_chunk(project_id: str, chunk_id: str, new_text: str) -> bool:
     chunks_dir = get_sermon_draft_chunks_dir(project_id)
@@ -713,6 +971,10 @@ def get_sermon_final_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "final.md"
 
+def get_sermon_master_text_meta_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "master_text_meta.json"
+
 def get_sermon_chunks_dir(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     chunks_dir = sermon_dir / "chunks"
@@ -745,6 +1007,49 @@ def _find_heading_level(line: str) -> Optional[Tuple[int, str]]:
     level = len(m.group(1))
     title = m.group(2).strip()
     return level, title
+
+def _slice_text_by_lines(text: str, start_line: Optional[int], end_line: Optional[int]) -> str:
+    if not start_line or not end_line:
+        return text
+    lines = text.splitlines()
+    start_index = max(0, int(start_line) - 1)
+    end_index = min(len(lines), int(end_line))
+    if start_index >= end_index:
+        return ""
+    return "\n".join(lines[start_index:end_index]).strip()
+
+def _get_draft_chunk_meta(project_id: str, chunk_id: str) -> Optional[dict]:
+    meta_file = get_draft_chunks_meta_path(project_id)
+    if not meta_file.exists():
+        return None
+    with open(meta_file, "r", encoding="utf-8") as f:
+        for item in json.load(f):
+            if item.get("id") == chunk_id:
+                return item
+    return None
+
+def _get_fidelity_audit_source_slice(project_id: str, chunk_id: str, source_content: str) -> str:
+    chunk_meta = _get_draft_chunk_meta(project_id, chunk_id)
+    if not chunk_meta:
+        return extract_processable_content(source_content)
+
+    start_line = chunk_meta.get("source_start_line")
+    end_line = chunk_meta.get("source_end_line")
+    if not start_line or not end_line:
+        raise ValueError(f"Draft chunk {chunk_id} is missing source line boundaries")
+
+    raw_slice = _slice_text_by_lines(source_content, start_line, end_line)
+    if not raw_slice.strip():
+        raise ValueError(
+            f"Draft chunk {chunk_id} source slice is empty for lines {start_line}-{end_line}"
+        )
+
+    processed_slice = extract_processable_content(raw_slice)
+    if not processed_slice.strip():
+        raise ValueError(
+            f"Draft chunk {chunk_id} source slice became empty after preprocessing for lines {start_line}-{end_line}"
+        )
+    return processed_slice
 
 def split_markdown_for_review(
     md: str,
@@ -841,28 +1146,25 @@ def start_theological_review(project_id: str) -> bool:
     
     if not draft_file.exists():
         raise FileNotFoundError(f"Draft not found for project {project_id}")
-        
-    if not final_file.exists():
-        import shutil
-        shutil.copy2(draft_file, final_file)
-        
-    # Always regenerate chunks if meta_file doesn't exist or we just created final.md
-    if not meta_file.exists() or not final_file.exists():
-        with open(final_file, "r", encoding="utf-8") as f:
+
+    if _should_sync_draft_chunks_from_generated_units(project_id):
+        sync_draft_chunks_from_generated_units(project_id)
+
+    if not final_file.exists() or not _has_final_chunk_bundle(project_id):
+        draft_text = draft_file.read_text(encoding="utf-8")
+        if not final_file.exists() or final_file.read_text(encoding="utf-8") == draft_text:
+            if sync_final_chunks_from_draft_chunks(project_id):
+                return True
+
+        with open(final_file if final_file.exists() else draft_file, "r", encoding="utf-8") as f:
             md_content = f.read()
-            
+
         chunks = split_markdown_for_review(md_content)
         meta_json = chunks_to_jsonable(chunks)
-        
-        import json
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump(meta_json, f, indent=2, ensure_ascii=False)
-            
-        for c in chunks:
-            chunk_path = chunks_dir / f"{c.id}.md"
-            with open(chunk_path, "w", encoding="utf-8") as f:
-                f.write(c.text.strip() + "\n")
-                
+        _persist_final_chunks(project_id, meta_json, {c.id: c.text.strip() + "\n" for c in chunks})
+        if not final_file.exists():
+            final_file.write_text(md_content, encoding="utf-8")
+
     return True
 
 def rebuild_final_from_chunks(project_id: str):
@@ -897,23 +1199,19 @@ def get_final_chunks(project_id: str) -> List[Dict]:
     chunks_dir = get_sermon_chunks_dir(project_id)
     
     # Auto-generate chunks if not present but final.md is
-    if not meta_file.exists():
+    if not meta_file.exists() or not any(chunks_dir.glob("*.md")):
         final_file = get_sermon_final_path(project_id)
         if final_file.exists():
-            with open(final_file, "r", encoding="utf-8") as f:
-                md_content = f.read()
-                
-            chunks = split_markdown_for_review(md_content)
-            meta_json = chunks_to_jsonable(chunks)
-            
-            import json
-            with open(meta_file, "w", encoding="utf-8") as f:
-                json.dump(meta_json, f, indent=2, ensure_ascii=False)
-                
-            for c in chunks:
-                chunk_path = chunks_dir / f"{c.id}.md"
-                with open(chunk_path, "w", encoding="utf-8") as f:
-                    f.write(c.text.strip() + "\n")
+            draft_file = get_sermon_draft_path(project_id)
+            draft_text = draft_file.read_text(encoding="utf-8") if draft_file.exists() else None
+            final_text = final_file.read_text(encoding="utf-8")
+
+            if draft_text is not None and final_text == draft_text and sync_final_chunks_from_draft_chunks(project_id):
+                pass
+            else:
+                chunks = split_markdown_for_review(final_text)
+                meta_json = chunks_to_jsonable(chunks)
+                _persist_final_chunks(project_id, meta_json, {c.id: c.text.strip() + "\n" for c in chunks})
         else:
             return []
     
@@ -943,6 +1241,7 @@ def update_final_chunk(project_id: str, chunk_id: str, content: str) -> bool:
         
     with open(chunk_path, "w", encoding="utf-8") as f:
          f.write(content.strip() + "\n")
+    rebuild_final_from_chunks(project_id)
     return True
 
 def get_sermon_final(project_id: str) -> str:
@@ -963,7 +1262,183 @@ def save_sermon_final(project_id: str, content: str) -> bool:
     final_file = get_sermon_final_path(project_id)
     with open(final_file, "w", encoding="utf-8") as f:
         f.write(content)
+
+    meta_file = get_chunks_meta_path(project_id)
+    if meta_file.exists():
+        meta_file.unlink()
+
+    chunks_dir = get_sermon_chunks_dir(project_id)
+    for stale_chunk in chunks_dir.glob("*.md"):
+        stale_chunk.unlink()
     return True
+
+
+def _default_master_text_metadata() -> dict:
+    return {
+        "title": "",
+        "subtitle": "",
+        "summary": "",
+        "key_bible_verse": "",
+        "key_exegetical_points": "",
+        "key_theological_points": "",
+    }
+
+
+def _normalize_bullet_markdown(value: Any) -> str:
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            text = str(item).strip()
+            if text:
+                lines.append(f"- {text}")
+        return "\n".join(lines)
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    lines = [line.rstrip() for line in text.splitlines()]
+    normalized: list[str] = []
+    saw_bullet = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^[-*•]\s+", stripped):
+            normalized.append(re.sub(r"^[-*•]\s+", "- ", stripped))
+            saw_bullet = True
+        else:
+            normalized.append(stripped)
+
+    if not normalized:
+        return ""
+    if saw_bullet:
+        return "\n".join(normalized)
+
+    return "\n".join(f"- {line}" for line in normalized)
+
+
+def _normalize_master_text_metadata(payload: Optional[dict]) -> dict:
+    data = _default_master_text_metadata()
+    if isinstance(payload, dict):
+        data["title"] = str(payload.get("title") or "").strip()
+        data["subtitle"] = str(payload.get("subtitle") or "").strip()
+        data["summary"] = str(payload.get("summary") or "").strip()
+        data["key_bible_verse"] = str(payload.get("key_bible_verse") or "").strip()
+        data["key_exegetical_points"] = _normalize_bullet_markdown(payload.get("key_exegetical_points"))
+        data["key_theological_points"] = _normalize_bullet_markdown(payload.get("key_theological_points"))
+    return data
+
+
+def get_sermon_master_text_metadata(project_id: str) -> dict:
+    meta_path = get_sermon_master_text_meta_path(project_id)
+    if not meta_path.exists():
+        return _default_master_text_metadata()
+    with open(meta_path, "r", encoding="utf-8") as f:
+        return _normalize_master_text_metadata(json.load(f))
+
+
+def save_sermon_master_text_metadata(project_id: str, payload: dict) -> dict:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    if not sermon_dir.exists():
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
+
+    normalized = _normalize_master_text_metadata(payload)
+    meta_path = get_sermon_master_text_meta_path(project_id)
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(normalized, f, ensure_ascii=False, indent=2)
+    return normalized
+
+
+def _read_stage1_prompt(prompt_name: str) -> str:
+    prompts_dir = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    prompt_text = (prompts_dir / prompt_name).read_text(encoding="utf-8")
+    shared_tokens = {
+        "{{CATEGORY_DEFINITIONS}}": (prompts_dir / "shared" / "category_definitions.md").read_text(encoding="utf-8").strip(),
+    }
+    for token, value in shared_tokens.items():
+        prompt_text = prompt_text.replace(token, value)
+    return prompt_text
+
+
+def _parse_loose_json_response(content: str) -> Dict[str, Any]:
+    cleaned = content.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}\s*$", cleaned, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
+
+
+def generate_sermon_master_text_metadata(
+    project_id: str,
+    model: str = "claude-sonnet-4-6",
+) -> dict:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    if not sermon_dir.exists():
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+
+    rebuild_final_from_chunks(project_id)
+    final_text = get_sermon_final(project_id).strip()
+    if not final_text:
+        raise ValueError("Final Master Text not found. Please Start Theological Review first.")
+
+    project_meta = get_sermon_project_metadata(project_id)
+    project_title = project_meta.title if project_meta else project_id
+    bible_verse = project_meta.bible_verse if project_meta else ""
+
+    system_prompt = _read_stage1_prompt("master_text_metadata.md")
+    user_prompt = (
+        f"專案標題：{project_title}\n"
+        f"現有經文欄位：{bible_verse}\n\n"
+        "以下是已完成的 Master Text。請基於全文生成整體 metadata。\n\n"
+        "【Master Text 開始】\n"
+        f"{final_text}\n"
+        "【Master Text 結束】\n\n"
+        "你必須只輸出合法 JSON，不可包含 Markdown 代碼塊、說明文字或前後綴。\n"
+        "輸出 JSON 必須符合以下 schema：\n"
+        f"{json.dumps(MASTER_TEXT_METADATA_SCHEMA, ensure_ascii=False, indent=2)}"
+    )
+
+    client = Anthropic(api_key=api_key, max_retries=0, timeout=180.0)
+    message = client.messages.create(
+        model=model,
+        max_tokens=4000,
+        temperature=0.2,
+        system=system_prompt,
+        thinking={"type": "disabled"},
+        messages=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": user_prompt}],
+            }
+        ],
+    )
+
+    text_blocks = [
+        block.text.strip()
+        for block in getattr(message, "content", [])
+        if getattr(block, "type", None) == "text" and getattr(block, "text", "").strip()
+    ]
+    if not text_blocks:
+        raise RuntimeError(f"Anthropic response missing text content: {message}")
+
+    parsed = _parse_loose_json_response("\n".join(text_blocks).strip())
+    normalized = _normalize_master_text_metadata(parsed)
+    return save_sermon_master_text_metadata(project_id, normalized)
 def get_sermon_audit_result(project_id: str, chunk_id: str) -> Optional[dict]:
     """
     Load the persisted fidelity audit result (fidelity_audit.json) and return it as a dictionary for a specific chunk.
@@ -983,6 +1458,77 @@ def get_sermon_audit_result(project_id: str, chunk_id: str) -> Optional[dict]:
     except Exception as e:
         print(f"Error reading fidelity_audit.json: {e}")
         return None
+
+def get_fidelity_audit_summary(project_id: str) -> dict:
+    try:
+        if _should_sync_draft_chunks_from_generated_units(project_id):
+            sync_draft_chunks_from_generated_units(project_id)
+    except Exception:
+        pass
+
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    chunks_meta_file = sermon_dir / "draft_chunks_meta.json"
+    audit_file = sermon_dir / "fidelity_audit.json"
+
+    if not chunks_meta_file.exists():
+        return {
+            "total_chunks": 0,
+            "passed_chunks": 0,
+            "failed_chunks": 0,
+            "missing_chunks": 0,
+            "all_passed": False,
+            "chunks": [],
+        }
+
+    with open(chunks_meta_file, "r", encoding="utf-8") as f:
+        chunks = json.load(f)
+
+    audits: Dict[str, Any] = {}
+    if audit_file.exists():
+        with open(audit_file, "r", encoding="utf-8") as f:
+            audits = json.load(f)
+
+    summary_chunks: list[dict] = []
+    passed_chunks = 0
+    failed_chunks = 0
+    missing_chunks = 0
+
+    for chunk in chunks:
+        chunk_id = chunk.get("id")
+        audit = audits.get(chunk_id) if chunk_id else None
+        passed = bool(isinstance(audit, dict) and audit.get("pass") is True)
+        has_result = isinstance(audit, dict)
+
+        if passed:
+            status = "passed"
+            passed_chunks += 1
+        elif has_result:
+            status = "failed"
+            failed_chunks += 1
+        else:
+            status = "missing"
+            missing_chunks += 1
+
+        summary_chunks.append(
+            {
+                "id": chunk_id,
+                "title": chunk.get("title") or chunk_id,
+                "status": status,
+                "pass": passed,
+                "faithfulness": audit.get("scores", {}).get("faithfulness") if isinstance(audit, dict) else None,
+                "must_fix_count": len(audit.get("must_fix", [])) if isinstance(audit, dict) and isinstance(audit.get("must_fix"), list) else 0,
+            }
+        )
+
+    total_chunks = len(summary_chunks)
+    return {
+        "total_chunks": total_chunks,
+        "passed_chunks": passed_chunks,
+        "failed_chunks": failed_chunks,
+        "missing_chunks": missing_chunks,
+        "all_passed": total_chunks > 0 and passed_chunks == total_chunks,
+        "chunks": summary_chunks,
+    }
 
 
 
@@ -1194,6 +1740,12 @@ def get_sermon_project_metadata(project_id: str) -> Optional[SermonProject]:
     import json
     with open(meta_file, "r", encoding="utf-8") as f:
         data = json.load(f)
+    try:
+        check_and_update_project_audit_status(project_id)
+        with open(meta_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        pass
     return SermonProject(**data)
 
 def list_sermon_projects() -> List[SermonProject]:
@@ -1254,12 +1806,15 @@ def commit_sermon_project(project_id: str) -> str:
         paths_to_add.append(str(draft_file))
         
     final_file = sermon_dir / "final.md"
+    master_text_meta_file = sermon_dir / "master_text_meta.json"
     chunks_meta = sermon_dir / "chunks_meta.json"
     audit_file = sermon_dir / "theological_audit.json"
     chunks_dir = sermon_dir / "chunks"
     
     if final_file.exists():
         paths_to_add.append(str(final_file))
+    if master_text_meta_file.exists():
+        paths_to_add.append(str(master_text_meta_file))
     if chunks_meta.exists():
         paths_to_add.append(str(chunks_meta))
     if audit_file.exists():
@@ -1406,6 +1961,7 @@ def export_sermon_to_doc(project_id: str) -> str:
 
     meta_file = sermon_dir / "meta.json"
     title = f"Master Text: {project_id}"
+    subtitle = ""
     
     import json
     meta_data = {}
@@ -1416,6 +1972,10 @@ def export_sermon_to_doc(project_id: str) -> str:
                 title = meta_data.get("title", title)
         except:
             pass
+
+    master_text_meta = get_sermon_master_text_metadata(project_id)
+    export_title = (master_text_meta.get("title") or "").strip() or title
+    subtitle = (master_text_meta.get("subtitle") or "").strip()
             
     existing_doc_id = meta_data.get("google_doc_id")
 
@@ -1494,6 +2054,13 @@ def export_sermon_to_doc(project_id: str) -> str:
     draft_content = re.sub(r'^\s*>.*$', preserve_blockquote_lines, draft_content, flags=re.MULTILINE)
     
     html_body = markdown.markdown(draft_content, extensions=['tables', 'footnotes', 'fenced_code'])
+
+    header_parts: list[str] = []
+    if export_title:
+        header_parts.append(f"<h1 class=\"export-doc-title\">{html.escape(export_title)}</h1>")
+    if subtitle:
+        header_parts.append(f"<p class=\"export-doc-subtitle\">{html.escape(subtitle)}</p>")
+    header_html = "\n".join(header_parts)
     
     # Process Images (SVG -> PNG, Local -> Base64)
     html_body = _process_images_for_export(html_body)
@@ -1512,6 +2079,8 @@ def export_sermon_to_doc(project_id: str) -> str:
         h1 {{ font-size: 24pt; margin-top: 24pt; margin-bottom: 12pt; }}
         h2 {{ font-size: 18pt; margin-top: 18pt; margin-bottom: 8pt; }}
         h3 {{ font-size: 14pt; margin-top: 14pt; margin-bottom: 6pt; }}
+        .export-doc-title {{ text-align: left; font-size: 26pt; font-weight: 700; margin-top: 0; margin-bottom: 8pt; }}
+        .export-doc-subtitle {{ text-align: left; font-size: 13pt; color: #555555; margin-top: 0; margin-bottom: 22pt; }}
         ul, ol {{ margin-bottom: 12pt; }}
         li {{ margin-bottom: 4pt; }}
         blockquote {{ margin-left: 20pt; padding-left: 10pt; border-left: 2pt solid #cccccc; color: #555555; background-color: #f9f9f9; padding: 10pt; font-style: italic; }}
@@ -1523,6 +2092,7 @@ def export_sermon_to_doc(project_id: str) -> str:
     </style>
     </head>
     <body>
+    {header_html}
     {html_body}
     </body>
     </html>
@@ -1562,6 +2132,7 @@ def export_sermon_to_doc(project_id: str) -> str:
                 # Let's try to update the content.
                 drive_service.files().update(
                     fileId=existing_doc_id,
+                    body={"name": export_title},
                     media_body=media
                 ).execute()
                 file_id = existing_doc_id
@@ -1574,7 +2145,7 @@ def export_sermon_to_doc(project_id: str) -> str:
         # B. Create New if needed
         if not existing_doc_id:
             file_metadata = {
-                'name': title,
+                'name': export_title,
                 'mimeType': 'application/vnd.google-apps.document'
             }
             
@@ -1761,7 +2332,7 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
     """
     try:
         source_content = get_sermon_source(project_id)
-        
+
         chunk_file = get_sermon_draft_chunks_dir(project_id) / f"{chunk_id}.md"
         if not chunk_file.exists():
              return {"error": f"Chunk file {chunk_id}.md not found."}
@@ -1771,8 +2342,8 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
 
         if not source_content:
             return "Error: Unified source notes are empty."
-            
-        source_content = extract_processable_content(source_content)
+
+        source_content = _get_fidelity_audit_source_slice(project_id, chunk_id, source_content)
 
         if not draft_content.strip():
             return "Error: Chunk content is empty. Please edit the chunk before auditing."
@@ -2090,6 +2661,12 @@ def check_and_update_project_audit_status(project_id: str) -> bool:
     If so, sets the project's meta.json `audit_passed` flag to True.
     """
     import json
+    try:
+        if _should_sync_draft_chunks_from_generated_units(project_id):
+            sync_draft_chunks_from_generated_units(project_id)
+    except Exception:
+        pass
+
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     if not sermon_dir.exists():
         return False

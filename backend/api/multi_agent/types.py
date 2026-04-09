@@ -20,11 +20,13 @@ class AgentState(BaseModel):
     source_notes: str  # The unified markdown from OCR or transcript
     
     # --- Phase 1: Teaching Units ---
-    units: Optional[List[Dict]] = None  # [{title, keypoints, type, content}, ...]
+    units: Optional[List[Dict]] = None  # metadata-only split artifacts
     
     # --- Phase 2: Expansion ---
     draft_chunks: List[str] = Field(default_factory=list)
     full_manuscript: Optional[str] = None
+    generated_units: Optional[List[Dict]] = None
+    failed_units: List[Dict] = Field(default_factory=list)
     
     # --- Logging ---
     processing_logs: List[str] = Field(default_factory=list)

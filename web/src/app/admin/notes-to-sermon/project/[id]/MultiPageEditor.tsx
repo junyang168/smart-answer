@@ -28,6 +28,26 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [usedPromptId, setUsedPromptId] = useState<string | null>(null);
     const [auditPassed, setAuditPassed] = useState<boolean | null>(null);
     const [projectType, setProjectType] = useState<string>("sermon_note");
+    const [masterTextMeta, setMasterTextMeta] = useState({
+        title: "",
+        subtitle: "",
+        summary: "",
+        key_bible_verse: "",
+        key_exegetical_points: "",
+        key_theological_points: "",
+    });
+    const [masterTextMetaOriginal, setMasterTextMetaOriginal] = useState({
+        title: "",
+        subtitle: "",
+        summary: "",
+        key_bible_verse: "",
+        key_exegetical_points: "",
+        key_theological_points: "",
+    });
+    const [isMasterMetaLoading, setIsMasterMetaLoading] = useState(false);
+    const [isMasterMetaSaving, setIsMasterMetaSaving] = useState(false);
+    const [isMasterMetaGenerating, setIsMasterMetaGenerating] = useState(false);
+    const [showMasterMetaEditor, setShowMasterMetaEditor] = useState(false);
 
     // Content State
     const [markdown, setMarkdown] = useState("");
@@ -42,6 +62,35 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     // Chunking State
     const [chunks, setChunks] = useState<any[]>([]);
     const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
+    const masterTextMetaDirty = JSON.stringify(masterTextMeta) !== JSON.stringify(masterTextMetaOriginal);
+
+    const normalizeBulletMarkdown = (value: any) => {
+        if (Array.isArray(value)) {
+            return value
+                .map((item) => String(item || "").trim())
+                .filter(Boolean)
+                .map((item) => `- ${item}`)
+                .join("\n");
+        }
+        const text = String(value || "").trim();
+        if (!text) return "";
+        const lines = text
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+        if (lines.every((line) => /^[-*•]\s+/.test(line))) {
+            return lines.map((line) => line.replace(/^[-*•]\s+/, "- ")).join("\n");
+        }
+        return lines.map((line) => `- ${line.replace(/^[-*•]\s+/, "")}`).join("\n");
+    };
+    const hasMasterTextMetaContent = Boolean(
+        masterTextMeta.title ||
+        masterTextMeta.subtitle ||
+        masterTextMeta.summary ||
+        masterTextMeta.key_bible_verse ||
+        masterTextMeta.key_exegetical_points ||
+        masterTextMeta.key_theological_points
+    );
 
     const editorOptions = useMemo(() => ({
         spellChecker: false,
@@ -197,6 +246,54 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         };
         load();
     }, [projectId, viewMode]);
+
+    useEffect(() => {
+        if (viewMode !== 'final' || !hasFinal) {
+            return;
+        }
+
+        const loadMasterTextMeta = async () => {
+            setIsMasterMetaLoading(true);
+            try {
+                const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/master-text-metadata`, {
+                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+                });
+                if (!res.ok) {
+                    throw new Error("Failed to load master text metadata");
+                }
+                const data = await res.json();
+                const rawMeta = data.metadata || {
+                    title: "",
+                    subtitle: "",
+                    summary: "",
+                    key_bible_verse: "",
+                    key_exegetical_points: "",
+                    key_theological_points: "",
+                };
+                const nextMeta = {
+                    ...rawMeta,
+                    key_exegetical_points: normalizeBulletMarkdown(rawMeta.key_exegetical_points),
+                    key_theological_points: normalizeBulletMarkdown(rawMeta.key_theological_points),
+                };
+                setMasterTextMeta(nextMeta);
+                setMasterTextMetaOriginal(nextMeta);
+                setShowMasterMetaEditor(!(
+                    nextMeta.title ||
+                    nextMeta.subtitle ||
+                    nextMeta.summary ||
+                    nextMeta.key_bible_verse ||
+                    nextMeta.key_exegetical_points ||
+                    nextMeta.key_theological_points
+                ));
+            } catch (e) {
+                console.error("Failed to load master text metadata", e);
+            } finally {
+                setIsMasterMetaLoading(false);
+            }
+        };
+
+        loadMasterTextMeta();
+    }, [projectId, viewMode, hasFinal]);
 
     // Load Prompts
     useEffect(() => {
@@ -416,8 +513,72 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
     };
 
+    const handleSaveMasterTextMeta = async () => {
+        setIsMasterMetaSaving(true);
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/master-text-metadata`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(masterTextMeta),
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.detail || "Failed to save master text metadata");
+            }
+            const data = await res.json();
+            const nextMeta = data.metadata || masterTextMeta;
+            setMasterTextMeta(nextMeta);
+            setMasterTextMetaOriginal(nextMeta);
+            setShowMasterMetaEditor(false);
+            return true;
+        } catch (e: any) {
+            alert(e.message || "Failed to save master text metadata");
+            return false;
+        } finally {
+            setIsMasterMetaSaving(false);
+        }
+    };
+
+    const handleGenerateMasterTextMeta = async () => {
+        if (viewMode !== 'final') return;
+
+        if (markdown !== originalMarkdown && !isProcessing) {
+            const saved = await handleSave('final');
+            if (!saved) return;
+        }
+
+        if (masterTextMetaDirty) {
+            const overwrite = window.confirm("Generate new master text metadata and overwrite the current metadata fields?");
+            if (!overwrite) return;
+        }
+
+        setIsMasterMetaGenerating(true);
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/generate-master-text-metadata`, {
+                method: "POST",
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.detail || "Failed to generate master text metadata");
+            }
+            const nextMeta = data.metadata || masterTextMeta;
+            setMasterTextMeta(nextMeta);
+            setMasterTextMetaOriginal(nextMeta);
+            setShowMasterMetaEditor(false);
+        } catch (e: any) {
+            alert(e.message || "Failed to generate master text metadata");
+        } finally {
+            setIsMasterMetaGenerating(false);
+        }
+    };
+
     const handleViewSwitch = async (newMode: 'source' | 'draft' | 'final') => {
         if (newMode === viewMode) return;
+
+        if (viewMode === 'final' && masterTextMetaDirty) {
+            const savedMeta = await handleSaveMasterTextMeta();
+            if (!savedMeta) return;
+        }
 
         // Auto-Save if dirty
         if (markdown !== originalMarkdown && !isProcessing) {
@@ -477,6 +638,10 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const handleCheckIn = async () => {
         if (!confirm("Commit current state to local git?")) return;
         try {
+            if (viewMode === 'final' && masterTextMetaDirty) {
+                const metaSaved = await handleSaveMasterTextMeta();
+                if (!metaSaved) return;
+            }
             // Ensure current view is saved first
             if (markdown !== originalMarkdown) {
                 await handleSave();
@@ -905,6 +1070,150 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             </div>
                         </div>
 
+                        {viewMode === 'final' && activeChunkId === 'FULL_DOC' && (
+                            <div className="mb-3 rounded border border-amber-200 bg-amber-50">
+                                <div className="p-3 flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                            <div className="text-sm font-bold text-amber-900">Master Text Metadata</div>
+                                            {masterTextMetaDirty && (
+                                                <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-red-100 text-red-700">Unsaved</span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-amber-700 mt-0.5">
+                                            Generate and edit publication-facing summary fields for the whole master text.
+                                        </div>
+                                        {!showMasterMetaEditor && (
+                                            <div className="mt-2 space-y-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                    {masterTextMeta.title && (
+                                                        <span className="px-2 py-1 rounded bg-white border text-xs text-gray-700 max-w-full truncate">
+                                                            <strong>Title:</strong> {masterTextMeta.title}
+                                                        </span>
+                                                    )}
+                                                    {masterTextMeta.subtitle && (
+                                                        <span className="px-2 py-1 rounded bg-white border text-xs text-gray-700 max-w-full truncate">
+                                                            <strong>Sub:</strong> {masterTextMeta.subtitle}
+                                                        </span>
+                                                    )}
+                                                    {masterTextMeta.key_bible_verse && (
+                                                        <span className="px-2 py-1 rounded bg-white border text-xs text-gray-700">
+                                                            <strong>Verse:</strong> {masterTextMeta.key_bible_verse}
+                                                        </span>
+                                                    )}
+                                                    {!hasMasterTextMetaContent && !isMasterMetaLoading && (
+                                                        <span className="px-2 py-1 rounded bg-white border text-xs text-gray-500">
+                                                            No metadata yet
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                {masterTextMeta.summary && (
+                                                    <div className="text-xs text-gray-700 leading-5 max-h-10 overflow-hidden">
+                                                        {masterTextMeta.summary}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                            onClick={handleGenerateMasterTextMeta}
+                                            disabled={isMasterMetaGenerating || isMasterMetaLoading}
+                                            className={`px-3 py-1 rounded text-sm font-bold ${isMasterMetaGenerating || isMasterMetaLoading ? 'bg-gray-300 text-gray-600' : 'bg-amber-600 text-white hover:bg-amber-700'}`}
+                                        >
+                                            {isMasterMetaGenerating ? 'Generating...' : 'Generate'}
+                                        </button>
+                                        <button
+                                            onClick={() => setShowMasterMetaEditor(prev => !prev)}
+                                            disabled={isMasterMetaLoading}
+                                            className={`px-3 py-1 rounded text-sm font-bold ${isMasterMetaLoading ? 'bg-gray-200 text-gray-500' : 'bg-white border border-amber-300 text-amber-800 hover:bg-amber-100'}`}
+                                        >
+                                            {showMasterMetaEditor ? 'Collapse' : hasMasterTextMetaContent ? 'Edit' : 'Open'}
+                                        </button>
+                                        {showMasterMetaEditor && (
+                                            <button
+                                                onClick={handleSaveMasterTextMeta}
+                                                disabled={isMasterMetaSaving || isMasterMetaLoading || !masterTextMetaDirty}
+                                                className={`px-3 py-1 rounded text-sm font-bold ${isMasterMetaSaving || isMasterMetaLoading || !masterTextMetaDirty ? 'bg-gray-200 text-gray-500' : 'bg-green-600 text-white hover:bg-green-700'}`}
+                                            >
+                                                {isMasterMetaSaving ? 'Saving...' : masterTextMetaDirty ? 'Save*' : 'Saved'}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {showMasterMetaEditor && (
+                                    <div className="px-3 pb-3 pt-0 space-y-3 border-t border-amber-200">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3">
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Title</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full border rounded p-2 text-sm bg-white"
+                                                    value={masterTextMeta.title}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, title: e.target.value }))}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Sub title</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full border rounded p-2 text-sm bg-white"
+                                                    value={masterTextMeta.subtitle}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, subtitle: e.target.value }))}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Key Bible Verse</label>
+                                                <input
+                                                    type="text"
+                                                    className="w-full border rounded p-2 text-sm bg-white"
+                                                    value={masterTextMeta.key_bible_verse}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, key_bible_verse: e.target.value }))}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">Summary</label>
+                                                <textarea
+                                                    className="w-full border rounded p-2 text-sm h-24 bg-white"
+                                                    value={masterTextMeta.summary}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, summary: e.target.value }))}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">关键释经观点</label>
+                                                <textarea
+                                                    className="w-full border rounded p-3 text-sm h-32 bg-white font-mono leading-6"
+                                                    placeholder="- point 1&#10;- point 2"
+                                                    value={masterTextMeta.key_exegetical_points}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, key_exegetical_points: e.target.value }))}
+                                                    onBlur={(e) => setMasterTextMeta(prev => ({ ...prev, key_exegetical_points: normalizeBulletMarkdown(e.target.value) }))}
+                                                />
+                                                <div className="mt-1 text-[11px] text-gray-500">Markdown bullet list, one item per line.</div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 mb-1">关键神学观点</label>
+                                                <textarea
+                                                    className="w-full border rounded p-3 text-sm h-32 bg-white font-mono leading-6"
+                                                    placeholder="- point 1&#10;- point 2"
+                                                    value={masterTextMeta.key_theological_points}
+                                                    onChange={(e) => setMasterTextMeta(prev => ({ ...prev, key_theological_points: e.target.value }))}
+                                                    onBlur={(e) => setMasterTextMeta(prev => ({ ...prev, key_theological_points: normalizeBulletMarkdown(e.target.value) }))}
+                                                />
+                                                <div className="mt-1 text-[11px] text-gray-500">Markdown bullet list, one item per line.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {(viewMode === 'final' || viewMode === 'draft') && chunks.length > 0 && (
                             <div className="mb-2 w-full flex items-center bg-indigo-50 p-2 rounded border border-indigo-100">
                                 <label className="text-sm font-bold text-indigo-900 mr-2 whitespace-nowrap">Review Chunk:</label>
@@ -961,6 +1270,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 selectedChunkId={activeChunkId}
                                 selectedChunkText={markdown}
                                 onHighlightText={handleHighlightText}
+                                onAuditComplete={handleAuditComplete}
+                                onForcePassSuccess={handleAuditComplete}
                                 mode="fidelity"
                             />
                         ) : viewMode === 'final' ? (
@@ -969,6 +1280,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 selectedChunkId={activeChunkId}
                                 selectedChunkText={markdown}
                                 onHighlightText={handleHighlightText}
+                                onAuditComplete={handleAuditComplete}
                                 mode="theological"
                             />
                         ) : null}

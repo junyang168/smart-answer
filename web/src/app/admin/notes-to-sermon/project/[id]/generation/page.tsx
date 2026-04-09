@@ -12,6 +12,7 @@ interface AgentLog {
 }
 
 interface ProjectStatus {
+    processing?: boolean;
     is_processing: boolean;
     processing_status?: string;
     processing_progress?: number;
@@ -22,6 +23,24 @@ const AGENTS = [
     { role: "segmenter", label: "教學單元切割", icon: Scissors, color: "bg-purple-100 text-purple-700" },
     { role: "expander", label: "逐字稿撰寫", icon: PenTool, color: "bg-blue-100 text-blue-700" },
 ];
+
+function renderManuscriptSections(unit: any): string {
+    const sections = unit?.manuscript_sections || {};
+    const sectionMap: Array<[string, string]> = [
+        ["exegesis", "釋經"],
+        ["theological_significance", "神學意義"],
+        ["application", "生活應用"],
+        ["appendix", "附錄"],
+    ];
+    const blocks = sectionMap
+        .map(([key, label]) => {
+            const value = sections?.[key];
+            if (typeof value !== "string" || !value.trim()) return null;
+            return `### ${label}\n\n${value.trim()}`;
+        })
+        .filter(Boolean);
+    return blocks.join("\n\n");
+}
 
 export default function GenerationPage({ params }: { params: { id: string } }) {
     const router = useRouter();
@@ -87,17 +106,25 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                 const units = agentState.units;
                 if (Array.isArray(units) && units.length > 0) {
                     return units.map((u: any, i: number) => {
-                        const title = u.title || `教學單元 ${i + 1}`;
-                        const keypoints = u.keypoints ? `\n>\n> **Keypoints：**\n> ${u.keypoints.replace(/\n/g, "\n> ")}` : "";
-                        const unitType = u.type ? ` (${u.type})` : "";
-                        const content = (u.content || u).toString().replace(/\n/g, "\n> ");
-                        return `> [!NOTE]\n> **${i + 1}. ${title}**${unitType}${keypoints}\n>\n> ${content}`;
+                        const chapterTitle = u.chapter_title || "未標明章標題";
+                        const sectionTitle = u.section_title || "未標明節標題";
+                        const unitTitle = u.unit_title || `教學單元 ${i + 1}`;
+                        const scriptureRange = u.scripture_range || "未標明";
+                        const lineRange = `${u.start_line ?? "?"}-${u.end_line ?? "?"}`;
+                        const splitReason = u.split_reason || "未提供切割理由";
+                        return `> [!NOTE]\n> **${u.unit_id || `u${String(i + 1).padStart(3, "0")}`} ${unitTitle}**\n>\n> **章標題：** ${chapterTitle}\n>\n> **節標題：** ${sectionTitle}\n>\n> **經文範圍：** ${scriptureRange}\n>\n> **來源行號：** ${lineRange}\n>\n> **切割理由：** ${splitReason}`;
                     }).join("\n\n");
                 }
                 return "等待切割中...";
             case "expander":
+                if (agentState.full_manuscript?.trim()) return agentState.full_manuscript;
+                if (agentState.generated_units?.length > 0) {
+                    return agentState.generated_units.map((unit: any) => {
+                        return `## ${unit.unit_title || unit.unit_id}\n\n${renderManuscriptSections(unit)}`;
+                    }).join("\n\n");
+                }
                 if (agentState.draft_chunks?.length > 0) return agentState.draft_chunks.join("\n\n");
-                return agentState.full_manuscript || "等待擴展中...";
+                return "等待擴展中...";
             default: return "No specific output for this agent.";
         }
     };
@@ -124,7 +151,11 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         const hasData = (
                             agentState && (
                                 (agent.role === "segmenter" && agentState.units) ||
-                                (agent.role === "expander" && agentState.draft_chunks?.length > 0)
+                                (agent.role === "expander" && (
+                                    Boolean(agentState.full_manuscript?.trim()) ||
+                                    (agentState.generated_units?.length ?? 0) > 0 ||
+                                    (agentState.draft_chunks?.length ?? 0) > 0
+                                ))
                             )
                         );
 
@@ -172,7 +203,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         Live Agent Thoughts
                     </h2>
                     <div className="flex items-center gap-2">
-                        {!status?.is_processing && logs.length > 0 && (
+                        {!((status?.is_processing ?? false) || (status?.processing ?? false)) && logs.length > 0 && (
                             <button
                                 onClick={async () => {
                                     if (!confirm("Are you sure you want to RESTART? This will wipe all current progress.")) return;
@@ -234,7 +265,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         })
                     )}
 
-                    {status?.is_processing && logs.length > 0 && (
+                    {((status?.is_processing ?? false) || (status?.processing ?? false)) && logs.length > 0 && (
                         <div className="flex justify-center py-4">
                             <span className="animate-pulse text-gray-400">...</span>
                         </div>
