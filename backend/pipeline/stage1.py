@@ -867,18 +867,69 @@ class Stage1Pipeline:
             json_schema=self.MANUSCRIPT_GENERATION_SCHEMA,
             temperature=0.2,
         )
-        manuscript_sections = self._normalize_manuscript_sections(
-            generated_payload.get("manuscript_sections", {})
-        )
-        coverage_checks = self._normalize_coverage_checks(
-            generated_payload.get("coverage_checks", []),
-            points=points,
-        )
+        manuscript_sections = self._normalize_manuscript_sections(generated_payload.get("manuscript_sections", {}))
+        coverage_checks = self._normalize_coverage_checks(generated_payload.get("coverage_checks", []), points=points)
         coverage_summary = self._normalize_coverage_summary(
             generated_payload.get("coverage_summary", {}),
             points=points,
             coverage_checks=coverage_checks,
         )
+
+        original_outline_score = self._outline_style_score(manuscript_sections)
+        if self._manuscript_needs_prose_refinement(manuscript_sections):
+            self._log(
+                "expander",
+                f"逐字稿偏向提綱式表達，嘗試 prose 化重寫 {unit.unit_id}。",
+                unit_id=unit.unit_id,
+            )
+            retry_user_prompt = (
+                user_prompt
+                + "\n\n【重要修正要求】\n"
+                + "上一版逐字稿仍偏向課堂提綱／筆記式表達。\n"
+                + "請保留必要的小標題，但正文必須改寫為連續的分析性段落。\n"
+                + "除非來源本身明確要求，禁止使用 `1. 2. 3.`、`第一/第二/第三`、`一、二、三、` 或 bullet points 作為正文主體展開方式。\n"
+                + "每個小標題下方至少應有完整散文段落來承載論證，而不是用條列替代逐字稿。\n"
+            )
+            try:
+                retry_payload = self.llm.generate_json(
+                    system_prompt=self.generator_prompt,
+                    user_prompt=retry_user_prompt,
+                    json_schema=self.MANUSCRIPT_GENERATION_SCHEMA,
+                    temperature=0.2,
+                )
+                retry_sections = self._normalize_manuscript_sections(retry_payload.get("manuscript_sections", {}))
+                retry_coverage_checks = self._normalize_coverage_checks(
+                    retry_payload.get("coverage_checks", []),
+                    points=points,
+                )
+                retry_coverage_summary = self._normalize_coverage_summary(
+                    retry_payload.get("coverage_summary", {}),
+                    points=points,
+                    coverage_checks=retry_coverage_checks,
+                )
+                retry_outline_score = self._outline_style_score(retry_sections)
+                if retry_outline_score < original_outline_score:
+                    manuscript_sections = retry_sections
+                    coverage_checks = retry_coverage_checks
+                    coverage_summary = retry_coverage_summary
+                    self._log(
+                        "expander",
+                        f"採用 prose 化重寫版本 {unit.unit_id}（score {original_outline_score} -> {retry_outline_score}）。",
+                        unit_id=unit.unit_id,
+                    )
+                else:
+                    self._log(
+                        "expander",
+                        f"保留原版本 {unit.unit_id}（prose 化未改善 score {original_outline_score} -> {retry_outline_score}）。",
+                        unit_id=unit.unit_id,
+                    )
+            except Exception as retry_exc:
+                self._log(
+                    "expander",
+                    f"prose 化重寫失敗，保留原版本 {unit.unit_id}：{retry_exc}",
+                    unit_id=unit.unit_id,
+                )
+
         generated_markdown = self._render_generated_unit_markdown(
             points=points,
             manuscript_sections=manuscript_sections,
@@ -1129,6 +1180,37 @@ class Stage1Pipeline:
             return None
         normalized_text = self._sanitize_section_headings(text, expected_label)
         return normalized_text or None
+
+    def _outline_style_score(self, manuscript_sections: Dict[str, Optional[str]]) -> int:
+        score = 0
+        numbered_heading_re = re.compile(r"^#{3,6}\s*[一二三四五六七八九十]+\s*[、.．)]", re.MULTILINE)
+        numbered_list_re = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)
+        chinese_sequence_re = re.compile(r"(第[一二三四五六七八九十]+|[一二三四五六七八九十]+、)")
+        bullet_re = re.compile(r"^\s*[-*•]\s+", re.MULTILINE)
+        for section_text in manuscript_sections.values():
+            if not section_text:
+                continue
+            score += len(numbered_heading_re.findall(section_text)) * 3
+            score += len(numbered_list_re.findall(section_text)) * 3
+            score += len(bullet_re.findall(section_text)) * 2
+            score += len(chinese_sequence_re.findall(section_text))
+        return score
+
+    def _manuscript_needs_prose_refinement(
+        self,
+        manuscript_sections: Dict[str, Optional[str]],
+    ) -> bool:
+        for section_text in manuscript_sections.values():
+            if not section_text:
+                continue
+            numbered_heading_count = len(
+                re.findall(r"^#{3,6}\s*[一二三四五六七八九十]+\s*[、.．)]", section_text, re.MULTILINE)
+            )
+            numbered_list_count = len(re.findall(r"^\s*\d+\.\s+", section_text, re.MULTILINE))
+            bullet_count = len(re.findall(r"^\s*[-*•]\s+", section_text, re.MULTILINE))
+            if numbered_heading_count >= 3 or numbered_list_count >= 2 or bullet_count >= 4:
+                return True
+        return False
 
     def _render_manuscript_only_markdown(
         self,
