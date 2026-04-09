@@ -27,6 +27,8 @@ from backend.api.sermon_converter_service import (
     get_sermon_master_text_metadata,
     save_sermon_master_text_metadata,
     generate_sermon_master_text_metadata,
+    get_stage1_pipeline_status,
+    start_stage1_pipeline_job,
     NoteImage,
     Segment,
     NoteImage,
@@ -150,6 +152,10 @@ class GenerateDraftRequest(BaseModel):
     use_mas: bool = True # Default to Multi-Agent System
     restart: bool = False # Force restart
 
+
+class Stage1ActionRequest(BaseModel):
+    force: bool = False
+
 @router.post("/sermon-project/{project_id}/generate-draft")
 def trigger_draft_generation(project_id: str, background_tasks: BackgroundTasks, payload: Optional[GenerateDraftRequest] = None):
     """
@@ -176,6 +182,83 @@ def trigger_draft_generation(project_id: str, background_tasks: BackgroundTasks,
     except Exception as e:
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sermon-project/{project_id}/stage1/status")
+def get_stage1_status_endpoint(project_id: str):
+    try:
+        return get_stage1_pipeline_status(project_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/stage1/split")
+def start_stage1_split_endpoint(project_id: str, payload: Optional[Stage1ActionRequest] = None):
+    payload = payload or Stage1ActionRequest()
+    try:
+        return {
+            "status": "success",
+            "job": start_stage1_pipeline_job(
+                project_id=project_id,
+                mode="split",
+                force=payload.force,
+            ),
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/stage1/generate-all")
+def start_stage1_generate_all_endpoint(project_id: str, payload: Optional[Stage1ActionRequest] = None):
+    payload = payload or Stage1ActionRequest()
+    try:
+        return {
+            "status": "success",
+            "job": start_stage1_pipeline_job(
+                project_id=project_id,
+                mode="generate_all",
+                force=payload.force,
+            ),
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/stage1/unit/{unit_id}/generate")
+def start_stage1_generate_unit_endpoint(project_id: str, unit_id: str, payload: Optional[Stage1ActionRequest] = None):
+    payload = payload or Stage1ActionRequest()
+    try:
+        return {
+            "status": "success",
+            "job": start_stage1_pipeline_job(
+                project_id=project_id,
+                mode="generate_unit",
+                unit_id=unit_id,
+                force=payload.force,
+            ),
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sermon-project/{project_id}/draft")

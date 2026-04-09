@@ -489,13 +489,17 @@ class Stage1Pipeline:
         output_dir: Path,
         force: bool = False,
         split_only: bool = False,
+        selected_unit_ids: Optional[List[str]] = None,
     ) -> RunSummary:
         input_path = input_path.resolve()
         output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if force:
-            self._clear_previous_outputs(output_dir)
+            if selected_unit_ids:
+                self._clear_selected_unit_outputs(output_dir, selected_unit_ids)
+            else:
+                self._clear_previous_outputs(output_dir)
 
         source_doc = SourceDocument.from_path(input_path)
         manifest_path = output_dir / "stage1_manifest.json"
@@ -526,22 +530,41 @@ class Stage1Pipeline:
             manifest_path=manifest_path,
         )
         summary.units = units
+        self._refresh_manifest_unit_statuses(
+            manifest=manifest,
+            manifest_path=manifest_path,
+            units=units,
+            generated_dir=generated_dir,
+            source_hash=source_doc.sha256,
+        )
 
         if split_only:
             manifest["status"] = "split_only_completed"
             manifest["completed_at"] = _utcnow()
-            manifest["successful_unit_count"] = 0
-            manifest["failed_unit_count"] = 0
+            available_units = self._load_available_generated_units(
+                generated_dir=generated_dir,
+                units=units,
+                source_hash=source_doc.sha256,
+            )
+            failed_units = self._collect_failed_units_from_manifest(manifest)
+            manifest["successful_unit_count"] = len(available_units)
+            manifest["failed_unit_count"] = len(failed_units)
+            manifest["failed_units"] = failed_units
             self._save_manifest(manifest_path, manifest)
             self._progress("單元切割完成", 100)
             self._log("system", f"Stage 1A 完成，共 {len(units)} 個單元。")
             return summary
 
-        total_units = len(units)
+        selected_ids = set(selected_unit_ids or [])
+        units_to_process = [unit for unit in units if not selected_ids or unit.unit_id in selected_ids]
+        if not units_to_process:
+            raise ValueError("No matching units selected for generation")
+
+        total_units = len(units_to_process)
         completed_units: List[GeneratedUnit] = []
         failed_units: List[Dict[str, str]] = []
 
-        for index, unit in enumerate(units, start=1):
+        for index, unit in enumerate(units_to_process, start=1):
             progress = 10 if total_units == 0 else 10 + int((index - 1) / total_units * 85)
             self._progress("逐單元生成", progress)
             artifact_path = generated_dir / f"{unit.unit_id}.json"
@@ -572,6 +595,13 @@ class Stage1Pipeline:
                 f"開始生成 {unit.unit_id}：{unit.unit_title}",
                 unit_id=unit.unit_id,
                 scripture_range=unit.scripture_range,
+            )
+            self._mark_unit_status(
+                manifest=manifest,
+                manifest_path=manifest_path,
+                unit_id=unit.unit_id,
+                status="running",
+                artifact=str(artifact_path),
             )
             try:
                 points = self._load_points_artifact(
@@ -653,23 +683,27 @@ class Stage1Pipeline:
                     unit_id=unit.unit_id,
                 )
 
-        ordered_completed_units = sorted(
-            completed_units,
-            key=lambda item: next(
-                index for index, unit in enumerate(units) if unit.unit_id == item.unit_id
-            ),
+        ordered_completed_units = self._load_available_generated_units(
+            generated_dir=generated_dir,
+            units=units,
+            source_hash=source_doc.sha256,
         )
         combined_markdown = self._combine_units(ordered_completed_units)
 
         draft_path = output_dir / "draft_v1.md"
         draft_path.write_text(combined_markdown, encoding="utf-8")
 
-        manifest["status"] = "completed_with_failures" if failed_units else "completed"
+        manifest_failed_units = self._collect_failed_units_from_manifest(manifest)
+        has_all_units = len(ordered_completed_units) == len(units)
+        if manifest_failed_units:
+            manifest["status"] = "completed_with_failures" if has_all_units else "partial_completed_with_failures"
+        else:
+            manifest["status"] = "completed" if has_all_units else "partial_completed"
         manifest["completed_at"] = _utcnow()
         manifest["draft_path"] = str(draft_path)
         manifest["successful_unit_count"] = len(ordered_completed_units)
-        manifest["failed_unit_count"] = len(failed_units)
-        manifest["failed_units"] = failed_units
+        manifest["failed_unit_count"] = len(manifest_failed_units)
+        manifest["failed_units"] = manifest_failed_units
         self._save_manifest(manifest_path, manifest)
 
         self._progress("Stage 1 完成", 100)
@@ -679,7 +713,7 @@ class Stage1Pipeline:
         )
 
         summary.generated_units = ordered_completed_units
-        summary.failed_units = failed_units
+        summary.failed_units = manifest_failed_units
         summary.combined_markdown = combined_markdown
         return summary
 
@@ -698,6 +732,8 @@ class Stage1Pipeline:
 
         self._progress("教學單元切割", 5)
         self._log("segmenter", "開始執行 Stage 1A 單元切割。")
+        manifest["split_status"] = "running"
+        self._save_manifest(manifest_path, manifest)
         try:
             units = self._split_units(source_doc)
             self._save_units(units_path, units)
@@ -1370,6 +1406,74 @@ class Stage1Pipeline:
             manifest["units"][unit_id]["error"] = error
         self._save_manifest(manifest_path, manifest)
 
+    def _refresh_manifest_unit_statuses(
+        self,
+        manifest: Dict[str, Any],
+        manifest_path: Path,
+        units: List[UnitBoundary],
+        generated_dir: Path,
+        source_hash: str,
+    ) -> None:
+        manifest.setdefault("units", {})
+        for unit in units:
+            artifact_path = generated_dir / f"{unit.unit_id}.json"
+            existing_unit = self._load_generated_unit(
+                artifact_path=artifact_path,
+                expected_source_hash=source_hash,
+                expected_model=self.model,
+            )
+            current_entry = manifest["units"].get(unit.unit_id, {})
+            if existing_unit:
+                status = "completed"
+                error = None
+            elif current_entry.get("status") == "failed":
+                status = "failed"
+                error = current_entry.get("error")
+            else:
+                status = "pending"
+                error = None
+            manifest["units"][unit.unit_id] = {
+                "status": status,
+                "artifact": str(artifact_path),
+                "updated_at": current_entry.get("updated_at") or _utcnow(),
+            }
+            if error:
+                manifest["units"][unit.unit_id]["error"] = error
+        self._save_manifest(manifest_path, manifest)
+
+    def _load_available_generated_units(
+        self,
+        generated_dir: Path,
+        units: List[UnitBoundary],
+        source_hash: str,
+    ) -> List[GeneratedUnit]:
+        available_units: List[GeneratedUnit] = []
+        for unit in units:
+            artifact_path = generated_dir / f"{unit.unit_id}.json"
+            existing_unit = self._load_generated_unit(
+                artifact_path=artifact_path,
+                expected_source_hash=source_hash,
+                expected_model=self.model,
+            )
+            if existing_unit:
+                available_units.append(existing_unit)
+        return available_units
+
+    def _collect_failed_units_from_manifest(self, manifest: Dict[str, Any]) -> List[Dict[str, str]]:
+        failures: List[Dict[str, str]] = []
+        for unit_id, payload in (manifest.get("units") or {}).items():
+            if isinstance(payload, dict) and payload.get("status") == "failed":
+                failures.append({"unit_id": unit_id, "error": str(payload.get("error") or "Unknown error")})
+        return failures
+
+    def _clear_selected_unit_outputs(self, output_dir: Path, selected_unit_ids: List[str]) -> None:
+        generated_dir = output_dir / "generated_units"
+        for unit_id in selected_unit_ids:
+            for suffix in (".json", ".points.json"):
+                artifact_path = generated_dir / f"{unit_id}{suffix}"
+                if artifact_path.exists():
+                    artifact_path.unlink()
+
     def _clear_previous_outputs(self, output_dir: Path) -> None:
         generated_dir = output_dir / "generated_units"
         if generated_dir.exists():
@@ -1396,6 +1500,7 @@ def run_stage1_pipeline(
     max_retries: int = 3,
     force: bool = False,
     split_only: bool = False,
+    selected_unit_ids: Optional[List[str]] = None,
     log_path: Optional[Path] = None,
     log_callback: Optional[LogCallback] = None,
     progress_callback: Optional[ProgressCallback] = None,
@@ -1408,4 +1513,10 @@ def run_stage1_pipeline(
         logger=logger,
         progress_callback=progress_callback,
     )
-    return pipeline.run(input_path=input_path, output_dir=output_dir, force=force, split_only=split_only)
+    return pipeline.run(
+        input_path=input_path,
+        output_dir=output_dir,
+        force=force,
+        split_only=split_only,
+        selected_unit_ids=selected_unit_ids,
+    )

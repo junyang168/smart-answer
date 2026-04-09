@@ -1,307 +1,462 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CheckCircle, Circle, Scissors, PenTool, MessageSquare, RefreshCcw } from "lucide-react";
-import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdown";
+import {
+    AlertCircle,
+    ArrowLeft,
+    CheckCircle2,
+    FileText,
+    Loader2,
+    PenTool,
+    Play,
+    RefreshCcw,
+    Scissors,
+} from "lucide-react";
 
-interface AgentLog {
+type Stage1Log = {
     timestamp: string;
     role: string;
     message: string;
+    unit_id?: string;
+};
+
+type Stage1Unit = {
+    unit_id: string;
+    chapter_title: string;
+    section_title: string;
+    unit_title: string;
+    scripture_range: string;
+    start_line: number;
+    end_line: number;
+    split_reason: string;
+    status: "pending" | "running" | "completed" | "failed" | string;
+    has_points: boolean;
+    has_generated: boolean;
+    error?: string | null;
+    display_index: number;
+};
+
+type Stage1Status = {
+    job: {
+        running: boolean;
+        status?: string;
+        mode?: string;
+        unit_id?: string | null;
+        force?: boolean;
+        started_at?: string;
+        completed_at?: string;
+        failed_at?: string;
+        error?: string;
+    };
+    project: {
+        processing: boolean;
+        processing_status?: string;
+        processing_progress?: number;
+        processing_error?: string;
+        title?: string;
+    };
+    manifest: {
+        status?: string;
+        split_status?: string;
+        failed_units?: Array<{ unit_id: string; error: string }>;
+    };
+    summary: {
+        total_units: number;
+        completed_units: number;
+        running_units: number;
+        failed_units: number;
+        pending_units: number;
+        split_completed: boolean;
+        draft_ready: boolean;
+        current_unit_id?: string | null;
+    };
+    units: Stage1Unit[];
+    logs: Stage1Log[];
+};
+
+const DEFAULT_STATUS: Stage1Status = {
+    job: { running: false },
+    project: { processing: false },
+    manifest: {},
+    summary: {
+        total_units: 0,
+        completed_units: 0,
+        running_units: 0,
+        failed_units: 0,
+        pending_units: 0,
+        split_completed: false,
+        draft_ready: false,
+        current_unit_id: null,
+    },
+    units: [],
+    logs: [],
+};
+
+function statusBadge(status: string) {
+    switch (status) {
+        case "completed":
+            return "bg-green-100 text-green-700 border-green-200";
+        case "running":
+            return "bg-blue-100 text-blue-700 border-blue-200";
+        case "failed":
+            return "bg-red-100 text-red-700 border-red-200";
+        default:
+            return "bg-gray-100 text-gray-600 border-gray-200";
+    }
 }
 
-interface ProjectStatus {
-    processing?: boolean;
-    is_processing: boolean;
-    processing_status?: string;
-    processing_progress?: number;
-    processing_error?: string;
-}
-
-const AGENTS = [
-    { role: "segmenter", label: "教學單元切割", icon: Scissors, color: "bg-purple-100 text-purple-700" },
-    { role: "expander", label: "逐字稿撰寫", icon: PenTool, color: "bg-blue-100 text-blue-700" },
-];
-
-function renderManuscriptSections(unit: any): string {
-    const sections = unit?.manuscript_sections || {};
-    const sectionMap: Array<[string, string]> = [
-        ["exegesis", "釋經"],
-        ["theological_significance", "神學意義"],
-        ["application", "生活應用"],
-        ["appendix", "附錄"],
-    ];
-    const blocks = sectionMap
-        .map(([key, label]) => {
-            const value = sections?.[key];
-            if (typeof value !== "string" || !value.trim()) return null;
-            return `### ${label}\n\n${value.trim()}`;
-        })
-        .filter(Boolean);
-    return blocks.join("\n\n");
+function modeLabel(mode?: string, unitId?: string | null) {
+    switch (mode) {
+        case "split":
+            return "教學單元切割";
+        case "generate_all":
+            return "全部單元生成";
+        case "generate_unit":
+            return unitId ? `單元生成 ${unitId}` : "單元生成";
+        default:
+            return "Stage 1";
+    }
 }
 
 export default function GenerationPage({ params }: { params: { id: string } }) {
     const router = useRouter();
-    const [logs, setLogs] = useState<AgentLog[]>([]);
-    const [status, setStatus] = useState<ProjectStatus | null>(null);
-    const logContainerRef = useRef<HTMLDivElement>(null);
-    const [mounted, setMounted] = useState(false);
+    const [state, setState] = useState<Stage1Status>(DEFAULT_STATUS);
+    const [loading, setLoading] = useState(true);
+    const [requesting, setRequesting] = useState<string | null>(null);
 
-    const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-    const [agentState, setAgentState] = useState<any>(null);
+    const fetchStatus = async () => {
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/status`, {
+                headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+            });
+            if (!res.ok) {
+                throw new Error("Failed to load Stage 1 status");
+            }
+            const data = await res.json();
+            setState({
+                ...DEFAULT_STATUS,
+                ...data,
+                job: { ...DEFAULT_STATUS.job, ...(data.job || {}) },
+                project: { ...DEFAULT_STATUS.project, ...(data.project || {}) },
+                manifest: { ...DEFAULT_STATUS.manifest, ...(data.manifest || {}) },
+                summary: { ...DEFAULT_STATUS.summary, ...(data.summary || {}) },
+                units: Array.isArray(data.units) ? data.units : [],
+                logs: Array.isArray(data.logs) ? data.logs : [],
+            });
+        } catch (error) {
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        setMounted(true);
-        const interval = setInterval(fetchData, 2000);
-        fetchData();
+        fetchStatus();
+        const interval = setInterval(fetchStatus, 2000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [params.id]);
 
-    useEffect(() => {
-        if (logContainerRef.current) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    const launchJob = async (path: string, options?: { force?: boolean; confirmMessage?: string }) => {
+        if (options?.confirmMessage && !window.confirm(options.confirmMessage)) {
+            return;
         }
-    }, [logs]);
-
-    const fetchData = async () => {
+        setRequesting(path);
         try {
-            const [logsRes, projectRes, stateRes] = await Promise.all([
-                fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}/agent-logs`),
-                fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}`),
-                fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}/agent-state`)
-            ]);
-
-            if (logsRes.ok) {
-                const logsData = await logsRes.json();
-                setLogs(logsData);
+            const res = await fetch(path, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ force: options?.force ?? false }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(data.detail || "Failed to start Stage 1 job");
             }
-            if (projectRes.ok) {
-                const projectData = await projectRes.json();
-                setStatus(projectData);
-            }
-            if (stateRes.ok) {
-                const stateData = await stateRes.json();
-                setAgentState(stateData);
-            } else if (stateRes.status === 404) {
-                setAgentState(null); // Clear state if file deleted
-            }
-        } catch (e) {
-            console.error(e);
+            await fetchStatus();
+        } catch (error: any) {
+            alert(error.message || "Failed to start Stage 1 job");
+        } finally {
+            setRequesting(null);
         }
     };
 
-    if (!mounted) return null;
-
-    // Determine current active agent based on last log?
-    const lastLog = logs.length > 0 ? logs[logs.length - 1] : null;
-    const activeRole = lastLog ? lastLog.role : null;
-
-    const getAgentContent = (role: string) => {
-        if (!agentState) return "No data available yet.";
-        switch (role) {
-            case "segmenter":
-                const units = agentState.units;
-                if (Array.isArray(units) && units.length > 0) {
-                    return units.map((u: any, i: number) => {
-                        const chapterTitle = u.chapter_title || "未標明章標題";
-                        const sectionTitle = u.section_title || "未標明節標題";
-                        const unitTitle = u.unit_title || `教學單元 ${i + 1}`;
-                        const scriptureRange = u.scripture_range || "未標明";
-                        const lineRange = `${u.start_line ?? "?"}-${u.end_line ?? "?"}`;
-                        const splitReason = u.split_reason || "未提供切割理由";
-                        return `> [!NOTE]\n> **${u.unit_id || `u${String(i + 1).padStart(3, "0")}`} ${unitTitle}**\n>\n> **章標題：** ${chapterTitle}\n>\n> **節標題：** ${sectionTitle}\n>\n> **經文範圍：** ${scriptureRange}\n>\n> **來源行號：** ${lineRange}\n>\n> **切割理由：** ${splitReason}`;
-                    }).join("\n\n");
-                }
-                return "等待切割中...";
-            case "expander":
-                if (agentState.full_manuscript?.trim()) return agentState.full_manuscript;
-                if (agentState.generated_units?.length > 0) {
-                    return agentState.generated_units.map((unit: any) => {
-                        return `## ${unit.unit_title || unit.unit_id}\n\n${renderManuscriptSections(unit)}`;
-                    }).join("\n\n");
-                }
-                if (agentState.draft_chunks?.length > 0) return agentState.draft_chunks.join("\n\n");
-                return "等待擴展中...";
-            default: return "No specific output for this agent.";
+    const overallProgress = useMemo(() => {
+        if (typeof state.project.processing_progress === "number") {
+            return state.project.processing_progress;
         }
-    };
+        if (!state.summary.total_units) {
+            return state.summary.split_completed ? 15 : 0;
+        }
+        const completed = state.summary.completed_units + state.summary.failed_units;
+        return Math.max(15, Math.min(100, Math.round((completed / state.summary.total_units) * 100)));
+    }, [state.project.processing_progress, state.summary]);
+
+    const running = state.job.running;
+    const splitReady = state.summary.split_completed;
+    const failedUnits = state.units.filter((unit) => unit.status === "failed");
 
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10">
-            <div className="w-full max-w-4xl px-4 mb-4 flex justify-between items-center">
-                <button onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)} className="flex items-center text-gray-600 hover:text-gray-900">
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Back to Project
-                </button>
-                <h1 className="text-xl font-bold">Multi-Agent Generation</h1>
-            </div>
+        <div className="min-h-screen bg-gray-50 py-10">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="space-y-2">
+                        <button
+                            onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)}
+                            className="flex items-center text-sm text-gray-500 hover:text-gray-800"
+                        >
+                            <ArrowLeft className="mr-2 h-4 w-4" />
+                            Back to Project
+                        </button>
+                        <div>
+                            <h1 className="text-2xl font-bold text-gray-900">Stage 1 Pipeline</h1>
+                            <p className="text-sm text-gray-500">
+                                {state.project.title || params.id}
+                            </p>
+                        </div>
+                    </div>
 
-            {/* Workflow Viz */}
-            <div className="w-full max-w-4xl bg-white rounded-xl shadow-sm border p-6 mb-6">
-                <div className="flex justify-between items-center relative">
-                    {/* Connecting Line */}
-                    <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-100 -z-0" />
+                    <div className="flex flex-wrap items-center gap-3">
+                        <button
+                            onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/split`, {
+                                force: splitReady,
+                                confirmMessage: splitReady ? "Rerun unit splitting and refresh the Stage 1 split result?" : undefined,
+                            })}
+                            disabled={running || requesting !== null}
+                            className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                        >
+                            {requesting?.endsWith("/stage1/split") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Scissors className="mr-2 h-4 w-4" />}
+                            {splitReady ? "Rerun Split" : "Run Unit Split"}
+                        </button>
+                        <button
+                            onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/generate-all`, {
+                                force: splitReady,
+                                confirmMessage: splitReady ? "Generate manuscripts for all units now?" : "Run the full Stage 1 pipeline now?",
+                            })}
+                            disabled={running || requesting !== null}
+                            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                        >
+                            {requesting?.endsWith("/stage1/generate-all") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                            {splitReady ? "Generate All Units" : "Run Full Pipeline"}
+                        </button>
+                        <button
+                            onClick={fetchStatus}
+                            disabled={loading}
+                            className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                        >
+                            <RefreshCcw className="mr-2 h-4 w-4" />
+                            Refresh
+                        </button>
+                        <button
+                            onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)}
+                            disabled={!state.summary.draft_ready}
+                            className="inline-flex items-center rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                            <FileText className="mr-2 h-4 w-4" />
+                            Open Draft
+                        </button>
+                    </div>
+                </div>
 
-                    {AGENTS.map((agent) => {
-                        const Icon = agent.icon;
-                        const isActive = activeRole === agent.role || (status?.processing_status?.toLowerCase().includes(agent.role));
-                        const hasData = (
-                            agentState && (
-                                (agent.role === "segmenter" && agentState.units) ||
-                                (agent.role === "expander" && (
-                                    Boolean(agentState.full_manuscript?.trim()) ||
-                                    (agentState.generated_units?.length ?? 0) > 0 ||
-                                    (agentState.draft_chunks?.length ?? 0) > 0
-                                ))
-                            )
-                        );
-
-                        return (
-                            <div key={agent.role} className="z-10 flex flex-col items-center cursor-pointer group" onClick={() => setSelectedAgent(agent.role)}>
-                                <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all ${isActive ? agent.color + " border-current scale-110 shadow-lg" : hasData ? "bg-white border-green-500 text-green-600 shadow-md" : "bg-white border-gray-200 text-gray-300"}`}>
-                                    <Icon className="w-6 h-6" />
-                                </div>
-                                <span className={`text-xs mt-2 font-medium ${isActive ? "text-gray-900" : hasData ? "text-green-700" : "text-gray-400"} group-hover:text-blue-600`}>
-                                    {agent.label}
-                                </span>
-                                {hasData && <span className="text-[10px] text-green-600 mt-0.5">(View)</span>}
+                <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
+                    <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-900">Pipeline Status</h2>
+                                <p className="text-sm text-gray-500">
+                                    {running
+                                        ? `${modeLabel(state.job.mode, state.job.unit_id)} 正在執行`
+                                        : splitReady
+                                            ? "Split result is ready. You can generate individual units or run all."
+                                            : "Run unit splitting first, then inspect the split result."}
+                                </p>
                             </div>
-                        );
-                    })}
-                </div>
+                            <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${running ? "border-blue-200 bg-blue-50 text-blue-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>
+                                {running ? "Running" : (state.manifest.status || "Idle")}
+                            </span>
+                        </div>
 
-                {status?.processing_error && (
-                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex items-start">
-                        <div className="font-semibold mr-2">Error:</div>
-                        <div>{status.processing_error}</div>
-                    </div>
-                )}
+                        <div className="mt-6">
+                            <div className="mb-2 flex items-center justify-between text-sm">
+                                <span className="font-medium text-gray-700">
+                                    {state.project.processing_status || state.manifest.status || "Not started"}
+                                </span>
+                                <span className="text-gray-500">{overallProgress}%</span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                    className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                                    style={{ width: `${overallProgress}%` }}
+                                />
+                            </div>
+                        </div>
 
-                {/* Progress Bar */}
-                <div className="mt-8">
-                    <div className="flex justify-between text-sm mb-1">
-                        <span className="font-semibold text-gray-700">{status?.processing_status || "Initializing..."}</span>
-                        <span className="text-gray-500">{status?.processing_progress || 0}%</span>
-                    </div>
-                    <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                        <div
-                            className="bg-blue-600 h-full transition-all duration-500"
-                            style={{ width: `${status?.processing_progress || 0}%` }}
-                        />
-                    </div>
-                </div>
-            </div>
+                        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                            {[
+                                ["Total Units", state.summary.total_units],
+                                ["Completed", state.summary.completed_units],
+                                ["Running", state.summary.running_units],
+                                ["Pending", state.summary.pending_units],
+                                ["Failed", state.summary.failed_units],
+                            ].map(([label, value]) => (
+                                <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
+                                    <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
+                                </div>
+                            ))}
+                        </div>
 
-            {/* Live Logs */}
-            <div className="w-full max-w-4xl bg-white rounded-xl shadow-sm border flex-grow flex flex-col h-[500px]">
-                <div className="p-4 border-b bg-gray-50 flex justify-between items-center rounded-t-xl">
-                    <h2 className="font-semibold flex items-center text-gray-700">
-                        <MessageSquare className="w-4 h-4 mr-2" />
-                        Live Agent Thoughts
-                    </h2>
-                    <div className="flex items-center gap-2">
-                        {!((status?.is_processing ?? false) || (status?.processing ?? false)) && logs.length > 0 && (
-                            <button
-                                onClick={async () => {
-                                    if (!confirm("Are you sure you want to RESTART? This will wipe all current progress.")) return;
-                                    try {
-                                        await fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}/generate-draft`, {
-                                            method: "POST",
-                                            headers: { "Content-Type": "application/json" },
-                                            body: JSON.stringify({ use_mas: true, restart: true })
-                                        });
-                                        setLogs([]);
-                                        setAgentState(null); // Fix: Clear local state immediately to reset icons
-                                        setStatus({ is_processing: true, processing_status: "Restarting..." });
-                                    } catch (e) {
-                                        alert("Failed to restart: " + e);
-                                    }
-                                }}
-                                className="text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-lg text-sm transition-colors flex items-center mr-2"
-                                title="Restart Generation"
-                            >
-                                <RefreshCcw className="w-4 h-4 mr-1" />
-                                Restart
-                            </button>
+                        {state.project.processing_error && (
+                            <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                <div className="mb-1 flex items-center font-semibold">
+                                    <AlertCircle className="mr-2 h-4 w-4" />
+                                    Stage 1 Error
+                                </div>
+                                <div>{state.project.processing_error}</div>
+                            </div>
                         )}
-                        {status?.processing_progress === 100 && (
-                            <button
-                                onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)}
-                                className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm hover:bg-green-700 transition-colors flex items-center"
-                            >
-                                <CheckCircle className="w-4 h-4 mr-2" />
-                                View Draft
-                            </button>
+
+                        {failedUnits.length > 0 && (
+                            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                                <div className="mb-2 font-semibold">Failed Units</div>
+                                <div className="space-y-1">
+                                    {failedUnits.map((unit) => (
+                                        <div key={unit.unit_id}>
+                                            {unit.unit_id} {unit.unit_title}: {unit.error || "Unknown error"}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         )}
                     </div>
+
+                    <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                        <h2 className="text-lg font-semibold text-gray-900">Live Logs</h2>
+                        <div className="mt-4 h-[420px] space-y-3 overflow-y-auto rounded-xl border border-gray-100 bg-gray-50 p-4">
+                            {loading ? (
+                                <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                                    Loading Stage 1 logs...
+                                </div>
+                            ) : state.logs.length === 0 ? (
+                                <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                                    No Stage 1 logs yet.
+                                </div>
+                            ) : (
+                                state.logs.map((log, index) => (
+                                    <div key={`${log.timestamp}-${index}`} className="rounded-lg border border-gray-100 bg-white p-3 text-sm">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div className="font-medium text-gray-900">{log.message}</div>
+                                                <div className="mt-1 text-xs uppercase tracking-wide text-gray-400">{log.role}</div>
+                                            </div>
+                                            <div className="text-xs text-gray-400">
+                                                {new Date(log.timestamp).toLocaleTimeString([], {
+                                                    hour: "2-digit",
+                                                    minute: "2-digit",
+                                                    second: "2-digit",
+                                                    hour12: false,
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                <div ref={logContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-sm">
-                    {logs.length === 0 ? (
-                        <div className="text-gray-400 text-center mt-20 italic">
-                            Waiting for agents to start...
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+                    <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+                        <div>
+                            <h2 className="text-lg font-semibold text-gray-900">Teaching Units</h2>
+                            <p className="text-sm text-gray-500">
+                                Split first, inspect the boundaries, then generate manuscripts per unit or all at once.
+                            </p>
+                        </div>
+                        {state.summary.current_unit_id && (
+                            <div className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                Current: {state.summary.current_unit_id}
+                            </div>
+                        )}
+                    </div>
+
+                    {!splitReady ? (
+                        <div className="p-8 text-center text-sm text-gray-500">
+                            No split result yet. Run unit splitting to inspect the Stage 1 boundaries.
                         </div>
                     ) : (
-                        logs.map((log, i) => {
-                            const agent = AGENTS.find(a => a.role === log.role) || { label: log.role, color: "bg-gray-100" };
-                            return (
-                                <div key={i} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                    <div className="flex-shrink-0 w-24 text-right pt-1">
-                                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${agent.color}`}>
-                                            {agent.label}
-                                        </span>
-                                    </div>
-                                    <div className="flex-1 bg-white border-l-2 pl-3 border-gray-200 py-1 text-gray-800">
-                                        {log.message}
-                                    </div>
-                                    <div className="text-xs text-gray-400 pt-1 w-16">
-                                        {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                                    </div>
-                                </div>
-                            )
-                        })
-                    )}
-
-                    {((status?.is_processing ?? false) || (status?.processing ?? false)) && logs.length > 0 && (
-                        <div className="flex justify-center py-4">
-                            <span className="animate-pulse text-gray-400">...</span>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-gray-100 text-sm">
+                                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                                    <tr>
+                                        <th className="px-6 py-3">Unit</th>
+                                        <th className="px-6 py-3">Scripture</th>
+                                        <th className="px-6 py-3">Source Lines</th>
+                                        <th className="px-6 py-3">Split Reason</th>
+                                        <th className="px-6 py-3">Status</th>
+                                        <th className="px-6 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {state.units.map((unit) => {
+                                        const unitActionPath = `/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/unit/${unit.unit_id}/generate`;
+                                        const isUnitRequesting = requesting === unitActionPath;
+                                        const regenerate = unit.has_generated;
+                                        return (
+                                            <tr key={unit.unit_id} className="align-top">
+                                                <td className="px-6 py-4">
+                                                    <div className="font-semibold text-gray-900">
+                                                        {unit.display_index}. {unit.unit_title}
+                                                    </div>
+                                                    <div className="mt-1 text-xs text-gray-500">
+                                                        {unit.chapter_title || "未標明章標題"}
+                                                        {unit.section_title ? ` / ${unit.section_title}` : ""}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-700">{unit.scripture_range || "未標明"}</td>
+                                                <td className="px-6 py-4 text-gray-700">
+                                                    lines {unit.start_line}-{unit.end_line}
+                                                </td>
+                                                <td className="max-w-md px-6 py-4 text-gray-600">{unit.split_reason}</td>
+                                                <td className="px-6 py-4">
+                                                    <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadge(unit.status)}`}>
+                                                        {unit.status === "completed" && <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
+                                                        {unit.status === "running" && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                                                        {unit.status === "pending" && <PenTool className="mr-1.5 h-3.5 w-3.5" />}
+                                                        {unit.status === "failed" && <AlertCircle className="mr-1.5 h-3.5 w-3.5" />}
+                                                        {unit.status}
+                                                    </div>
+                                                    <div className="mt-2 text-xs text-gray-400">
+                                                        {unit.has_points ? "points ready" : "no points"} · {unit.has_generated ? "draft ready" : "no draft"}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <button
+                                                        onClick={() => launchJob(unitActionPath, {
+                                                            force: regenerate,
+                                                            confirmMessage: regenerate ? `Regenerate manuscript for ${unit.unit_id}?` : undefined,
+                                                        })}
+                                                        disabled={running || requesting !== null}
+                                                        className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                                                    >
+                                                        {isUnitRequesting ? (
+                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <PenTool className="mr-2 h-4 w-4" />
+                                                        )}
+                                                        {regenerate ? "Regenerate" : "Generate"}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
                     )}
                 </div>
             </div>
-
-            {/* Agent Output Modal */}
-            {selectedAgent && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedAgent(null)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                        <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-xl">
-                            <h3 className="text-lg font-bold flex items-center">
-                                {(() => {
-                                    const a = AGENTS.find(x => x.role === selectedAgent);
-                                    const Icon = a?.icon;
-                                    return (
-                                        <>
-                                            {Icon && <Icon className="w-5 h-5 mr-2" />}
-                                            {a?.label} - Artifacts
-                                        </>
-                                    )
-                                })()}
-                            </h3>
-                            <button onClick={() => setSelectedAgent(null)} className="text-gray-500 hover:text-gray-800">
-                                Close
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-6 bg-white">
-                            <div className="prose max-w-none text-gray-800">
-                                <ScriptureMarkdown markdown={getAgentContent(selectedAgent)} />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

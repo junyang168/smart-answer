@@ -60,6 +60,14 @@ Current implementation:
 - `backend/pipeline/stage1.py`
 - CLI entry: `backend/pipeline/sermon_generation.py`
 
+Current operator workflow:
+- click `Generate Draft`
+- enter the Stage 1 console
+- run split first if needed
+- inspect the unit boundaries
+- generate one unit or all units
+- monitor progress and logs from persisted backend state
+
 
 ### Step 2: Fidelity Audit
 
@@ -130,9 +138,18 @@ Review panels:
 - `TheologicalAuditPanel.tsx`
 
 Current UI behavior:
+- `Generate Draft` opens the Stage 1 console instead of silently launching a full run
+- Stage 1 console supports:
+  - split-only execution
+  - per-unit manuscript generation
+  - generate-all execution
+  - live polling of progress, unit states, and logs
 - draft and final are edited chunk-by-chunk
 - `FULL_DOC` can still be selected for whole-document viewing
 - Master Text metadata panel only appears in `Master Text` mode when `FULL_DOC` is selected
+
+Stage 1 console:
+- `web/src/app/admin/notes-to-sermon/project/[id]/generation/page.tsx`
 
 
 ### Backend
@@ -146,6 +163,9 @@ Core service:
 Stage 1 pipeline:
 - `backend/pipeline/stage1.py`
 
+Detached Stage 1 worker:
+- `backend/pipeline/stage1_worker.py`
+
 
 ## Current File Layout Per Project
 
@@ -156,6 +176,7 @@ Primary files:
 - `unified_source.md`
 - `original_notes.md`
 - `stage1_manifest.json`
+- `stage1_job.json`
 - `stage1_units.json`
 - `draft_v1.md`
 - `final.md`
@@ -180,6 +201,7 @@ Audit artifacts:
 
 Logs:
 - `stage1_logs.jsonl`
+- `stage1_worker.log`
 - `agent_logs.json`
 
 
@@ -231,6 +253,10 @@ Prompt:
 Per unit:
 - second call consumes extracted points plus source slices
 - outputs structured JSON, then markdown is derived from it
+- generation can run for:
+  - one selected unit
+  - all units in one pass
+- reruns reuse existing artifacts unless forced
 
 Prompt:
 - `backend/pipeline/prompts/unit_generator.md`
@@ -268,6 +294,29 @@ Rendered user-facing draft:
 Important:
 - provenance and line boundaries are still preserved in JSON metadata
 - they are hidden from the rendered manuscript body
+
+
+### 6. Stage 1 Job Model
+
+Stage 1 execution is now backend-detached.
+
+Behavior:
+- UI starts a backend worker process
+- the worker continues after the HTTP request returns
+- the browser can refresh and recover progress from persisted state
+- status is derived from:
+  - `stage1_manifest.json`
+  - `stage1_job.json`
+  - `stage1_logs.jsonl`
+
+Supported modes:
+- split only
+- generate one unit
+- generate all units
+
+Important:
+- the Stage 1 console does not depend on in-memory browser state
+- the pipeline is resumable because unit outputs are persisted per artifact file
 
 
 ## Chunk Lineage Design
@@ -342,6 +391,25 @@ Stored result:
 - `theological_audit.json`
 
 
+## Stage 1 Control Endpoints
+
+Status:
+- `GET /admin/notes-to-sermon/sermon-project/{project_id}/stage1/status`
+
+Actions:
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/stage1/split`
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/stage1/generate-all`
+- `POST /admin/notes-to-sermon/sermon-project/{project_id}/stage1/unit/{unit_id}/generate`
+
+Returned status payload includes:
+- current job mode
+- whether the detached worker is still running
+- manifest status
+- per-unit status
+- current progress
+- recent Stage 1 logs
+
+
 ## Master Text Metadata
 
 Stored in:
@@ -402,6 +470,8 @@ Implemented:
 - OCR page processing into `unified_source.md`
 - Stage 1 split / point extraction / manuscript generation
 - Claude-based Stage 1 pipeline
+- detached Stage 1 backend worker with persisted progress
+- Stage 1 console UI for split / per-unit / generate-all control
 - generated-unit-based draft chunking
 - fidelity audit with note-slice boundaries
 - lineage-preserving theological audit chunks

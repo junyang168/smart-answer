@@ -594,27 +594,19 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     // Removed auto-toggle preview logic for draft mode, defaulting to standard markdown editor
 
     const handleGenerate = async () => {
-        // 1. Ensure Source is saved
+        // Ensure source is saved before entering the Stage 1 console.
         if (viewMode === 'source' && markdown !== originalMarkdown) {
-            await handleSave('source');
+            const saved = await handleSave('source');
+            if (!saved) return;
         }
-
-        if (!confirm("Generate a new draft? This will overwrite any existing draft.")) return;
-
         setIsGenerating(true);
         try {
-            await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/generate-draft`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt_id: selectedPromptId })
-            });
-            // alert("Draft generation started! Switching to Draft view...");
-            // setViewMode('draft');
             router.push(`/admin/notes-to-sermon/project/${projectId}/generation`);
         } catch (e) {
-            alert("Failed to start generation");
+            alert("Failed to open Stage 1 pipeline");
+        } finally {
+            setIsGenerating(false);
         }
-        setIsGenerating(false);
     };
 
     const handleStartTheologicalReview = async () => {

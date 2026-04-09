@@ -4,6 +4,9 @@ import json
 import os
 import shutil
 import html
+import subprocess
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
@@ -567,6 +570,260 @@ def get_sermon_draft_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "draft_v1.md"
 
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def get_stage1_manifest_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "stage1_manifest.json"
+
+
+def get_stage1_units_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "stage1_units.json"
+
+
+def get_stage1_logs_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "stage1_logs.jsonl"
+
+
+def get_stage1_job_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "stage1_job.json"
+
+
+def _load_json_file(path: Path, default: Any) -> Any:
+    if not path.exists():
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _save_json_file(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+
+
+def _load_stage1_job_state(project_id: str) -> dict:
+    return _load_json_file(get_stage1_job_path(project_id), {})
+
+
+def _save_stage1_job_state(project_id: str, payload: dict) -> None:
+    _save_json_file(get_stage1_job_path(project_id), payload)
+
+
+def _is_pid_running(pid: Optional[int]) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        proc_state = result.stdout.strip()
+        if not proc_state or proc_state.startswith("Z"):
+            return False
+        return True
+    except Exception:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def _load_stage1_logs(project_id: str, limit: int = 200) -> list[dict]:
+    log_path = get_stage1_logs_path(project_id)
+    if not log_path.exists():
+        return []
+    entries: list[dict] = []
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return entries[-limit:]
+
+
+def _build_stage1_unit_statuses(project_id: str, manifest: dict, units_payload: list[dict]) -> list[dict]:
+    manifest_units = manifest.get("units") if isinstance(manifest, dict) else {}
+    if not isinstance(manifest_units, dict):
+        manifest_units = {}
+    generated_dir = NOTES_TO_SERMON_DIR / project_id / "generated_units"
+    result: list[dict] = []
+    for index, unit in enumerate(units_payload, start=1):
+        unit_id = unit.get("unit_id") or f"u{index:03d}"
+        generated_path = generated_dir / f"{unit_id}.json"
+        points_path = generated_dir / f"{unit_id}.points.json"
+        manifest_entry = manifest_units.get(unit_id) or {}
+        status = manifest_entry.get("status")
+        if not status:
+            status = "completed" if generated_path.exists() else "pending"
+        result.append(
+            {
+                **unit,
+                "display_index": index,
+                "status": status,
+                "has_points": points_path.exists(),
+                "has_generated": generated_path.exists(),
+                "error": manifest_entry.get("error"),
+                "artifact": manifest_entry.get("artifact") or str(generated_path),
+                "updated_at": manifest_entry.get("updated_at"),
+            }
+        )
+    return result
+
+
+def get_stage1_pipeline_status(project_id: str) -> dict:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    manifest = _load_json_file(get_stage1_manifest_path(project_id), {})
+    units_payload = _load_json_file(get_stage1_units_path(project_id), {}).get("units", [])
+    logs = _load_stage1_logs(project_id)
+    meta = _load_json_file(sermon_dir / "meta.json", {})
+    raw_job = _load_stage1_job_state(project_id)
+    job_running = _is_pid_running(raw_job.get("pid"))
+    job_status = raw_job.get("status")
+    if job_status in {"starting", "running"} and not job_running:
+        job_status = raw_job.get("final_status") or "stopped"
+
+    units = _build_stage1_unit_statuses(project_id, manifest, units_payload if isinstance(units_payload, list) else [])
+    counts = {
+        "total_units": len(units),
+        "completed_units": sum(1 for unit in units if unit.get("status") == "completed"),
+        "running_units": sum(1 for unit in units if unit.get("status") == "running"),
+        "failed_units": sum(1 for unit in units if unit.get("status") == "failed"),
+        "pending_units": sum(1 for unit in units if unit.get("status") not in {"completed", "running", "failed"}),
+    }
+    current_unit = next((unit for unit in units if unit.get("status") == "running"), None)
+    draft_path = get_sermon_draft_path(project_id)
+    return {
+        "job": {
+            **raw_job,
+            "running": job_running,
+            "status": job_status,
+        },
+        "project": {
+            "processing": bool(meta.get("processing")),
+            "processing_status": meta.get("processing_status"),
+            "processing_progress": meta.get("processing_progress"),
+            "processing_error": meta.get("processing_error"),
+            "title": meta.get("title") or project_id,
+        },
+        "manifest": manifest,
+        "summary": {
+            **counts,
+            "split_completed": bool(units),
+            "draft_ready": draft_path.exists(),
+            "current_unit_id": current_unit.get("unit_id") if current_unit else None,
+        },
+        "units": units,
+        "logs": logs,
+    }
+
+
+def start_stage1_pipeline_job(
+    project_id: str,
+    mode: str,
+    unit_id: Optional[str] = None,
+    force: bool = False,
+    model: str = "claude-sonnet-4-6",
+    timeout_seconds: float = 90.0,
+    max_retries: int = 3,
+) -> dict:
+    project_dir = NOTES_TO_SERMON_DIR / project_id
+    if not project_dir.exists():
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
+
+    input_path = project_dir / "unified_source.md"
+    if not input_path.exists():
+        raise FileNotFoundError(f"Unified source not found for {project_id}")
+
+    current_status = get_stage1_pipeline_status(project_id)
+    if current_status.get("job", {}).get("running"):
+        raise RuntimeError("Stage 1 pipeline is already running")
+
+    if mode == "generate_unit":
+        units_payload = _load_json_file(get_stage1_units_path(project_id), {}).get("units", [])
+        valid_unit_ids = {item.get("unit_id") for item in units_payload if isinstance(item, dict)}
+        if not unit_id or unit_id not in valid_unit_ids:
+            raise ValueError(f"Unknown Stage 1 unit: {unit_id}")
+
+    worker_log_path = project_dir / "stage1_worker.log"
+    worker_log_handle = open(worker_log_path, "ab")
+    repo_root = Path(__file__).resolve().parents[2]
+    command = [
+        sys.executable,
+        "-m",
+        "backend.pipeline.stage1_worker",
+        "--project-id",
+        project_id,
+        "--mode",
+        mode,
+        "--model",
+        model,
+        "--timeout",
+        str(timeout_seconds),
+        "--max-retries",
+        str(max_retries),
+    ]
+    if unit_id:
+        command.extend(["--unit-id", unit_id])
+    if force:
+        command.append("--force")
+
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(repo_root) if not existing_pythonpath else f"{repo_root}:{existing_pythonpath}"
+    process = subprocess.Popen(
+        command,
+        cwd=str(repo_root),
+        env=env,
+        stdout=worker_log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+    worker_log_handle.close()
+
+    job_state = {
+        "status": "starting",
+        "mode": mode,
+        "unit_id": unit_id,
+        "force": force,
+        "pid": process.pid,
+        "model": model,
+        "timeout_seconds": timeout_seconds,
+        "max_retries": max_retries,
+        "started_at": _utcnow_iso(),
+    }
+    _save_stage1_job_state(project_id, job_state)
+
+    stage_label = {
+        "split": "Queued Stage 1 split",
+        "generate_all": "Queued Stage 1 generation",
+        "generate_unit": f"Queued Stage 1 unit {unit_id}",
+    }.get(mode, "Queued Stage 1")
+    update_sermon_processing_status(project_id, True, {"stage": stage_label, "progress": 0})
+    return job_state
+
 def reset_agent_state(project_id: str):
     """
     Reset the multi-agent system state for a project, allowing a fresh restart.
@@ -595,6 +852,14 @@ def reset_agent_state(project_id: str):
     stage1_units = sermon_dir / "stage1_units.json"
     if stage1_units.exists():
         stage1_units.unlink()
+
+    stage1_job = sermon_dir / "stage1_job.json"
+    if stage1_job.exists():
+        stage1_job.unlink()
+
+    stage1_worker_log = sermon_dir / "stage1_worker.log"
+    if stage1_worker_log.exists():
+        stage1_worker_log.unlink()
 
     for draft_name in ["draft_v1.md", "stage1_draft.md"]:
         draft_file = sermon_dir / draft_name
