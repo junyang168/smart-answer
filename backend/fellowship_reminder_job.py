@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 from email.utils import formataddr, parseaddr
+import html
 import json
 import os
+import re
 import smtplib
 import time as time_module
 from dataclasses import dataclass
@@ -71,6 +73,8 @@ class FellowshipEvent:
     title: Optional[str] = None
     series: Optional[str] = None
     sequence: Optional[int] = None
+    email_subject: Optional[str] = None
+    email_body_html: Optional[str] = None
 
 
 def load_fellowship_events(path: str) -> list[FellowshipEvent]:
@@ -113,6 +117,8 @@ def load_fellowship_events(path: str) -> list[FellowshipEvent]:
                 title=_clean_optional_str("title"),
                 series=_clean_optional_str("series"),
                 sequence=_clean_optional_int("sequence"),
+                email_subject=_clean_optional_str("emailSubject") or _clean_optional_str("email_subject"),
+                email_body_html=_clean_optional_str("emailBodyHtml") or _clean_optional_str("email_body_html"),
             )
         )
     return parsed
@@ -164,6 +170,18 @@ def _record_event_sent(event: FellowshipEvent) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _html_to_text(value: str) -> str:
+    if not value:
+        return ""
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", value)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</p>", "\n\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    lines = [line.rstrip() for line in text.splitlines()]
+    return "\n".join(lines).strip()
+
+
 def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     formatted_date = datetime.combine(event.date, time.min, tzinfo=TIMEZONE).strftime("%m/%d")
     raw_sender = os.getenv("REMINDER_SENDER") or os.getenv("SMTP_USERNAME")
@@ -176,6 +194,12 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
         parsed_email = raw_sender
     display_name = name_override or parsed_name
     sender = formataddr((display_name, parsed_email)) if display_name else parsed_email
+
+    custom_subject = (event.email_subject or "").strip()
+    custom_html = (event.email_body_html or "").strip()
+    if custom_html:
+        subject = custom_subject or os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ")
+        return sender, subject, _html_to_text(custom_html), custom_html
 
     subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ")
     details_lines: list[str] = []
