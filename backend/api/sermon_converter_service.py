@@ -1121,14 +1121,52 @@ def _render_generated_unit_markdown_for_draft(unit_payload: dict, display_index:
         parts.append(body)
     return "\n\n".join(parts).strip()
 
+def _load_existing_draft_chunk_bundle(project_id: str) -> Dict[str, dict]:
+    meta_file = get_draft_chunks_meta_path(project_id)
+    chunks_dir = get_sermon_draft_chunks_dir(project_id)
+    if not meta_file.exists():
+        return {}
+
+    try:
+        meta_data = json.loads(meta_file.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    if not isinstance(meta_data, list):
+        return {}
+
+    existing_by_unit_id: Dict[str, dict] = {}
+    for item in meta_data:
+        if not isinstance(item, dict):
+            continue
+        unit_id = item.get("unit_id")
+        chunk_id = item.get("id")
+        if not unit_id or not chunk_id:
+            continue
+        chunk_path = chunks_dir / f"{chunk_id}.md"
+        if not chunk_path.exists():
+            continue
+        existing_by_unit_id[str(unit_id)] = {
+            "meta": item,
+            "content": chunk_path.read_text(encoding="utf-8"),
+            "mtime": chunk_path.stat().st_mtime,
+        }
+    return existing_by_unit_id
+
 def _build_draft_chunks_from_generated_units(project_id: str) -> tuple[str, list[dict], Dict[str, str]]:
     chunk_entries: list[dict] = []
     chunk_text_by_id: Dict[str, str] = {}
     combined_blocks: list[str] = []
+    existing_by_unit_id = _load_existing_draft_chunk_bundle(project_id)
     for index, path in enumerate(_list_generated_unit_paths(project_id), start=1):
         unit_payload = json.loads(path.read_text(encoding="utf-8"))
         chunk_id = f"chunk_{index:03d}"
-        content = _render_generated_unit_markdown_for_draft(unit_payload, display_index=index)
+        unit_id = str(unit_payload.get("unit_id") or "")
+        generated_content = _render_generated_unit_markdown_for_draft(unit_payload, display_index=index)
+        content = generated_content
+        existing_chunk = existing_by_unit_id.get(unit_id)
+        if existing_chunk and existing_chunk.get("mtime", 0.0) >= path.stat().st_mtime:
+            content = existing_chunk["content"]
         chunk_text_by_id[chunk_id] = content
         combined_blocks.append(content)
         chunk_entries.append(
