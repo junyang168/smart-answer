@@ -88,6 +88,8 @@ class GeneratedUnit:
 
 @dataclass
 class SourceDocument:
+    IGNORE_BELOW_MARKER = "<!-- Ignore Below -->"
+
     path: Path
     content: str
     lines: List[str]
@@ -103,9 +105,16 @@ class SourceDocument:
             sha256=_sha256_text(content),
         )
 
-    def with_line_numbers(self) -> str:
-        numbered_lines = []
+    def split_cutoff_line(self) -> int:
         for index, line in enumerate(self.lines, start=1):
+            if self.IGNORE_BELOW_MARKER in line:
+                return index - 1
+        return len(self.lines)
+
+    def with_line_numbers(self, end_line: Optional[int] = None) -> str:
+        visible_end_line = len(self.lines) if end_line is None else min(len(self.lines), end_line)
+        numbered_lines = []
+        for index, line in enumerate(self.lines[:visible_end_line], start=1):
             numbered_lines.append(f"{index:04d}: {line}")
         return "\n".join(numbered_lines)
 
@@ -753,11 +762,19 @@ class Stage1Pipeline:
             raise
 
     def _split_units(self, source_doc: SourceDocument) -> List[UnitBoundary]:
+        split_cutoff_line = source_doc.split_cutoff_line()
+        if split_cutoff_line < 1:
+            raise ValueError("No usable note lines remain above <!-- Ignore Below -->")
+        if split_cutoff_line < len(source_doc.lines):
+            self._log(
+                "segmenter",
+                f"偵測到 Ignore Below 標記，單元切割只使用第 1–{split_cutoff_line} 行。",
+            )
         user_prompt = (
             "以下是已校正的釋經課筆記。每一行都帶有明確行號。\n"
             "請只回傳切割後的單元邊界與中繼資料，不可複製任何原始筆記內容。\n\n"
             "【來源筆記（含行號）】\n"
-            f"{source_doc.with_line_numbers()}"
+            f"{source_doc.with_line_numbers(end_line=split_cutoff_line)}"
         )
         response = self.llm.generate_json(
             system_prompt=self.split_prompt,
@@ -765,7 +782,7 @@ class Stage1Pipeline:
             json_schema=self.SPLIT_SCHEMA,
             temperature=0.0,
         )
-        return self._normalize_units(response.get("units", []), line_count=len(source_doc.lines))
+        return self._normalize_units(response.get("units", []), line_count=split_cutoff_line)
 
     def _normalize_units(
         self,
