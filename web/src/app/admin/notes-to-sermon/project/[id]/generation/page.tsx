@@ -430,6 +430,11 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                                     <div className="mt-2 text-xs text-gray-400">
                                                         {unit.has_points ? "points ready" : "no points"} · {unit.has_generated ? "draft ready" : "no draft"}
                                                     </div>
+                                                    {unit.error && (
+                                                        <div className="mt-2 max-w-xs text-xs leading-5 text-red-600">
+                                                            {unit.error}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
                                                     <button

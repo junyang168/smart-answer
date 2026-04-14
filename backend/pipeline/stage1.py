@@ -187,6 +187,7 @@ class Stage1AnthropicClient:
         user_prompt: str,
         json_schema: Dict[str, Any],
         temperature: float = 0.0,
+        timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         return self._with_retries(
             lambda: self._generate_json_once(
@@ -194,6 +195,7 @@ class Stage1AnthropicClient:
                 user_prompt=user_prompt,
                 json_schema=json_schema,
                 temperature=temperature,
+                timeout_seconds=timeout_seconds,
             )
         )
 
@@ -202,12 +204,14 @@ class Stage1AnthropicClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
+        timeout_seconds: Optional[float] = None,
     ) -> str:
         return self._with_retries(
             lambda: self._generate_text_once(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=temperature,
+                timeout_seconds=timeout_seconds,
             )
         )
 
@@ -241,6 +245,7 @@ class Stage1AnthropicClient:
         user_prompt: str,
         json_schema: Dict[str, Any],
         temperature: float,
+        timeout_seconds: Optional[float],
     ) -> Dict[str, Any]:
         schema_description = json.dumps(json_schema.get("schema", {}), ensure_ascii=False, indent=2)
         content = self._post_chat_completion(
@@ -252,6 +257,7 @@ class Stage1AnthropicClient:
                 f"{schema_description}"
             ),
             temperature=temperature,
+            timeout_seconds=timeout_seconds,
         )
         return self._parse_json_response(content)
 
@@ -260,11 +266,13 @@ class Stage1AnthropicClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        timeout_seconds: Optional[float],
     ) -> str:
         return self._post_chat_completion(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
+            timeout_seconds=timeout_seconds,
         )
 
     def _post_chat_completion(
@@ -272,9 +280,18 @@ class Stage1AnthropicClient:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        timeout_seconds: Optional[float] = None,
     ) -> str:
+        client = self.client
+        effective_timeout = timeout_seconds or self.timeout_seconds
+        if effective_timeout != self.timeout_seconds:
+            client = Anthropic(
+                api_key=os.environ.get("ANTHROPIC_API_KEY"),
+                max_retries=0,
+                timeout=effective_timeout,
+            )
         try:
-            message = self.client.messages.create(
+            message = client.messages.create(
                 model=self.model,
                 max_tokens=self.max_output_tokens,
                 temperature=temperature,
@@ -782,7 +799,34 @@ class Stage1Pipeline:
             json_schema=self.SPLIT_SCHEMA,
             temperature=0.0,
         )
-        return self._normalize_units(response.get("units", []), line_count=split_cutoff_line)
+        raw_units = response.get("units", [])
+        try:
+            return self._normalize_units(raw_units, line_count=split_cutoff_line)
+        except Exception as exc:
+            self._log("segmenter", f"初次切割結果驗證失敗，嘗試修正：{exc}")
+            repair_user_prompt = (
+                f"{user_prompt}\n\n"
+                "【上一輪切割結果（有錯誤，請修正）】\n"
+                f"{json.dumps({'units': raw_units}, ensure_ascii=False, indent=2)}\n\n"
+                "【驗證錯誤】\n"
+                f"{exc}\n\n"
+                "請修正上一輪切割結果，並重新輸出完整 JSON。修正要求：\n"
+                f"1. 所有單元必須落在 1 到 {split_cutoff_line} 行之內。\n"
+                "2. 所有單元必須依 start_line 遞增排列。\n"
+                "3. 單元之間不可重疊，後一單元的 start_line 必須大於前一單元的 end_line。\n"
+                "4. 保留原本的邏輯切割意圖，只在必要處修正邊界。\n"
+                "5. 仍然不可複製任何原始筆記內容到欄位中。\n"
+            )
+            repaired_response = self.llm.generate_json(
+                system_prompt=self.split_prompt,
+                user_prompt=repair_user_prompt,
+                json_schema=self.SPLIT_SCHEMA,
+                temperature=0.0,
+            )
+            repaired_units = repaired_response.get("units", [])
+            normalized = self._normalize_units(repaired_units, line_count=split_cutoff_line)
+            self._log("segmenter", "切割修正成功，已採用修正版邊界。")
+            return normalized
 
     def _normalize_units(
         self,
@@ -892,16 +936,28 @@ class Stage1Pipeline:
         current_slice = source_doc.slice_by_lines(unit.start_line, unit.end_line)
         previous_unit = self._find_unit(units, unit.prev_unit_id)
         next_unit = self._find_unit(units, unit.next_unit_id)
-        previous_slice = (
-            source_doc.slice_by_lines(previous_unit.start_line, previous_unit.end_line)
-            if previous_unit
-            else ""
-        )
-        next_slice = (
-            source_doc.slice_by_lines(next_unit.start_line, next_unit.end_line)
-            if next_unit
-            else ""
-        )
+        heavy_unit = len(points) >= 20 or len(current_slice) >= 3000 or (unit.end_line - unit.start_line + 1) >= 90
+        previous_slice = ""
+        next_slice = ""
+        if not heavy_unit:
+            previous_slice = (
+                source_doc.slice_by_lines(previous_unit.start_line, previous_unit.end_line)
+                if previous_unit
+                else ""
+            )
+            next_slice = (
+                source_doc.slice_by_lines(next_unit.start_line, next_unit.end_line)
+                if next_unit
+                else ""
+            )
+        else:
+            self._log(
+                "expander",
+                f"單元 {unit.unit_id} 較大（{len(points)} points, {len(current_slice)} chars），逐字稿生成省略相鄰單元上下文。",
+                unit_id=unit.unit_id,
+            )
+
+        manuscript_timeout_seconds = max(self.timeout_seconds, 240.0 if heavy_unit else 180.0)
 
         points_json = json.dumps({"points": points}, ensure_ascii=False, indent=2)
         user_prompt = (
@@ -919,6 +975,7 @@ class Stage1Pipeline:
             user_prompt=user_prompt,
             json_schema=self.MANUSCRIPT_GENERATION_SCHEMA,
             temperature=0.2,
+            timeout_seconds=manuscript_timeout_seconds,
         )
         manuscript_sections = self._normalize_manuscript_sections(generated_payload.get("manuscript_sections", {}))
         coverage_checks = self._normalize_coverage_checks(generated_payload.get("coverage_checks", []), points=points)
@@ -949,6 +1006,7 @@ class Stage1Pipeline:
                     user_prompt=retry_user_prompt,
                     json_schema=self.MANUSCRIPT_GENERATION_SCHEMA,
                     temperature=0.2,
+                    timeout_seconds=manuscript_timeout_seconds,
                 )
                 retry_sections = self._normalize_manuscript_sections(retry_payload.get("manuscript_sections", {}))
                 retry_coverage_checks = self._normalize_coverage_checks(
