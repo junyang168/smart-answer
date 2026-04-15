@@ -38,6 +38,7 @@ SERMON_TO_VIDEO_DIR: Final[Path] = DATA_BASE_PATH / "sermon_to_video"
 MICRO_SERMONS_FILE: Final[Path] = SERMON_TO_VIDEO_DIR / "micro_sermons.json"
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
+OCR_MODEL: Final[str] = os.getenv("OCR_MODEL", "gemini-3.1-pro-preview")
 GEMINI_API_KEY: Final[Optional[str]] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY1")
 
 # RAG Configuration

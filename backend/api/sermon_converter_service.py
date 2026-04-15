@@ -18,7 +18,7 @@ import git
 import google.auth
 from googleapiclient.discovery import build
 
-from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT
+from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT, OCR_MODEL
 
 # Define the source directory for notes
 IMAGES_ROOT = FULL_ARTICLE_ROOT / "images" / "scanned_mat"
@@ -145,7 +145,7 @@ def list_note_images(folder: str = "") -> List[NoteImage]:
 
 def process_note_image(filename: str, folder: str = "") -> str:
     """
-    Process a single image using Gemini 3 Pro.
+    Process a single image using the configured Gemini OCR model.
     Returns the process_id (which currently is just the filename stem).
     """
     ensure_dirs()
@@ -160,7 +160,7 @@ def process_note_image(filename: str, folder: str = "") -> str:
         location="global" 
     )
 
-    model_id = "gemini-3-pro-preview"
+    model_id = OCR_MODEL
 
     # 3. Read Image
     with open(image_path, "rb") as img_f:
