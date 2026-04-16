@@ -3239,6 +3239,8 @@ def _process_images_for_export(html_content: str) -> str:
     import base64
     import mimetypes
     import os
+    import tempfile
+    import subprocess
     from urllib.parse import urlparse, unquote
     from urllib.request import urlopen
     
@@ -3259,11 +3261,51 @@ def _process_images_for_export(html_content: str) -> str:
     try:
         import cairosvg
     except ImportError:
-        print("Warning: cairosvg not found. SVG conversion will fail.")
+        print("Warning: cairosvg not found. SVG conversion will fall back to native tools only.")
         cairosvg = None
 
     soup = BeautifulSoup(html_content, 'html.parser')
     max_image_width_px = 624  # 8.5in page width with 1in margins ~= 6.5in content width
+
+    def _convert_svg_to_png_bytes(svg_bytes: bytes, origin_label: str) -> bytes | None:
+        with tempfile.TemporaryDirectory(prefix="svg-export-") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            svg_path = tmpdir_path / "source.svg"
+            png_path = tmpdir_path / "source.png"
+            svg_path.write_bytes(svg_bytes)
+
+            # Prefer native macOS converters because they use system font rendering
+            # and handle CJK glyphs more reliably than Cairo in this environment.
+            native_commands = [
+                ["sips", "-s", "format", "png", str(svg_path), "--out", str(png_path)],
+                ["qlmanage", "-t", "-s", "1600", "-o", str(tmpdir_path), str(svg_path)],
+            ]
+
+            for command in native_commands:
+                try:
+                    completed = subprocess.run(
+                        command,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=20,
+                    )
+                    if completed.returncode == 0:
+                        if command[0] == "qlmanage":
+                            ql_png = tmpdir_path / f"{svg_path.name}.png"
+                            if ql_png.exists():
+                                return ql_png.read_bytes()
+                        elif png_path.exists():
+                            return png_path.read_bytes()
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
+
+            if cairosvg:
+                try:
+                    return cairosvg.svg2png(bytestring=svg_bytes)
+                except Exception as e:
+                    print(f"Failed to convert SVG {origin_label} with cairosvg fallback: {e}")
+            return None
 
     def _apply_export_image_sizing() -> None:
         img['width'] = str(max_image_width_px)
@@ -3283,15 +3325,12 @@ def _process_images_for_export(html_content: str) -> str:
         def _embed_image_bytes(image_bytes: bytes, mime_type: str | None, origin_label: str) -> None:
             normalized_mime = mime_type or 'image/png'
             if normalized_mime == 'image/svg+xml':
-                if cairosvg:
-                    try:
-                        png_data = cairosvg.svg2png(bytestring=image_bytes)
-                        b64_data = base64.b64encode(png_data).decode('utf-8')
-                        img['src'] = f"data:image/png;base64,{b64_data}"
-                    except Exception as e:
-                        print(f"Failed to convert SVG {origin_label}: {e}")
+                png_data = _convert_svg_to_png_bytes(image_bytes, origin_label)
+                if png_data:
+                    b64_data = base64.b64encode(png_data).decode('utf-8')
+                    img['src'] = f"data:image/png;base64,{b64_data}"
                 else:
-                    print(f"Skipping SVG {origin_label} - cairosvg missing")
+                    print(f"Skipping SVG {origin_label} - no usable SVG renderer available")
                 return
 
             b64_data = base64.b64encode(image_bytes).decode('utf-8')
