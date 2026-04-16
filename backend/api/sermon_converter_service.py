@@ -1339,6 +1339,11 @@ def _get_fidelity_audit_source_slice(project_id: str, chunk_id: str, source_cont
     start_line = chunk_meta.get("source_start_line")
     end_line = chunk_meta.get("source_end_line")
     if not start_line or not end_line:
+        # Manual draft workflows may never run Stage 1, so draft chunks are created
+        # from pasted markdown only and have no source-note lineage. In that case,
+        # fidelity audit must fall back to the full unified notes instead of failing.
+        if not _list_generated_unit_paths(project_id):
+            return extract_processable_content(source_content)
         raise ValueError(f"Draft chunk {chunk_id} is missing source line boundaries")
 
     raw_slice = _slice_text_by_lines(source_content, start_line, end_line)
