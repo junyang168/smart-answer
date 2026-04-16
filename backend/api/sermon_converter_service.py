@@ -2389,6 +2389,7 @@ def export_sermon_to_doc(project_id: str) -> str:
         h3 {{ font-size: 14pt; margin-top: 14pt; margin-bottom: 6pt; }}
         .export-doc-title {{ text-align: left; font-size: 26pt; font-weight: 700; margin-top: 0; margin-bottom: 8pt; }}
         .export-doc-subtitle {{ text-align: left; font-size: 13pt; color: #555555; margin-top: 0; margin-bottom: 22pt; }}
+        img {{ width: 6.5in; max-width: 100%; height: auto; display: block; margin: 12pt 0; }}
         ul, ol {{ margin-bottom: 12pt; }}
         li {{ margin-bottom: 4pt; }}
         blockquote {{ margin-left: 20pt; padding-left: 10pt; border-left: 2pt solid #cccccc; color: #555555; background-color: #f9f9f9; padding: 10pt; font-style: italic; }}
@@ -3238,6 +3239,8 @@ def _process_images_for_export(html_content: str) -> str:
     import base64
     import mimetypes
     import os
+    from urllib.parse import urlparse, unquote
+    from urllib.request import urlopen
     
     # --- MacOS Apple Silicon Cairo Fix ---
     # Attempt to help ctypes find the library on Apple Silicon for cairosvg
@@ -3260,52 +3263,73 @@ def _process_images_for_export(html_content: str) -> str:
         cairosvg = None
 
     soup = BeautifulSoup(html_content, 'html.parser')
+    max_image_width_px = 624  # 8.5in page width with 1in margins ~= 6.5in content width
+
+    def _apply_export_image_sizing() -> None:
+        img['width'] = str(max_image_width_px)
+        if img.has_attr('height'):
+            del img['height']
+        existing_style = img.get('style', '').strip()
+        sizing_style = (
+            f"width:{max_image_width_px}px; max-width:100%; height:auto; display:block;"
+        )
+        img['style'] = f"{existing_style}; {sizing_style}".strip('; ').strip()
     
     for img in soup.find_all('img'):
         src = img.get('src')
         if not src:
             continue
             
-        # Resolve local path
-        local_path = None
-        if src.startswith('/web/data/'):
-            # Map /web/data/ -> DATA_BASE_PATH/
-            # DATA_BASE_PATH is /.../web/data
-            rel_path = src.replace('/web/data/', '')
-            local_path = DATA_BASE_PATH / rel_path
-        elif src.startswith('http'):
-            # Skip remote images for now (Google Docs handles them if public, but we could embed them too)
-            pass
-            
-        if local_path and local_path.exists():
-            try:
-                mime_type, _ = mimetypes.guess_type(local_path)
-                
-                # Special handling for SVG
-                if mime_type == 'image/svg+xml' or local_path.suffix.lower() == '.svg':
-                    if cairosvg:
-                        try:
-                            with open(local_path, 'rb') as f:
-                                svg_data = f.read()
-                            # Convert to PNG
-                            png_data = cairosvg.svg2png(bytestring=svg_data)
-                            b64_data = base64.b64encode(png_data).decode('utf-8')
-                            img['src'] = f"data:image/png;base64,{b64_data}"
-                            # Remove height/width attributes if they cause issues, or let Docs handle it?
-                            # Usually Docs handles standard images fine.
-                        except Exception as e:
-                            print(f"Failed to convert SVG {local_path}: {e}")
-                    else:
-                        print(f"Skipping SVG {local_path} - cairosvg missing")
+        def _embed_image_bytes(image_bytes: bytes, mime_type: str | None, origin_label: str) -> None:
+            normalized_mime = mime_type or 'image/png'
+            if normalized_mime == 'image/svg+xml':
+                if cairosvg:
+                    try:
+                        png_data = cairosvg.svg2png(bytestring=image_bytes)
+                        b64_data = base64.b64encode(png_data).decode('utf-8')
+                        img['src'] = f"data:image/png;base64,{b64_data}"
+                    except Exception as e:
+                        print(f"Failed to convert SVG {origin_label}: {e}")
                 else:
-                    # Standard Image (JPG, PNG)
-                    with open(local_path, "rb") as f:
-                        data = f.read()
-                        b64_data = base64.b64encode(data).decode('utf-8')
-                        if not mime_type: mime_type = 'image/png'
-                        img['src'] = f"data:{mime_type};base64,{b64_data}"
-                        
-            except Exception as e:
-                print(f"Error processing image {src}: {e}")
+                    print(f"Skipping SVG {origin_label} - cairosvg missing")
+                return
+
+            b64_data = base64.b64encode(image_bytes).decode('utf-8')
+            img['src'] = f"data:{normalized_mime};base64,{b64_data}"
+
+        try:
+            local_path = None
+            remote_url = None
+
+            if src.startswith('/web/data/'):
+                rel_path = src.replace('/web/data/', '', 1)
+                local_path = DATA_BASE_PATH / rel_path
+            elif src.startswith('http://') or src.startswith('https://'):
+                parsed = urlparse(src)
+                normalized_path = unquote(parsed.path)
+                if normalized_path.startswith('/web/data/'):
+                    rel_path = normalized_path.replace('/web/data/', '', 1)
+                    candidate = DATA_BASE_PATH / rel_path
+                    if candidate.exists():
+                        local_path = candidate
+                    else:
+                        remote_url = src
+                else:
+                    remote_url = src
+
+            if local_path and local_path.exists():
+                mime_type, _ = mimetypes.guess_type(local_path)
+                with open(local_path, 'rb') as f:
+                    _embed_image_bytes(f.read(), mime_type, str(local_path))
+            elif remote_url:
+                with urlopen(remote_url, timeout=20) as response:
+                    image_bytes = response.read()
+                    mime_type = response.headers.get_content_type()
+                    if not mime_type or mime_type == 'application/octet-stream':
+                        mime_type, _ = mimetypes.guess_type(urlparse(remote_url).path)
+                    _embed_image_bytes(image_bytes, mime_type, remote_url)
+            _apply_export_image_sizing()
+        except Exception as e:
+            print(f"Error processing image {src}: {e}")
                 
     return str(soup)
