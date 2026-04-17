@@ -49,6 +49,7 @@ export const config = {
   matcher: [
     "/admin/:path*",
     "/api/admin/:path*",
+    "/resources/notes_to_manuscript_series",
     "/resources/notes_to_manuscript_series/:path*",
   ],
 };
