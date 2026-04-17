@@ -120,6 +120,8 @@ def debug_path():
 def list_public_series_endpoint():
     summaries: List[PublicLectureSeriesSummary] = []
     for series in list_series():
+        if series.project_type != "sermon_note":
+            continue
         lecture_count = len(series.lectures)
         project_count = sum(len(lecture.project_ids) for lecture in series.lectures)
         available_project_count = 0
@@ -147,6 +149,8 @@ def list_public_series_endpoint():
 def get_public_series_endpoint(series_id: str):
     series = get_series(series_id)
     if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if series.project_type != "sermon_note":
         raise HTTPException(status_code=404, detail="Series not found")
     return _build_public_series_detail(series)
 
