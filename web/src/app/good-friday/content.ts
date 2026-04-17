@@ -10,7 +10,7 @@ export interface CrossSaying {
 export const heroContent = {
   title: "十字架上的七句話",
   subtitle: "受難節特別聚會",
-  heroImageSrc: "https://dallas-hlc.org/web/data/full_article/images/good_friday.png",
+  heroImageSrc: "/web/data/full_article/images/good_friday.png",
   introduction: [
     "當耶穌被釘在十字架上時，祂並沒有沉默。",
     "在那幾個小時裡，祂說了七句話。",

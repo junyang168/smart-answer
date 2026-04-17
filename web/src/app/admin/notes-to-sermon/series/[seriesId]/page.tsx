@@ -374,9 +374,7 @@ export default function SeriesDetailPage() {
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">{series.title}</h1>
                         <p className="text-gray-600 mt-1">{series.description}</p>
-                        {series.folder && (
-                            <p className="text-xs text-gray-400 mt-1">Source Folder: {series.folder}</p>
-                        )}
+
                         {series.project_type === 'transcript' && (
                             <p className="text-xs text-purple-600 font-bold mt-1">Type: Fellowship Transcript</p>
                         )}
