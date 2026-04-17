@@ -24,6 +24,13 @@ import { useRouter } from 'next/navigation';
 
 const resourceCardsData = [
   {
+    icon: FileSignature,
+    title: '講義轉逐字稿',
+    description: `按系列與講次瀏覽「講義轉逐字稿」的整理稿件，並直接前往 Google Doc 閱讀完整手稿內容。此模組需先以 Google 帳號登入。`,
+    link: '/resources/notes_to_manuscript_series',
+    linkLabel: '查看系列',
+  },
+  {
     icon: Mic,
     title: '講道中心',
     description: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,

@@ -7,6 +7,17 @@ export default withAuth(
     const pathname = req.nextUrl.pathname;
 
     const isApiRequest = pathname.startsWith("/api/");
+    const isNotesToManuscriptResources =
+      pathname.startsWith("/resources/notes_to_manuscript_series");
+
+    if (isNotesToManuscriptResources) {
+      if (!token) {
+        const signInUrl = new URL("/api/auth/signin", req.url);
+        signInUrl.searchParams.set("callbackUrl", req.url);
+        return NextResponse.redirect(signInUrl);
+      }
+      return NextResponse.next();
+    }
 
     if (token?.role === "editor") {
       return NextResponse.next();
@@ -35,5 +46,9 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/api/admin/:path*",
+    "/resources/notes_to_manuscript_series/:path*",
+  ],
 };

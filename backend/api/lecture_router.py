@@ -8,8 +8,10 @@ from backend.api.lecture_manager import (
     add_lecture, update_lecture, delete_lecture,
     assign_project_to_lecture, remove_project_from_lecture
 )
+from backend.api.sermon_converter_service import get_sermon_project_metadata
 
 router = APIRouter(prefix="/admin/notes-to-sermon/series", tags=["Lecture Series"])
+public_router = APIRouter(prefix="/notes-to-sermon/public", tags=["Lecture Series Public"])
 
 # --- Request Models ---
 
@@ -27,12 +29,126 @@ class CreateLectureRequest(BaseModel):
 class AssignProjectRequest(BaseModel):
     project_id: str
 
+
+class PublicLectureProject(BaseModel):
+    id: str
+    title: str
+    google_doc_id: Optional[str] = None
+    google_doc_url: Optional[str] = None
+    available: bool = False
+
+
+class PublicLecture(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    folder: Optional[str] = None
+    projects: List[PublicLectureProject]
+
+
+class PublicLectureSeriesSummary(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    folder: Optional[str] = None
+    project_type: str = "sermon_note"
+    lecture_count: int
+    project_count: int
+    available_project_count: int
+
+
+class PublicLectureSeriesDetail(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    folder: Optional[str] = None
+    project_type: str = "sermon_note"
+    lectures: List[PublicLecture]
+
+
+def _build_google_doc_url(doc_id: Optional[str]) -> Optional[str]:
+    if not doc_id:
+        return None
+    return f"https://docs.google.com/document/d/{doc_id}/edit"
+
+
+def _build_public_series_detail(series: LectureSeries) -> PublicLectureSeriesDetail:
+    lectures: List[PublicLecture] = []
+    for lecture in series.lectures:
+        projects: List[PublicLectureProject] = []
+        for project_id in lecture.project_ids:
+            project = get_sermon_project_metadata(project_id)
+            title = project.title if project else project_id
+            google_doc_id = project.google_doc_id if project else None
+            projects.append(
+                PublicLectureProject(
+                    id=project_id,
+                    title=title,
+                    google_doc_id=google_doc_id,
+                    google_doc_url=_build_google_doc_url(google_doc_id),
+                    available=bool(google_doc_id),
+                )
+            )
+        lectures.append(
+            PublicLecture(
+                id=lecture.id,
+                title=lecture.title,
+                description=lecture.description,
+                folder=lecture.folder,
+                projects=projects,
+            )
+        )
+
+    return PublicLectureSeriesDetail(
+        id=series.id,
+        title=series.title,
+        description=series.description,
+        folder=series.folder,
+        project_type=series.project_type,
+        lectures=lectures,
+    )
+
 # --- Series Endpoints ---
 
 @router.get("/debug-path")
 def debug_path():
     from backend.api.lecture_manager import SERIES_DB_PATH
     return {"path": str(SERIES_DB_PATH), "exists": SERIES_DB_PATH.exists(), "parent_exists": SERIES_DB_PATH.parent.exists()}
+
+
+@public_router.get("/series", response_model=List[PublicLectureSeriesSummary])
+def list_public_series_endpoint():
+    summaries: List[PublicLectureSeriesSummary] = []
+    for series in list_series():
+        lecture_count = len(series.lectures)
+        project_count = sum(len(lecture.project_ids) for lecture in series.lectures)
+        available_project_count = 0
+        for lecture in series.lectures:
+            for project_id in lecture.project_ids:
+                project = get_sermon_project_metadata(project_id)
+                if project and project.google_doc_id:
+                    available_project_count += 1
+        summaries.append(
+            PublicLectureSeriesSummary(
+                id=series.id,
+                title=series.title,
+                description=series.description,
+                folder=series.folder,
+                project_type=series.project_type,
+                lecture_count=lecture_count,
+                project_count=project_count,
+                available_project_count=available_project_count,
+            )
+        )
+    return summaries
+
+
+@public_router.get("/series/{series_id}", response_model=PublicLectureSeriesDetail)
+def get_public_series_endpoint(series_id: str):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    return _build_public_series_detail(series)
 
 @router.get("", response_model=List[LectureSeries])
 def list_series_endpoint():

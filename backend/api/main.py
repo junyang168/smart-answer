@@ -21,7 +21,7 @@ from .scripture import router as scripture_router
 from .sc_api import router as sc_api_router
 from .sc_api.rag import router as rag_router
 from .sermon_converter_router import router as sermon_converter_router
-from .lecture_router import router as lecture_router
+from .lecture_router import router as lecture_router, public_router as lecture_public_router
 
 app = FastAPI()
 
@@ -51,6 +51,7 @@ app.include_router(sc_api_router)
 app.include_router(rag_router)
 app.include_router(sermon_converter_router)
 app.include_router(lecture_router)
+app.include_router(lecture_public_router)
 
 
 @app.get("/healthz")
