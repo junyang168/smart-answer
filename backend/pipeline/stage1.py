@@ -89,6 +89,7 @@ class GeneratedUnit:
 @dataclass
 class SourceDocument:
     IGNORE_BELOW_MARKER = "<!-- Ignore Below -->"
+    IGNORE_BELOW_PATTERN = re.compile(r"<!--\s*Ignore Below\s*-->", re.IGNORECASE)
 
     path: Path
     content: str
@@ -107,7 +108,7 @@ class SourceDocument:
 
     def split_cutoff_line(self) -> int:
         for index, line in enumerate(self.lines, start=1):
-            if self.IGNORE_BELOW_MARKER in line:
+            if self.IGNORE_BELOW_PATTERN.search(line):
                 return index - 1
         return len(self.lines)
 
