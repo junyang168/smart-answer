@@ -10,6 +10,7 @@ interface Project {
     title: string;
     series_id?: string;
     lecture_id?: string;
+    project_type?: string;
 }
 
 interface Lecture {
@@ -551,7 +552,12 @@ export default function SeriesDetailPage() {
                                     >
                                         <option value="">Select a project...</option>
                                         {allProjects
-                                            .filter(p => !p.series_id && !p.lecture_id) // Show only unassigned projects? Or allow steal? Let's show currently unassigned.
+                                            .filter(
+                                                (p) =>
+                                                    !p.series_id &&
+                                                    !p.lecture_id &&
+                                                    (p.project_type || "sermon_note") === (series.project_type || "sermon_note")
+                                            )
                                             .map(p => (
                                                 <option key={p.id} value={p.id}>{p.title}</option>
                                             ))

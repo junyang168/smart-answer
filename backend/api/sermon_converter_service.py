@@ -85,6 +85,18 @@ def ensure_dirs():
     raw_ocr_dir.mkdir(exist_ok=True)
     return raw_ocr_dir
 
+
+def _build_unique_project_id(title: str) -> str:
+    base_id = title.lower().replace(" ", "_").replace(":", "").strip("_") or "project"
+    candidate = base_id
+    suffix = 2
+
+    while (NOTES_TO_SERMON_DIR / candidate).exists():
+        candidate = f"{base_id}_{suffix}"
+        suffix += 1
+
+    return candidate
+
 def get_raw_ocr_path(filename: str, folder: str = "") -> Path:
     """
     Get the flat path for a page's markdown file.
@@ -264,8 +276,7 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
     """
     ensure_dirs()
     
-    # Simple ID generation from title
-    project_id = title.lower().replace(" ", "_").replace(":", "")
+    project_id = _build_unique_project_id(title)
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     sermon_dir.mkdir(exist_ok=True)
     
