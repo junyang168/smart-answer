@@ -14,8 +14,8 @@ const contactInfo = {
         time: "每週日上午 11:00 - 12:30 CST",
     },
     fellowship: {
-        title: "線上，線下團契",
-        time: "每兩週一次，週五晚 8:00 - 9:30 CST",
+        title: "線上團契",
+        time: "每兩週一次，週五晚 7:30 - 9:00 CST",
         address: "線下地址： 903 W. Parker Road, Plano, TX 75023",
         zoomLink: "https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1",
         calendarFile: "https://us02web.zoom.us/meeting/tZEsdu2qqT8oGtJDGuEp1tM9fsTMIaesw9PW/ics?icsToken=DIyWPSjdSSgoyqWFqQAALAAAAPR9M8v-Wg05bjlrK8AYLAS2cq9R0c5GMHTY1PEMuILPHl9n81UpnE3wiUCKCD352zm17Dme0slKBat-rjAwMDAwMQ" // ✅ 指向我们创建的 .ics 文件
