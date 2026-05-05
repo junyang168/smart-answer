@@ -266,6 +266,23 @@ def delete_lecture(series_id: str, lecture_id: str) -> bool:
                 return True
     return False
 
+def reorder_lectures(series_id: str, lecture_ids: List[str]) -> bool:
+    data = _load_db()
+    for s in data:
+        if s["id"] == series_id:
+            current_lectures = s.get("lectures", [])
+            current_ids = [lecture.get("id") for lecture in current_lectures]
+
+            if len(current_ids) != len(lecture_ids) or set(current_ids) != set(lecture_ids):
+                return False
+
+            lecture_by_id = {lecture["id"]: lecture for lecture in current_lectures}
+            s["lectures"] = [lecture_by_id[lecture_id] for lecture_id in lecture_ids]
+            s["updated_at"] = datetime.utcnow().isoformat()
+            _save_db(data)
+            return True
+    return False
+
 # --- Project Assignment ---
 
 def assign_project_to_lecture(series_id: str, lecture_id: str, project_id: str) -> bool:

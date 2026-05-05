@@ -5,7 +5,7 @@ from typing import List, Optional
 from backend.api.lecture_manager import (
     LectureSeries, Lecture,
     list_series, get_series, create_series, update_series_metadata, delete_series,
-    add_lecture, update_lecture, delete_lecture,
+    add_lecture, update_lecture, delete_lecture, reorder_lectures,
     assign_project_to_lecture, remove_project_from_lecture
 )
 from backend.api.sermon_converter_service import get_sermon_project_metadata
@@ -28,6 +28,9 @@ class CreateLectureRequest(BaseModel):
 
 class AssignProjectRequest(BaseModel):
     project_id: str
+
+class ReorderLecturesRequest(BaseModel):
+    lecture_ids: List[str]
 
 
 class PublicLectureProject(BaseModel):
@@ -203,6 +206,13 @@ def add_lecture_endpoint(series_id: str, payload: CreateLectureRequest):
     if not lecture:
         raise HTTPException(status_code=404, detail="Series not found")
     return lecture
+
+@router.put("/{series_id}/lectures/reorder")
+def reorder_lectures_endpoint(series_id: str, payload: ReorderLecturesRequest):
+    success = reorder_lectures(series_id, payload.lecture_ids)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to reorder lectures. Ensure all provided IDs match the existing ones.")
+    return {"status": "success"}
 
 @router.put("/{series_id}/lectures/{lecture_id}", response_model=Lecture)
 def update_lecture_endpoint(series_id: str, lecture_id: str, payload: CreateLectureRequest):

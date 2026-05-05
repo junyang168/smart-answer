@@ -362,6 +362,44 @@ export default function SeriesDetailPage() {
         handleReorder(lectureId, newOrder);
     };
 
+    const handleLectureReorder = async (newLectures: Lecture[]) => {
+        const previousLectures = series?.lectures;
+        try {
+            setSeries(prev => prev ? { ...prev, lectures: newLectures } : null);
+
+            const res = await fetch(`/api/admin/notes-to-sermon/series/${seriesId}/lectures/reorder`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ lecture_ids: newLectures.map(lecture => lecture.id) })
+            });
+
+            if (!res.ok) {
+                alert("Failed to save lecture order");
+                if (previousLectures) {
+                    setSeries(prev => prev ? { ...prev, lectures: previousLectures } : null);
+                } else {
+                    fetchData();
+                }
+            }
+        } catch (e) {
+            alert("Error saving lecture order");
+            if (previousLectures) {
+                setSeries(prev => prev ? { ...prev, lectures: previousLectures } : null);
+            } else {
+                fetchData();
+            }
+        }
+    };
+
+    const moveLecture = (index: number, targetIndex: number) => {
+        if (!series || index === targetIndex || targetIndex < 0 || targetIndex >= series.lectures.length) return;
+
+        const newLectures = [...series.lectures];
+        const [lecture] = newLectures.splice(index, 1);
+        newLectures.splice(targetIndex, 0, lecture);
+        handleLectureReorder(newLectures);
+    };
+
     if (isLoading) return <div className="p-10 text-center">Loading...</div>;
     if (!series) return <div className="p-10 text-center">Series not found</div>;
 
@@ -463,7 +501,41 @@ export default function SeriesDetailPage() {
                                     </p>
                                 )}
                             </div>
-                            <div className="flex space-x-2">
+                            <div className="flex items-center space-x-2">
+                                <div className="flex items-center space-x-1">
+                                    <button
+                                        onClick={() => moveLecture(index, 0)}
+                                        className="text-gray-400 hover:text-gray-700 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                                        title="Move to first"
+                                        disabled={index === 0}
+                                    >
+                                        Top
+                                    </button>
+                                    <button
+                                        onClick={() => moveLecture(index, index - 1)}
+                                        className="text-gray-400 hover:text-gray-700 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                                        title="Move up"
+                                        disabled={index === 0}
+                                    >
+                                        ▲
+                                    </button>
+                                    <button
+                                        onClick={() => moveLecture(index, index + 1)}
+                                        className="text-gray-400 hover:text-gray-700 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                                        title="Move down"
+                                        disabled={index === series.lectures.length - 1}
+                                    >
+                                        ▼
+                                    </button>
+                                    <button
+                                        onClick={() => moveLecture(index, series.lectures.length - 1)}
+                                        className="text-gray-400 hover:text-gray-700 text-xs disabled:opacity-30 disabled:cursor-not-allowed"
+                                        title="Move to last"
+                                        disabled={index === series.lectures.length - 1}
+                                    >
+                                        Bottom
+                                    </button>
+                                </div>
                                 <button
                                     onClick={() => handleOpenEditLecture(lecture)}
                                     className="text-blue-600 hover:text-blue-800 text-sm"
