@@ -21,6 +21,8 @@ from backend.api.sermon_converter_service import (
     generate_sermon_draft,
     get_sermon_draft,
     save_sermon_draft,
+    get_sermon_consolidated,
+    save_sermon_consolidated,
     commit_sermon_project,
     export_sermon_to_doc,
     update_sermon_project_metadata,
@@ -468,6 +470,23 @@ def save_project_final(project_id: str, payload: SaveSourceRequest):
     try:
         save_sermon_final(project_id, payload.content)
         return {"status": "success", "message": "Final master text saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sermon-project/{project_id}/consolidated")
+def get_project_consolidated(project_id: str):
+    try:
+        return {"content": get_sermon_consolidated(project_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/consolidated")
+def save_project_consolidated(project_id: str, payload: SaveSourceRequest):
+    try:
+        save_sermon_consolidated(project_id, payload.content)
+        return {"status": "success", "message": "Consolidated text saved."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

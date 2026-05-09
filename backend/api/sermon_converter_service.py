@@ -1285,6 +1285,10 @@ def get_sermon_final_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "final.md"
 
+def get_sermon_consolidated_path(project_id: str) -> Path:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    return sermon_dir / "consolidated.md"
+
 def get_sermon_master_text_meta_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "master_text_meta.json"
@@ -1589,6 +1593,25 @@ def save_sermon_final(project_id: str, content: str) -> bool:
     chunks_dir = get_sermon_chunks_dir(project_id)
     for stale_chunk in chunks_dir.glob("*.md"):
         stale_chunk.unlink()
+    return True
+
+
+def get_sermon_consolidated(project_id: str) -> str:
+    consolidated_file = get_sermon_consolidated_path(project_id)
+    if not consolidated_file.exists():
+        return ""
+    with open(consolidated_file, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def save_sermon_consolidated(project_id: str, content: str) -> bool:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    if not sermon_dir.exists():
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
+
+    consolidated_file = get_sermon_consolidated_path(project_id)
+    with open(consolidated_file, "w", encoding="utf-8") as f:
+        f.write(content)
     return True
 
 
@@ -2125,6 +2148,7 @@ def commit_sermon_project(project_id: str) -> str:
         paths_to_add.append(str(draft_file))
         
     final_file = sermon_dir / "final.md"
+    consolidated_file = sermon_dir / "consolidated.md"
     master_text_meta_file = sermon_dir / "master_text_meta.json"
     chunks_meta = sermon_dir / "chunks_meta.json"
     audit_file = sermon_dir / "theological_audit.json"
@@ -2132,6 +2156,8 @@ def commit_sermon_project(project_id: str) -> str:
     
     if final_file.exists():
         paths_to_add.append(str(final_file))
+    if consolidated_file.exists():
+        paths_to_add.append(str(consolidated_file))
     if master_text_meta_file.exists():
         paths_to_add.append(str(master_text_meta_file))
     if chunks_meta.exists():
@@ -2271,11 +2297,13 @@ def export_sermon_to_doc(project_id: str) -> str:
     if not sermon_dir.exists():
          raise FileNotFoundError(f"Sermon project {project_id} not found")
     
-    draft_file = sermon_dir / "final.md"
-    if not draft_file.exists():
+    final_file = sermon_dir / "final.md"
+    consolidated_file = sermon_dir / "consolidated.md"
+    export_file = consolidated_file if consolidated_file.exists() and consolidated_file.read_text(encoding="utf-8").strip() else final_file
+    if not export_file.exists():
         raise ValueError("Final Master Text not found. Please Start Theological Review first.")
         
-    with open(draft_file, "r", encoding="utf-8") as f:
+    with open(export_file, "r", encoding="utf-8") as f:
         draft_content = f.read()
 
     meta_file = sermon_dir / "meta.json"

@@ -13,9 +13,11 @@ const SimpleMDE = dynamic(() => import("react-simplemde-editor"), {
 
 import TheologicalAuditPanel from "./TheologicalAuditPanel";
 
+type ViewMode = 'source' | 'draft' | 'final' | 'consolidated';
+
 export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const router = useRouter();
-    const [viewMode, setViewMode] = useState<'source' | 'draft' | 'final'>('source');
+    const [viewMode, setViewMode] = useState<ViewMode>('source');
     const [hasFinal, setHasFinal] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
     const [projectTitle, setProjectTitle] = useState(projectId);
@@ -96,7 +98,11 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         spellChecker: false,
         status: false,
         previewClass: ["editor-preview", "prose", "prose-indigo", "max-w-none", "prose-p:leading-relaxed", "prose-headings:font-bold"],
-        placeholder: viewMode === 'source' ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified manuscript will appear here...") : (viewMode === 'draft' ? "Generated Draft will appear here..." : "Master Text will appear here..."),
+        placeholder: viewMode === 'source'
+            ? (projectType === 'transcript' ? "Enter raw transcript here..." : "Unified input will appear here...")
+            : (viewMode === 'draft'
+                ? "Generated Draft will appear here..."
+                : (viewMode === 'final' ? "Master Text will appear here..." : "Paste consolidated markdown text here...")),
         minHeight: "500px",
         readOnly: false,
     }), [viewMode, projectType, activeChunkId]);
@@ -472,7 +478,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     }
 
 
-    const handleSave = async (checkMode?: 'source' | 'draft' | 'final') => {
+    const handleSave = async (checkMode?: ViewMode) => {
         const modeToSave = checkMode || viewMode;
         try {
             if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId && activeChunkId !== "FULL_DOC") {
@@ -572,7 +578,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         }
     };
 
-    const handleViewSwitch = async (newMode: 'source' | 'draft' | 'final') => {
+    const handleViewSwitch = async (newMode: ViewMode) => {
         if (newMode === viewMode) return;
 
         if (viewMode === 'final' && masterTextMetaDirty) {
@@ -671,7 +677,17 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     };
 
     const handleExportDoc = async () => {
-        if (!confirm("Export current draft to Google Doc?")) return;
+        if (viewMode === 'final' && masterTextMetaDirty) {
+            const metaSaved = await handleSaveMasterTextMeta();
+            if (!metaSaved) return;
+        }
+
+        if (markdown !== originalMarkdown && !isProcessing) {
+            const saved = await handleSave();
+            if (!saved) return;
+        }
+
+        if (!confirm("Export to Google Doc? Saved consolidated text will be used when present.")) return;
         try {
             const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/export-doc`, { method: "POST" });
             const data = await res.json();
@@ -891,6 +907,15 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             Export to Doc
                         </button>
                     )}
+                    {hasFinal && viewMode === 'consolidated' && (
+                        <button
+                            onClick={handleExportDoc}
+                            className={`px-3 py-1 rounded font-bold text-sm text-blue-700 bg-blue-100 hover:bg-blue-200`}
+                            title="Export consolidated text to Google Doc"
+                        >
+                            Export to Doc
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -1025,27 +1050,43 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 <div className="flex items-center space-x-4">
                                     <div className="flex bg-gray-200 rounded p-1 inline-flex items-center">
                                         <button
-                                            className={`px-3 py-1 text-sm rounded ${viewMode === 'source' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                            className={`px-3 py-1 text-sm rounded whitespace-nowrap ${viewMode === 'source' ? 'bg-white shadow' : 'text-gray-600'}`}
                                             onClick={() => handleViewSwitch('source')}
                                         >
                                             Unified Input
                                         </button>
                                         <button
-                                            className={`px-3 py-1 text-sm rounded ${viewMode === 'draft' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                            className={`px-3 py-1 text-sm rounded whitespace-nowrap ${viewMode === 'draft' ? 'bg-white shadow' : 'text-gray-600'}`}
                                             onClick={() => handleViewSwitch('draft')}
                                         >
                                             Generated Draft
                                         </button>
                                         {hasFinal && (
                                             <button
-                                                className={`px-3 py-1 text-sm rounded ${viewMode === 'final' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                                className={`px-3 py-1 text-sm rounded whitespace-nowrap ${viewMode === 'final' ? 'bg-white shadow' : 'text-gray-600'}`}
                                                 onClick={() => handleViewSwitch('final')}
                                             >
                                                 Master Text
                                             </button>
                                         )}
+                                        {hasFinal && (
+                                            <button
+                                                className={`px-3 py-1 text-sm rounded whitespace-nowrap ${viewMode === 'consolidated' ? 'bg-white shadow' : 'text-gray-600'}`}
+                                                onClick={() => handleViewSwitch('consolidated')}
+                                            >
+                                                Consolidated Text
+                                            </button>
+                                        )}
                                     </div>
-                                    <span>{viewMode === 'source' ? 'Unified Manuscript' : viewMode === 'draft' ? 'Sermon Draft' : 'Master Text Final'} ({markdown.length} chars)</span>
+                                    <span>
+                                        {viewMode === 'source'
+                                            ? 'Unified Input'
+                                            : viewMode === 'draft'
+                                                ? 'Sermon Draft'
+                                                : viewMode === 'final'
+                                                    ? 'Master Text Final'
+                                                    : 'Consolidated Text'} ({markdown.length} chars)
+                                    </span>
                                 </div>
                                 {viewMode === 'source' && (
                                     <button

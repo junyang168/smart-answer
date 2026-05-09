@@ -100,6 +100,20 @@ Goal:
 - preserve stable chunk identities for final review and export
 
 
+### Optional Step 4.5: Consolidated Text
+
+Goal:
+- save a manually merged manuscript after Master Text finalization
+- support merging the note-derived manuscript with another source, such as Dr. Wang sermon transcripts
+- export the consolidated manuscript to Google Docs when it is present
+
+Important:
+- this merge is currently manual and outside the automated generation pipeline
+- the UI provides a `Consolidated Text` tab with a Markdown editor
+- saved content is stored as `consolidated.md`
+- Google Docs export uses `consolidated.md` when it has content; otherwise it uses `final.md`
+
+
 ### Step 5: Editorial Metadata + Export
 
 Goal:
@@ -133,6 +147,7 @@ Views:
 - `Unified Input`
 - `Generated Draft`
 - `Master Text`
+- `Consolidated Text`
 
 Review panels:
 - `TheologicalAuditPanel.tsx`
@@ -147,6 +162,8 @@ Current UI behavior:
 - draft and final are edited chunk-by-chunk
 - `FULL_DOC` can still be selected for whole-document viewing
 - Master Text metadata panel only appears in `Master Text` mode when `FULL_DOC` is selected
+- `Consolidated Text` is a whole-document Markdown editor for manually merged manuscript text
+- export prefers saved `consolidated.md` when it is non-empty
 
 Stage 1 console:
 - `web/src/app/admin/notes-to-sermon/project/[id]/generation/page.tsx`
@@ -180,6 +197,7 @@ Primary files:
 - `stage1_units.json`
 - `draft_v1.md`
 - `final.md`
+- `consolidated.md`
 - `master_text_meta.json`
 
 Stage 1 artifacts:

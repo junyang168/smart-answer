@@ -264,7 +264,7 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
         "  {details_html}"
         "</div>"
         "<div>"
-        "    <a href=\"Https://us02web.zoom.us/j/85114274206?pwd=ZUwq4UzMMH9XmJlkN7fjULnFyKeaVq.1\">Zoom 線上會議</a>"
+        "    <a href=\"https://meet.google.com/mhc-nafs-ahn\">Google 線上會議</a>"
         "</div>"
         "<div><br/><br/>"
         "<a href=\"https://www.dallas-hlc.org/resources/articles\">觀看過往團契分享</a>"
