@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ExternalLink, Search, Users } from "lucide-react";
+import { ExternalLink, Search, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PublicFellowshipEntry } from "@/app/types/publicFellowship";
@@ -121,8 +121,6 @@ function FellowshipCard({
   entry: PublicFellowshipEntry;
   featured?: boolean;
 }) {
-  const previewLearnings = entry.keyLearnings.slice(0, featured ? 4 : 2);
-
   return (
     <article className={featured ? "" : "rounded-lg border border-gray-200 bg-white p-5 shadow-sm"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -148,19 +146,6 @@ function FellowshipCard({
         <div className="prose prose-slate mt-4 max-w-none text-gray-700 prose-p:leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.summary}</ReactMarkdown>
         </div>
-      )}
-
-      {previewLearnings.length > 0 && (
-        <ul className="mt-4 space-y-2 text-base text-gray-700">
-          {previewLearnings.map((learning, index) => (
-            <li key={index} className="flex gap-2">
-              <BookOpen className="mt-0.5 h-4 w-4 flex-none text-[#8B4513]" />
-              <div className="prose prose-slate max-w-none text-gray-700 prose-p:my-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{learning}</ReactMarkdown>
-              </div>
-            </li>
-          ))}
-        </ul>
       )}
 
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-500">
