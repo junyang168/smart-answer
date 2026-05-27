@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FellowshipDocument } from "@/app/types/fellowship";
 import { PublicFellowshipEntry } from "@/app/types/publicFellowship";
+import { toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
 
 async function fetchFellowship(date: string): Promise<PublicFellowshipEntry> {
   const response = await fetch(`/api/sc_api/fellowships/${encodeURIComponent(date)}`, {
@@ -27,10 +28,6 @@ async function fetchDocuments(date: string): Promise<FellowshipDocument[]> {
     return [];
   }
   return response.json();
-}
-
-function toProxyDocumentUrl(url: string): string {
-  return url.startsWith("/admin/") ? `/api${url}` : url;
 }
 
 export function FellowshipDetail({ date }: { date: string }) {
@@ -154,7 +151,7 @@ export function FellowshipDetail({ date }: { date: string }) {
               {documents.map((document) => (
                 <a
                   key={document.name}
-                  href={toProxyDocumentUrl(document.url)}
+                  href={toFellowshipDocumentHref(entry.isoDate, document)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="rounded-md border border-gray-200 p-4 text-base text-blue-700 hover:border-blue-200 hover:bg-blue-50"

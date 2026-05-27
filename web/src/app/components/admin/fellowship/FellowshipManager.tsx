@@ -23,6 +23,7 @@ import {
   FellowshipSourceLink,
 } from "@/app/types/fellowship";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/app/components/ui/tabs";
+import { toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
 
 const ReactQuill = dynamic(() => import("react-quill"), { ssr: false });
 
@@ -116,10 +117,6 @@ function formatFileSize(size: number): string {
     return `${Math.round(size / 1024)} KB`;
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function toProxyDocumentUrl(url: string): string {
-  return url.startsWith("/admin/") ? `/api${url}` : url;
 }
 
 export function FellowshipManager() {
@@ -1044,7 +1041,7 @@ export function FellowshipManager() {
                             {documents.map((document) => (
                               <a
                                 key={document.name}
-                                href={toProxyDocumentUrl(document.url)}
+                                href={toFellowshipDocumentHref(toIsoDate(entry.date), document)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="block max-w-56 truncate text-blue-600 hover:underline"
