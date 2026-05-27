@@ -7,9 +7,16 @@ import { ArrowLeft, FileText, Lock } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+function encodePathSegments(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 async function fetchMarkdownDocument(date: string, documentPath: string): Promise<string> {
   const response = await fetch(
-    `/api/admin/fellowships/${encodeURIComponent(date)}/documents/${encodeURIComponent(documentPath)}`,
+    `/api/admin/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
