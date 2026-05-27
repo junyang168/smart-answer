@@ -238,14 +238,16 @@ def delete_fellowship(date: str) -> None:
 
 
 def _fellowship_date_to_folder_name(date: str) -> str:
-    try:
-        parsed = datetime.strptime(date, "%m/%d/%Y")
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid fellowship date: {date}",
-        ) from exc
-    return parsed.strftime("%Y-%m-%d")
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(date, fmt)
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid fellowship date: {date}",
+    )
 
 
 def _resolve_fellowship_docs_dir(date: str) -> Path:

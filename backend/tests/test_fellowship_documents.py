@@ -37,6 +37,25 @@ def test_list_fellowship_documents_uses_iso_date_folder(monkeypatch, tmp_path):
     assert documents[0].size == 5
 
 
+def test_list_fellowship_documents_accepts_iso_date(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    documents = service.list_fellowship_documents("2026-05-22")
+
+    assert len(documents) == 1
+    assert documents[0].name == "lesson notes.txt"
+    assert documents[0].url == "/admin/fellowships/2026-05-22/documents/lesson%20notes.txt"
+
+
+def test_get_fellowship_document_path_accepts_iso_date(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    path, media_type = service.get_fellowship_document_path("2026-05-22", "lesson notes.txt")
+
+    assert path.name == "lesson notes.txt"
+    assert media_type == "text/plain"
+
+
 def test_get_fellowship_document_path_rejects_traversal(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
 
