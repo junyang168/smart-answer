@@ -15,6 +15,14 @@ async function fetchFellowships(): Promise<PublicFellowshipEntry[]> {
   return response.json();
 }
 
+function getTodayIsoDate(): string {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function FellowshipArchive() {
   const [entries, setEntries] = useState<PublicFellowshipEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -34,15 +42,20 @@ export function FellowshipArchive() {
       .finally(() => setLoading(false));
   }, []);
 
+  const visibleEntries = useMemo(() => {
+    const todayIso = getTodayIsoDate();
+    return entries.filter((entry) => entry.isoDate <= todayIso);
+  }, [entries]);
+
   const seriesOptions = useMemo(
     () =>
-      Array.from(new Set(entries.map((entry) => entry.series).filter(Boolean) as string[])).sort(),
-    [entries],
+      Array.from(new Set(visibleEntries.map((entry) => entry.series).filter(Boolean) as string[])).sort(),
+    [visibleEntries],
   );
 
   const filteredEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return entries.filter((entry) => {
+    return visibleEntries.filter((entry) => {
       const matchesSeries = !series || entry.series === series;
       const searchable = [entry.title, entry.series, entry.host, entry.date]
         .filter(Boolean)
@@ -50,7 +63,7 @@ export function FellowshipArchive() {
         .toLowerCase();
       return matchesSeries && (!normalizedQuery || searchable.includes(normalizedQuery));
     });
-  }, [entries, query, series]);
+  }, [visibleEntries, query, series]);
 
   const latest = filteredEntries[0];
   const rest = latest ? filteredEntries.slice(1) : filteredEntries;
