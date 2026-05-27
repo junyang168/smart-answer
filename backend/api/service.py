@@ -4,13 +4,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import math
 import shutil
+import mimetypes
 import os
 import os
 import re
 import git
 from decimal import Decimal
 from typing import Optional
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 from collections.abc import Sequence
 
 import httpx
@@ -24,6 +25,7 @@ from .models import (
     DepthOfFaithEpisode,
     DepthOfFaithEpisodeCreate,
     DepthOfFaithEpisodeUpdate,
+    FellowshipDocument,
     FellowshipEntry,
     FellowshipEmailContent,
     FellowshipEmailResult,
@@ -58,7 +60,7 @@ from .sunday_service_email import (
     TEST_RECIPIENT,
     EMAIL_PRODUCTION,
 )
-from .config import SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
+from .config import FELLOWSHIP_DOCS_DIR, SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
 from .ppt_generator import generate_presentation_from_template
 from .scripture import parse_reference, BIBLE_API_TRANSLATION_ZH, ALIAS_TO_API_BOOK, BOOK_SLUG_TO_NAME
 from .webpage_extractor import fetch_lyrics_text
@@ -228,6 +230,65 @@ def delete_fellowship(date: str) -> None:
         repository.delete_fellowship(date)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def _fellowship_date_to_folder_name(date: str) -> str:
+    try:
+        parsed = datetime.strptime(date, "%m/%d/%Y")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid fellowship date: {date}",
+        ) from exc
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _resolve_fellowship_docs_dir(date: str) -> Path:
+    root = FELLOWSHIP_DOCS_DIR.resolve()
+    folder = (root / _fellowship_date_to_folder_name(date)).resolve()
+    if root != folder and root not in folder.parents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fellowship document path")
+    return folder
+
+
+def _fellowship_document_url(date: str, relative_path: str) -> str:
+    return f"/admin/fellowships/{quote(date, safe='')}/documents/{quote(relative_path, safe='')}"
+
+
+def list_fellowship_documents(date: str) -> list[FellowshipDocument]:
+    folder = _resolve_fellowship_docs_dir(date)
+    if not folder.exists():
+        return []
+    if not folder.is_dir():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fellowship docs path is not a directory")
+
+    documents: list[FellowshipDocument] = []
+    for path in sorted(folder.rglob("*"), key=lambda item: item.relative_to(folder).as_posix().lower()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        relative_path = path.relative_to(folder).as_posix()
+        stat = path.stat()
+        documents.append(
+            FellowshipDocument(
+                name=relative_path,
+                url=_fellowship_document_url(date, relative_path),
+                size=stat.st_size,
+                modifiedAt=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
+            )
+        )
+    return documents
+
+
+def get_fellowship_document_path(date: str, document_path: str) -> tuple[Path, str | None]:
+    folder = _resolve_fellowship_docs_dir(date)
+    root = folder.resolve()
+    candidate = (root / document_path).resolve()
+    if root != candidate and root not in candidate.parents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fellowship document path")
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fellowship document not found")
+    media_type, _encoding = mimetypes.guess_type(candidate.name)
+    return candidate, media_type
 
 
 def _build_default_fellowship_email_subject(entry: FellowshipEntry) -> str:

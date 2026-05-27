@@ -1,4 +1,5 @@
 import {
+  FellowshipDocument,
   FellowshipEmailContent,
   FellowshipEmailResult,
   FellowshipEntry,
@@ -37,6 +38,14 @@ async function parseJson<T>(response: Response): Promise<T> {
 
 export async function fetchFellowships(): Promise<FellowshipEntry[]> {
   const response = await fetch(resolveApiUrl(API_BASE_PATH), { cache: "no-store" });
+  return parseJson(response);
+}
+
+export async function fetchFellowshipDocuments(date: string): Promise<FellowshipDocument[]> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/documents`),
+    { cache: "no-store" },
+  );
   return parseJson(response);
 }
 

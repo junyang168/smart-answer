@@ -127,6 +127,15 @@ class FellowshipEmailContent(BaseModel):
     html: str = ""
 
 
+class FellowshipDocument(BaseModel):
+    name: str
+    url: str
+    size: int
+    modified_at: datetime = Field(..., alias="modifiedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 SongSource = Literal["custom", "hymnal"]
 SundayWorkerRole = Literal["司會", "領詩", "證道講員", "讀經經文", "司琴"]
 

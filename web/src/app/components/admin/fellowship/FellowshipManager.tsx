@@ -6,6 +6,7 @@ import "react-quill/dist/quill.snow.css";
 import {
   createFellowship,
   deleteFellowship,
+  fetchFellowshipDocuments,
   fetchFellowshipEmailContent,
   fetchFellowships,
   sendFellowshipEmail,
@@ -13,6 +14,7 @@ import {
   updateFellowshipEmailContent,
 } from "@/app/admin/fellowship/api";
 import {
+  FellowshipDocument,
   FellowshipEmailContent,
   FellowshipEntry,
 } from "@/app/types/fellowship";
@@ -32,6 +34,8 @@ type FetchState =
   | { status: "idle" | "loading"; data: FellowshipEntry[] }
   | { status: "ready"; data: FellowshipEntry[] }
   | { status: "error"; data: FellowshipEntry[]; error: string };
+
+type DocumentsByDate = Record<string, FellowshipDocument[]>;
 
 const emptyForm: FormState = {
   sequence: "",
@@ -92,8 +96,23 @@ function looksLikeHtmlDocument(value: string): boolean {
   return /<!doctype html|<html[\s>]|<head[\s>]|<body[\s>]/i.test(value);
 }
 
+function formatFileSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function toProxyDocumentUrl(url: string): string {
+  return url.startsWith("/admin/") ? `/api${url}` : url;
+}
+
 export function FellowshipManager() {
   const [state, setState] = useState<FetchState>({ status: "idle", data: [] });
+  const [documentsByDate, setDocumentsByDate] = useState<DocumentsByDate>({});
   const [form, setForm] = useState<FormState>(emptyForm);
   const [activeTab, setActiveTab] = useState("details");
   const [editingSequence, setEditingSequence] = useState<number | null>(null);
@@ -140,6 +159,16 @@ export function FellowshipManager() {
     try {
       const entries = await fetchFellowships();
       setState({ status: "ready", data: entries });
+      const documentPairs = await Promise.all(
+        entries.map(async (entry): Promise<[string, FellowshipDocument[]]> => {
+          try {
+            return [entry.date, await fetchFellowshipDocuments(entry.date)];
+          } catch {
+            return [entry.date, []];
+          }
+        }),
+      );
+      setDocumentsByDate(Object.fromEntries(documentPairs));
     } catch (err) {
       const message = err instanceof Error ? err.message : "載入團契資料失敗";
       setState((prev) => ({ status: "error", data: prev.data, error: message }));
@@ -650,6 +679,9 @@ export function FellowshipManager() {
                   Email
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  文件
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   操作
                 </th>
               </tr>
@@ -657,44 +689,67 @@ export function FellowshipManager() {
             <tbody className="divide-y divide-gray-200">
               {sortedEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">
                     尚未建立任何團契資訊。
                   </td>
                 </tr>
               ) : (
-                sortedEntries.map((entry, index) => (
-                  <tr
-                    key={entry.date || `${entry.title ?? ""}-${index}`}
-                    className="transition hover:bg-blue-50"
-                  >
-                    <td className="px-4 py-3 text-sm text-gray-600">{entry.date}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{entry.host ?? ""}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{entry.title}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{entry.series ?? ""}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{entry.sequence ?? ""}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {entry.emailSubject || entry.emailBodyHtml ? "已自訂" : "使用預設"}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(entry)}
-                          className="rounded-md border border-blue-200 px-3 py-1 text-blue-600 hover:bg-blue-50"
-                        >
-                          編輯
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(entry.date)}
-                          className="rounded-md border border-red-200 px-3 py-1 text-red-600 hover:bg-red-50"
-                        >
-                          刪除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                sortedEntries.map((entry, index) => {
+                  const documents = documentsByDate[entry.date] ?? [];
+                  return (
+                    <tr
+                      key={entry.date || `${entry.title ?? ""}-${index}`}
+                      className="transition hover:bg-blue-50"
+                    >
+                      <td className="px-4 py-3 text-sm text-gray-600">{entry.date}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{entry.host ?? ""}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{entry.title}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{entry.series ?? ""}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{entry.sequence ?? ""}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {entry.emailSubject || entry.emailBodyHtml ? "已自訂" : "使用預設"}
+                      </td>
+                      <td className="min-w-48 px-4 py-3 text-sm text-gray-600">
+                        {documents.length > 0 ? (
+                          <div className="space-y-1">
+                            {documents.map((document) => (
+                              <a
+                                key={document.name}
+                                href={toProxyDocumentUrl(document.url)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block max-w-56 truncate text-blue-600 hover:underline"
+                                title={`${document.name} (${formatFileSize(document.size)})`}
+                              >
+                                {document.name}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">無</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(entry)}
+                            className="rounded-md border border-blue-200 px-3 py-1 text-blue-600 hover:bg-blue-50"
+                          >
+                            編輯
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(entry.date)}
+                            className="rounded-md border border-red-200 px-3 py-1 text-red-600 hover:bg-red-50"
+                          >
+                            刪除
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

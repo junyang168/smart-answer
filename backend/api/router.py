@@ -12,6 +12,7 @@ from .models import (
     DepthOfFaithEpisodeCreate,
     DepthOfFaithEpisodeUpdate,
     DepthOfFaithAudioUploadResponse,
+    FellowshipDocument,
     FellowshipEntry,
     FellowshipEmailContent,
     FellowshipEmailResult,
@@ -49,6 +50,8 @@ from .service import (
     get_fellowship_email_content,
     update_fellowship_email_content,
     email_fellowship,
+    list_fellowship_documents,
+    get_fellowship_document_path,
     list_sermon_series,
     create_sermon_series,
     update_sermon_series,
@@ -193,6 +196,17 @@ def write_fellowship_email_content(
 @fellowship_router.post("/{date:path}/email", response_model=FellowshipEmailResult)
 def send_fellowship_email(date: str) -> FellowshipEmailResult:
     return email_fellowship(date)
+
+
+@fellowship_router.get("/{date:path}/documents", response_model=list[FellowshipDocument])
+def read_fellowship_documents(date: str) -> list[FellowshipDocument]:
+    return list_fellowship_documents(date)
+
+
+@fellowship_router.get("/{date:path}/documents/{document_path:path}")
+def download_fellowship_document(date: str, document_path: str) -> FileResponse:
+    path, media_type = get_fellowship_document_path(date, document_path)
+    return FileResponse(path, media_type=media_type, filename=path.name)
 
 
 @fellowship_router.put("/{date:path}", response_model=FellowshipEntry)

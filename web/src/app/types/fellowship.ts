@@ -19,3 +19,10 @@ export interface FellowshipEmailResult {
   subject: string;
   dryRun?: boolean;
 }
+
+export interface FellowshipDocument {
+  name: string;
+  url: string;
+  size: number;
+  modifiedAt: string;
+}
