@@ -19,6 +19,11 @@ from backend.api.gemini_client import gemini_client
 
 from .access_control import AccessControl
 from .copilot import Copilot, ChatMessage, Document
+from .fellowship_schedule import (
+    compute_next_fellowship,
+    load_fellowship_entries,
+    save_fellowship_entries,
+)
 from .image_to_text import ImageToText
 from .script_delta import ScriptDelta
 from .sermon_comment import SermonCommentManager
@@ -81,8 +86,8 @@ class SermonManager:
         self._quick_search_cache: Dict[str, Tuple[datetime, List[str]]] = {}
         self._quick_search_ttl = timedelta(minutes=10)
 
-        with open(os.path.join(self.config_folder, 'fellowship.json'), 'r', encoding='utf-8') as f:
-            self.fellowship = json.load(f)
+        self.fellowship_file = Path(self.config_folder) / "fellowship.json"
+        self.fellowship = load_fellowship_entries(self.fellowship_file)
 
 
 
@@ -94,25 +99,12 @@ class SermonManager:
         observer.start()
 
     def get_next_fellowship(self):
-        last_fellowship = self.fellowship[-1] 
-        last_date_str = last_fellowship['date'] 
-        last_date = datetime.strptime(last_date_str, "%m/%d/%Y")
-
-        # If the last recorded date is already in the future, return it
-        if last_date > datetime.now():
-             return {'date': last_date.strftime("%m/%d/%Y")}
-
-        next_date = last_date + timedelta(weeks=2)
-        if next_date < datetime.now():
-            while next_date < datetime.now():
-                last_date = next_date
-                self.fellowship.append({'date': next_date.strftime("%m/%d/%Y")})
-                next_date = last_date + timedelta(weeks=2)
-            
-            with open(os.path.join(self.config_folder, 'fellowship.json'), 'w', encoding='utf-8') as f:
-                json.dump(self.fellowship, f, ensure_ascii=False, indent=4)
-
-        return {'date': next_date.strftime("%m/%d/%Y")}
+        entries = load_fellowship_entries(self.fellowship_file)
+        next_date, updated_entries, changed = compute_next_fellowship(entries)
+        if changed:
+            save_fellowship_entries(self.fellowship_file, updated_entries)
+        self.fellowship = updated_entries
+        return {"date": next_date}
 
     def get_file_path(self,type:str, item:str):
         return os.path.join(self.base_folder, type, item + '.json')
