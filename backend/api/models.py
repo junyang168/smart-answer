@@ -101,14 +101,47 @@ class GenerateSummaryResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class FellowshipSourceLink(BaseModel):
+    label: str = ""
+    url: str = ""
+
+
 class FellowshipEntry(BaseModel):
     date: str
     host: Optional[str] = None
     title: Optional[str] = None
     series: Optional[str] = None
     sequence: Optional[int] = None
+    source_links: List[FellowshipSourceLink] = Field(default_factory=list, alias="sourceLinks")
+    summary: Optional[str] = None
+    key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    key_learnings_generated_at: Optional[datetime] = Field(None, alias="keyLearningsGeneratedAt")
     email_subject: Optional[str] = Field(None, alias="emailSubject")
     email_body_html: Optional[str] = Field(None, alias="emailBodyHtml")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipPublicEntry(BaseModel):
+    date: str
+    iso_date: str = Field(..., alias="isoDate")
+    host: Optional[str] = None
+    title: Optional[str] = None
+    series: Optional[str] = None
+    sequence: Optional[int] = None
+    source_links: List[FellowshipSourceLink] = Field(default_factory=list, alias="sourceLinks")
+    summary: Optional[str] = None
+    key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    has_documents: bool = Field(False, alias="hasDocuments")
+    document_count: int = Field(0, alias="documentCount")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipLearningContent(BaseModel):
+    summary: str = ""
+    key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    generated_at: Optional[datetime] = Field(None, alias="generatedAt")
 
     model_config = ConfigDict(populate_by_name=True)
 

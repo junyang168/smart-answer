@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authConfig } from "@/app/utils/auth";
 
 const BACKEND_BASE = process.env.FULL_ARTICLE_SERVICE_URL?.replace(/\/$/, "");
 
@@ -13,6 +15,14 @@ function buildBackendUrl(pathSegments: string[] | undefined, search: string): st
 }
 
 async function proxy(request: NextRequest, params: { path?: string[] }) {
+  const requestedPath = params.path?.join("/") ?? "";
+  if (requestedPath.split("/").includes("documents")) {
+    const session = await getServerSession(authConfig);
+    if (!session) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+  }
+
   const targetUrl = buildBackendUrl(params.path, request.nextUrl.search);
   const headers = new Headers();
 

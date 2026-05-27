@@ -14,6 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
 from backend.api.config import DATA_BASE_PATH
+from backend.api.service import get_public_fellowship, list_public_fellowships
 
 from .copilot import ChatMessage
 from .qaManager import QAItem, qaManager
@@ -451,6 +452,16 @@ def get_fellowship():
     return sermon_manager.get_next_fellowship()
 
 
+@router.get("/fellowships")
+def get_fellowships():
+    return list_public_fellowships()
+
+
+@router.get("/fellowships/{date}")
+def get_fellowship_detail(date: str):
+    return get_public_fellowship(date)
+
+
 @router.post("/search")
 def search_script(req: SearchRequest):
     return sermon_manager.search_script(req.item, req.text_list)
@@ -499,5 +510,4 @@ def delete_qa(user_id: str, qa_id: str):
 @router.get("/qas/{user_id}/{qa_id}")
 def get_qa_by_id(user_id: str, qa_id: str) -> Optional[QAItem]:
     return qa_manager.get_qa_by_id(user_id, qa_id)
-
 

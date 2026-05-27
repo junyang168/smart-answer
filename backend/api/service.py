@@ -5,9 +5,11 @@ from pathlib import Path
 import math
 import shutil
 import mimetypes
-import os
+import json
 import os
 import re
+import zipfile
+import xml.etree.ElementTree as ET
 import git
 from decimal import Decimal
 from typing import Optional
@@ -17,6 +19,7 @@ from collections.abc import Sequence
 import httpx
 from opencc import OpenCC
 from fastapi import HTTPException, UploadFile, status
+from pptx import Presentation
 
 from .gemini_client import gemini_client
 from .models import (
@@ -29,6 +32,8 @@ from .models import (
     FellowshipEntry,
     FellowshipEmailContent,
     FellowshipEmailResult,
+    FellowshipLearningContent,
+    FellowshipPublicEntry,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -289,6 +294,181 @@ def get_fellowship_document_path(date: str, document_path: str) -> tuple[Path, s
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fellowship document not found")
     media_type, _encoding = mimetypes.guess_type(candidate.name)
     return candidate, media_type
+
+
+def _normalize_fellowship_date(value: str) -> str:
+    value = value.strip()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).strftime("%m/%d/%Y")
+        except ValueError:
+            continue
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid fellowship date: {value}")
+
+
+def _fellowship_iso_date(date: str) -> str:
+    return datetime.strptime(date, "%m/%d/%Y").strftime("%Y-%m-%d")
+
+
+def _to_public_fellowship_entry(entry: FellowshipEntry) -> FellowshipPublicEntry:
+    documents = list_fellowship_documents(entry.date)
+    return FellowshipPublicEntry(
+        date=entry.date,
+        isoDate=_fellowship_iso_date(entry.date),
+        host=entry.host,
+        title=entry.title,
+        series=entry.series,
+        sequence=entry.sequence,
+        sourceLinks=entry.source_links,
+        summary=entry.summary,
+        keyLearnings=entry.key_learnings,
+        hasDocuments=bool(documents),
+        documentCount=len(documents),
+    )
+
+
+def list_public_fellowships() -> list[FellowshipPublicEntry]:
+    return [_to_public_fellowship_entry(entry) for entry in list_fellowships()]
+
+
+def get_public_fellowship(date: str) -> FellowshipPublicEntry:
+    normalized_date = _normalize_fellowship_date(date)
+    for entry in list_fellowships():
+        if entry.date == normalized_date:
+            return _to_public_fellowship_entry(entry)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+
+
+def update_fellowship_learning_content(
+    date: str,
+    payload: FellowshipLearningContent,
+) -> FellowshipLearningContent:
+    normalized_date = _normalize_fellowship_date(date)
+    for entry in list_fellowships():
+        if entry.date == normalized_date:
+            updated = entry.model_copy(
+                update={
+                    "summary": payload.summary.strip(),
+                    "key_learnings": [item.strip() for item in payload.key_learnings if item.strip()],
+                    "key_learnings_generated_at": payload.generated_at,
+                }
+            )
+            repository.update_fellowship(normalized_date, updated)
+            return FellowshipLearningContent(
+                summary=updated.summary or "",
+                keyLearnings=updated.key_learnings,
+                generatedAt=updated.key_learnings_generated_at,
+            )
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+
+
+def _extract_text_from_docx(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            xml_text = archive.read("word/document.xml")
+    except Exception:
+        return ""
+    root = ET.fromstring(xml_text)
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    paragraphs: list[str] = []
+    for paragraph in root.findall(".//w:p", namespace):
+        text = "".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
+
+
+def _extract_text_from_pptx(path: Path) -> str:
+    try:
+        presentation = Presentation(path)
+    except Exception:
+        return ""
+    chunks: list[str] = []
+    for slide_index, slide in enumerate(presentation.slides, start=1):
+        slide_text: list[str] = []
+        for shape in slide.shapes:
+            text = getattr(shape, "text", "")
+            if text and text.strip():
+                slide_text.append(text.strip())
+        if slide_text:
+            chunks.append(f"Slide {slide_index}\n" + "\n".join(slide_text))
+    return "\n\n".join(chunks)
+
+
+def _extract_text_from_fellowship_docs(date: str) -> str:
+    folder = _resolve_fellowship_docs_dir(date)
+    if not folder.exists():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fellowship docs folder found")
+    chunks: list[str] = []
+    for path in sorted(folder.rglob("*"), key=lambda item: item.name.lower()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        suffix = path.suffix.lower()
+        text = ""
+        if suffix in {".txt", ".md"}:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        elif suffix == ".docx":
+            text = _extract_text_from_docx(path)
+        elif suffix == ".pptx":
+            text = _extract_text_from_pptx(path)
+        if text.strip():
+            chunks.append(f"# {path.name}\n{text.strip()}")
+    combined = "\n\n---\n\n".join(chunks).strip()
+    if not combined:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No supported text content found in docs")
+    return combined[:45000]
+
+
+def _parse_learning_generation(raw_text: str) -> FellowshipLearningContent:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"```$", "", text).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to parse generated key learnings") from exc
+    summary = str(data.get("summary") or "").strip()
+    key_learnings = data.get("keyLearnings") or data.get("key_learnings") or []
+    if not isinstance(key_learnings, list):
+        key_learnings = []
+    cleaned = [str(item).strip() for item in key_learnings if str(item).strip()]
+    return FellowshipLearningContent(
+        summary=summary,
+        keyLearnings=cleaned[:8],
+        generatedAt=datetime.now(timezone.utc),
+    )
+
+
+def generate_fellowship_learning_content(date: str) -> FellowshipLearningContent:
+    normalized_date = _normalize_fellowship_date(date)
+    entry = None
+    for candidate in list_fellowships():
+        if candidate.date == normalized_date:
+            entry = candidate
+            break
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+
+    docs_text = _extract_text_from_fellowship_docs(normalized_date)
+    prompt = (
+        "你是教會團契查經內容整理同工。請根據以下團契文件，產生給公開網頁使用的學習回顧。"
+        "受眾包含已參加團契的會眾，以及想了解本教會團契的訪客。\n\n"
+        "要求：\n"
+        "1. 使用繁體中文。\n"
+        "2. summary 需 80-140 字，清楚說明本次查經主題與屬靈焦點，可使用簡潔 Markdown。\n"
+        "3. keyLearnings 需 3-6 點，每點一句完整、具體、可回顧的學習重點，可使用簡潔 Markdown。\n"
+        "4. 不要提到 AI、文件來源限制或內部管理流程。\n"
+        "5. 只輸出 JSON，格式為 {\"summary\":\"...\",\"keyLearnings\":[\"...\"]}，Markdown 內容放在字串內。\n\n"
+        f"團契資料：日期 {entry.date}，主題 {entry.title or ''}，系列 {entry.series or ''}，主講 {entry.host or ''}\n\n"
+        f"文件內容：\n{docs_text}"
+    )
+    try:
+        generated = gemini_client.generate(prompt)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    content = _parse_learning_generation(generated)
+    return update_fellowship_learning_content(normalized_date, content)
 
 
 def _build_default_fellowship_email_subject(entry: FellowshipEntry) -> str:

@@ -24,6 +24,10 @@ export default (phase, { defaultConfig }) => {
           destination: '/api/auth/:path*',
         },
         {
+          source: '/api/admin/fellowships/:path*',
+          destination: '/api/admin/fellowships/:path*',
+        },
+        {
           source: '/api/:path((?!auth).*)',
           destination,
         },

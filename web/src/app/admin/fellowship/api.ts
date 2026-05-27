@@ -3,6 +3,7 @@ import {
   FellowshipEmailContent,
   FellowshipEmailResult,
   FellowshipEntry,
+  FellowshipLearningContent,
 } from "@/app/types/fellowship";
 
 const API_BASE_PATH = "/api/admin/fellowships";
@@ -64,6 +65,28 @@ export async function updateFellowship(date: string, entry: FellowshipEntry): Pr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entry),
   });
+  return parseJson(response);
+}
+
+export async function updateFellowshipLearning(
+  date: string,
+  content: FellowshipLearningContent,
+): Promise<FellowshipLearningContent> {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/learning`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(content),
+  });
+  return parseJson(response);
+}
+
+export async function generateFellowshipLearning(date: string): Promise<FellowshipLearningContent> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/learning/generate`),
+    {
+      method: "POST",
+    },
+  );
   return parseJson(response);
 }
 

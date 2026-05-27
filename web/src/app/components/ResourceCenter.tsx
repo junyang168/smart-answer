@@ -31,6 +31,13 @@ const resourceCardsData = [
     linkLabel: '查看系列',
   },
   {
+    icon: Users,
+    title: '團契查經回顧',
+    description: `回顧雙週團契查經的主題、學習重點與來源連結，也讓新朋友認識我們如何一起查考聖經。`,
+    link: '/resources/fellowship',
+    linkLabel: '查看回顧',
+  },
+  {
     icon: Mic,
     title: '講道中心',
     description: `所有講道都配備了由 AI 生成並經同工校對的**簡介、要點和完整文字稿**。您可以像搜索文章一樣， 精準定位任何講道內容。`,

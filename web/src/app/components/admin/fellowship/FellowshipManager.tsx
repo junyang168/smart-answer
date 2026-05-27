@@ -9,14 +9,18 @@ import {
   fetchFellowshipDocuments,
   fetchFellowshipEmailContent,
   fetchFellowships,
+  generateFellowshipLearning,
   sendFellowshipEmail,
   updateFellowship,
   updateFellowshipEmailContent,
+  updateFellowshipLearning,
 } from "@/app/admin/fellowship/api";
 import {
   FellowshipDocument,
   FellowshipEmailContent,
   FellowshipEntry,
+  FellowshipLearningContent,
+  FellowshipSourceLink,
 } from "@/app/types/fellowship";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/app/components/ui/tabs";
 
@@ -28,6 +32,7 @@ interface FormState {
   host: string;
   title: string;
   series: string;
+  sourceLinks: FellowshipSourceLink[];
 }
 
 type FetchState =
@@ -43,11 +48,18 @@ const emptyForm: FormState = {
   host: "",
   title: "",
   series: "",
+  sourceLinks: [],
 };
 
 const emptyEmailContent: FellowshipEmailContent = {
   subject: "",
   html: "",
+};
+
+const emptyLearningContent: FellowshipLearningContent = {
+  summary: "",
+  keyLearnings: [],
+  generatedAt: null,
 };
 
 const toIsoDate = (value: string) => {
@@ -125,6 +137,11 @@ export function FellowshipManager() {
   const [emailSaving, setEmailSaving] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [learningContent, setLearningContent] =
+    useState<FellowshipLearningContent>(emptyLearningContent);
+  const [learningSaving, setLearningSaving] = useState(false);
+  const [learningGenerating, setLearningGenerating] = useState(false);
+  const [learningError, setLearningError] = useState<string | null>(null);
 
   const emailEditorModules = useMemo(
     () => ({
@@ -212,6 +229,22 @@ export function FellowshipManager() {
     }));
   }, []);
 
+  const syncEntryLearningContent = useCallback((date: string, content: FellowshipLearningContent) => {
+    setState((prev) => ({
+      ...prev,
+      data: prev.data.map((entry) =>
+        entry.date === date
+          ? {
+              ...entry,
+              summary: content.summary,
+              keyLearnings: content.keyLearnings,
+              keyLearningsGeneratedAt: content.generatedAt ?? entry.keyLearningsGeneratedAt ?? null,
+            }
+          : entry,
+      ),
+    }));
+  }, []);
+
   const resetForm = useCallback(() => {
     setForm(emptyForm);
     setEditingSequence(null);
@@ -219,13 +252,42 @@ export function FellowshipManager() {
     setEmailContent(emptyEmailContent);
     setEmailError(null);
     setEmailLoading(false);
+    setLearningContent(emptyLearningContent);
+    setLearningError(null);
   }, []);
 
   const handleChange =
-    (field: keyof FormState) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    (field: Exclude<keyof FormState, "sourceLinks">) =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
       const value = event.target.value;
       setForm((prev) => ({ ...prev, [field]: value }));
     };
+
+  const handleSourceLinkChange =
+    (index: number, field: keyof FellowshipSourceLink) =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setForm((prev) => ({
+        ...prev,
+        sourceLinks: prev.sourceLinks.map((link, linkIndex) =>
+          linkIndex === index ? { ...link, [field]: value } : link,
+        ),
+      }));
+    };
+
+  const addSourceLink = () => {
+    setForm((prev) => ({
+      ...prev,
+      sourceLinks: [...prev.sourceLinks, { label: "", url: "" }],
+    }));
+  };
+
+  const removeSourceLink = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      sourceLinks: prev.sourceLinks.filter((_link, linkIndex) => linkIndex !== index),
+    }));
+  };
 
   const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value;
@@ -243,6 +305,36 @@ export function FellowshipManager() {
     setForm((prev) => ({ ...prev, date: value }));
   };
 
+  const handleLearningSummaryChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    setLearningContent((prev) => ({ ...prev, summary: value }));
+  };
+
+  const handleKeyLearningChange =
+    (index: number) => (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setLearningContent((prev) => ({
+        ...prev,
+        keyLearnings: prev.keyLearnings.map((item, itemIndex) =>
+          itemIndex === index ? value : item,
+        ),
+      }));
+    };
+
+  const addKeyLearning = () => {
+    setLearningContent((prev) => ({
+      ...prev,
+      keyLearnings: [...prev.keyLearnings, ""],
+    }));
+  };
+
+  const removeKeyLearning = (index: number) => {
+    setLearningContent((prev) => ({
+      ...prev,
+      keyLearnings: prev.keyLearnings.filter((_item, itemIndex) => itemIndex !== index),
+    }));
+  };
+
   const handleEdit = (entry: FellowshipEntry) => {
     setEditingSequence(entry.sequence ?? null);
     setEditingDate(entry.date);
@@ -252,9 +344,18 @@ export function FellowshipManager() {
       host: entry.host ?? "",
       title: entry.title ?? "",
       series: entry.series ?? "",
+      sourceLinks: entry.sourceLinks?.length
+        ? entry.sourceLinks.map((link) => ({ label: link.label ?? "", url: link.url ?? "" }))
+        : [],
     });
     setFeedback(null);
     setError(null);
+    setLearningError(null);
+    setLearningContent({
+      summary: entry.summary ?? "",
+      keyLearnings: entry.keyLearnings?.length ? [...entry.keyLearnings] : [],
+      generatedAt: entry.keyLearningsGeneratedAt ?? null,
+    });
   };
 
   useEffect(() => {
@@ -348,12 +449,30 @@ export function FellowshipManager() {
     const formattedDate = toDisplayDate(trimmedDate);
     const effectiveSequence =
       parsedSequence != null ? parsedSequence : editingSequence != null ? editingSequence : null;
+    const sourceLinks = form.sourceLinks
+      .map((link) => ({
+        label: link.label.trim(),
+        url: link.url.trim(),
+      }))
+      .filter((link) => link.label || link.url);
+    const incompleteSourceLink = sourceLinks.find((link) => !link.label || !link.url);
+    if (incompleteSourceLink) {
+      setError("來源連結需同時填寫名稱與 URL");
+      setSaving(false);
+      return;
+    }
 
     const payload: FellowshipEntry = {
       date: formattedDate,
       host: form.host.trim(),
       title: form.title.trim(),
       series: form.series.trim(),
+      sourceLinks,
+      summary: currentEntry?.summary ?? "",
+      keyLearnings: currentEntry?.keyLearnings ?? [],
+      keyLearningsGeneratedAt: currentEntry?.keyLearningsGeneratedAt ?? null,
+      emailSubject: currentEntry?.emailSubject ?? null,
+      emailBodyHtml: currentEntry?.emailBodyHtml ?? null,
       ...(effectiveSequence != null ? { sequence: effectiveSequence } : {}),
     };
 
@@ -459,6 +578,53 @@ export function FellowshipManager() {
 
   const previewInFrame = looksLikeHtmlDocument(emailContent.html);
 
+  const handleLearningSave = async () => {
+    if (!editingDate) {
+      setLearningError("請先選擇既有團契資料");
+      return;
+    }
+    const payload: FellowshipLearningContent = {
+      summary: learningContent.summary.trim(),
+      keyLearnings: learningContent.keyLearnings.map((item) => item.trim()).filter(Boolean),
+      generatedAt: learningContent.generatedAt ?? null,
+    };
+    setLearningSaving(true);
+    setLearningError(null);
+    setFeedback(null);
+    try {
+      const saved = await updateFellowshipLearning(editingDate, payload);
+      setLearningContent(saved);
+      syncEntryLearningContent(editingDate, saved);
+      setFeedback("已儲存團契學習回顧");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "儲存團契學習回顧失敗";
+      setLearningError(message);
+    } finally {
+      setLearningSaving(false);
+    }
+  };
+
+  const handleLearningGenerate = async () => {
+    if (!editingDate) {
+      setLearningError("請先選擇既有團契資料");
+      return;
+    }
+    setLearningGenerating(true);
+    setLearningError(null);
+    setFeedback(null);
+    try {
+      const generated = await generateFellowshipLearning(editingDate);
+      setLearningContent(generated);
+      syncEntryLearningContent(editingDate, generated);
+      setFeedback("已從團契文件產生學習回顧，請確認後可再手動調整");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "產生團契學習回顧失敗";
+      setLearningError(message);
+    } finally {
+      setLearningGenerating(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <section className="space-y-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -481,8 +647,9 @@ export function FellowshipManager() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 md:inline-flex md:w-auto">
+          <TabsList className="grid w-full grid-cols-3 md:inline-flex md:w-auto">
             <TabsTrigger value="details">團契資料管理</TabsTrigger>
+            <TabsTrigger value="learning">學習回顧</TabsTrigger>
             <TabsTrigger value="email">團契 Email 通訊</TabsTrigger>
           </TabsList>
 
@@ -539,6 +706,49 @@ export function FellowshipManager() {
                   className="mt-1 rounded-md border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </label>
+              <div className="space-y-3 md:col-span-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-gray-700">來源連結</span>
+                  <button
+                    type="button"
+                    onClick={addSourceLink}
+                    className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    新增來源
+                  </button>
+                </div>
+                {form.sourceLinks.length > 0 ? (
+                  <div className="space-y-2">
+                    {form.sourceLinks.map((link, index) => (
+                      <div key={index} className="grid gap-2 md:grid-cols-[1fr_1.5fr_auto]">
+                        <input
+                          type="text"
+                          value={link.label}
+                          onChange={handleSourceLinkChange(index, "label")}
+                          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="來源名稱，例如王守仁牧師講道"
+                        />
+                        <input
+                          type="url"
+                          value={link.url}
+                          onChange={handleSourceLinkChange(index, "url")}
+                          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="https://..."
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeSourceLink(index)}
+                          className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">尚未加入來源連結。</p>
+                )}
+              </div>
               <div className="flex justify-end gap-2 md:col-span-2">
                 {editingDate != null && (
                   <button
@@ -558,6 +768,102 @@ export function FellowshipManager() {
                 </button>
               </div>
             </form>
+          </TabsContent>
+
+          <TabsContent value="learning" className="mt-0">
+            <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-6 shadow-sm">
+              <header className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold text-emerald-950">團契學習回顧</h2>
+                  <p className="mt-1 text-sm text-emerald-700">
+                    {editingDate
+                      ? `目前編輯 ${editingDate} 的公開學習重點。`
+                      : "請先從下方表格選擇一筆既有團契資料，再編輯學習回顧。"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLearningGenerate}
+                    disabled={!editingDate || learningGenerating || learningSaving}
+                    className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:text-emerald-300"
+                  >
+                    {learningGenerating ? "產生中…" : "從文件產生"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLearningSave}
+                    disabled={!editingDate || learningGenerating || learningSaving}
+                    className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                  >
+                    {learningSaving ? "儲存中…" : "儲存回顧"}
+                  </button>
+                </div>
+              </header>
+
+              {learningError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {learningError}
+                </div>
+              )}
+
+              <label className="flex flex-col">
+                <span className="text-sm font-medium text-emerald-950">公開摘要（Markdown）</span>
+                <textarea
+                  value={learningContent.summary}
+                  onChange={handleLearningSummaryChange}
+                  disabled={!editingDate || learningGenerating || learningSaving}
+                  rows={4}
+                  className="mt-1 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-gray-100"
+                  placeholder="可使用 Markdown 簡短介紹本次團契查經的主題與屬靈焦點，例如 **信心的回應** 或 [來源](https://...)"
+                />
+              </label>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium text-emerald-950">學習重點（Markdown）</span>
+                  <button
+                    type="button"
+                    onClick={addKeyLearning}
+                    disabled={!editingDate || learningGenerating || learningSaving}
+                    className="rounded-md border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:text-emerald-300"
+                  >
+                    新增重點
+                  </button>
+                </div>
+                {learningContent.keyLearnings.length > 0 ? (
+                  <div className="space-y-2">
+                    {learningContent.keyLearnings.map((item, index) => (
+                      <div key={index} className="grid gap-2 md:grid-cols-[1fr_auto]">
+                        <textarea
+                          value={item}
+                          onChange={handleKeyLearningChange(index)}
+                          disabled={!editingDate || learningGenerating || learningSaving}
+                          rows={2}
+                          className="min-h-20 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-gray-100"
+                          placeholder="輸入一項學習重點，可使用 Markdown，例如 **基督是教會的根基**"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeKeyLearning(index)}
+                          disabled={!editingDate || learningGenerating || learningSaving}
+                          className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                        >
+                          移除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">尚未建立學習重點。</p>
+                )}
+                {learningContent.generatedAt && (
+                  <p className="text-xs text-emerald-700">
+                    最近產生時間：{new Date(learningContent.generatedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="email" className="mt-0">
@@ -679,6 +985,9 @@ export function FellowshipManager() {
                   Email
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  來源
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                   文件
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -689,7 +998,7 @@ export function FellowshipManager() {
             <tbody className="divide-y divide-gray-200">
               {sortedEntries.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">
                     尚未建立任何團契資訊。
                   </td>
                 </tr>
@@ -708,6 +1017,26 @@ export function FellowshipManager() {
                       <td className="px-4 py-3 text-sm text-gray-700">{entry.sequence ?? ""}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {entry.emailSubject || entry.emailBodyHtml ? "已自訂" : "使用預設"}
+                      </td>
+                      <td className="min-w-48 px-4 py-3 text-sm text-gray-600">
+                        {entry.sourceLinks?.length ? (
+                          <div className="space-y-1">
+                            {entry.sourceLinks.map((link, linkIndex) => (
+                              <a
+                                key={`${link.url}-${linkIndex}`}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block max-w-56 truncate text-blue-600 hover:underline"
+                                title={link.url}
+                              >
+                                {link.label || link.url}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">無</span>
+                        )}
                       </td>
                       <td className="min-w-48 px-4 py-3 text-sm text-gray-600">
                         {documents.length > 0 ? (

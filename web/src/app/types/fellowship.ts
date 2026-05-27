@@ -1,11 +1,26 @@
+export interface FellowshipSourceLink {
+  label: string;
+  url: string;
+}
+
 export interface FellowshipEntry {
   date: string;
   host?: string | null;
   title?: string | null;
   series?: string | null;
   sequence?: number | null;
+  sourceLinks?: FellowshipSourceLink[];
+  summary?: string | null;
+  keyLearnings?: string[];
+  keyLearningsGeneratedAt?: string | null;
   emailSubject?: string | null;
   emailBodyHtml?: string | null;
+}
+
+export interface FellowshipLearningContent {
+  summary: string;
+  keyLearnings: string[];
+  generatedAt?: string | null;
 }
 
 export interface FellowshipEmailContent {

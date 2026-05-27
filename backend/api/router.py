@@ -16,6 +16,7 @@ from .models import (
     FellowshipEntry,
     FellowshipEmailContent,
     FellowshipEmailResult,
+    FellowshipLearningContent,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -52,6 +53,8 @@ from .service import (
     email_fellowship,
     list_fellowship_documents,
     get_fellowship_document_path,
+    update_fellowship_learning_content,
+    generate_fellowship_learning_content,
     list_sermon_series,
     create_sermon_series,
     update_sermon_series,
@@ -196,6 +199,19 @@ def write_fellowship_email_content(
 @fellowship_router.post("/{date:path}/email", response_model=FellowshipEmailResult)
 def send_fellowship_email(date: str) -> FellowshipEmailResult:
     return email_fellowship(date)
+
+
+@fellowship_router.put("/{date:path}/learning", response_model=FellowshipLearningContent)
+def write_fellowship_learning_content(
+    date: str,
+    payload: FellowshipLearningContent,
+) -> FellowshipLearningContent:
+    return update_fellowship_learning_content(date, payload)
+
+
+@fellowship_router.post("/{date:path}/learning/generate", response_model=FellowshipLearningContent)
+def generate_fellowship_learning(date: str) -> FellowshipLearningContent:
+    return generate_fellowship_learning_content(date)
 
 
 @fellowship_router.get("/{date:path}/documents", response_model=list[FellowshipDocument])
