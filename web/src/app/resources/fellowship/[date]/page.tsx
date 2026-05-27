@@ -13,7 +13,7 @@ export default function FellowshipDetailPage({ params }: { params: { date: strin
   ];
 
   return (
-    <div className="bg-gray-50">
+    <div className="bg-white">
       <div className="container mx-auto px-6 py-12">
         <Breadcrumb links={breadcrumbLinks} />
         <Suspense fallback={<FellowshipDetailFallback />}>

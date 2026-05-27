@@ -71,14 +71,14 @@ export function FellowshipArchive() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="w-full rounded-md border border-gray-300 bg-white py-3 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#8B4513]/30"
+            className="w-full rounded-md border border-gray-300 bg-white py-3 pl-10 pr-3 text-base focus:outline-none focus:ring-2 focus:ring-[#8B4513]/30"
             placeholder="搜尋主題、系列、主講..."
           />
         </label>
         <select
           value={series}
           onChange={(event) => setSeries(event.target.value)}
-          className="rounded-md border border-gray-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#8B4513]/30"
+          className="rounded-md border border-gray-300 bg-white px-3 py-3 text-base focus:outline-none focus:ring-2 focus:ring-[#8B4513]/30"
         >
           <option value="">全部系列</option>
           {seriesOptions.map((option) => (
@@ -91,7 +91,7 @@ export function FellowshipArchive() {
 
       {latest && (
         <section className="rounded-lg border border-amber-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#8B4513]">
+          <div className="mb-4 flex items-center gap-2 text-base font-semibold text-[#8B4513]">
             <Users className="h-5 w-5" />
             最新團契回顧
           </div>
@@ -127,9 +127,9 @@ function FellowshipCard({
     <article className={featured ? "" : "rounded-lg border border-gray-200 bg-white p-5 shadow-sm"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-gray-500">{entry.date}</p>
-          <h2 className="mt-1 text-2xl font-bold text-gray-900">{entry.title || "團契查經"}</h2>
-          <p className="mt-2 text-sm text-gray-600">
+          <p className="text-base font-semibold text-gray-500">{entry.date}</p>
+          <h2 className="mt-1 text-2xl font-bold font-display text-gray-900">{entry.title || "團契查經"}</h2>
+          <p className="mt-2 text-base text-gray-600">
             {[entry.series, entry.sequence ? `第 ${entry.sequence} 講` : null, entry.host]
               .filter(Boolean)
               .join(" · ")}
@@ -137,7 +137,7 @@ function FellowshipCard({
         </div>
         <Link
           href={`/resources/fellowship/${entry.isoDate}`}
-          className="inline-flex items-center gap-1 rounded-md bg-[#8B4513] px-4 py-2 text-sm font-semibold text-white hover:bg-[#6f3710]"
+          className="inline-flex items-center gap-1 rounded-md bg-[#8B4513] px-4 py-2 text-base font-semibold text-white hover:bg-[#6f3710]"
         >
           查看回顧
           <ExternalLink className="h-4 w-4" />
@@ -145,17 +145,17 @@ function FellowshipCard({
       </div>
 
       {entry.summary && (
-        <div className="prose prose-sm mt-4 max-w-none text-gray-700 prose-p:leading-6">
+        <div className="prose prose-slate mt-4 max-w-none text-gray-700 prose-p:leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.summary}</ReactMarkdown>
         </div>
       )}
 
       {previewLearnings.length > 0 && (
-        <ul className="mt-4 space-y-2 text-sm text-gray-700">
+        <ul className="mt-4 space-y-2 text-base text-gray-700">
           {previewLearnings.map((learning, index) => (
             <li key={index} className="flex gap-2">
               <BookOpen className="mt-0.5 h-4 w-4 flex-none text-[#8B4513]" />
-              <div className="prose prose-sm max-w-none text-gray-700 prose-p:my-0">
+              <div className="prose prose-slate max-w-none text-gray-700 prose-p:my-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{learning}</ReactMarkdown>
               </div>
             </li>
