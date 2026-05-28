@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import {
+  Citation,
   querySermonSearch,
   SermonSearchMode,
   SermonSearchResponse,
@@ -52,7 +53,11 @@ function sourceAnchorId(sourceId: string) {
   return `source-${sourceId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-function formatAnswerWithSourceNumbers(answer: string, sources: SourceCard[]) {
+function formatAnswerWithSourceNumbers(
+  answer: string,
+  sources: SourceCard[],
+  citations: Citation[],
+) {
   const numberBySourceId = new Map<string, number>();
   sources.forEach((source, index) => {
     numberBySourceId.set(source.source_id.toLowerCase(), index + 1);
@@ -66,7 +71,7 @@ function formatAnswerWithSourceNumbers(answer: string, sources: SourceCard[]) {
     return `[${sourceNumber}](#${sourceAnchorId(sourceId)})`;
   };
 
-  return answer
+  const formatted = answer
     .replace(SOURCE_PARENTHESES_PATTERN, (_match, body: string) => {
       const citations = Array.from(body.matchAll(SOURCE_ID_PATTERN))
         .map((item) => item[0])
@@ -80,6 +85,21 @@ function formatAnswerWithSourceNumbers(answer: string, sources: SourceCard[]) {
     )
     .replace(/\s+([，。；：、])/g, "$1")
     .replace(/[（(]\s*[）)]/g, "");
+  if (formatted.includes("](#source-")) {
+    return formatted;
+  }
+
+  const fallbackCitations = citations
+    .map((citation) => citation.source_id)
+    .filter((sourceId, index, array) => array.indexOf(sourceId) === index)
+    .map(citationFor)
+    .filter(Boolean);
+  const sourceFallback = sources
+    .slice(0, 4)
+    .map((source) => citationFor(source.source_id))
+    .filter(Boolean);
+  const citationLine = (fallbackCitations.length ? fallbackCitations : sourceFallback).join(" ");
+  return citationLine ? `${formatted.trim()} ${citationLine}` : formatted;
 }
 
 export function SermonSearchPanel({
@@ -103,7 +123,10 @@ export function SermonSearchPanel({
     return map;
   }, [result]);
   const formattedAnswer = useMemo(
-    () => (result ? formatAnswerWithSourceNumbers(result.answer, result.sources) : ""),
+    () =>
+      result
+        ? formatAnswerWithSourceNumbers(result.answer, result.sources, result.citations)
+        : "",
     [result],
   );
 
