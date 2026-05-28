@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import {
   BookOpenText,
@@ -107,8 +108,14 @@ export function SermonSearchPanel({
   seriesTitle,
   projectLinks,
 }: SermonSearchPanelProps) {
-  const [question, setQuestion] = useState("");
-  const [mode, setMode] = useState<SermonSearchMode>("normal");
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialQuestion = searchParams.get("q") || "";
+  const initialMode = searchParams.get("mode") === "deep" ? "deep" : "normal";
+  const lastLoadedQueryRef = useRef<string | null>(null);
+  const [question, setQuestion] = useState(initialQuestion);
+  const [mode, setMode] = useState<SermonSearchMode>(initialMode);
   const [result, setResult] = useState<SermonSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -130,33 +137,71 @@ export function SermonSearchPanel({
     [result],
   );
 
-  async function runSearch(nextQuestion = question) {
-    const trimmed = nextQuestion.trim();
-    if (!trimmed || isLoading) {
-      return;
-    }
+  const updateSearchUrl = useCallback(
+    (nextQuestion: string, nextMode: SermonSearchMode) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("q", nextQuestion);
+      if (nextMode === "deep") {
+        params.set("mode", "deep");
+      } else {
+        params.delete("mode");
+      }
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
-    setQuestion(trimmed);
-    setIsLoading(true);
-    setError(null);
+  const runSearch = useCallback(
+    async (
+      nextQuestion = question,
+      options: { nextMode?: SermonSearchMode; updateUrl?: boolean } = {},
+    ) => {
+      const trimmed = nextQuestion.trim();
+      const searchMode = options.nextMode || mode;
+      if (!trimmed || isLoading) {
+        return;
+      }
 
-    try {
-      const response = await querySermonSearch({
-        question: trimmed,
-        mode,
-        filters: {
-          series_ids: [seriesId],
-          project_types: ["sermon_note"],
-        },
-        top_k: mode === "deep" ? 24 : 12,
-      });
-      setResult(response);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "搜尋失敗");
-    } finally {
-      setIsLoading(false);
+      lastLoadedQueryRef.current = `${searchMode}:${trimmed}`;
+      setQuestion(trimmed);
+      setMode(searchMode);
+      setIsLoading(true);
+      setError(null);
+      if (options.updateUrl !== false) {
+        updateSearchUrl(trimmed, searchMode);
+      }
+
+      try {
+        const response = await querySermonSearch({
+          question: trimmed,
+          mode: searchMode,
+          filters: {
+            series_ids: [seriesId],
+            project_types: ["sermon_note"],
+          },
+          top_k: searchMode === "deep" ? 24 : 12,
+        });
+        setResult(response);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "搜尋失敗");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isLoading, mode, question, seriesId, updateSearchUrl],
+  );
+
+  useEffect(() => {
+    const urlQuestion = searchParams.get("q") || "";
+    const urlMode = searchParams.get("mode") === "deep" ? "deep" : "normal";
+    setQuestion(urlQuestion);
+    setMode(urlMode);
+    const loadKey = `${urlMode}:${urlQuestion}`;
+    if (urlQuestion.trim() && lastLoadedQueryRef.current !== loadKey) {
+      lastLoadedQueryRef.current = loadKey;
+      void runSearch(urlQuestion, { nextMode: urlMode, updateUrl: false });
     }
-  }
+  }, [runSearch, searchParams]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

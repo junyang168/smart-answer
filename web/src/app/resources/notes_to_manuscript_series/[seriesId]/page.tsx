@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 
@@ -91,11 +92,13 @@ export default async function NotesToManuscriptSeriesDetailPage({
         </div>
       </section>
 
-      <SermonSearchPanel
-        seriesId={series.id}
-        seriesTitle={series.title}
-        projectLinks={projectLinks}
-      />
+      <Suspense fallback={null}>
+        <SermonSearchPanel
+          seriesId={series.id}
+          seriesTitle={series.title}
+          projectLinks={projectLinks}
+        />
+      </Suspense>
 
       <section className="container mx-auto px-6 mt-10 space-y-8">
         {series.lectures.length === 0 ? (
