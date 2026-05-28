@@ -36,6 +36,8 @@ const EXAMPLE_QUESTIONS = [
   "如何解釋太 16:19？",
   "教授對 16 章釋經都覆蓋了那些 verses？",
 ];
+const SOURCE_ID_PATTERN = /[0-9a-f]{12}-\d{4}/gi;
+const SOURCE_PARENTHESES_PATTERN = /[（(]([^（）()]*\bsource\s+[0-9a-f]{12}-\d{4}[^（）()]*)[）)]/gi;
 
 function formatHeading(path: string[]) {
   return path.filter(Boolean).join(" > ");
@@ -44,6 +46,40 @@ function formatHeading(path: string[]) {
 function sourceUrl(source: SourceCard, projectLinks: Record<string, ProjectLink>) {
   const project = projectLinks[source.content_id];
   return project?.available ? project.google_doc_url || null : null;
+}
+
+function sourceAnchorId(sourceId: string) {
+  return `source-${sourceId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function formatAnswerWithSourceNumbers(answer: string, sources: SourceCard[]) {
+  const numberBySourceId = new Map<string, number>();
+  sources.forEach((source, index) => {
+    numberBySourceId.set(source.source_id.toLowerCase(), index + 1);
+  });
+
+  const citationFor = (sourceId: string) => {
+    const sourceNumber = numberBySourceId.get(sourceId.toLowerCase());
+    if (!sourceNumber) {
+      return "";
+    }
+    return `[${sourceNumber}](#${sourceAnchorId(sourceId)})`;
+  };
+
+  return answer
+    .replace(SOURCE_PARENTHESES_PATTERN, (_match, body: string) => {
+      const citations = Array.from(body.matchAll(SOURCE_ID_PATTERN))
+        .map((item) => item[0])
+        .filter((sourceId, index, array) => array.indexOf(sourceId) === index)
+        .map(citationFor)
+        .filter(Boolean);
+      return citations.length ? citations.join(" ") : "";
+    })
+    .replace(/\bsource\s+([0-9a-f]{12}-\d{4})/gi, (_match, sourceId: string) =>
+      citationFor(sourceId),
+    )
+    .replace(/\s+([，。；：、])/g, "$1")
+    .replace(/[（(]\s*[）)]/g, "");
 }
 
 export function SermonSearchPanel({
@@ -66,6 +102,10 @@ export function SermonSearchPanel({
     });
     return map;
   }, [result]);
+  const formattedAnswer = useMemo(
+    () => (result ? formatAnswerWithSourceNumbers(result.answer, result.sources) : ""),
+    [result],
+  );
 
   async function runSearch(nextQuestion = question) {
     const trimmed = nextQuestion.trim();
@@ -193,7 +233,20 @@ export function SermonSearchPanel({
                 <span>回答</span>
               </div>
               <div className="prose prose-slate max-w-none whitespace-pre-wrap text-slate-800 prose-p:leading-8">
-                <ReactMarkdown>{result.answer}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    a: ({ children, href }) => (
+                      <a
+                        href={href}
+                        className="mx-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-sky-50 px-1.5 text-sm font-semibold text-sky-700 no-underline hover:bg-sky-100"
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {formattedAnswer}
+                </ReactMarkdown>
               </div>
 
               {result.citations.length > 0 ? (
@@ -249,7 +302,11 @@ export function SermonSearchPanel({
                     const url = sourceUrl(source, projectLinks);
                     const quote = citationBySource.get(source.source_id);
                     return (
-                      <div key={source.source_id} className="px-5 py-4">
+                      <div
+                        id={sourceAnchorId(source.source_id)}
+                        key={source.source_id}
+                        className="scroll-mt-24 px-5 py-4"
+                      >
                         <div className="mb-2 flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-xs font-semibold text-sky-700">
