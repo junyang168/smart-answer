@@ -1,16 +1,15 @@
 import type { ReactElement, ReactNode } from "react";
 
-import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
-import { authConfig } from "@/app/utils/auth";
+import { getSessionWithDevFallback } from "@/app/utils/auth";
 
 export default async function NotesToManuscriptLayout({
   children,
 }: {
   children: ReactNode;
 }): Promise<ReactElement> {
-  const session = await getServerSession(authConfig);
+  const session = await getSessionWithDevFallback();
 
   if (!session) {
     redirect(

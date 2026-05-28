@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 
+import { SermonSearchPanel } from "../SermonSearchPanel";
 import {
   fetchNotesToManuscriptSeriesDetail,
   NOTES_TO_MANUSCRIPT_REVALIDATE,
@@ -48,6 +49,18 @@ export default async function NotesToManuscriptSeriesDetailPage({
     { name: "講義轉逐字稿系列", href: "/resources/notes_to_manuscript_series" },
     { name: series.title },
   ];
+  const projectLinks = Object.fromEntries(
+    series.lectures.flatMap((lecture) =>
+      lecture.projects.map((project) => [
+        project.id,
+        {
+          title: project.title,
+          google_doc_url: project.google_doc_url,
+          available: project.available,
+        },
+      ]),
+    ),
+  );
 
   return (
     <div className="bg-gray-50 min-h-screen pb-16">
@@ -77,6 +90,12 @@ export default async function NotesToManuscriptSeriesDetailPage({
           ) : null}
         </div>
       </section>
+
+      <SermonSearchPanel
+        seriesId={series.id}
+        seriesTitle={series.title}
+        projectLinks={projectLinks}
+      />
 
       <section className="container mx-auto px-6 mt-10 space-y-8">
         {series.lectures.length === 0 ? (
