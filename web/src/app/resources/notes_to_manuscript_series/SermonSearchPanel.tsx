@@ -39,7 +39,7 @@ const EXAMPLE_QUESTIONS = [
   "教授對 16 章釋經都覆蓋了那些 verses？",
 ];
 const SOURCE_ID_PATTERN = /[0-9a-f]{12}-\d{4}/gi;
-const SOURCE_PARENTHESES_PATTERN = /[（(]([^（）()]*\bsource\s+[0-9a-f]{12}-\d{4}[^（）()]*)[）)]/gi;
+const SOURCE_PARENTHESES_PATTERN = /[（(]([^（）()]*[0-9a-f]{12}-\d{4}[^（）()]*)[）)]/gi;
 
 function formatHeading(path: string[]) {
   return path.filter(Boolean).join(" > ");
@@ -71,34 +71,40 @@ function formatAnswerWithSourceNumbers(
     }
     return `[${sourceNumber}](#${sourceAnchorId(sourceId)})`;
   };
+  const orderedUniqueCitations = (sourceIds: string[]) =>
+    sourceIds
+      .filter((sourceId, index, array) => array.indexOf(sourceId) === index)
+      .sort((a, b) => {
+        const aNumber = numberBySourceId.get(a.toLowerCase()) || Number.MAX_SAFE_INTEGER;
+        const bNumber = numberBySourceId.get(b.toLowerCase()) || Number.MAX_SAFE_INTEGER;
+        return aNumber - bNumber;
+      })
+      .map(citationFor)
+      .filter(Boolean);
 
   const formatted = answer
     .replace(SOURCE_PARENTHESES_PATTERN, (_match, body: string) => {
-      const citations = Array.from(body.matchAll(SOURCE_ID_PATTERN))
-        .map((item) => item[0])
-        .filter((sourceId, index, array) => array.indexOf(sourceId) === index)
-        .map(citationFor)
-        .filter(Boolean);
+      const citations = orderedUniqueCitations(
+        Array.from(body.matchAll(SOURCE_ID_PATTERN)).map((item) => item[0]),
+      );
       return citations.length ? citations.join(" ") : "";
     })
     .replace(/\bsource\s+([0-9a-f]{12}-\d{4})/gi, (_match, sourceId: string) =>
       citationFor(sourceId),
     )
+    .replace(SOURCE_ID_PATTERN, (sourceId: string) => citationFor(sourceId))
     .replace(/\s+([，。；：、])/g, "$1")
     .replace(/[（(]\s*[）)]/g, "");
   if (formatted.includes("](#source-")) {
     return formatted;
   }
 
-  const fallbackCitations = citations
-    .map((citation) => citation.source_id)
-    .filter((sourceId, index, array) => array.indexOf(sourceId) === index)
-    .map(citationFor)
-    .filter(Boolean);
-  const sourceFallback = sources
-    .slice(0, 4)
-    .map((source) => citationFor(source.source_id))
-    .filter(Boolean);
+  const fallbackCitations = orderedUniqueCitations(
+    citations.map((citation) => citation.source_id),
+  );
+  const sourceFallback = orderedUniqueCitations(
+    sources.slice(0, 4).map((source) => source.source_id),
+  );
   const citationLine = (fallbackCitations.length ? fallbackCitations : sourceFallback).join(" ");
   return citationLine ? `${formatted.trim()} ${citationLine}` : formatted;
 }
