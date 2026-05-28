@@ -11,6 +11,21 @@ from backend.api.sermon_search.models import DiscoveredManuscript, SermonSearchR
 from backend.api.sermon_search.service import SermonSearchService
 
 
+class FakeLLM:
+    available = True
+
+    def __init__(self) -> None:
+        self.planner_calls = 0
+        self.answer_calls = 0
+
+    def generate_json(self, messages, mode="normal"):
+        if "agentic search planner" in messages[0]["content"]:
+            self.planner_calls += 1
+            return {"searches": [{"tool": "multi_index_search", "query": "planner should not run"}]}
+        self.answer_calls += 1
+        return {"answer": "根據講稿，這是快速回答。", "citations": [], "related_questions": []}
+
+
 def _manuscript(path: Path, project_id: str = "project-1", title: str = "1章-耶穌的來歷", bible_verse: str | None = None) -> DiscoveredManuscript:
     return DiscoveredManuscript(
         series_id="series-1",
@@ -152,6 +167,22 @@ class SermonSearchTests(unittest.TestCase):
         self.assertIn("document_lookup", response.search_trace.tools_used)
         self.assertIn("document_coverage", response.search_trace.tools_used)
         self.assertIn("Matt.16.1-Matt.16.19", response.answer)
+
+    def test_normal_mode_skips_llm_planner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "final.md"
+            path.write_text("## 耶和華的僕人\n\n以賽亞書 42 章討論耶和華僕人的使命。", encoding="utf-8")
+            search_index = SermonSearchIndex(root / "search.sqlite3")
+            search_index.rebuild_from_manuscripts([_manuscript(path)])
+            fake_llm = FakeLLM()
+            service = SermonSearchService(index=search_index, llm=fake_llm)
+
+            response = service.query(SermonSearchRequest(question="什麼是耶和華的僕人？"))
+
+        self.assertEqual(response.search_trace.rounds, 1)
+        self.assertEqual(fake_llm.planner_calls, 0)
+        self.assertEqual(fake_llm.answer_calls, 1)
 
 
 if __name__ == "__main__":

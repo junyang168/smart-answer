@@ -37,12 +37,13 @@ class SermonSearchService:
 
     def query(self, request: SermonSearchRequest) -> SermonSearchResponse:
         self._ensure_index()
-        max_rounds = 4 if request.mode.value == "deep" else 3
+        max_rounds = 4 if request.mode.value == "deep" else 1
         target_k = request.top_k or (30 if request.mode.value == "deep" else 12)
         all_cards: Dict[str, SourceCard] = {}
         round_traces: List[SearchRoundTrace] = []
         tools: set[str] = set()
         notes: List[str] = []
+        search_cache: Dict[str, tuple[List[SourceCard], List[str]]] = {}
         state: dict = {
             "question": request.question,
             "round": 0,
@@ -90,7 +91,12 @@ class SermonSearchService:
                     continue
 
                 query_text = str(search.get("query") or request.question)
-                cards, used = self.index.search(query_text, request.filters, limit=80)
+                cache_key = self._search_cache_key(query_text, request)
+                if cache_key in search_cache:
+                    cards, used = search_cache[cache_key]
+                else:
+                    cards, used = self.index.search(query_text, request.filters, limit=80)
+                    search_cache[cache_key] = (cards, used)
                 round_candidate_count += len(cards)
                 tools.update(used)
                 round_tools.extend(used)
@@ -129,7 +135,8 @@ class SermonSearchService:
                 break
 
         sources = self._rank_cards(all_cards.values())[:target_k]
-        units = self.index.load_units([source.source_id for source in sources])
+        answer_limit = 18 if request.mode.value == "deep" else 8
+        units = self.index.load_units([source.source_id for source in sources[:answer_limit]])
         answer, citations, related = self._answer(request, units, sources, state["observations"])
         trace = SearchTrace(
             mode=request.mode,
@@ -147,12 +154,26 @@ class SermonSearchService:
         )
 
     def _plan_next_searches(self, request: SermonSearchRequest, state: dict) -> dict:
+        if request.mode.value == "normal":
+            return self._fallback_plan(request, state)
         if self.llm.available:
             try:
                 return self.llm.generate_json(self._planner_messages(request, state), request.mode.value)
             except Exception as exc:
                 state.setdefault("notes", []).append(f"Planner failed; used fallback planner: {exc}")
         return self._fallback_plan(request, state)
+
+    def _search_cache_key(self, query_text: str, request: SermonSearchRequest) -> str:
+        filters = "|".join(
+            [
+                ",".join(request.filters.series_ids),
+                ",".join(request.filters.project_types),
+                ",".join(request.filters.topics),
+                ",".join(request.filters.canonical_refs),
+                ",".join(request.filters.content_types),
+            ]
+        )
+        return f"{query_text}\n{filters}"
 
     def _planner_messages(self, request: SermonSearchRequest, state: dict) -> List[Dict[str, str]]:
         system = (
@@ -364,7 +385,10 @@ class SermonSearchService:
         if not self.llm.available:
             return self._extractive_answer(request.question, units, sources)
         try:
-            payload = self.llm.generate_json(self._answer_messages(request.question, units, observations), request.mode.value)
+            payload = self.llm.generate_json(
+                self._answer_messages(request.question, units, observations, request.mode.value),
+                request.mode.value,
+            )
             return self._verified_llm_payload(payload, units)
         except Exception as exc:
             if coverage_answer:
@@ -372,12 +396,20 @@ class SermonSearchService:
             answer, citations, related = self._extractive_answer(request.question, units, sources)
             return (f"{answer}\n\n（DeepSeek 回答失敗，已改用檢索摘要：{exc}）", citations, related)
 
-    def _answer_messages(self, question: str, units: Sequence[SourceUnit], observations: Sequence[dict]) -> List[Dict[str, str]]:
+    def _answer_messages(
+        self,
+        question: str,
+        units: Sequence[SourceUnit],
+        observations: Sequence[dict],
+        mode: str,
+    ) -> List[Dict[str, str]]:
+        text_limit = 2200 if mode == "deep" else 1400
         evidence = "\n\n".join(
             [
                 (
                     f"<source id=\"{unit.source_id}\" doc=\"{unit.project_title}\" "
-                    f"heading=\"{' > '.join(unit.heading_path)}\">\n{unit.text}\n</source>"
+                    f"heading=\"{' > '.join(unit.heading_path)}\">\n"
+                    f"{self._evidence_text(unit.text, text_limit)}\n</source>"
                 )
                 for unit in units
             ]
@@ -410,6 +442,12 @@ class SermonSearchService:
 }}
 """
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+    def _evidence_text(self, text: str, limit: int) -> str:
+        cleaned = text.strip()
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: limit - 1].rstrip() + "…"
 
     def _coverage_answer(self, observations: Sequence[dict]) -> str | None:
         for observation in reversed(observations):
