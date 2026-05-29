@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import {
   BookOpenText,
@@ -59,6 +60,10 @@ function formatAnswerWithSourceNumbers(
   sources: SourceCard[],
   citations: Citation[],
 ) {
+  if (!answer.trim()) {
+    return "";
+  }
+
   const numberBySourceId = new Map<string, number>();
   sources.forEach((source, index) => {
     numberBySourceId.set(source.source_id.toLowerCase(), index + 1);
@@ -125,6 +130,7 @@ export function SermonSearchPanel({
   const [result, setResult] = useState<SermonSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [streamStatus, setStreamStatus] = useState<"idle" | "retrieving" | "writing">("idle");
 
   const citationBySource = useMemo(() => {
     const map = new Map<string, string>();
@@ -172,6 +178,7 @@ export function SermonSearchPanel({
       setQuestion(trimmed);
       setMode(searchMode);
       setIsLoading(true);
+      setStreamStatus("retrieving");
       setError(null);
       setResult(null);
       if (options.updateUrl !== false) {
@@ -189,12 +196,15 @@ export function SermonSearchPanel({
           top_k: searchMode === "deep" ? 24 : 12,
         }, (event) => {
           if (event.type === "sources") {
-            setResult({
-              answer: "",
-              citations: [],
-              sources: event.sources,
-              related_questions: [],
-              search_trace: event.search_trace,
+            flushSync(() => {
+              setResult({
+                answer: "",
+                citations: [],
+                sources: event.sources,
+                related_questions: [],
+                search_trace: event.search_trace,
+              });
+              setStreamStatus("writing");
             });
             return;
           }
@@ -225,6 +235,7 @@ export function SermonSearchPanel({
         setError(err instanceof Error ? err.message : "搜尋失敗");
       } finally {
         setIsLoading(false);
+        setStreamStatus("idle");
       }
     },
     [isLoading, mode, question, seriesId, updateSearchUrl],
@@ -322,7 +333,41 @@ export function SermonSearchPanel({
         {isLoading ? (
           <div className="mt-8 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-slate-600 shadow-sm">
             <Loader2 className="h-5 w-5 animate-spin text-sky-700" />
-            <span>正在檢索講稿、整理引用...</span>
+            <span>
+              {streamStatus === "writing" && result?.sources.length
+                ? `已找到 ${result.sources.length} 個來源，正在撰寫回答...`
+                : "正在檢索講稿、整理引用..."}
+            </span>
+          </div>
+        ) : null}
+
+        {isLoading && result?.sources.length ? (
+          <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/60 px-5 py-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-sky-900">搜尋結果</p>
+              <p className="text-xs font-semibold text-sky-700">
+                {result.sources.length} 個來源
+              </p>
+            </div>
+            <div className="grid gap-2 md:grid-cols-3">
+              {result.sources.slice(0, 3).map((source, index) => (
+                <a
+                  key={source.source_id}
+                  href={`#${sourceAnchorId(source.source_id)}`}
+                  className="rounded-xl border border-sky-100 bg-white px-3 py-2 text-left shadow-sm transition hover:border-sky-200"
+                >
+                  <p className="text-xs font-semibold text-sky-700">
+                    {String(index + 1).padStart(2, "0")}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
+                    {source.doc_title}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                    {source.snippet}
+                  </p>
+                </a>
+              ))}
+            </div>
           </div>
         ) : null}
 

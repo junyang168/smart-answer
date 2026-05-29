@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from .models import (
@@ -36,24 +36,39 @@ def query(payload: SermonSearchRequest) -> SermonSearchResponse:
     return sermon_search_service.query(payload)
 
 
-@router.post("/query_stream")
-def query_stream(payload: SermonSearchRequest) -> StreamingResponse:
+def _query_stream_response(payload: SermonSearchRequest) -> StreamingResponse:
     def events():
         for event in sermon_search_service.stream_query_events(payload):
             event_type = str(event.get("type") or "message")
             yield f"event: {event_type}\n"
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             if event_type == "sources":
-                yield f": {' ' * 4096}\n\n"
+                yield f": {' ' * 65536}\n\n"
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "Content-Encoding": "identity",
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/query_stream")
+def query_stream(payload: SermonSearchRequest) -> StreamingResponse:
+    return _query_stream_response(payload)
+
+
+@router.get("/query_stream")
+def query_stream_get(payload: str = Query(...)) -> StreamingResponse:
+    try:
+        request = SermonSearchRequest.model_validate_json(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid stream payload") from exc
+    return _query_stream_response(request)
 
 
 @compat_router.get("/semantic_search/{q}", response_model=List[SourceCard])

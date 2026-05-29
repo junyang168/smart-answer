@@ -99,6 +99,10 @@ export async function streamSermonSearch(
   payload: SermonSearchRequest,
   onEvent: (event: SermonSearchStreamEvent) => void,
 ): Promise<void> {
+  if (typeof EventSource !== "undefined") {
+    return streamSermonSearchWithEventSource(payload, onEvent);
+  }
+
   const response = await fetch("/api/sermon_search/query_stream", {
     method: "POST",
     headers: {
@@ -142,4 +146,37 @@ export async function streamSermonSearch(
       onEvent(JSON.parse(dataLine.slice(6)) as SermonSearchStreamEvent);
     }
   }
+}
+
+function streamSermonSearchWithEventSource(
+  payload: SermonSearchRequest,
+  onEvent: (event: SermonSearchStreamEvent) => void,
+): Promise<void> {
+  const params = new URLSearchParams({ payload: JSON.stringify(payload) });
+  const source = new EventSource(`/api/sermon_search/query_stream?${params.toString()}`);
+
+  return new Promise((resolve, reject) => {
+    let completed = false;
+    const close = () => {
+      completed = true;
+      source.close();
+    };
+    const handleEvent = (event: MessageEvent<string>) => {
+      onEvent(JSON.parse(event.data) as SermonSearchStreamEvent);
+    };
+
+    source.addEventListener("sources", handleEvent);
+    source.addEventListener("answer_delta", handleEvent);
+    source.addEventListener("done", (event: MessageEvent<string>) => {
+      handleEvent(event);
+      close();
+      resolve();
+    });
+    source.onerror = () => {
+      source.close();
+      if (!completed) {
+        reject(new Error("搜尋串流中斷"));
+      }
+    };
+  });
 }
