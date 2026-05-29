@@ -43,6 +43,8 @@ def query_stream(payload: SermonSearchRequest) -> StreamingResponse:
             event_type = str(event.get("type") or "message")
             yield f"event: {event_type}\n"
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if event_type == "sources":
+                yield f": {' ' * 4096}\n\n"
 
     return StreamingResponse(
         events(),
