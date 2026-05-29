@@ -48,8 +48,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     redirect: "manual",
   });
 
-  const responseBody = await backendResponse.arrayBuffer();
-  const response = new NextResponse(responseBody, {
+  const response = new NextResponse(backendResponse.body, {
     status: backendResponse.status,
   });
 

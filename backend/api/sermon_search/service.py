@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, Iterator, List, Sequence
 
 from .deepseek_client import DeepSeekClient
 from .index_store import SermonSearchIndex
@@ -36,6 +36,83 @@ class SermonSearchService:
         )
 
     def query(self, request: SermonSearchRequest) -> SermonSearchResponse:
+        sources, units, trace, observations = self._retrieve(request)
+        answer, citations, related = self._answer(request, units, sources, observations)
+        return SermonSearchResponse(
+            answer=answer,
+            citations=citations,
+            sources=sources,
+            related_questions=related,
+            search_trace=trace,
+        )
+
+    def stream_query_events(self, request: SermonSearchRequest) -> Iterator[dict]:
+        sources, units, trace, observations = self._retrieve(request)
+        yield {
+            "type": "sources",
+            "sources": [source.model_dump() for source in sources],
+            "search_trace": trace.model_dump(),
+        }
+
+        coverage_answer = self._coverage_answer(observations)
+        if coverage_answer and (not self.llm.available or self._is_coverage_question(request.question)):
+            yield {"type": "answer_delta", "delta": coverage_answer}
+            yield {
+                "type": "done",
+                "citations": [citation.model_dump() for citation in self._fallback_citations(units[:5])],
+                "related_questions": [],
+            }
+            return
+
+        if not units:
+            yield {"type": "answer_delta", "delta": "目前索引中沒有找到足夠的講稿依據來回答這個問題。"}
+            yield {"type": "done", "citations": [], "related_questions": []}
+            return
+
+        if not self.llm.available:
+            answer, citations, related = self._extractive_answer(request.question, units, sources)
+            yield {"type": "answer_delta", "delta": answer}
+            yield {
+                "type": "done",
+                "citations": [citation.model_dump() for citation in citations],
+                "related_questions": related,
+            }
+            return
+
+        streamed_any = False
+        try:
+            for delta in self.llm.stream_text(
+                self._stream_answer_messages(request.question, units, observations, request.mode.value),
+                request.mode.value,
+            ):
+                streamed_any = True
+                yield {"type": "answer_delta", "delta": delta}
+            yield {
+                "type": "done",
+                "citations": [citation.model_dump() for citation in self._fallback_citations(units[:6])],
+                "related_questions": [],
+            }
+        except Exception as exc:
+            if streamed_any:
+                yield {"type": "answer_delta", "delta": f"\n\n（串流回答中斷：{exc}）"}
+                yield {
+                    "type": "done",
+                    "citations": [citation.model_dump() for citation in self._fallback_citations(units[:6])],
+                    "related_questions": [],
+                }
+                return
+            answer, citations, related = self._extractive_answer(request.question, units, sources)
+            yield {"type": "answer_delta", "delta": f"{answer}\n\n（DeepSeek 串流失敗，已改用檢索摘要：{exc}）"}
+            yield {
+                "type": "done",
+                "citations": [citation.model_dump() for citation in citations],
+                "related_questions": related,
+            }
+
+    def _retrieve(
+        self,
+        request: SermonSearchRequest,
+    ) -> tuple[List[SourceCard], List[SourceUnit], SearchTrace, Sequence[dict]]:
         self._ensure_index()
         max_rounds = 4 if request.mode.value == "deep" else 1
         target_k = request.top_k or (30 if request.mode.value == "deep" else 12)
@@ -137,7 +214,6 @@ class SermonSearchService:
         sources = self._rank_cards(all_cards.values())[:target_k]
         answer_limit = 18 if request.mode.value == "deep" else 8
         units = self.index.load_units([source.source_id for source in sources[:answer_limit]])
-        answer, citations, related = self._answer(request, units, sources, state["observations"])
         trace = SearchTrace(
             mode=request.mode,
             rounds=len(round_traces),
@@ -145,13 +221,7 @@ class SermonSearchService:
             notes=notes + ([] if self.llm.available else ["DeepSeek API key missing; used fallback planner/extractive answer."]),
             round_traces=round_traces,
         )
-        return SermonSearchResponse(
-            answer=answer,
-            citations=citations,
-            sources=sources,
-            related_questions=related,
-            search_trace=trace,
-        )
+        return sources, units, trace, state["observations"]
 
     def _plan_next_searches(self, request: SermonSearchRequest, state: dict) -> dict:
         if request.mode.value == "normal":
@@ -440,6 +510,43 @@ class SermonSearchService:
   ],
   "related_questions": ["..."]
 }}
+"""
+        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+    def _stream_answer_messages(
+        self,
+        question: str,
+        units: Sequence[SourceUnit],
+        observations: Sequence[dict],
+        mode: str,
+    ) -> List[Dict[str, str]]:
+        text_limit = 2200 if mode == "deep" else 1400
+        evidence = "\n\n".join(
+            [
+                (
+                    f"<source id=\"{unit.source_id}\" doc=\"{unit.project_title}\" "
+                    f"heading=\"{' > '.join(unit.heading_path)}\">\n"
+                    f"{self._evidence_text(unit.text, text_limit)}\n</source>"
+                )
+                for unit in units
+            ]
+        )
+        observation_text = "\n".join(self._format_observation(observation) for observation in observations[-8:])
+        system = (
+            "你是 Dr. Wang 馬太福音釋經講稿的檢索問答助手。"
+            "只能根據提供的 source 回答；不要使用外部知識補充成為主要論據。"
+            "用繁體中文直接回答，不要輸出 JSON。"
+            "每個主要論點後面都要標出 source_id，例如（source 35480499140f-0028）。"
+        )
+        user = f"""
+問題：
+{question}
+
+講稿證據：
+{evidence}
+
+工具 observations：
+{observation_text}
 """
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

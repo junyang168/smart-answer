@@ -15,10 +15,10 @@ import {
 
 import {
   Citation,
-  querySermonSearch,
   SermonSearchMode,
   SermonSearchResponse,
   SourceCard,
+  streamSermonSearch,
 } from "./sermon-search";
 
 export interface ProjectLink {
@@ -173,12 +173,13 @@ export function SermonSearchPanel({
       setMode(searchMode);
       setIsLoading(true);
       setError(null);
+      setResult(null);
       if (options.updateUrl !== false) {
         updateSearchUrl(trimmed, searchMode);
       }
 
       try {
-        const response = await querySermonSearch({
+        await streamSermonSearch({
           question: trimmed,
           mode: searchMode,
           filters: {
@@ -186,8 +187,40 @@ export function SermonSearchPanel({
             project_types: ["sermon_note"],
           },
           top_k: searchMode === "deep" ? 24 : 12,
+        }, (event) => {
+          if (event.type === "sources") {
+            setResult({
+              answer: "",
+              citations: [],
+              sources: event.sources,
+              related_questions: [],
+              search_trace: event.search_trace,
+            });
+            return;
+          }
+          if (event.type === "answer_delta") {
+            setResult((current) =>
+              current
+                ? {
+                    ...current,
+                    answer: `${current.answer}${event.delta}`,
+                  }
+                : current,
+            );
+            return;
+          }
+          if (event.type === "done") {
+            setResult((current) =>
+              current
+                ? {
+                    ...current,
+                    citations: event.citations,
+                    related_questions: event.related_questions,
+                  }
+                : current,
+            );
+          }
         });
-        setResult(response);
       } catch (err) {
         setError(err instanceof Error ? err.message : "搜尋失敗");
       } finally {
@@ -307,20 +340,27 @@ export function SermonSearchPanel({
                 <span>回答</span>
               </div>
               <div className="prose prose-slate max-w-none whitespace-pre-wrap text-slate-800 prose-p:leading-8">
-                <ReactMarkdown
-                  components={{
-                    a: ({ children, href }) => (
-                      <a
-                        href={href}
-                        className="mx-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-sky-50 px-1.5 text-sm font-semibold text-sky-700 no-underline hover:bg-sky-100"
-                      >
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {formattedAnswer}
-                </ReactMarkdown>
+                {formattedAnswer ? (
+                  <ReactMarkdown
+                    components={{
+                      a: ({ children, href }) => (
+                        <a
+                          href={href}
+                          className="mx-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-sky-50 px-1.5 text-sm font-semibold text-sky-700 no-underline hover:bg-sky-100"
+                        >
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {formattedAnswer}
+                  </ReactMarkdown>
+                ) : (
+                  <div className="flex items-center gap-3 text-base text-slate-500">
+                    <Loader2 className="h-4 w-4 animate-spin text-sky-700" />
+                    <span>正在撰寫回答...</span>
+                  </div>
+                )}
               </div>
 
               {result.citations.length > 0 ? (

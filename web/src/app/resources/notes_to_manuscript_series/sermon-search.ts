@@ -60,6 +60,22 @@ export interface SermonSearchResponse {
   search_trace: SearchTrace;
 }
 
+export type SermonSearchStreamEvent =
+  | {
+      type: "sources";
+      sources: SourceCard[];
+      search_trace: SearchTrace;
+    }
+  | {
+      type: "answer_delta";
+      delta: string;
+    }
+  | {
+      type: "done";
+      citations: Citation[];
+      related_questions: string[];
+    };
+
 export async function querySermonSearch(
   payload: SermonSearchRequest,
 ): Promise<SermonSearchResponse> {
@@ -77,4 +93,53 @@ export async function querySermonSearch(
   }
 
   return response.json();
+}
+
+export async function streamSermonSearch(
+  payload: SermonSearchRequest,
+  onEvent: (event: SermonSearchStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch("/api/sermon_search/query_stream", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok || !response.body) {
+    const message = await response.text();
+    throw new Error(message || `Search failed with ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split("\n\n");
+    buffer = events.pop() || "";
+    for (const eventText of events) {
+      const dataLine = eventText
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      if (!dataLine) {
+        continue;
+      }
+      onEvent(JSON.parse(dataLine.slice(6)) as SermonSearchStreamEvent);
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    const dataLine = tail.split("\n").find((line) => line.startsWith("data: "));
+    if (dataLine) {
+      onEvent(JSON.parse(dataLine.slice(6)) as SermonSearchStreamEvent);
+    }
+  }
 }

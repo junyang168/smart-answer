@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from openai import OpenAI
 
@@ -40,6 +40,18 @@ class DeepSeekClient:
         content = response.choices[0].message.content or ""
         return self._parse_json(content)
 
+    def stream_text(self, messages: List[Dict[str, str]], mode: str = "normal") -> Iterator[str]:
+        stream = self.client.chat.completions.create(
+            model=self.model_for_mode(mode),
+            messages=messages,
+            temperature=0.1,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+
     def _parse_json(self, text: str) -> Dict[str, Any]:
         stripped = text.strip()
         if stripped.startswith("```"):
@@ -54,4 +66,3 @@ class DeepSeekClient:
             if start >= 0 and end > start:
                 return json.loads(stripped[start : end + 1])
             raise
-
