@@ -326,8 +326,8 @@ class SermonSearchService:
         return {"sufficient": False, "notes": [f"Insufficient evidence after intent {plan.get('intent', 'unknown')}; continuing."]}
 
     def _document_coverage_observation(self, doc_query: str) -> tuple[dict, List[SourceCard]]:
-        units = self.index.find_document_units(doc_query)
-        if not units:
+        groups = self.index.find_document_unit_groups(doc_query, limit=8)
+        if not groups:
             return (
                 {
                     "tool": "document_coverage",
@@ -339,6 +339,84 @@ class SermonSearchService:
                 [],
             )
 
+        target_chapter_match = re.search(r"(\d+)\s*章", doc_query)
+        target_matt_prefix = f"Matt.{target_chapter_match.group(1)}." if target_chapter_match else None
+        summaries = [
+            self._document_coverage_summary(units, target_matt_prefix)
+            for _document, units in groups
+        ]
+        total_units = sum(len(units) for _document, units in groups)
+        all_scope_refs: List[str] = []
+        all_explicit_refs: List[str] = []
+        all_cross_refs: List[str] = []
+        for summary in summaries:
+            for ref in summary["broad"]:
+                if ref not in all_scope_refs:
+                    all_scope_refs.append(ref)
+            for ref in summary["specific"]:
+                if ref not in all_explicit_refs:
+                    all_explicit_refs.append(ref)
+            for ref in summary["cross_refs"]:
+                if ref not in all_cross_refs:
+                    all_cross_refs.append(ref)
+
+        if len(groups) == 1:
+            doc_title = groups[0][1][0].project_title
+            lines = [f"`{doc_title}` 這份講稿的索引覆蓋如下：", ""]
+        else:
+            lines = [f"`{doc_query}` 相關講稿的索引覆蓋如下：", ""]
+        for index, ((_document, units), summary) in enumerate(zip(groups, summaries), start=1):
+            if len(groups) > 1:
+                lines.append(f"{index}. `{units[0].project_title}`")
+            if summary["broad"]:
+                lines.append(f"文件層級範圍：{', '.join(summary['broad'])}")
+            if summary["specific"]:
+                lines.append(f"明確逐段處理/引用的馬太經文：{', '.join(summary['specific'])}")
+            if summary["cross_refs"]:
+                lines.append(f"主要交叉經文：{', '.join(summary['cross_refs'])}")
+            lines.append(f"索引來源單元數：{len(units)}")
+            lines.append("")
+        lines.append(f"合計來源單元數：{total_units}")
+
+        sources: List[SourceCard] = []
+        for group_index, (_document, units) in enumerate(groups):
+            for unit_index, unit in enumerate(units[:4]):
+                sources.append(
+                    SourceCard(
+                        source_id=unit.source_id,
+                        content_id=unit.project_id,
+                        score=100.0 - (group_index * 10) - unit_index,
+                        doc_title=unit.project_title,
+                        series_title=unit.series_title,
+                        lecture_title=unit.lecture_title,
+                        heading_path=unit.heading_path,
+                        snippet=self._short_quote(unit.text, 180),
+                        topics=unit.topic_tags,
+                        canonical_refs=[ref.osis for ref in unit.all_canonical_refs],
+                    )
+                )
+
+        return (
+            {
+                "tool": "document_coverage",
+                "query": doc_query,
+                "found": True,
+                "document_title": groups[0][1][0].project_title,
+                "document_titles": [units[0].project_title for _document, units in groups],
+                "document_scope_refs": all_scope_refs,
+                "explicit_matthew_refs": all_explicit_refs,
+                "cross_refs": all_cross_refs,
+                "unit_count": total_units,
+                "answer": "\n".join(lines).strip(),
+            },
+            sources[:12],
+        )
+
+    def _document_coverage_summary(
+        self,
+        units: Sequence[SourceUnit],
+        target_matt_prefix: str | None = None,
+    ) -> dict[str, List[str]]:
         matt_counter: Counter[str] = Counter()
         cross_counter: Counter[str] = Counter()
         doc_scope_matt: List[str] = []
@@ -354,13 +432,14 @@ class SermonSearchService:
                         explicit_matt.append(ref.osis)
                 else:
                     cross_counter[ref.osis] += 1
-        doc_title = units[0].project_title
         broad = doc_scope_matt or [ref for ref, count in matt_counter.items() if count == len(units)]
         target_prefix = None
         if broad:
             first = broad[0].split("-")[0].split(".")
             if len(first) >= 2:
                 target_prefix = ".".join(first[:2]) + "."
+        elif target_matt_prefix:
+            target_prefix = target_matt_prefix
         specific = [
             ref
             for ref in explicit_matt
@@ -372,44 +451,7 @@ class SermonSearchService:
             if ref not in broad and ref not in specific
         ]
         cross_refs = [*other_matt, *[ref for ref, _ in cross_counter.most_common(12)]]
-        lines = [f"`{doc_title}` 這份講稿的索引覆蓋如下：", ""]
-        if broad:
-            lines.append(f"文件層級範圍：{', '.join(broad)}")
-        if specific:
-            lines.append(f"明確逐段處理/引用的馬太經文：{', '.join(specific)}")
-        if cross_refs:
-            lines.append(f"主要交叉經文：{', '.join(cross_refs)}")
-        lines.append("")
-        lines.append(f"索引來源單元數：{len(units)}")
-        sources = [
-            SourceCard(
-                source_id=unit.source_id,
-                content_id=unit.project_id,
-                score=100.0 - index,
-                doc_title=unit.project_title,
-                series_title=unit.series_title,
-                lecture_title=unit.lecture_title,
-                heading_path=unit.heading_path,
-                snippet=self._short_quote(unit.text, 180),
-                topics=unit.topic_tags,
-                canonical_refs=[ref.osis for ref in unit.all_canonical_refs],
-            )
-            for index, unit in enumerate(units[:12])
-        ]
-        return (
-            {
-                "tool": "document_coverage",
-                "query": doc_query,
-                "found": True,
-                "document_title": doc_title,
-                "document_scope_refs": broad,
-                "explicit_matthew_refs": specific,
-                "cross_refs": cross_refs,
-                "unit_count": len(units),
-                "answer": "\n".join(lines),
-            },
-            sources,
-        )
+        return {"broad": broad, "specific": specific, "cross_refs": cross_refs}
 
     def _ensure_index(self) -> None:
         status = self.index.status()

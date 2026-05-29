@@ -168,6 +168,36 @@ class SermonSearchTests(unittest.TestCase):
         self.assertIn("document_coverage", response.search_trace.tools_used)
         self.assertIn("Matt.16.1-Matt.16.19", response.answer)
 
+    def test_chapter_coverage_aggregates_matching_documents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first.md"
+            second = root / "second.md"
+            third = root / "third.md"
+            first.write_text("## 太 16:19\n\n我要把天國的鑰匙給你。", encoding="utf-8")
+            second.write_text("## 太 16:21-27\n\n耶穌說自己必須受苦，門徒要捨己。", encoding="utf-8")
+            third.write_text("## 靈魂體\n\n太 16:25-28 討論生命與賞賜，也旁及太 22:37。", encoding="utf-8")
+            search_index = SermonSearchIndex(root / "search.sqlite3")
+            search_index.rebuild_from_manuscripts(
+                [
+                    _manuscript(first, project_id="matt-16-a", title="16章 - 鑰匙", bible_verse="太 16:1-19"),
+                    _manuscript(second, project_id="matt-16-b", title="16 章 - 捨己", bible_verse="太 16:21-27"),
+                    _manuscript(third, project_id="matt-16-c", title="16 章 - 靈魂體"),
+                ]
+            )
+            service = SermonSearchService(index=search_index)
+            service.llm.api_key = None
+
+            response = service.query(SermonSearchRequest(question="教授對 16 章釋經都覆蓋了那些 verses?"))
+
+        self.assertIn("16章 - 鑰匙", response.answer)
+        self.assertIn("16 章 - 捨己", response.answer)
+        self.assertIn("16 章 - 靈魂體", response.answer)
+        self.assertIn("Matt.16.1-Matt.16.19", response.answer)
+        self.assertIn("Matt.16.21-Matt.16.27", response.answer)
+        self.assertIn("Matt.16.25-Matt.16.28", response.answer)
+        self.assertNotIn("明確逐段處理/引用的馬太經文：Matt.22.37", response.answer)
+
     def test_normal_mode_skips_llm_planner(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

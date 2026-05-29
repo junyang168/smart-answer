@@ -199,6 +199,8 @@ class SermonSearchIndex:
     def find_documents(self, query: str, limit: int = 10) -> List[dict]:
         self.initialize()
         normalized_query = self._normalize_title(query)
+        chapter_match = re.search(r"(\d+)\s*章", query)
+        normalized_chapter = f"{chapter_match.group(1)}章" if chapter_match else ""
         query_terms = [self._normalize_title(term) for term in self._query_terms(query)]
         query_terms = [term for term in query_terms if term]
         scored: List[dict] = []
@@ -230,6 +232,8 @@ class SermonSearchIndex:
                     score += 80.0
                 elif haystack in normalized_query:
                     score += 65.0
+            if normalized_chapter and normalized_chapter in haystack:
+                score += 70.0
             for term in query_terms:
                 if term and term in haystack:
                     score += min(30.0, 4.0 + len(term))
@@ -850,12 +854,8 @@ class SermonSearchIndex:
             for row in rows
         ]
 
-    def find_document_units(self, document_query: str) -> List[SourceUnit]:
+    def load_document_units(self, document_id: str) -> List[SourceUnit]:
         self.initialize()
-        matches = self.find_documents(document_query, limit=1)
-        if not matches:
-            return []
-        document_id = matches[0]["document_id"]
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -866,6 +866,20 @@ class SermonSearchIndex:
                 (document_id,),
             ).fetchall()
         return self.load_units([row["source_id"] for row in rows])
+
+    def find_document_unit_groups(self, document_query: str, limit: int = 8) -> List[tuple[dict, List[SourceUnit]]]:
+        self.initialize()
+        matches = self.find_documents(document_query, limit=limit)
+        groups: List[tuple[dict, List[SourceUnit]]] = []
+        for match in matches:
+            units = self.load_document_units(match["document_id"])
+            if units:
+                groups.append((match, units))
+        return groups
+
+    def find_document_units(self, document_query: str) -> List[SourceUnit]:
+        groups = self.find_document_unit_groups(document_query, limit=1)
+        return groups[0][1] if groups else []
 
     def _normalize_title(self, text: str) -> str:
         return re.sub(r"[\s_\\\-－—、，,。:：]+", "", text or "").lower()
