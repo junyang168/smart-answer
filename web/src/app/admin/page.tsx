@@ -37,6 +37,11 @@ const cards = [
     href: "/admin/email",
   },
   {
+    title: "Email 收件人管理",
+    description: "維護團契提醒、主日崇拜提醒與會眾 Email 使用的收件人名單。",
+    href: "/admin/email/recipients",
+  },
+  {
     title: "筆記生成講稿",
     description: "從手寫筆記圖像生成結構化講章草稿，並支援 AI 協作修訂。",
     href: "/admin/notes-to-sermon/series",

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import re
+from email.utils import parseaddr
+from pathlib import Path
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -113,6 +117,47 @@ class EmailRequest(BaseModel):
     subject: str
     body: str  # HTML body
     recipients_type: str = "congregation"  # Default to congregation
+
+
+class EmailRecipientsResponse(BaseModel):
+    recipients: list[str]
+    count: int
+    file_path: str
+    production: bool
+
+
+class EmailRecipientsUpdateRequest(BaseModel):
+    recipients: list[str]
+
+
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _normalize_recipient(raw_value: str) -> str:
+    _, parsed_email = parseaddr(raw_value)
+    candidate = (parsed_email or raw_value).strip()
+    if not candidate or not _EMAIL_PATTERN.fullmatch(candidate):
+        raise ValueError(f"Invalid email address: {raw_value}")
+    return candidate
+
+
+def _dedupe_recipients(values: list[str]) -> list[str]:
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        candidate = _normalize_recipient(value)
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        recipients.append(candidate)
+    if not recipients:
+        raise ValueError("At least one recipient is required")
+    return recipients
+
+
+def _notification_recipients_path() -> Path:
+    return determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
 
 
 router = APIRouter(prefix="/admin/full-articles", tags=["full-articles"])
@@ -435,11 +480,44 @@ def admin_upload_depth_of_faith_audio(file: UploadFile = File(...)) -> DepthOfFa
 email_router = APIRouter(prefix="/admin/email", tags=["email"])
 
 
+@email_router.get("/recipients", response_model=EmailRecipientsResponse)
+def get_email_recipients() -> EmailRecipientsResponse:
+    recipients_path = _notification_recipients_path()
+    recipients = load_notification_recipients(recipients_path)
+    return EmailRecipientsResponse(
+        recipients=recipients,
+        count=len(recipients),
+        file_path=str(recipients_path),
+        production=NOTIFICATION_PRODUCTION,
+    )
+
+
+@email_router.put("/recipients", response_model=EmailRecipientsResponse)
+def update_email_recipients(req: EmailRecipientsUpdateRequest) -> EmailRecipientsResponse:
+    try:
+        recipients = _dedupe_recipients(req.recipients)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    recipients_path = _notification_recipients_path()
+    recipients_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = recipients_path.with_suffix(f"{recipients_path.suffix}.tmp")
+    tmp_path.write_text("\n".join(recipients) + "\n", encoding="utf-8")
+    tmp_path.replace(recipients_path)
+
+    return EmailRecipientsResponse(
+        recipients=recipients,
+        count=len(recipients),
+        file_path=str(recipients_path),
+        production=NOTIFICATION_PRODUCTION,
+    )
+
+
 @email_router.post("/send")
 def send_custom_email(req: EmailRequest):
     # Determine recipients
     if req.recipients_type == "congregation":
-        recipients_path = determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
+        recipients_path = _notification_recipients_path()
         recipients = load_notification_recipients(recipients_path)
     else:
         # Fallback or other types can be added here

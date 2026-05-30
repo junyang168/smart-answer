@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import 'react-quill/dist/quill.snow.css';
 
 const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
@@ -97,7 +98,15 @@ export default function EmailSender() {
 
     return (
         <div className="p-6 max-w-4xl mx-auto">
-            <h1 className="text-2xl font-bold mb-6">Send Email to Congregation</h1>
+            <div className="mb-6 flex items-center justify-between gap-4">
+                <h1 className="text-2xl font-bold">Send Email to Congregation</h1>
+                <Link
+                    href="/admin/email/recipients"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                    Manage recipients
+                </Link>
+            </div>
 
             <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
