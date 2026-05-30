@@ -24,7 +24,7 @@ import {
 
 export interface ProjectLink {
   title: string;
-  google_doc_url?: string | null;
+  href?: string | null;
   available: boolean;
 }
 
@@ -48,7 +48,7 @@ function formatHeading(path: string[]) {
 
 function sourceUrl(source: SourceCard, projectLinks: Record<string, ProjectLink>) {
   const project = projectLinks[source.content_id];
-  return project?.available ? project.google_doc_url || null : null;
+  return project?.available ? project.href || null : null;
 }
 
 function sourceAnchorId(sourceId: string) {

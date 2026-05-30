@@ -8,6 +8,7 @@ import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 import { SermonSearchPanel } from "../SermonSearchPanel";
 import {
   fetchNotesToManuscriptSeriesDetail,
+  NotesToManuscriptSeriesDetail,
   NOTES_TO_MANUSCRIPT_REVALIDATE,
 } from "../data";
 
@@ -37,7 +38,7 @@ export default async function NotesToManuscriptSeriesDetailPage({
 }: PageProps) {
   const { seriesId } = await params;
 
-  let series;
+  let series: NotesToManuscriptSeriesDetail;
   try {
     series = await fetchNotesToManuscriptSeriesDetail(seriesId);
   } catch {
@@ -56,7 +57,7 @@ export default async function NotesToManuscriptSeriesDetailPage({
         project.id,
         {
           title: project.title,
-          google_doc_url: project.google_doc_url,
+          href: `/resources/notes_to_manuscript_series/${series.id}/${project.id}`,
           available: project.available,
         },
       ]),
@@ -144,10 +145,10 @@ export default async function NotesToManuscriptSeriesDetailPage({
                 ) : (
                   <div className="space-y-3">
                     {lecture.projects.map((project) =>
-                      project.available && project.google_doc_url ? (
-                        <a
+                      project.available ? (
+                        <Link
                           key={project.id}
-                          href={project.google_doc_url}
+                          href={`/resources/notes_to_manuscript_series/${series.id}/${project.id}`}
                           className="block rounded-xl border border-slate-200 px-4 py-4 transition hover:border-sky-300 hover:bg-sky-50/40"
                         >
                           <div className="flex items-center justify-between gap-4">
@@ -155,15 +156,12 @@ export default async function NotesToManuscriptSeriesDetailPage({
                               <h3 className="text-lg font-semibold text-slate-900">
                                 {project.title}
                               </h3>
-                              <p className="mt-1 text-sm text-slate-500">
-                                前往 Google Doc 閱讀逐字稿
-                              </p>
                             </div>
                             <span className="text-sm font-semibold text-sky-700 whitespace-nowrap">
                               查看稿件 →
                             </span>
                           </div>
-                        </a>
+                        </Link>
                       ) : (
                         <div
                           key={project.id}
@@ -175,7 +173,7 @@ export default async function NotesToManuscriptSeriesDetailPage({
                                 {project.title}
                               </h3>
                               <p className="mt-1 text-sm text-slate-500">
-                                尚未發布 Google Doc
+                                尚未發布逐字稿
                               </p>
                             </div>
                             <span className="text-sm font-semibold text-slate-400 whitespace-nowrap">

@@ -9,6 +9,7 @@ from backend.api.lecture_manager import (
     assign_project_to_lecture, remove_project_from_lecture
 )
 from backend.api.sermon_converter_service import get_sermon_project_metadata
+from backend.api.sermon_converter_service import get_sermon_final_path
 
 router = APIRouter(prefix="/admin/notes-to-sermon/series", tags=["Lecture Series"])
 public_router = APIRouter(prefix="/notes-to-sermon/public", tags=["Lecture Series Public"])
@@ -69,10 +70,20 @@ class PublicLectureSeriesDetail(BaseModel):
     lectures: List[PublicLecture]
 
 
+class PublicProjectManuscript(BaseModel):
+    id: str
+    title: str
+    markdown: str
+
+
 def _build_google_doc_url(doc_id: Optional[str]) -> Optional[str]:
     if not doc_id:
         return None
     return f"https://docs.google.com/document/d/{doc_id}/edit"
+
+
+def _project_has_final_markdown(project_id: str) -> bool:
+    return get_sermon_final_path(project_id).is_file()
 
 
 def _build_public_series_detail(series: LectureSeries) -> PublicLectureSeriesDetail:
@@ -89,7 +100,7 @@ def _build_public_series_detail(series: LectureSeries) -> PublicLectureSeriesDet
                     title=title,
                     google_doc_id=google_doc_id,
                     google_doc_url=_build_google_doc_url(google_doc_id),
-                    available=bool(google_doc_id),
+                    available=bool(project and _project_has_final_markdown(project_id)),
                 )
             )
         lectures.append(
@@ -131,7 +142,7 @@ def list_public_series_endpoint():
         for lecture in series.lectures:
             for project_id in lecture.project_ids:
                 project = get_sermon_project_metadata(project_id)
-                if project and project.google_doc_id:
+                if project and _project_has_final_markdown(project_id):
                     available_project_count += 1
         summaries.append(
             PublicLectureSeriesSummary(
@@ -156,6 +167,28 @@ def get_public_series_endpoint(series_id: str):
     if series.project_type != "sermon_note":
         raise HTTPException(status_code=404, detail="Series not found")
     return _build_public_series_detail(series)
+
+
+@public_router.get("/projects/{project_id}/manuscript", response_model=PublicProjectManuscript)
+def get_public_project_manuscript_endpoint(project_id: str):
+    project = get_sermon_project_metadata(project_id)
+    if not project or project.project_type != "sermon_note":
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    final_path = get_sermon_final_path(project_id)
+    if not final_path.is_file():
+        raise HTTPException(status_code=404, detail="Manuscript not found")
+
+    try:
+        markdown = final_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read manuscript: {exc}") from exc
+
+    return PublicProjectManuscript(
+        id=project.id,
+        title=project.title,
+        markdown=markdown,
+    )
 
 @router.get("", response_model=List[LectureSeries])
 def list_series_endpoint():

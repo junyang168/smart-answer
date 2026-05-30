@@ -26,7 +26,7 @@ const resourceCardsData = [
   {
     icon: FileSignature,
     title: '講義轉逐字稿',
-    description: `按系列與講次瀏覽「講義轉逐字稿」的整理稿件，並直接前往 Google Doc 閱讀完整手稿內容。此模組需先以 Google 帳號登入。`,
+    description: `按系列與講次瀏覽「講義轉逐字稿」的整理稿件，並閱讀完整手稿內容。此模組需先以 Google 帳號登入。`,
     link: '/resources/notes_to_manuscript_series',
     linkLabel: '查看系列',
   },

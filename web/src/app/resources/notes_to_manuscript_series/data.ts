@@ -44,6 +44,12 @@ export interface NotesToManuscriptSeriesDetail {
   lectures: NotesToManuscriptLecture[];
 }
 
+export interface NotesToManuscriptManuscript {
+  id: string;
+  title: string;
+  markdown: string;
+}
+
 export const NOTES_TO_MANUSCRIPT_REVALIDATE = 300;
 
 async function fetchBackendJson<T>(path: string): Promise<T> {
@@ -71,5 +77,13 @@ export async function fetchNotesToManuscriptSeriesDetail(
 ): Promise<NotesToManuscriptSeriesDetail> {
   return fetchBackendJson<NotesToManuscriptSeriesDetail>(
     `/notes-to-sermon/public/series/${encodeURIComponent(seriesId)}`,
+  );
+}
+
+export async function fetchNotesToManuscriptManuscript(
+  projectId: string,
+): Promise<NotesToManuscriptManuscript> {
+  return fetchBackendJson<NotesToManuscriptManuscript>(
+    `/notes-to-sermon/public/projects/${encodeURIComponent(projectId)}/manuscript`,
   );
 }

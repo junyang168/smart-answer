@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = {
   title: "講義轉逐字稿系列 | AI 輔助查經",
-  description: "按系列查看講義轉逐字稿的教學講稿，並直接前往 Google Doc 閱讀完整內容。",
+  description: "按系列查看講義轉逐字稿的教學講稿，並閱讀完整逐字稿內容。",
 };
 
 export const revalidate = NOTES_TO_MANUSCRIPT_REVALIDATE;
@@ -36,7 +36,7 @@ export default async function NotesToManuscriptSeriesPage() {
             講義轉逐字稿系列
           </h1>
           <p className="mt-4 text-lg text-slate-600 leading-relaxed">
-            依系列查看各講次與已發布的逐字稿專案。進入系列後，您可以按講次瀏覽並直接前往對應的 Google Doc。
+            依系列查看各講次與已發布的逐字稿專案。進入系列後，您可以按講次瀏覽並閱讀完整逐字稿。
           </p>
         </div>
       </section>
