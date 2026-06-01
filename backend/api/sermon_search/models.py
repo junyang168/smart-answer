@@ -146,3 +146,39 @@ class ReindexResponse(BaseModel):
     documents_indexed: int
     source_units_indexed: int
     skipped: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class TopicSourceCard(BaseModel):
+    project_id: str
+    project_title: str
+    lecture_title: str
+    source_sections: List[str] = Field(default_factory=list)
+    section_anchors: List[str] = Field(default_factory=list)
+    lun_dian: List[str] = Field(default_factory=list)
+
+
+class TopicCard(BaseModel):
+    id: str
+    name: str
+    type: str                                  # "concept" | "passage"
+    size: str
+    canonical_ref: Optional[str] = None        # OSIS
+    canonical_ref_raw: Optional[str] = None    # display form
+    chapter: Optional[int] = None              # parsed from OSIS, for chapter grouping
+    notes: Optional[str] = None
+    sources: List[TopicSourceCard] = Field(default_factory=list)
+    aliases: List[str] = Field(default_factory=list)
+
+
+class TopicListResponse(BaseModel):
+    available: bool = True
+    generated_at: Optional[str] = None
+    count: int = 0
+    topics: List[TopicCard] = Field(default_factory=list)
+
+
+class TopicStatus(BaseModel):
+    available: bool = False
+    generated_at: Optional[str] = None
+    passage_count: int = 0
+    concept_count: int = 0

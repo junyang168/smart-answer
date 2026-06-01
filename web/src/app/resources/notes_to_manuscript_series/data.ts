@@ -50,6 +50,35 @@ export interface NotesToManuscriptManuscript {
   markdown: string;
 }
 
+export interface TopicSourceCard {
+  project_id: string;
+  project_title: string;
+  lecture_title: string;
+  source_sections: string[];
+  section_anchors: string[];
+  lun_dian: string[];
+}
+
+export interface TopicCard {
+  id: string;
+  name: string;
+  type: "concept" | "passage";
+  size: string;
+  canonical_ref?: string | null;
+  canonical_ref_raw?: string | null;
+  chapter?: number | null;
+  notes?: string | null;
+  sources: TopicSourceCard[];
+  aliases: string[];
+}
+
+export interface TopicListResponse {
+  available: boolean;
+  generated_at?: string | null;
+  count: number;
+  topics: TopicCard[];
+}
+
 export const NOTES_TO_MANUSCRIPT_REVALIDATE = 300;
 
 async function fetchBackendJson<T>(path: string): Promise<T> {
@@ -86,4 +115,24 @@ export async function fetchNotesToManuscriptManuscript(
   return fetchBackendJson<NotesToManuscriptManuscript>(
     `/notes-to-sermon/public/projects/${encodeURIComponent(projectId)}/manuscript`,
   );
+}
+
+export async function fetchSeriesTopics(
+  seriesId: string,
+): Promise<TopicListResponse> {
+  try {
+    // Always fresh: the topic index is rebuilt out-of-band (reindex), so this
+    // navigation data must reflect the current index rather than a stale cache.
+    const response = await fetch(
+      `${BACKEND_BASE}/sermon_search/topics?series_id=${encodeURIComponent(seriesId)}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) {
+      throw new Error(`topics ${response.status}`);
+    }
+    return (await response.json()) as TopicListResponse;
+  } catch {
+    // Topic index may not be built yet — degrade gracefully.
+    return { available: false, count: 0, topics: [] };
+  }
 }
