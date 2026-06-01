@@ -80,7 +80,7 @@ class SermonExtractor(embed_content_extractor):
         牧師講道:
         """
         messages = [{"role": "user", "content": f"{question}{text}"}]
-        client = OpenAI(api_key="sk-db21da11c39642b592e6ebeeda50e87d", base_url="https://api.deepseek.com")
+        client = OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"], base_url="https://api.deepseek.com")
         response = client.chat.completions.create(
             model="deepseek-reasoner",
             messages=messages
