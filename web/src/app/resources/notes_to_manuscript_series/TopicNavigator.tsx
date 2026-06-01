@@ -344,16 +344,31 @@ function ManuscriptView({
           <div className="p-6 space-y-3">
             {lecture.projects.map((project) =>
               project.available ? (
-                <Link
-                  key={project.id}
-                  href={`/resources/notes_to_manuscript_series/${seriesId}/${project.id}`}
-                  className="block rounded-xl border border-slate-200 px-4 py-4 transition hover:border-sky-300 hover:bg-sky-50/40"
-                >
-                  <div className="flex items-center justify-between gap-4">
-                    <h3 className="text-lg font-semibold text-slate-900">{project.title}</h3>
-                    <span className="text-sm font-semibold text-sky-700 whitespace-nowrap">查看稿件 →</span>
-                  </div>
-                </Link>
+                project.google_doc_url ? (
+                  <a
+                    key={project.id}
+                    href={project.google_doc_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-xl border border-slate-200 px-4 py-4 transition hover:border-sky-300 hover:bg-sky-50/40"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <h3 className="text-lg font-semibold text-slate-900">{project.title}</h3>
+                      <span className="text-sm font-semibold text-sky-700 whitespace-nowrap">查看 Google Doc ↗</span>
+                    </div>
+                  </a>
+                ) : (
+                  <Link
+                    key={project.id}
+                    href={`/resources/notes_to_manuscript_series/${seriesId}/${project.id}`}
+                    className="block rounded-xl border border-slate-200 px-4 py-4 transition hover:border-sky-300 hover:bg-sky-50/40"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <h3 className="text-lg font-semibold text-slate-900">{project.title}</h3>
+                      <span className="text-sm font-semibold text-sky-700 whitespace-nowrap">查看稿件 →</span>
+                    </div>
+                  </Link>
+                )
               ) : (
                 <div key={project.id} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
                   <div className="flex items-center justify-between gap-4">
