@@ -94,11 +94,6 @@ export default async function NotesToManuscriptSeriesDetailPage({
               {series.description}
             </p>
           ) : null}
-          {series.folder ? (
-            <p className="mt-3 text-xs text-slate-400 font-mono">
-              Source Folder: {series.folder}
-            </p>
-          ) : null}
         </div>
       </section>
 
