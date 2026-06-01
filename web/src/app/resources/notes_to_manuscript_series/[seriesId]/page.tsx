@@ -6,11 +6,16 @@ import { Suspense } from "react";
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 
 import { SermonSearchPanel } from "../SermonSearchPanel";
+import { TopicNavigator } from "../TopicNavigator";
 import {
   fetchNotesToManuscriptSeriesDetail,
+  fetchSeriesTopics,
   NotesToManuscriptSeriesDetail,
   NOTES_TO_MANUSCRIPT_REVALIDATE,
+  TopicListResponse,
 } from "../data";
+
+const ASK_PANEL_ID = "ask-panel";
 
 type PageProps = {
   params: Promise<{ seriesId: string }>;
@@ -43,6 +48,13 @@ export default async function NotesToManuscriptSeriesDetailPage({
     series = await fetchNotesToManuscriptSeriesDetail(seriesId);
   } catch {
     notFound();
+  }
+
+  let topicList: TopicListResponse = { available: false, count: 0, topics: [] };
+  try {
+    topicList = await fetchSeriesTopics(series.id);
+  } catch {
+    // non-fatal: degrade to manuscript-only navigation
   }
 
   const breadcrumbLinks = [
@@ -93,103 +105,25 @@ export default async function NotesToManuscriptSeriesDetailPage({
         </div>
       </section>
 
+      <div id={ASK_PANEL_ID} className="scroll-mt-6">
+        <Suspense fallback={null}>
+          <SermonSearchPanel
+            seriesId={series.id}
+            seriesTitle={series.title}
+            projectLinks={projectLinks}
+          />
+        </Suspense>
+      </div>
+
       <Suspense fallback={null}>
-        <SermonSearchPanel
+        <TopicNavigator
           seriesId={series.id}
-          seriesTitle={series.title}
+          topics={topicList.topics}
+          topicsAvailable={topicList.available}
           projectLinks={projectLinks}
+          lectures={series.lectures}
         />
       </Suspense>
-
-      <section className="container mx-auto px-6 mt-10 space-y-8">
-        {series.lectures.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center text-slate-500">
-            此系列目前尚未整理任何講次。
-          </div>
-        ) : (
-          series.lectures.map((lecture, lectureIndex) => (
-            <article
-              key={lecture.id}
-              className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden"
-            >
-              <div className="px-6 py-5 border-b border-slate-200 bg-slate-50">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-400">
-                      第 {lectureIndex + 1} 講
-                    </p>
-                    <h2 className="mt-1 text-2xl font-bold text-slate-900">
-                      {lecture.title}
-                    </h2>
-                    {lecture.description ? (
-                      <p className="mt-2 text-slate-600">{lecture.description}</p>
-                    ) : null}
-                    {lecture.folder ? (
-                      <p className="mt-2 text-xs text-slate-400 font-mono">
-                        /{lecture.folder}
-                      </p>
-                    ) : null}
-                  </div>
-                  <span className="rounded-full bg-sky-50 text-sky-700 text-xs font-semibold px-3 py-1 whitespace-nowrap">
-                    {lecture.projects.filter((project) => project.available).length}/
-                    {lecture.projects.length} 可閱讀
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-6">
-                {lecture.projects.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
-                    此講次目前尚無專案。
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {lecture.projects.map((project) =>
-                      project.available ? (
-                        <Link
-                          key={project.id}
-                          href={`/resources/notes_to_manuscript_series/${series.id}/${project.id}`}
-                          className="block rounded-xl border border-slate-200 px-4 py-4 transition hover:border-sky-300 hover:bg-sky-50/40"
-                        >
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <h3 className="text-lg font-semibold text-slate-900">
-                                {project.title}
-                              </h3>
-                            </div>
-                            <span className="text-sm font-semibold text-sky-700 whitespace-nowrap">
-                              查看稿件 →
-                            </span>
-                          </div>
-                        </Link>
-                      ) : (
-                        <div
-                          key={project.id}
-                          className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
-                        >
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <h3 className="text-lg font-semibold text-slate-700">
-                                {project.title}
-                              </h3>
-                              <p className="mt-1 text-sm text-slate-500">
-                                尚未發布逐字稿
-                              </p>
-                            </div>
-                            <span className="text-sm font-semibold text-slate-400 whitespace-nowrap">
-                              未就緒
-                            </span>
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                )}
-              </div>
-            </article>
-          ))
-        )}
-      </section>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
 import { Popover, PopoverTrigger, PopoverContent } from "@/app/components/popover";
 import * as Tabs from "@radix-ui/react-tabs";
+import { slugifyHeadingAnchor } from "./heading-anchor";
 
 type Lang = "zh" | "en" | "el" | "he";
 
@@ -324,8 +325,9 @@ export function ScriptureMarkdown({ markdown, sectionId }: ScriptureMarkdownProp
 
   const components = useMemo(() => ({
     h2({ children, ...props }: any) {
+      const anchorId = slugifyHeadingAnchor(extractText(children)) || undefined;
       return (
-        <h2 className="scroll-mt-24 text-3xl font-bold mt-8 mb-4 text-gray-900" {...props}>
+        <h2 id={anchorId} className="scroll-mt-24 text-3xl font-bold mt-8 mb-4 text-gray-900" {...props}>
           {children}
         </h2>
       );

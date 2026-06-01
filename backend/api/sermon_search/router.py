@@ -13,8 +13,12 @@ from .models import (
     SermonSearchRequest,
     SermonSearchResponse,
     SourceCard,
+    TopicCard,
+    TopicListResponse,
+    TopicStatus,
 )
 from .service import sermon_search_service
+from .topic_index_store import topic_index_store
 
 
 router = APIRouter(prefix="/sermon_search", tags=["sermon-search"])
@@ -69,6 +73,28 @@ def query_stream_get(payload: str = Query(...)) -> StreamingResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid stream payload") from exc
     return _query_stream_response(request)
+
+
+@router.get("/topics/status", response_model=TopicStatus)
+def topics_status() -> TopicStatus:
+    return topic_index_store.status()
+
+
+@router.get("/topics", response_model=TopicListResponse)
+def topics(
+    series_id: str | None = Query(default=None),
+    type: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+) -> TopicListResponse:
+    return topic_index_store.list_topics(series_id=series_id, topic_type=type, q=q)
+
+
+@router.get("/topics/{topic_id}", response_model=TopicCard)
+def topic_detail(topic_id: str, series_id: str | None = Query(default=None)) -> TopicCard:
+    card = topic_index_store.get_topic(topic_id, series_id=series_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return card
 
 
 @compat_router.get("/semantic_search/{q}", response_model=List[SourceCard])
