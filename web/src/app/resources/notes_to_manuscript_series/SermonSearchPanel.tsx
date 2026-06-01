@@ -32,6 +32,9 @@ interface SermonSearchPanelProps {
   seriesId: string;
   seriesTitle: string;
   projectLinks: Record<string, ProjectLink>;
+  // When rendered inside the TopicNavigator tab, the parent already provides
+  // the container + horizontal padding, so drop our own outer section wrapper.
+  embedded?: boolean;
 }
 
 const EXAMPLE_QUESTIONS = [
@@ -118,6 +121,7 @@ export function SermonSearchPanel({
   seriesId,
   seriesTitle,
   projectLinks,
+  embedded = false,
 }: SermonSearchPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -258,8 +262,9 @@ export function SermonSearchPanel({
     void runSearch();
   }
 
+  const Root = embedded ? "div" : "section";
   return (
-    <section className="container mx-auto px-6 mt-10">
+    <Root className={embedded ? "" : "container mx-auto px-6 mt-10"}>
       <div className="max-w-6xl">
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-500">
           <Sparkles className="h-4 w-4 text-sky-600" />
@@ -549,6 +554,6 @@ export function SermonSearchPanel({
           </div>
         ) : null}
       </div>
-    </section>
+    </Root>
   );
 }

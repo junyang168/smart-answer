@@ -3,15 +3,16 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BookMarked, BookOpen, ChevronDown, ChevronRight, FileText, Layers, Search } from "lucide-react";
+import { BookMarked, BookOpen, ChevronDown, ChevronRight, FileText, Layers, Search, Sparkles } from "lucide-react";
 
-import type { ProjectLink } from "./SermonSearchPanel";
+import { SermonSearchPanel, type ProjectLink } from "./SermonSearchPanel";
 import type { NotesToManuscriptLecture, TopicCard } from "./data";
 
-type ViewKey = "chapter" | "topic" | "manuscript";
+type ViewKey = "chapter" | "topic" | "manuscript" | "ask";
 
 interface TopicNavigatorProps {
   seriesId: string;
+  seriesTitle: string;
   topics: TopicCard[];
   topicsAvailable: boolean;
   projectLinks: Record<string, ProjectLink>;
@@ -48,14 +49,18 @@ function osisStartKey(canonicalRef?: string | null): [number, number] {
   return [chapter, verse];
 }
 
-const SEGMENTS: { key: ViewKey; label: string; icon: typeof Layers }[] = [
+type Segment = { key: ViewKey; label: string; icon: typeof Layers };
+
+const TOPIC_SEGMENTS: Segment[] = [
   { key: "chapter", label: "按章節", icon: BookMarked },
   { key: "topic", label: "按主題", icon: Layers },
-  { key: "manuscript", label: "逐篇瀏覽", icon: FileText },
 ];
+const MANUSCRIPT_SEGMENT: Segment = { key: "manuscript", label: "逐篇瀏覽", icon: FileText };
+const ASK_SEGMENT: Segment = { key: "ask", label: "問答", icon: Sparkles };
 
 export function TopicNavigator({
   seriesId,
+  seriesTitle,
   topics,
   topicsAvailable,
   projectLinks,
@@ -66,8 +71,18 @@ export function TopicNavigator({
   const searchParams = useSearchParams();
 
   const hasTopics = topicsAvailable && topics.length > 0;
-  const urlView = (searchParams.get("view") as ViewKey) || (hasTopics ? "chapter" : "manuscript");
-  const view: ViewKey = SEGMENTS.some((s) => s.key === urlView) ? urlView : "chapter";
+  // Chapter/topic only exist when an index is built; 逐篇 and 問答 are always present.
+  const segments: Segment[] = [
+    ...(hasTopics ? TOPIC_SEGMENTS : []),
+    MANUSCRIPT_SEGMENT,
+    ASK_SEGMENT,
+  ];
+
+  // Default: browse-first (按章節), but a shared/refreshed ?q= link lands on 問答.
+  const hasQuery = Boolean(searchParams.get("q"));
+  const fallbackView: ViewKey = hasQuery ? "ask" : hasTopics ? "chapter" : "manuscript";
+  const urlView = searchParams.get("view") as ViewKey | null;
+  const view: ViewKey = urlView && segments.some((s) => s.key === urlView) ? urlView : fallbackView;
 
   const setView = useCallback(
     (next: ViewKey) => {
@@ -94,27 +109,25 @@ export function TopicNavigator({
 
   return (
     <section className="container mx-auto px-6 mt-8">
-      {hasTopics ? (
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          {SEGMENTS.map((seg) => {
-            const Icon = seg.icon;
-            const active = seg.key === view;
-            return (
-              <button
-                key={seg.key}
-                type="button"
-                onClick={() => setView(seg.key)}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                  active ? "bg-sky-600 text-white shadow" : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {seg.label}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
+      <div className="inline-flex flex-wrap rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        {segments.map((seg) => {
+          const Icon = seg.icon;
+          const active = seg.key === view;
+          return (
+            <button
+              key={seg.key}
+              type="button"
+              onClick={() => setView(seg.key)}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                active ? "bg-sky-600 text-white shadow" : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {seg.label}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="mt-6">
         {view === "chapter" && hasTopics ? (
@@ -123,8 +136,16 @@ export function TopicNavigator({
         {view === "topic" && hasTopics ? (
           <TopicView concepts={concepts} projectLinks={projectLinks} />
         ) : null}
-        {view === "manuscript" || !hasTopics ? (
+        {view === "manuscript" ? (
           <ManuscriptView seriesId={seriesId} lectures={lectures} />
+        ) : null}
+        {view === "ask" ? (
+          <SermonSearchPanel
+            seriesId={seriesId}
+            seriesTitle={seriesTitle}
+            projectLinks={projectLinks}
+            embedded
+          />
         ) : null}
       </div>
     </section>

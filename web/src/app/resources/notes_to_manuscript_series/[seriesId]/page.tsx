@@ -5,7 +5,6 @@ import { Suspense } from "react";
 
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 
-import { SermonSearchPanel } from "../SermonSearchPanel";
 import { TopicNavigator } from "../TopicNavigator";
 import {
   fetchNotesToManuscriptSeriesDetail,
@@ -14,8 +13,6 @@ import {
   NOTES_TO_MANUSCRIPT_REVALIDATE,
   TopicListResponse,
 } from "../data";
-
-const ASK_PANEL_ID = "ask-panel";
 
 type PageProps = {
   params: Promise<{ seriesId: string }>;
@@ -105,19 +102,10 @@ export default async function NotesToManuscriptSeriesDetailPage({
         </div>
       </section>
 
-      <div id={ASK_PANEL_ID} className="scroll-mt-6">
-        <Suspense fallback={null}>
-          <SermonSearchPanel
-            seriesId={series.id}
-            seriesTitle={series.title}
-            projectLinks={projectLinks}
-          />
-        </Suspense>
-      </div>
-
       <Suspense fallback={null}>
         <TopicNavigator
           seriesId={series.id}
+          seriesTitle={series.title}
           topics={topicList.topics}
           topicsAvailable={topicList.available}
           projectLinks={projectLinks}
