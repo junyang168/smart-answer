@@ -9,7 +9,9 @@ if (!BACKEND_BASE) {
 }
 
 function buildBackendUrl(pathSegments: string[] | undefined, search: string): string {
-  const joined = pathSegments?.length ? `/${pathSegments.map(encodeURIComponent).join("/")}` : "";
+  const joined = pathSegments?.length
+    ? `/${pathSegments.flatMap((segment) => segment.split("/")).map(encodeURIComponent).join("/")}`
+    : "";
   const searchPart = search ? search : "";
   return `${BACKEND_BASE}/admin/fellowships${joined}${searchPart}`;
 }

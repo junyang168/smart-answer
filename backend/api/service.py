@@ -259,7 +259,8 @@ def _resolve_fellowship_docs_dir(date: str) -> Path:
 
 
 def _fellowship_document_url(date: str, relative_path: str) -> str:
-    return f"/admin/fellowships/{quote(date, safe='')}/documents/{quote(relative_path, safe='')}"
+    folder_date = _fellowship_date_to_folder_name(date)
+    return f"/admin/fellowships/{quote(folder_date, safe='')}/documents/{quote(relative_path, safe='/')}"
 
 
 def list_fellowship_documents(date: str) -> list[FellowshipDocument]:

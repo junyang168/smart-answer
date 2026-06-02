@@ -17,6 +17,7 @@ def _load_service_with_data_dir(monkeypatch, tmp_path):
     (full_article_dir / "full_article_prompt.md").write_text("prompt", encoding="utf-8")
     (config_dir / "fellowship.json").write_text('[{"date":"05/22/2026"}]', encoding="utf-8")
     (docs_dir / "lesson notes.txt").write_text("hello", encoding="utf-8")
+    (docs_dir / "恩典的國度，僕人的生命.pptx").write_bytes(b"pptx")
 
     monkeypatch.setenv("DATA_BASE_DIR", str(data_dir))
     monkeypatch.setenv("FULL_ARTICLE_ROOT", str(full_article_dir))
@@ -30,21 +31,32 @@ def test_list_fellowship_documents_uses_iso_date_folder(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
 
     documents = service.list_fellowship_documents("05/22/2026")
+    document = next(doc for doc in documents if doc.name == "lesson notes.txt")
 
-    assert len(documents) == 1
-    assert documents[0].name == "lesson notes.txt"
-    assert documents[0].url == "/admin/fellowships/05%2F22%2F2026/documents/lesson%20notes.txt"
-    assert documents[0].size == 5
+    assert document.url == "/admin/fellowships/2026-05-22/documents/lesson%20notes.txt"
+    assert document.size == 5
 
 
 def test_list_fellowship_documents_accepts_iso_date(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
 
     documents = service.list_fellowship_documents("2026-05-22")
+    document = next(doc for doc in documents if doc.name == "lesson notes.txt")
 
-    assert len(documents) == 1
-    assert documents[0].name == "lesson notes.txt"
-    assert documents[0].url == "/admin/fellowships/2026-05-22/documents/lesson%20notes.txt"
+    assert document.url == "/admin/fellowships/2026-05-22/documents/lesson%20notes.txt"
+
+
+def test_list_fellowship_documents_encodes_non_ascii_pptx(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    documents = service.list_fellowship_documents("05/22/2026")
+    document = next(doc for doc in documents if doc.name == "恩典的國度，僕人的生命.pptx")
+
+    assert document.url == (
+        "/admin/fellowships/2026-05-22/documents/"
+        "%E6%81%A9%E5%85%B8%E7%9A%84%E5%9C%8B%E5%BA%A6%EF%BC%8C"
+        "%E5%83%95%E4%BA%BA%E7%9A%84%E7%94%9F%E5%91%BD.pptx"
+    )
 
 
 def test_get_fellowship_document_path_accepts_iso_date(monkeypatch, tmp_path):
