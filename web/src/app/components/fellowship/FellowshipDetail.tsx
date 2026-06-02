@@ -48,12 +48,12 @@ export function FellowshipDetail({ date }: { date: string }) {
   }, [date]);
 
   useEffect(() => {
-    if (status === "authenticated" && entry?.date) {
-      fetchDocuments(entry.date).then(setDocuments).catch(() => setDocuments([]));
+    if (status === "authenticated" && entry?.isoDate) {
+      fetchDocuments(entry.isoDate).then(setDocuments).catch(() => setDocuments([]));
     } else {
       setDocuments([]);
     }
-  }, [entry?.date, status]);
+  }, [entry?.isoDate, status]);
 
   if (loading) {
     return <div className="py-16 text-center text-gray-500">正在載入團契回顧...</div>;

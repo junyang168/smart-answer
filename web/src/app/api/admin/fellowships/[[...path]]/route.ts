@@ -8,17 +8,58 @@ if (!BACKEND_BASE) {
   throw new Error("FULL_ARTICLE_SERVICE_URL environment variable is required for fellowship proxy");
 }
 
+function splitPathSegments(pathSegments: string[] | undefined): string[] {
+  return (
+    pathSegments?.flatMap((segment) => {
+      try {
+        return decodeURIComponent(segment).split("/").filter(Boolean);
+      } catch {
+        return segment.split("/").filter(Boolean);
+      }
+    }) ?? []
+  );
+}
+
+function toIsoDateSegment(date: string): string | null {
+  const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, month, day, year] = match;
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDocumentPathSegments(pathSegments: string[] | undefined): string[] {
+  const segments = splitPathSegments(pathSegments);
+  const documentsIndex = segments.indexOf("documents");
+  if (documentsIndex === -1) {
+    return segments;
+  }
+
+  if (documentsIndex === 1) {
+    const isoDate = toIsoDateSegment(segments[0]);
+    return isoDate ? [isoDate, ...segments.slice(1)] : segments;
+  }
+
+  if (documentsIndex === 3) {
+    const isoDate = toIsoDateSegment(segments.slice(0, 3).join("/"));
+    return isoDate ? [isoDate, ...segments.slice(3)] : segments;
+  }
+
+  return segments;
+}
+
 function buildBackendUrl(pathSegments: string[] | undefined, search: string): string {
-  const joined = pathSegments?.length
-    ? `/${pathSegments.flatMap((segment) => segment.split("/")).map(encodeURIComponent).join("/")}`
-    : "";
+  const normalizedSegments = normalizeDocumentPathSegments(pathSegments);
+  const joined = normalizedSegments.length ? `/${normalizedSegments.map(encodeURIComponent).join("/")}` : "";
   const searchPart = search ? search : "";
   return `${BACKEND_BASE}/admin/fellowships${joined}${searchPart}`;
 }
 
 async function proxy(request: NextRequest, params: { path?: string[] }) {
-  const requestedPath = params.path?.join("/") ?? "";
-  if (requestedPath.split("/").includes("documents")) {
+  const requestedSegments = splitPathSegments(params.path);
+  if (requestedSegments.includes("documents")) {
     const session = await getServerSession(authConfig);
     if (!session) {
       return NextResponse.json({ error: "Authentication required" }, { status: 401 });
