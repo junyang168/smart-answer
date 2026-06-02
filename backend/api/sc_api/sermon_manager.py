@@ -506,7 +506,15 @@ class SermonManager:
         return result
 
     def get_no_permission(self):
-        return Permission(canRead=False, canWrite=False, canAssign=False, canUnassign=False, canAssignAnyone=False)
+        return Permission(
+            canRead=False,
+            canWrite=False,
+            canAssign=False,
+            canUnassign=False,
+            canAssignAnyone=False,
+            canPublish=False,
+            canViewPublished=False,
+        )
     
     
 
