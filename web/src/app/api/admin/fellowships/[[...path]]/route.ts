@@ -88,29 +88,43 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     body = text.length ? text : undefined;
   }
 
+  const backendMethod = request.method === "HEAD" ? "GET" : request.method;
   const backendResponse = await fetch(targetUrl, {
-    method: request.method,
+    method: backendMethod,
     headers,
     body,
     redirect: "manual",
   });
 
-  const responseBody = await backendResponse.arrayBuffer();
-  const response = new NextResponse(responseBody, {
-    status: backendResponse.status,
-  });
-
+  const responseHeaders = new Headers();
   backendResponse.headers.forEach((value, key) => {
     if (key.toLowerCase() === "content-length") {
       return;
     }
-    response.headers.set(key, value);
+    responseHeaders.set(key, value);
   });
 
-  return response;
+  if (request.method === "HEAD") {
+    await backendResponse.body?.cancel();
+    return new NextResponse(null, {
+      status: backendResponse.status,
+      statusText: backendResponse.statusText,
+      headers: responseHeaders,
+    });
+  }
+
+  return new NextResponse(backendResponse.body, {
+    status: backendResponse.status,
+    statusText: backendResponse.statusText,
+    headers: responseHeaders,
+  });
 }
 
 export async function GET(request: NextRequest, { params }: { params: { path?: string[] } }) {
+  return proxy(request, params);
+}
+
+export async function HEAD(request: NextRequest, { params }: { params: { path?: string[] } }) {
   return proxy(request, params);
 }
 
