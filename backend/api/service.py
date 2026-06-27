@@ -311,14 +311,14 @@ def is_public_fellowship_document(document: FellowshipDocument) -> bool:
     lower_name = name.lower()
     extension = lower_name.rsplit(".", 1)[-1] if "." in lower_name else ""
     hidden_prefixes = ("audio/", "tmp/", "temp/", "cache/")
-    hidden_extensions = {"mp3", "mp4", "m4a", "mov", "wav", "webm"}
+    public_extensions = {"md", "pptx", "mp4"}
     if lower_name.startswith(hidden_prefixes):
         return False
-    if extension in hidden_extensions:
+    if extension not in public_extensions:
         return False
-    if lower_name == FELLOWSHIP_GENERATED_TRANSCRIPT:
+    if lower_name in {FELLOWSHIP_GENERATED_TRANSCRIPT, FELLOWSHIP_ANALYSIS_DOCUMENT.lower()}:
         return False
-    if " - recording" in lower_name or " - chat" in lower_name:
+    if " - chat" in lower_name or lower_name.endswith(" chat.md") or lower_name.endswith(" chat.txt"):
         return False
     return True
 

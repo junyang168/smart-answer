@@ -37,18 +37,18 @@ function isPublicFellowshipDocument(document: FellowshipDocument): boolean {
   const lowerName = name.toLowerCase();
   const extension = lowerName.split(".").pop() ?? "";
   const hiddenPrefixes = ["audio/", "tmp/", "temp/", "cache/"];
-  const hiddenExtensions = new Set(["mp3", "mp4", "m4a", "mov", "wav", "webm"]);
+  const publicExtensions = new Set(["md", "pptx", "mp4"]);
 
   if (hiddenPrefixes.some((prefix) => lowerName.startsWith(prefix))) {
     return false;
   }
-  if (hiddenExtensions.has(extension)) {
+  if (!publicExtensions.has(extension)) {
     return false;
   }
-  if (lowerName === "recording.transcript.generated.md") {
+  if (lowerName === "recording.transcript.generated.md" || name === "主題與查經重點.md") {
     return false;
   }
-  if (lowerName.includes(" - recording") || lowerName.includes(" - chat")) {
+  if (lowerName.includes(" - chat") || lowerName.endsWith(" chat.md") || lowerName.endsWith(" chat.txt")) {
     return false;
   }
   return true;

@@ -59,9 +59,10 @@ def test_list_fellowship_documents_encodes_non_ascii_pptx(monkeypatch, tmp_path)
     )
 
 
-def test_list_public_fellowship_documents_hides_temporary_recording_outputs(monkeypatch, tmp_path):
+def test_list_public_fellowship_documents_shows_inputs_and_hides_generated_outputs(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
     docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    (docs_dir / "查經講稿.md").write_text("prepared manuscript", encoding="utf-8")
     (docs_dir / "主題與查經重點.md").write_text("report", encoding="utf-8")
     (docs_dir / "recording.transcript.generated.md").write_text("generated", encoding="utf-8")
     (docs_dir / "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4").write_bytes(b"mp4")
@@ -72,11 +73,11 @@ def test_list_public_fellowship_documents_hides_temporary_recording_outputs(monk
     documents = service.list_public_fellowship_documents("05/22/2026")
     names = {document.name for document in documents}
 
-    assert "主題與查經重點.md" in names
-    assert "lesson notes.txt" in names
+    assert "查經講稿.md" in names
     assert "恩典的國度，僕人的生命.pptx" in names
+    assert "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4" in names
+    assert "主題與查經重點.md" not in names
     assert "recording.transcript.generated.md" not in names
-    assert "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4" not in names
     assert "audio/達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp3" not in names
 
 
