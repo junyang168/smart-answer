@@ -57,6 +57,15 @@ function buildBackendUrl(pathSegments: string[] | undefined, search: string): st
   return `${BACKEND_BASE}/admin/fellowships${joined}${searchPart}`;
 }
 
+function isMarkdownDocumentRequest(pathSegments: string[] | undefined): boolean {
+  const segments = normalizeDocumentPathSegments(pathSegments);
+  const documentsIndex = segments.indexOf("documents");
+  if (documentsIndex === -1 || documentsIndex >= segments.length - 1) {
+    return false;
+  }
+  return segments[segments.length - 1]?.toLowerCase().endsWith(".md") ?? false;
+}
+
 async function proxy(request: NextRequest, params: { path?: string[] }) {
   const requestedSegments = splitPathSegments(params.path);
   if (requestedSegments.includes("documents")) {
@@ -98,15 +107,31 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
 
   const responseHeaders = new Headers();
   backendResponse.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "content-length") {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey === "content-length") {
+      return;
+    }
+    if (isMarkdownDocumentRequest(params.path) && lowerKey === "content-disposition") {
       return;
     }
     responseHeaders.set(key, value);
   });
+  if (isMarkdownDocumentRequest(params.path)) {
+    responseHeaders.set("content-type", "text/markdown; charset=utf-8");
+  }
 
   if (request.method === "HEAD") {
     await backendResponse.body?.cancel();
     return new NextResponse(null, {
+      status: backendResponse.status,
+      statusText: backendResponse.statusText,
+      headers: responseHeaders,
+    });
+  }
+
+  if (request.method === "GET" && isMarkdownDocumentRequest(params.path)) {
+    const buffer = await backendResponse.arrayBuffer();
+    return new NextResponse(buffer, {
       status: backendResponse.status,
       statusText: backendResponse.statusText,
       headers: responseHeaders,
