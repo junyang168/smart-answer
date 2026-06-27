@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FellowshipDocument } from "@/app/types/fellowship";
 import { PublicFellowshipEntry } from "@/app/types/publicFellowship";
-import { toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
+import { isMarkdownDocument, toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
 
 async function fetchFellowship(date: string): Promise<PublicFellowshipEntry> {
   const response = await fetch(`/api/sc_api/fellowships/${encodeURIComponent(date)}`, {
@@ -206,17 +206,21 @@ export function FellowshipDetail({ date }: { date: string }) {
         </div>
         {publicDocuments.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2">
-            {publicDocuments.map((document) => (
-              <a
-                key={document.name}
-                href={toFellowshipDocumentHref(entry.isoDate, document)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-md border border-gray-200 p-4 text-base text-blue-700 hover:border-blue-200 hover:bg-blue-50"
-              >
-                {document.name}
-              </a>
-            ))}
+            {publicDocuments.map((document) => {
+              const isMarkdown = isMarkdownDocument(document);
+              return (
+                <a
+                  key={document.name}
+                  href={toFellowshipDocumentHref(entry.isoDate, document)}
+                  target={isMarkdown ? "_blank" : undefined}
+                  rel={isMarkdown ? "noopener noreferrer" : undefined}
+                  download={isMarkdown ? undefined : document.name.split("/").pop()}
+                  className="rounded-md border border-gray-200 p-4 text-base text-blue-700 hover:border-blue-200 hover:bg-blue-50"
+                >
+                  {document.name}
+                </a>
+              );
+            })}
           </div>
         ) : (
           <p className="text-lg text-gray-500">此團契目前沒有可下載文件。</p>
