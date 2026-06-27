@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
-import { ArrowLeft, BookOpen, ExternalLink, FileText, Lock, Users } from "lucide-react";
+import { ArrowLeft, BookOpen, ExternalLink, FileText, Users } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { FellowshipDocument } from "@/app/types/fellowship";
@@ -23,7 +22,7 @@ async function fetchFellowship(date: string): Promise<PublicFellowshipEntry> {
 
 async function fetchDocuments(date: string): Promise<FellowshipDocument[]> {
   const response = await fetch(
-    `/api/admin/fellowships/${encodeURIComponent(date)}/documents?publicOnly=true`,
+    `/api/sc_api/fellowships/${encodeURIComponent(date)}/documents`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -55,7 +54,6 @@ function isPublicFellowshipDocument(document: FellowshipDocument): boolean {
 }
 
 export function FellowshipDetail({ date }: { date: string }) {
-  const { status } = useSession();
   const [entry, setEntry] = useState<PublicFellowshipEntry | null>(null);
   const [documents, setDocuments] = useState<FellowshipDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,12 +97,12 @@ export function FellowshipDetail({ date }: { date: string }) {
   }, [date]);
 
   useEffect(() => {
-    if (status === "authenticated" && entry?.isoDate) {
+    if (entry?.isoDate) {
       fetchDocuments(entry.isoDate).then(setDocuments).catch(() => setDocuments([]));
     } else {
       setDocuments([]);
     }
-  }, [entry?.isoDate, status]);
+  }, [entry?.isoDate]);
 
   if (loading) {
     return <div className="py-16 text-center text-gray-500">正在載入團契回顧...</div>;
@@ -206,29 +204,22 @@ export function FellowshipDetail({ date }: { date: string }) {
           <FileText className="h-6 w-6 text-[#8B4513]" />
           團契文件
         </div>
-        {status === "authenticated" ? (
-          publicDocuments.length > 0 ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              {publicDocuments.map((document) => (
-                <a
-                  key={document.name}
-                  href={toFellowshipDocumentHref(entry.isoDate, document)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-md border border-gray-200 p-4 text-base text-blue-700 hover:border-blue-200 hover:bg-blue-50"
-                >
-                  {document.name}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <p className="text-lg text-gray-500">此團契目前沒有可下載文件。</p>
-          )
-        ) : (
-          <div className="flex items-center gap-2 rounded-md bg-gray-50 p-4 text-base text-gray-600">
-            <Lock className="h-4 w-4" />
-            團契文件僅提供已登入使用者查看。公開頁面仍可閱讀學習重點與來源連結。
+        {publicDocuments.length > 0 ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {publicDocuments.map((document) => (
+              <a
+                key={document.name}
+                href={toFellowshipDocumentHref(entry.isoDate, document)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-gray-200 p-4 text-base text-blue-700 hover:border-blue-200 hover:bg-blue-50"
+              >
+                {document.name}
+              </a>
+            ))}
           </div>
+        ) : (
+          <p className="text-lg text-gray-500">此團契目前沒有可下載文件。</p>
         )}
       </section>
 

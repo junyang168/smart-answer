@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { signIn, useSession } from "next-auth/react";
-import { ArrowLeft, FileText, Lock } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,7 +15,7 @@ function encodePathSegments(path: string): string {
 
 async function fetchMarkdownDocument(date: string, documentPath: string): Promise<string> {
   const response = await fetch(
-    `/api/admin/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
+    `/api/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -32,7 +31,6 @@ export function FellowshipMarkdownDocument({
   date: string;
   documentPath: string;
 }) {
-  const { status } = useSession();
   const [markdown, setMarkdown] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,11 +38,6 @@ export function FellowshipMarkdownDocument({
   const documentName = useMemo(() => documentPath.split("/").pop() || documentPath, [documentPath]);
 
   useEffect(() => {
-    if (status !== "authenticated") {
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     fetchMarkdownDocument(date, documentPath)
       .then((content) => {
@@ -53,27 +46,10 @@ export function FellowshipMarkdownDocument({
       })
       .catch((err) => setError(err instanceof Error ? err.message : "載入團契文件失敗"))
       .finally(() => setLoading(false));
-  }, [date, documentPath, status]);
+  }, [date, documentPath]);
 
-  if (status === "loading" || loading) {
+  if (loading) {
     return <div className="py-16 text-center text-gray-500">正在載入團契文件...</div>;
-  }
-
-  if (status !== "authenticated") {
-    return (
-      <div className="rounded-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
-        <Lock className="mx-auto h-8 w-8 text-[#8B4513]" />
-        <h1 className="mt-4 text-2xl font-bold font-display text-gray-900">需要登入</h1>
-        <p className="mt-2 text-gray-600">團契文件僅提供已登入使用者查看。</p>
-        <button
-          type="button"
-          onClick={() => signIn("google")}
-          className="mt-5 rounded-md bg-[#8B4513] px-4 py-2 font-semibold text-white hover:bg-[#6f3710]"
-        >
-          使用 Google 登入
-        </button>
-      </div>
-    );
   }
 
   if (error) {

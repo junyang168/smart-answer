@@ -17,6 +17,7 @@ from backend.api.config import DATA_BASE_PATH
 from backend.api.service import (
     get_public_fellowship,
     get_public_fellowship_document_path,
+    list_public_fellowship_documents,
     list_public_fellowships,
 )
 
@@ -464,6 +465,11 @@ def get_fellowships():
 @router.get("/fellowships/{date}")
 def get_fellowship_detail(date: str):
     return get_public_fellowship(date)
+
+
+@router.get("/fellowships/{date}/documents")
+def get_fellowship_documents(date: str):
+    return list_public_fellowship_documents(date)
 
 
 @router.get("/fellowships/{date}/documents/{document_path:path}")
