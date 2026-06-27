@@ -6,9 +6,13 @@ import "react-quill/dist/quill.snow.css";
 import {
   createFellowship,
   deleteFellowship,
+  fetchFellowshipAnalysisAssets,
+  fetchFellowshipAnalysisJob,
+  fetchFellowshipDocumentText,
   fetchFellowshipDocuments,
   fetchFellowshipEmailContent,
   fetchFellowships,
+  generateFellowshipAnalysis,
   generateFellowshipLearning,
   sendFellowshipEmail,
   updateFellowship,
@@ -19,11 +23,16 @@ import {
   FellowshipDocument,
   FellowshipEmailContent,
   FellowshipEntry,
+  FellowshipAnalysisAssets,
+  FellowshipAnalysisContent,
+  FellowshipAnalysisJob,
   FellowshipLearningContent,
   FellowshipSourceLink,
 } from "@/app/types/fellowship";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/app/components/ui/tabs";
 import { toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const ReactQuill = dynamic(() => import("react-quill"), { ssr: false });
 
@@ -42,6 +51,11 @@ type FetchState =
   | { status: "error"; data: FellowshipEntry[]; error: string };
 
 type DocumentsByDate = Record<string, FellowshipDocument[]>;
+type LearningListField =
+  | "keyLearnings"
+  | "audienceQuestions"
+  | "audienceSharings"
+  | "leaderResponses";
 
 const emptyForm: FormState = {
   sequence: "",
@@ -60,6 +74,9 @@ const emptyEmailContent: FellowshipEmailContent = {
 const emptyLearningContent: FellowshipLearningContent = {
   summary: "",
   keyLearnings: [],
+  audienceQuestions: [],
+  audienceSharings: [],
+  leaderResponses: [],
   generatedAt: null,
 };
 
@@ -119,6 +136,10 @@ function formatFileSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const ANALYSIS_POLL_INTERVAL_MS = 3000;
+const ANALYSIS_POLL_TIMEOUT_MS = 90 * 60 * 1000;
+const ANALYSIS_DOCUMENT_NAME = "主題與查經重點.md";
+
 export function FellowshipManager() {
   const [state, setState] = useState<FetchState>({ status: "idle", data: [] });
   const [documentsByDate, setDocumentsByDate] = useState<DocumentsByDate>({});
@@ -139,6 +160,14 @@ export function FellowshipManager() {
   const [learningSaving, setLearningSaving] = useState(false);
   const [learningGenerating, setLearningGenerating] = useState(false);
   const [learningError, setLearningError] = useState<string | null>(null);
+  const [analysisAssets, setAnalysisAssets] = useState<FellowshipAnalysisAssets | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisGenerating, setAnalysisGenerating] = useState(false);
+  const [analysisJob, setAnalysisJob] = useState<FellowshipAnalysisJob | null>(null);
+  const [analysisContent, setAnalysisContent] = useState<FellowshipAnalysisContent | null>(null);
+  const [analysisMarkdown, setAnalysisMarkdown] = useState("");
+  const [analysisMarkdownLoading, setAnalysisMarkdownLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const emailEditorModules = useMemo(
     () => ({
@@ -211,6 +240,16 @@ export function FellowshipManager() {
     [entries, editingDate],
   );
 
+  const currentDocuments = useMemo(
+    () => (editingDate ? documentsByDate[editingDate] ?? [] : []),
+    [documentsByDate, editingDate],
+  );
+
+  const currentAnalysisDocument = useMemo(
+    () => currentDocuments.find((document) => document.name === ANALYSIS_DOCUMENT_NAME) ?? null,
+    [currentDocuments],
+  );
+
   const syncEntryEmailContent = useCallback((date: string, content: FellowshipEmailContent) => {
     setState((prev) => ({
       ...prev,
@@ -235,6 +274,9 @@ export function FellowshipManager() {
               ...entry,
               summary: content.summary,
               keyLearnings: content.keyLearnings,
+              audienceQuestions: content.audienceQuestions,
+              audienceSharings: content.audienceSharings,
+              leaderResponses: content.leaderResponses,
               keyLearningsGeneratedAt: content.generatedAt ?? entry.keyLearningsGeneratedAt ?? null,
             }
           : entry,
@@ -251,6 +293,14 @@ export function FellowshipManager() {
     setEmailLoading(false);
     setLearningContent(emptyLearningContent);
     setLearningError(null);
+    setAnalysisAssets(null);
+    setAnalysisError(null);
+    setAnalysisJob(null);
+    setAnalysisContent(null);
+    setAnalysisMarkdown("");
+    setAnalysisMarkdownLoading(false);
+    setAnalysisLoading(false);
+    setAnalysisGenerating(false);
   }, []);
 
   const handleChange =
@@ -332,6 +382,30 @@ export function FellowshipManager() {
     }));
   };
 
+  const handleLearningListChange =
+    (field: LearningListField, index: number) =>
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setLearningContent((prev) => ({
+        ...prev,
+        [field]: prev[field].map((item, itemIndex) => (itemIndex === index ? value : item)),
+      }));
+    };
+
+  const addLearningListItem = (field: LearningListField) => {
+    setLearningContent((prev) => ({
+      ...prev,
+      [field]: [...prev[field], ""],
+    }));
+  };
+
+  const removeLearningListItem = (field: LearningListField, index: number) => {
+    setLearningContent((prev) => ({
+      ...prev,
+      [field]: prev[field].filter((_item, itemIndex) => itemIndex !== index),
+    }));
+  };
+
   const handleEdit = (entry: FellowshipEntry) => {
     setEditingSequence(entry.sequence ?? null);
     setEditingDate(entry.date);
@@ -351,9 +425,86 @@ export function FellowshipManager() {
     setLearningContent({
       summary: entry.summary ?? "",
       keyLearnings: entry.keyLearnings?.length ? [...entry.keyLearnings] : [],
+      audienceQuestions: entry.audienceQuestions?.length ? [...entry.audienceQuestions] : [],
+      audienceSharings: entry.audienceSharings?.length ? [...entry.audienceSharings] : [],
+      leaderResponses: entry.leaderResponses?.length ? [...entry.leaderResponses] : [],
       generatedAt: entry.keyLearningsGeneratedAt ?? null,
     });
+    setAnalysisAssets(null);
+    setAnalysisError(null);
+    setAnalysisJob(null);
+    setAnalysisContent(null);
+    setAnalysisMarkdown("");
+    setAnalysisMarkdownLoading(false);
   };
+
+  useEffect(() => {
+    if (!editingDate) {
+      setAnalysisAssets(null);
+      setAnalysisError(null);
+      setAnalysisJob(null);
+      setAnalysisLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    fetchFellowshipAnalysisAssets(editingDate)
+      .then((assets) => {
+        if (!cancelled) {
+          setAnalysisAssets(assets);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "載入分析資料來源失敗";
+          setAnalysisError(message);
+          setAnalysisAssets(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAnalysisLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editingDate]);
+
+  useEffect(() => {
+    if (!editingDate || !currentAnalysisDocument) {
+      setAnalysisMarkdown("");
+      setAnalysisMarkdownLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAnalysisMarkdownLoading(true);
+    fetchFellowshipDocumentText(editingDate, currentAnalysisDocument.name)
+      .then((markdown) => {
+        if (!cancelled) {
+          setAnalysisMarkdown(markdown);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "載入完整分析報告失敗";
+          setAnalysisError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAnalysisMarkdownLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAnalysisDocument, editingDate]);
 
   useEffect(() => {
     if (!editingDate) {
@@ -467,6 +618,9 @@ export function FellowshipManager() {
       sourceLinks,
       summary: currentEntry?.summary ?? "",
       keyLearnings: currentEntry?.keyLearnings ?? [],
+      audienceQuestions: currentEntry?.audienceQuestions ?? [],
+      audienceSharings: currentEntry?.audienceSharings ?? [],
+      leaderResponses: currentEntry?.leaderResponses ?? [],
       keyLearningsGeneratedAt: currentEntry?.keyLearningsGeneratedAt ?? null,
       emailSubject: currentEntry?.emailSubject ?? null,
       emailBodyHtml: currentEntry?.emailBodyHtml ?? null,
@@ -583,6 +737,9 @@ export function FellowshipManager() {
     const payload: FellowshipLearningContent = {
       summary: learningContent.summary.trim(),
       keyLearnings: learningContent.keyLearnings.map((item) => item.trim()).filter(Boolean),
+      audienceQuestions: learningContent.audienceQuestions.map((item) => item.trim()).filter(Boolean),
+      audienceSharings: learningContent.audienceSharings.map((item) => item.trim()).filter(Boolean),
+      leaderResponses: learningContent.leaderResponses.map((item) => item.trim()).filter(Boolean),
       generatedAt: learningContent.generatedAt ?? null,
     };
     setLearningSaving(true);
@@ -620,6 +777,144 @@ export function FellowshipManager() {
     } finally {
       setLearningGenerating(false);
     }
+  };
+
+  const handleAnalysisGenerate = async () => {
+    if (!editingDate) {
+      setAnalysisError("請先選擇既有團契資料");
+      return;
+    }
+    setAnalysisGenerating(true);
+    setAnalysisError(null);
+    setFeedback(null);
+    try {
+      const started = await generateFellowshipAnalysis(editingDate);
+      setAnalysisJob(started);
+      let latest = started;
+      const deadline = Date.now() + ANALYSIS_POLL_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (latest.status === "completed" || latest.status === "failed") {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, ANALYSIS_POLL_INTERVAL_MS));
+        latest = await fetchFellowshipAnalysisJob(editingDate, started.jobId);
+        setAnalysisJob(latest);
+      }
+      if (latest.status !== "completed" && latest.status !== "failed") {
+        setFeedback("分析仍在後台執行，可稍後重新整理此頁查看結果。");
+        return;
+      }
+      if (latest.status !== "completed") {
+        throw new Error(latest.error || latest.message || "產生主題與查經重點失敗");
+      }
+      if (latest.content) {
+        setAnalysisContent(latest.content);
+        setAnalysisMarkdown(latest.content.markdown || "");
+        const interactionSummaries = (kind: string) =>
+          latest.content?.interactions
+            .filter((interaction) => interaction.kind === kind)
+            .map((interaction) => {
+              const text = (interaction.summary || interaction.text).trim();
+              return interaction.speaker && text ? `${interaction.speaker}：${text}` : text;
+            })
+            .filter(Boolean) ?? [];
+        const generated: FellowshipLearningContent = {
+          summary: latest.content.centralMessage || latest.content.theme,
+          keyLearnings: latest.content.keyPoints,
+          audienceQuestions: interactionSummaries("question"),
+          audienceSharings: interactionSummaries("sharing"),
+          leaderResponses: interactionSummaries("response"),
+          generatedAt: latest.content.generatedAt ?? null,
+        };
+        setLearningContent(generated);
+        syncEntryLearningContent(editingDate, generated);
+      }
+      const [documents, assets] = await Promise.all([
+        fetchFellowshipDocuments(editingDate),
+        fetchFellowshipAnalysisAssets(editingDate),
+      ]);
+      setDocumentsByDate((prev) => ({ ...prev, [editingDate]: documents }));
+      setAnalysisAssets(assets);
+      setFeedback("已產生主題與查經重點文件");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "產生主題與查經重點失敗";
+      setAnalysisError(message);
+    } finally {
+      setAnalysisGenerating(false);
+    }
+  };
+
+  const renderAssetSummary = (
+    label: string,
+    asset: FellowshipAnalysisAssets["pptx"] | FellowshipAnalysisAssets["transcript"] | FellowshipAnalysisAssets["recording"],
+  ) => (
+    <div className="rounded-md border border-sky-100 bg-white p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">{label}</p>
+      {asset ? (
+        <div className="mt-1 space-y-1 text-sm text-gray-700">
+          <p className="break-all font-medium">{asset.name}</p>
+          <p className="text-xs text-gray-500">
+            {asset.source === "drive" ? "Google Drive" : "本地文件"}
+            {asset.size != null ? ` · ${formatFileSize(asset.size)}` : ""}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-1 text-sm text-gray-500">未找到</p>
+      )}
+    </div>
+  );
+
+  const displayedAnalysisMarkdown = analysisContent?.markdown || analysisMarkdown;
+
+  const renderLearningListEditor = (
+    field: LearningListField,
+    title: string,
+    addLabel: string,
+    emptyText: string,
+    placeholder: string,
+  ) => {
+    const items = learningContent[field];
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-emerald-950">{title}</span>
+          <button
+            type="button"
+            onClick={() => addLearningListItem(field)}
+            disabled={!editingDate || learningGenerating || learningSaving}
+            className="rounded-md border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:text-emerald-300"
+          >
+            {addLabel}
+          </button>
+        </div>
+        {items.length > 0 ? (
+          <div className="space-y-2">
+            {items.map((item, index) => (
+              <div key={`${field}-${index}`} className="grid gap-2 md:grid-cols-[1fr_auto]">
+                <textarea
+                  value={item}
+                  onChange={handleLearningListChange(field, index)}
+                  disabled={!editingDate || learningGenerating || learningSaving}
+                  rows={2}
+                  className="min-h-20 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-gray-100"
+                  placeholder={placeholder}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeLearningListItem(field, index)}
+                  disabled={!editingDate || learningGenerating || learningSaving}
+                  className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
+                >
+                  移除
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">{emptyText}</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -804,6 +1099,116 @@ export function FellowshipManager() {
                 </div>
               )}
 
+              <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-sky-950">分析資料來源</h3>
+                    <p className="mt-1 text-xs text-sky-700">
+                      從團契 metadata、文件資料夾與 Google Meet Recordings 解析 PPT、逐字稿與錄音。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAnalysisGenerate}
+                    disabled={!editingDate || analysisLoading || analysisGenerating}
+                    className="rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+                  >
+                    {analysisGenerating ? "產生中…" : "產生主題與查經重點"}
+                  </button>
+                </div>
+
+                {analysisError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {analysisError}
+                  </div>
+                )}
+
+                {analysisLoading ? (
+                  <p className="text-sm text-sky-700">分析資料來源載入中…</p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {renderAssetSummary("PPT", analysisAssets?.pptx)}
+                    {renderAssetSummary("逐字稿 / 講稿", analysisAssets?.transcript)}
+                    {renderAssetSummary("錄音", analysisAssets?.recording)}
+                  </div>
+                )}
+
+                {analysisAssets?.emptyChat && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    找到 chat 檔案「{analysisAssets.emptyChat.name}」，但檔案太小，已視為空檔案並忽略。
+                  </div>
+                )}
+
+                {analysisAssets?.messages.length ? (
+                  <ul className="space-y-1 text-xs text-sky-700">
+                    {analysisAssets.messages.map((message, index) => (
+                      <li key={`${message}-${index}`}>{message}</li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {analysisJob && (
+                  <div className="rounded-md border border-sky-100 bg-white p-3 text-sm text-gray-700">
+                    <p>
+                      Job 狀態：<span className="font-semibold">{analysisJob.status}</span>
+                      {analysisJob.message ? ` · ${analysisJob.message}` : ""}
+                    </p>
+                    {analysisJob.resultDocumentName && editingDate && (
+                      <a
+                        href={toFellowshipDocumentHref(toIsoDate(editingDate), {
+                          name: analysisJob.resultDocumentName,
+                          url: "",
+                          size: 0,
+                          modifiedAt: "",
+                        })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-block text-sky-700 hover:underline"
+                      >
+                        開啟 {analysisJob.resultDocumentName}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-950">完整分析報告</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      顯示已產生的 `主題與查經重點.md`，包含主題、中心信息、經文結構、查經重點、會眾互動與生活應用。
+                    </p>
+                  </div>
+                  {currentAnalysisDocument && editingDate && (
+                    <a
+                      href={toFellowshipDocumentHref(toIsoDate(editingDate), currentAnalysisDocument)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      開啟 Markdown
+                    </a>
+                  )}
+                </div>
+
+                {analysisMarkdownLoading ? (
+                  <p className="text-sm text-slate-500">完整分析報告載入中…</p>
+                ) : displayedAnalysisMarkdown ? (
+                  <div className="max-h-[520px] overflow-auto rounded-md border border-slate-100 bg-slate-50 p-4">
+                    <div className="prose prose-slate max-w-none text-sm">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {displayedAnalysisMarkdown}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    尚未產生完整分析報告。點選「產生主題與查經重點」後會在這裡顯示所有 section。
+                  </p>
+                )}
+              </div>
+
               <label className="flex flex-col">
                 <span className="text-sm font-medium text-emerald-950">公開摘要（Markdown）</span>
                 <textarea
@@ -816,44 +1221,39 @@ export function FellowshipManager() {
                 />
               </label>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-emerald-950">學習重點（Markdown）</span>
-                  <button
-                    type="button"
-                    onClick={addKeyLearning}
-                    disabled={!editingDate || learningGenerating || learningSaving}
-                    className="rounded-md border border-emerald-300 px-3 py-1 text-sm text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:text-emerald-300"
-                  >
-                    新增重點
-                  </button>
-                </div>
-                {learningContent.keyLearnings.length > 0 ? (
-                  <div className="space-y-2">
-                    {learningContent.keyLearnings.map((item, index) => (
-                      <div key={index} className="grid gap-2 md:grid-cols-[1fr_auto]">
-                        <textarea
-                          value={item}
-                          onChange={handleKeyLearningChange(index)}
-                          disabled={!editingDate || learningGenerating || learningSaving}
-                          rows={2}
-                          className="min-h-20 rounded-md border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:bg-gray-100"
-                          placeholder="輸入一項學習重點，可使用 Markdown，例如 **基督是教會的根基**"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeKeyLearning(index)}
-                          disabled={!editingDate || learningGenerating || learningSaving}
-                          className="rounded-md border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-red-100 disabled:text-red-300"
-                        >
-                          移除
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">尚未建立學習重點。</p>
-                )}
+              {renderLearningListEditor(
+                "keyLearnings",
+                "學習重點（Markdown）",
+                "新增重點",
+                "尚未建立學習重點。",
+                "輸入一項學習重點，可使用 Markdown，例如 **基督是教會的根基**",
+              )}
+
+              {renderLearningListEditor(
+                "audienceQuestions",
+                "會眾問題（Markdown）",
+                "新增問題",
+                "尚未整理會眾問題。",
+                "輸入一項會眾問題，例如 彼得出於好意，為何耶穌卻稱他為撒但？",
+              )}
+
+              {renderLearningListEditor(
+                "audienceSharings",
+                "會眾分享（Markdown）",
+                "新增分享",
+                "尚未整理會眾分享。",
+                "輸入一項會眾分享，可包含分享者與內容摘要。",
+              )}
+
+              {renderLearningListEditor(
+                "leaderResponses",
+                "帶領者回應（Markdown）",
+                "新增回應",
+                "尚未整理帶領者回應。",
+                "輸入一項帶領者回應，聚焦對問題或分享的查經回應。",
+              )}
+
+              <div>
                 {learningContent.generatedAt && (
                   <p className="text-xs text-emerald-700">
                     最近產生時間：{new Date(learningContent.generatedAt).toLocaleString()}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { ArrowLeft, BookOpen, ExternalLink, FileText, Lock, Users } from "lucide-react";
@@ -21,13 +22,36 @@ async function fetchFellowship(date: string): Promise<PublicFellowshipEntry> {
 }
 
 async function fetchDocuments(date: string): Promise<FellowshipDocument[]> {
-  const response = await fetch(`/api/admin/fellowships/${encodeURIComponent(date)}/documents`, {
-    cache: "no-store",
-  });
+  const response = await fetch(
+    `/api/admin/fellowships/${encodeURIComponent(date)}/documents?publicOnly=true`,
+    { cache: "no-store" },
+  );
   if (!response.ok) {
     return [];
   }
   return response.json();
+}
+
+function isPublicFellowshipDocument(document: FellowshipDocument): boolean {
+  const name = document.name;
+  const lowerName = name.toLowerCase();
+  const extension = lowerName.split(".").pop() ?? "";
+  const hiddenPrefixes = ["audio/", "tmp/", "temp/", "cache/"];
+  const hiddenExtensions = new Set(["mp3", "mp4", "m4a", "mov", "wav", "webm"]);
+
+  if (hiddenPrefixes.some((prefix) => lowerName.startsWith(prefix))) {
+    return false;
+  }
+  if (hiddenExtensions.has(extension)) {
+    return false;
+  }
+  if (lowerName === "recording.transcript.generated.md") {
+    return false;
+  }
+  if (lowerName.includes(" - recording") || lowerName.includes(" - chat")) {
+    return false;
+  }
+  return true;
 }
 
 export function FellowshipDetail({ date }: { date: string }) {
@@ -36,6 +60,33 @@ export function FellowshipDetail({ date }: { date: string }) {
   const [documents, setDocuments] = useState<FellowshipDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const renderMarkdownListSection = (
+    title: string,
+    items: string[],
+    emptyText: string,
+    icon: ReactNode,
+  ) => (
+    <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex items-center gap-3 text-xl font-bold font-display text-gray-900">
+        {icon}
+        {title}
+      </div>
+      {items.length > 0 ? (
+        <ul className="space-y-3">
+          {items.map((item, index) => (
+            <li key={index} className="rounded-md bg-gray-50 p-4">
+              <div className="prose prose-slate max-w-none text-gray-700 lg:prose-lg prose-p:my-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{item}</ReactMarkdown>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-lg text-gray-500">{emptyText}</p>
+      )}
+    </section>
+  );
 
   useEffect(() => {
     fetchFellowship(date)
@@ -67,6 +118,8 @@ export function FellowshipDetail({ date }: { date: string }) {
     );
   }
 
+  const publicDocuments = documents.filter(isPublicFellowshipDocument);
+
   return (
     <article className="space-y-8">
       <Link href="/resources/fellowship" className="inline-flex items-center gap-2 text-base text-[#8B4513] hover:underline">
@@ -96,25 +149,33 @@ export function FellowshipDetail({ date }: { date: string }) {
         </section>
       )}
 
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center gap-3 text-xl font-bold font-display text-gray-900">
-          <BookOpen className="h-6 w-6 text-[#8B4513]" />
-          學習重點
-        </div>
-        {entry.keyLearnings.length > 0 ? (
-          <ul className="space-y-3">
-            {entry.keyLearnings.map((learning, index) => (
-              <li key={index} className="rounded-md bg-gray-50 p-4">
-                <div className="prose prose-slate max-w-none text-gray-700 lg:prose-lg prose-p:my-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{learning}</ReactMarkdown>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-lg text-gray-500">此團契尚未整理公開學習重點。</p>
-        )}
-      </section>
+      {renderMarkdownListSection(
+        "學習重點",
+        entry.keyLearnings ?? [],
+        "此團契尚未整理公開學習重點。",
+        <BookOpen className="h-6 w-6 text-[#8B4513]" />,
+      )}
+
+      {renderMarkdownListSection(
+        "會眾問題",
+        entry.audienceQuestions ?? [],
+        "此團契尚未整理會眾問題。",
+        <Users className="h-6 w-6 text-[#8B4513]" />,
+      )}
+
+      {renderMarkdownListSection(
+        "會眾分享",
+        entry.audienceSharings ?? [],
+        "此團契尚未整理會眾分享。",
+        <Users className="h-6 w-6 text-[#8B4513]" />,
+      )}
+
+      {renderMarkdownListSection(
+        "帶領者回應",
+        entry.leaderResponses ?? [],
+        "此團契尚未整理帶領者回應。",
+        <BookOpen className="h-6 w-6 text-[#8B4513]" />,
+      )}
 
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center gap-3 text-xl font-bold font-display text-gray-900">
@@ -146,9 +207,9 @@ export function FellowshipDetail({ date }: { date: string }) {
           團契文件
         </div>
         {status === "authenticated" ? (
-          documents.length > 0 ? (
+          publicDocuments.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2">
-              {documents.map((document) => (
+              {publicDocuments.map((document) => (
                 <a
                   key={document.name}
                   href={toFellowshipDocumentHref(entry.isoDate, document)}

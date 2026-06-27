@@ -8,6 +8,10 @@ import mimetypes
 import json
 import os
 import re
+import subprocess
+import tempfile
+import threading
+import uuid
 import zipfile
 import xml.etree.ElementTree as ET
 import git
@@ -28,10 +32,15 @@ from .models import (
     DepthOfFaithEpisode,
     DepthOfFaithEpisodeCreate,
     DepthOfFaithEpisodeUpdate,
+    FellowshipAnalysisAsset,
+    FellowshipAnalysisAssets,
+    FellowshipAnalysisContent,
+    FellowshipAnalysisJob,
     FellowshipDocument,
     FellowshipEntry,
     FellowshipEmailContent,
     FellowshipEmailResult,
+    FellowshipInteraction,
     FellowshipLearningContent,
     FellowshipPublicEntry,
     GenerateArticleRequest,
@@ -65,7 +74,17 @@ from .sunday_service_email import (
     TEST_RECIPIENT,
     EMAIL_PRODUCTION,
 )
-from .config import FELLOWSHIP_DOCS_DIR, SUNDAY_WORSHIP_DIR, PPT_TEMPLATE_FILE
+from .config import (
+    FELLOWSHIP_ANALYSIS_MODEL,
+    FELLOWSHIP_CHAT_MIN_BYTES,
+    FELLOWSHIP_DOCS_DIR,
+    FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID,
+    FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL,
+    FELLOWSHIP_TRANSCRIBE_MODEL,
+    OPENAI_API_KEY,
+    SUNDAY_WORSHIP_DIR,
+    PPT_TEMPLATE_FILE,
+)
 from .ppt_generator import generate_presentation_from_template
 from .scripture import parse_reference, BIBLE_API_TRANSLATION_ZH, ALIAS_TO_API_BOOK, BOOK_SLUG_TO_NAME
 from .webpage_extractor import fetch_lyrics_text
@@ -287,6 +306,27 @@ def list_fellowship_documents(date: str) -> list[FellowshipDocument]:
     return documents
 
 
+def is_public_fellowship_document(document: FellowshipDocument) -> bool:
+    name = document.name
+    lower_name = name.lower()
+    extension = lower_name.rsplit(".", 1)[-1] if "." in lower_name else ""
+    hidden_prefixes = ("audio/", "tmp/", "temp/", "cache/")
+    hidden_extensions = {"mp3", "mp4", "m4a", "mov", "wav", "webm"}
+    if lower_name.startswith(hidden_prefixes):
+        return False
+    if extension in hidden_extensions:
+        return False
+    if lower_name == FELLOWSHIP_GENERATED_TRANSCRIPT:
+        return False
+    if " - recording" in lower_name or " - chat" in lower_name:
+        return False
+    return True
+
+
+def list_public_fellowship_documents(date: str) -> list[FellowshipDocument]:
+    return [document for document in list_fellowship_documents(date) if is_public_fellowship_document(document)]
+
+
 def get_fellowship_document_path(date: str, document_path: str) -> tuple[Path, str | None]:
     folder = _resolve_fellowship_docs_dir(date)
     root = folder.resolve()
@@ -297,6 +337,200 @@ def get_fellowship_document_path(date: str, document_path: str) -> tuple[Path, s
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fellowship document not found")
     media_type, _encoding = mimetypes.guess_type(candidate.name)
     return candidate, media_type
+
+
+GENERATED_FELLOWSHIP_PREFIXES = ("主題與查經重點", "analysis", "generated")
+FELLOWSHIP_ANALYSIS_DOCUMENT = "主題與查經重點.md"
+FELLOWSHIP_GENERATED_TRANSCRIPT = "recording.transcript.generated.md"
+FELLOWSHIP_STT_MAX_BYTES = 24 * 1024 * 1024
+FELLOWSHIP_STT_SEGMENT_SECONDS = 10 * 60
+_DRIVE_FOLDER_RE = re.compile(r"(?:/folders/|[?&]id=)([-\w]{10,})")
+_ANALYSIS_JOBS: dict[str, FellowshipAnalysisJob] = {}
+_ANALYSIS_JOB_LOCK = threading.Lock()
+
+
+def parse_google_drive_folder_id(url: str) -> str | None:
+    match = _DRIVE_FOLDER_RE.search(url)
+    return match.group(1) if match else None
+
+
+def _asset_modified_at(path: Path) -> datetime:
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+
+
+def _classify_fellowship_asset_name(name: str, mime_type: str | None = None) -> str:
+    lowered = name.lower()
+    suffix = Path(name).suffix.lower()
+    if name.startswith(GENERATED_FELLOWSHIP_PREFIXES):
+        return "generated"
+    if " - chat" in lowered or lowered.endswith(" chat") or suffix in {".vtt", ".srt"}:
+        return "chat"
+    if "recording" in lowered or "錄音" in name or suffix in {".mp4", ".m4a", ".mp3", ".mov"}:
+        return "recording"
+    if suffix == ".pptx":
+        return "pptx"
+    if suffix in {".md", ".txt", ".docx"} or "transcript" in lowered or "逐字" in name or "會議記錄" in name or "会议记录" in name:
+        return "transcript"
+    if mime_type == "application/vnd.google-apps.document":
+        return "transcript"
+    return "document"
+
+
+def _local_fellowship_assets(date: str) -> list[FellowshipAnalysisAsset]:
+    folder = _resolve_fellowship_docs_dir(date)
+    if not folder.exists():
+        return []
+    assets: list[FellowshipAnalysisAsset] = []
+    for path in sorted(folder.rglob("*"), key=lambda item: item.relative_to(folder).as_posix().lower()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        relative_path = path.relative_to(folder).as_posix()
+        kind = _classify_fellowship_asset_name(path.name)
+        stat = path.stat()
+        usable = kind != "generated"
+        reason = "generatedOutput" if kind == "generated" else None
+        if kind == "chat" and stat.st_size < FELLOWSHIP_CHAT_MIN_BYTES:
+            usable = False
+            reason = "emptyChat"
+        assets.append(
+            FellowshipAnalysisAsset(
+                name=relative_path,
+                source="local",
+                kind=kind,
+                url=_fellowship_document_url(date, relative_path),
+                size=stat.st_size,
+                modifiedAt=_asset_modified_at(path),
+                usable=usable,
+                reason=reason,
+            )
+        )
+    return assets
+
+
+def _drive_folder_ids_for_entry(entry: FellowshipEntry) -> list[str]:
+    folder_ids: list[str] = []
+    for source in entry.source_links:
+        url = source.url or ""
+        folder_id = parse_google_drive_folder_id(url)
+        if folder_id:
+            folder_ids.append(folder_id)
+    if not folder_ids and FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID:
+        folder_ids.append(FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID)
+    return list(dict.fromkeys(folder_ids))
+
+
+def _get_drive_service(scopes: Sequence[str] | None = None):
+    from googleapiclient.discovery import build
+    import google.auth
+
+    credentials, _project = google.auth.default(
+        scopes=list(scopes or ["https://www.googleapis.com/auth/drive.metadata.readonly"])
+    )
+    return build("drive", "v3", credentials=credentials)
+
+
+def _list_drive_folder_assets(folder_id: str, date: str) -> list[FellowshipAnalysisAsset]:
+    normalized = _normalize_fellowship_date(date)
+    iso = _fellowship_iso_date(normalized)
+    slash_date = iso.replace("-", "/")
+    service = _get_drive_service(["https://www.googleapis.com/auth/drive.metadata.readonly"])
+    assets: list[FellowshipAnalysisAsset] = []
+    page_token = None
+    while True:
+        response = service.files().list(
+            q=f"'{folder_id}' in parents and trashed=false",
+            spaces="drive",
+            fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
+            pageToken=page_token,
+        ).execute()
+        for item in response.get("files", []):
+            name = str(item.get("name") or "")
+            if iso not in name and slash_date not in name:
+                continue
+            mime_type = item.get("mimeType")
+            kind = _classify_fellowship_asset_name(name, mime_type)
+            size_value = item.get("size")
+            size = int(size_value) if str(size_value or "").isdigit() else None
+            usable = kind != "generated"
+            reason = None
+            if kind == "chat" and (size or 0) < FELLOWSHIP_CHAT_MIN_BYTES:
+                usable = False
+                reason = "emptyChat"
+            modified_at = None
+            if item.get("modifiedTime"):
+                modified_at = datetime.fromisoformat(str(item["modifiedTime"]).replace("Z", "+00:00"))
+            assets.append(
+                FellowshipAnalysisAsset(
+                    name=name,
+                    source="drive",
+                    kind=kind,
+                    url=item.get("webViewLink"),
+                    size=size,
+                    modifiedAt=modified_at,
+                    driveFileId=item.get("id"),
+                    mimeType=mime_type,
+                    usable=usable,
+                    reason=reason,
+                )
+            )
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+    return assets
+
+
+def _find_fellowship_entry(date: str) -> FellowshipEntry:
+    normalized_date = _normalize_fellowship_date(date)
+    for entry in list_fellowships():
+        if entry.date == normalized_date:
+            return entry
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+
+
+def _score_asset(asset: FellowshipAnalysisAsset) -> tuple[int, int, float]:
+    name = asset.name.lower()
+    name_score = 0
+    for token in ("查經", "逐字", "transcript", "gemini", "會議記錄", "会议记录", "recording"):
+        if token.lower() in name:
+            name_score += 10
+    modified = asset.modified_at.timestamp() if asset.modified_at else 0
+    return (name_score, asset.size or 0, modified)
+
+
+def _select_analysis_assets(date: str, candidates: list[FellowshipAnalysisAsset]) -> FellowshipAnalysisAssets:
+    usable = [asset for asset in candidates if asset.usable]
+    pptx_candidates = [asset for asset in usable if asset.kind == "pptx"]
+    transcript_candidates = [asset for asset in usable if asset.kind == "transcript"]
+    recording_candidates = [asset for asset in usable if asset.kind == "recording"]
+    empty_chat = next((asset for asset in candidates if asset.reason == "emptyChat"), None)
+    messages: list[str] = []
+    if empty_chat:
+        messages.append(f"找到 chat 檔案 {empty_chat.name}，但小於 {FELLOWSHIP_CHAT_MIN_BYTES} bytes，已視為空檔案。")
+    if not transcript_candidates:
+        messages.append("未找到可用逐字稿，生成時會使用錄音轉文字。")
+    return FellowshipAnalysisAssets(
+        date=_fellowship_date_to_folder_name(date),
+        pptx=max(pptx_candidates, key=_score_asset, default=None),
+        transcript=max(transcript_candidates, key=_score_asset, default=None),
+        recording=max(recording_candidates, key=_score_asset, default=None),
+        emptyChat=empty_chat,
+        candidates=candidates,
+        messages=messages,
+    )
+
+
+def resolve_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
+    entry = _find_fellowship_entry(date)
+    candidates = _local_fellowship_assets(entry.date)
+    drive_errors: list[str] = []
+    for folder_id in _drive_folder_ids_for_entry(entry):
+        try:
+            candidates.extend(_list_drive_folder_assets(folder_id, entry.date))
+        except Exception as exc:
+            drive_errors.append(f"Unable to read Drive folder {folder_id}: {exc}")
+    assets = _select_analysis_assets(entry.date, candidates)
+    assets.messages.extend(drive_errors)
+    return assets
 
 
 def _normalize_fellowship_date(value: str) -> str:
@@ -314,7 +548,7 @@ def _fellowship_iso_date(date: str) -> str:
 
 
 def _to_public_fellowship_entry(entry: FellowshipEntry) -> FellowshipPublicEntry:
-    documents = list_fellowship_documents(entry.date)
+    documents = list_public_fellowship_documents(entry.date)
     return FellowshipPublicEntry(
         date=entry.date,
         isoDate=_fellowship_iso_date(entry.date),
@@ -325,6 +559,9 @@ def _to_public_fellowship_entry(entry: FellowshipEntry) -> FellowshipPublicEntry
         sourceLinks=entry.source_links,
         summary=entry.summary,
         keyLearnings=entry.key_learnings,
+        audienceQuestions=entry.audience_questions,
+        audienceSharings=entry.audience_sharings,
+        leaderResponses=entry.leader_responses,
         hasDocuments=bool(documents),
         documentCount=len(documents),
     )
@@ -353,6 +590,9 @@ def update_fellowship_learning_content(
                 update={
                     "summary": payload.summary.strip(),
                     "key_learnings": [item.strip() for item in payload.key_learnings if item.strip()],
+                    "audience_questions": [item.strip() for item in payload.audience_questions if item.strip()],
+                    "audience_sharings": [item.strip() for item in payload.audience_sharings if item.strip()],
+                    "leader_responses": [item.strip() for item in payload.leader_responses if item.strip()],
                     "key_learnings_generated_at": payload.generated_at,
                 }
             )
@@ -360,6 +600,9 @@ def update_fellowship_learning_content(
             return FellowshipLearningContent(
                 summary=updated.summary or "",
                 keyLearnings=updated.key_learnings,
+                audienceQuestions=updated.audience_questions,
+                audienceSharings=updated.audience_sharings,
+                leaderResponses=updated.leader_responses,
                 generatedAt=updated.key_learnings_generated_at,
             )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
@@ -422,6 +665,446 @@ def _extract_text_from_fellowship_docs(date: str) -> str:
     return combined[:45000]
 
 
+def _local_path_for_analysis_asset(date: str, asset: FellowshipAnalysisAsset) -> Path:
+    if asset.source != "local":
+        raise ValueError("Asset is not local")
+    folder = _resolve_fellowship_docs_dir(date)
+    root = folder.resolve()
+    candidate = (root / asset.name).resolve()
+    if root != candidate and root not in candidate.parents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fellowship analysis asset path")
+    if not candidate.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship analysis asset not found: {asset.name}")
+    return candidate
+
+
+def _read_analysis_asset_text(date: str, asset: FellowshipAnalysisAsset) -> str:
+    if asset.source == "local":
+        path = _local_path_for_analysis_asset(date, asset)
+        suffix = path.suffix.lower()
+        if suffix in {".txt", ".md"}:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        if suffix == ".docx":
+            return _extract_text_from_docx(path)
+        if suffix == ".pptx":
+            return _extract_text_from_pptx(path)
+        return ""
+    if asset.source == "drive" and asset.drive_file_id:
+        service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+        if asset.mime_type == "application/vnd.google-apps.document":
+            return service.files().export(fileId=asset.drive_file_id, mimeType="text/plain").execute().decode("utf-8", "ignore")
+        request = service.files().get_media(fileId=asset.drive_file_id)
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
+            from googleapiclient.http import MediaIoBaseDownload
+
+            downloader = MediaIoBaseDownload(tmp, request)
+            done = False
+            while not done:
+                _status_obj, done = downloader.next_chunk()
+            tmp.flush()
+            return Path(tmp.name).read_text(encoding="utf-8", errors="ignore")
+    return ""
+
+
+def _download_recording_asset(date: str, asset: FellowshipAnalysisAsset) -> Path:
+    cache_dir = Path(tempfile.gettempdir()) / "smart-answer-fellowship-recordings" / _fellowship_date_to_folder_name(date)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(asset.name).suffix or ".mp4"
+    target = cache_dir / f"recording-{asset.drive_file_id or abs(hash(asset.name))}{suffix}"
+    if target.exists() and target.stat().st_size > 0:
+        return target
+    if asset.source == "local":
+        return _local_path_for_analysis_asset(date, asset)
+    if asset.source == "drive" and asset.drive_file_id:
+        service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+        request = service.files().get_media(fileId=asset.drive_file_id)
+        from googleapiclient.http import MediaIoBaseDownload
+
+        with target.open("wb") as handle:
+            downloader = MediaIoBaseDownload(handle, request)
+            done = False
+            while not done:
+                _status_obj, done = downloader.next_chunk()
+        return target
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recording asset is not downloadable")
+
+
+def _looks_like_meeting_transcript(text: str) -> bool:
+    if "WEBVTT" in text[:200]:
+        return True
+    timestamp_hits = len(
+        re.findall(
+            r"^\s*\d{1,2}:\d{2}(?::\d{2})?(?:[,.]\d{3})?\b",
+            text[:8000],
+            flags=re.MULTILINE,
+        )
+    )
+    return timestamp_hits >= 4
+
+
+def _extract_audio_for_transcription(recording_path: Path) -> Path:
+    cache_dir = Path(tempfile.gettempdir()) / "smart-answer-fellowship-audio" / str(abs(hash(str(recording_path))))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    audio_path = cache_dir / "recording.stt.mp3"
+    if audio_path.exists() and audio_path.stat().st_size > 0:
+        return audio_path
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(recording_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        str(audio_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="ffmpeg executable not found") from exc
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to extract audio from recording") from exc
+    return audio_path
+
+
+def _split_audio_for_transcription(audio_path: Path, *, force: bool = False) -> list[Path]:
+    if not force and audio_path.stat().st_size <= FELLOWSHIP_STT_MAX_BYTES:
+        return [audio_path]
+    chunk_dir = audio_path.parent / f"{audio_path.stem}-chunks"
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    chunks = sorted(chunk_dir.glob("chunk-*.mp3"))
+    if chunks:
+        return chunks
+    pattern = chunk_dir / "chunk-%03d.mp3"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(audio_path),
+        "-f",
+        "segment",
+        "-segment_time",
+        str(FELLOWSHIP_STT_SEGMENT_SECONDS),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        str(pattern),
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="ffmpeg executable not found") from exc
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to split audio for transcription") from exc
+    chunks = sorted(chunk_dir.glob("chunk-*.mp3"))
+    if not chunks:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create audio chunks for transcription")
+    return chunks
+
+
+def _format_seconds(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _transcription_response_to_markdown(response: object, *, offset_seconds: float = 0.0, include_header: bool = True) -> str:
+    data = response.model_dump() if hasattr(response, "model_dump") else response
+    if not isinstance(data, dict):
+        text = str(response).strip()
+        return text
+    segments = data.get("segments") or []
+    lines: list[str] = ["# 錄音自動轉錄", ""] if include_header else []
+    if segments:
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            start = segment.get("start")
+            end = segment.get("end")
+            text = str(segment.get("text") or "").strip()
+            speaker = str(segment.get("speaker") or segment.get("speaker_label") or "").strip()
+            if not text:
+                continue
+            timestamp = ""
+            if start is not None:
+                start_value = offset_seconds + float(start)
+                timestamp = f"[{_format_seconds(start_value)}"
+                if end is not None:
+                    timestamp += f"-{_format_seconds(offset_seconds + float(end))}"
+                timestamp += "] "
+            label = f"{speaker}: " if speaker else ""
+            lines.append(f"{timestamp}{label}{text}")
+        return "\n".join(lines).strip()
+    text = str(data.get("text") or "").strip()
+    return "\n".join([*lines, text]).strip()
+
+
+def _transcribe_recording(recording_path: Path) -> str:
+    if not OPENAI_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OPENAI_API_KEY is required to transcribe fellowship recordings when no usable transcript exists",
+        )
+    from .openai_client import get_openai_client
+
+    audio_path = _extract_audio_for_transcription(recording_path)
+    client = get_openai_client()
+    model = FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL or FELLOWSHIP_TRANSCRIBE_MODEL
+    uses_gpt4o_transcribe = model.startswith("gpt-4o-transcribe")
+    chunks = _split_audio_for_transcription(audio_path, force=uses_gpt4o_transcribe)
+    markdown_parts: list[str] = ["# 錄音自動轉錄", ""]
+    for index, chunk in enumerate(chunks):
+        offset = index * FELLOWSHIP_STT_SEGMENT_SECONDS
+        response_format = "json" if uses_gpt4o_transcribe else "verbose_json"
+        kwargs = {
+            "model": model,
+            "file": chunk.open("rb"),
+            "response_format": response_format,
+        }
+        if response_format == "verbose_json" and not FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL:
+            kwargs["timestamp_granularities"] = ["segment"]
+        try:
+            response = client.audio.transcriptions.create(**kwargs)
+        finally:
+            file_obj = kwargs["file"]
+            try:
+                file_obj.close()
+            except Exception:
+                pass
+        part = _transcription_response_to_markdown(response, offset_seconds=offset, include_header=False)
+        chunk_end = offset + FELLOWSHIP_STT_SEGMENT_SECONDS
+        markdown_parts.append(f"## Part {index + 1} [{_format_seconds(offset)}-{_format_seconds(chunk_end)}]")
+        markdown_parts.append("")
+        markdown_parts.append(part)
+        markdown_parts.append("")
+    return "\n".join(markdown_parts).strip()
+
+
+def _safe_json_from_llm(raw_text: str) -> dict:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"```$", "", text).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            raise
+        return json.loads(match.group(0))
+
+
+def _render_fellowship_analysis_markdown(content: FellowshipAnalysisContent) -> str:
+    if content.markdown.strip():
+        return content.markdown.strip()
+
+    def section(title: str, body: str) -> str:
+        return f"## {title}\n\n{body.strip()}" if body.strip() else ""
+
+    def bullet(items: Sequence[str]) -> str:
+        return "\n".join(f"- {item}" for item in items if item.strip())
+
+    grouped: dict[str, list[FellowshipInteraction]] = {"question": [], "sharing": [], "response": []}
+    for item in content.interactions:
+        grouped.setdefault(item.kind, []).append(item)
+
+    def interaction_lines(items: Sequence[FellowshipInteraction]) -> str:
+        lines: list[str] = []
+        for item in items:
+            time_part = f" `{item.timestamp_start}`" if item.timestamp_start else ""
+            speaker = f"{item.speaker}：" if item.speaker else ""
+            summary = item.summary or item.text
+            if summary:
+                lines.append(f"- {time_part} {speaker}{summary}".strip())
+        return "\n".join(lines)
+
+    parts = [
+        "# 主題與查經重點",
+        section("主題", content.theme),
+        section("中心信息", content.central_message),
+        section("經文範圍", content.bible_passage),
+        section("經文結構", bullet(content.outline)),
+        section("查經重點", bullet(content.key_points)),
+        section("會眾問題", interaction_lines(grouped.get("question", []))),
+        section("會眾分享", interaction_lines(grouped.get("sharing", []))),
+        section("帶領者回應", interaction_lines(grouped.get("response", []))),
+        section("生活應用", bullet(content.applications)),
+        section("可延伸討論問題", bullet(content.discussion_questions)),
+    ]
+    return "\n\n".join(part for part in parts if part).strip() + "\n"
+
+
+def _analysis_prompt(entry: FellowshipEntry, ppt_text: str, prepared_text: str, meeting_text: str) -> str:
+    return (
+        "你是教會團契查經內容整理同工。請根據資料產生結構化分析，特別要分辨正式講解與會眾互動。\n"
+        "請使用繁體中文。只輸出 JSON，不要使用 Markdown code fence。\n\n"
+        "JSON 欄位：theme, centralMessage, biblePassage, outline, keyPoints, interactions, applications, discussionQuestions, markdown。\n"
+        "interactions 每項包含 kind(question/sharing/response), speaker, timestampStart, timestampEnd, text, summary。\n"
+        "markdown 必須包含標題與以下章節：主題、中心信息、經文結構、查經重點、會眾問題、會眾分享、帶領者回應、生活應用、可延伸討論問題。\n"
+        "若資料沒有會眾互動，請讓 interactions 為空陣列，不要編造。\n\n"
+        f"團契 metadata：日期 {entry.date}；主題 {entry.title or ''}；系列 {entry.series or ''}；主領 {entry.host or ''}\n\n"
+        f"=== PPT 文字 ===\n{ppt_text[:18000]}\n\n"
+        f"=== 講稿或逐字稿文件 ===\n{prepared_text[:18000]}\n\n"
+        f"=== 錄音轉錄或會議逐字稿 ===\n{meeting_text[:35000]}"
+    )
+
+
+def _parse_analysis_content(raw_text: str) -> FellowshipAnalysisContent:
+    try:
+        data = _safe_json_from_llm(raw_text)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to parse fellowship analysis JSON") from exc
+    data["generatedAt"] = datetime.now(timezone.utc).isoformat()
+    try:
+        content = FellowshipAnalysisContent.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Generated fellowship analysis has invalid shape") from exc
+    content.markdown = _render_fellowship_analysis_markdown(content)
+    return content
+
+
+def _generate_analysis_content(entry: FellowshipEntry, assets: FellowshipAnalysisAssets, meeting_text: str, prepared_text: str, ppt_text: str) -> FellowshipAnalysisContent:
+    prompt = _analysis_prompt(entry, ppt_text, prepared_text, meeting_text)
+    if OPENAI_API_KEY:
+        try:
+            from .openai_client import generate_structured_json
+
+            schema = {
+                "name": "fellowship_analysis",
+                "schema": FellowshipAnalysisContent.model_json_schema(),
+                "strict": False,
+            }
+            data = generate_structured_json(
+                "You produce strict JSON fellowship Bible study analysis.",
+                prompt,
+                schema,
+                model=FELLOWSHIP_ANALYSIS_MODEL,
+                temperature=0.0,
+            )
+            data["generatedAt"] = datetime.now(timezone.utc).isoformat()
+            content = FellowshipAnalysisContent.model_validate(data)
+            content.markdown = _render_fellowship_analysis_markdown(content)
+            return content
+        except Exception:
+            # Fall back to the existing Gemini generation path.
+            pass
+    generated = gemini_client.generate(prompt)
+    return _parse_analysis_content(generated)
+
+
+def _write_fellowship_analysis_outputs(date: str, transcript_text: str | None, content: FellowshipAnalysisContent) -> None:
+    folder = _resolve_fellowship_docs_dir(date)
+    folder.mkdir(parents=True, exist_ok=True)
+    if transcript_text:
+        (folder / FELLOWSHIP_GENERATED_TRANSCRIPT).write_text(transcript_text.strip() + "\n", encoding="utf-8")
+    (folder / FELLOWSHIP_ANALYSIS_DOCUMENT).write_text(content.markdown.strip() + "\n", encoding="utf-8")
+
+
+def _run_fellowship_analysis(date: str) -> FellowshipAnalysisContent:
+    entry = _find_fellowship_entry(date)
+    assets = resolve_fellowship_analysis_assets(entry.date)
+    ppt_text = _read_analysis_asset_text(entry.date, assets.pptx) if assets.pptx else ""
+    source_transcript_text = _read_analysis_asset_text(entry.date, assets.transcript) if assets.transcript else ""
+    meeting_text = source_transcript_text if _looks_like_meeting_transcript(source_transcript_text) else ""
+    generated_transcript: str | None = None
+    if not meeting_text:
+        if not assets.recording:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No usable transcript or recording found for fellowship analysis")
+        recording_path = _download_recording_asset(entry.date, assets.recording)
+        generated_transcript = _transcribe_recording(recording_path)
+        meeting_text = generated_transcript
+    content = _generate_analysis_content(entry, assets, meeting_text, source_transcript_text, ppt_text)
+    _write_fellowship_analysis_outputs(entry.date, generated_transcript, content)
+
+    def interaction_summary(kind: str) -> list[str]:
+        items: list[str] = []
+        for interaction in content.interactions:
+            if interaction.kind != kind:
+                continue
+            text = (interaction.summary or interaction.text).strip()
+            if interaction.speaker and text:
+                text = f"{interaction.speaker}：{text}"
+            if text:
+                items.append(text)
+        return items
+
+    update_fellowship_learning_content(
+        entry.date,
+        FellowshipLearningContent(
+            summary=(content.central_message or content.theme).strip(),
+            keyLearnings=content.key_points,
+            audienceQuestions=interaction_summary("question"),
+            audienceSharings=interaction_summary("sharing"),
+            leaderResponses=interaction_summary("response"),
+            generatedAt=content.generated_at,
+        ),
+    )
+    return content
+
+
+def _set_analysis_job(job: FellowshipAnalysisJob) -> None:
+    with _ANALYSIS_JOB_LOCK:
+        _ANALYSIS_JOBS[job.job_id] = job
+
+
+def start_fellowship_analysis_job(date: str) -> FellowshipAnalysisJob:
+    normalized = _normalize_fellowship_date(date)
+    job = FellowshipAnalysisJob(
+        jobId=str(uuid.uuid4()),
+        date=normalized,
+        status="queued",
+        message="Analysis job queued",
+    )
+    _set_analysis_job(job)
+    return job
+
+
+def run_fellowship_analysis_job(job_id: str) -> None:
+    with _ANALYSIS_JOB_LOCK:
+        job = _ANALYSIS_JOBS.get(job_id)
+    if job is None:
+        return
+    job.status = "running"
+    job.message = "Resolving assets, transcribing if needed, and generating analysis"
+    _set_analysis_job(job)
+    try:
+        content = _run_fellowship_analysis(job.date)
+        job.status = "completed"
+        job.message = "Analysis completed"
+        job.result_document_name = FELLOWSHIP_ANALYSIS_DOCUMENT
+        job.content = content
+        job.error = None
+    except Exception as exc:
+        job.status = "failed"
+        job.message = "Analysis failed"
+        job.error = getattr(exc, "detail", None) or str(exc)
+    _set_analysis_job(job)
+
+
+def get_fellowship_analysis_job(date: str, job_id: str) -> FellowshipAnalysisJob:
+    normalized = _normalize_fellowship_date(date)
+    with _ANALYSIS_JOB_LOCK:
+        job = _ANALYSIS_JOBS.get(job_id)
+    if job is None or job.date != normalized:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship analysis job {job_id} not found")
+    return job
+
+
 def _parse_learning_generation(raw_text: str) -> FellowshipLearningContent:
     text = raw_text.strip()
     if text.startswith("```"):
@@ -435,10 +1118,24 @@ def _parse_learning_generation(raw_text: str) -> FellowshipLearningContent:
     key_learnings = data.get("keyLearnings") or data.get("key_learnings") or []
     if not isinstance(key_learnings, list):
         key_learnings = []
+
+    def cleaned_list(*keys: str) -> list[str]:
+        value = None
+        for key in keys:
+            if key in data:
+                value = data.get(key)
+                break
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
     cleaned = [str(item).strip() for item in key_learnings if str(item).strip()]
     return FellowshipLearningContent(
         summary=summary,
-        keyLearnings=cleaned[:8],
+        keyLearnings=cleaned,
+        audienceQuestions=cleaned_list("audienceQuestions", "audience_questions"),
+        audienceSharings=cleaned_list("audienceSharings", "audience_sharings"),
+        leaderResponses=cleaned_list("leaderResponses", "leader_responses"),
         generatedAt=datetime.now(timezone.utc),
     )
 
@@ -460,9 +1157,10 @@ def generate_fellowship_learning_content(date: str) -> FellowshipLearningContent
         "要求：\n"
         "1. 使用繁體中文。\n"
         "2. summary 需 80-140 字，清楚說明本次查經主題與屬靈焦點，可使用簡潔 Markdown。\n"
-        "3. keyLearnings 需 3-6 點，每點一句完整、具體、可回顧的學習重點，可使用簡潔 Markdown。\n"
-        "4. 不要提到 AI、文件來源限制或內部管理流程。\n"
-        "5. 只輸出 JSON，格式為 {\"summary\":\"...\",\"keyLearnings\":[\"...\"]}，Markdown 內容放在字串內。\n\n"
+        "3. keyLearnings 需列出完整查經重點，每點一句完整、具體、可回顧，可使用簡潔 Markdown。\n"
+        "4. 若文件中有互動內容，請分別整理 audienceQuestions、audienceSharings、leaderResponses；沒有則用空陣列，不要編造。\n"
+        "5. 不要提到 AI、文件來源限制或內部管理流程。\n"
+        "6. 只輸出 JSON，格式為 {\"summary\":\"...\",\"keyLearnings\":[\"...\"],\"audienceQuestions\":[\"...\"],\"audienceSharings\":[\"...\"],\"leaderResponses\":[\"...\"]}，Markdown 內容放在字串內。\n\n"
         f"團契資料：日期 {entry.date}，主題 {entry.title or ''}，系列 {entry.series or ''}，主講 {entry.host or ''}\n\n"
         f"文件內容：\n{docs_text}"
     )

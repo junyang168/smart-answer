@@ -59,6 +59,27 @@ def test_list_fellowship_documents_encodes_non_ascii_pptx(monkeypatch, tmp_path)
     )
 
 
+def test_list_public_fellowship_documents_hides_temporary_recording_outputs(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    (docs_dir / "主題與查經重點.md").write_text("report", encoding="utf-8")
+    (docs_dir / "recording.transcript.generated.md").write_text("generated", encoding="utf-8")
+    (docs_dir / "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4").write_bytes(b"mp4")
+    audio_dir = docs_dir / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp3").write_bytes(b"mp3")
+
+    documents = service.list_public_fellowship_documents("05/22/2026")
+    names = {document.name for document in documents}
+
+    assert "主題與查經重點.md" in names
+    assert "lesson notes.txt" in names
+    assert "恩典的國度，僕人的生命.pptx" in names
+    assert "recording.transcript.generated.md" not in names
+    assert "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4" not in names
+    assert "audio/達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp3" not in names
+
+
 def test_get_fellowship_document_path_accepts_iso_date(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
 
@@ -77,3 +98,83 @@ def test_get_fellowship_document_path_rejects_traversal(monkeypatch, tmp_path):
         assert getattr(exc, "status_code", None) == 400
     else:
         raise AssertionError("Expected path traversal to be rejected")
+
+
+def test_parse_google_drive_folder_id(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    folder_id = service.parse_google_drive_folder_id(
+        "https://drive.google.com/drive/folders/19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
+    )
+
+    assert folder_id == "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
+
+
+def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    config_file = tmp_path / "data" / "config" / "fellowship.json"
+    config_file.write_text(
+        """
+        [
+          {
+            "date": "06/19/2026",
+            "title": "苦難與榮耀之路",
+            "sourceLinks": [
+              {
+                "label": "Meet Recordings",
+                "url": "https://drive.google.com/drive/folders/19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
+              }
+            ]
+          }
+        ]
+        """,
+        encoding="utf-8",
+    )
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-06-19"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "苦難與榮耀之路 太 16_20–17_13.md").write_text("prepared manuscript" * 100, encoding="utf-8")
+    (docs_dir / "苦難與榮耀之路_太16_20-17_13_查經.pptx").write_bytes(b"pptx")
+
+    def fake_drive_assets(folder_id, date):
+        assert folder_id == "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
+        return [
+            service.FellowshipAnalysisAsset(
+                name="達拉斯聖道教會團契查經 - 2026/06/19 19:28 CDT - Chat",
+                source="drive",
+                kind="chat",
+                size=44,
+                usable=False,
+                reason="emptyChat",
+                driveFileId="chat-id",
+            ),
+            service.FellowshipAnalysisAsset(
+                name="達拉斯聖道教會團契查經 - 2026/06/19 19:28 CDT - Recording",
+                source="drive",
+                kind="recording",
+                size=213_100_000,
+                usable=True,
+                driveFileId="recording-id",
+            ),
+        ]
+
+    monkeypatch.setattr(service, "_drive_folder_ids_for_entry", lambda entry: ["19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"])
+    monkeypatch.setattr(service, "_list_drive_folder_assets", fake_drive_assets)
+
+    assets = service.resolve_fellowship_analysis_assets("2026-06-19")
+
+    assert assets.recording is not None
+    assert assets.recording.drive_file_id == "recording-id"
+    assert assets.empty_chat is not None
+    assert assets.empty_chat.reason == "emptyChat"
+    assert assets.transcript is not None
+    assert assets.pptx is not None
+
+
+def test_prepared_chinese_manuscript_is_not_meeting_transcript(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    manuscript = "原因就在一句話：門徒名字認對了，畫面卻錯了。\n【讀經：馬太福音 16:20】\n" * 20
+    transcript = "00:00:01 Jun Yang: 大家平安\n00:00:04 Mary: 我有一個問題\n00:00:08 Jun Yang: 好\n00:00:12 Mary: 分享一下\n"
+
+    assert service._looks_like_meeting_transcript(manuscript) is False
+    assert service._looks_like_meeting_transcript(transcript) is True

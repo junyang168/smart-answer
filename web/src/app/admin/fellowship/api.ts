@@ -1,4 +1,6 @@
 import {
+  FellowshipAnalysisAssets,
+  FellowshipAnalysisJob,
   FellowshipDocument,
   FellowshipEmailContent,
   FellowshipEmailResult,
@@ -50,6 +52,30 @@ export async function fetchFellowshipDocuments(date: string): Promise<Fellowship
   return parseJson(response);
 }
 
+function encodePathSegments(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export async function fetchFellowshipDocumentText(
+  date: string,
+  documentPath: string,
+): Promise<string> {
+  const response = await fetch(
+    resolveApiUrl(
+      `${API_BASE_PATH}/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
+    ),
+    { cache: "no-store" },
+  );
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+  return response.text();
+}
+
 export async function createFellowship(entry: FellowshipEntry): Promise<FellowshipEntry> {
   const response = await fetch(resolveApiUrl(API_BASE_PATH), {
     method: "POST",
@@ -86,6 +112,33 @@ export async function generateFellowshipLearning(date: string): Promise<Fellowsh
     {
       method: "POST",
     },
+  );
+  return parseJson(response);
+}
+
+export async function fetchFellowshipAnalysisAssets(date: string): Promise<FellowshipAnalysisAssets> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/assets`),
+    { cache: "no-store" },
+  );
+  return parseJson(response);
+}
+
+export async function generateFellowshipAnalysis(date: string): Promise<FellowshipAnalysisJob> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/generate`),
+    { method: "POST" },
+  );
+  return parseJson(response);
+}
+
+export async function fetchFellowshipAnalysisJob(
+  date: string,
+  jobId: string,
+): Promise<FellowshipAnalysisJob> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/jobs/${encodeURIComponent(jobId)}`),
+    { cache: "no-store" },
   );
   return parseJson(response);
 }

@@ -10,6 +10,9 @@ export interface PublicFellowshipEntry {
   sourceLinks: FellowshipSourceLink[];
   summary?: string | null;
   keyLearnings: string[];
+  audienceQuestions: string[];
+  audienceSharings: string[];
+  leaderResponses: string[];
   hasDocuments: boolean;
   documentCount: number;
 }

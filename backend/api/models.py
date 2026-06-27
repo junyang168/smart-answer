@@ -115,6 +115,9 @@ class FellowshipEntry(BaseModel):
     source_links: List[FellowshipSourceLink] = Field(default_factory=list, alias="sourceLinks")
     summary: Optional[str] = None
     key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    audience_questions: List[str] = Field(default_factory=list, alias="audienceQuestions")
+    audience_sharings: List[str] = Field(default_factory=list, alias="audienceSharings")
+    leader_responses: List[str] = Field(default_factory=list, alias="leaderResponses")
     key_learnings_generated_at: Optional[datetime] = Field(None, alias="keyLearningsGeneratedAt")
     email_subject: Optional[str] = Field(None, alias="emailSubject")
     email_body_html: Optional[str] = Field(None, alias="emailBodyHtml")
@@ -132,6 +135,9 @@ class FellowshipPublicEntry(BaseModel):
     source_links: List[FellowshipSourceLink] = Field(default_factory=list, alias="sourceLinks")
     summary: Optional[str] = None
     key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    audience_questions: List[str] = Field(default_factory=list, alias="audienceQuestions")
+    audience_sharings: List[str] = Field(default_factory=list, alias="audienceSharings")
+    leader_responses: List[str] = Field(default_factory=list, alias="leaderResponses")
     has_documents: bool = Field(False, alias="hasDocuments")
     document_count: int = Field(0, alias="documentCount")
 
@@ -141,6 +147,9 @@ class FellowshipPublicEntry(BaseModel):
 class FellowshipLearningContent(BaseModel):
     summary: str = ""
     key_learnings: List[str] = Field(default_factory=list, alias="keyLearnings")
+    audience_questions: List[str] = Field(default_factory=list, alias="audienceQuestions")
+    audience_sharings: List[str] = Field(default_factory=list, alias="audienceSharings")
+    leader_responses: List[str] = Field(default_factory=list, alias="leaderResponses")
     generated_at: Optional[datetime] = Field(None, alias="generatedAt")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -165,6 +174,71 @@ class FellowshipDocument(BaseModel):
     url: str
     size: int
     modified_at: datetime = Field(..., alias="modifiedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipAnalysisAsset(BaseModel):
+    name: str
+    source: str = "local"
+    kind: str = "document"
+    url: Optional[str] = None
+    size: Optional[int] = None
+    modified_at: Optional[datetime] = Field(None, alias="modifiedAt")
+    drive_file_id: Optional[str] = Field(None, alias="driveFileId")
+    mime_type: Optional[str] = Field(None, alias="mimeType")
+    usable: bool = True
+    reason: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipAnalysisAssets(BaseModel):
+    date: str
+    pptx: Optional[FellowshipAnalysisAsset] = None
+    transcript: Optional[FellowshipAnalysisAsset] = None
+    recording: Optional[FellowshipAnalysisAsset] = None
+    empty_chat: Optional[FellowshipAnalysisAsset] = Field(None, alias="emptyChat")
+    candidates: List[FellowshipAnalysisAsset] = Field(default_factory=list)
+    messages: List[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipInteraction(BaseModel):
+    kind: str
+    speaker: str = ""
+    timestamp_start: Optional[str] = Field(None, alias="timestampStart")
+    timestamp_end: Optional[str] = Field(None, alias="timestampEnd")
+    text: str = ""
+    summary: str = ""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipAnalysisContent(BaseModel):
+    theme: str = ""
+    central_message: str = Field("", alias="centralMessage")
+    bible_passage: str = Field("", alias="biblePassage")
+    outline: List[str] = Field(default_factory=list)
+    key_points: List[str] = Field(default_factory=list, alias="keyPoints")
+    interactions: List[FellowshipInteraction] = Field(default_factory=list)
+    applications: List[str] = Field(default_factory=list)
+    discussion_questions: List[str] = Field(default_factory=list, alias="discussionQuestions")
+    markdown: str = ""
+    generated_at: Optional[datetime] = Field(None, alias="generatedAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipAnalysisJob(BaseModel):
+    job_id: str = Field(..., alias="jobId")
+    date: str
+    status: str
+    message: str = ""
+    result_document_name: Optional[str] = Field(None, alias="resultDocumentName")
+    error: Optional[str] = None
+    content: Optional[FellowshipAnalysisContent] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

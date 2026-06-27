@@ -424,7 +424,7 @@ class ArticleRepository:
         tmp_path = FELLOWSHIP_FILE.with_suffix(".tmp")
         tmp_path.write_text(
             json.dumps(
-                [entry.model_dump(by_alias=True) for entry in entries],
+                [entry.model_dump(by_alias=True, mode="json") for entry in entries],
                 ensure_ascii=False,
                 indent=2,
             ),

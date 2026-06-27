@@ -4,7 +4,7 @@ import re
 from email.utils import parseaddr
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -18,6 +18,8 @@ from .models import (
     DepthOfFaithAudioUploadResponse,
     FellowshipDocument,
     FellowshipEntry,
+    FellowshipAnalysisAssets,
+    FellowshipAnalysisJob,
     FellowshipEmailContent,
     FellowshipEmailResult,
     FellowshipLearningContent,
@@ -59,6 +61,11 @@ from .service import (
     get_fellowship_document_path,
     update_fellowship_learning_content,
     generate_fellowship_learning_content,
+    get_fellowship_analysis_job,
+    list_public_fellowship_documents,
+    resolve_fellowship_analysis_assets,
+    run_fellowship_analysis_job,
+    start_fellowship_analysis_job,
     list_sermon_series,
     create_sermon_series,
     update_sermon_series,
@@ -259,8 +266,30 @@ def generate_fellowship_learning(date: str) -> FellowshipLearningContent:
     return generate_fellowship_learning_content(date)
 
 
+@fellowship_router.get("/{date:path}/analysis/assets", response_model=FellowshipAnalysisAssets)
+def read_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
+    return resolve_fellowship_analysis_assets(date)
+
+
+@fellowship_router.post("/{date:path}/analysis/generate", response_model=FellowshipAnalysisJob)
+def generate_fellowship_analysis(date: str, background_tasks: BackgroundTasks) -> FellowshipAnalysisJob:
+    job = start_fellowship_analysis_job(date)
+    background_tasks.add_task(run_fellowship_analysis_job, job.job_id)
+    return job
+
+
+@fellowship_router.get("/{date:path}/analysis/jobs/{job_id}", response_model=FellowshipAnalysisJob)
+def read_fellowship_analysis_job(date: str, job_id: str) -> FellowshipAnalysisJob:
+    return get_fellowship_analysis_job(date, job_id)
+
+
 @fellowship_router.get("/{date:path}/documents", response_model=list[FellowshipDocument])
-def read_fellowship_documents(date: str) -> list[FellowshipDocument]:
+def read_fellowship_documents(
+    date: str,
+    public_only: bool = Query(False, alias="publicOnly"),
+) -> list[FellowshipDocument]:
+    if public_only:
+        return list_public_fellowship_documents(date)
     return list_fellowship_documents(date)
 
 
