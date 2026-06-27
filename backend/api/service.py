@@ -327,6 +327,14 @@ def list_public_fellowship_documents(date: str) -> list[FellowshipDocument]:
     return [document for document in list_fellowship_documents(date) if is_public_fellowship_document(document)]
 
 
+def get_public_fellowship_document_path(date: str, document_path: str) -> tuple[Path, str | None]:
+    path, media_type = get_fellowship_document_path(date, document_path)
+    public_names = {document.name for document in list_public_fellowship_documents(date)}
+    if document_path not in public_names:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fellowship document not found")
+    return path, media_type
+
+
 def get_fellowship_document_path(date: str, document_path: str) -> tuple[Path, str | None]:
     folder = _resolve_fellowship_docs_dir(date)
     root = folder.resolve()

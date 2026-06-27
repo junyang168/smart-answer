@@ -17,11 +17,16 @@ export default (phase, { defaultConfig }) => {
     },
     async rewrites() {
       const isProd = process.env.NODE_ENV === 'production';
-      const destination = isProd ? 'http://127.0.0.1:8555/:path*' : 'http://127.0.0.1:8222/:path*';
+      const backendOrigin = isProd ? 'http://127.0.0.1:8555' : 'http://127.0.0.1:8222';
+      const destination = `${backendOrigin}/:path*`;
       return [
         {
           source: '/api/auth/:path*',
           destination: '/api/auth/:path*',
+        },
+        {
+          source: '/sc_api/:path*',
+          destination: `${backendOrigin}/sc_api/:path*`,
         },
         {
           source: '/api/admin/fellowships/:path*',

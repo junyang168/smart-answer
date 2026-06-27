@@ -9,12 +9,16 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
 from backend.api.config import DATA_BASE_PATH
-from backend.api.service import get_public_fellowship, list_public_fellowships
+from backend.api.service import (
+    get_public_fellowship,
+    get_public_fellowship_document_path,
+    list_public_fellowships,
+)
 
 from .copilot import ChatMessage
 from .qaManager import QAItem, qaManager
@@ -462,6 +466,12 @@ def get_fellowship_detail(date: str):
     return get_public_fellowship(date)
 
 
+@router.get("/fellowships/{date}/documents/{document_path:path}")
+def download_public_fellowship_document(date: str, document_path: str) -> FileResponse:
+    path, media_type = get_public_fellowship_document_path(date, document_path)
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 @router.post("/search")
 def search_script(req: SearchRequest):
     return sermon_manager.search_script(req.item, req.text_list)
@@ -510,4 +520,3 @@ def delete_qa(user_id: str, qa_id: str):
 @router.get("/qas/{user_id}/{qa_id}")
 def get_qa_by_id(user_id: str, qa_id: str) -> Optional[QAItem]:
     return qa_manager.get_qa_by_id(user_id, qa_id)
-

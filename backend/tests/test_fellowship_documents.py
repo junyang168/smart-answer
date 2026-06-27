@@ -22,7 +22,11 @@ def _load_service_with_data_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_BASE_DIR", str(data_dir))
     monkeypatch.setenv("FULL_ARTICLE_ROOT", str(full_article_dir))
     for module_name in list(sys.modules):
-        if module_name.startswith("backend.api.config") or module_name.startswith("backend.api.service"):
+        if (
+            module_name.startswith("backend.api.config")
+            or module_name.startswith("backend.api.service")
+            or module_name.startswith("backend.api.storage")
+        ):
             sys.modules.pop(module_name, None)
     return importlib.import_module("backend.api.service")
 
@@ -99,6 +103,33 @@ def test_get_fellowship_document_path_rejects_traversal(monkeypatch, tmp_path):
         assert getattr(exc, "status_code", None) == 400
     else:
         raise AssertionError("Expected path traversal to be rejected")
+
+
+def test_get_public_fellowship_document_path_allows_input_mp4(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    recording_name = "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4"
+    (docs_dir / recording_name).write_bytes(b"mp4")
+
+    path, media_type = service.get_public_fellowship_document_path("2026-05-22", recording_name)
+
+    assert path.name == recording_name
+    assert media_type == "video/mp4"
+
+
+def test_get_public_fellowship_document_path_hides_generated_outputs(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    (docs_dir / "主題與查經重點.md").write_text("report", encoding="utf-8")
+    (docs_dir / "recording.transcript.generated.md").write_text("generated", encoding="utf-8")
+
+    for document_name in ("主題與查經重點.md", "recording.transcript.generated.md"):
+        try:
+            service.get_public_fellowship_document_path("2026-05-22", document_name)
+        except Exception as exc:
+            assert getattr(exc, "status_code", None) == 404
+        else:
+            raise AssertionError(f"Expected generated document to be hidden: {document_name}")
 
 
 def test_parse_google_drive_folder_id(monkeypatch, tmp_path):

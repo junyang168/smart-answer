@@ -90,6 +90,14 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (cookies) {
     headers.set("cookie", cookies);
   }
+  const range = request.headers.get("range");
+  if (range) {
+    headers.set("range", range);
+  }
+  const accept = request.headers.get("accept");
+  if (accept) {
+    headers.set("accept", accept);
+  }
 
   let body: BodyInit | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -108,7 +116,7 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   const responseHeaders = new Headers();
   backendResponse.headers.forEach((value, key) => {
     const lowerKey = key.toLowerCase();
-    if (lowerKey === "content-length") {
+    if (lowerKey === "content-length" && isMarkdownDocumentRequest(params.path)) {
       return;
     }
     if (isMarkdownDocumentRequest(params.path) && lowerKey === "content-disposition") {
