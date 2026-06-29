@@ -1,14 +1,68 @@
 import Link from "next/link";
 import { ArrowLeft, FileText } from "lucide-react";
+import { readFile } from "fs/promises";
+import path from "path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+const FELLOWSHIP_ANALYSIS_DOCUMENT = "主題與查經重點.md";
+const FELLOWSHIP_GENERATED_TRANSCRIPT = "recording.transcript.generated.md";
 const RAW_BACKEND_BASE =
   process.env.SC_API_SERVICE_URL ??
   process.env.FULL_ARTICLE_SERVICE_URL ??
   process.env.NEXT_PUBLIC_FULL_ARTICLE_SERVICE_URL ??
   (process.env.NODE_ENV === "production" ? "http://127.0.0.1:8555" : "http://127.0.0.1:8222");
 const BACKEND_BASE = RAW_BACKEND_BASE.replace(/\/$/, "");
+
+async function readRootEnvValue(key: string): Promise<string | null> {
+  const candidates = [path.resolve(process.cwd(), ".env"), path.resolve(process.cwd(), "..", ".env")];
+  for (const envPath of candidates) {
+    try {
+      const content = await readFile(envPath, "utf-8");
+      const line = content
+        .split(/\r?\n/)
+        .find((entry) => entry.trim().startsWith(`${key}=`));
+      if (line) {
+        return line.slice(line.indexOf("=") + 1).trim().replace(/^['"]|['"]$/g, "");
+      }
+    } catch {
+      // Ignore missing env files; the HTTP fallback below still works.
+    }
+  }
+  return null;
+}
+
+function fellowshipDateToFolderName(date: string): string {
+  const isoMatch = date.match(/^\d{4}-\d{2}-\d{2}$/);
+  if (isoMatch) {
+    return date;
+  }
+  const usMatch = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (usMatch) {
+    const [, month, day, year] = usMatch;
+    return `${year}-${month}-${day}`;
+  }
+  throw new Error("Invalid fellowship date");
+}
+
+function isPublicMarkdownDocument(documentPath: string): boolean {
+  const lowerPath = documentPath.toLowerCase();
+  const name = documentPath.split("/").pop() ?? documentPath;
+  const hiddenPrefixes = ["audio/", "tmp/", "temp/", "cache/"];
+  if (!lowerPath.endsWith(".md")) {
+    return false;
+  }
+  if (hiddenPrefixes.some((prefix) => lowerPath.startsWith(prefix))) {
+    return false;
+  }
+  if (lowerPath === FELLOWSHIP_GENERATED_TRANSCRIPT || name === FELLOWSHIP_ANALYSIS_DOCUMENT) {
+    return false;
+  }
+  if (lowerPath.includes(" - chat") || lowerPath.endsWith(" chat.md") || lowerPath.endsWith(" chat.txt")) {
+    return false;
+  }
+  return true;
+}
 
 function encodePathSegments(path: string): string {
   return path
@@ -17,7 +71,38 @@ function encodePathSegments(path: string): string {
     .join("/");
 }
 
+async function readMarkdownDocumentFromDisk(date: string, documentPath: string): Promise<string | null> {
+  if (!isPublicMarkdownDocument(documentPath)) {
+    throw new Error("Unable to load fellowship document");
+  }
+
+  const dataBaseDir = process.env.DATA_BASE_DIR ?? (await readRootEnvValue("DATA_BASE_DIR"));
+  const docsDir =
+    process.env.FELLOWSHIP_DOCS_DIR ??
+    (dataBaseDir ? path.join(dataBaseDir, "fellowship", "docs") : null);
+  if (!docsDir) {
+    return null;
+  }
+
+  const folder = path.resolve(docsDir, fellowshipDateToFolderName(date));
+  const candidate = path.resolve(folder, documentPath);
+  if (candidate !== folder && !candidate.startsWith(`${folder}${path.sep}`)) {
+    throw new Error("Unable to load fellowship document");
+  }
+
+  try {
+    return await readFile(candidate, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
 async function fetchMarkdownDocument(date: string, documentPath: string): Promise<string> {
+  const diskContent = await readMarkdownDocumentFromDisk(date, documentPath);
+  if (diskContent !== null) {
+    return diskContent;
+  }
+
   const url = `${BACKEND_BASE}/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`;
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
