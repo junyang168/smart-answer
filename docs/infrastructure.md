@@ -13,6 +13,24 @@ The development environment uses an Nginx proxy (installed via Homebrew) listeni
 | `/static` | Backend Service | 8008 | **Legacy Web App** Static assets |
 | `/` | Web UI (Next.js) | 3003 | Frontend Application |
 
+### Smart Answer API Routing Notes
+
+The deployed site has two different API surfaces that look similar but are routed differently:
+
+- `/sc_api/...` is owned by nginx and currently targets the legacy backend on port `8008`.
+- `/api/sc_api/...` is owned by the Next.js app and is proxied by `web/src/app/api/sc_api/[[...path]]/route.ts` to the current FastAPI backend (`SC_API_SERVICE_URL` or `FULL_ARTICLE_SERVICE_URL`).
+
+For new Smart Answer frontend code, prefer `/api/sc_api/...` for browser-facing API calls and file downloads. Do not link public fellowship documents directly to `/sc_api/...`; in production that path can be intercepted by nginx and served by the wrong backend.
+
+The Next.js `/api/sc_api` proxy must stream file responses and forward `Range` / `Accept` headers. Large fellowship MP4 files rely on byte-range requests; buffering full responses or dropping range headers can cause Cloudflare/nginx 502s or stalled downloads.
+
+Fellowship Markdown pages under `/resources/fellowship/[date]/docs/[...documentPath]` are server-rendered by Next.js. The Next process reads public `.md` files directly from:
+
+- `FELLOWSHIP_DOCS_DIR`, when set; otherwise
+- `DATA_BASE_DIR/fellowship/docs`
+
+The same fellowship docs directory must therefore be readable by both the FastAPI backend and the Next.js frontend process in production.
+
 ### Nginx Configuration Block
 ```nginx
 server {

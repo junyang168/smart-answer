@@ -27,11 +27,12 @@ The application follows a microservices-like architecture with a Next.js fronten
 2.  **Admin & Orchestration Service (Backend API)**:
     -   **Path**: `backend/`
     -   **Tech**: FastAPI, Python
-    -   **Port**: 8222 (mapped to `/sc_api` and `/api/admin` via Next.js proxy)
+    -   **Port**: 8222 in local development, 8555 in production service scripts
     -   **Description**: The core application backend for the **new Smart Answer UI**. Handles:
         -   Church management (fellowships, sermons, Sunday services).
         -   Webcast and slide management.
-        -   API endpoints under  `/sc_api` and `/admin`.
+        -   API endpoints under `/sc_api` and `/admin`.
+        -   Browser-facing new-app calls should use Next.js API routes such as `/api/sc_api/...` and `/api/admin/...`; direct `/sc_api/...` may be routed by nginx to the legacy backend in production.
 
 3.  **Legacy Web Application**:
     -   **Path**: `/web` (URL path), served from static files. Source code not included.
@@ -45,6 +46,7 @@ The application follows a microservices-like architecture with a Next.js fronten
         For new app, routing internet traffic to the appropriate services (`/`, ).
 -   **Data Stores**:
     -   **FileSystem**: Used for storing slides, audio, and generated markdown files.
+    -   Fellowship documents live under `DATA_BASE_DIR/fellowship/docs/YYYY-MM-DD`. Public fellowship Markdown pages are rendered server-side by Next.js and require the Next process to read that directory.
 
 ## Getting Started
 

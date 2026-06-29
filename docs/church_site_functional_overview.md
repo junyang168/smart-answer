@@ -108,7 +108,7 @@ Public listing behavior:
 
 - Only fellowship entries dated today or earlier are shown.
 - Future fellowship entries are hidden from the public listing.
-- Listing cards show date, title, series, sequence, host, public summary, source count, and authenticated document availability.
+- Listing cards show date, title, series, sequence, host, public summary, source count, and public document availability.
 - Listing cards do not show learning-point previews.
 
 Detail page behavior:
@@ -122,16 +122,30 @@ Detail page behavior:
   - Host
   - Public summary
   - Key learnings
+  - Audience questions
+  - Audience sharing
+  - Leader responses
   - Source links
-- Public summary and key learnings are entered and rendered as Markdown.
+- Public summary, key learnings, audience questions, audience sharing, and leader responses are entered and rendered as Markdown.
 
 Document access behavior:
 
 - Fellowship documents are stored under `data/fellowship/docs/[YYYY-MM-DD]`.
-- Documents are visible only to authenticated users.
-- Non-Markdown documents open through the protected file endpoint.
+- Public document access is allowlisted, not authenticated.
+- Public input documents are:
+  - Prepared manuscript/teaching notes in Markdown (`*.md`)
+  - Fellowship presentation files (`*.pptx`)
+  - Original Google Meet recording MP4 files (`*.mp4`)
+- Generated or temporary files are hidden from public document lists and public file endpoints, including:
+  - `主題與查經重點.md`
+  - `recording.transcript.generated.md`
+  - Google Meet chat files
+  - Extracted audio such as `audio/*.mp3`
+  - Temporary/cache folders
 - Markdown documents (`*.md`) open as rendered web pages instead of raw downloads.
-- Unauthenticated users see a login/access notice for protected documents.
+- The Markdown document page renders server-side and reads public Markdown from the fellowship docs directory first. It falls back to the backend public document endpoint only when the docs directory is unavailable to the Next.js process.
+- Non-Markdown public documents use `/api/sc_api/fellowships/[date]/documents/[documentPath]` so requests go through the Next.js API proxy instead of the nginx `/sc_api/` legacy route.
+- PPTX and MP4 links are normal attachment downloads, not new-tab rendered pages. The proxy must preserve `Range` headers for large MP4 downloads.
 
 Admin-managed fellowship fields:
 
@@ -149,8 +163,9 @@ Admin-managed fellowship fields:
 Learning content generation:
 
 - Key learnings and summary can be generated from associated fellowship documents.
+- Generated analysis can also populate audience questions, audience sharing, and leader responses.
 - Generated content can be manually edited in the admin page.
-- Summary and key learnings are stored as Markdown text.
+- Summary, key learnings, and interaction sections are stored as Markdown text.
 
 ## Faith Q&A
 
@@ -304,10 +319,18 @@ Primary storage pattern:
 - Generated Markdown, sermon resources, fellowship documents, slides, and media are stored on the filesystem.
 - Fellowship documents are organized by ISO date folder:
   - `data/fellowship/docs/YYYY-MM-DD`
+- The Next.js process must be able to read the fellowship docs directory for server-rendered public Markdown pages:
+  - Prefer `FELLOWSHIP_DOCS_DIR` when set.
+  - Otherwise use `DATA_BASE_DIR/fellowship/docs`.
+  - The production deployment should provide the same filesystem path to both the FastAPI backend and the Next.js frontend process.
 
 Important implication:
 
 - File and folder naming conventions are part of the functional contract for modules that link documents to content records.
+- Public fellowship document visibility must remain consistent between:
+  - Backend allowlist logic (`list_public_fellowship_documents` / public document endpoint)
+  - Frontend document links
+  - Server-rendered Markdown file access
 
 ## Current Functional Gaps
 
@@ -319,4 +342,3 @@ The following areas may need fuller documentation or future decisions:
 - Data retention policy for contact submissions and email history.
 - Public/private rules for every sermon media type.
 - Backup and restore expectations for filesystem-based content.
-
