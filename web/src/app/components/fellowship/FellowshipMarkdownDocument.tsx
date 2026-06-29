@@ -1,10 +1,14 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const RAW_BACKEND_BASE =
+  process.env.SC_API_SERVICE_URL ??
+  process.env.FULL_ARTICLE_SERVICE_URL ??
+  process.env.NEXT_PUBLIC_FULL_ARTICLE_SERVICE_URL ??
+  (process.env.NODE_ENV === "production" ? "http://127.0.0.1:8555" : "http://127.0.0.1:8222");
+const BACKEND_BASE = RAW_BACKEND_BASE.replace(/\/$/, "");
 
 function encodePathSegments(path: string): string {
   return path
@@ -14,46 +18,28 @@ function encodePathSegments(path: string): string {
 }
 
 async function fetchMarkdownDocument(date: string, documentPath: string): Promise<string> {
-  const response = await fetch(
-    `/api/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
-    { cache: "no-store" },
-  );
+  const url = `${BACKEND_BASE}/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`;
+  const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Unable to load fellowship document");
   }
   return response.text();
 }
 
-export function FellowshipMarkdownDocument({
+export async function FellowshipMarkdownDocument({
   date,
   documentPath,
 }: {
   date: string;
   documentPath: string;
 }) {
-  const [markdown, setMarkdown] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const documentName = useMemo(() => documentPath.split("/").pop() || documentPath, [documentPath]);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchMarkdownDocument(date, documentPath)
-      .then((content) => {
-        setMarkdown(content);
-        setError(null);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "載入團契文件失敗"))
-      .finally(() => setLoading(false));
-  }, [date, documentPath]);
-
-  if (loading) {
-    return <div className="py-16 text-center text-gray-500">正在載入團契文件...</div>;
-  }
-
-  if (error) {
-    return <div className="rounded-md border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>;
+  const documentName = documentPath.split("/").pop() || documentPath;
+  let markdown = "";
+  let error: string | null = null;
+  try {
+    markdown = await fetchMarkdownDocument(date, documentPath);
+  } catch (err) {
+    error = err instanceof Error ? err.message : "載入團契文件失敗";
   }
 
   return (
@@ -71,11 +57,15 @@ export function FellowshipMarkdownDocument({
         <h1 className="mt-2 text-3xl font-bold font-display text-gray-900 lg:text-4xl">{documentName}</h1>
       </header>
 
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="prose prose-slate max-w-none lg:prose-lg">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-        </div>
-      </section>
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 p-4 text-red-700">{error}</div>
+      ) : (
+        <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="prose prose-slate max-w-none lg:prose-lg">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+          </div>
+        </section>
+      )}
     </article>
   );
 }

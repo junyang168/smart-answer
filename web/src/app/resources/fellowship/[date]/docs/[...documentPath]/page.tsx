@@ -1,8 +1,5 @@
-import { Suspense } from "react";
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 import { FellowshipMarkdownDocument } from "@/app/components/fellowship/FellowshipMarkdownDocument";
-
-const MarkdownDocumentFallback = () => <div className="py-20 text-center">正在準備團契文件...</div>;
 
 function safeDecodeURIComponent(value: string): string {
   try {
@@ -31,9 +28,7 @@ export default function FellowshipMarkdownDocumentPage({
     <div className="bg-white">
       <div className="container mx-auto px-6 py-12">
         <Breadcrumb links={breadcrumbLinks} />
-        <Suspense fallback={<MarkdownDocumentFallback />}>
-          <FellowshipMarkdownDocument date={date} documentPath={documentPath} />
-        </Suspense>
+        <FellowshipMarkdownDocument date={date} documentPath={documentPath} />
       </div>
     </div>
   );

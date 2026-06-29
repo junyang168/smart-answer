@@ -29,6 +29,14 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
   if (cookies) {
     headers.set("cookie", cookies);
   }
+  const range = request.headers.get("range");
+  if (range) {
+    headers.set("range", range);
+  }
+  const accept = request.headers.get("accept");
+  if (accept) {
+    headers.set("accept", accept);
+  }
 
   let body: BodyInit | undefined;
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -43,22 +51,32 @@ async function proxy(request: NextRequest, params: { path?: string[] }) {
     redirect: "manual",
   });
 
-  const responseBody = await backendResponse.arrayBuffer();
-  const response = new NextResponse(responseBody, {
-    status: backendResponse.status,
-  });
-
+  const responseHeaders = new Headers();
   backendResponse.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "content-length") {
-      return;
-    }
-    response.headers.set(key, value);
+    responseHeaders.set(key, value);
   });
 
-  return response;
+  if (request.method === "HEAD") {
+    await backendResponse.body?.cancel();
+    return new NextResponse(null, {
+      status: backendResponse.status,
+      statusText: backendResponse.statusText,
+      headers: responseHeaders,
+    });
+  }
+
+  return new NextResponse(backendResponse.body, {
+    status: backendResponse.status,
+    statusText: backendResponse.statusText,
+    headers: responseHeaders,
+  });
 }
 
 export async function GET(request: NextRequest, { params }: { params: { path?: string[] } }) {
+  return proxy(request, params);
+}
+
+export async function HEAD(request: NextRequest, { params }: { params: { path?: string[] } }) {
   return proxy(request, params);
 }
 
