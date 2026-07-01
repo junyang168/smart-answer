@@ -245,17 +245,28 @@ export function SermonSearchPanel({
     [isLoading, mode, question, seriesId, updateSearchUrl],
   );
 
+  // Keep the latest runSearch in a ref so the URL-sync effect doesn't depend on
+  // it (runSearch changes on every keystroke; depending on it would re-run this
+  // effect and clobber what the user is typing).
+  const runSearchRef = useRef(runSearch);
+  runSearchRef.current = runSearch;
+
   useEffect(() => {
+    // Only react to a shared/refreshed ?q= link. When there's no q, do nothing —
+    // never overwrite the user's in-progress input.
     const urlQuestion = searchParams.get("q") || "";
-    const urlMode = searchParams.get("mode") === "deep" ? "deep" : "normal";
-    setQuestion(urlQuestion);
-    setMode(urlMode);
-    const loadKey = `${urlMode}:${urlQuestion}`;
-    if (urlQuestion.trim() && lastLoadedQueryRef.current !== loadKey) {
-      lastLoadedQueryRef.current = loadKey;
-      void runSearch(urlQuestion, { nextMode: urlMode, updateUrl: false });
+    if (!urlQuestion.trim()) {
+      return;
     }
-  }, [runSearch, searchParams]);
+    const urlMode = searchParams.get("mode") === "deep" ? "deep" : "normal";
+    const loadKey = `${urlMode}:${urlQuestion}`;
+    if (lastLoadedQueryRef.current !== loadKey) {
+      lastLoadedQueryRef.current = loadKey;
+      setQuestion(urlQuestion);
+      setMode(urlMode);
+      void runSearchRef.current(urlQuestion, { nextMode: urlMode, updateUrl: false });
+    }
+  }, [searchParams]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
