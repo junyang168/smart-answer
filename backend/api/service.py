@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import errno
+import hashlib
 import math
 import shutil
 import mimetypes
@@ -11,6 +13,7 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
@@ -355,6 +358,8 @@ FELLOWSHIP_STT_SEGMENT_SECONDS = 10 * 60
 _DRIVE_FOLDER_RE = re.compile(r"(?:/folders/|[?&]id=)([-\w]{10,})")
 _ANALYSIS_JOBS: dict[str, FellowshipAnalysisJob] = {}
 _ANALYSIS_JOB_LOCK = threading.Lock()
+_TRANSCRIPTION_CACHE_LOCKS: dict[str, threading.Lock] = {}
+_TRANSCRIPTION_CACHE_LOCKS_LOCK = threading.Lock()
 
 
 def parse_google_drive_folder_id(url: str) -> str | None:
@@ -794,33 +799,76 @@ def _ffmpeg_executable() -> str:
         ) from exc
 
 
+def _transcription_cache_key(path: Path) -> str:
+    try:
+        stat = path.stat()
+        source = f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+    except OSError:
+        source = str(path.resolve())
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+
+
+def _lock_for_transcription_cache(cache_key: str) -> threading.Lock:
+    with _TRANSCRIPTION_CACHE_LOCKS_LOCK:
+        lock = _TRANSCRIPTION_CACHE_LOCKS.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _TRANSCRIPTION_CACHE_LOCKS[cache_key] = lock
+        return lock
+
+
+def _run_ffmpeg_command(cmd: list[str], *, stage: str) -> None:
+    transient_errnos = {errno.EDEADLK, errno.EAGAIN}
+    last_exc: OSError | None = None
+    for attempt in range(3):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return
+        except OSError as exc:
+            if exc.errno not in transient_errnos:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{stage}: {exc}") from exc
+            last_exc = exc
+            time.sleep(0.5 * (attempt + 1))
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            detail = stage if not stderr else f"{stage}: {stderr[-1000:]}"
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail) from exc
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"{stage}: {last_exc}") from last_exc
+
+
 def _extract_audio_for_transcription(recording_path: Path) -> Path:
-    cache_dir = Path(tempfile.gettempdir()) / "smart-answer-fellowship-audio" / str(abs(hash(str(recording_path))))
+    cache_key = _transcription_cache_key(recording_path)
+    cache_dir = Path(tempfile.gettempdir()) / "smart-answer-fellowship-audio" / cache_key
     cache_dir.mkdir(parents=True, exist_ok=True)
     audio_path = cache_dir / "recording.stt.mp3"
-    if audio_path.exists() and audio_path.stat().st_size > 0:
-        return audio_path
-    cmd = [
-        _ffmpeg_executable(),
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(recording_path),
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-b:a",
-        "32k",
-        str(audio_path),
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to extract audio from recording") from exc
+    lock = _lock_for_transcription_cache(cache_key)
+    with lock:
+        if audio_path.exists() and audio_path.stat().st_size > 0:
+            return audio_path
+        temp_audio_path = audio_path.with_suffix(".tmp.mp3")
+        if temp_audio_path.exists():
+            temp_audio_path.unlink()
+        cmd = [
+            _ffmpeg_executable(),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(recording_path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-b:a",
+            "32k",
+            str(temp_audio_path),
+        ]
+        _run_ffmpeg_command(cmd, stage="Unable to extract audio from recording")
+        if not temp_audio_path.exists() or temp_audio_path.stat().st_size <= 0:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to extract audio from recording")
+        temp_audio_path.replace(audio_path)
     return audio_path
 
 
@@ -828,39 +876,44 @@ def _split_audio_for_transcription(audio_path: Path, *, force: bool = False) -> 
     if not force and audio_path.stat().st_size <= FELLOWSHIP_STT_MAX_BYTES:
         return [audio_path]
     chunk_dir = audio_path.parent / f"{audio_path.stem}-chunks"
-    chunk_dir.mkdir(parents=True, exist_ok=True)
-    chunks = sorted(chunk_dir.glob("chunk-*.mp3"))
-    if chunks:
+    complete_marker = chunk_dir / ".complete"
+    lock = _lock_for_transcription_cache(audio_path.parent.name)
+    with lock:
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        chunks = [chunk for chunk in sorted(chunk_dir.glob("chunk-*.mp3")) if chunk.stat().st_size > 0]
+        if complete_marker.exists() and chunks:
+            return chunks
+        for chunk in chunk_dir.glob("chunk-*.mp3"):
+            chunk.unlink()
+        if complete_marker.exists():
+            complete_marker.unlink()
+        pattern = chunk_dir / "chunk-%03d.mp3"
+        cmd = [
+            _ffmpeg_executable(),
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(audio_path),
+            "-f",
+            "segment",
+            "-segment_time",
+            str(FELLOWSHIP_STT_SEGMENT_SECONDS),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-b:a",
+            "32k",
+            str(pattern),
+        ]
+        _run_ffmpeg_command(cmd, stage="Unable to split audio for transcription")
+        chunks = [chunk for chunk in sorted(chunk_dir.glob("chunk-*.mp3")) if chunk.stat().st_size > 0]
+        if not chunks:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create audio chunks for transcription")
+        complete_marker.write_text("ok\n", encoding="utf-8")
         return chunks
-    pattern = chunk_dir / "chunk-%03d.mp3"
-    cmd = [
-        _ffmpeg_executable(),
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(audio_path),
-        "-f",
-        "segment",
-        "-segment_time",
-        str(FELLOWSHIP_STT_SEGMENT_SECONDS),
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-b:a",
-        "32k",
-        str(pattern),
-    ]
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to split audio for transcription") from exc
-    chunks = sorted(chunk_dir.glob("chunk-*.mp3"))
-    if not chunks:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to create audio chunks for transcription")
-    return chunks
 
 
 def _format_seconds(seconds: float) -> str:
@@ -919,21 +972,33 @@ def _transcribe_recording(recording_path: Path) -> str:
     for index, chunk in enumerate(chunks):
         offset = index * FELLOWSHIP_STT_SEGMENT_SECONDS
         response_format = "json" if uses_gpt4o_transcribe else "verbose_json"
-        kwargs = {
-            "model": model,
-            "file": chunk.open("rb"),
-            "response_format": response_format,
-        }
-        if response_format == "verbose_json" and not FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL:
-            kwargs["timestamp_granularities"] = ["segment"]
+        kwargs = {}
         try:
+            kwargs = {
+                "model": model,
+                "file": chunk.open("rb"),
+                "response_format": response_format,
+            }
+            if response_format == "verbose_json" and not FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL:
+                kwargs["timestamp_granularities"] = ["segment"]
             response = client.audio.transcriptions.create(**kwargs)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unable to transcribe audio chunk {index + 1}: {exc}",
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Unable to transcribe audio chunk {index + 1}: {exc}",
+            ) from exc
         finally:
-            file_obj = kwargs["file"]
-            try:
-                file_obj.close()
-            except Exception:
-                pass
+            file_obj = locals().get("kwargs", {}).get("file")
+            if file_obj:
+                try:
+                    file_obj.close()
+                except Exception:
+                    pass
         part = _transcription_response_to_markdown(response, offset_seconds=offset, include_header=False)
         chunk_end = offset + FELLOWSHIP_STT_SEGMENT_SECONDS
         markdown_parts.append(f"## Part {index + 1} [{_format_seconds(offset)}-{_format_seconds(chunk_end)}]")

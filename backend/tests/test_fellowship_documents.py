@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import importlib
 import os
 import sys
@@ -277,3 +278,38 @@ def test_ffmpeg_executable_uses_imageio_fallback(monkeypatch, tmp_path):
     )
 
     assert service._ffmpeg_executable() == "/tmp/imageio-ffmpeg"
+
+
+def test_run_ffmpeg_command_retries_transient_deadlock(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    calls = {"count": 0}
+
+    def fake_run(_cmd, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError(errno.EDEADLK, "Resource deadlock avoided")
+        return None
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+    monkeypatch.setattr(service.time, "sleep", lambda _seconds: None)
+
+    service._run_ffmpeg_command(["ffmpeg", "-version"], stage="test stage")
+
+    assert calls["count"] == 2
+
+
+def test_run_ffmpeg_command_reports_non_transient_oserror(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    def fake_run(_cmd, **_kwargs):
+        raise OSError(errno.ENOENT, "No such file or directory")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+
+    try:
+        service._run_ffmpeg_command(["ffmpeg"], stage="test stage")
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 500
+        assert "test stage" in getattr(exc, "detail", "")
+    else:
+        raise AssertionError("Expected ffmpeg OSError to be reported")
