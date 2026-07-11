@@ -776,6 +776,24 @@ def _looks_like_meeting_transcript(text: str) -> bool:
     return timestamp_hits >= 4
 
 
+def _ffmpeg_executable() -> str:
+    configured = os.getenv("FFMPEG_PATH")
+    if configured:
+        return configured
+    executable = shutil.which("ffmpeg")
+    if executable:
+        return executable
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ffmpeg executable not found. Install ffmpeg, set FFMPEG_PATH, or install imageio-ffmpeg.",
+        ) from exc
+
+
 def _extract_audio_for_transcription(recording_path: Path) -> Path:
     cache_dir = Path(tempfile.gettempdir()) / "smart-answer-fellowship-audio" / str(abs(hash(str(recording_path))))
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -783,7 +801,7 @@ def _extract_audio_for_transcription(recording_path: Path) -> Path:
     if audio_path.exists() and audio_path.stat().st_size > 0:
         return audio_path
     cmd = [
-        "ffmpeg",
+        _ffmpeg_executable(),
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -801,8 +819,6 @@ def _extract_audio_for_transcription(recording_path: Path) -> Path:
     ]
     try:
         subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="ffmpeg executable not found") from exc
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to extract audio from recording") from exc
     return audio_path
@@ -818,7 +834,7 @@ def _split_audio_for_transcription(audio_path: Path, *, force: bool = False) -> 
         return chunks
     pattern = chunk_dir / "chunk-%03d.mp3"
     cmd = [
-        "ffmpeg",
+        _ffmpeg_executable(),
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -839,8 +855,6 @@ def _split_audio_for_transcription(audio_path: Path, *, force: bool = False) -> 
     ]
     try:
         subprocess.run(cmd, check=True)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="ffmpeg executable not found") from exc
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to split audio for transcription") from exc
     chunks = sorted(chunk_dir.glob("chunk-*.mp3"))

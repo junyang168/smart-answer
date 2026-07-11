@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import types
 
 
 def _load_service_with_data_dir(monkeypatch, tmp_path):
@@ -253,3 +254,26 @@ def test_prepared_chinese_manuscript_is_not_meeting_transcript(monkeypatch, tmp_
 
     assert service._looks_like_meeting_transcript(manuscript) is False
     assert service._looks_like_meeting_transcript(transcript) is True
+
+
+def test_ffmpeg_executable_prefers_configured_path(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    monkeypatch.setenv("FFMPEG_PATH", "/opt/bin/ffmpeg")
+    monkeypatch.setattr(service.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+
+    assert service._ffmpeg_executable() == "/opt/bin/ffmpeg"
+
+
+def test_ffmpeg_executable_uses_imageio_fallback(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    monkeypatch.delenv("FFMPEG_PATH", raising=False)
+    monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+    monkeypatch.setitem(
+        sys.modules,
+        "imageio_ffmpeg",
+        types.SimpleNamespace(get_ffmpeg_exe=lambda: "/tmp/imageio-ffmpeg"),
+    )
+
+    assert service._ffmpeg_executable() == "/tmp/imageio-ffmpeg"

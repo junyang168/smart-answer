@@ -13,6 +13,7 @@ pytz
 python-multipart
 markdownify
 ffmpeg-python
+imageio-ffmpeg
 GitPython
 opencc-python-reimplemented
 google-cloud-aiplatform>=1.73.0

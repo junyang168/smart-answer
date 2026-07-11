@@ -89,6 +89,8 @@ The application follows a microservices-like architecture with a Next.js fronten
     source backend/.venv/bin/activate
     uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8222
     ```
+    Fellowship recording transcription requires an `ffmpeg` executable. The backend resolves it in this order:
+    `FFMPEG_PATH`, system `ffmpeg`, then the packaged `imageio-ffmpeg` dependency from `backend/requirements.txt`.
 
 2.  **Web UI**:
     ```bash
