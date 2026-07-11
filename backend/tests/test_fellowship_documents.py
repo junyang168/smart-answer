@@ -142,6 +142,49 @@ def test_parse_google_drive_folder_id(monkeypatch, tmp_path):
     assert folder_id == "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
 
 
+def test_list_drive_folder_assets_matches_underscore_dates_and_all_drives(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+
+    class FakeRequest:
+        def execute(self):
+            return {
+                "files": [
+                    {
+                        "id": "recording-id",
+                        "name": "達拉斯聖道教會團契查經 - 2026_07_10 19_22 CDT - Recording.mp4",
+                        "mimeType": "video/mp4",
+                        "size": "187107205",
+                        "modifiedTime": "2026-07-11T01:57:52.323Z",
+                    },
+                    {
+                        "id": "other-id",
+                        "name": "達拉斯聖道教會團契查經 - 2026_07_09 19_22 CDT - Recording.mp4",
+                        "mimeType": "video/mp4",
+                        "size": "1",
+                        "modifiedTime": "2026-07-10T01:57:52.323Z",
+                    },
+                ]
+            }
+
+    class FakeFiles:
+        def list(self, **kwargs):
+            assert kwargs["includeItemsFromAllDrives"] is True
+            assert kwargs["supportsAllDrives"] is True
+            return FakeRequest()
+
+    class FakeService:
+        def files(self):
+            return FakeFiles()
+
+    monkeypatch.setattr(service, "_get_drive_service", lambda scopes: FakeService())
+
+    assets = service._list_drive_folder_assets("folder-id", "07/10/2026")
+
+    assert len(assets) == 1
+    assert assets[0].drive_file_id == "recording-id"
+    assert assets[0].kind == "recording"
+
+
 def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypatch, tmp_path):
     service = _load_service_with_data_dir(monkeypatch, tmp_path)
     config_file = tmp_path / "data" / "config" / "fellowship.json"

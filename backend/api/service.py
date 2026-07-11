@@ -429,11 +429,34 @@ def _drive_folder_ids_for_entry(entry: FellowshipEntry) -> list[str]:
 
 def _get_drive_service(scopes: Sequence[str] | None = None):
     from googleapiclient.discovery import build
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google.oauth2 import service_account
     import google.auth
 
-    credentials, _project = google.auth.default(
-        scopes=list(scopes or ["https://www.googleapis.com/auth/drive.metadata.readonly"])
+    requested_scopes = list(scopes or ["https://www.googleapis.com/auth/drive.metadata.readonly"])
+    credentials = None
+    service_account_path = Path(
+        os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "") or Path(__file__).resolve().parents[2] / "service_account.json"
     )
+    if service_account_path.exists():
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                str(service_account_path), scopes=requested_scopes
+            )
+        except Exception:
+            credentials = None
+    token_path = Path(os.environ.get("GOOGLE_OAUTH_TOKEN_FILE", "") or Path(__file__).resolve().parents[2] / "token.json")
+    if credentials is None and token_path.exists():
+        try:
+            credentials = Credentials.from_authorized_user_file(str(token_path), requested_scopes)
+            if credentials.expired and credentials.refresh_token:
+                credentials.refresh(Request())
+                token_path.write_text(credentials.to_json(), encoding="utf-8")
+        except Exception:
+            credentials = None
+    if credentials is None:
+        credentials, _project = google.auth.default(scopes=requested_scopes)
     return build("drive", "v3", credentials=credentials)
 
 
@@ -441,6 +464,7 @@ def _list_drive_folder_assets(folder_id: str, date: str) -> list[FellowshipAnaly
     normalized = _normalize_fellowship_date(date)
     iso = _fellowship_iso_date(normalized)
     slash_date = iso.replace("-", "/")
+    underscore_date = iso.replace("-", "_")
     service = _get_drive_service(["https://www.googleapis.com/auth/drive.metadata.readonly"])
     assets: list[FellowshipAnalysisAsset] = []
     page_token = None
@@ -450,10 +474,12 @@ def _list_drive_folder_assets(folder_id: str, date: str) -> list[FellowshipAnaly
             spaces="drive",
             fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
             pageToken=page_token,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
         ).execute()
         for item in response.get("files", []):
             name = str(item.get("name") or "")
-            if iso not in name and slash_date not in name:
+            if iso not in name and slash_date not in name and underscore_date not in name:
                 continue
             mime_type = item.get("mimeType")
             kind = _classify_fellowship_asset_name(name, mime_type)
