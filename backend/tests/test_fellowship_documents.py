@@ -18,6 +18,11 @@ def _load_service_with_data_dir(monkeypatch, tmp_path):
     (full_article_dir / "full_articles.json").write_text("[]", encoding="utf-8")
     (full_article_dir / "full_article_prompt.md").write_text("prompt", encoding="utf-8")
     (config_dir / "fellowship.json").write_text('[{"date":"05/22/2026"}]', encoding="utf-8")
+    (config_dir / "config.json").write_text(
+        '{"users":[],"user_roles":[],"role_permissions":[]}',
+        encoding="utf-8",
+    )
+    (config_dir / "sermon.json").write_text("[]", encoding="utf-8")
     (docs_dir / "lesson notes.txt").write_text("hello", encoding="utf-8")
     (docs_dir / "恩典的國度，僕人的生命.pptx").write_bytes(b"pptx")
 
@@ -132,6 +137,47 @@ def test_get_public_fellowship_document_path_hides_generated_outputs(monkeypatch
             assert getattr(exc, "status_code", None) == 404
         else:
             raise AssertionError(f"Expected generated document to be hidden: {document_name}")
+
+
+def test_public_document_text_route_reads_markdown_with_unicode_name(monkeypatch, tmp_path):
+    _load_service_with_data_dir(monkeypatch, tmp_path)
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    document_name = "教會的根基與權柄 太 16_18-19.md"
+    (docs_dir / document_name).write_text("# 教會的根基與權柄\n\ncontent", encoding="utf-8")
+
+    sys.modules.pop("backend.api.sc_api.router", None)
+    router_module = importlib.import_module("backend.api.sc_api.router")
+
+    response = router_module.read_public_fellowship_document_text("2026-05-22", document_name)
+
+    assert response.status_code == 200
+    assert response.media_type == "text/markdown"
+    assert response.body.decode("utf-8").startswith("# 教會的根基與權柄")
+
+
+def test_public_document_text_route_does_not_expose_hidden_or_binary_files(monkeypatch, tmp_path):
+    _load_service_with_data_dir(monkeypatch, tmp_path)
+    docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-05-22"
+    recording_name = "達拉斯聖道教會團契查經 - 2026_05_22 19_10 CDT - Recording.mp4"
+    (docs_dir / "recording.transcript.generated.md").write_text("generated", encoding="utf-8")
+    (docs_dir / recording_name).write_bytes(b"mp4")
+
+    sys.modules.pop("backend.api.sc_api.router", None)
+    router_module = importlib.import_module("backend.api.sc_api.router")
+
+    try:
+        router_module.read_public_fellowship_document_text("2026-05-22", "recording.transcript.generated.md")
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 404
+    else:
+        raise AssertionError("Expected generated transcript to remain hidden")
+
+    try:
+        router_module.read_public_fellowship_document_text("2026-05-22", recording_name)
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 400
+    else:
+        raise AssertionError("Expected binary recording to be rejected by text endpoint")
 
 
 def test_parse_google_drive_folder_id(monkeypatch, tmp_path):

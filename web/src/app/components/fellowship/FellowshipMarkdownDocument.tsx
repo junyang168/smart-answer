@@ -47,15 +47,20 @@ function fellowshipDateToFolderName(date: string): string {
 
 function isPublicMarkdownDocument(documentPath: string): boolean {
   const lowerPath = documentPath.toLowerCase();
-  const name = documentPath.split("/").pop() ?? documentPath;
+  const segments = documentPath.split("/");
+  const name = segments.pop() ?? documentPath;
+  const lowerName = name.toLowerCase();
   const hiddenPrefixes = ["audio/", "tmp/", "temp/", "cache/"];
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return false;
+  }
   if (!lowerPath.endsWith(".md")) {
     return false;
   }
   if (hiddenPrefixes.some((prefix) => lowerPath.startsWith(prefix))) {
     return false;
   }
-  if (lowerPath === FELLOWSHIP_GENERATED_TRANSCRIPT || name === FELLOWSHIP_ANALYSIS_DOCUMENT) {
+  if (lowerName === FELLOWSHIP_GENERATED_TRANSCRIPT || name === FELLOWSHIP_ANALYSIS_DOCUMENT) {
     return false;
   }
   if (lowerPath.includes(" - chat") || lowerPath.endsWith(" chat.md") || lowerPath.endsWith(" chat.txt")) {
@@ -105,7 +110,7 @@ async function fetchMarkdownDocument(date: string, documentPath: string): Promis
 
   const url = `${BACKEND_BASE}/sc_api/fellowships/${encodeURIComponent(
     fellowshipDateToFolderName(date),
-  )}/documents/${encodePathSegments(documentPath)}`;
+  )}/document-text/${encodePathSegments(documentPath)}`;
   const response = await fetch(url, {
     cache: "no-store",
     headers: { Accept: "text/markdown, text/plain;q=0.9" },

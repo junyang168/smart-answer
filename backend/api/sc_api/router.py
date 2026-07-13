@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
@@ -470,6 +470,17 @@ def get_fellowship_detail(date: str):
 @router.get("/fellowships/{date}/documents")
 def get_fellowship_documents(date: str):
     return list_public_fellowship_documents(date)
+
+
+@router.get("/fellowships/{date}/document-text/{document_path:path}")
+def read_public_fellowship_document_text(date: str, document_path: str) -> Response:
+    path, media_type = get_public_fellowship_document_path(date, document_path)
+    if path.suffix.lower() not in {".md", ".txt"}:
+        raise HTTPException(status_code=400, detail="Fellowship document is not text")
+    return Response(
+        content=path.read_text(encoding="utf-8", errors="replace"),
+        media_type=media_type or "text/plain; charset=utf-8",
+    )
 
 
 @router.get("/fellowships/{date}/documents/{document_path:path}")
