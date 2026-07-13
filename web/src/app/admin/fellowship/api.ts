@@ -31,6 +31,15 @@ function resolveApiUrl(path: string): string {
   return new URL(path, siteBase).toString();
 }
 
+function encodeDateSegment(date: string): string {
+  const match = date.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (match) {
+    const [, month, day, year] = match;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  return encodeURIComponent(date);
+}
+
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const message = await response.text();
@@ -46,7 +55,7 @@ export async function fetchFellowships(): Promise<FellowshipEntry[]> {
 
 export async function fetchFellowshipDocuments(date: string): Promise<FellowshipDocument[]> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/documents`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/documents`),
     { cache: "no-store" },
   );
   return parseJson(response);
@@ -65,7 +74,7 @@ export async function fetchFellowshipDocumentText(
 ): Promise<string> {
   const response = await fetch(
     resolveApiUrl(
-      `${API_BASE_PATH}/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`,
+      `${API_BASE_PATH}/${encodeDateSegment(date)}/documents/${encodePathSegments(documentPath)}`,
     ),
     { cache: "no-store" },
   );
@@ -86,7 +95,7 @@ export async function createFellowship(entry: FellowshipEntry): Promise<Fellowsh
 }
 
 export async function updateFellowship(date: string, entry: FellowshipEntry): Promise<FellowshipEntry> {
-  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}`), {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(entry),
@@ -98,7 +107,7 @@ export async function updateFellowshipLearning(
   date: string,
   content: FellowshipLearningContent,
 ): Promise<FellowshipLearningContent> {
-  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/learning`), {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/learning`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(content),
@@ -108,7 +117,7 @@ export async function updateFellowshipLearning(
 
 export async function generateFellowshipLearning(date: string): Promise<FellowshipLearningContent> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/learning/generate`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/learning/generate`),
     {
       method: "POST",
     },
@@ -118,7 +127,7 @@ export async function generateFellowshipLearning(date: string): Promise<Fellowsh
 
 export async function fetchFellowshipAnalysisAssets(date: string): Promise<FellowshipAnalysisAssets> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/assets`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/analysis/assets`),
     { cache: "no-store" },
   );
   return parseJson(response);
@@ -126,7 +135,7 @@ export async function fetchFellowshipAnalysisAssets(date: string): Promise<Fello
 
 export async function generateFellowshipAnalysis(date: string): Promise<FellowshipAnalysisJob> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/generate`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/analysis/generate`),
     { method: "POST" },
   );
   return parseJson(response);
@@ -137,14 +146,14 @@ export async function fetchFellowshipAnalysisJob(
   jobId: string,
 ): Promise<FellowshipAnalysisJob> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/analysis/jobs/${encodeURIComponent(jobId)}`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/analysis/jobs/${encodeURIComponent(jobId)}`),
     { cache: "no-store" },
   );
   return parseJson(response);
 }
 
 export async function deleteFellowship(date: string): Promise<void> {
-  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}`), {
+  const response = await fetch(resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}`), {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -157,7 +166,7 @@ export async function fetchFellowshipEmailContent(
   date: string,
 ): Promise<FellowshipEmailContent> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/email-body`),
     { cache: "no-store" },
   );
   return parseJson(response);
@@ -168,7 +177,7 @@ export async function updateFellowshipEmailContent(
   content: FellowshipEmailContent,
 ): Promise<FellowshipEmailContent> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email-body`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/email-body`),
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -180,7 +189,7 @@ export async function updateFellowshipEmailContent(
 
 export async function sendFellowshipEmail(date: string): Promise<FellowshipEmailResult> {
   const response = await fetch(
-    resolveApiUrl(`${API_BASE_PATH}/${encodeURIComponent(date)}/email`),
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/email`),
     {
       method: "POST",
     },

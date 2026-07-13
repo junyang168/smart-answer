@@ -167,6 +167,7 @@ export function FellowshipManager() {
   const [analysisContent, setAnalysisContent] = useState<FellowshipAnalysisContent | null>(null);
   const [analysisMarkdown, setAnalysisMarkdown] = useState("");
   const [analysisMarkdownLoading, setAnalysisMarkdownLoading] = useState(false);
+  const [analysisMarkdownError, setAnalysisMarkdownError] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const emailEditorModules = useMemo(
@@ -316,6 +317,7 @@ export function FellowshipManager() {
     setAnalysisContent(null);
     setAnalysisMarkdown("");
     setAnalysisMarkdownLoading(false);
+    setAnalysisMarkdownError(null);
     setAnalysisLoading(false);
     setAnalysisGenerating(false);
   }, []);
@@ -454,6 +456,7 @@ export function FellowshipManager() {
     setAnalysisContent(null);
     setAnalysisMarkdown("");
     setAnalysisMarkdownLoading(false);
+    setAnalysisMarkdownError(null);
     if (isSameDate) {
       void loadAnalysisAssets(entry.date);
     }
@@ -499,11 +502,13 @@ export function FellowshipManager() {
     if (!editingDate || !currentAnalysisDocument) {
       setAnalysisMarkdown("");
       setAnalysisMarkdownLoading(false);
+      setAnalysisMarkdownError(null);
       return;
     }
 
     let cancelled = false;
     setAnalysisMarkdownLoading(true);
+    setAnalysisMarkdownError(null);
     fetchFellowshipDocumentText(editingDate, currentAnalysisDocument.name)
       .then((markdown) => {
         if (!cancelled) {
@@ -513,7 +518,7 @@ export function FellowshipManager() {
       .catch((err) => {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : "載入完整分析報告失敗";
-          setAnalysisError(message);
+          setAnalysisMarkdownError(message);
         }
       })
       .finally(() => {
@@ -807,6 +812,7 @@ export function FellowshipManager() {
     }
     setAnalysisGenerating(true);
     setAnalysisError(null);
+    setAnalysisMarkdownError(null);
     setFeedback(null);
     try {
       const started = await generateFellowshipAnalysis(editingDate);
@@ -831,6 +837,7 @@ export function FellowshipManager() {
       if (latest.content) {
         setAnalysisContent(latest.content);
         setAnalysisMarkdown(latest.content.markdown || "");
+        setAnalysisMarkdownError(null);
         const interactionSummaries = (kind: string) =>
           latest.content?.interactions
             .filter((interaction) => interaction.kind === kind)
@@ -1213,6 +1220,12 @@ export function FellowshipManager() {
                     </a>
                   )}
                 </div>
+
+                {analysisMarkdownError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {analysisMarkdownError}
+                  </div>
+                )}
 
                 {analysisMarkdownLoading ? (
                   <p className="text-sm text-slate-500">完整分析報告載入中…</p>
