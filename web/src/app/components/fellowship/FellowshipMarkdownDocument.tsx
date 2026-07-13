@@ -103,12 +103,18 @@ async function fetchMarkdownDocument(date: string, documentPath: string): Promis
     return diskContent;
   }
 
-  const url = `${BACKEND_BASE}/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodePathSegments(documentPath)}`;
-  const response = await fetch(url, { cache: "no-store" });
+  const url = `${BACKEND_BASE}/sc_api/fellowships/${encodeURIComponent(
+    fellowshipDateToFolderName(date),
+  )}/documents/${encodePathSegments(documentPath)}`;
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { Accept: "text/markdown, text/plain;q=0.9" },
+  });
   if (!response.ok) {
     throw new Error("Unable to load fellowship document");
   }
-  return response.text();
+  const content = await response.arrayBuffer();
+  return new TextDecoder("utf-8").decode(content);
 }
 
 export async function FellowshipMarkdownDocument({
@@ -124,7 +130,8 @@ export async function FellowshipMarkdownDocument({
   try {
     markdown = await fetchMarkdownDocument(date, documentPath);
   } catch (err) {
-    error = err instanceof Error ? err.message : "載入團契文件失敗";
+    console.error("Unable to load fellowship document", { date, documentPath, error: err });
+    error = "Unable to load fellowship document";
   }
 
   return (
