@@ -11,7 +11,7 @@ export function toFellowshipDocumentHref(date: string, document: FellowshipDocum
     .join("/");
 
   if (!isMarkdownDocument(document)) {
-    return `/api/sc_api/fellowships/${encodeURIComponent(date)}/documents/${encodedPath}`;
+    return `/api/fellowship-documents/${encodeURIComponent(date)}/${encodedPath}`;
   }
 
   return `/resources/fellowship/${encodeURIComponent(date)}/docs/${encodedPath}`;

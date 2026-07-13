@@ -33,6 +33,10 @@ export default (phase, { defaultConfig }) => {
           destination: '/api/admin/fellowships/:path*',
         },
         {
+          source: '/api/fellowship-documents/:path*',
+          destination: '/api/fellowship-documents/:path*',
+        },
+        {
           source: '/api/:path((?!auth).*)',
           destination,
         },

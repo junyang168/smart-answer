@@ -143,9 +143,9 @@ Document access behavior:
   - Extracted audio such as `audio/*.mp3`
   - Temporary/cache folders
 - Markdown documents (`*.md`) open as rendered web pages instead of raw downloads.
-- The Markdown document page renders server-side and reads public Markdown from the fellowship docs directory first. It falls back to the backend public document endpoint only when the docs directory is unavailable to the Next.js process.
-- Non-Markdown public documents use `/api/sc_api/fellowships/[date]/documents/[documentPath]` so requests go through the Next.js API proxy instead of the nginx `/sc_api/` legacy route.
-- PPTX and MP4 links are normal attachment downloads, not new-tab rendered pages. The proxy must preserve `Range` headers for large MP4 downloads.
+- The Markdown document page renders server-side and reads public Markdown from the fellowship docs directory first. It falls back to the backend public text endpoint only when the docs directory is unavailable to the Next.js process.
+- Non-Markdown public documents use `/api/fellowship-documents/[date]/[documentPath]`, a Next.js local file route that reads from the same fellowship docs directory.
+- PPTX and MP4 links are normal attachment downloads, not new-tab rendered pages. The local file route must preserve `Range` headers for large MP4 downloads.
 
 Admin-managed fellowship fields:
 

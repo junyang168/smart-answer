@@ -20,9 +20,13 @@ The deployed site has two different API surfaces that look similar but are route
 - `/sc_api/...` is owned by nginx and currently targets the legacy backend on port `8008`.
 - `/api/sc_api/...` is owned by the Next.js app and is proxied by `web/src/app/api/sc_api/[[...path]]/route.ts` to the current FastAPI backend (`SC_API_SERVICE_URL` or `FULL_ARTICLE_SERVICE_URL`).
 
-For new Smart Answer frontend code, prefer `/api/sc_api/...` for browser-facing API calls and file downloads. Do not link public fellowship documents directly to `/sc_api/...`; in production that path can be intercepted by nginx and served by the wrong backend.
+For new Smart Answer frontend code, prefer `/api/sc_api/...` for browser-facing JSON API calls. Do not link public fellowship documents directly to `/sc_api/...`; in production that path can be intercepted by nginx and served by the wrong backend.
 
-The Next.js `/api/sc_api` proxy must stream file responses and forward `Range` / `Accept` headers. Large fellowship MP4 files rely on byte-range requests; buffering full responses or dropping range headers can cause Cloudflare/nginx 502s or stalled downloads.
+Public fellowship attachment downloads use the Next.js local file route:
+
+- `/api/fellowship-documents/[date]/[documentPath]`
+
+This route reads from the fellowship docs directory and implements byte-range responses for MP4 files. Large fellowship recordings should not be downloaded through `/api/sc_api/.../documents/...`, because that path adds an extra backend/proxy hop and has caused stalled downloads for large recordings.
 
 Fellowship Markdown pages under `/resources/fellowship/[date]/docs/[...documentPath]` are server-rendered by Next.js. The Next process reads public `.md` files directly from:
 
