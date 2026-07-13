@@ -130,12 +130,13 @@ Detail page behavior:
 
 Document access behavior:
 
-- Fellowship documents are stored under `data/fellowship/docs/[YYYY-MM-DD]`.
+- Fellowship documents are stored under `FELLOWSHIP_DOCS_DIR/[YYYY-MM-DD]` when configured, otherwise `data/fellowship/docs/[YYYY-MM-DD]`.
+- The dated local docs folder is the source of truth for public fellowship document downloads.
 - Public document access is allowlisted, not authenticated.
 - Public input documents are:
   - Prepared manuscript/teaching notes in Markdown (`*.md`)
   - Fellowship presentation files (`*.pptx`)
-  - Original Google Meet recording MP4 files (`*.mp4`)
+  - Local copies of the Google Meet recording MP4 files (`*.mp4`)
 - Generated or temporary files are hidden from public document lists and public file endpoints, including:
   - `主題與查經重點.md`
   - `recording.transcript.generated.md`
@@ -159,6 +160,13 @@ Admin-managed fellowship fields:
 - Key learnings
 - Email content
 - Associated document links
+
+Source link policy:
+
+- `Source links` / `來源連結` are for teaching/source material links, such as Dr. Wang notes or related reference documents.
+- Do not store the global Google Meet Recordings folder in `來源連結`.
+- Google Meet recording discovery uses backend configuration such as `FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID` and Drive access, not per-entry public source links.
+- When a recording should be publicly downloadable, copy or download the selected MP4 into the fellowship's dated docs folder and let the public document allowlist expose it as a normal input file.
 
 Learning content generation:
 
@@ -327,6 +335,7 @@ Primary storage pattern:
 Important implication:
 
 - File and folder naming conventions are part of the functional contract for modules that link documents to content records.
+- Data setup should be corrected in the docs folder when public input files are missing. Avoid hard-coding fellowship-specific filenames or source links in code.
 - Public fellowship document visibility must remain consistent between:
   - Backend allowlist logic (`list_public_fellowship_documents` / public document endpoint)
   - Frontend document links

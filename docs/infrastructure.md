@@ -35,6 +35,31 @@ Fellowship Markdown pages under `/resources/fellowship/[date]/docs/[...documentP
 
 The same fellowship docs directory must therefore be readable by both the FastAPI backend and the Next.js frontend process in production.
 
+### Fellowship Recording and Document Storage
+
+Fellowship documents use the dated local docs folder as the source of truth for public downloads:
+
+- `FELLOWSHIP_DOCS_DIR/YYYY-MM-DD`, when `FELLOWSHIP_DOCS_DIR` is set; otherwise
+- `DATA_BASE_DIR/fellowship/docs/YYYY-MM-DD`.
+
+Public input files in that folder are:
+
+- The prepared teaching manuscript or transcript used for the fellowship (`*.md`)
+- The teaching deck (`*.pptx`)
+- A local copy of the Google Meet recording (`*.mp4`)
+
+Generated and temporary files must remain hidden from the public view:
+
+- `主題與查經重點.md`
+- `recording.transcript.generated.md`
+- Google Meet chat files
+- Extracted audio such as `audio/*.mp3`
+- `tmp/`, `temp/`, and `cache/` files
+
+The admin fellowship `來源連結` / `sourceLinks` field is not the place to store the global Google Meet Recordings folder. That field is reserved for Dr. Wang teaching/source document links. The Meet Recordings folder is infrastructure configuration, either through `FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID` or backend Drive access, and selected recordings should be copied into the dated local docs folder before being exposed publicly.
+
+If a fellowship page cannot find a recording, fix the data by placing the correct MP4 under that fellowship's dated docs folder. Do not add the Meet Recordings folder URL to the fellowship entry to make the public UI find it.
+
 ### Nginx Configuration Block
 ```nginx
 server {

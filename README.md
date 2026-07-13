@@ -46,7 +46,9 @@ The application follows a microservices-like architecture with a Next.js fronten
         For new app, routing internet traffic to the appropriate services (`/`, ).
 -   **Data Stores**:
     -   **FileSystem**: Used for storing slides, audio, and generated markdown files.
-    -   Fellowship documents live under `DATA_BASE_DIR/fellowship/docs/YYYY-MM-DD`. Public fellowship Markdown pages are rendered server-side by Next.js and require the Next process to read that directory.
+    -   Fellowship documents live under `DATA_BASE_DIR/fellowship/docs/YYYY-MM-DD` unless `FELLOWSHIP_DOCS_DIR` is set. Public fellowship Markdown pages are rendered server-side by Next.js and require the Next process to read that same directory.
+    -   Fellowship public input files are the prepared manuscript Markdown, PPTX, and local MP4 recording copy. Generated analysis/transcript files, extracted audio, cache files, and Google Meet chat files are hidden from public document lists.
+    -   Fellowship `sourceLinks` are for teaching/source material links only. Do not store the shared Google Meet Recordings folder there; recordings should be copied into the dated fellowship docs folder when they are meant to be public inputs.
 
 ## Getting Started
 
@@ -91,6 +93,7 @@ The application follows a microservices-like architecture with a Next.js fronten
     ```
     Fellowship recording transcription requires an `ffmpeg` executable. The backend resolves it in this order:
     `FFMPEG_PATH`, system `ffmpeg`, then the packaged `imageio-ffmpeg` dependency from `backend/requirements.txt`.
+    When a Google Drive recording is used for analysis, the backend may download a local MP4 copy into the dated fellowship docs folder so the public site can serve it like the PPTX and manuscript.
 
 2.  **Web UI**:
     ```bash
