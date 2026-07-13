@@ -198,6 +198,10 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
             "title": "苦難與榮耀之路",
             "sourceLinks": [
               {
+                "label": "王守仁牧師講義",
+                "url": "https://example.com/dr-wang"
+              },
+              {
                 "label": "Meet Recordings",
                 "url": "https://drive.google.com/drive/folders/19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"
               }
@@ -235,13 +239,23 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
             ),
         ]
 
-    monkeypatch.setattr(service, "_drive_folder_ids_for_entry", lambda entry: ["19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX"])
+    def fake_download_drive_recording(date, asset):
+        return service.FellowshipAnalysisAsset(
+            name="達拉斯聖道教會團契查經 - 2026_06_19 19_28 CDT - Recording.mp4",
+            source="local",
+            kind="recording",
+            size=asset.size,
+            usable=True,
+        )
+
     monkeypatch.setattr(service, "_list_drive_folder_assets", fake_drive_assets)
+    monkeypatch.setattr(service, "_download_drive_recording_to_docs", fake_download_drive_recording)
 
     assets = service.resolve_fellowship_analysis_assets("2026-06-19")
 
     assert assets.recording is not None
-    assert assets.recording.drive_file_id == "recording-id"
+    assert assets.recording.source == "local"
+    assert assets.recording.name.endswith(".mp4")
     assert assets.empty_chat is not None
     assert assets.empty_chat.reason == "emptyChat"
     assert assets.transcript is not None
@@ -251,6 +265,8 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
         candidate for candidate in assets.candidates if candidate.name == "recording.transcript.generated.md"
     )
     assert generated_transcript.kind == "transcript"
+    public_entry = service.get_public_fellowship("2026-06-19")
+    assert [source.label for source in public_entry.source_links] == ["王守仁牧師講義"]
 
 
 def test_prepared_chinese_manuscript_is_not_meeting_transcript(monkeypatch, tmp_path):

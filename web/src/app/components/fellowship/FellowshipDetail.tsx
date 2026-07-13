@@ -10,6 +10,20 @@ import { FellowshipDocument } from "@/app/types/fellowship";
 import { PublicFellowshipEntry } from "@/app/types/publicFellowship";
 import { isMarkdownDocument, toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
 
+const MEET_RECORDINGS_FOLDER_ID = "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX";
+
+function teachingSourceLinks(entry: PublicFellowshipEntry) {
+  return entry.sourceLinks.filter((source) => {
+    const label = (source.label || "").trim().toLowerCase();
+    const url = source.url || "";
+    return (
+      !url.includes(`/folders/${MEET_RECORDINGS_FOLDER_ID}`) &&
+      !url.includes(`id=${MEET_RECORDINGS_FOLDER_ID}`) &&
+      !["meet recordings", "google meet recordings", "recording folder", "recordings folder"].includes(label)
+    );
+  });
+}
+
 async function fetchFellowship(date: string): Promise<PublicFellowshipEntry> {
   const response = await fetch(`/api/sc_api/fellowships/${encodeURIComponent(date)}`, {
     cache: "no-store",
@@ -117,6 +131,7 @@ export function FellowshipDetail({ date }: { date: string }) {
   }
 
   const publicDocuments = documents.filter(isPublicFellowshipDocument);
+  const publicSourceLinks = teachingSourceLinks(entry);
 
   return (
     <article className="space-y-8">
@@ -180,9 +195,9 @@ export function FellowshipDetail({ date }: { date: string }) {
           <ExternalLink className="h-6 w-6 text-[#8B4513]" />
           來源連結
         </div>
-        {entry.sourceLinks.length > 0 ? (
+        {publicSourceLinks.length > 0 ? (
           <div className="grid gap-3 md:grid-cols-2">
-            {entry.sourceLinks.map((source, index) => (
+            {publicSourceLinks.map((source, index) => (
               <a
                 key={`${source.url}-${index}`}
                 href={source.url}

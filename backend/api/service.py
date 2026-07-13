@@ -46,6 +46,7 @@ from .models import (
     FellowshipInteraction,
     FellowshipLearningContent,
     FellowshipPublicEntry,
+    FellowshipSourceLink,
     GenerateArticleRequest,
     GenerateArticleResponse,
     GenerateSummaryResponse,
@@ -422,16 +423,10 @@ def _local_fellowship_assets(date: str) -> list[FellowshipAnalysisAsset]:
     return assets
 
 
-def _drive_folder_ids_for_entry(entry: FellowshipEntry) -> list[str]:
-    folder_ids: list[str] = []
-    for source in entry.source_links:
-        url = source.url or ""
-        folder_id = parse_google_drive_folder_id(url)
-        if folder_id:
-            folder_ids.append(folder_id)
-    if not folder_ids and FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID:
-        folder_ids.append(FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID)
-    return list(dict.fromkeys(folder_ids))
+def _drive_folder_ids_for_entry(_entry: FellowshipEntry) -> list[str]:
+    if not FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID:
+        return []
+    return [FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID]
 
 
 def _get_drive_service(scopes: Sequence[str] | None = None):
@@ -528,18 +523,86 @@ def _find_fellowship_entry(date: str) -> FellowshipEntry:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
 
 
-def _score_asset(asset: FellowshipAnalysisAsset) -> tuple[int, int, float]:
+def _score_asset(asset: FellowshipAnalysisAsset) -> tuple[int, int, int, float]:
     name = asset.name.lower()
     name_score = 0
     for token in ("查經", "逐字", "transcript", "gemini", "會議記錄", "会议记录", "recording"):
         if token.lower() in name:
             name_score += 10
+    source_score = 10 if asset.source == "local" else 0
     modified = asset.modified_at.timestamp() if asset.modified_at else 0
-    return (name_score, asset.size or 0, modified)
+    return (name_score, source_score, asset.size or 0, modified)
 
 
 def _is_generated_transcript_asset(asset: FellowshipAnalysisAsset) -> bool:
     return Path(asset.name).name.lower() == FELLOWSHIP_GENERATED_TRANSCRIPT
+
+
+def _safe_local_recording_name(asset: FellowshipAnalysisAsset) -> str:
+    suffix = Path(asset.name).suffix.lower()
+    if not suffix:
+        if asset.mime_type == "video/mp4":
+            suffix = ".mp4"
+        elif asset.mime_type == "audio/mpeg":
+            suffix = ".mp3"
+        elif asset.mime_type == "audio/mp4":
+            suffix = ".m4a"
+        else:
+            suffix = ".mp4"
+    stem = asset.name
+    if stem.lower().endswith(suffix):
+        stem = stem[: -len(suffix)]
+    safe_stem = re.sub(r"[/:]+", "_", stem).strip()
+    safe_stem = re.sub(r"\s+", " ", safe_stem) or f"recording-{asset.drive_file_id or abs(hash(asset.name))}"
+    return f"{safe_stem}{suffix}"
+
+
+def _download_drive_recording_to_docs(date: str, asset: FellowshipAnalysisAsset) -> FellowshipAnalysisAsset:
+    if asset.source != "drive" or not asset.drive_file_id:
+        return asset
+
+    folder = _resolve_fellowship_docs_dir(date)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / _safe_local_recording_name(asset)
+    if target.exists() and target.stat().st_size > 0:
+        if asset.size is None or target.stat().st_size == asset.size:
+            stat = target.stat()
+            return FellowshipAnalysisAsset(
+                name=target.name,
+                source="local",
+                kind="recording",
+                url=_fellowship_document_url(date, target.name),
+                size=stat.st_size,
+                modifiedAt=_asset_modified_at(target),
+                usable=True,
+            )
+
+    service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+    request = service.files().get_media(fileId=asset.drive_file_id)
+    from googleapiclient.http import MediaIoBaseDownload
+
+    temp_target = target.with_suffix(f"{target.suffix}.download")
+    try:
+        with temp_target.open("wb") as handle:
+            downloader = MediaIoBaseDownload(handle, request)
+            done = False
+            while not done:
+                _status_obj, done = downloader.next_chunk()
+        temp_target.replace(target)
+    finally:
+        if temp_target.exists():
+            temp_target.unlink(missing_ok=True)
+
+    stat = target.stat()
+    return FellowshipAnalysisAsset(
+        name=target.name,
+        source="local",
+        kind="recording",
+        url=_fellowship_document_url(date, target.name),
+        size=stat.st_size,
+        modifiedAt=_asset_modified_at(target),
+        usable=True,
+    )
 
 
 def _select_analysis_assets(date: str, candidates: list[FellowshipAnalysisAsset]) -> FellowshipAnalysisAssets:
@@ -571,11 +634,21 @@ def resolve_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
     entry = _find_fellowship_entry(date)
     candidates = _local_fellowship_assets(entry.date)
     drive_errors: list[str] = []
-    for folder_id in _drive_folder_ids_for_entry(entry):
-        try:
-            candidates.extend(_list_drive_folder_assets(folder_id, entry.date))
-        except Exception as exc:
-            drive_errors.append(f"Unable to read Drive folder {folder_id}: {exc}")
+    has_local_recording = any(asset.usable and asset.kind == "recording" and asset.source == "local" for asset in candidates)
+    if not has_local_recording:
+        drive_candidates: list[FellowshipAnalysisAsset] = []
+        for folder_id in _drive_folder_ids_for_entry(entry):
+            try:
+                drive_candidates.extend(_list_drive_folder_assets(folder_id, entry.date))
+            except Exception as exc:
+                drive_errors.append(f"Unable to read Drive folder {folder_id}: {exc}")
+        candidates.extend(drive_candidates)
+        drive_assets = _select_analysis_assets(entry.date, drive_candidates)
+        if drive_assets.recording and drive_assets.recording.source == "drive":
+            try:
+                candidates.append(_download_drive_recording_to_docs(entry.date, drive_assets.recording))
+            except Exception as exc:
+                drive_errors.append(f"Unable to download Drive recording {drive_assets.recording.name}: {exc}")
     assets = _select_analysis_assets(entry.date, candidates)
     assets.messages.extend(drive_errors)
     return assets
@@ -595,6 +668,19 @@ def _fellowship_iso_date(date: str) -> str:
     return datetime.strptime(date, "%m/%d/%Y").strftime("%Y-%m-%d")
 
 
+def _is_meet_recording_source_link(source: FellowshipSourceLink) -> bool:
+    label = (source.label or "").strip().lower()
+    folder_id = parse_google_drive_folder_id(source.url or "")
+    return (
+        folder_id == FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID
+        or label in {"meet recordings", "google meet recordings", "recording folder", "recordings folder"}
+    )
+
+
+def _teaching_source_links(entry: FellowshipEntry) -> list[FellowshipSourceLink]:
+    return [source for source in entry.source_links if not _is_meet_recording_source_link(source)]
+
+
 def _to_public_fellowship_entry(entry: FellowshipEntry) -> FellowshipPublicEntry:
     documents = list_public_fellowship_documents(entry.date)
     return FellowshipPublicEntry(
@@ -604,7 +690,7 @@ def _to_public_fellowship_entry(entry: FellowshipEntry) -> FellowshipPublicEntry
         title=entry.title,
         series=entry.series,
         sequence=entry.sequence,
-        sourceLinks=entry.source_links,
+        sourceLinks=_teaching_source_links(entry),
         summary=entry.summary,
         keyLearnings=entry.key_learnings,
         audienceQuestions=entry.audience_questions,

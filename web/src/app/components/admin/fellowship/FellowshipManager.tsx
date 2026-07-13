@@ -66,6 +66,22 @@ const emptyForm: FormState = {
   sourceLinks: [],
 };
 
+const MEET_RECORDINGS_FOLDER_ID = "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX";
+
+function isMeetRecordingSourceLink(link: FellowshipSourceLink): boolean {
+  const label = (link.label || "").trim().toLowerCase();
+  const url = link.url || "";
+  return (
+    url.includes(`/folders/${MEET_RECORDINGS_FOLDER_ID}`) ||
+    url.includes(`id=${MEET_RECORDINGS_FOLDER_ID}`) ||
+    ["meet recordings", "google meet recordings", "recording folder", "recordings folder"].includes(label)
+  );
+}
+
+function teachingSourceLinks(links: FellowshipSourceLink[] | undefined): FellowshipSourceLink[] {
+  return (links ?? []).filter((link) => !isMeetRecordingSourceLink(link));
+}
+
 const emptyEmailContent: FellowshipEmailContent = {
   subject: "",
   html: "",
@@ -435,8 +451,8 @@ export function FellowshipManager() {
       host: entry.host ?? "",
       title: entry.title ?? "",
       series: entry.series ?? "",
-      sourceLinks: entry.sourceLinks?.length
-        ? entry.sourceLinks.map((link) => ({ label: link.label ?? "", url: link.url ?? "" }))
+      sourceLinks: teachingSourceLinks(entry.sourceLinks).length
+        ? teachingSourceLinks(entry.sourceLinks).map((link) => ({ label: link.label ?? "", url: link.url ?? "" }))
         : [],
     });
     setFeedback(null);
@@ -628,7 +644,7 @@ export function FellowshipManager() {
         label: link.label.trim(),
         url: link.url.trim(),
       }))
-      .filter((link) => link.label || link.url);
+      .filter((link) => (link.label || link.url) && !isMeetRecordingSourceLink(link));
     const incompleteSourceLink = sourceLinks.find((link) => !link.label || !link.url);
     if (incompleteSourceLink) {
       setError("來源連結需同時填寫名稱與 URL");
@@ -1133,7 +1149,7 @@ export function FellowshipManager() {
                   <div>
                     <h3 className="text-sm font-semibold text-sky-950">分析資料來源</h3>
                     <p className="mt-1 text-xs text-sky-700">
-                      從團契 metadata、文件資料夾與 Google Meet Recordings 解析 PPT、逐字稿與錄音。
+                      從團契 metadata、本地文件資料夾與固定 Meet Recordings 資料夾解析 PPT、逐字稿與錄音。
                     </p>
                   </div>
                   <button
@@ -1451,9 +1467,9 @@ export function FellowshipManager() {
                         {entry.emailSubject || entry.emailBodyHtml ? "已自訂" : "使用預設"}
                       </td>
                       <td className="min-w-48 px-4 py-3 text-sm text-gray-600">
-                        {entry.sourceLinks?.length ? (
+                        {teachingSourceLinks(entry.sourceLinks).length ? (
                           <div className="space-y-1">
-                            {entry.sourceLinks.map((link, linkIndex) => (
+                            {teachingSourceLinks(entry.sourceLinks).map((link, linkIndex) => (
                               <a
                                 key={`${link.url}-${linkIndex}`}
                                 href={link.url}

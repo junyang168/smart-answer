@@ -7,6 +7,20 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PublicFellowshipEntry } from "@/app/types/publicFellowship";
 
+const MEET_RECORDINGS_FOLDER_ID = "19VF_eDRUkpBy0vc7YljpTFFPzgHiuTUX";
+
+function teachingSourceCount(entry: PublicFellowshipEntry): number {
+  return entry.sourceLinks.filter((link) => {
+    const label = (link.label || "").trim().toLowerCase();
+    const url = link.url || "";
+    return (
+      !url.includes(`/folders/${MEET_RECORDINGS_FOLDER_ID}`) &&
+      !url.includes(`id=${MEET_RECORDINGS_FOLDER_ID}`) &&
+      !["meet recordings", "google meet recordings", "recording folder", "recordings folder"].includes(label)
+    );
+  }).length;
+}
+
 async function fetchFellowships(): Promise<PublicFellowshipEntry[]> {
   const response = await fetch("/api/sc_api/fellowships", { cache: "no-store" });
   if (!response.ok) {
@@ -162,7 +176,7 @@ function FellowshipCard({
       )}
 
       <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-500">
-        <span className="rounded-full bg-gray-100 px-3 py-1">來源 {entry.sourceLinks.length}</span>
+        <span className="rounded-full bg-gray-100 px-3 py-1">來源 {teachingSourceCount(entry)}</span>
         {entry.hasDocuments && (
           <span className="rounded-full bg-gray-100 px-3 py-1">登入可看文件 {entry.documentCount}</span>
         )}
