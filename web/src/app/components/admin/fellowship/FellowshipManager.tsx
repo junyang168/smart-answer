@@ -218,6 +218,23 @@ export function FellowshipManager() {
     }
   }, []);
 
+  const loadAnalysisAssets = useCallback(async (date: string) => {
+    setAnalysisLoading(true);
+    setAnalysisError(null);
+    try {
+      const assets = await fetchFellowshipAnalysisAssets(date);
+      setAnalysisAssets(assets);
+      return assets;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "載入分析資料來源失敗";
+      setAnalysisError(message);
+      setAnalysisAssets(null);
+      return null;
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (state.status === "idle") {
       load().catch(() => {});
@@ -407,6 +424,7 @@ export function FellowshipManager() {
   };
 
   const handleEdit = (entry: FellowshipEntry) => {
+    const isSameDate = editingDate === entry.date;
     setEditingSequence(entry.sequence ?? null);
     setEditingDate(entry.date);
     setForm({
@@ -436,6 +454,9 @@ export function FellowshipManager() {
     setAnalysisContent(null);
     setAnalysisMarkdown("");
     setAnalysisMarkdownLoading(false);
+    if (isSameDate) {
+      void loadAnalysisAssets(entry.date);
+    }
   };
 
   useEffect(() => {
@@ -847,6 +868,7 @@ export function FellowshipManager() {
   const renderAssetSummary = (
     label: string,
     asset: FellowshipAnalysisAssets["pptx"] | FellowshipAnalysisAssets["transcript"] | FellowshipAnalysisAssets["recording"],
+    loaded = analysisAssets !== null,
   ) => (
     <div className="rounded-md border border-sky-100 bg-white p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">{label}</p>
@@ -859,7 +881,7 @@ export function FellowshipManager() {
           </p>
         </div>
       ) : (
-        <p className="mt-1 text-sm text-gray-500">未找到</p>
+        <p className="mt-1 text-sm text-gray-500">{loaded ? "未找到" : "尚未載入"}</p>
       )}
     </div>
   );

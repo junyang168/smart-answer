@@ -374,6 +374,8 @@ def _asset_modified_at(path: Path) -> datetime:
 def _classify_fellowship_asset_name(name: str, mime_type: str | None = None) -> str:
     lowered = name.lower()
     suffix = Path(name).suffix.lower()
+    if lowered == FELLOWSHIP_GENERATED_TRANSCRIPT:
+        return "transcript"
     if name.startswith(GENERATED_FELLOWSHIP_PREFIXES):
         return "generated"
     if " - chat" in lowered or lowered.endswith(" chat") or suffix in {".vtt", ".srt"}:
@@ -536,10 +538,17 @@ def _score_asset(asset: FellowshipAnalysisAsset) -> tuple[int, int, float]:
     return (name_score, asset.size or 0, modified)
 
 
+def _is_generated_transcript_asset(asset: FellowshipAnalysisAsset) -> bool:
+    return Path(asset.name).name.lower() == FELLOWSHIP_GENERATED_TRANSCRIPT
+
+
 def _select_analysis_assets(date: str, candidates: list[FellowshipAnalysisAsset]) -> FellowshipAnalysisAssets:
     usable = [asset for asset in candidates if asset.usable]
     pptx_candidates = [asset for asset in usable if asset.kind == "pptx"]
     transcript_candidates = [asset for asset in usable if asset.kind == "transcript"]
+    preferred_transcript_candidates = [
+        asset for asset in transcript_candidates if not _is_generated_transcript_asset(asset)
+    ]
     recording_candidates = [asset for asset in usable if asset.kind == "recording"]
     empty_chat = next((asset for asset in candidates if asset.reason == "emptyChat"), None)
     messages: list[str] = []
@@ -550,7 +559,7 @@ def _select_analysis_assets(date: str, candidates: list[FellowshipAnalysisAsset]
     return FellowshipAnalysisAssets(
         date=_fellowship_date_to_folder_name(date),
         pptx=max(pptx_candidates, key=_score_asset, default=None),
-        transcript=max(transcript_candidates, key=_score_asset, default=None),
+        transcript=max(preferred_transcript_candidates or transcript_candidates, key=_score_asset, default=None),
         recording=max(recording_candidates, key=_score_asset, default=None),
         emptyChat=empty_chat,
         candidates=candidates,

@@ -210,6 +210,7 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
     docs_dir = tmp_path / "data" / "fellowship" / "docs" / "2026-06-19"
     docs_dir.mkdir(parents=True, exist_ok=True)
     (docs_dir / "苦難與榮耀之路 太 16_20–17_13.md").write_text("prepared manuscript" * 100, encoding="utf-8")
+    (docs_dir / "recording.transcript.generated.md").write_text("generated transcript" * 100, encoding="utf-8")
     (docs_dir / "苦難與榮耀之路_太16_20-17_13_查經.pptx").write_bytes(b"pptx")
 
     def fake_drive_assets(folder_id, date):
@@ -244,7 +245,12 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
     assert assets.empty_chat is not None
     assert assets.empty_chat.reason == "emptyChat"
     assert assets.transcript is not None
+    assert assets.transcript.name == "苦難與榮耀之路 太 16_20–17_13.md"
     assert assets.pptx is not None
+    generated_transcript = next(
+        candidate for candidate in assets.candidates if candidate.name == "recording.transcript.generated.md"
+    )
+    assert generated_transcript.kind == "transcript"
 
 
 def test_prepared_chinese_manuscript_is_not_meeting_transcript(monkeypatch, tmp_path):
