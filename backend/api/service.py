@@ -248,14 +248,14 @@ def create_fellowship(entry: FellowshipEntry) -> FellowshipEntry:
 
 def update_fellowship(date: str, entry: FellowshipEntry) -> FellowshipEntry:
     try:
-        return repository.update_fellowship(date, entry)
+        return repository.update_fellowship(_normalize_fellowship_date(date), entry)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 def delete_fellowship(date: str) -> None:
     try:
-        repository.delete_fellowship(date)
+        repository.delete_fellowship(_normalize_fellowship_date(date))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
