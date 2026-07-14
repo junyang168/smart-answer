@@ -1086,23 +1086,38 @@ export function FellowshipManager() {
                   <p className="text-sm text-gray-500">尚未加入來源連結。</p>
                 )}
               </div>
-              <div className="flex justify-end gap-2 md:col-span-2">
-                {editingDate != null && (
+              <div className="flex flex-wrap items-center justify-between gap-2 md:col-span-2">
+                {editingDate != null ? (
                   <button
                     type="button"
-                    onClick={resetForm}
-                    className="inline-flex items-center rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    onClick={() => handleDelete(editingDate)}
+                    disabled={saving}
+                    className="inline-flex items-center rounded-md border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
                   >
-                    取消編輯
+                    刪除
                   </button>
+                ) : (
+                  <span />
                 )}
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {saving ? "儲存中..." : editingDate != null ? "更新資料" : "新增團契"}
-                </button>
+                <div className="flex gap-2">
+                  {editingDate != null && (
+                    <button
+                      type="button"
+                      onClick={resetForm}
+                      disabled={saving}
+                      className="inline-flex items-center rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-60"
+                    >
+                      取消編輯
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {saving ? "儲存中..." : editingDate != null ? "更新" : "新增團契"}
+                  </button>
+                </div>
               </div>
             </form>
           </TabsContent>
