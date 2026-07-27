@@ -107,11 +107,6 @@ def _sanitize_series_project_links(data: List[dict]) -> bool:
                     changed = True
                     continue
 
-                project_type = _normalize_project_type(getattr(project, "project_type", None))
-                if project_type != series_type:
-                    changed = True
-                    continue
-
                 if getattr(project, "series_id", None) != series.get("id"):
                     changed = True
                     continue
@@ -311,11 +306,6 @@ def assign_project_to_lecture(series_id: str, lecture_id: str, project_id: str) 
 
     project = get_sermon_project_metadata(project_id)
     if not project:
-        return False
-
-    target_series_type = _normalize_project_type(target_series.get("project_type"))
-    project_type = _normalize_project_type(getattr(project, "project_type", None))
-    if project_type != target_series_type:
         return False
 
     assigned_series_id, assigned_lecture_id = _find_project_assignment(data, project_id)

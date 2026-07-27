@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _client = None
+DEFAULT_OPENAI_GENERATION_MODEL = os.getenv(
+    "OPENAI_GENERATION_MODEL",
+    "gpt-5.6-sol",
+)
 
 def get_openai_client() -> OpenAI:
     """Returns a singleton OpenAI client."""
@@ -23,7 +27,7 @@ def generate_structured_json(
     system_prompt: str,
     user_prompt: str,
     json_schema: Dict[str, Any],
-    model: str = "gpt-5.2",
+    model: Optional[str] = None,
     temperature: float = 0.0,
     max_tokens: Optional[int] = None
 ) -> Dict[str, Any]:
@@ -32,9 +36,10 @@ def generate_structured_json(
     Returns the parsed JSON dictionary.
     """
     client = get_openai_client()
+    selected_model = model or DEFAULT_OPENAI_GENERATION_MODEL
     
     kwargs = {
-        "model": model,
+        "model": selected_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -43,8 +48,13 @@ def generate_structured_json(
             "type": "json_schema",
             "json_schema": json_schema,
         },
-        "temperature": temperature,
     }
+
+    # GPT-5.6 currently accepts only its default temperature value. Omitting
+    # the field preserves that supported default while older model routes keep
+    # the caller's existing sampling behavior.
+    if not selected_model.startswith("gpt-5.6"):
+        kwargs["temperature"] = temperature
     
     if max_tokens is not None:
         kwargs["max_completion_tokens"] = max_tokens  # OpenAI updated mapping for o1/newer models

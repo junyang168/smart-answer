@@ -29,6 +29,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [selectedPromptId, setSelectedPromptId] = useState<string>("");
     const [usedPromptId, setUsedPromptId] = useState<string | null>(null);
     const [auditPassed, setAuditPassed] = useState<boolean | null>(null);
+    const [theologicalAuditPassed, setTheologicalAuditPassed] = useState<boolean | null>(null);
+    const [theologicalAuditCompleted, setTheologicalAuditCompleted] = useState<boolean | null>(null);
     const [projectType, setProjectType] = useState<string>("sermon_note");
     const [masterTextMeta, setMasterTextMeta] = useState({
         title: "",
@@ -235,6 +237,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 }
                 if (metaData.audit_passed !== undefined) {
                     setAuditPassed(metaData.audit_passed);
+                }
+                if (metaData.theological_audit_passed !== undefined) {
+                    setTheologicalAuditPassed(metaData.theological_audit_passed);
+                }
+                if (metaData.theological_audit_completed !== undefined) {
+                    setTheologicalAuditCompleted(metaData.theological_audit_completed);
                 }
 
                 const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final`);
@@ -481,21 +489,33 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const handleSave = async (checkMode?: ViewMode) => {
         const modeToSave = checkMode || viewMode;
         try {
+            let res: Response;
             if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId && activeChunkId !== "FULL_DOC") {
-                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${modeToSave}/chunk/${activeChunkId}`, {
+                res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${modeToSave}/chunk/${activeChunkId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ content: markdown })
                 });
             } else {
                 const endpoint = modeToSave;
-                await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
+                res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/${endpoint}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ content: markdown })
                 });
             }
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.detail || "Failed to save");
+            }
             setOriginalMarkdown(markdown); // Reset dirty flag
+            if (projectType === 'transcript' && modeToSave === 'draft') {
+                setAuditPassed(false);
+            }
+            if (modeToSave === 'final') {
+                setTheologicalAuditPassed(false);
+                setTheologicalAuditCompleted(false);
+            }
 
             // Sync local chunk state
             if ((modeToSave === 'final' || modeToSave === 'draft') && activeChunkId) {
@@ -513,8 +533,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             }
 
             return true;
-        } catch (e) {
-            alert("Failed to save");
+        } catch (e: any) {
+            alert(e.message || "Failed to save");
             return false;
         }
     };
@@ -624,6 +644,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
             const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/start-review`, { method: "POST" });
             if (res.ok) {
                 setHasFinal(true);
+                setTheologicalAuditPassed(false);
+                setTheologicalAuditCompleted(false);
                 setViewMode('final');
             } else {
                 alert("Failed to start review.");
@@ -751,6 +773,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 if (data.audit_passed !== undefined) {
                     setAuditPassed(data.audit_passed);
                 }
+                if (data.theological_audit_passed !== undefined) {
+                    setTheologicalAuditPassed(data.theological_audit_passed);
+                }
+                if (data.theological_audit_completed !== undefined) {
+                    setTheologicalAuditCompleted(data.theological_audit_completed);
+                }
             }
         } catch (e) {
             console.error("Failed to reload meta after audit", e);
@@ -838,6 +866,18 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         return <div className="p-10 text-center">Loading / Processing Project...</div>;
     }
 
+    const canCheckIn = projectType === 'transcript'
+        ? hasFinal && theologicalAuditCompleted === true
+        : auditPassed === true;
+
+    const checkInRequirement = projectType !== 'transcript'
+        ? "Must pass AI Audit first"
+        : auditPassed !== true
+            ? "Run and pass Coverage Audit first"
+            : !hasFinal
+                ? "Start Theological Review first"
+                : "Complete the theological audit for every Review Chunk";
+
     return (
         <div className="flex flex-col h-full">
             {/* Header / Tabs */}
@@ -892,12 +932,30 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     </button>
                     <button
                         onClick={handleCheckIn}
-                        disabled={auditPassed !== true}
-                        className={`px-3 py-1 rounded font-bold text-sm ${auditPassed === true ? 'text-white bg-gray-800 hover:bg-gray-900' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
-                        title={auditPassed === true ? "Commit to local git" : "Must pass AI Audit first"}
+                        disabled={!canCheckIn}
+                        className={`px-3 py-1 rounded font-bold text-sm ${canCheckIn ? 'text-white bg-gray-800 hover:bg-gray-900' : 'text-gray-400 bg-gray-100 cursor-not-allowed'}`}
+                        title={canCheckIn ? "Commit to local git" : checkInRequirement}
                     >
                         Check In
                     </button>
+                    {projectType === 'transcript' && !canCheckIn && (
+                        <span className="max-w-[220px] text-xs leading-tight text-amber-700">
+                            {auditPassed !== true ? (
+                                <Link href={`/admin/notes-to-sermon/project/${projectId}/generation`} className="underline hover:text-amber-900">
+                                    Run and pass Coverage Audit first
+                                </Link>
+                            ) : !hasFinal ? (
+                                "Start Theological Review first"
+                            ) : (
+                                "Audit every Review Chunk; findings remain visible for your judgment."
+                            )}
+                        </span>
+                    )}
+                    {projectType === 'transcript' && canCheckIn && theologicalAuditPassed === false && (
+                        <span className="max-w-[220px] text-xs leading-tight text-amber-700">
+                            Theological audit completed with findings. Review them before Check In.
+                        </span>
+                    )}
                     {hasFinal && viewMode === 'final' && (
                         <button
                             onClick={handleExportDoc}
@@ -1296,8 +1354,9 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             />
                         </div>
                     </div>
-                    <div className={`border-l h-full ${viewMode === 'draft' || viewMode === 'final' ? 'block' : 'hidden'}`}>
-                        {viewMode === 'draft' ? (
+                    {(viewMode === 'final' || (viewMode === 'draft' && projectType !== 'transcript')) && (
+                    <div className="border-l h-full block">
+                        {viewMode === 'draft' && projectType !== 'transcript' ? (
                             <TheologicalAuditPanel
                                 projectId={projectId}
                                 selectedChunkId={activeChunkId}
@@ -1318,6 +1377,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                             />
                         ) : null}
                     </div>
+                    )}
                 </div>
             </div>
             {/* Metadata Modal */}

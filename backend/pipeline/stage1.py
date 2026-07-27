@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from anthropic import Anthropic
+from openai import OpenAI
+
+from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
 
 LogCallback = Callable[[str, str], None]
 ProgressCallback = Callable[[str, int], None]
@@ -36,6 +39,23 @@ def _read_prompt(prompt_name: str) -> str:
     for token, value in shared_tokens.items():
         prompt_text = prompt_text.replace(token, value)
     return prompt_text
+
+
+def get_stage1_prompt_bundle(project_type: str = "sermon_note") -> Dict[str, str]:
+    """Return the exact resolved prompts used by Stage 1 for review and runtime."""
+    normalized_type = "transcript" if project_type == "transcript" else "sermon_note"
+    if normalized_type == "transcript":
+        return {
+            "evidence_inventory": _read_prompt("transcript_evidence_inventory.md"),
+            "manuscript_planner": _read_prompt("transcript_manuscript_planner.md"),
+            "unit_generator": _read_prompt("unit_generator_transcript.md"),
+            "coverage_auditor": _read_prompt("transcript_coverage_auditor.md"),
+        }
+    return {
+        "unit_splitter": _read_prompt("unit_splitter.md"),
+        "point_extractor": _read_prompt("point_extractor.md"),
+        "unit_generator": _read_prompt("unit_generator.md"),
+    }
 
 
 def _to_chinese_section_number(value: int) -> str:
@@ -357,6 +377,78 @@ class Stage1AnthropicClient:
             raise
 
 
+class Stage1OpenAIClient:
+    """OpenAI structured-output adapter for the production Stage 1 pipeline."""
+
+    def __init__(
+        self,
+        model: str = DEFAULT_OPENAI_GENERATION_MODEL,
+        timeout_seconds: float = 90.0,
+        max_retries: int = 3,
+        max_output_tokens: int = 20000,
+        reasoning_effort: str = "medium",
+    ) -> None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self.max_output_tokens = max_output_tokens
+        self.reasoning_effort = reasoning_effort
+        self.client = OpenAI(api_key=api_key, max_retries=0, timeout=timeout_seconds)
+
+    def generate_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        json_schema: Dict[str, Any],
+        temperature: float = 0.0,
+        timeout_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                client = self.client
+                effective_timeout = timeout_seconds or self.timeout_seconds
+                if effective_timeout != self.timeout_seconds:
+                    client = self.client.with_options(timeout=effective_timeout)
+                kwargs: Dict[str, Any] = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": json_schema,
+                    },
+                    "max_completion_tokens": self.max_output_tokens,
+                }
+                if self.model.startswith("gpt-5.6"):
+                    kwargs["reasoning_effort"] = self.reasoning_effort
+                else:
+                    kwargs["temperature"] = temperature
+                response = client.chat.completions.create(**kwargs)
+                content = response.choices[0].message.content or ""
+                if not content.strip():
+                    raise RuntimeError(f"OpenAI response missing text content: {response}")
+                return json.loads(content)
+            except Exception as exc:  # pragma: no cover - SDK exception surface varies
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                error_text = str(exc).lower()
+                if "429" in error_text or "rate_limit" in error_text or "too many requests" in error_text:
+                    delay_seconds = min(15 * attempt, 60)
+                else:
+                    delay_seconds = min(2 ** (attempt - 1), 8)
+                time.sleep(delay_seconds)
+        if last_error is None:
+            raise RuntimeError("OpenAI Stage 1 call failed without an exception")
+        raise last_error
+
+
 class Stage1Pipeline:
     SPLIT_SCHEMA: Dict[str, Any] = {
         "name": "stage1_unit_split_v1",
@@ -490,25 +582,35 @@ class Stage1Pipeline:
 
     def __init__(
         self,
-        model: str = "claude-sonnet-4-6",
+        model: str = DEFAULT_OPENAI_GENERATION_MODEL,
+        project_type: str = "sermon_note",
         timeout_seconds: float = 90.0,
         max_retries: int = 3,
         logger: Optional[StructuredLogger] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> None:
         self.model = model
+        self.project_type = "transcript" if project_type == "transcript" else "sermon_note"
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
-        self.llm = Stage1AnthropicClient(
+        self.llm = Stage1OpenAIClient(
             model=model,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
         )
         self.logger = logger
         self.progress_callback = progress_callback
-        self.split_prompt = _read_prompt("unit_splitter.md")
-        self.point_extractor_prompt = _read_prompt("point_extractor.md")
-        self.generator_prompt = _read_prompt("unit_generator.md")
+        # Stage1Pipeline remains the notes workflow. Transcript projects use
+        # TranscriptPipeline, which has a global evidence/plan/audit lifecycle.
+        prompt_bundle = get_stage1_prompt_bundle("sermon_note")
+        self.split_prompt = prompt_bundle["unit_splitter"]
+        self.point_extractor_prompt = prompt_bundle["point_extractor"]
+        self.generator_prompt = prompt_bundle["unit_generator"]
+        self.pipeline_signature = _sha256_text(
+            "\n---\n".join(
+                [self.model, self.project_type, self.split_prompt, self.point_extractor_prompt, self.generator_prompt]
+            )
+        )
 
     def run(
         self,
@@ -752,10 +854,12 @@ class Stage1Pipeline:
         manifest_path: Path,
     ) -> List[UnitBoundary]:
         if units_path.exists() and manifest.get("source_sha256") == source_doc.sha256:
-            units = self._load_units(units_path)
-            if units:
-                self._log("segmenter", f"沿用既有切割結果，共 {len(units)} 個單元。")
-                return units
+            units_payload = json.loads(units_path.read_text(encoding="utf-8"))
+            if units_payload.get("pipeline_signature") == self.pipeline_signature:
+                units = self._load_units(units_path)
+                if units:
+                    self._log("segmenter", f"沿用既有切割結果，共 {len(units)} 個單元。")
+                    return units
 
         self._progress("教學單元切割", 5)
         self._log("segmenter", "開始執行 Stage 1A 單元切割。")
@@ -788,10 +892,11 @@ class Stage1Pipeline:
                 "segmenter",
                 f"偵測到 Ignore Below 標記，單元切割只使用第 1–{split_cutoff_line} 行。",
             )
+        source_label = "人工校訂後的講座逐字稿" if self.project_type == "transcript" else "已校正的釋經課筆記"
         user_prompt = (
-            "以下是已校正的釋經課筆記。每一行都帶有明確行號。\n"
+            f"以下是{source_label}。每一行都帶有明確行號。\n"
             "請只回傳切割後的單元邊界與中繼資料，不可複製任何原始筆記內容。\n\n"
-            "【來源筆記（含行號）】\n"
+            f"【來源{('逐字稿' if self.project_type == 'transcript' else '筆記')}（含行號）】\n"
             f"{source_doc.with_line_numbers(end_line=split_cutoff_line)}"
         )
         response = self.llm.generate_json(
@@ -910,14 +1015,15 @@ class Stage1Pipeline:
             else ""
         )
 
+        source_kind = "逐字稿" if self.project_type == "transcript" else "筆記"
         user_prompt = (
             f"【章標題】\n{unit.chapter_title or '未標明'}\n\n"
             f"【節標題】\n{unit.section_title or '未標明'}\n\n"
             f"【單元標題】\n{unit.unit_title}\n\n"
             f"【經文範圍】\n{unit.scripture_range or '未標明'}\n\n"
-            f"【當前單元筆記（第 {unit.start_line}–{unit.end_line} 行）】\n{current_slice}\n\n"
-            f"【上一單元筆記】\n{previous_slice or '無'}\n\n"
-            f"【下一單元筆記】\n{next_slice or '無'}\n"
+            f"【當前單元{source_kind}（第 {unit.start_line}–{unit.end_line} 行）】\n{current_slice}\n\n"
+            f"【上一單元{source_kind}】\n{previous_slice or '無'}\n\n"
+            f"【下一單元{source_kind}】\n{next_slice or '無'}\n"
         )
         generated_payload = self.llm.generate_json(
             system_prompt=self.point_extractor_prompt,
@@ -961,15 +1067,16 @@ class Stage1Pipeline:
         manuscript_timeout_seconds = max(self.timeout_seconds, 240.0 if heavy_unit else 180.0)
 
         points_json = json.dumps({"points": points}, ensure_ascii=False, indent=2)
+        source_kind = "逐字稿" if self.project_type == "transcript" else "筆記"
         user_prompt = (
             f"【章標題】\n{unit.chapter_title or '未標明'}\n\n"
             f"【節標題】\n{unit.section_title or '未標明'}\n\n"
             f"【單元標題】\n{unit.unit_title}\n\n"
             f"【經文範圍】\n{unit.scripture_range or '未標明'}\n\n"
             f"【第一步已提取的結構化要點】\n{points_json}\n\n"
-            f"【當前單元筆記（僅供校對與措辭對照）】\n{current_slice}\n\n"
-            f"【上一單元筆記】\n{previous_slice or '無'}\n\n"
-            f"【下一單元筆記】\n{next_slice or '無'}\n"
+            f"【當前單元{source_kind}（僅供校對與措辭對照）】\n{current_slice}\n\n"
+            f"【上一單元{source_kind}】\n{previous_slice or '無'}\n\n"
+            f"【下一單元{source_kind}】\n{next_slice or '無'}\n"
         )
         generated_payload = self.llm.generate_json(
             system_prompt=self.generator_prompt,
@@ -1086,6 +1193,7 @@ class Stage1Pipeline:
             "points": points,
             "source_sha256": source_hash,
             "model": self.model,
+            "pipeline_signature": self.pipeline_signature,
             "generated_at": _utcnow(),
         }
         artifact_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1102,6 +1210,8 @@ class Stage1Pipeline:
         if payload.get("source_sha256") != expected_source_hash:
             return None
         if payload.get("model") != expected_model:
+            return None
+        if payload.get("pipeline_signature") != self.pipeline_signature:
             return None
         raw_points = payload.get("points")
         if not isinstance(raw_points, list):
@@ -1370,7 +1480,12 @@ class Stage1Pipeline:
         source_doc: SourceDocument,
         force: bool,
     ) -> Dict[str, Any]:
-        if not manifest or manifest.get("source_sha256") != source_doc.sha256 or force:
+        if (
+            not manifest
+            or manifest.get("source_sha256") != source_doc.sha256
+            or manifest.get("pipeline_signature") != self.pipeline_signature
+            or force
+        ):
             manifest = {
                 "status": "running",
                 "started_at": _utcnow(),
@@ -1378,6 +1493,8 @@ class Stage1Pipeline:
                 "output_dir": str(output_dir),
                 "source_sha256": source_doc.sha256,
                 "model": self.model,
+                "project_type": self.project_type,
+                "pipeline_signature": self.pipeline_signature,
                 "timeout_seconds": self.timeout_seconds,
                 "max_retries": self.max_retries,
                 "split_status": "pending",
@@ -1396,6 +1513,7 @@ class Stage1Pipeline:
 
     def _save_units(self, units_path: Path, units: List[UnitBoundary]) -> None:
         payload = {
+            "pipeline_signature": self.pipeline_signature,
             "units": [asdict(unit) for unit in units],
         }
         units_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1413,6 +1531,7 @@ class Stage1Pipeline:
         payload = asdict(generated_unit)
         payload["source_sha256"] = source_hash
         payload["model"] = self.model
+        payload["pipeline_signature"] = self.pipeline_signature
         payload["generated_at"] = _utcnow()
         artifact_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -1428,6 +1547,8 @@ class Stage1Pipeline:
         if payload.get("source_sha256") != expected_source_hash:
             return None
         if payload.get("model") != expected_model:
+            return None
+        if payload.get("pipeline_signature") != self.pipeline_signature:
             return None
         if not isinstance(payload.get("points"), list):
             return None
@@ -1571,7 +1692,8 @@ class Stage1Pipeline:
 def run_stage1_pipeline(
     input_path: Path,
     output_dir: Path,
-    model: str = "claude-sonnet-4-6",
+    model: str = DEFAULT_OPENAI_GENERATION_MODEL,
+    project_type: str = "sermon_note",
     timeout_seconds: float = 90.0,
     max_retries: int = 3,
     force: bool = False,
@@ -1584,6 +1706,7 @@ def run_stage1_pipeline(
     logger = StructuredLogger(log_path, callback=log_callback) if log_path else None
     pipeline = Stage1Pipeline(
         model=model,
+        project_type=project_type,
         timeout_seconds=timeout_seconds,
         max_retries=max_retries,
         logger=logger,

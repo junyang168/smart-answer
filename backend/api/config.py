@@ -53,7 +53,11 @@ FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID: Final[Optional[str]] = (
 FELLOWSHIP_CHAT_MIN_BYTES: Final[int] = int(os.getenv("FELLOWSHIP_CHAT_MIN_BYTES", "1024"))
 FELLOWSHIP_TRANSCRIBE_MODEL: Final[str] = os.getenv("FELLOWSHIP_TRANSCRIBE_MODEL", "gpt-4o-transcribe")
 FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL: Final[Optional[str]] = os.getenv("FELLOWSHIP_TRANSCRIBE_DIARIZE_MODEL")
-FELLOWSHIP_ANALYSIS_MODEL: Final[str] = os.getenv("FELLOWSHIP_ANALYSIS_MODEL", "gpt-5.2")
+OPENAI_GENERATION_MODEL: Final[str] = os.getenv("OPENAI_GENERATION_MODEL", "gpt-5.6-sol")
+FELLOWSHIP_ANALYSIS_MODEL: Final[str] = os.getenv(
+    "FELLOWSHIP_ANALYSIS_MODEL",
+    OPENAI_GENERATION_MODEL,
+)
 
 # Multi-Agent LLM Provider
 MAS_LLM_PROVIDER: Final[str] = os.getenv("MAS_LLM_PROVIDER", "gemini")  # "gemini" or "openai_compatible"

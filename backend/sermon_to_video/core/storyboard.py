@@ -1,8 +1,12 @@
 import json
+import os
 from typing import List, Dict, Any
 from backend.api.openai_client import generate_structured_json
 
-MODEL_STORYBOARD = "gpt-5.4"
+MODEL_STORYBOARD = os.getenv(
+    "STORYBOARD_MODEL",
+    os.getenv("OPENAI_GENERATION_MODEL", "gpt-5.6-sol"),
+)
 
 # --- SYSTEM PROMPT: EXEGESIS (V6) ---
 PROMPT_EXEGESIS = """

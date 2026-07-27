@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Set
@@ -51,7 +52,7 @@ DEFAULT_INPUT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_patched")
 DEFAULT_OUTPUT_JSON = REPO_ROOT / "transcript_analysis_openai.json"
 DEFAULT_OUTPUT_NDJSON = REPO_ROOT / "transcript_analysis_openai.ndjson"
 
-MODEL_DEFAULT = "gpt-5.4"
+MODEL_DEFAULT = os.getenv("OPENAI_GENERATION_MODEL", "gpt-5.6-sol")
 
 
 ANALYSIS_SCHEMA: Dict[str, Any] = {

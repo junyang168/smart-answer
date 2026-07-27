@@ -45,6 +45,8 @@ from backend.api.prompt_manager import (
     delete_prompt,
     Prompt
 )
+from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
+from backend.pipeline.stage1 import get_stage1_prompt_bundle
 from pydantic import BaseModel, Field
 
 # Use the prefix/tags from the plan
@@ -197,6 +199,21 @@ def get_stage1_status_endpoint(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sermon-project/{project_id}/stage1/prompts")
+def get_stage1_prompts_endpoint(project_id: str):
+    """Return the exact runtime Stage 1 prompts for read-only review."""
+    project = get_sermon_project_metadata(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_type = "transcript" if project.project_type == "transcript" else "sermon_note"
+    return {
+        "project_type": project_type,
+        "model": DEFAULT_OPENAI_GENERATION_MODEL,
+        "reasoning_effort": "medium",
+        "prompts": get_stage1_prompt_bundle(project_type),
+    }
+
+
 @router.post("/sermon-project/{project_id}/stage1/split")
 def start_stage1_split_endpoint(project_id: str, payload: Optional[Stage1ActionRequest] = None):
     payload = payload or Stage1ActionRequest()
@@ -217,6 +234,52 @@ def start_stage1_split_endpoint(project_id: str, payload: Optional[Stage1ActionR
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/stage1/analyze")
+def start_transcript_analysis_endpoint(project_id: str, payload: Optional[Stage1ActionRequest] = None):
+    payload = payload or Stage1ActionRequest()
+    project = get_sermon_project_metadata(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.project_type != "transcript":
+        raise HTTPException(status_code=400, detail="Analyze Transcript is only available for transcript projects")
+    try:
+        return {
+            "status": "success",
+            "job": start_stage1_pipeline_job(
+                project_id=project_id,
+                mode="analyze",
+                force=payload.force,
+            ),
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/sermon-project/{project_id}/stage1/audit")
+def start_transcript_audit_endpoint(project_id: str, payload: Optional[Stage1ActionRequest] = None):
+    payload = payload or Stage1ActionRequest()
+    project = get_sermon_project_metadata(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.project_type != "transcript":
+        raise HTTPException(status_code=400, detail="Coverage Audit is only available for transcript projects")
+    try:
+        return {
+            "status": "success",
+            "job": start_stage1_pipeline_job(
+                project_id=project_id,
+                mode="audit",
+                force=payload.force,
+            ),
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/sermon-project/{project_id}/stage1/generate-all")
@@ -344,6 +407,14 @@ def check_in_project(project_id: str):
     """
     Commit the sermon project (source, draft, meta) to the local git repo.
     """
+    project = get_sermon_project_metadata(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.project_type == "transcript" and project.theological_audit_completed is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Complete the theological audit for every final review chunk before Check In.",
+        )
     try:
         commit_hash = commit_sermon_project(project_id)
         return {"status": "success", "commit_hash": commit_hash, "message": "Project checked in successfully."}

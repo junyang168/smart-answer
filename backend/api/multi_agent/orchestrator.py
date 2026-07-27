@@ -11,10 +11,13 @@ from backend.api.sermon_converter_service import (
     get_sermon_source,
     save_sermon_draft,
     sync_draft_chunks_from_generated_units,
+    update_transcript_coverage_audit_state,
     update_sermon_processing_status,
 )
 from backend.api.lecture_manager import list_series
 from backend.pipeline.stage1 import run_stage1_pipeline
+from backend.pipeline.transcript_pipeline import run_transcript_pipeline
+from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
 
 
 def _render_manuscript_sections(sections: dict) -> str:
@@ -86,6 +89,17 @@ async def process_project_with_mas(project_id: str, force_restart: bool = False)
             lecture_title = "Unknown Lecture"
             lecture_desc = ""
             project_type = "sermon_note"
+
+            # Workflow type belongs to the Project. A mixed Series may contain
+            # both note and transcript projects, so Series type is not authoritative.
+            meta_path = DATA_BASE_PATH / "notes_to_surmon" / project_id / "meta.json"
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta_data = json.load(f)
+                    project_type = meta_data.get("project_type", "sermon_note")
+                except Exception:
+                    pass
             
             all_series = list_series()
             found = False
@@ -96,22 +110,11 @@ async def process_project_with_mas(project_id: str, force_restart: bool = False)
                         series_desc = s.description or ""
                         lecture_title = l.title
                         lecture_desc = l.description or ""
-                        project_type = s.project_type or "sermon_note"
                         found = True
                         break
                 if found:
                     break
 
-            if not found:
-                meta_path = DATA_BASE_PATH / "notes_to_surmon" / project_id / "meta.json"
-                if meta_path.exists():
-                    try:
-                        with open(meta_path, "r", encoding="utf-8") as f:
-                            meta_data = json.load(f)
-                        project_type = meta_data.get("project_type", "sermon_note")
-                    except Exception:
-                        pass
-            
             state = AgentState(
                 project_id=project_id,
                 project_type=project_type,
@@ -126,6 +129,14 @@ async def process_project_with_mas(project_id: str, force_restart: bool = False)
             latest_source = get_sermon_source(project_id)
             if latest_source:
                 state.source_notes = latest_source
+            meta_path = DATA_BASE_PATH / "notes_to_surmon" / project_id / "meta.json"
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta_data = json.load(f)
+                    state.project_type = meta_data.get("project_type", state.project_type)
+                except Exception:
+                    pass
 
         project_dir = DATA_BASE_PATH / "notes_to_surmon" / project_id
         input_path = project_dir / "unified_source.md"
@@ -137,11 +148,48 @@ async def process_project_with_mas(project_id: str, force_restart: bool = False)
         def on_progress(stage: str, progress: int) -> None:
             update_sermon_processing_status(project_id, True, {"stage": stage, "progress": progress})
 
+        if state.project_type == "transcript":
+            transcript_summary = await asyncio.to_thread(
+                run_transcript_pipeline,
+                input_path=input_path,
+                output_dir=project_dir,
+                mode="generate_all",
+                model=DEFAULT_OPENAI_GENERATION_MODEL,
+                timeout_seconds=180.0,
+                max_retries=3,
+                force=force_restart,
+                log_path=log_path,
+                log_callback=on_log,
+                progress_callback=on_progress,
+            )
+            state.units = transcript_summary.units
+            state.generated_units = transcript_summary.generated_units
+            state.draft_chunks = [unit.get("generated_markdown", "") for unit in transcript_summary.generated_units]
+            state.failed_units = []
+            state.full_manuscript = transcript_summary.combined_markdown
+            _save_agent_state(state)
+            save_sermon_draft(project_id, transcript_summary.combined_markdown)
+            if transcript_summary.audit:
+                update_transcript_coverage_audit_state(
+                    project_id,
+                    stale=False,
+                    overall_status=transcript_summary.audit.get("overall_status"),
+                )
+            final_stage = (
+                "Complete"
+                if transcript_summary.audit.get("overall_status") == "pass"
+                else "Complete with audit findings"
+            )
+            update_sermon_processing_status(project_id, False, {"stage": final_stage, "progress": 100})
+            _log_agent_action(project_id, "system", "Transcript manuscript generation completed.")
+            return
+
         summary = await asyncio.to_thread(
             run_stage1_pipeline,
             input_path=input_path,
             output_dir=project_dir,
-            model="claude-sonnet-4-6",
+            model=DEFAULT_OPENAI_GENERATION_MODEL,
+            project_type=state.project_type,
             timeout_seconds=90.0,
             max_retries=3,
             force=force_restart,

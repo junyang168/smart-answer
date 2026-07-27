@@ -86,6 +86,15 @@ def _project_has_final_markdown(project_id: str) -> bool:
     return get_sermon_final_path(project_id).is_file()
 
 
+def _project_belongs_to_public_series(project_id: str) -> bool:
+    for series in list_series():
+        if series.project_type != "sermon_note":
+            continue
+        if any(project_id in lecture.project_ids for lecture in series.lectures):
+            return True
+    return False
+
+
 def _build_public_series_detail(series: LectureSeries) -> PublicLectureSeriesDetail:
     lectures: List[PublicLecture] = []
     for lecture in series.lectures:
@@ -172,7 +181,7 @@ def get_public_series_endpoint(series_id: str):
 @public_router.get("/projects/{project_id}/manuscript", response_model=PublicProjectManuscript)
 def get_public_project_manuscript_endpoint(project_id: str):
     project = get_sermon_project_metadata(project_id)
-    if not project or project.project_type != "sermon_note":
+    if not project or not _project_belongs_to_public_series(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
 
     final_path = get_sermon_final_path(project_id)

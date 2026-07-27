@@ -18,13 +18,14 @@ import git
 import google.auth
 from googleapiclient.discovery import build
 
-from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT, OCR_MODEL
+from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT, OCR_MODEL, OPENAI_GENERATION_MODEL
 
 # Define the source directory for notes
 IMAGES_ROOT = FULL_ARTICLE_ROOT / "images" / "scanned_mat"
 
 # Define the output directory
 NOTES_TO_SERMON_DIR = DATA_BASE_PATH / "notes_to_surmon"
+TRANSCRIPTS_TO_MANUSCRIPT_DIR = DATA_BASE_PATH / "transcripts_to_manuscript"
 
 class NoteImage(BaseModel):
     filename: str
@@ -53,6 +54,8 @@ class SermonProject(BaseModel):
     series_id: Optional[str] = None
     lecture_id: Optional[str] = None
     audit_passed: Optional[bool] = None
+    theological_audit_passed: Optional[bool] = None
+    theological_audit_completed: Optional[bool] = None
     project_type: str = "sermon_note" 
 
 
@@ -80,6 +83,7 @@ MASTER_TEXT_METADATA_SCHEMA: Dict[str, Any] = {
 def ensure_dirs():
     if not NOTES_TO_SERMON_DIR.exists():
         NOTES_TO_SERMON_DIR.mkdir(parents=True, exist_ok=True)
+    TRANSCRIPTS_TO_MANUSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     # New flat directory for processed OCR files
     raw_ocr_dir = NOTES_TO_SERMON_DIR / "raw_ocr"
     raw_ocr_dir.mkdir(exist_ok=True)
@@ -91,7 +95,11 @@ def _build_unique_project_id(title: str) -> str:
     candidate = base_id
     suffix = 2
 
-    while (NOTES_TO_SERMON_DIR / candidate).exists():
+    while (
+        (NOTES_TO_SERMON_DIR / candidate).exists()
+        or (NOTES_TO_SERMON_DIR / candidate).is_symlink()
+        or (TRANSCRIPTS_TO_MANUSCRIPT_DIR / candidate).exists()
+    ):
         candidate = f"{base_id}_{suffix}"
         suffix += 1
 
@@ -277,8 +285,22 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
     ensure_dirs()
     
     project_id = _build_unique_project_id(title)
-    sermon_dir = NOTES_TO_SERMON_DIR / project_id
-    sermon_dir.mkdir(exist_ok=True)
+    normalized_project_type = "transcript" if project_type in {"transcript", "Fellowship Transcript"} else "sermon_note"
+    compatibility_path = NOTES_TO_SERMON_DIR / project_id
+    if normalized_project_type == "transcript":
+        sermon_dir = TRANSCRIPTS_TO_MANUSCRIPT_DIR / project_id
+        sermon_dir.mkdir(exist_ok=False)
+        # Existing workflow code resolves projects through notes_to_surmon.
+        # Keep a compatibility link while storing the actual files in the
+        # dedicated transcript manuscript root.
+        try:
+            compatibility_path.symlink_to(sermon_dir, target_is_directory=True)
+        except Exception:
+            shutil.rmtree(sermon_dir)
+            raise
+    else:
+        sermon_dir = compatibility_path
+        sermon_dir.mkdir(exist_ok=False)
     
     
     unified_content = f"# {title}\n\n"
@@ -291,7 +313,12 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
         "pages": pages,
         "series_id": series_id,
         "lecture_id": lecture_id,
-        "project_type": project_type
+        "project_type": normalized_project_type,
+        "storage_root": (
+            "transcripts_to_manuscript"
+            if normalized_project_type == "transcript"
+            else "notes_to_surmon"
+        ),
     }
     with open(sermon_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
@@ -324,7 +351,7 @@ def _rebuild_unified_source(project_id: str, pages: List[str]):
     """
     Helper to reconstruct the unified markdown file from current pages.
     """
-    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    sermon_dir = (NOTES_TO_SERMON_DIR / project_id).resolve()
     # Get title from meta if possible, or parsing not needed if we just overwrite content
     # But we want to keep the Title header.
     # Let's read the current title from meta
@@ -703,6 +730,87 @@ def _build_stage1_unit_statuses(project_id: str, manifest: dict, units_payload: 
     return result
 
 
+def _unwrap_transcript_artifact(path: Path) -> dict:
+    wrapper = _load_json_file(path, {})
+    payload = wrapper.get("payload") if isinstance(wrapper, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+def _get_transcript_pipeline_status(
+    project_id: str,
+    sermon_dir: Path,
+    meta: dict,
+    raw_job: dict,
+    job_running: bool,
+    job_status: Optional[str],
+    logs: list[dict],
+) -> dict:
+    manifest = _load_json_file(sermon_dir / "transcript_manifest.json", {})
+    evidence_payload = _unwrap_transcript_artifact(sermon_dir / "evidence_inventory.json")
+    plan_payload = _unwrap_transcript_artifact(sermon_dir / "manuscript_plan.json")
+    audit_payload = _unwrap_transcript_artifact(sermon_dir / "coverage_audit.json")
+    evidence = evidence_payload.get("evidence", []) if isinstance(evidence_payload, dict) else []
+    units_payload = plan_payload.get("units", []) if isinstance(plan_payload, dict) else []
+    generated_dir = sermon_dir / "transcript_generated_units"
+    current_unit_id = raw_job.get("unit_id") if job_running else None
+    units: list[dict] = []
+    for index, unit in enumerate(units_payload if isinstance(units_payload, list) else [], start=1):
+        unit_id = unit.get("unit_id") or f"U{index:03d}"
+        generated_path = generated_dir / f"{unit_id}.json"
+        status = "running" if current_unit_id == unit_id else ("completed" if generated_path.exists() else "pending")
+        units.append(
+            {
+                **unit,
+                "display_index": index,
+                "status": status,
+                "has_evidence": bool(unit.get("evidence_ids")),
+                "evidence_count": len(unit.get("evidence_ids", [])),
+                "has_generated": generated_path.exists(),
+                "error": None,
+                "artifact": str(generated_path),
+            }
+        )
+    counts = {
+        "total_units": len(units),
+        "completed_units": sum(1 for unit in units if unit["status"] == "completed"),
+        "running_units": sum(1 for unit in units if unit["status"] == "running"),
+        "failed_units": 0,
+        "pending_units": sum(1 for unit in units if unit["status"] == "pending"),
+    }
+    return {
+        "job": {**raw_job, "running": job_running, "status": job_status},
+        "project": {
+            "processing": bool(meta.get("processing")),
+            "processing_status": meta.get("processing_status"),
+            "processing_progress": meta.get("processing_progress"),
+            "processing_error": meta.get("processing_error"),
+            "title": meta.get("title") or project_id,
+            "project_type": "transcript",
+            "model": raw_job.get("model") or OPENAI_GENERATION_MODEL,
+        },
+        "manifest": manifest,
+        "summary": {
+            **counts,
+            "split_completed": False,
+            "analysis_completed": bool(evidence and units),
+            "evidence_count": len(evidence),
+            "plan_ready": bool(units),
+            "draft_ready": get_sermon_draft_path(project_id).exists(),
+            "audit_status": (
+                "stale"
+                if meta.get("coverage_audit_stale", False)
+                else audit_payload.get("overall_status")
+            ),
+            "audit_finding_count": len(audit_payload.get("findings", [])),
+            "current_unit_id": current_unit_id,
+        },
+        "units": units,
+        "logs": logs,
+        "evidence": evidence,
+        "audit": audit_payload,
+    }
+
+
 def get_stage1_pipeline_status(project_id: str) -> dict:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     manifest = _load_json_file(get_stage1_manifest_path(project_id), {})
@@ -714,6 +822,17 @@ def get_stage1_pipeline_status(project_id: str) -> dict:
     job_status = raw_job.get("status")
     if job_status in {"starting", "running"} and not job_running:
         job_status = raw_job.get("final_status") or "stopped"
+
+    if meta.get("project_type") == "transcript":
+        return _get_transcript_pipeline_status(
+            project_id=project_id,
+            sermon_dir=sermon_dir,
+            meta=meta,
+            raw_job=raw_job,
+            job_running=job_running,
+            job_status=job_status,
+            logs=logs,
+        )
 
     units = _build_stage1_unit_statuses(project_id, manifest, units_payload if isinstance(units_payload, list) else [])
     counts = {
@@ -737,6 +856,8 @@ def get_stage1_pipeline_status(project_id: str) -> dict:
             "processing_progress": meta.get("processing_progress"),
             "processing_error": meta.get("processing_error"),
             "title": meta.get("title") or project_id,
+            "project_type": meta.get("project_type", "sermon_note"),
+            "model": raw_job.get("model") or OPENAI_GENERATION_MODEL,
         },
         "manifest": manifest,
         "summary": {
@@ -755,7 +876,7 @@ def start_stage1_pipeline_job(
     mode: str,
     unit_id: Optional[str] = None,
     force: bool = False,
-    model: str = "claude-sonnet-4-6",
+    model: str = OPENAI_GENERATION_MODEL,
     timeout_seconds: float = 90.0,
     max_retries: int = 3,
 ) -> dict:
@@ -767,12 +888,18 @@ def start_stage1_pipeline_job(
     if not input_path.exists():
         raise FileNotFoundError(f"Unified source not found for {project_id}")
 
+    meta = _load_json_file(project_dir / "meta.json", {})
+    project_type = "transcript" if meta.get("project_type") == "transcript" else "sermon_note"
+
     current_status = get_stage1_pipeline_status(project_id)
     if current_status.get("job", {}).get("running"):
         raise RuntimeError("Stage 1 pipeline is already running")
 
     if mode == "generate_unit":
-        units_payload = _load_json_file(get_stage1_units_path(project_id), {}).get("units", [])
+        if project_type == "transcript":
+            units_payload = _unwrap_transcript_artifact(project_dir / "manuscript_plan.json").get("units", [])
+        else:
+            units_payload = _load_json_file(get_stage1_units_path(project_id), {}).get("units", [])
         valid_unit_ids = {item.get("unit_id") for item in units_payload if isinstance(item, dict)}
         if not unit_id or unit_id not in valid_unit_ids:
             raise ValueError(f"Unknown Stage 1 unit: {unit_id}")
@@ -790,6 +917,8 @@ def start_stage1_pipeline_job(
         mode,
         "--model",
         model,
+        "--project-type",
+        project_type,
         "--timeout",
         str(timeout_seconds),
         "--max-retries",
@@ -821,6 +950,7 @@ def start_stage1_pipeline_job(
         "force": force,
         "pid": process.pid,
         "model": model,
+        "project_type": project_type,
         "timeout_seconds": timeout_seconds,
         "max_retries": max_retries,
         "started_at": _utcnow_iso(),
@@ -829,8 +959,10 @@ def start_stage1_pipeline_job(
 
     stage_label = {
         "split": "Queued Stage 1 split",
+        "analyze": "Queued transcript analysis",
         "generate_all": "Queued Stage 1 generation",
         "generate_unit": f"Queued Stage 1 unit {unit_id}",
+        "audit": "Queued transcript coverage audit",
     }.get(mode, "Queued Stage 1")
     update_sermon_processing_status(project_id, True, {"stage": stage_label, "progress": 0})
     return job_state
@@ -880,6 +1012,20 @@ def reset_agent_state(project_id: str):
     generated_units_dir = sermon_dir / "generated_units"
     if generated_units_dir.exists():
         shutil.rmtree(generated_units_dir)
+
+    transcript_generated_units_dir = sermon_dir / "transcript_generated_units"
+    if transcript_generated_units_dir.exists():
+        shutil.rmtree(transcript_generated_units_dir)
+
+    for transcript_artifact in [
+        "evidence_inventory.json",
+        "manuscript_plan.json",
+        "coverage_audit.json",
+        "transcript_manifest.json",
+    ]:
+        artifact_path = sermon_dir / transcript_artifact
+        if artifact_path.exists():
+            artifact_path.unlink()
 
     draft_chunks_dir = sermon_dir / "draft_chunks"
     if draft_chunks_dir.exists():
@@ -1022,6 +1168,23 @@ def get_draft_chunks(project_id: str) -> list[dict]:
 def _write_draft_chunks_from_markdown(project_id: str, content: str) -> None:
     chunks = split_markdown_for_review(content)
     meta_json = chunks_to_jsonable(chunks)
+    if _is_transcript_project(project_id):
+        plan = _unwrap_transcript_artifact(NOTES_TO_SERMON_DIR / project_id / "manuscript_plan.json")
+        units = plan.get("units", []) if isinstance(plan, dict) else []
+        units_by_title = {
+            unit.get("title"): unit
+            for unit in units
+            if isinstance(unit, dict) and unit.get("title")
+        }
+        for index, item in enumerate(meta_json):
+            unit = units_by_title.get(item.get("title"))
+            if not unit and index < len(units):
+                unit = units[index]
+            if not isinstance(unit, dict):
+                continue
+            item["unit_id"] = unit.get("unit_id")
+            item["evidence_ids"] = unit.get("evidence_ids", [])
+            item["source_ranges"] = unit.get("source_ranges", [])
     _persist_draft_chunks(project_id, meta_json, {c.id: c.text for c in chunks})
 
 def _persist_draft_chunks(project_id: str, meta_json: list[dict], chunk_text_by_id: Dict[str, str]) -> None:
@@ -1233,17 +1396,14 @@ def sync_final_chunks_from_draft_chunks(project_id: str) -> bool:
     return True
 
 def _should_sync_draft_chunks_from_generated_units(project_id: str) -> bool:
+    """Bootstrap draft chunks once; never overwrite later human draft edits."""
     generated_paths = _list_generated_unit_paths(project_id)
     if not generated_paths:
         return False
     meta_file = get_draft_chunks_meta_path(project_id)
     chunks_dir = get_sermon_draft_chunks_dir(project_id)
     chunk_files = list(chunks_dir.glob("*.md"))
-    latest_generated_mtime = max(path.stat().st_mtime for path in generated_paths)
-    if not meta_file.exists() or not chunk_files:
-        return True
-    latest_chunk_mtime = max([meta_file.stat().st_mtime, *(chunk.stat().st_mtime for chunk in chunk_files)])
-    return latest_generated_mtime > latest_chunk_mtime
+    return not meta_file.exists() or not chunk_files
 
 def update_draft_chunk(project_id: str, chunk_id: str, new_text: str) -> bool:
     chunks_dir = get_sermon_draft_chunks_dir(project_id)
@@ -1256,6 +1416,8 @@ def update_draft_chunk(project_id: str, chunk_id: str, new_text: str) -> bool:
         
     # Rebuild draft
     rebuild_draft_from_chunks(project_id)
+    if _is_transcript_project(project_id):
+        update_transcript_coverage_audit_state(project_id, stale=True)
     return True
 
 def rebuild_draft_from_chunks(project_id: str):
@@ -1346,7 +1508,108 @@ def _get_draft_chunk_meta(project_id: str, chunk_id: str) -> Optional[dict]:
                 return item
     return None
 
+def _is_transcript_project(project_id: str) -> bool:
+    meta = _load_json_file(NOTES_TO_SERMON_DIR / project_id / "meta.json", {})
+    return meta.get("project_type") == "transcript"
+
+def _find_transcript_unit_for_chunk(project_id: str, chunk_id: str) -> Optional[dict]:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    plan = _unwrap_transcript_artifact(sermon_dir / "manuscript_plan.json")
+    units = plan.get("units", []) if isinstance(plan, dict) else []
+    if not isinstance(units, list):
+        return None
+
+    chunk_meta = _get_draft_chunk_meta(project_id, chunk_id) or {}
+    unit_id = chunk_meta.get("unit_id")
+    if unit_id:
+        matched = next((unit for unit in units if unit.get("unit_id") == unit_id), None)
+        if matched:
+            return matched
+
+    title = chunk_meta.get("title")
+    if title:
+        matched = next((unit for unit in units if unit.get("title") == title), None)
+        if matched:
+            return matched
+
+    match = re.fullmatch(r"chunk_(\d+)", chunk_id)
+    if match:
+        index = int(match.group(1)) - 1
+        if 0 <= index < len(units):
+            return units[index]
+    return None
+
+def _merge_source_ranges(ranges: list[dict]) -> list[dict]:
+    ordered = sorted(
+        (
+            {"start_line": int(item["start_line"]), "end_line": int(item["end_line"])}
+            for item in ranges
+            if item.get("start_line") and item.get("end_line")
+        ),
+        key=lambda item: (item["start_line"], item["end_line"]),
+    )
+    merged: list[dict] = []
+    for item in ordered:
+        if merged and item["start_line"] <= merged[-1]["end_line"] + 1:
+            merged[-1]["end_line"] = max(merged[-1]["end_line"], item["end_line"])
+        else:
+            merged.append(dict(item))
+    return merged
+
+def _get_transcript_fidelity_audit_context(
+    project_id: str, chunk_id: str, source_content: str
+) -> str:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    unit = _find_transcript_unit_for_chunk(project_id, chunk_id)
+    if not unit:
+        raise ValueError(f"Cannot map draft chunk {chunk_id} to a transcript manuscript unit")
+
+    inventory = _unwrap_transcript_artifact(sermon_dir / "evidence_inventory.json")
+    evidence_items = inventory.get("evidence", []) if isinstance(inventory, dict) else []
+    evidence_by_id = {
+        item.get("evidence_id"): item
+        for item in evidence_items
+        if isinstance(item, dict) and item.get("evidence_id")
+    }
+    assigned_ids = unit.get("evidence_ids", [])
+    assigned_evidence = [evidence_by_id[item] for item in assigned_ids if item in evidence_by_id]
+    missing_ids = [item for item in assigned_ids if item not in evidence_by_id]
+    if missing_ids:
+        raise ValueError(f"Transcript unit {unit.get('unit_id')} has missing evidence IDs: {missing_ids}")
+
+    ranges = _merge_source_ranges(
+        [source_range for item in assigned_evidence for source_range in item.get("source_ranges", [])]
+    )
+    source_slices: list[str] = []
+    for source_range in ranges:
+        start = source_range["start_line"]
+        end = source_range["end_line"]
+        excerpt = _slice_text_by_lines(source_content, start, end)
+        if excerpt:
+            source_slices.append(f"【原文第 {start}–{end} 行】\n{excerpt}")
+
+    unit_scope = {
+        "unit_id": unit.get("unit_id"),
+        "title": unit.get("title"),
+        "central_question": unit.get("central_question"),
+        "direct_answer": unit.get("direct_answer"),
+        "objective": unit.get("objective"),
+        "evidence_ids": assigned_ids,
+        "category_assignments": unit.get("category_assignments", {}),
+    }
+    return (
+        "【本单元审核范围】\n"
+        f"{json.dumps(unit_scope, ensure_ascii=False, indent=2)}\n\n"
+        "【本单元必须覆盖的 Evidence Inventory】\n"
+        f"{json.dumps(assigned_evidence, ensure_ascii=False, indent=2)}\n\n"
+        "【对应原文片段】\n"
+        + "\n\n".join(source_slices)
+    )
+
 def _get_fidelity_audit_source_slice(project_id: str, chunk_id: str, source_content: str) -> str:
+    if _is_transcript_project(project_id):
+        return _get_transcript_fidelity_audit_context(project_id, chunk_id, source_content)
+
     chunk_meta = _get_draft_chunk_meta(project_id, chunk_id)
     if not chunk_meta:
         return extract_processable_content(source_content)
@@ -1477,6 +1740,7 @@ def start_theological_review(project_id: str) -> bool:
         draft_text = draft_file.read_text(encoding="utf-8")
         if not final_file.exists() or final_file.read_text(encoding="utf-8") == draft_text:
             if sync_final_chunks_from_draft_chunks(project_id):
+                reset_theological_audit_state(project_id)
                 return True
 
         with open(final_file if final_file.exists() else draft_file, "r", encoding="utf-8") as f:
@@ -1487,6 +1751,8 @@ def start_theological_review(project_id: str) -> bool:
         _persist_final_chunks(project_id, meta_json, {c.id: c.text.strip() + "\n" for c in chunks})
         if not final_file.exists():
             final_file.write_text(md_content, encoding="utf-8")
+
+        reset_theological_audit_state(project_id)
 
     return True
 
@@ -1565,6 +1831,7 @@ def update_final_chunk(project_id: str, chunk_id: str, content: str) -> bool:
     with open(chunk_path, "w", encoding="utf-8") as f:
          f.write(content.strip() + "\n")
     rebuild_final_from_chunks(project_id)
+    invalidate_theological_audit_chunk(project_id, chunk_id)
     return True
 
 def get_sermon_final(project_id: str) -> str:
@@ -1593,6 +1860,7 @@ def save_sermon_final(project_id: str, content: str) -> bool:
     chunks_dir = get_sermon_chunks_dir(project_id)
     for stale_chunk in chunks_dir.glob("*.md"):
         stale_chunk.unlink()
+    reset_theological_audit_state(project_id)
     return True
 
 
@@ -2118,7 +2386,7 @@ def commit_sermon_project(project_id: str) -> str:
     """
     rebuild_final_from_chunks(project_id)
     
-    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    sermon_dir = (NOTES_TO_SERMON_DIR / project_id).resolve()
     if not sermon_dir.exists():
         raise FileNotFoundError(f"Sermon project {project_id} not found")
 
@@ -2645,7 +2913,6 @@ def run_structured_chunk_audit(
             system_prompt=system_prompt,
             user_prompt=input_text,
             json_schema=json_schema.get("json_schema", json_schema),
-            model="gpt-5.2",
             temperature=0.0
         )
         
@@ -2679,6 +2946,7 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
     Returns the fidelity analysis text as a python dictionary (JSON).
     """
     try:
+        is_transcript = _is_transcript_project(project_id)
         source_content = get_sermon_source(project_id)
 
         chunk_file = get_sermon_draft_chunks_dir(project_id) / f"{chunk_id}.md"
@@ -2854,6 +3122,23 @@ def fidelity_audit_chunk(project_id: str, chunk_id: str) -> dict:
         - 调整语气强度
         
         """
+        if is_transcript:
+            SYSTEM_PROMPT = """
+            【Transcript Project 的强制审核边界】
+
+            本次只审核一个 manuscript unit，不审核整篇 transcript。
+            输入中的【笔记】已经被整理为：本单元计划、本单元被分配的 Evidence Inventory，以及用于核实的原文片段。
+
+            你必须遵守：
+            1. coverage 必须逐一对应本单元的 evidence_id；note_id 直接使用 evidence_id。
+            2. deletion 只能依据“本单元必须覆盖的 Evidence Inventory”判定。
+            3. 其他单元的主题、经文、例证或结论没有出现在本单元，绝对不是 deletion。
+            4. 对应原文片段可能因为原始 transcript 一行很长而包含别的主题；未分配给本单元的原文内容不得要求本单元覆盖。
+            5. 每条 evidence 不只检查主题是否出现，也检查问题与回答、交叉经文的证明作用、限定语气和分类功能是否准确。
+            6. addition 可依据 assigned evidence 与对应原文共同判断，但不得因为正文使用平和语言、重排顺序或加入最小逻辑连接而误报。
+            7. 不可建议把其他 manuscript unit 的内容搬入当前 unit。
+
+            """ + SYSTEM_PROMPT
         AUDIT_SCHEMA = {
             "type": "json_schema",
             "json_schema": {
@@ -3022,8 +3307,24 @@ def check_and_update_project_audit_status(project_id: str) -> bool:
     meta_file = sermon_dir / "meta.json"
     audit_file = sermon_dir / "fidelity_audit.json"
     chunks_meta_file = sermon_dir / "draft_chunks_meta.json"
-    
-    if not (meta_file.exists() and audit_file.exists() and chunks_meta_file.exists()):
+
+    if not meta_file.exists():
+        return False
+
+    if _is_transcript_project(project_id):
+        meta_data = _load_json_file(meta_file, {})
+        coverage = _unwrap_transcript_artifact(sermon_dir / "coverage_audit.json")
+        coverage_passed = (
+            not meta_data.get("coverage_audit_stale", False)
+            and coverage.get("overall_status") == "pass"
+        )
+        if meta_data.get("audit_passed") != coverage_passed:
+            meta_data["audit_passed"] = coverage_passed
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta_data, f, indent=2, ensure_ascii=False)
+        return coverage_passed
+
+    if not (audit_file.exists() and chunks_meta_file.exists()):
         return False
         
     try:
@@ -3055,6 +3356,105 @@ def check_and_update_project_audit_status(project_id: str) -> bool:
     except Exception as e:
         print(f"Error checking project audit status for {project_id}: {e}")
         return False
+
+
+def update_transcript_coverage_audit_state(
+    project_id: str,
+    *,
+    stale: bool,
+    overall_status: Optional[str] = None,
+) -> bool:
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    meta_file = sermon_dir / "meta.json"
+    if not meta_file.exists():
+        return False
+    meta_data = _load_json_file(meta_file, {})
+    if meta_data.get("project_type") != "transcript":
+        return False
+    meta_data["coverage_audit_stale"] = stale
+    if stale:
+        meta_data["audit_passed"] = False
+    elif overall_status is not None:
+        meta_data["audit_passed"] = overall_status == "pass"
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+    return True
+
+
+def reset_theological_audit_state(project_id: str) -> bool:
+    """Start a fresh final-text review and invalidate any earlier theology audit."""
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    meta_file = sermon_dir / "meta.json"
+    if not meta_file.exists():
+        return False
+
+    audit_file = sermon_dir / "theological_audit.json"
+    if audit_file.exists():
+        audit_file.unlink()
+
+    meta_data = _load_json_file(meta_file, {})
+    meta_data["theological_audit_passed"] = False
+    meta_data["theological_audit_completed"] = False
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+    return True
+
+
+def invalidate_theological_audit_chunk(project_id: str, chunk_id: str) -> bool:
+    """Invalidate the audit for a final chunk after that chunk is edited."""
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    meta_file = sermon_dir / "meta.json"
+    if not meta_file.exists():
+        return False
+
+    audit_file = sermon_dir / "theological_audit.json"
+    audits = _load_json_file(audit_file, {})
+    if isinstance(audits, dict) and chunk_id in audits:
+        audits.pop(chunk_id, None)
+        with open(audit_file, "w", encoding="utf-8") as f:
+            json.dump(audits, f, indent=2, ensure_ascii=False)
+
+    meta_data = _load_json_file(meta_file, {})
+    meta_data["theological_audit_passed"] = False
+    meta_data["theological_audit_completed"] = False
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+    return True
+
+
+def check_and_update_theological_audit_status(project_id: str) -> bool:
+    """Track audit completion separately from whether the audit found issues."""
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    meta_file = sermon_dir / "meta.json"
+    chunks_meta_file = get_chunks_meta_path(project_id)
+    audit_file = sermon_dir / "theological_audit.json"
+    if not (meta_file.exists() and chunks_meta_file.exists() and audit_file.exists()):
+        return False
+
+    chunks = _load_json_file(chunks_meta_file, [])
+    audits = _load_json_file(audit_file, {})
+    all_completed = bool(chunks)
+    all_passed = bool(chunks)
+    for chunk in chunks:
+        chunk_id = chunk.get("id") if isinstance(chunk, dict) else None
+        result = audits.get(chunk_id) if chunk_id and isinstance(audits, dict) else None
+        if (
+            not isinstance(result, dict)
+            or result.get("error")
+            or not isinstance(result.get("issues"), list)
+        ):
+            all_completed = False
+            all_passed = False
+            break
+        if result.get("issues"):
+            all_passed = False
+
+    meta_data = _load_json_file(meta_file, {})
+    meta_data["theological_audit_passed"] = all_passed
+    meta_data["theological_audit_completed"] = all_completed
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta_data, f, indent=2, ensure_ascii=False)
+    return all_completed
 
 
 # ======================
@@ -3237,7 +3637,7 @@ def audit_theological_boundary(project_id: str, chunk_id: str) -> dict:
                      data["summary"] = "未發現重大邊界問題。"
             return data
 
-        return run_structured_chunk_audit(
+        result = run_structured_chunk_audit(
             project_id=project_id,
             chunk_id=chunk_id,
             input_text=exegesis_markdown,
@@ -3246,6 +3646,8 @@ def audit_theological_boundary(project_id: str, chunk_id: str) -> dict:
             output_filename="theological_audit.json",
             post_process_hook=_filter_confidence
         )
+        check_and_update_theological_audit_status(project_id)
+        return result
 
     except Exception as e:
         print(f"Error loading final text chunk for theological audit {project_id}: {e}")

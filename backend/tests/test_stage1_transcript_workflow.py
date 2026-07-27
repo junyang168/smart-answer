@@ -1,0 +1,407 @@
+import json
+from types import SimpleNamespace
+
+from backend.pipeline import stage1
+from backend.pipeline import transcript_pipeline
+from backend.api import sermon_converter_service as service
+
+
+class _FakeCompletions:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"ok"}'))]
+        )
+
+
+class _FakeOpenAI:
+    def __init__(self, **_kwargs):
+        self.completions = _FakeCompletions()
+        self.chat = SimpleNamespace(completions=self.completions)
+
+    def with_options(self, **_kwargs):
+        return self
+
+
+def test_transcript_prompt_bundle_is_runtime_specific():
+    transcript = stage1.get_stage1_prompt_bundle("transcript")
+    notes = stage1.get_stage1_prompt_bundle("sermon_note")
+
+    assert transcript != notes
+    assert set(transcript) == {
+        "evidence_inventory",
+        "manuscript_planner",
+        "unit_generator",
+        "coverage_auditor",
+    }
+    assert "不可先按连续行号切割全文" in transcript["evidence_inventory"]
+    assert "每个 evidence ID 必须且只能被分配到一个单元" in transcript["manuscript_planner"]
+    assert "問題 → 直接回答" in transcript["unit_generator"]
+    assert "交叉經文及其證明作用" in transcript["unit_generator"]
+    assert "### 釋經" in transcript["unit_generator"]
+    assert "covered_evidence_ids" in transcript["unit_generator"]
+    assert "完整 transcript" in transcript["coverage_auditor"]
+    assert "{{CATEGORY_DEFINITIONS}}" not in transcript["unit_generator"]
+
+
+def test_stage1_openai_client_uses_gpt56_structured_output(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(stage1, "OpenAI", _FakeOpenAI)
+    client = stage1.Stage1OpenAIClient(model="gpt-5.6-sol", max_retries=1)
+    schema = {
+        "name": "answer_schema",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+        },
+    }
+
+    result = client.generate_json("system", "user", schema, temperature=0.7)
+
+    assert result == {"answer": "ok"}
+    request = client.client.completions.kwargs
+    assert request["model"] == "gpt-5.6-sol"
+    assert request["reasoning_effort"] == "medium"
+    assert request["response_format"] == {"type": "json_schema", "json_schema": schema}
+    assert "temperature" not in request
+
+
+class _FakeTranscriptClient:
+    def __init__(self, **_kwargs):
+        self.calls = []
+
+    def generate_json(self, _system_prompt, _user_prompt, schema, **_kwargs):
+        self.calls.append(schema["name"])
+        if schema["name"] == "transcript_evidence_inventory_v1":
+            return {
+                "evidence": [
+                    {
+                        "evidence_id": "E001",
+                        "type": "question",
+                        "category": "釋經",
+                        "content": "问题是什么？",
+                        "scripture_refs": [],
+                        "source_ranges": [{"start_line": 1, "end_line": 1}],
+                        "supports": [],
+                        "answers_question": None,
+                        "question_status": "answered",
+                    },
+                    {
+                        "evidence_id": "E002",
+                        "type": "answer",
+                        "category": "釋經",
+                        "content": "这是教授的回答。",
+                        "scripture_refs": [],
+                        "source_ranges": [{"start_line": 3, "end_line": 3}],
+                        "supports": [],
+                        "answers_question": "E001",
+                        "question_status": None,
+                    },
+                    {
+                        "evidence_id": "E003",
+                        "type": "scripture_evidence",
+                        "category": "釋經",
+                        "content": "交叉经文支持这个回答。",
+                        "scripture_refs": ["太17:5"],
+                        "source_ranges": [{"start_line": 2, "end_line": 2}],
+                        "supports": ["E002"],
+                        "answers_question": None,
+                        "question_status": None,
+                    },
+                ],
+                "inventory_summary": {
+                    "total_evidence": 3,
+                    "question_ids": ["E001"],
+                    "unanswered_question_ids": [],
+                    "scripture_evidence_ids": ["E003"],
+                },
+            }
+        if schema["name"] == "transcript_manuscript_plan_v1":
+            return {
+                "units": [{
+                    "unit_id": "temporary",
+                    "title": "问题与回答",
+                    "central_question": "问题是什么？",
+                    "direct_answer": "这是教授的回答。",
+                    "scripture_range": "太17:5",
+                    "objective": "说明问答及其经文根据",
+                    "evidence_ids": ["E001", "E002", "E003"],
+                    "category_assignments": {
+                        "exegesis": ["E001", "E002", "E003"],
+                        "theological_significance": [],
+                        "application": [],
+                        "appendix": [],
+                    },
+                    "source_ranges": [
+                        {"start_line": 1, "end_line": 1},
+                        {"start_line": 3, "end_line": 3},
+                    ],
+                    "plan_reason": "把相隔的提问与回答放在同一逻辑单元。",
+                }],
+                "unassigned_evidence_ids": [],
+            }
+        if schema["name"] == "transcript_manuscript_unit_v1":
+            return {
+                "manuscript_sections": {
+                    "exegesis": "### 釋經\n\n问题的直接回答，并说明太17:5如何支持这个回答。",
+                    "theological_significance": None,
+                    "application": None,
+                    "appendix": None,
+                },
+                "covered_evidence_ids": ["E001", "E002", "E003"],
+                "coverage_notes": [],
+            }
+        return {
+            "overall_status": "pass",
+            "findings": [],
+            "missing_evidence_ids": [],
+            "unanswered_question_ids": [],
+            "misclassified_evidence_ids": [],
+        }
+
+
+def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    source = tmp_path / "transcript.md"
+    source.write_text("教授提出问题\n太17:5的证据\n教授后来回答", encoding="utf-8")
+    output_dir = tmp_path / "output"
+
+    analyzed = transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="analyze",
+    )
+    assert [unit["unit_id"] for unit in analyzed.units] == ["U001"]
+    assert not (output_dir / "transcript_generated_units").exists()
+
+    generated = transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="generate_all",
+    )
+    assert generated.audit["overall_status"] == "pass"
+    assert generated.generated_units[0]["covered_evidence_ids"] == ["E001", "E002", "E003"]
+    assert generated.combined_markdown.startswith("## 问题与回答\n\n### 釋經")
+    assert generated.combined_markdown.count("### 釋經") == 1
+    assert not generated.generated_units[0]["manuscript_sections"]["exegesis"].startswith("###")
+    assert "### 神學意義" not in generated.combined_markdown
+
+    generated_unit_path = output_dir / "transcript_generated_units" / "U001.json"
+    generated_unit_before_audit = generated_unit_path.read_bytes()
+    human_edited_draft = "## 人工整理後的講稿\n\n### 釋經\n\n保留人工修改。"
+    (output_dir / "draft_v1.md").write_text(human_edited_draft, encoding="utf-8")
+    audited = transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="audit",
+        force=True,
+    )
+    assert audited.audit["overall_status"] == "pass"
+    assert generated_unit_path.read_bytes() == generated_unit_before_audit
+    assert audited.combined_markdown == human_edited_draft
+    assert (output_dir / "draft_v1.md").read_text(encoding="utf-8") == human_edited_draft
+
+
+def test_transcript_fidelity_audit_uses_only_assigned_unit_evidence(monkeypatch, tmp_path):
+    project_id = "transcript-audit"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir()
+    (project_dir / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "Test", "pages": [], "project_type": "transcript"}),
+        encoding="utf-8",
+    )
+    (project_dir / "manuscript_plan.json").write_text(
+        json.dumps({
+            "payload": {
+                "units": [
+                    {
+                        "unit_id": "U001",
+                        "title": "第一单元",
+                        "central_question": "第一问？",
+                        "direct_answer": "第一答。",
+                        "objective": "只处理第一主题",
+                        "evidence_ids": ["E001"],
+                        "category_assignments": {
+                            "exegesis": ["E001"],
+                            "theological_significance": [],
+                            "application": [],
+                            "appendix": [],
+                        },
+                        "source_ranges": [{"start_line": 1, "end_line": 1}],
+                    },
+                    {
+                        "unit_id": "U002",
+                        "title": "第二单元",
+                        "central_question": "第二问？",
+                        "direct_answer": "第二答。",
+                        "objective": "只处理第二主题",
+                        "evidence_ids": ["E002"],
+                        "category_assignments": {
+                            "exegesis": ["E002"],
+                            "theological_significance": [],
+                            "application": [],
+                            "appendix": [],
+                        },
+                        "source_ranges": [{"start_line": 2, "end_line": 2}],
+                    },
+                ]
+            }
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (project_dir / "evidence_inventory.json").write_text(
+        json.dumps({
+            "payload": {
+                "evidence": [
+                    {
+                        "evidence_id": "E001",
+                        "content": "第一单元证据",
+                        "source_ranges": [{"start_line": 1, "end_line": 1}],
+                    },
+                    {
+                        "evidence_id": "E002",
+                        "content": "第二单元证据",
+                        "source_ranges": [{"start_line": 2, "end_line": 2}],
+                    },
+                ]
+            }
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+    service._write_draft_chunks_from_markdown(
+        project_id,
+        "## 第一单元\n\n### 釋經\n\n第一正文\n\n## 第二单元\n\n### 釋經\n\n第二正文",
+    )
+
+    chunk_meta = json.loads((project_dir / "draft_chunks_meta.json").read_text(encoding="utf-8"))
+    assert chunk_meta[0]["unit_id"] == "U001"
+    assert chunk_meta[0]["evidence_ids"] == ["E001"]
+
+    context = service._get_fidelity_audit_source_slice(
+        project_id,
+        "chunk_001",
+        "第一单元原文\n第二单元原文",
+    )
+    assert '"evidence_id": "E001"' in context
+    assert "第一单元原文" in context
+    assert '"evidence_id": "E002"' not in context
+    assert "第二单元原文" not in context
+
+    (project_dir / "coverage_audit.json").write_text(
+        json.dumps({"payload": {"overall_status": "pass", "findings": []}}),
+        encoding="utf-8",
+    )
+    assert service.check_and_update_project_audit_status(project_id) is True
+    service.update_transcript_coverage_audit_state(project_id, stale=True)
+    assert service.check_and_update_project_audit_status(project_id) is False
+    updated_meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert updated_meta["audit_passed"] is False
+    assert updated_meta["coverage_audit_stale"] is True
+
+
+def test_detached_stage1_job_preserves_project_workflow_and_model(monkeypatch, tmp_path):
+    project_id = "transcript-project"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir()
+    (project_dir / "unified_source.md").write_text("講座逐字稿", encoding="utf-8")
+    (project_dir / "meta.json").write_text(
+        '{"id":"transcript-project","title":"Test","pages":[],"project_type":"transcript"}',
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class _FakeProcess:
+        pid = 12345
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return _FakeProcess()
+
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+    monkeypatch.setattr(service.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(service, "update_sermon_processing_status", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, "_is_pid_running", lambda _pid: False)
+
+    state = service.start_stage1_pipeline_job(project_id, mode="analyze")
+
+    assert state["project_type"] == "transcript"
+    assert state["model"] == "gpt-5.6-sol"
+    command = captured["command"]
+    assert command[command.index("--project-type") + 1] == "transcript"
+    assert command[command.index("--model") + 1] == "gpt-5.6-sol"
+    assert command[command.index("--mode") + 1] == "analyze"
+
+
+def test_theological_audit_gate_requires_every_clean_final_chunk(monkeypatch, tmp_path):
+    project_id = "theology-gate"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir()
+    (project_dir / "meta.json").write_text(
+        json.dumps({
+            "id": project_id,
+            "title": "Test",
+            "pages": [],
+            "project_type": "transcript",
+            "theological_audit_passed": False,
+        }),
+        encoding="utf-8",
+    )
+    (project_dir / "chunks_meta.json").write_text(
+        json.dumps([{"id": "chunk_001"}, {"id": "chunk_002"}]),
+        encoding="utf-8",
+    )
+    (project_dir / "theological_audit.json").write_text(
+        json.dumps({
+            "chunk_001": {"summary": "clean", "issues": []},
+            "chunk_002": {"summary": "clean", "issues": []},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+
+    assert service.check_and_update_theological_audit_status(project_id) is True
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["theological_audit_passed"] is True
+    assert meta["theological_audit_completed"] is True
+
+    audits = json.loads((project_dir / "theological_audit.json").read_text(encoding="utf-8"))
+    audits["chunk_002"]["issues"] = [{"type": "overstatement"}]
+    (project_dir / "theological_audit.json").write_text(json.dumps(audits), encoding="utf-8")
+    assert service.check_and_update_theological_audit_status(project_id) is True
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["theological_audit_passed"] is False
+    assert meta["theological_audit_completed"] is True
+
+    service.invalidate_theological_audit_chunk(project_id, "chunk_002")
+    assert service.check_and_update_theological_audit_status(project_id) is False
+    audits = json.loads((project_dir / "theological_audit.json").read_text(encoding="utf-8"))
+    assert "chunk_002" not in audits
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["theological_audit_passed"] is False
+    assert meta["theological_audit_completed"] is False
+
+
+def test_generated_units_do_not_overwrite_existing_human_draft_chunks(monkeypatch, tmp_path):
+    project_id = "human-draft-authority"
+    project_dir = tmp_path / project_id
+    generated_dir = project_dir / "transcript_generated_units"
+    chunks_dir = project_dir / "draft_chunks"
+    generated_dir.mkdir(parents=True)
+    chunks_dir.mkdir()
+    (generated_dir / "U001.json").write_text("{}", encoding="utf-8")
+    (project_dir / "draft_chunks_meta.json").write_text(
+        json.dumps([{"id": "chunk_001"}]),
+        encoding="utf-8",
+    )
+    (chunks_dir / "chunk_001.md").write_text("人工修改", encoding="utf-8")
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+
+    assert service._should_sync_draft_chunks_from_generated_units(project_id) is False

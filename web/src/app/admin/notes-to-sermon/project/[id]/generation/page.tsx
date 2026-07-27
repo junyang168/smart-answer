@@ -7,10 +7,12 @@ import {
     ArrowLeft,
     CheckCircle2,
     FileText,
+    Eye,
     Loader2,
     PenTool,
     Play,
     RefreshCcw,
+    Search,
     Scissors,
 } from "lucide-react";
 
@@ -35,6 +37,14 @@ type Stage1Unit = {
     has_generated: boolean;
     error?: string | null;
     display_index: number;
+    title?: string;
+    central_question?: string | null;
+    direct_answer?: string | null;
+    objective?: string;
+    evidence_ids?: string[];
+    evidence_count?: number;
+    source_ranges?: Array<{ start_line: number; end_line: number }>;
+    plan_reason?: string;
 };
 
 type Stage1Status = {
@@ -55,6 +65,8 @@ type Stage1Status = {
         processing_progress?: number;
         processing_error?: string;
         title?: string;
+        project_type?: string;
+        model?: string;
     };
     manifest: {
         status?: string;
@@ -68,11 +80,34 @@ type Stage1Status = {
         failed_units: number;
         pending_units: number;
         split_completed: boolean;
+        analysis_completed?: boolean;
+        evidence_count?: number;
+        plan_ready?: boolean;
         draft_ready: boolean;
+        audit_status?: string | null;
+        audit_finding_count?: number;
         current_unit_id?: string | null;
     };
     units: Stage1Unit[];
     logs: Stage1Log[];
+};
+
+type PromptKey = string;
+
+type Stage1PromptBundle = {
+    project_type: string;
+    model: string;
+    reasoning_effort: string;
+    prompts: Record<string, string>;
+};
+
+const PROMPT_LABELS: Record<string, string> = {
+    unit_splitter: "1. 單元切割",
+    point_extractor: "2. 細節與經文證據提取",
+    unit_generator: "3. Manuscript 生成",
+    evidence_inventory: "1. 全文證據清單",
+    manuscript_planner: "2. 全文邏輯規劃",
+    coverage_auditor: "4. 全文覆蓋審核",
 };
 
 const DEFAULT_STATUS: Stage1Status = {
@@ -110,10 +145,14 @@ function modeLabel(mode?: string, unitId?: string | null) {
     switch (mode) {
         case "split":
             return "教學單元切割";
+        case "analyze":
+            return "全文證據與邏輯分析";
         case "generate_all":
             return "全部單元生成";
         case "generate_unit":
             return unitId ? `單元生成 ${unitId}` : "單元生成";
+        case "audit":
+            return "全文覆蓋審核";
         default:
             return "Stage 1";
     }
@@ -121,13 +160,17 @@ function modeLabel(mode?: string, unitId?: string | null) {
 
 export default function GenerationPage({ params }: { params: { id: string } }) {
     const router = useRouter();
+    const projectId = decodeURIComponent(params.id);
     const [state, setState] = useState<Stage1Status>(DEFAULT_STATUS);
     const [loading, setLoading] = useState(true);
     const [requesting, setRequesting] = useState<string | null>(null);
+    const [promptBundle, setPromptBundle] = useState<Stage1PromptBundle | null>(null);
+    const [showPromptReview, setShowPromptReview] = useState(false);
+    const [activePrompt, setActivePrompt] = useState<PromptKey>("unit_generator");
 
     const fetchStatus = async () => {
         try {
-            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/status`, {
+            const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/status`, {
                 headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
             });
             if (!res.ok) {
@@ -156,7 +199,25 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
         const interval = setInterval(fetchStatus, 2000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [params.id]);
+    }, [projectId]);
+
+    useEffect(() => {
+        fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/prompts`, {
+            headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        })
+            .then(async (res) => {
+                if (!res.ok) throw new Error("Failed to load Stage 1 prompts");
+                return res.json();
+            })
+            .then(setPromptBundle)
+            .catch((error) => console.error(error));
+    }, [projectId]);
+
+    useEffect(() => {
+        if (!promptBundle?.prompts) return;
+        const preferred = promptBundle.project_type === "transcript" ? "evidence_inventory" : "unit_generator";
+        if (promptBundle.prompts[preferred]) setActivePrompt(preferred);
+    }, [promptBundle]);
 
     const launchJob = async (path: string, options?: { force?: boolean; confirmMessage?: string }) => {
         if (options?.confirmMessage && !window.confirm(options.confirmMessage)) {
@@ -186,14 +247,16 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
             return state.project.processing_progress;
         }
         if (!state.summary.total_units) {
-            return state.summary.split_completed ? 15 : 0;
+            return state.summary.analysis_completed ? 30 : (state.summary.split_completed ? 15 : 0);
         }
         const completed = state.summary.completed_units + state.summary.failed_units;
         return Math.max(15, Math.min(100, Math.round((completed / state.summary.total_units) * 100)));
     }, [state.project.processing_progress, state.summary]);
 
     const running = state.job.running;
+    const isTranscript = state.project.project_type === "transcript" || promptBundle?.project_type === "transcript";
     const splitReady = state.summary.split_completed;
+    const analysisReady = Boolean(state.summary.analysis_completed);
     const failedUnits = state.units.filter((unit) => unit.status === "failed");
 
     return (
@@ -202,7 +265,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="space-y-2">
                         <button
-                            onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)}
+                            onClick={() => router.push(`/admin/notes-to-sermon/project/${projectId}`)}
                             className="flex items-center text-sm text-gray-500 hover:text-gray-800"
                         >
                             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -211,34 +274,70 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         <div>
                             <h1 className="text-2xl font-bold text-gray-900">Stage 1 Pipeline</h1>
                             <p className="text-sm text-gray-500">
-                                {state.project.title || params.id}
+                                {state.project.title || projectId}
                             </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
                         <button
-                            onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/split`, {
-                                force: splitReady,
-                                confirmMessage: splitReady ? "Rerun unit splitting and refresh the Stage 1 split result?" : undefined,
-                            })}
-                            disabled={running || requesting !== null}
-                            className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            onClick={() => setShowPromptReview((value) => !value)}
+                            className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
                         >
-                            {requesting?.endsWith("/stage1/split") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Scissors className="mr-2 h-4 w-4" />}
-                            {splitReady ? "Rerun Split" : "Run Unit Split"}
+                            <Eye className="mr-2 h-4 w-4" />
+                            {showPromptReview ? "Hide Prompts" : "Review Prompts"}
                         </button>
+                        {isTranscript ? (
+                            <button
+                                onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/analyze`, {
+                                    force: analysisReady,
+                                    confirmMessage: analysisReady ? "Rerun full transcript evidence extraction and logical planning?" : undefined,
+                                })}
+                                disabled={running || requesting !== null}
+                                className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                                {requesting?.endsWith("/stage1/analyze") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                                {analysisReady ? "Rerun Analysis" : "Analyze Transcript"}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/split`, {
+                                    force: splitReady,
+                                    confirmMessage: splitReady ? "Rerun unit splitting and refresh the Stage 1 split result?" : undefined,
+                                })}
+                                disabled={running || requesting !== null}
+                                className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                            >
+                                {requesting?.endsWith("/stage1/split") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Scissors className="mr-2 h-4 w-4" />}
+                                {splitReady ? "Rerun Split" : "Run Unit Split"}
+                            </button>
+                        )}
                         <button
-                            onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/generate-all`, {
-                                force: splitReady,
-                                confirmMessage: splitReady ? "Generate manuscripts for all units now?" : "Run the full Stage 1 pipeline now?",
+                            onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/generate-all`, {
+                                force: isTranscript ? state.summary.draft_ready : splitReady,
+                                confirmMessage: isTranscript
+                                    ? (analysisReady ? "Generate the manuscript from the reviewed evidence and logical plan?" : "Analyze the full transcript, build the plan, and generate the manuscript now?")
+                                    : (splitReady ? "Generate manuscripts for all units now?" : "Run the full Stage 1 pipeline now?"),
                             })}
                             disabled={running || requesting !== null}
                             className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
                             {requesting?.endsWith("/stage1/generate-all") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                            {splitReady ? "Generate All Units" : "Run Full Pipeline"}
+                            {isTranscript ? "Generate Manuscript" : (splitReady ? "Generate All Units" : "Run Full Pipeline")}
                         </button>
+                        {isTranscript
+                            && state.summary.total_units > 0
+                            && state.summary.completed_units === state.summary.total_units
+                            && (
+                            <button
+                                onClick={() => launchJob(`/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/audit`, { force: true })}
+                                disabled={running || requesting !== null}
+                                className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                            >
+                                {requesting?.endsWith("/stage1/audit") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                                Coverage Audit
+                            </button>
+                        )}
                         <button
                             onClick={fetchStatus}
                             disabled={loading}
@@ -248,7 +347,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                             Refresh
                         </button>
                         <button
-                            onClick={() => router.push(`/admin/notes-to-sermon/project/${params.id}`)}
+                            onClick={() => router.push(`/admin/notes-to-sermon/project/${projectId}`)}
                             disabled={!state.summary.draft_ready}
                             className="inline-flex items-center rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
                         >
@@ -258,6 +357,49 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                     </div>
                 </div>
 
+                {showPromptReview && (
+                    <div className="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                                <h2 className="text-lg font-semibold text-gray-900">Runtime Prompt Review</h2>
+                                <p className="mt-1 text-sm text-gray-500">
+                                    These are the exact resolved prompts that this Project will use. This view is read-only.
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                                <span className="rounded-full bg-purple-100 px-3 py-1 text-purple-700">
+                                    Workflow: {promptBundle?.project_type || state.project.project_type || "loading"}
+                                </span>
+                                <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-700">
+                                    Model: {promptBundle?.model || state.project.model || "loading"}
+                                </span>
+                                <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-700">
+                                    Reasoning: {promptBundle?.reasoning_effort || "medium"}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 flex flex-wrap gap-2">
+                            {Object.keys(promptBundle?.prompts || {}).map((key) => (
+                                <button
+                                    key={key}
+                                    onClick={() => setActivePrompt(key)}
+                                    className={`rounded-lg px-3 py-2 text-sm font-medium transition ${activePrompt === key
+                                        ? "bg-indigo-600 text-white"
+                                        : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                                        }`}
+                                >
+                                    {PROMPT_LABELS[key] || key}
+                                </button>
+                            ))}
+                        </div>
+
+                        <pre className="mt-4 max-h-[560px] overflow-auto whitespace-pre-wrap rounded-xl border border-gray-200 bg-gray-50 p-5 text-sm leading-6 text-gray-800">
+                            {promptBundle?.prompts?.[activePrompt] || "Loading prompt..."}
+                        </pre>
+                    </div>
+                )}
+
                 <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
                     <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -266,9 +408,13 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                 <p className="text-sm text-gray-500">
                                     {running
                                         ? `${modeLabel(state.job.mode, state.job.unit_id)} 正在執行`
-                                        : splitReady
-                                            ? "Split result is ready. You can generate individual units or run all."
-                                            : "Run unit splitting first, then inspect the split result."}
+                                        : isTranscript
+                                            ? (analysisReady
+                                                ? "Full evidence inventory and logical manuscript plan are ready for review."
+                                                : "Analyze the full transcript first; no mechanical line-based split is used.")
+                                            : splitReady
+                                                ? "Split result is ready. You can generate individual units or run all."
+                                                : "Run unit splitting first, then inspect the split result."}
                                 </p>
                             </div>
                             <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${running ? "border-blue-200 bg-blue-50 text-blue-700" : "border-gray-200 bg-gray-50 text-gray-600"}`}>
@@ -292,13 +438,19 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         </div>
 
                         <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                            {[
+                            {(isTranscript ? [
+                                ["Evidence", state.summary.evidence_count || 0],
+                                ["Planned Units", state.summary.total_units],
+                                ["Generated", state.summary.completed_units],
+                                ["Pending", state.summary.pending_units],
+                                ["Audit Findings", state.summary.audit_finding_count || 0],
+                            ] : [
                                 ["Total Units", state.summary.total_units],
                                 ["Completed", state.summary.completed_units],
                                 ["Running", state.summary.running_units],
                                 ["Pending", state.summary.pending_units],
                                 ["Failed", state.summary.failed_units],
-                            ].map(([label, value]) => (
+                            ]).map(([label, value]) => (
                                 <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
                                     <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
                                     <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
@@ -368,9 +520,13 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
                     <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-900">Teaching Units</h2>
+                            <h2 className="text-lg font-semibold text-gray-900">
+                                {isTranscript ? "Manuscript Plan" : "Teaching Units"}
+                            </h2>
                             <p className="text-sm text-gray-500">
-                                Split first, inspect the boundaries, then generate manuscripts per unit or all at once.
+                                {isTranscript
+                                    ? "Logical units are built from the full evidence inventory and may combine non-contiguous source ranges."
+                                    : "Split first, inspect the boundaries, then generate manuscripts per unit or all at once."}
                             </p>
                         </div>
                         {state.summary.current_unit_id && (
@@ -381,9 +537,11 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         )}
                     </div>
 
-                    {!splitReady ? (
+                    {!(isTranscript ? analysisReady : splitReady) ? (
                         <div className="p-8 text-center text-sm text-gray-500">
-                            No split result yet. Run unit splitting to inspect the Stage 1 boundaries.
+                            {isTranscript
+                                ? "No manuscript plan yet. Analyze the transcript to build the evidence inventory and logical plan."
+                                : "No split result yet. Run unit splitting to inspect the Stage 1 boundaries."}
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
@@ -392,33 +550,51 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                     <tr>
                                         <th className="px-6 py-3">Unit</th>
                                         <th className="px-6 py-3">Scripture</th>
-                                        <th className="px-6 py-3">Source Lines</th>
-                                        <th className="px-6 py-3">Split Reason</th>
+                                        <th className="px-6 py-3">{isTranscript ? "Evidence / Source" : "Source Lines"}</th>
+                                        <th className="px-6 py-3">{isTranscript ? "Logical Role" : "Split Reason"}</th>
                                         <th className="px-6 py-3">Status</th>
                                         <th className="px-6 py-3 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {state.units.map((unit) => {
-                                        const unitActionPath = `/api/admin/notes-to-sermon/sermon-project/${params.id}/stage1/unit/${unit.unit_id}/generate`;
+                                        const unitActionPath = `/api/admin/notes-to-sermon/sermon-project/${projectId}/stage1/unit/${unit.unit_id}/generate`;
                                         const isUnitRequesting = requesting === unitActionPath;
                                         const regenerate = unit.has_generated;
                                         return (
                                             <tr key={unit.unit_id} className="align-top">
                                                 <td className="px-6 py-4">
                                                     <div className="font-semibold text-gray-900">
-                                                        {unit.display_index}. {unit.unit_title}
+                                                        {unit.display_index}. {unit.title || unit.unit_title}
                                                     </div>
-                                                    <div className="mt-1 text-xs text-gray-500">
-                                                        {unit.chapter_title || "未標明章標題"}
-                                                        {unit.section_title ? ` / ${unit.section_title}` : ""}
-                                                    </div>
+                                                    {isTranscript ? (
+                                                        <div className="mt-2 max-w-sm space-y-1 text-xs leading-5 text-gray-500">
+                                                            {unit.central_question && <div><span className="font-semibold text-gray-600">Question:</span> {unit.central_question}</div>}
+                                                            {unit.direct_answer && <div><span className="font-semibold text-gray-600">Answer:</span> {unit.direct_answer}</div>}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="mt-1 text-xs text-gray-500">
+                                                            {unit.chapter_title || "未標明章標題"}
+                                                            {unit.section_title ? ` / ${unit.section_title}` : ""}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-700">{unit.scripture_range || "未標明"}</td>
                                                 <td className="px-6 py-4 text-gray-700">
-                                                    lines {unit.start_line}-{unit.end_line}
+                                                    {isTranscript ? (
+                                                        <div className="space-y-1">
+                                                            <div>{unit.evidence_count ?? unit.evidence_ids?.length ?? 0} evidence items</div>
+                                                            <div className="text-xs text-gray-500">
+                                                                {(unit.source_ranges || []).map((range) => `${range.start_line}–${range.end_line}`).join(", ") || "No source range"}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <>lines {unit.start_line}-{unit.end_line}</>
+                                                    )}
                                                 </td>
-                                                <td className="max-w-md px-6 py-4 text-gray-600">{unit.split_reason}</td>
+                                                <td className="max-w-md px-6 py-4 text-gray-600">
+                                                    {isTranscript ? (unit.plan_reason || unit.objective) : unit.split_reason}
+                                                </td>
                                                 <td className="px-6 py-4">
                                                     <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadge(unit.status)}`}>
                                                         {unit.status === "completed" && <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
@@ -428,7 +604,9 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                                         {unit.status}
                                                     </div>
                                                     <div className="mt-2 text-xs text-gray-400">
-                                                        {unit.has_points ? "points ready" : "no points"} · {unit.has_generated ? "draft ready" : "no draft"}
+                                                        {isTranscript
+                                                            ? `${unit.evidence_count ?? unit.evidence_ids?.length ?? 0} evidence · ${unit.has_generated ? "draft ready" : "no draft"}`
+                                                            : `${unit.has_points ? "points ready" : "no points"} · ${unit.has_generated ? "draft ready" : "no draft"}`}
                                                     </div>
                                                     {unit.error && (
                                                         <div className="mt-2 max-w-xs text-xs leading-5 text-red-600">

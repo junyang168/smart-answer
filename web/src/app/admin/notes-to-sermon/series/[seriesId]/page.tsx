@@ -119,25 +119,21 @@ export default function SeriesDetailPage() {
     const [projectImages, setProjectImages] = useState<any[]>([]);
     const [selectedImages, setSelectedImages] = useState<string[]>([]);
     const [newProjectTitle, setNewProjectTitle] = useState("");
+    const [newProjectType, setNewProjectType] = useState<"sermon_note" | "transcript">("sermon_note");
     const [isFetchingImages, setIsFetchingImages] = useState(false);
 
     const handleOpenCreateProject = async (lecture: Lecture) => {
-        // If transcript type, we don't need folder images
-        if (series?.project_type === 'transcript') {
-            setCreatingProjectForLecture(lecture);
-            setNewProjectTitle(lecture.title);
-            setSelectedImages([]); // No images needed
+        setCreatingProjectForLecture(lecture);
+        setNewProjectTitle(lecture.title); // Default title
+        setNewProjectType(series?.project_type === "transcript" ? "transcript" : "sermon_note");
+        setSelectedImages([]);
+        setProjectImages([]);
+
+        if (!series?.folder || !lecture.folder) {
             return;
         }
 
-        if (!series?.folder || !lecture.folder) {
-            alert("Cannot create project: Series or Lecture folder is missing.");
-            return;
-        }
-        setCreatingProjectForLecture(lecture);
-        setNewProjectTitle(lecture.title); // Default title
         setIsFetchingImages(true);
-        setSelectedImages([]);
 
         try {
             // Construct the relative folder path: series_folder/lecture_folder
@@ -162,7 +158,7 @@ export default function SeriesDetailPage() {
         if (!newProjectTitle) return alert("Title required");
 
         // Validation depends on type
-        if (series?.project_type !== 'transcript' && selectedImages.length === 0) {
+        if (newProjectType !== 'transcript' && selectedImages.length === 0) {
             return alert("Select at least one image");
         }
 
@@ -175,7 +171,7 @@ export default function SeriesDetailPage() {
                     pages: selectedImages,
                     series_id: seriesId,
                     lecture_id: creatingProjectForLecture.id,
-                    project_type: series?.project_type || 'sermon_note'
+                    project_type: newProjectType
                 })
             });
 
@@ -464,7 +460,7 @@ export default function SeriesDetailPage() {
                                 ))}
                             </select>
                             <p className="text-[10px] text-gray-500 mt-0.5">
-                                Select subfolder from .../images/{series.folder}/
+                                Scanned-notes source folder: .../images/{series.folder}/. Not required for Transcript projects.
                             </p>
                         </div>
                     ) : (
@@ -558,8 +554,7 @@ export default function SeriesDetailPage() {
                                 <button
                                     onClick={() => handleOpenCreateProject(lecture)}
                                     className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    disabled={series.project_type !== 'transcript' && (!series.folder || !lecture.folder)}
-                                    title={(series.project_type !== 'transcript' && (!series.folder || !lecture.folder)) ? "Configure folders to enable creation" : "Create new project from lecture folder"}
+                                    title="Create a Notes or Transcript project"
                                 >
                                     + New Project
                                 </button>
@@ -627,8 +622,7 @@ export default function SeriesDetailPage() {
                                             .filter(
                                                 (p) =>
                                                     !p.series_id &&
-                                                    !p.lecture_id &&
-                                                    (p.project_type || "sermon_note") === (series.project_type || "sermon_note")
+                                                    !p.lecture_id
                                             )
                                             .map(p => (
                                                 <option key={p.id} value={p.id}>{p.title}</option>
@@ -681,16 +675,40 @@ export default function SeriesDetailPage() {
                                 />
                             </div>
 
-                            {series?.project_type === 'transcript' ? (
-                                <div className="p-4 bg-purple-50 rounded text-purple-700 italic text-center rounded border border-purple-200">
-                                    Transcript projects do not use scanned images.
-                                    A simplified editor will be created.
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium mb-1">Workflow Type</label>
+                                <select
+                                    className="border rounded w-full p-2 bg-white"
+                                    value={newProjectType}
+                                    onChange={e => {
+                                        const value = e.target.value === "transcript" ? "transcript" : "sermon_note";
+                                        setNewProjectType(value);
+                                        if (value === "transcript") setSelectedImages([]);
+                                    }}
+                                >
+                                    <option value="sermon_note">Notes — scanned lecture notes</option>
+                                    <option value="transcript">Transcript — published sermon script</option>
+                                </select>
+                            </div>
+
+                            {newProjectType === 'transcript' ? (
+                                <div className="p-4 bg-purple-50 rounded text-purple-700 border border-purple-200">
+                                    <p className="font-medium">Transcript projects do not use scanned images.</p>
+                                    <p className="mt-1 text-sm font-mono break-all">
+                                        Files will be stored in /opt/homebrew/var/www/church/web/data/transcripts_to_manuscript/&lt;project-id&gt;
+                                    </p>
                                 </div>
                             ) : (
                                 <>
-                                    <label className="block text-sm font-medium mb-2">Select Images from {series?.folder}/{creatingProjectForLecture.folder}</label>
+                                    {series?.folder && creatingProjectForLecture.folder ? (
+                                        <label className="block text-sm font-medium mb-2">Select Images from {series.folder}/{creatingProjectForLecture.folder}</label>
+                                    ) : (
+                                        <div className="p-4 bg-amber-50 text-amber-700 border border-amber-200 rounded">
+                                            Select a scanned-notes folder on the Lecture before creating a Notes project, or choose Transcript above.
+                                        </div>
+                                    )}
 
-                                    {isFetchingImages ? (
+                                    {!series?.folder || !creatingProjectForLecture.folder ? null : isFetchingImages ? (
                                         <div className="py-8 text-center text-gray-500">Loading images...</div>
                                     ) : projectImages.length === 0 ? (
                                         <div className="py-8 text-center text-gray-500 bg-gray-50 rounded">No images found in this folder.</div>
@@ -734,14 +752,14 @@ export default function SeriesDetailPage() {
 
                         <div className="p-4 border-t bg-gray-50 rounded-b-lg flex justify-between items-center">
                             <span className="text-sm text-gray-600">
-                                {series?.project_type === 'transcript' ? 'Ready to create' : `${selectedImages.length} images selected`}
+                                {newProjectType === 'transcript' ? 'Ready to create in transcripts_to_manuscript' : `${selectedImages.length} images selected`}
                             </span>
                             <div className="space-x-3">
                                 <button onClick={() => setCreatingProjectForLecture(null)} className="px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
                                 <button
                                     onClick={handleCreateProject}
                                     className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
-                                    disabled={series?.project_type !== 'transcript' && selectedImages.length === 0}
+                                    disabled={newProjectType !== 'transcript' && selectedImages.length === 0}
                                 >
                                     Create Project
                                 </button>

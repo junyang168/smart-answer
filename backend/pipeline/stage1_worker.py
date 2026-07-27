@@ -8,18 +8,27 @@ from datetime import datetime, timezone
 from backend.api.sermon_converter_service import (
     NOTES_TO_SERMON_DIR,
     _save_stage1_job_state,
+    save_sermon_draft,
     sync_draft_chunks_from_generated_units,
+    update_transcript_coverage_audit_state,
     update_sermon_processing_status,
 )
+from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
 from backend.pipeline.stage1 import run_stage1_pipeline
+from backend.pipeline.transcript_pipeline import run_transcript_pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a detached Stage 1 pipeline job.")
     parser.add_argument("--project-id", required=True)
-    parser.add_argument("--mode", required=True, choices=["split", "generate_all", "generate_unit"])
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=["split", "analyze", "generate_all", "generate_unit", "audit"],
+    )
     parser.add_argument("--unit-id")
-    parser.add_argument("--model", default="claude-sonnet-4-6")
+    parser.add_argument("--model", default=DEFAULT_OPENAI_GENERATION_MODEL)
+    parser.add_argument("--project-type", choices=["sermon_note", "transcript"], default="sermon_note")
     parser.add_argument("--timeout", type=float, default=90.0)
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--force", action="store_true")
@@ -41,6 +50,7 @@ def main() -> int:
             "force": args.force,
             "pid": os.getpid(),
             "model": args.model,
+            "project_type": args.project_type,
             "timeout_seconds": args.timeout,
             "max_retries": args.max_retries,
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -48,20 +58,45 @@ def main() -> int:
     )
 
     try:
-        summary = run_stage1_pipeline(
-            input_path=input_path,
-            output_dir=project_dir,
-            model=args.model,
-            timeout_seconds=args.timeout,
-            max_retries=args.max_retries,
-            force=args.force,
-            split_only=args.mode == "split",
-            selected_unit_ids=[args.unit_id] if args.mode == "generate_unit" and args.unit_id else None,
-            log_path=log_path,
-        )
+        if args.project_type == "transcript":
+            transcript_mode = "analyze" if args.mode == "split" else args.mode
+            summary = run_transcript_pipeline(
+                input_path=input_path,
+                output_dir=project_dir,
+                mode=transcript_mode,
+                selected_unit_id=args.unit_id,
+                model=args.model,
+                timeout_seconds=max(args.timeout, 180.0),
+                max_retries=args.max_retries,
+                force=args.force,
+                log_path=log_path,
+            )
+            if summary.combined_markdown and transcript_mode != "audit":
+                save_sermon_draft(args.project_id, summary.combined_markdown)
+            if summary.audit:
+                update_transcript_coverage_audit_state(
+                    args.project_id,
+                    stale=False,
+                    overall_status=summary.audit.get("overall_status"),
+                )
+        else:
+            summary = run_stage1_pipeline(
+                input_path=input_path,
+                output_dir=project_dir,
+                model=args.model,
+                project_type=args.project_type,
+                timeout_seconds=args.timeout,
+                max_retries=args.max_retries,
+                force=args.force,
+                split_only=args.mode == "split",
+                selected_unit_ids=[args.unit_id] if args.mode == "generate_unit" and args.unit_id else None,
+                log_path=log_path,
+            )
 
-        if args.mode != "split":
-            sync_draft_chunks_from_generated_units(args.project_id)
+        analysis_only = args.mode in {"split", "analyze"}
+        if not analysis_only:
+            if args.project_type != "transcript":
+                sync_draft_chunks_from_generated_units(args.project_id)
             stage_label = "Stage 1 Ready" if len(summary.generated_units) == len(summary.units) else "Stage 1 Partial Draft Updated"
             update_sermon_processing_status(
                 args.project_id,
@@ -72,11 +107,12 @@ def main() -> int:
                 },
             )
         else:
+            analysis_label = "Transcript Analysis Complete" if args.project_type == "transcript" else "Stage 1 Split Complete"
             update_sermon_processing_status(
                 args.project_id,
                 False,
                 {
-                    "stage": "Stage 1 Split Complete",
+                    "stage": analysis_label,
                     "progress": 100,
                 },
             )
@@ -91,12 +127,13 @@ def main() -> int:
                 "force": args.force,
                 "pid": os.getpid(),
                 "model": args.model,
+                "project_type": args.project_type,
                 "timeout_seconds": args.timeout,
                 "max_retries": args.max_retries,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "units": len(summary.units),
                 "generated_units": len(summary.generated_units),
-                "failed_units": len(summary.failed_units),
+                "failed_units": len(getattr(summary, "failed_units", [])),
             },
         )
         return 0
@@ -112,6 +149,7 @@ def main() -> int:
                 "force": args.force,
                 "pid": os.getpid(),
                 "model": args.model,
+                "project_type": args.project_type,
                 "timeout_seconds": args.timeout,
                 "max_retries": args.max_retries,
                 "failed_at": datetime.now(timezone.utc).isoformat(),
