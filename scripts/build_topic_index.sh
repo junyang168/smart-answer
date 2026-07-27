@@ -25,6 +25,6 @@ echo "==> Building topic index"
 echo "==> Reindexing sermon search (with embeddings)"
 curl -fsS -m 600 -X POST "http://127.0.0.1:8555/sermon_search/reindex" \
   -H "content-type: application/json" \
-  -d '{"project_types":["sermon_note"],"include_embeddings":true}' && echo ""
+  -d '{"project_types":["sermon_note","transcript"],"include_embeddings":true}' && echo ""
 
 echo "==> Topic index rebuild complete"

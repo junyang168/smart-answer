@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable, List, Optional, Tuple
 
 from backend.api.sermon_search.discovery import discover_manuscripts
+from backend.api.sermon_search.discovery import DEFAULT_MANUSCRIPT_PROJECT_TYPES
 from backend.api.sermon_search.models import DiscoveredManuscript
 
 
@@ -14,7 +15,7 @@ def load_corpus(
     """Return (manuscript_metadata, markdown_text) for every readable manuscript."""
     manuscripts = discover_manuscripts(
         series_ids=series_ids,
-        project_types=list(project_types) if project_types else ["sermon_note"],
+        project_types=list(project_types) if project_types else DEFAULT_MANUSCRIPT_PROJECT_TYPES,
     )
     if project_ids:
         selected = set(project_ids)

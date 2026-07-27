@@ -30,6 +30,17 @@ interface LectureSeries {
     lectures: Lecture[];
 }
 
+interface IndexRefreshStatus {
+    series_id: string;
+    status: "idle" | "queued" | "running" | "completed" | "failed";
+    message: string;
+    started_at?: string;
+    finished_at?: string;
+    topic_count?: number;
+    documents_indexed?: number;
+    source_units_indexed?: number;
+}
+
 export default function SeriesDetailPage() {
     const params = useParams();
     const seriesId = params.seriesId as string;
@@ -38,6 +49,8 @@ export default function SeriesDetailPage() {
     const [series, setSeries] = useState<LectureSeries | null>(null);
     const [allProjects, setAllProjects] = useState<Project[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [indexRefresh, setIndexRefresh] = useState<IndexRefreshStatus | null>(null);
+    const [indexRefreshError, setIndexRefreshError] = useState("");
 
     // Lecture UI State
     const [isCreatingLecture, setIsCreatingLecture] = useState(false);
@@ -196,9 +209,46 @@ export default function SeriesDetailPage() {
     useEffect(() => {
         if (seriesId) {
             fetchData();
+            fetchIndexRefreshStatus();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [seriesId]);
+
+    useEffect(() => {
+        if (indexRefresh?.status !== "queued" && indexRefresh?.status !== "running") return;
+        const timer = window.setInterval(() => {
+            fetchIndexRefreshStatus();
+        }, 2000);
+        return () => window.clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [seriesId, indexRefresh?.status]);
+
+    const fetchIndexRefreshStatus = async () => {
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/series/${seriesId}/index-refresh`, {
+                cache: "no-store",
+            });
+            if (res.ok) setIndexRefresh(await res.json());
+        } catch (e) {
+            console.error("Failed to fetch index refresh status", e);
+        }
+    };
+
+    const handleRefreshIndex = async () => {
+        setIndexRefreshError("");
+        try {
+            const res = await fetch(`/api/admin/notes-to-sermon/series/${seriesId}/index-refresh`, {
+                method: "POST",
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                throw new Error(body.detail || "Unable to start index refresh.");
+            }
+            setIndexRefresh(body);
+        } catch (e) {
+            setIndexRefreshError(e instanceof Error ? e.message : "Unable to start index refresh.");
+        }
+    };
 
     const fetchData = async () => {
         setIsLoading(true);
@@ -414,7 +464,36 @@ export default function SeriesDetailPage() {
                             <p className="text-xs text-purple-600 font-bold mt-1">Type: Fellowship Transcript</p>
                         )}
                     </div>
-                    {/* Series Actions (Edit/Delete) could go here */}
+                    <div className="flex flex-col items-end gap-2">
+                        <button
+                            type="button"
+                            onClick={handleRefreshIndex}
+                            disabled={indexRefresh?.status === "queued" || indexRefresh?.status === "running"}
+                            className="rounded bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Refresh chapter, topic, and manuscript search indexes for this series"
+                        >
+                            {indexRefresh?.status === "queued" || indexRefresh?.status === "running"
+                                ? "Refreshing Index…"
+                                : "↻ Refresh Index"}
+                        </button>
+                        {indexRefresh && indexRefresh.status !== "idle" ? (
+                            <p className={`max-w-sm text-right text-xs ${
+                                indexRefresh.status === "failed"
+                                    ? "text-red-600"
+                                    : indexRefresh.status === "completed"
+                                        ? "text-green-700"
+                                        : "text-amber-700"
+                            }`}>
+                                {indexRefresh.message}
+                                {indexRefresh.status === "completed" && indexRefresh.documents_indexed !== undefined
+                                    ? ` ${indexRefresh.documents_indexed} manuscripts indexed.`
+                                    : ""}
+                            </p>
+                        ) : null}
+                        {indexRefreshError ? (
+                            <p className="max-w-sm text-right text-xs text-red-600">{indexRefreshError}</p>
+                        ) : null}
+                    </div>
                 </div>
             </div>
 

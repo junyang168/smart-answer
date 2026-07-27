@@ -126,7 +126,16 @@ def extract_topics_from_chunk(
     system_prompt = _PROMPT_PATH.read_text(encoding="utf-8")
     label_hint = "、".join(section_labels) if section_labels else "全文"
     scope = (manuscript.bible_verse or "").strip()
-    scope_hint = scope if scope else "無（概論／結構性文件）"
+    derive_scope_from_content = manuscript.project_type == "transcript" and not scope
+    if scope:
+        scope_hint = scope
+    elif derive_scope_from_content:
+        scope_hint = (
+            "未預先指定。請只根據本逐字稿正文判定：凡教授連續、專門釋解的馬太福音段落，"
+            "可建立 passage 主題；其他書卷及順帶提及的馬太經文仍視為交叉引用。"
+        )
+    else:
+        scope_hint = "無（概論／結構性文件）"
     user_prompt = (
         f"【系列】{manuscript.series_title}\n"
         f"【講稿標題】{manuscript.project_title}\n"
@@ -142,10 +151,10 @@ def extract_topics_from_chunk(
         temperature=0.2,
     )
 
-    # Overview/structural documents (no declared passage scope) have no
-    # dedicated passage topics — any passage the model surfaces there is cited
-    # evidence, not exegesis. Drop those entries deterministically.
-    has_scope = bool(scope)
+    # Notes projects without a declared scope remain overview/structural
+    # documents. Transcript projects are different: their actual exegesis is
+    # the source of truth, so passage scope may be derived from the content.
+    has_scope = bool(scope) or derive_scope_from_content
 
     entries: List[TopicEntry] = []
     for raw in payload.get("topics") or []:

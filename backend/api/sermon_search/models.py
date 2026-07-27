@@ -137,7 +137,7 @@ class IndexStatus(BaseModel):
 
 class ReindexRequest(BaseModel):
     series_ids: List[str] = Field(default_factory=list)
-    project_types: List[str] = Field(default_factory=lambda: ["sermon_note"])
+    project_types: List[str] = Field(default_factory=lambda: ["sermon_note", "transcript"])
     include_embeddings: bool = False
 
 

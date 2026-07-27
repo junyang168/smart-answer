@@ -92,26 +92,52 @@ def _cache_path(cache_dir: Path, project_id: str) -> Path:
     return cache_dir / f"{project_id}.json"
 
 
-def _load_cache(cache_dir: Path, project_id: str, content_hash: str, model: str) -> Optional[List[Dict[str, Any]]]:
+def _load_cache(
+    cache_dir: Path,
+    project_id: str,
+    content_hash: str,
+    model: str,
+    bible_verse: Optional[str] = None,
+    project_type: str = "sermon_note",
+) -> Optional[List[Dict[str, Any]]]:
     path = _cache_path(cache_dir, project_id)
     if not path.exists():
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("content_hash") == content_hash and payload.get("model") == model:
+        if payload.get("content_hash") != content_hash or payload.get("model") != model:
+            return None
+
+        # Legacy note caches were already extracted with their explicit scope,
+        # so they remain valid. Legacy transcript caches are not safe: before
+        # transcript scope inference existed they silently dropped passages.
+        if "bible_verse" not in payload:
+            if project_type == "transcript":
+                return None
+            return payload.get("raw_topics", [])
+
+        if payload.get("bible_verse") == (bible_verse or ""):
             return payload.get("raw_topics", [])
     except Exception:
         pass
     return None
 
 
-def _save_cache(cache_dir: Path, project_id: str, content_hash: str, model: str, raw_topics: List[Dict[str, Any]]) -> None:
+def _save_cache(
+    cache_dir: Path,
+    project_id: str,
+    content_hash: str,
+    model: str,
+    raw_topics: List[Dict[str, Any]],
+    bible_verse: Optional[str] = None,
+) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = _cache_path(cache_dir, project_id)
     payload = {
         "project_id": project_id,
         "content_hash": content_hash,
         "model": model,
+        "bible_verse": bible_verse or "",
         "raw_topics": raw_topics,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -230,7 +256,14 @@ def run_topic_index_pipeline(
         print(f"[{idx}/{len(corpus)}] {manuscript.project_title} ({pid})")
 
         if not force:
-            cached = _load_cache(cache_dir, pid, manuscript.content_hash, model)
+            cached = _load_cache(
+                cache_dir,
+                pid,
+                manuscript.content_hash,
+                model,
+                bible_verse=manuscript.bible_verse,
+                project_type=manuscript.project_type,
+            )
             if cached is not None:
                 print(f"  → cache hit, skipping LLM call")
                 continue
@@ -240,7 +273,14 @@ def run_topic_index_pipeline(
             print(f"  → {len(chunk_groups)} chunk group(s)")
             entries = extract_topics_from_manuscript(llm, manuscript, chunk_groups)
             print(f"  → {len(entries)} topic(s) extracted")
-            _save_cache(cache_dir, pid, manuscript.content_hash, model, _entries_to_raw(entries))
+            _save_cache(
+                cache_dir,
+                pid,
+                manuscript.content_hash,
+                model,
+                _entries_to_raw(entries),
+                bible_verse=manuscript.bible_verse,
+            )
         except Exception as exc:
             print(f"  ERROR: {exc}")
             skipped.append(f"{pid}: {exc}")
@@ -288,7 +328,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", help="Output directory for topic_index.json and cache (default: <data>/sermon_search)")
     parser.add_argument("--series", nargs="*", metavar="SERIES_ID", help="Limit to specific series IDs")
     parser.add_argument("--project", nargs="*", metavar="PROJECT_ID", help="Limit to specific project IDs")
-    parser.add_argument("--project-types", nargs="*", default=["sermon_note"], metavar="TYPE")
+    parser.add_argument(
+        "--project-types",
+        nargs="*",
+        default=["sermon_note", "transcript"],
+        metavar="TYPE",
+    )
     parser.add_argument("--model", default="claude-sonnet-4-6")
     parser.add_argument("--timeout", type=float, default=120.0, help="Per-request timeout in seconds")
     parser.add_argument("--max-retries", type=int, default=3)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -10,6 +10,12 @@ from backend.api.lecture_manager import (
 )
 from backend.api.sermon_converter_service import get_sermon_project_metadata
 from backend.api.sermon_converter_service import get_sermon_final_path
+from backend.api.series_index_refresh import (
+    SeriesIndexRefreshStatus,
+    get_series_index_refresh_status,
+    queue_series_index_refresh,
+    run_series_index_refresh,
+)
 
 router = APIRouter(prefix="/admin/notes-to-sermon/series", tags=["Lecture Series"])
 public_router = APIRouter(prefix="/notes-to-sermon/public", tags=["Lecture Series Public"])
@@ -213,6 +219,28 @@ def get_series_endpoint(series_id: str):
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     return series
+
+
+@router.get("/{series_id}/index-refresh", response_model=SeriesIndexRefreshStatus)
+def get_index_refresh_status_endpoint(series_id: str):
+    if not get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found")
+    return get_series_index_refresh_status(series_id)
+
+
+@router.post("/{series_id}/index-refresh", response_model=SeriesIndexRefreshStatus, status_code=202)
+def start_index_refresh_endpoint(series_id: str, background_tasks: BackgroundTasks):
+    if not get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found")
+
+    status, accepted = queue_series_index_refresh(series_id)
+    if not accepted:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Index refresh is already running for series {status.series_id}.",
+        )
+    background_tasks.add_task(run_series_index_refresh, series_id)
+    return status
 
 @router.put("/{series_id}", response_model=LectureSeries)
 def update_series_endpoint(series_id: str, payload: CreateSeriesRequest):

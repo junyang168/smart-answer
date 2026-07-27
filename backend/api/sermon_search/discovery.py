@@ -10,6 +10,9 @@ from backend.api.sermon_converter_service import get_sermon_final_path, get_serm
 from .models import DiscoveredManuscript
 
 
+DEFAULT_MANUSCRIPT_PROJECT_TYPES = ["sermon_note", "transcript"]
+
+
 def _hash_file(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as fh:
@@ -23,19 +26,21 @@ def discover_manuscripts(
     project_types: Optional[Iterable[str]] = None,
 ) -> List[DiscoveredManuscript]:
     selected_series = set(series_ids or [])
-    selected_types = set(project_types or ["sermon_note"])
+    selected_types = set(project_types or DEFAULT_MANUSCRIPT_PROJECT_TYPES)
     manuscripts: List[DiscoveredManuscript] = []
 
     for series in list_series():
         if selected_series and series.id not in selected_series:
-            continue
-        if selected_types and series.project_type not in selected_types:
             continue
         for lecture in series.lectures:
             for project_id in lecture.project_ids:
                 project = get_sermon_project_metadata(project_id)
                 path = get_sermon_final_path(project_id)
                 if not project or not path.exists():
+                    continue
+                # A series may contain both scanned-note and transcript
+                # projects. Filter on the project itself, not the container.
+                if selected_types and project.project_type not in selected_types:
                     continue
                 stat = path.stat()
                 manuscripts.append(
@@ -57,4 +62,3 @@ def discover_manuscripts(
                     )
                 )
     return manuscripts
-

@@ -5,6 +5,7 @@ from collections import Counter
 from typing import Dict, Iterable, Iterator, List, Sequence
 
 from .deepseek_client import DeepSeekClient
+from .discovery import DEFAULT_MANUSCRIPT_PROJECT_TYPES
 from .index_store import SermonSearchIndex
 from .models import (
     Citation,
@@ -31,7 +32,7 @@ class SermonSearchService:
     def reindex(self, request: ReindexRequest) -> ReindexResponse:
         return self.index.rebuild(
             series_ids=request.series_ids or None,
-            project_types=request.project_types or ["sermon_note"],
+            project_types=request.project_types or DEFAULT_MANUSCRIPT_PROJECT_TYPES,
             include_embeddings=request.include_embeddings,
         )
 
@@ -456,7 +457,7 @@ class SermonSearchService:
     def _ensure_index(self) -> None:
         status = self.index.status()
         if status.source_unit_count == 0:
-            self.index.rebuild(project_types=["sermon_note"])
+            self.index.rebuild(project_types=DEFAULT_MANUSCRIPT_PROJECT_TYPES)
 
     def _rank_cards(self, cards: Iterable[SourceCard]) -> List[SourceCard]:
         return sorted(cards, key=lambda card: card.score, reverse=True)
