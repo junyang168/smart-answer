@@ -10,6 +10,8 @@ from backend.api.sermon_converter_service import (
     get_image_path,
     get_page_segments,
     create_sermon_project,
+    get_sermon_transcript_info,
+    import_sermon_transcript,
     get_sermon_source,
     save_sermon_source,
     get_sermon_images,
@@ -37,6 +39,7 @@ from backend.api.sermon_converter_service import (
     Segment,
     SermonProject
 )
+from backend.api.sermon_converter_service import SermonTranscriptConflictError
 from backend.api.prompt_manager import (
     list_prompts,
     get_prompt,
@@ -99,13 +102,60 @@ class CreateSermonRequest(BaseModel):
     series_id: Optional[str] = None
     lecture_id: Optional[str] = None
     project_type: Optional[str] = "sermon_note"
+    sermon_transcript_id: Optional[str] = None
+    import_sermon_transcript: bool = False
 
 @router.post("/sermon-project", response_model=SermonProject)
 def create_sermon(payload: CreateSermonRequest) -> SermonProject:
     """
     Create a new logical sermon project from a list of pages.
     """
-    return create_sermon_project(payload.title, payload.pages, payload.series_id, payload.lecture_id, payload.project_type)
+    try:
+        project = create_sermon_project(
+            payload.title,
+            payload.pages,
+            payload.series_id,
+            payload.lecture_id,
+            payload.project_type,
+            payload.sermon_transcript_id,
+        )
+        if payload.import_sermon_transcript:
+            if not payload.sermon_transcript_id:
+                raise ValueError("Sermon Transcript ID is required for import")
+            import_sermon_transcript(project.id, payload.sermon_transcript_id)
+            return get_sermon_project_metadata(project.id) or project
+        return project
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/sermon-transcript")
+def get_transcript_info(transcript_id: str = Query(...)):
+    try:
+        return get_sermon_transcript_info(transcript_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+class ImportSermonTranscriptRequest(BaseModel):
+    transcript_id: str
+    overwrite: bool = False
+
+
+@router.post("/sermon-project/{project_id}/import-sermon-transcript")
+def import_project_sermon_transcript(project_id: str, payload: ImportSermonTranscriptRequest):
+    try:
+        return import_sermon_transcript(project_id, payload.transcript_id, payload.overwrite)
+    except SermonTranscriptConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 @router.get("/sermon-project/{project_id}/source")
 def get_project_source(project_id: str):
@@ -628,6 +678,7 @@ class UpdateMetadataRequest(BaseModel):
     title: str
     bible_verse: Optional[str] = None
     google_doc_link: Optional[str] = None
+    sermon_transcript_id: Optional[str] = None
 
 @router.post("/sermon-project/{project_id}/metadata", response_model=SermonProject)
 def update_project_metadata(project_id: str, payload: UpdateMetadataRequest):
@@ -637,9 +688,15 @@ def update_project_metadata(project_id: str, payload: UpdateMetadataRequest):
     try:
         # Import locally to ensure fresh reload during dev
         from backend.api.sermon_converter_service import update_sermon_project_metadata
-        return update_sermon_project_metadata(project_id, payload.title, payload.bible_verse, payload.google_doc_link)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Sermon project not found")
+        return update_sermon_project_metadata(
+            project_id,
+            payload.title,
+            payload.bible_verse,
+            payload.google_doc_link,
+            payload.sermon_transcript_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as ve:
         # Handle the validation error we explicitly raise
         raise HTTPException(status_code=400, detail=str(ve))

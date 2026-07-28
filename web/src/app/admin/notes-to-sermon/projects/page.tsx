@@ -15,6 +15,8 @@ export default function ProjectCreationPage() {
     const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
     const [title, setTitle] = useState("");
     const [projectType, setProjectType] = useState("sermon_note");
+    const [sermonTranscriptId, setSermonTranscriptId] = useState("");
+    const [importTranscript, setImportTranscript] = useState(true);
     const router = useRouter();
 
     useEffect(() => {
@@ -47,13 +49,22 @@ export default function ProjectCreationPage() {
             const res = await fetch("/api/admin/notes-to-sermon/sermon-project", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, pages: sortedPages, project_type: projectType })
+                body: JSON.stringify({
+                    title,
+                    pages: sortedPages,
+                    project_type: projectType,
+                    sermon_transcript_id: projectType === 'transcript' ? sermonTranscriptId.trim() || null : null,
+                    import_sermon_transcript: projectType === 'transcript' && importTranscript && Boolean(sermonTranscriptId.trim()),
+                })
             });
             const project = await res.json();
+            if (!res.ok) {
+                throw new Error(project.detail || "Failed to create project");
+            }
             // Redirect to the Unified Lab (will be created next)
             router.push(`/admin/notes-to-sermon/project/${project.id}`);
-        } catch (e) {
-            alert("Failed to create project");
+        } catch (e: any) {
+            alert(e.message || "Failed to create project");
         }
     };
 
@@ -158,9 +169,31 @@ export default function ProjectCreationPage() {
             </div>
 
             {projectType === 'transcript' ? (
-                <div className="mb-6 p-6 bg-purple-50 rounded border border-purple-200 text-center text-purple-800">
-                    <p className="font-semibold">Transcript Mode</p>
-                    <p className="text-sm mt-1">You will be able to paste the raw script directly in the editor.</p>
+                <div className="mb-6 p-6 bg-purple-50 rounded border border-purple-200 text-purple-900">
+                    <p className="font-semibold">Transcript Source</p>
+                    <p className="text-sm mt-1 mb-4">
+                        Enter the transcript ID exactly as it appears in the sermon transcript system. The .json suffix is optional.
+                    </p>
+                    <label className="block text-sm font-medium mb-1">Sermon Transcript ID</label>
+                    <input
+                        type="text"
+                        className="w-full p-2 border border-purple-200 rounded bg-white"
+                        value={sermonTranscriptId}
+                        onChange={(e) => setSermonTranscriptId(e.target.value)}
+                        placeholder="e.g. 2016 NYSC 專題：馬太福音釋經（五）4"
+                    />
+                    <label className="flex items-center gap-2 mt-3 text-sm">
+                        <input
+                            type="checkbox"
+                            checked={importTranscript}
+                            disabled={!sermonTranscriptId.trim()}
+                            onChange={(e) => setImportTranscript(e.target.checked)}
+                        />
+                        Import this transcript into Unified Input when the project is created
+                    </label>
+                    <p className="text-xs mt-3 text-purple-700">
+                        Leave the ID blank if you prefer to paste the transcript manually later.
+                    </p>
                 </div>
             ) : (
                 <div className="mb-6">

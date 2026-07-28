@@ -23,8 +23,11 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [projectTitle, setProjectTitle] = useState(projectId);
     const [bibleVerse, setBibleVerse] = useState("");
     const [showMetaEdit, setShowMetaEdit] = useState(false);
-    const [metaForm, setMetaForm] = useState({ title: "", bibleVerse: "", googleDocLink: "" });
+    const [metaForm, setMetaForm] = useState({ title: "", bibleVerse: "", googleDocLink: "", sermonTranscriptId: "" });
     const [googleDocLink, setGoogleDocLink] = useState("");
+    const [sermonTranscriptId, setSermonTranscriptId] = useState("");
+    const [sermonTranscriptSourceStage, setSermonTranscriptSourceStage] = useState("");
+    const [isTranscriptImporting, setIsTranscriptImporting] = useState(false);
     const [prompts, setPrompts] = useState<any[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<string>("");
     const [usedPromptId, setUsedPromptId] = useState<string | null>(null);
@@ -236,6 +239,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 if (metaData.project_type) {
                     setProjectType(metaData.project_type);
                 }
+                setSermonTranscriptId(metaData.sermon_transcript_id || "");
+                setSermonTranscriptSourceStage(metaData.sermon_transcript_source_stage || "");
                 if (metaData.audit_passed !== undefined) {
                     setAuditPassed(metaData.audit_passed);
                 }
@@ -737,12 +742,20 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
 
 
     const handleOpenMetaEdit = () => {
-        setMetaForm({ title: projectTitle, bibleVerse: bibleVerse, googleDocLink: googleDocLink });
+        setMetaForm({
+            title: projectTitle,
+            bibleVerse: bibleVerse,
+            googleDocLink: googleDocLink,
+            sermonTranscriptId: sermonTranscriptId,
+        });
         setShowMetaEdit(true);
     };
 
-    const handleSaveMeta = async () => {
-        if (!metaForm.title) return alert("Title is required");
+    const handleSaveMeta = async (closeModal = true): Promise<boolean> => {
+        if (!metaForm.title) {
+            alert("Title is required");
+            return false;
+        }
 
         try {
             const res = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/metadata`, {
@@ -751,20 +764,83 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 body: JSON.stringify({
                     title: metaForm.title,
                     bible_verse: metaForm.bibleVerse,
-                    google_doc_link: metaForm.googleDocLink
+                    google_doc_link: metaForm.googleDocLink,
+                    sermon_transcript_id: projectType === 'transcript' ? metaForm.sermonTranscriptId.trim() : null,
                 })
             });
+            const data = await res.json();
             if (res.ok) {
                 setProjectTitle(metaForm.title);
                 setBibleVerse(metaForm.bibleVerse);
                 setGoogleDocLink(metaForm.googleDocLink);
-                setShowMetaEdit(false);
+                setSermonTranscriptId(data.sermon_transcript_id || "");
+                setSermonTranscriptSourceStage(data.sermon_transcript_source_stage || "");
+                if (closeModal) setShowMetaEdit(false);
+                return true;
             } else {
-                const data = await res.json();
                 alert("Failed to update metadata: " + (data.detail || "Unknown error"));
+                return false;
             }
         } catch (e) {
             alert("Error updating metadata");
+            return false;
+        }
+    };
+
+    const handleImportSermonTranscript = async () => {
+        const transcriptId = metaForm.sermonTranscriptId.trim();
+        if (!transcriptId) {
+            alert("Enter a Sermon Transcript ID first.");
+            return;
+        }
+        const metadataSaved = await handleSaveMeta(false);
+        if (!metadataSaved) return;
+
+        let overwrite = false;
+        const visibleUnsavedSource = viewMode === 'source' && markdown !== originalMarkdown && markdown.trim().length > 0;
+        if (visibleUnsavedSource) {
+            overwrite = window.confirm(
+                "Unified Input has unsaved text. Replace it with the linked sermon transcript?"
+            );
+            if (!overwrite) return;
+        }
+
+        const runImport = async (allowOverwrite: boolean) => fetch(
+            `/api/admin/notes-to-sermon/sermon-project/${projectId}/import-sermon-transcript`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ transcript_id: transcriptId, overwrite: allowOverwrite }),
+            }
+        );
+
+        setIsTranscriptImporting(true);
+        try {
+            let res = await runImport(overwrite);
+            if (res.status === 409) {
+                const confirmed = window.confirm(
+                    "Unified Input already contains content. Replace it with the linked sermon transcript?"
+                );
+                if (!confirmed) return;
+                res = await runImport(true);
+            }
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Transcript import failed");
+
+            setSermonTranscriptId(data.transcript_id);
+            setSermonTranscriptSourceStage(data.source_stage);
+            setShowMetaEdit(false);
+            if (viewMode === 'source') {
+                setMarkdown(data.content || "");
+                setOriginalMarkdown(data.content || "");
+            } else {
+                setViewMode('source');
+            }
+            alert(`Imported ${data.character_count.toLocaleString()} characters from the ${data.source_stage} transcript.`);
+        } catch (e: any) {
+            alert(e.message || "Transcript import failed");
+        } finally {
+            setIsTranscriptImporting(false);
         }
     };
 
@@ -895,7 +971,12 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     <div>
                         <div className="flex items-center space-x-2">
                             <h1 className="text-xl font-bold">Project: {projectTitle}</h1>
-                            <button onClick={handleOpenMetaEdit} className="text-gray-400 hover:text-indigo-600">
+                            <button
+                                onClick={handleOpenMetaEdit}
+                                className="text-gray-400 hover:text-indigo-600"
+                                aria-label="Edit Project Info"
+                                title="Edit Project Info"
+                            >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                 </svg>
@@ -1420,6 +1501,30 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                     onChange={e => setMetaForm({ ...metaForm, googleDocLink: e.target.value })}
                                 />
                             </div>
+                            {projectType === 'transcript' && (
+                                <div className="rounded border border-purple-200 bg-purple-50 p-3">
+                                    <label className="block text-sm font-bold mb-1">Sermon Transcript ID</label>
+                                    <input
+                                        type="text"
+                                        className="w-full border p-2 rounded bg-white"
+                                        placeholder="e.g. 2016 NYSC 專題：馬太福音釋經（五）4"
+                                        value={metaForm.sermonTranscriptId}
+                                        onChange={e => setMetaForm({ ...metaForm, sermonTranscriptId: e.target.value })}
+                                    />
+                                    <p className="mt-1 text-xs text-purple-700">
+                                        Saving links the transcript without changing Unified Input.
+                                        {sermonTranscriptSourceStage && ` Last import used the ${sermonTranscriptSourceStage} version.`}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleImportSermonTranscript}
+                                        disabled={isTranscriptImporting || !metaForm.sermonTranscriptId.trim()}
+                                        className="mt-3 w-full px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-300"
+                                    >
+                                        {isTranscriptImporting ? "Importing…" : "Import to Unified Input"}
+                                    </button>
+                                </div>
+                            )}
                             <div className="flex justify-end space-x-2">
                                 <button
                                     onClick={() => setShowMetaEdit(false)}
@@ -1428,7 +1533,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={handleSaveMeta}
+                                    onClick={() => handleSaveMeta()}
                                     className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
                                 >
                                     Save

@@ -65,10 +65,15 @@ Transcript projects additionally use:
 *   `storage_root`: `"transcripts_to_manuscript"`
 *   `series_id` / `lecture_id`: bidirectional Series and Lecture association
 *   `bible_verse`: optional editor-supplied scripture-scope hint; transcript passage indexing can derive scope from manuscript content when this is empty
+*   `sermon_transcript_id`: exact source transcript identifier, stored without `.json`
+*   `sermon_transcript_source_stage`: stage used by the last import (`published`, `reviewed`, or `raw`)
+*   `sermon_transcript_imported_at`: UTC timestamp of the last Unified Input import
+*   `sermon_transcript_source_sha256`: hash of the imported transcript text for provenance
 *   `coverage_audit_stale`: whether the draft changed after the last Coverage Audit
 *   `audit_passed`: whether the current Coverage Audit passed
 *   `theological_audit_completed`: whether every final chunk has an executable audit result
 *   `theological_audit_passed`: whether every final chunk completed with zero findings; informational and not the Check In gate
+*   `theological_review_stale`: an integration patch changed the Draft after an older final review copy was created; the UI must offer **Restart Theological Review** and Check In remains disabled
 
 ### 2.4. Transcript Project Storage
 
@@ -118,6 +123,19 @@ This preserves existing notes-to-sermon routes while keeping transcript manuscri
 *   **Returns**: The full `AgentState` JSON object. Used by frontend to render output artifacts.
 
 ### 3.3. Transcript Pipeline Endpoints
+
+* **GET** `/admin/notes-to-sermon/sermon-transcript?transcript_id={id}`
+  * Validates an exact ID and reports the selected workflow stage and character count.
+  * Resolution order is `script_published`, `script_review`, then `script_patched`.
+* **POST** `/admin/notes-to-sermon/sermon-project/{id}/import-sermon-transcript`
+  * Payload: `{ "transcript_id": "...", "overwrite": false }`.
+  * Imports non-comment transcript paragraphs into `unified_source.md`, preserving reviewed subtitle Markdown.
+  * Returns `409 Conflict` when meaningful Unified Input exists and `overwrite` is false.
+  * Records source provenance and invalidates prior Coverage/theological-review status.
+* **POST** `/admin/notes-to-sermon/sermon-project`
+  * Transcript creation additionally accepts `sermon_transcript_id` and `import_sermon_transcript`.
+* **POST** `/admin/notes-to-sermon/sermon-project/{id}/metadata`
+  * Accepts `sermon_transcript_id`; updating this field links the transcript but does not import or overwrite Unified Input.
 
 * **POST** `/admin/notes-to-sermon/sermon-project/{id}/stage1/analyze`
   * Builds or refreshes the evidence inventory and logical manuscript plan.
@@ -176,7 +194,9 @@ This preserves existing notes-to-sermon routes while keeping transcript manuscri
   * Payload: `{ "project_id": "...", "application_id": "..." }`.
   * Applies every currently safe replacement to the target Project's `draft_v1.md`, never to `final.md`.
   * Leaves patches with human Draft edits or a changed/missing reviewed baseline untouched and reports them as conflicts requiring manual merge.
-  * Invalidates the review state of every changed target Project so its updated Draft follows the normal audit and check-in workflow.
+  * For a transcript target, writes a deterministic patch Coverage pass only when reversing all applied patches reconstructs the complete reviewed `final.md`; otherwise leaves Coverage stale.
+  * Marks a successfully certified transcript target's final review copy stale so the editor must explicitly restart theological review from the updated Draft.
+  * Notes targets and uncertified transcript targets follow their normal audit and check-in workflow.
 
 ## 4. Implementation Details
 
@@ -347,10 +367,11 @@ Implementation lives in `backend/api/series_manuscript_application.py`.
 Reviewed integration changes
   -> revalidate every earlier target final.md hash
   -> compose current Project draft from new + appendix units
-  -> persist 9 earlier-unit replacements as pending patches
+  -> persist earlier-unit replacements as pending patches
   -> persist all evidence dispositions in integration_application.json
   -> create editable draft chunks with integrated evidence lineage
-  -> mark Coverage Audit stale and reset Theological Review
+  -> write Integration Coverage Check (pass)
+  -> reset Theological Review
 ```
 
 Applying reviewed earlier-unit patches is a separate, recoverable step:
@@ -361,7 +382,9 @@ Pending replacement patch
   -> verify the same unit in draft_v1.md has no human divergence
   -> safe: replace only that H2 unit in draft_v1.md
   -> conflict: preserve the Draft unchanged and require manual merge
-  -> invalidate target audits; never write final.md
+  -> transcript target with exact reconstructed baseline: write patch Coverage pass
+  -> other target or failed reconstruction: invalidate target audit
+  -> mark any certified transcript review copy stale; never write final.md
 ```
 
 Artifacts:

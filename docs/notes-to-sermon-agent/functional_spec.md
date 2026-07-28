@@ -75,6 +75,19 @@ flowchart LR
 *   A Project may be assigned to an existing Lecture and Series; no additional hierarchy is required.
 *   Transcript projects are displayed alongside notes projects in the same Series administration and public manuscript presentation.
 
+#### Linking and importing the sermon transcript
+
+When creating a Transcript Project, or later from **Edit Project Info**, the editor may enter a **Sermon Transcript ID**. The ID is the transcript filename without the `.json` suffix, for example `2016 NYSC 專題：馬太福音釋經（五）4`.
+
+Linking and importing are separate actions:
+
+* **Save** records the link without changing Unified Input.
+* **Import to Unified Input** loads the linked transcript into `unified_source.md`.
+* During Project creation, the editor may choose to link and import in one step.
+* Source resolution prefers Published, then Reviewed, then Raw (`script_published` → `script_review` → `script_patched`).
+* An import never silently replaces meaningful Unified Input. The editor must explicitly confirm replacement.
+* Importing a new source invalidates prior Coverage and theological-review status; the manuscript pipeline must be rerun against the new source.
+
 #### Generation pipeline
 The transcript workflow operates on the complete transcript rather than first dividing it into arbitrary text chunks:
 
@@ -196,6 +209,47 @@ For a transcript target, patch application creates a deterministic **Integration
 Standalone **Generate Manuscript** is blocked after an Integration Application exists because it would ignore cross-lecture dispositions and reintroduce lecture repetition.
 
 The successful materialization records an automatic **Integration Coverage Check** as passed. It is based on the approved proposal, per-operation evidence coverage, exact one-disposition-per-evidence validation, patch-target hash validation, and Project-local chunk lineage. The ordinary AI Coverage Audit remains available as an optional rerun; it becomes required again only if the editor changes the generated Draft and therefore makes the earlier integration check stale.
+
+#### Cross-lecture editor workflow
+
+```mermaid
+flowchart TD
+    A["Later lecture Transcript"] --> B["Full evidence inventory"]
+    B --> C["Cross-lecture continuity analysis"]
+    C --> D["Review Merge Proposal"]
+    D --> E["Approve and build integration changes"]
+    E --> F["Generate current Project Draft"]
+    F --> G["Automatic Integration Coverage Check"]
+    G --> H["Start Theological Review"]
+    H --> I["Audit every Review Chunk"]
+    I --> J["Check In current Project"]
+    E --> K["Apply safe earlier-Project patches"]
+    K --> L["Updated target Draft"]
+    L --> M{"Can the published baseline be reconstructed exactly?"}
+    M -->|"Yes: transcript target"| N["Automatic Integration Patch Coverage Check"]
+    N --> O["Restart Theological Review"]
+    O --> P["Audit every new Review Chunk"]
+    P --> Q["Check In target Project"]
+    M -->|"No"| R["Preserve Draft and require manual merge"]
+    R --> S["Run the target Project's normal audits"]
+    S --> Q
+    J --> T["Refresh Series Index"]
+    Q --> T
+```
+
+The editor's operating sequence is:
+
+1. Run **跨讲整合** for the later transcript and review every proposed destination, existing-unit title, change summary, and Evidence assignment.
+2. Approve the proposal and build the integration changes.
+3. Select **生成整合后 Manuscript**. New main and appendix content is written only to the later lecture's Draft.
+4. Select **应用安全补丁**. Open **查看全部补丁** to see `已应用到 Draft`, `可安全应用`, and `需要手动合并` states and links to each target Project.
+5. For the later lecture, review the Draft, start theological review, audit every Review Chunk, and Check In. Its deterministic Integration Coverage Check is sufficient unless the Draft is edited afterward.
+6. For each updated transcript target, select **Restart Theological Review**, audit every regenerated Review Chunk, and Check In. The restart button appears only after the automatic patch coverage proof succeeds.
+7. For a notes target, follow its existing Fidelity Audit and Check In workflow.
+8. For a conflict, compare the published unit, current human-edited Draft unit, and proposed patch; merge intentionally, then complete the target Project's normal audits.
+9. After all intended Projects are checked in, use **Refresh Index** on the Series page so public chapter/topic navigation and search reflect the changes.
+
+`final.md` and public navigation do not change merely because a patch is generated or applied to a Draft. The explicit review, Check In, and index-refresh steps remain separate editorial decisions.
 
 ## 4. User Stories
 *   *As a Pastor, I want to see the "Exegetical Notes" before the draft is written, so I can trust the biblical foundation.*

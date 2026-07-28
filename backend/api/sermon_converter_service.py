@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import html
+import hashlib
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -26,6 +27,11 @@ IMAGES_ROOT = FULL_ARTICLE_ROOT / "images" / "scanned_mat"
 # Define the output directory
 NOTES_TO_SERMON_DIR = DATA_BASE_PATH / "notes_to_surmon"
 TRANSCRIPTS_TO_MANUSCRIPT_DIR = DATA_BASE_PATH / "transcripts_to_manuscript"
+SERMON_TRANSCRIPT_DIRS = (
+    ("published", DATA_BASE_PATH / "script_published"),
+    ("reviewed", DATA_BASE_PATH / "script_review"),
+    ("raw", DATA_BASE_PATH / "script_patched"),
+)
 
 class NoteImage(BaseModel):
     filename: str
@@ -57,7 +63,15 @@ class SermonProject(BaseModel):
     theological_audit_passed: Optional[bool] = None
     theological_audit_completed: Optional[bool] = None
     theological_review_stale: Optional[bool] = None
-    project_type: str = "sermon_note" 
+    project_type: str = "sermon_note"
+    sermon_transcript_id: Optional[str] = None
+    sermon_transcript_source_stage: Optional[str] = None
+    sermon_transcript_imported_at: Optional[str] = None
+    sermon_transcript_source_sha256: Optional[str] = None
+
+
+class SermonTranscriptConflictError(ValueError):
+    """Raised when an import would overwrite meaningful Unified Input."""
 
 
 MASTER_TEXT_METADATA_SCHEMA: Dict[str, Any] = {
@@ -276,7 +290,14 @@ def get_sermon_draft_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     return sermon_dir / "draft.md"
 
-def create_sermon_project(title: str, pages: List[str], series_id: Optional[str] = None, lecture_id: Optional[str] = None, project_type: str = "sermon_note") -> SermonProject:
+def create_sermon_project(
+    title: str,
+    pages: List[str],
+    series_id: Optional[str] = None,
+    lecture_id: Optional[str] = None,
+    project_type: str = "sermon_note",
+    sermon_transcript_id: Optional[str] = None,
+) -> SermonProject:
     """
     Create a new sermon project.
     1. Create a folder for the sermon.
@@ -287,6 +308,9 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
     
     project_id = _build_unique_project_id(title)
     normalized_project_type = "transcript" if project_type in {"transcript", "Fellowship Transcript"} else "sermon_note"
+    normalized_transcript_id = None
+    if sermon_transcript_id and sermon_transcript_id.strip():
+        normalized_transcript_id = get_sermon_transcript_info(sermon_transcript_id)["transcript_id"]
     compatibility_path = NOTES_TO_SERMON_DIR / project_id
     if normalized_project_type == "transcript":
         sermon_dir = TRANSCRIPTS_TO_MANUSCRIPT_DIR / project_id
@@ -320,6 +344,7 @@ def create_sermon_project(title: str, pages: List[str], series_id: Optional[str]
             if normalized_project_type == "transcript"
             else "notes_to_surmon"
         ),
+        "sermon_transcript_id": normalized_transcript_id,
     }
     with open(sermon_dir / "meta.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
@@ -604,6 +629,99 @@ def save_sermon_source(project_id: str, content: str) -> bool:
     with open(unified_file, "w", encoding="utf-8") as f:
         f.write(content)
     return True
+
+
+def _normalize_sermon_transcript_id(transcript_id: str) -> str:
+    normalized = (transcript_id or "").strip()
+    if normalized.lower().endswith(".json"):
+        normalized = normalized[:-5].strip()
+    if not normalized:
+        raise ValueError("Sermon Transcript ID is required")
+    if normalized in {".", ".."} or "/" in normalized or "\\" in normalized or "\x00" in normalized:
+        raise ValueError("Invalid Sermon Transcript ID")
+    return normalized
+
+
+def resolve_sermon_transcript(transcript_id: str) -> Dict[str, Any]:
+    """Resolve an exact sermon transcript ID to the best available workflow stage."""
+    normalized = _normalize_sermon_transcript_id(transcript_id)
+    for stage, folder in SERMON_TRANSCRIPT_DIRS:
+        path = folder / f"{normalized}.json"
+        if path.is_file():
+            return {"transcript_id": normalized, "source_stage": stage, "path": path}
+    raise FileNotFoundError(f'Sermon transcript "{normalized}" was not found')
+
+
+def _load_sermon_transcript_content(path: Path) -> str:
+    with open(path, "r", encoding="utf-8") as source_file:
+        payload = json.load(source_file)
+    paragraphs = payload.get("script", []) if isinstance(payload, dict) else payload
+    if not isinstance(paragraphs, list):
+        raise ValueError("Sermon transcript has an unsupported format")
+    text_parts = []
+    for paragraph in paragraphs:
+        if not isinstance(paragraph, dict) or paragraph.get("type") == "comment":
+            continue
+        text = str(paragraph.get("text") or "").strip()
+        if text:
+            text_parts.append(text)
+    if not text_parts:
+        raise ValueError("Sermon transcript does not contain any text")
+    return "\n\n".join(text_parts).strip() + "\n"
+
+
+def get_sermon_transcript_info(transcript_id: str) -> Dict[str, Any]:
+    resolved = resolve_sermon_transcript(transcript_id)
+    content = _load_sermon_transcript_content(resolved["path"])
+    return {
+        "transcript_id": resolved["transcript_id"],
+        "source_stage": resolved["source_stage"],
+        "character_count": len(content),
+    }
+
+
+def import_sermon_transcript(project_id: str, transcript_id: str, overwrite: bool = False) -> Dict[str, Any]:
+    """Import a linked sermon transcript into Unified Input with overwrite protection."""
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    meta_file = sermon_dir / "meta.json"
+    if not meta_file.exists():
+        raise FileNotFoundError(f"Sermon project {project_id} not found")
+    with open(meta_file, "r", encoding="utf-8") as meta_handle:
+        metadata = json.load(meta_handle)
+    if metadata.get("project_type") != "transcript":
+        raise ValueError("Sermon transcripts can only be imported into Transcript projects")
+
+    resolved = resolve_sermon_transcript(transcript_id)
+    content = _load_sermon_transcript_content(resolved["path"])
+    final_file = sermon_dir / "final.md"
+    had_final_review = final_file.is_file() and bool(final_file.read_text(encoding="utf-8").strip())
+    current_content = get_sermon_source(project_id).strip()
+    placeholder = f'# {metadata.get("title", "").strip()}'.strip()
+    has_meaningful_input = bool(current_content and current_content != placeholder)
+    if has_meaningful_input and current_content != content.strip() and not overwrite:
+        raise SermonTranscriptConflictError(
+            "Unified Input already contains content. Confirm replacement before importing."
+        )
+
+    save_sermon_source(project_id, content)
+    metadata["sermon_transcript_id"] = resolved["transcript_id"]
+    metadata["sermon_transcript_source_stage"] = resolved["source_stage"]
+    metadata["sermon_transcript_imported_at"] = _utcnow_iso()
+    metadata["sermon_transcript_source_sha256"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    metadata["coverage_audit_stale"] = True
+    metadata["audit_passed"] = False
+    metadata["theological_audit_passed"] = False
+    metadata["theological_audit_completed"] = False
+    metadata["theological_review_stale"] = had_final_review
+    with open(meta_file, "w", encoding="utf-8") as meta_handle:
+        json.dump(metadata, meta_handle, ensure_ascii=False, indent=2)
+    return {
+        "status": "success",
+        "content": content,
+        "transcript_id": resolved["transcript_id"],
+        "source_stage": resolved["source_stage"],
+        "character_count": len(content),
+    }
 
 def get_sermon_draft_path(project_id: str) -> Path:
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
@@ -2535,7 +2653,13 @@ def commit_sermon_project(project_id: str) -> str:
     return str(commit.hexsha)
 
 
-def update_sermon_project_metadata(project_id: str, title: str, bible_verse: Optional[str] = None, google_doc_link: Optional[str] = None) -> SermonProject:
+def update_sermon_project_metadata(
+    project_id: str,
+    title: str,
+    bible_verse: Optional[str] = None,
+    google_doc_link: Optional[str] = None,
+    sermon_transcript_id: Optional[str] = None,
+) -> SermonProject:
     """
     Update the project metadata (title, bible_verse, google_doc_id).
     """
@@ -2564,6 +2688,20 @@ def update_sermon_project_metadata(project_id: str, title: str, bible_verse: Opt
         
     # Standardize: Always write what we have
     data["bible_verse"] = bible_verse
+
+    if sermon_transcript_id is not None:
+        if sermon_transcript_id.strip():
+            normalized_transcript_id = resolve_sermon_transcript(sermon_transcript_id)["transcript_id"]
+            if data.get("sermon_transcript_id") != normalized_transcript_id:
+                data.pop("sermon_transcript_source_stage", None)
+                data.pop("sermon_transcript_imported_at", None)
+                data.pop("sermon_transcript_source_sha256", None)
+            data["sermon_transcript_id"] = normalized_transcript_id
+        else:
+            data.pop("sermon_transcript_id", None)
+            data.pop("sermon_transcript_source_stage", None)
+            data.pop("sermon_transcript_imported_at", None)
+            data.pop("sermon_transcript_source_sha256", None)
     
     # Handle google doc link updates
     if google_doc_link is not None:
