@@ -56,6 +56,7 @@ class SermonProject(BaseModel):
     audit_passed: Optional[bool] = None
     theological_audit_passed: Optional[bool] = None
     theological_audit_completed: Optional[bool] = None
+    theological_review_stale: Optional[bool] = None
     project_type: str = "sermon_note" 
 
 
@@ -770,6 +771,39 @@ def _get_transcript_pipeline_status(
                 "artifact": str(generated_path),
             }
         )
+    integration_application = _load_json_file(
+        sermon_dir / "integration_application.json", {}
+    )
+    integration_active = (
+        integration_application.get("status")
+        == "draft_generated_pending_patch_review"
+    )
+    integration_patches = integration_application.get("pending_patches", [])
+    integration_patch_results = integration_application.get("patch_results", {})
+    applied_integration_patch_count = sum(
+        1
+        for result in integration_patch_results.values()
+        if isinstance(result, dict) and result.get("status") == "applied"
+    )
+    if integration_active:
+        units = [
+            {
+                "unit_id": item.get("canonical_unit_id"),
+                "title": item.get("unit_title"),
+                "display_index": index,
+                "status": "completed",
+                "has_evidence": bool(item.get("evidence_ids")),
+                "evidence_count": len(item.get("evidence_ids", [])),
+                "evidence_ids": item.get("evidence_ids", []),
+                "has_generated": True,
+                "error": None,
+                "artifact": str(sermon_dir / "integration_application.json"),
+                "integration_change_type": item.get("change_type"),
+            }
+            for index, item in enumerate(
+                integration_application.get("local_units", []), start=1
+            )
+        ]
     counts = {
         "total_units": len(units),
         "completed_units": sum(1 for unit in units if unit["status"] == "completed"),
@@ -803,6 +837,13 @@ def _get_transcript_pipeline_status(
             ),
             "audit_finding_count": len(audit_payload.get("findings", [])),
             "current_unit_id": current_unit_id,
+            "integration_active": integration_active,
+            "integration_series_id": integration_application.get("series_id"),
+            "pending_patch_count": len(integration_patches),
+            "applied_patch_count": applied_integration_patch_count,
+            "remaining_patch_count": max(
+                0, len(integration_patches) - applied_integration_patch_count
+            ),
         },
         "units": units,
         "logs": logs,
@@ -890,6 +931,19 @@ def start_stage1_pipeline_job(
 
     meta = _load_json_file(project_dir / "meta.json", {})
     project_type = "transcript" if meta.get("project_type") == "transcript" else "sermon_note"
+
+    integration_application = _load_json_file(
+        project_dir / "integration_application.json", {}
+    )
+    if (
+        project_type == "transcript"
+        and integration_application.get("status") == "draft_generated_pending_patch_review"
+        and mode in {"split", "analyze", "generate_all", "generate_unit"}
+    ):
+        raise RuntimeError(
+            "This Project uses an approved cross-lecture integration. "
+            "Review the integrated manuscript instead of running standalone generation."
+        )
 
     current_status = get_stage1_pipeline_status(project_id)
     if current_status.get("job", {}).get("running"):
@@ -1169,20 +1223,35 @@ def _write_draft_chunks_from_markdown(project_id: str, content: str) -> None:
     chunks = split_markdown_for_review(content)
     meta_json = chunks_to_jsonable(chunks)
     if _is_transcript_project(project_id):
-        plan = _unwrap_transcript_artifact(NOTES_TO_SERMON_DIR / project_id / "manuscript_plan.json")
-        units = plan.get("units", []) if isinstance(plan, dict) else []
+        integration = _load_json_file(
+            NOTES_TO_SERMON_DIR / project_id / "integration_application.json", {}
+        )
+        if integration.get("status") == "draft_generated_pending_patch_review":
+            units = integration.get("local_units", [])
+        else:
+            plan = _unwrap_transcript_artifact(NOTES_TO_SERMON_DIR / project_id / "manuscript_plan.json")
+            units = plan.get("units", []) if isinstance(plan, dict) else []
         units_by_title = {
-            unit.get("title"): unit
+            unit.get("unit_title") or unit.get("title"): unit
             for unit in units
-            if isinstance(unit, dict) and unit.get("title")
+            if isinstance(unit, dict) and (unit.get("unit_title") or unit.get("title"))
         }
         for index, item in enumerate(meta_json):
             unit = units_by_title.get(item.get("title"))
+            if not unit:
+                unit = next(
+                    (
+                        candidate
+                        for title, candidate in units_by_title.items()
+                        if item.get("title", "").startswith(f"{title} —")
+                    ),
+                    None,
+                )
             if not unit and index < len(units):
                 unit = units[index]
             if not isinstance(unit, dict):
                 continue
-            item["unit_id"] = unit.get("unit_id")
+            item["unit_id"] = unit.get("unit_id") or unit.get("canonical_unit_id")
             item["evidence_ids"] = unit.get("evidence_ids", [])
             item["source_ranges"] = unit.get("source_ranges", [])
     _persist_draft_chunks(project_id, meta_json, {c.id: c.text for c in chunks})
@@ -1735,6 +1804,25 @@ def start_theological_review(project_id: str) -> bool:
 
     if _should_sync_draft_chunks_from_generated_units(project_id):
         sync_draft_chunks_from_generated_units(project_id)
+
+    project_meta_file = NOTES_TO_SERMON_DIR / project_id / "meta.json"
+    project_meta = _load_json_file(project_meta_file, {})
+    if project_meta.get("theological_review_stale"):
+        md_content = draft_file.read_text(encoding="utf-8")
+        chunks = split_markdown_for_review(md_content)
+        meta_json = chunks_to_jsonable(chunks)
+        _persist_final_chunks(
+            project_id,
+            meta_json,
+            {chunk.id: chunk.text.strip() + "\n" for chunk in chunks},
+        )
+        final_file.write_text(md_content, encoding="utf-8")
+        reset_theological_audit_state(project_id)
+        project_meta = _load_json_file(project_meta_file, {})
+        project_meta["theological_review_stale"] = False
+        with open(project_meta_file, "w", encoding="utf-8") as f:
+            json.dump(project_meta, f, indent=2, ensure_ascii=False)
+        return True
 
     if not final_file.exists() or not _has_final_chunk_bundle(project_id):
         draft_text = draft_file.read_text(encoding="utf-8")

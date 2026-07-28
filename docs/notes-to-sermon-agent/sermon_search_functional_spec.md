@@ -17,12 +17,12 @@ In scope:
 - Coverage questions, such as which verses are covered by a chapter or document group.
 - Source cards, numbered citations, supporting quotes, and related questions.
 - Index status and reindexing APIs.
+- Series-admin Refresh Index control with background progress status.
 
 Out of scope for the current version:
 
 - Multi-turn conversational memory.
 - User feedback/rating workflows.
-- Admin UI for index management.
 - Answer caching.
 - Custom reranker service.
 - Editing source manuscripts from the search UI.
@@ -56,6 +56,8 @@ Important corpus assumptions:
 - Topic/theme is a first-class retrieval dimension, not a secondary display label.
 - A document can cover a Matthew passage while also discussing theological themes and cross references from other biblical books.
 - Cross references must be indexed and searchable without being treated as the document's primary Matthew scope.
+- A Series may contain both notes and transcript Projects; Project type is evaluated per manuscript.
+- Transcript passage scope is derived from sustained exegesis in manuscript content when no explicit `bible_verse` hint exists. Project titles are not scripture evidence.
 - The module must scale to at least 400 manuscript documents.
 
 ## 5. Primary Workflows
@@ -105,6 +107,19 @@ The UI may present suggested question chips. Selecting a chip runs the same sear
 ### 5.5. Refresh and Share
 
 When a user runs a search, the page URL stores the query and mode. Refreshing the page reloads the same search state and reruns the query.
+
+### 5.6. Refresh a Series Index
+
+After publishing or editing a manuscript, an Editor can select **Refresh Index** on the Series administration page.
+
+Expected behavior:
+
+- The action runs asynchronously and reports progress or failure.
+- New or changed manuscripts receive chapter/topic extraction; unchanged cache entries are reused.
+- The global topic index is merged before manuscript search is rebuilt.
+- Existing semantic-search capability is preserved.
+- Only one refresh runs at a time.
+- Successful completion makes newly extracted passage topics available to the public `按章節` view and concept topics available to `按主題`.
 
 ## 6. UI Requirements
 
@@ -213,12 +228,22 @@ Initial model choice:
 
 ## 10. Indexing and Storage
 
-The index is a local SQLite database.
+The module uses two related local indexes:
+
+- `topic_index.json` for public chapter/topic navigation;
+- SQLite for document, reference, full-text, and optional semantic search.
 
 Default index path:
 
 ```text
 <data_base>/sermon_search/sermon_search.sqlite3
+```
+
+Topic-index paths:
+
+```text
+<data_base>/sermon_search/topic_index.json
+<data_base>/sermon_search/cache/{project_id}.json
 ```
 
 Indexed entities:
@@ -233,11 +258,14 @@ Indexed entities:
 Indexing requirements:
 
 - Discover Markdown manuscripts from the notes-to-manuscript data tree.
+- Include `sermon_note` and `transcript` Projects by default and filter by Project metadata rather than Series type.
 - Preserve series, lecture, project, document title, Google Doc ID, source path, content hash, and modification time.
 - Parse headings into source unit heading paths.
 - Extract primary passage references, cross references, document scope references, topics, terms, and content types.
 - Support reindexing with or without embeddings.
 - Rebuilds should avoid leaving a corrupted partial index as the active index.
+- Transcript topic extraction must derive passage scope from manuscript content when explicit scope metadata is absent.
+- Topic-cache validity must account for manuscript content, extraction model, and explicit scripture-scope state.
 
 Embedding requirements:
 
@@ -253,6 +281,10 @@ Backend API routes:
   - Returns index path, document count, source unit count, indexed timestamp, and whether embeddings are enabled.
 - `POST /sermon_search/reindex`
   - Rebuilds the index. Accepts series, project type, and embedding options.
+- `POST /admin/notes-to-sermon/series/{series_id}/index-refresh`
+  - Queues cache-aware topic extraction for the Series followed by global search reindexing.
+- `GET /admin/notes-to-sermon/series/{series_id}/index-refresh`
+  - Returns background refresh status and completion counts.
 - `POST /sermon_search/query`
   - Runs a non-streaming search and returns the full response.
 - `POST /sermon_search/query_stream`
@@ -377,6 +409,15 @@ Given a completed search:
 - Refreshing the page restores the query from the URL.
 - The search reruns or restores equivalent visible results.
 
+### Series Index Refresh
+
+Given a newly checked-in transcript with an empty `bible_verse` field:
+
+- Refresh Index derives passage topics from sustained exegesis in the manuscript body.
+- It does not infer a chapter from the Project title.
+- Supporting cross-references are not promoted to primary passage topics.
+- The new manuscript becomes visible in chapter/topic navigation and searchable QA after the job completes.
+
 ### Streaming
 
 Given a slow LLM response:
@@ -389,7 +430,7 @@ Given a slow LLM response:
 Potential future work:
 
 - Server-side answer cache for repeated questions.
-- Admin UI for status, reindex, and embedding health.
+- Expanded admin diagnostics for historical refresh runs and embedding health.
 - User-visible deep search trace.
 - Feedback controls for answer quality and bad citations.
 - Optional reranker model.

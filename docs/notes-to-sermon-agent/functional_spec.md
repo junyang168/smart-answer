@@ -124,6 +124,79 @@ Transcript projects use two distinct review gates:
 
 Fidelity Audit is hidden for transcript projects because whole-document Coverage Audit already performs the source-fidelity check. The existing Fidelity Audit remains available for notes projects.
 
+### 3.8. Publication and Series Index Refresh
+
+Checking in a manuscript publishes `final.md`, but chapter/topic navigation and manuscript search are derived indexes and must be refreshed after manuscript content changes.
+
+The Series administration page provides a **Refresh Index** action. It:
+
+1. extracts or reuses cached chapter and theological-topic entries for the selected Series;
+2. merges those entries into the global topic index; and
+3. rebuilds manuscript search while preserving semantic embeddings when they are already enabled.
+
+The action runs in the background and displays queued, running, completed, or failed status. Only one global refresh may run at a time because the topic and search indexes are shared resources.
+
+Series may contain both notes and transcript projects. Index discovery therefore filters on each Project's `project_type`, not on the Series transaction type.
+
+#### Scripture scope for transcript projects
+
+`bible_verse` is optional project metadata. It may provide an editor-supplied scope hint, but transcript indexing does not require it and does not infer scope from the Project title.
+
+When a transcript has no explicit scope, the topic extractor derives passage topics from the manuscript content itself:
+
+* sustained explanation of a Matthew passage may become a `passage` topic;
+* supporting references from Matthew or other biblical books remain cross-references;
+* editorial titles are not treated as biblical evidence; and
+* concept-only material remains searchable without being assigned to a chapter.
+
+Topic-cache reuse includes scripture-scope state. Changing or removing an explicit scope causes the transcript to be re-extracted instead of reusing an incompatible cached result.
+
+### 3.9. Cross-Lecture Continuity and Series Manuscript
+
+A transcript Project remains the source, evidence, and audit unit. The final reader-facing manuscript is a Series-level editorial work and is not constrained by lecture boundaries.
+
+Before integrating a later transcript, the system compares its evidence inventory with earlier checked-in manuscripts in the same Series order. Comparison is based on manuscript content, Scripture references, and argument function; Project titles are not evidence of duplication.
+
+Each current evidence item must receive exactly one editorial disposition:
+
+* `new`: create a new logical unit;
+* `duplicate`: omit the repeated expression and point to the existing canonical location;
+* `extension`: merge the new Scripture, qualification, example, or reasoning into the existing unit;
+* `correction`: update the existing unit while preserving the fact and substance of the correction;
+* `related_qa`: place the question and actual answer at the appropriate exegetical, theological, or application location;
+* `tangential_qa`: preserve substantive but off-mainline material in the appendix;
+* `non_substantive`: omit classroom logistics, banter, or repetition with no new substance.
+
+Coverage at this layer means that every evidence item is **accounted for**, not that every repeated statement must be written again. An omitted item must retain a reason and, for duplication, the earlier manuscript location that already represents it.
+
+**跨讲整合** first produces a Merge Proposal for editorial review and does not modify any manuscript. After the editor approves that proposal, **批准并建立 Series Draft** applies only the approved dispositions to a separate Series-level review draft:
+
+* unchanged canonical units are copied without regeneration;
+* extensions and corrections update their matched canonical unit;
+* new material creates a new main unit;
+* substantive tangents become appendix units;
+* exact duplicates and non-substantive classroom material are recorded in the evidence registry without being repeated in the prose; and
+* every current evidence ID must have exactly one recorded disposition before the draft can be saved.
+
+The Series Draft is review-only. Building it never overwrites a Project `final.md`, never changes a public resource page, and never refreshes the public index. Publication remains a separate future editorial action.
+
+The editor reviews a **本次整合变更** view rather than reading the complete combined Series manuscript. It lists changed existing units and newly proposed main/appendix units with their target Project, evidence IDs, change summary, and expandable generated content. The complete Series snapshot remains available only as a secondary diagnostic preview.
+
+After reviewing the change set, **生成整合后 Manuscript** materializes the later lecture safely:
+
+* new main and appendix units become the current transcript Project's editable `draft_v1.md`;
+* updates to earlier manuscripts are stored as pending replacement patches and do not overwrite any earlier `final.md`;
+* all evidence dispositions are copied into the current Project's Integration Application so Coverage Audit can distinguish local text, earlier represented content, pending patches, exact duplicates, and non-substantive omissions; and
+* an existing human-edited current draft or a changed patch target causes generation to stop instead of overwriting work based on a stale proposal.
+
+The editor may then choose **应用安全补丁**. Before changing an earlier Project, the system compares the reviewed `final.md` hash, locates the exact reviewed unit, and verifies that the corresponding text in `draft_v1.md` still matches that published baseline. A safe patch replaces only that unit in the earlier Project Draft. It never changes `final.md`, and it invalidates the target Project's previous audits so the updated Draft must pass its own review and check-in workflow. If the target Draft contains human edits, the patch is marked **需要手动合并** and is left untouched; other safe patches can still proceed.
+
+For a transcript target, patch application creates a deterministic **Integration Patch Coverage Check** only when reversing every applied patch reconstructs the complete published baseline exactly. This proves that the approved patches are the only Draft changes and allows the editor to proceed directly to **Restart Theological Review**. Restarting review explicitly replaces the old review copy with the updated Draft and resets all theological audit chunks; the published site remains unchanged until Check In. If reconstruction fails, Coverage remains stale and no automatic pass is granted.
+
+Standalone **Generate Manuscript** is blocked after an Integration Application exists because it would ignore cross-lecture dispositions and reintroduce lecture repetition.
+
+The successful materialization records an automatic **Integration Coverage Check** as passed. It is based on the approved proposal, per-operation evidence coverage, exact one-disposition-per-evidence validation, patch-target hash validation, and Project-local chunk lineage. The ordinary AI Coverage Audit remains available as an optional rerun; it becomes required again only if the editor changes the generated Draft and therefore makes the earlier integration check stale.
+
 ## 4. User Stories
 *   *As a Pastor, I want to see the "Exegetical Notes" before the draft is written, so I can trust the biblical foundation.*
 *   *As an Editor, I want to restart the generation if the "Architect" splits the beats incorrectly, so I can get a better structure.*
@@ -131,9 +204,14 @@ Fidelity Audit is hidden for transcript projects because whole-document Coverage
 *   *As an Editor, I want a transcript manuscript to preserve every cited biblical argument while presenting Dr. Wang's teaching in a logical order.*
 *   *As an Editor, I want theological findings to remain visible without allowing the AI to make the final editorial decision for me.*
 *   *As an Editor, I want saved manual changes to remain authoritative when I rerun an audit.*
+*   *As an Editor, I want to refresh a Series index after publication and see when the new manuscript is available in chapter, topic, and search navigation.*
+*   *As an Editor, I want later lectures to enrich or correct the best existing manuscript location without forcing readers to encounter classroom repetition.*
+*   *As an Editor, I want safe cross-lecture updates applied to earlier Drafts while preserving published manuscripts and protecting any human-edited unit from automatic replacement.*
 
 ## 5. Non-Functional Requirements
 *   **Latency**: The full workflow can take 2-5 minutes depending on note length; the UI must handle this without timing out (using async polling).
 *   **Persistence**: All state is saved to disk (`json` files), ensuring no work is lost on server restart.
 *   **Audit Safety**: Audit-only operations are read-only with respect to manuscript text.
 *   **Traceability**: Transcript evidence and planned units retain source line ranges and evidence IDs.
+*   **Index Integrity**: Index refreshes must not silently exclude transcript Projects or replace content-derived passage scope with assumptions from editorial titles.
+*   **Continuity Integrity**: Cross-lecture analysis must account for every current evidence ID exactly once and may never classify a new Scripture argument as an exact duplicate merely because the conclusion is familiar.

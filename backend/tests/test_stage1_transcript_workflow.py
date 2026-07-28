@@ -73,11 +73,14 @@ def test_stage1_openai_client_uses_gpt56_structured_output(monkeypatch):
 
 
 class _FakeTranscriptClient:
+    user_prompts = []
+
     def __init__(self, **_kwargs):
         self.calls = []
 
     def generate_json(self, _system_prompt, _user_prompt, schema, **_kwargs):
         self.calls.append(schema["name"])
+        self.__class__.user_prompts.append(_user_prompt)
         if schema["name"] == "transcript_evidence_inventory_v1":
             return {
                 "evidence": [
@@ -178,7 +181,7 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
         mode="analyze",
     )
     assert [unit["unit_id"] for unit in analyzed.units] == ["U001"]
-    assert not (output_dir / "transcript_generated_units").exists()
+    assert not list((output_dir / "transcript_generated_units").glob("*.json"))
 
     generated = transcript_pipeline.run_transcript_pipeline(
         input_path=source,
@@ -206,6 +209,93 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
     assert generated_unit_path.read_bytes() == generated_unit_before_audit
     assert audited.combined_markdown == human_edited_draft
     assert (output_dir / "draft_v1.md").read_text(encoding="utf-8") == human_edited_draft
+
+
+def test_integrated_coverage_audit_accepts_external_evidence_dispositions(monkeypatch, tmp_path):
+    _FakeTranscriptClient.user_prompts.clear()
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    source = tmp_path / "transcript.md"
+    source.write_text("教授提出问题\n太17:5的证据\n教授后来回答", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="analyze",
+    )
+    (output_dir / "draft_v1.md").write_text(
+        "## 本讲新增内容\n\n### 釋經\n\n保留本讲新增内容。",
+        encoding="utf-8",
+    )
+    (output_dir / "integration_application.json").write_text(
+        json.dumps(
+            {
+                "status": "draft_generated_pending_patch_review",
+                "local_units": [{"unit_title": "本讲新增内容", "evidence_ids": ["E001"]}],
+                "pending_patches": [{"unit_title": "既有单元更新", "evidence_ids": ["E003"], "markdown": "更新内容"}],
+                "evidence_dispositions": [
+                    {"evidence_id": "E001", "disposition": "fully_represented"},
+                    {"evidence_id": "E002", "disposition": "represented_by_existing_unit"},
+                    {"evidence_id": "E003", "disposition": "merged_as_extension"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    audited = transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="audit",
+        force=True,
+    )
+
+    assert audited.audit["overall_status"] == "pass"
+    assert any("【Integration Application】" in prompt for prompt in _FakeTranscriptClient.user_prompts)
+    assert not list((output_dir / "transcript_generated_units").glob("*.json"))
+
+
+def test_integrated_stage1_status_distinguishes_total_and_remaining_patches(monkeypatch, tmp_path):
+    project_id = "integrated-status"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir()
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+    (project_dir / "draft_v1.md").write_text("## 本讲新增内容", encoding="utf-8")
+    (project_dir / "integration_application.json").write_text(
+        json.dumps(
+            {
+                "status": "draft_generated_pending_patch_review",
+                "series_id": "series-1",
+                "local_units": [{"canonical_unit_id": "local-1", "unit_title": "本讲新增内容"}],
+                "pending_patches": [
+                    {"canonical_unit_id": "patch-1"},
+                    {"canonical_unit_id": "patch-2"},
+                    {"canonical_unit_id": "patch-3"},
+                ],
+                "patch_results": {
+                    "patch-1": {"status": "applied"},
+                    "patch-2": {"status": "applied"},
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    status = service._get_transcript_pipeline_status(
+        project_id,
+        project_dir,
+        {},
+        {},
+        False,
+        None,
+        [],
+    )
+
+    assert status["summary"]["pending_patch_count"] == 3
+    assert status["summary"]["applied_patch_count"] == 2
+    assert status["summary"]["remaining_patch_count"] == 1
+    assert status["summary"]["integration_series_id"] == "series-1"
 
 
 def test_transcript_fidelity_audit_uses_only_assigned_unit_evidence(monkeypatch, tmp_path):

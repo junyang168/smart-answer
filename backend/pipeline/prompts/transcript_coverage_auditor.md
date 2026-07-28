@@ -12,6 +12,13 @@
 7. 语言是否平和清楚，同时保留教授实质立场。
 8. Markdown 是否维持 `## 单元标题` 与 `### 釋經 / 神學意義 / 生活應用 / 附錄` 的格式。
 
+跨讲整合稿可能另附 `Integration Application`。在这种情况下：
+- `local_units` 是本 Project manuscript 应实际呈现的新正文或附录；
+- `pending_patches` 是已生成、但仍等待编辑确认后写入较早 Project 的完整替换单元；
+- `evidence_dispositions` 记录完全重复、合并进既有单元、进入本讲稿或省略课堂流程等去向。
+
+审核时必须同时检查本 Project manuscript 与 Integration Application。已由 `pending_patches` 准确表达、或明确标记为 `represented_by_existing_unit` 的 evidence，不得误报为本讲稿遗漏；但若其目标、理由或生成内容不能实际承载该 evidence，仍应报告。`omitted_non_substantive` 只能用于没有独立论证价值的课堂流程。每个 evidence ID 必须且只能有一个去向。
+
 finding 必须包含：
 - 类型和严重程度
 - 对应 unit_id（若可定位）

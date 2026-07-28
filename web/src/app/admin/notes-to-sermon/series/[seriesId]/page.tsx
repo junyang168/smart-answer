@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import SeriesContinuityPanel from "./SeriesContinuityPanel";
 
 // Types
 interface Project {
@@ -51,6 +52,7 @@ export default function SeriesDetailPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [indexRefresh, setIndexRefresh] = useState<IndexRefreshStatus | null>(null);
     const [indexRefreshError, setIndexRefreshError] = useState("");
+    const [continuityProject, setContinuityProject] = useState<Project | null>(null);
 
     // Lecture UI State
     const [isCreatingLecture, setIsCreatingLecture] = useState(false);
@@ -451,6 +453,14 @@ export default function SeriesDetailPage() {
 
     return (
         <div className="container mx-auto p-6">
+            {continuityProject ? (
+                <SeriesContinuityPanel
+                    seriesId={seriesId}
+                    projectId={continuityProject.id}
+                    projectTitle={continuityProject.title}
+                    onClose={() => setContinuityProject(null)}
+                />
+            ) : null}
             <div className="mb-6">
                 <Link href="/admin/notes-to-sermon/series" className="text-gray-500 hover:text-gray-700 text-sm">
                     &larr; Back to Series List
@@ -652,6 +662,17 @@ export default function SeriesDetailPage() {
                                                 <span className="text-gray-400">Unknown Project ({pid})</span>
                                             )}
                                             <div className="flex items-center space-x-2">
+                                                {proj?.project_type === "transcript" &&
+                                                series.lectures.flatMap(item => item.project_ids).indexOf(pid) > 0 ? (
+                                                    <button
+                                                        data-testid={`continuity-${pid}`}
+                                                        onClick={() => setContinuityProject(proj)}
+                                                        className="rounded bg-purple-50 px-2 py-1 text-xs font-semibold text-purple-700 hover:bg-purple-100"
+                                                        title="Compare this transcript with earlier checked-in manuscripts"
+                                                    >
+                                                        跨讲整合
+                                                    </button>
+                                                ) : null}
                                                 <div className="flex flex-col space-y-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                                                     {pIndex > 0 && (
                                                         <button

@@ -400,7 +400,22 @@ class TranscriptPipeline:
         summary.generated_units = self._load_generated_units(
             generated_dir, source.sha256, summary.units
         )
-        if mode == "audit" and len(summary.generated_units) != len(summary.units):
+        integration_context: Optional[Dict[str, Any]] = None
+        integration_path = output_dir / "integration_application.json"
+        if integration_path.is_file():
+            candidate = json.loads(integration_path.read_text(encoding="utf-8"))
+            if candidate.get("status") == "draft_generated_pending_patch_review":
+                expected_ids = {item["evidence_id"] for item in summary.evidence}
+                disposition_ids = [
+                    item.get("evidence_id")
+                    for item in candidate.get("evidence_dispositions", [])
+                ]
+                if set(disposition_ids) != expected_ids or len(disposition_ids) != len(set(disposition_ids)):
+                    raise ValueError(
+                        "Integration Application does not account for every evidence ID exactly once"
+                    )
+                integration_context = candidate
+        if mode == "audit" and not integration_context and len(summary.generated_units) != len(summary.units):
             raise ValueError("Coverage audit requires every planned manuscript unit to be generated")
         draft_path = output_dir / "draft_v1.md"
         if mode == "audit":
@@ -413,11 +428,17 @@ class TranscriptPipeline:
             summary.combined_markdown = self._combine_units(summary.generated_units)
             draft_path.write_text(summary.combined_markdown, encoding="utf-8")
 
-        all_units_ready = len(summary.generated_units) == len(summary.units)
+        all_units_ready = bool(integration_context) or len(summary.generated_units) == len(summary.units)
         if all_units_ready:
             self._progress("全文覆蓋審核", 85)
             self._log("auditor", "开始执行全文 coverage audit。")
-            audit = self._audit(source, evidence_payload, plan_payload, summary.combined_markdown)
+            audit = self._audit(
+                source,
+                evidence_payload,
+                plan_payload,
+                summary.combined_markdown,
+                integration_context=integration_context,
+            )
             self._save_cached_payload(output_dir / "coverage_audit.json", source.sha256, audit)
 
             repairable = self._group_repairable_findings(audit)
@@ -441,7 +462,13 @@ class TranscriptPipeline:
                 )
                 summary.combined_markdown = self._combine_units(summary.generated_units)
                 (output_dir / "draft_v1.md").write_text(summary.combined_markdown, encoding="utf-8")
-                audit = self._audit(source, evidence_payload, plan_payload, summary.combined_markdown)
+                audit = self._audit(
+                    source,
+                    evidence_payload,
+                    plan_payload,
+                    summary.combined_markdown,
+                    integration_context=integration_context,
+                )
                 self._save_cached_payload(output_dir / "coverage_audit.json", source.sha256, audit)
 
             summary.audit = audit
@@ -590,12 +617,15 @@ class TranscriptPipeline:
         evidence_payload: Dict[str, Any],
         plan_payload: Dict[str, Any],
         manuscript: str,
+        integration_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         user_prompt = (
             f"【完整 transcript】\n{source.content}\n\n"
             f"【Evidence Inventory】\n{json.dumps(evidence_payload, ensure_ascii=False)}\n\n"
             f"【Manuscript Plan】\n{json.dumps(plan_payload, ensure_ascii=False)}\n\n"
-            f"【Generated Manuscript】\n{manuscript}"
+            f"【Generated Manuscript】\n{manuscript}\n\n"
+            f"【Integration Application】\n"
+            f"{json.dumps(integration_context, ensure_ascii=False) if integration_context else 'null'}"
         )
         return self.llm.generate_json(
             self.prompts["coverage_auditor"], user_prompt, AUDIT_SCHEMA,

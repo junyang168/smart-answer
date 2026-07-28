@@ -87,6 +87,11 @@ type Stage1Status = {
         audit_status?: string | null;
         audit_finding_count?: number;
         current_unit_id?: string | null;
+        integration_active?: boolean;
+        integration_series_id?: string | null;
+        pending_patch_count?: number;
+        applied_patch_count?: number;
+        remaining_patch_count?: number;
     };
     units: Stage1Unit[];
     logs: Stage1Log[];
@@ -257,6 +262,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
     const isTranscript = state.project.project_type === "transcript" || promptBundle?.project_type === "transcript";
     const splitReady = state.summary.split_completed;
     const analysisReady = Boolean(state.summary.analysis_completed);
+    const integrationActive = Boolean(state.summary.integration_active);
     const failedUnits = state.units.filter((unit) => unit.status === "failed");
 
     return (
@@ -293,7 +299,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                     force: analysisReady,
                                     confirmMessage: analysisReady ? "Rerun full transcript evidence extraction and logical planning?" : undefined,
                                 })}
-                                disabled={running || requesting !== null}
+                                disabled={running || requesting !== null || integrationActive}
                                 className="inline-flex items-center rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                             >
                                 {requesting?.endsWith("/stage1/analyze") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
@@ -319,11 +325,13 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                     ? (analysisReady ? "Generate the manuscript from the reviewed evidence and logical plan?" : "Analyze the full transcript, build the plan, and generate the manuscript now?")
                                     : (splitReady ? "Generate manuscripts for all units now?" : "Run the full Stage 1 pipeline now?"),
                             })}
-                            disabled={running || requesting !== null}
+                            disabled={running || requesting !== null || integrationActive}
                             className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
                         >
                             {requesting?.endsWith("/stage1/generate-all") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-                            {isTranscript ? "Generate Manuscript" : (splitReady ? "Generate All Units" : "Run Full Pipeline")}
+                            {isTranscript
+                                ? (integrationActive ? "Integrated Manuscript Ready" : "Generate Manuscript")
+                                : (splitReady ? "Generate All Units" : "Run Full Pipeline")}
                         </button>
                         {isTranscript
                             && state.summary.total_units > 0
@@ -335,7 +343,9 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                 className="inline-flex items-center rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:bg-gray-100"
                             >
                                 {requesting?.endsWith("/stage1/audit") ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-                                Coverage Audit
+                                {integrationActive && state.summary.audit_status === "pass"
+                                    ? "Rerun Coverage Audit (Optional)"
+                                    : "Coverage Audit"}
                             </button>
                         )}
                         <button
@@ -356,6 +366,24 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                         </button>
                     </div>
                 </div>
+
+                {integrationActive ? (
+                    <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm leading-6 text-indigo-900">
+                        <p className="min-w-0 flex-1">
+                            本 Project 已使用审核通过的跨讲整合生成。独立分析和 Generate Manuscript 已锁定，以免重新引入与前讲重复的内容。
+                            已应用 {state.summary.applied_patch_count || 0} 个既有单元补丁，尚有 {state.summary.remaining_patch_count ?? state.summary.pending_patch_count ?? 0} 个需要处理；你可以打开 Draft 编辑本讲新增内容，并按需要重新执行 Coverage Audit。
+                        </p>
+                        {state.summary.integration_series_id ? (
+                            <button
+                                type="button"
+                                onClick={() => router.push(`/admin/notes-to-sermon/series/${encodeURIComponent(state.summary.integration_series_id || "")}/draft`)}
+                                className="shrink-0 rounded-lg border border-indigo-300 bg-white px-4 py-2 font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-100"
+                            >
+                                查看全部 {state.summary.pending_patch_count || 0} 个补丁
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
 
                 {showPromptReview && (
                     <div className="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">

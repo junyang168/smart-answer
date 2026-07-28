@@ -31,6 +31,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     const [auditPassed, setAuditPassed] = useState<boolean | null>(null);
     const [theologicalAuditPassed, setTheologicalAuditPassed] = useState<boolean | null>(null);
     const [theologicalAuditCompleted, setTheologicalAuditCompleted] = useState<boolean | null>(null);
+    const [theologicalReviewStale, setTheologicalReviewStale] = useState(false);
     const [projectType, setProjectType] = useState<string>("sermon_note");
     const [masterTextMeta, setMasterTextMeta] = useState({
         title: "",
@@ -244,6 +245,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 if (metaData.theological_audit_completed !== undefined) {
                     setTheologicalAuditCompleted(metaData.theological_audit_completed);
                 }
+                setTheologicalReviewStale(metaData.theological_review_stale === true);
 
                 const finalRes = await fetch(`/api/admin/notes-to-sermon/sermon-project/${projectId}/final`);
                 if (finalRes.ok) {
@@ -636,7 +638,10 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
     };
 
     const handleStartTheologicalReview = async () => {
-        if (!confirm("Start Theological Review? This will create a final text copy of the current draft.")) return;
+        const message = theologicalReviewStale
+            ? "Restart Theological Review from the updated Draft? This replaces the previous review copy; the published site is unchanged until Check In."
+            : "Start Theological Review? This will create a final text copy of the current draft.";
+        if (!confirm(message)) return;
         try {
             if (markdown !== originalMarkdown) {
                 await handleSave();
@@ -646,6 +651,7 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                 setHasFinal(true);
                 setTheologicalAuditPassed(false);
                 setTheologicalAuditCompleted(false);
+                setTheologicalReviewStale(false);
                 setViewMode('final');
             } else {
                 alert("Failed to start review.");
@@ -874,8 +880,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
         ? "Must pass AI Audit first"
         : auditPassed !== true
             ? "Run and pass Coverage Audit first"
-            : !hasFinal
-                ? "Start Theological Review first"
+            : !hasFinal || theologicalReviewStale
+                ? (theologicalReviewStale ? "Restart Theological Review from the updated Draft" : "Start Theological Review first")
                 : "Complete the theological audit for every Review Chunk";
 
     return (
@@ -915,13 +921,13 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                     >
                         {isGenerating ? "Generating..." : "Generate Draft"}
                     </button>
-                    {!hasFinal && auditPassed === true && (
+                    {(!hasFinal || theologicalReviewStale) && auditPassed === true && (
                         <button
                             onClick={handleStartTheologicalReview}
                             className={`px-3 py-1 rounded font-bold text-sm text-white bg-green-600 hover:bg-green-700`}
-                            title="Start Theological Review"
+                            title={theologicalReviewStale ? "Restart Theological Review from updated Draft" : "Start Theological Review"}
                         >
-                            Start Theological Review
+                            {theologicalReviewStale ? "Restart Theological Review" : "Start Theological Review"}
                         </button>
                     )}
                     <button
@@ -944,8 +950,8 @@ export default function MultiPageEditor({ projectId }: { projectId: string }) {
                                 <Link href={`/admin/notes-to-sermon/project/${projectId}/generation`} className="underline hover:text-amber-900">
                                     Run and pass Coverage Audit first
                                 </Link>
-                            ) : !hasFinal ? (
-                                "Start Theological Review first"
+                            ) : !hasFinal || theologicalReviewStale ? (
+                                theologicalReviewStale ? "Restart Theological Review from the updated Draft" : "Start Theological Review first"
                             ) : (
                                 "Audit every Review Chunk; findings remain visible for your judgment."
                             )}

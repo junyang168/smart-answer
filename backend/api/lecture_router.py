@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from backend.api.lecture_manager import (
@@ -15,6 +15,26 @@ from backend.api.series_index_refresh import (
     get_series_index_refresh_status,
     queue_series_index_refresh,
     run_series_index_refresh,
+)
+from backend.api.series_manuscript_service import (
+    ContinuityStatus,
+    get_continuity_status,
+    queue_continuity_analysis,
+    run_continuity_analysis,
+)
+from backend.api.series_manuscript_builder import (
+    SeriesBuildStatus,
+    get_series_build_status,
+    get_series_draft,
+    get_series_draft_review,
+    queue_series_draft_build,
+    run_series_draft_build,
+)
+from backend.api.series_manuscript_application import (
+    apply_safe_integration_patches,
+    IntegratedManuscriptStatus,
+    get_integrated_manuscript_status,
+    materialize_integrated_manuscript,
 )
 
 router = APIRouter(prefix="/admin/notes-to-sermon/series", tags=["Lecture Series"])
@@ -38,6 +58,37 @@ class AssignProjectRequest(BaseModel):
 
 class ReorderLecturesRequest(BaseModel):
     lecture_ids: List[str]
+
+
+class ContinuityAnalysisRequest(BaseModel):
+    project_id: str
+
+
+class SeriesDraftBuildRequest(BaseModel):
+    project_id: str
+    proposal_id: str
+
+
+class IntegratedManuscriptRequest(BaseModel):
+    project_id: str
+    proposal_id: str
+
+
+class ApplyIntegrationPatchesRequest(BaseModel):
+    project_id: str
+    application_id: str
+
+
+class SeriesDraftContent(BaseModel):
+    series_id: str
+    markdown: str
+    proposal_id: Optional[str] = None
+    project_id: Optional[str] = None
+    built_at: Optional[str] = None
+    changed_unit_count: int = 0
+    new_unit_count: int = 0
+    evidence_count: int = 0
+    changes: List[dict] = Field(default_factory=list)
 
 
 class PublicLectureProject(BaseModel):
@@ -241,6 +292,131 @@ def start_index_refresh_endpoint(series_id: str, background_tasks: BackgroundTas
         )
     background_tasks.add_task(run_series_index_refresh, series_id)
     return status
+
+
+@router.get("/{series_id}/continuity/{project_id}", response_model=ContinuityStatus)
+def get_continuity_status_endpoint(series_id: str, project_id: str):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    return get_continuity_status(series_id, project_id)
+
+
+@router.post("/{series_id}/continuity", response_model=ContinuityStatus, status_code=202)
+def start_continuity_analysis_endpoint(
+    series_id: str,
+    payload: ContinuityAnalysisRequest,
+    background_tasks: BackgroundTasks,
+):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if payload.project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    project = get_sermon_project_metadata(payload.project_id)
+    if not project or project.project_type != "transcript":
+        raise HTTPException(status_code=400, detail="Continuity analysis requires a transcript project")
+    status, accepted = queue_continuity_analysis(series_id, payload.project_id)
+    if not accepted:
+        raise HTTPException(status_code=409, detail="Continuity analysis is already running")
+    background_tasks.add_task(run_continuity_analysis, series_id, payload.project_id)
+    return status
+
+
+@router.get("/{series_id}/series-draft/{project_id}", response_model=SeriesBuildStatus)
+def get_series_draft_status_endpoint(series_id: str, project_id: str):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    return get_series_build_status(series_id, project_id)
+
+
+@router.get("/{series_id}/series-draft", response_model=SeriesDraftContent)
+def get_series_draft_content_endpoint(series_id: str):
+    if not get_series(series_id):
+        raise HTTPException(status_code=404, detail="Series not found")
+    markdown = get_series_draft(series_id)
+    if not markdown:
+        raise HTTPException(status_code=404, detail="Series Draft not found")
+    review = get_series_draft_review(series_id)
+    return SeriesDraftContent(series_id=series_id, markdown=markdown, **review)
+
+
+@router.post("/{series_id}/series-draft", response_model=SeriesBuildStatus, status_code=202)
+def start_series_draft_build_endpoint(
+    series_id: str,
+    payload: SeriesDraftBuildRequest,
+    background_tasks: BackgroundTasks,
+):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if payload.project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    status, accepted = queue_series_draft_build(series_id, payload.project_id, payload.proposal_id)
+    if not accepted:
+        raise HTTPException(status_code=409, detail="Series Draft build is already running")
+    background_tasks.add_task(
+        run_series_draft_build,
+        series_id,
+        payload.project_id,
+        payload.proposal_id,
+    )
+    return status
+
+
+@router.get("/{series_id}/integrated-manuscript/{project_id}", response_model=IntegratedManuscriptStatus)
+def get_integrated_manuscript_status_endpoint(series_id: str, project_id: str):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    return get_integrated_manuscript_status(series_id, project_id)
+
+
+@router.post("/{series_id}/integrated-manuscript", response_model=IntegratedManuscriptStatus)
+def generate_integrated_manuscript_endpoint(
+    series_id: str,
+    payload: IntegratedManuscriptRequest,
+):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if payload.project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    try:
+        return materialize_integrated_manuscript(
+            series_id,
+            payload.project_id,
+            payload.proposal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{series_id}/integrated-manuscript/apply-patches", response_model=IntegratedManuscriptStatus)
+def apply_integration_patches_endpoint(
+    series_id: str,
+    payload: ApplyIntegrationPatchesRequest,
+):
+    series = get_series(series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not found")
+    if payload.project_id not in [item for lecture in series.lectures for item in lecture.project_ids]:
+        raise HTTPException(status_code=404, detail="Project is not assigned to this series")
+    try:
+        return apply_safe_integration_patches(
+            series_id,
+            payload.project_id,
+            payload.application_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.put("/{series_id}", response_model=LectureSeries)
 def update_series_endpoint(series_id: str, payload: CreateSeriesRequest):
