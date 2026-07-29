@@ -11,10 +11,14 @@
 6. 每个 evidence ID 必须且只能被分配到一个单元；不可遗漏或重复。
 7. 不可改变 evidence 的意思、分类或关系，也不可添加新的证据。
 8. 单元顺序按读者理解所需的逻辑顺序安排，不必复制教授讲课顺序。
+9. 区分正文单元与附录单元：正文使用 `unit_kind=main`，离题但有实质支持作用的材料使用 `unit_kind=appendix`。
+10. 每个附录必须用 `supports_unit_ids` 指明它支持或展开的正文/前置单元；若一段材料与任何正文论证都没有关系，不应为了保存而制造附录。正文单元的 `supports_unit_ids` 必须为空数组。
 
 每个单元必须提供：
 - `unit_id`：U001、U002……
 - `title`
+- `unit_kind`：`main` 或 `appendix`；标题本身不要添加「一、」或「附录一」，编号由程序统一生成
+- `supports_unit_ids`：附录所支持或展开的单元 ID；正文必须为空数组
 - `central_question`：没有明确问句时可为 null
 - `direct_answer`：教授没有明确回答时必须为 null
 - `scripture_range`

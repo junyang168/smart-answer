@@ -39,10 +39,12 @@ def test_transcript_prompt_bundle_is_runtime_specific():
     }
     assert "不可先按连续行号切割全文" in transcript["evidence_inventory"]
     assert "每个 evidence ID 必须且只能被分配到一个单元" in transcript["manuscript_planner"]
+    assert "supports_unit_ids" in transcript["manuscript_planner"]
     assert "問題 → 直接回答" in transcript["unit_generator"]
     assert "交叉經文及其證明作用" in transcript["unit_generator"]
     assert "出处 → 经文 → 解释" in transcript["unit_generator"]
     assert "scripture_presentations" in transcript["evidence_inventory"]
+    assert "supporting_appendices" in transcript["unit_generator"]
     assert "### 釋經" in transcript["unit_generator"]
     assert "covered_evidence_ids" in transcript["unit_generator"]
     assert "完整 transcript" in transcript["coverage_auditor"]
@@ -140,6 +142,8 @@ class _FakeTranscriptClient:
                 "units": [{
                     "unit_id": "temporary",
                     "title": "问题与回答",
+                    "unit_kind": "main",
+                    "supports_unit_ids": [],
                     "central_question": "问题是什么？",
                     "direct_answer": "这是教授的回答。",
                     "scripture_range": "太17:5",
@@ -203,7 +207,8 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
     )
     assert generated.audit["overall_status"] == "pass"
     assert generated.generated_units[0]["covered_evidence_ids"] == ["E001", "E002", "E003"]
-    assert generated.combined_markdown.startswith("## 问题与回答\n\n### 釋經")
+    assert generated.generated_units[0]["heading_title"] == "一、问题与回答"
+    assert generated.combined_markdown.startswith("## 一、问题与回答\n\n### 釋經")
     assert generated.combined_markdown.count("### 釋經") == 1
     assert not generated.generated_units[0]["manuscript_sections"]["exegesis"].startswith("###")
     assert "### 神學意義" not in generated.combined_markdown
@@ -211,7 +216,7 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
     generated_unit_path = output_dir / "transcript_generated_units" / "U001.json"
     generated_unit_before_audit = generated_unit_path.read_bytes()
     human_edited_draft = (
-        "## 人工整理後的講稿\n\n### 釋經\n\n保留人工修改。太 17:5：\n\n"
+        "## 一、人工整理後的講稿\n\n### 釋經\n\n保留人工修改。太 17:5：\n\n"
         "> 这是我的爱子。\n\n这段经文支持这个回答。"
     )
     (output_dir / "draft_v1.md").write_text(human_edited_draft, encoding="utf-8")
@@ -256,6 +261,67 @@ def test_scripture_presentation_requires_reference_and_blockquote(monkeypatch):
     assert good_issues == []
 
 
+def test_appendix_links_use_stable_heading_anchors(monkeypatch):
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    pipeline = transcript_pipeline.TranscriptPipeline()
+    unit = {
+        "supporting_appendices": [{
+            "unit_id": "U003",
+            "title": "附錄一：啟示錄文體",
+            "anchor": "附錄一-啟示錄文體",
+        }],
+    }
+
+    assert pipeline._appendix_link_issues(
+        {"exegesis": "詳見[附錄一：啟示錄文體](#附錄一-啟示錄文體)。"},
+        unit,
+    ) == []
+    assert pipeline._appendix_link_issues(
+        {"exegesis": "附錄另有說明，但沒有提供連結。"},
+        unit,
+    ) == ["缺少指向附錄一：啟示錄文體的内部链接 ](#附錄一-啟示錄文體)"]
+    assert pipeline._strip_unit_numbering("附錄三：既有標題") == "既有標題"
+    assert pipeline._chinese_number(12) == "十二"
+
+
+def test_whole_manuscript_structure_checks_numbering_and_contextual_appendix_link(monkeypatch):
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    pipeline = transcript_pipeline.TranscriptPipeline()
+    plan = {
+        "units": [
+            {
+                "unit_id": "U001",
+                "unit_kind": "main",
+                "heading_title": "一、正文",
+                "evidence_ids": ["E001"],
+                "supporting_appendices": [{
+                    "title": "附錄一：背景",
+                    "anchor": "附錄一-背景",
+                    "unit_id": "U002",
+                }],
+            },
+            {
+                "unit_id": "U002",
+                "unit_kind": "appendix",
+                "heading_title": "附錄一：背景",
+                "evidence_ids": ["E002"],
+                "supporting_appendices": [],
+            },
+        ]
+    }
+    good = "## 一、正文\n\n詳見[附錄一：背景](#附錄一-背景)。\n\n## 附錄一：背景\n\n內容。"
+    assert pipeline._whole_manuscript_structure_findings(plan, good) == []
+
+    missing_link = "## 一、正文\n\n沒有連結。\n\n## 附錄一：背景\n\n內容。"
+    findings = pipeline._whole_manuscript_structure_findings(plan, missing_link)
+    assert [item["finding_id"] for item in findings] == ["NAV001"]
+    assert findings[0]["unit_id"] == "U001"
+
+    missing_number = "## 正文\n\n內容。\n\n## 附錄一：背景\n\n內容。"
+    findings = pipeline._whole_manuscript_structure_findings(plan, missing_number)
+    assert findings[0]["description"] == "单元标题必须使用连续编号前缀：## 一、..."
+
+
 def test_coverage_audit_reuses_legacy_analysis_without_generated_units(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
     source = tmp_path / "transcript.md"
@@ -274,7 +340,7 @@ def test_coverage_audit_reuses_legacy_analysis_without_generated_units(monkeypat
         artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
 
     (output_dir / "draft_v1.md").write_text(
-        "## 人工稿\n\n太 17:5：\n\n> 这是我的爱子。\n\n这段经文支持教授的回答。",
+        "## 一、人工稿\n\n太 17:5：\n\n> 这是我的爱子。\n\n这段经文支持教授的回答。",
         encoding="utf-8",
     )
     audited = transcript_pipeline.run_transcript_pipeline(

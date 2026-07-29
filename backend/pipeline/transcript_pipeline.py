@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from backend.api.openai_client import DEFAULT_OPENAI_GENERATION_MODEL
+from backend.api.sermon_search.slugify import slugify_heading
 from backend.pipeline.stage1 import (
     SourceDocument,
     Stage1OpenAIClient,
@@ -153,6 +154,14 @@ PLAN_SCHEMA: Dict[str, Any] = {
                     "properties": {
                         "unit_id": {"type": "string"},
                         "title": {"type": "string"},
+                        "unit_kind": {
+                            "type": "string",
+                            "enum": ["main", "appendix"],
+                        },
+                        "supports_unit_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                         "central_question": {
                             "anyOf": [{"type": "string"}, {"type": "null"}]
                         },
@@ -184,6 +193,8 @@ PLAN_SCHEMA: Dict[str, Any] = {
                     "required": [
                         "unit_id",
                         "title",
+                        "unit_kind",
+                        "supports_unit_ids",
                         "central_question",
                         "direct_answer",
                         "scripture_range",
@@ -552,8 +563,12 @@ class TranscriptPipeline:
         )
         evidence_ids = {item["evidence_id"] for item in evidence_payload["evidence"]}
         assigned: List[str] = []
+        unit_id_map: Dict[str, str] = {}
         for index, unit in enumerate(payload.get("units", []), start=1):
-            unit["unit_id"] = f"U{index:03d}"
+            original_unit_id = str(unit.get("unit_id") or f"U{index:03d}")
+            normalized_unit_id = f"U{index:03d}"
+            unit_id_map[original_unit_id] = normalized_unit_id
+            unit["unit_id"] = normalized_unit_id
             assigned.extend(unit.get("evidence_ids", []))
             assigned_set = set(unit.get("evidence_ids", []))
             category_ids = []
@@ -561,6 +576,41 @@ class TranscriptPipeline:
                 category_ids.extend(values)
             if set(category_ids) != assigned_set or len(category_ids) != len(set(category_ids)):
                 raise ValueError(f"Category assignments do not exactly match {unit['unit_id']} evidence IDs")
+        unit_ids = {unit["unit_id"] for unit in payload.get("units", [])}
+        main_counter = 0
+        appendix_counter = 0
+        for unit in payload.get("units", []):
+            support_ids = [
+                unit_id_map.get(str(target_id), str(target_id))
+                for target_id in unit.get("supports_unit_ids", [])
+            ]
+            unit["supports_unit_ids"] = support_ids
+            if any(target_id not in unit_ids or target_id == unit["unit_id"] for target_id in support_ids):
+                raise ValueError(f"Invalid appendix support targets for {unit['unit_id']}: {support_ids}")
+            title = self._strip_unit_numbering(str(unit.get("title") or ""))
+            unit["title"] = title
+            if unit.get("unit_kind") == "appendix":
+                appendix_counter += 1
+                if not support_ids:
+                    raise ValueError(f"Appendix {unit['unit_id']} must support at least one manuscript unit")
+                heading_title = f"附錄{self._chinese_number(appendix_counter)}：{title}"
+            else:
+                main_counter += 1
+                if support_ids:
+                    raise ValueError(f"Main unit {unit['unit_id']} cannot declare supports_unit_ids")
+                heading_title = f"{self._chinese_number(main_counter)}、{title}"
+            unit["heading_title"] = heading_title
+            unit["heading_anchor"] = slugify_heading(heading_title)
+
+        units_by_id = {unit["unit_id"]: unit for unit in payload.get("units", [])}
+        for appendix in (unit for unit in payload.get("units", []) if unit.get("unit_kind") == "appendix"):
+            link = {
+                "unit_id": appendix["unit_id"],
+                "title": appendix["heading_title"],
+                "anchor": appendix["heading_anchor"],
+            }
+            for target_id in appendix["supports_unit_ids"]:
+                units_by_id[target_id].setdefault("supporting_appendices", []).append(link)
         assigned_set = set(assigned)
         missing = sorted(evidence_ids - assigned_set)
         unknown = sorted(assigned_set - evidence_ids)
@@ -613,11 +663,13 @@ class TranscriptPipeline:
         unknown = sorted(covered - set(assigned))
         normalized_sections = self._normalize_manuscript_sections(payload["manuscript_sections"])
         scripture_format_issues = self._scripture_format_issues(normalized_sections, evidence)
-        if missing or unknown or scripture_format_issues:
+        appendix_link_issues = self._appendix_link_issues(normalized_sections, unit)
+        if missing or unknown or scripture_format_issues or appendix_link_issues:
             retry_prompt = (
                 f"{user_prompt}\n\n【确定性覆盖检查失败】\n"
                 f"遗漏 evidence IDs：{missing}\n非本单元 evidence IDs：{unknown}\n"
                 f"经文呈现问题：{scripture_format_issues}\n"
+                f"附录链接问题：{appendix_link_issues}\n"
                 "请重新输出完整单元；保留已正确内容，明确补足遗漏，并移除非本单元材料。"
             )
             payload = self.llm.generate_json(
@@ -629,21 +681,29 @@ class TranscriptPipeline:
             unknown = sorted(covered - set(assigned))
             normalized_sections = self._normalize_manuscript_sections(payload["manuscript_sections"])
             scripture_format_issues = self._scripture_format_issues(normalized_sections, evidence)
-            if missing or unknown or scripture_format_issues:
+            appendix_link_issues = self._appendix_link_issues(normalized_sections, unit)
+            if missing or unknown or scripture_format_issues or appendix_link_issues:
                 raise ValueError(
                     f"Unit {unit['unit_id']} coverage failed: missing={missing}, unknown={unknown}, "
-                    f"scripture_format={scripture_format_issues}"
+                    f"scripture_format={scripture_format_issues}, appendix_links={appendix_link_issues}"
                 )
         return {
             "unit_id": unit["unit_id"],
             "unit_title": unit["title"],
+            "heading_title": unit.get("heading_title", unit["title"]),
+            "heading_anchor": unit.get("heading_anchor", slugify_heading(unit["title"])),
+            "unit_kind": unit.get("unit_kind", "main"),
+            "supports_unit_ids": unit.get("supports_unit_ids", []),
+            "supporting_appendices": unit.get("supporting_appendices", []),
             "scripture_range": unit.get("scripture_range", ""),
             "source_ranges": source_ranges,
             "evidence_ids": assigned,
             "manuscript_sections": normalized_sections,
             "covered_evidence_ids": payload["covered_evidence_ids"],
             "coverage_notes": payload.get("coverage_notes", []),
-            "generated_markdown": self._render_unit(unit["title"], normalized_sections),
+            "generated_markdown": self._render_unit(
+                unit.get("heading_title", unit["title"]), normalized_sections
+            ),
         }
 
     def _audit(
@@ -667,9 +727,12 @@ class TranscriptPipeline:
             timeout_seconds=max(self.timeout_seconds, 300.0),
         )
         if not integration_context:
-            deterministic_findings = self._whole_manuscript_scripture_findings(
-                evidence_payload, plan_payload, manuscript
-            )
+            deterministic_findings = [
+                *self._whole_manuscript_scripture_findings(
+                    evidence_payload, plan_payload, manuscript
+                ),
+                *self._whole_manuscript_structure_findings(plan_payload, manuscript),
+            ]
             if deterministic_findings:
                 existing_ids = {finding.get("finding_id") for finding in audit.get("findings", [])}
                 audit.setdefault("findings", []).extend(
@@ -714,6 +777,40 @@ class TranscriptPipeline:
             if isinstance(value, str) and value.strip():
                 blocks.append(f"### {label}\n\n{value.strip()}")
         return "\n\n".join(blocks).strip()
+
+    @staticmethod
+    def _chinese_number(value: int) -> str:
+        digits = "零一二三四五六七八九"
+        if value < 10:
+            return digits[value]
+        if value == 10:
+            return "十"
+        if value < 20:
+            return f"十{digits[value - 10]}"
+        if value < 100:
+            tens, ones = divmod(value, 10)
+            return f"{digits[tens]}十{digits[ones] if ones else ''}"
+        return str(value)
+
+    @staticmethod
+    def _strip_unit_numbering(title: str) -> str:
+        return re.sub(
+            r"^(?:[一二三四五六七八九十百]+、|附[錄录][一二三四五六七八九十百]+[：:、])\s*",
+            "",
+            title.strip(),
+        )
+
+    @staticmethod
+    def _appendix_link_issues(
+        sections: Dict[str, Optional[str]], unit: Dict[str, Any]
+    ) -> List[str]:
+        markdown = "\n\n".join(value for value in sections.values() if value)
+        issues = []
+        for appendix in unit.get("supporting_appendices", []):
+            expected = f"](#{appendix['anchor']})"
+            if expected not in markdown:
+                issues.append(f"缺少指向{appendix['title']}的内部链接 {expected}")
+        return issues
 
     def _normalize_manuscript_sections(
         self, sections: Dict[str, Optional[str]]
@@ -868,6 +965,85 @@ class TranscriptPipeline:
                     "recommended_fix": (
                         "按 notes-to-manuscript 格式单独标示经文出处；若 transcript 提供经文原句，"
                         "将原句放入 Markdown blockquote，再另起段落说明这段经文在论证中的作用。"
+                    ),
+                })
+                finding_index += 1
+        return findings
+
+    def _whole_manuscript_structure_findings(
+        self,
+        plan_payload: Dict[str, Any],
+        manuscript: str,
+    ) -> List[Dict[str, Any]]:
+        """Verify headings and appendix navigation produced by the current plan schema.
+
+        Legacy plans do not have ``heading_title`` and are intentionally skipped.
+        """
+        heading_matches = list(re.finditer(r"^##\s+(.+?)\s*$", manuscript, re.MULTILINE))
+        sections: List[Dict[str, str]] = []
+        for index, match in enumerate(heading_matches):
+            end = heading_matches[index + 1].start() if index + 1 < len(heading_matches) else len(manuscript)
+            sections.append({
+                "title": match.group(1).strip(),
+                "markdown": manuscript[match.start():end],
+            })
+
+        findings: List[Dict[str, Any]] = []
+        finding_index = 1
+        main_counter = 0
+        appendix_counter = 0
+        planned_units = [
+            unit for unit in plan_payload.get("units", [])
+            if str(unit.get("heading_title") or "").strip()
+        ]
+        section_by_unit_id = {
+            str(unit.get("unit_id")): sections[index]
+            for index, unit in enumerate(planned_units)
+            if unit.get("unit_id") and index < len(sections)
+        }
+        for unit_index, unit in enumerate(planned_units):
+            unit_id = unit.get("unit_id")
+            if unit.get("unit_kind") == "appendix":
+                appendix_counter += 1
+                required_prefix = f"附錄{self._chinese_number(appendix_counter)}："
+            else:
+                main_counter += 1
+                required_prefix = f"{self._chinese_number(main_counter)}、"
+            unit_section = sections[unit_index] if unit_index < len(sections) else None
+            if unit_section is None or not unit_section["title"].startswith(required_prefix):
+                findings.append({
+                    "finding_id": f"NAV{finding_index:03d}",
+                    "type": "tone_or_format",
+                    "severity": "medium",
+                    "unit_id": unit_id,
+                    "evidence_ids": unit.get("evidence_ids", []),
+                    "description": f"单元标题必须使用连续编号前缀：## {required_prefix}...",
+                    "recommended_fix": "恢复规划中的连续中文单元编号或附录编号。",
+                })
+                finding_index += 1
+                if unit_section is None:
+                    continue
+            unit_markdown = unit_section["markdown"]
+            for appendix in unit.get("supporting_appendices", []):
+                appendix_section = section_by_unit_id.get(str(appendix.get("unit_id") or ""))
+                target_anchor = (
+                    slugify_heading(appendix_section["title"])
+                    if appendix_section
+                    else appendix["anchor"]
+                )
+                expected = f"](#{target_anchor})"
+                if expected in unit_markdown:
+                    continue
+                findings.append({
+                    "finding_id": f"NAV{finding_index:03d}",
+                    "type": "tone_or_format",
+                    "severity": "medium",
+                    "unit_id": unit_id,
+                    "evidence_ids": unit.get("evidence_ids", []),
+                    "description": f"正文未链接其支持附录：{appendix['title']}",
+                    "recommended_fix": (
+                        "在最相关的正文句子或段落说明附录与论证的关系，并加入内部链接 "
+                        f"[{appendix['title']}](#{target_anchor})"
                     ),
                 })
                 finding_index += 1
