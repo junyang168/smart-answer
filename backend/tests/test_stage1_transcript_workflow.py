@@ -41,6 +41,8 @@ def test_transcript_prompt_bundle_is_runtime_specific():
     assert "每个 evidence ID 必须且只能被分配到一个单元" in transcript["manuscript_planner"]
     assert "問題 → 直接回答" in transcript["unit_generator"]
     assert "交叉經文及其證明作用" in transcript["unit_generator"]
+    assert "出处 → 经文 → 解释" in transcript["unit_generator"]
+    assert "scripture_presentations" in transcript["evidence_inventory"]
     assert "### 釋經" in transcript["unit_generator"]
     assert "covered_evidence_ids" in transcript["unit_generator"]
     assert "完整 transcript" in transcript["coverage_auditor"]
@@ -90,6 +92,7 @@ class _FakeTranscriptClient:
                         "category": "釋經",
                         "content": "问题是什么？",
                         "scripture_refs": [],
+                        "scripture_presentations": [],
                         "source_ranges": [{"start_line": 1, "end_line": 1}],
                         "supports": [],
                         "answers_question": None,
@@ -101,6 +104,7 @@ class _FakeTranscriptClient:
                         "category": "釋經",
                         "content": "这是教授的回答。",
                         "scripture_refs": [],
+                        "scripture_presentations": [],
                         "source_ranges": [{"start_line": 3, "end_line": 3}],
                         "supports": [],
                         "answers_question": "E001",
@@ -112,6 +116,12 @@ class _FakeTranscriptClient:
                         "category": "釋經",
                         "content": "交叉经文支持这个回答。",
                         "scripture_refs": ["太17:5"],
+                        "scripture_presentations": [{
+                            "reference": "太 17:5",
+                            "mode": "direct_quote",
+                            "quoted_text": "这是我的爱子。",
+                            "role": "支持这个回答。",
+                        }],
                         "source_ranges": [{"start_line": 2, "end_line": 2}],
                         "supports": ["E002"],
                         "answers_question": None,
@@ -152,7 +162,10 @@ class _FakeTranscriptClient:
         if schema["name"] == "transcript_manuscript_unit_v1":
             return {
                 "manuscript_sections": {
-                    "exegesis": "### 釋經\n\n问题的直接回答，并说明太17:5如何支持这个回答。",
+                    "exegesis": (
+                        "### 釋經\n\n问题的直接回答。太 17:5：\n\n"
+                        "> 这是我的爱子。\n\n这段经文支持这个回答。"
+                    ),
                     "theological_significance": None,
                     "application": None,
                     "appendix": None,
@@ -172,7 +185,7 @@ class _FakeTranscriptClient:
 def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monkeypatch, tmp_path):
     monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
     source = tmp_path / "transcript.md"
-    source.write_text("教授提出问题\n太17:5的证据\n教授后来回答", encoding="utf-8")
+    source.write_text("教授提出问题\n太17:5：这是我的爱子。\n教授后来回答", encoding="utf-8")
     output_dir = tmp_path / "output"
 
     analyzed = transcript_pipeline.run_transcript_pipeline(
@@ -197,7 +210,10 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
 
     generated_unit_path = output_dir / "transcript_generated_units" / "U001.json"
     generated_unit_before_audit = generated_unit_path.read_bytes()
-    human_edited_draft = "## 人工整理後的講稿\n\n### 釋經\n\n保留人工修改。"
+    human_edited_draft = (
+        "## 人工整理後的講稿\n\n### 釋經\n\n保留人工修改。太 17:5：\n\n"
+        "> 这是我的爱子。\n\n这段经文支持这个回答。"
+    )
     (output_dir / "draft_v1.md").write_text(human_edited_draft, encoding="utf-8")
     audited = transcript_pipeline.run_transcript_pipeline(
         input_path=source,
@@ -211,11 +227,72 @@ def test_transcript_pipeline_uses_global_evidence_plan_generation_and_audit(monk
     assert (output_dir / "draft_v1.md").read_text(encoding="utf-8") == human_edited_draft
 
 
+def test_scripture_presentation_requires_reference_and_blockquote(monkeypatch):
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    pipeline = transcript_pipeline.TranscriptPipeline()
+    evidence = [{
+        "evidence_id": "E003",
+        "scripture_presentations": [{
+            "reference": "太 17:5",
+            "mode": "direct_quote",
+            "quoted_text": "这是我的爱子。",
+            "role": "支持这个回答。",
+        }],
+    }]
+
+    bad_issues = pipeline._scripture_presentation_issues(
+        "太 17:5 说这是我的爱子，因此支持这个回答。",
+        evidence,
+    )
+    assert bad_issues == [{
+        "evidence_id": "E003",
+        "reason": "经文原句未使用 Markdown blockquote：太 17:5",
+    }]
+
+    good_issues = pipeline._scripture_presentation_issues(
+        "太 17:5：\n\n> 这是我的爱子。\n\n这段经文支持这个回答。",
+        evidence,
+    )
+    assert good_issues == []
+
+
+def test_coverage_audit_reuses_legacy_analysis_without_generated_units(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
+    source = tmp_path / "transcript.md"
+    source.write_text("教授提出问题\n太17:5：这是我的爱子。\n教授后来回答", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="analyze",
+    )
+
+    for artifact_name in ("evidence_inventory.json", "manuscript_plan.json"):
+        artifact_path = output_dir / artifact_name
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        artifact["pipeline_signature"] = "legacy-signature"
+        artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+
+    (output_dir / "draft_v1.md").write_text(
+        "## 人工稿\n\n太 17:5：\n\n> 这是我的爱子。\n\n这段经文支持教授的回答。",
+        encoding="utf-8",
+    )
+    audited = transcript_pipeline.run_transcript_pipeline(
+        input_path=source,
+        output_dir=output_dir,
+        mode="audit",
+        force=True,
+    )
+
+    assert audited.audit["overall_status"] == "pass"
+    assert not list((output_dir / "transcript_generated_units").glob("*.json"))
+
+
 def test_integrated_coverage_audit_accepts_external_evidence_dispositions(monkeypatch, tmp_path):
     _FakeTranscriptClient.user_prompts.clear()
     monkeypatch.setattr(transcript_pipeline, "Stage1OpenAIClient", _FakeTranscriptClient)
     source = tmp_path / "transcript.md"
-    source.write_text("教授提出问题\n太17:5的证据\n教授后来回答", encoding="utf-8")
+    source.write_text("教授提出问题\n太17:5：这是我的爱子。\n教授后来回答", encoding="utf-8")
     output_dir = tmp_path / "output"
     transcript_pipeline.run_transcript_pipeline(
         input_path=source,

@@ -30,6 +30,14 @@
 - 不可使用煽情呼召、誇張斷言、課堂插話或流程旁白。
 - manuscript 主體必須是連續散文；小標題只用於幫助閱讀，不可用條列代替論證。
 
+經文呈現格式：
+- 必須遵循既有 notes-to-manuscript 的「出处 → 经文 → 解释」顺序。
+- `scripture_presentations.mode=direct_quote` 时，先单独标示 `reference`，下一段用 Markdown blockquote（每行以 `> ` 开头）逐字呈现 `quoted_text`，然后另起普通段落解释该经文的 `role`。
+- `mode=paraphrase` 时，用普通散文准确转述并标示 `reference`；不得使用 blockquote，不得把转述伪装成经文原句。
+- `mode=reference_only` 时，只按来源实际作用标示出处，不可补写经文内容。
+- 不可把长段经文原句、释经说明和神学结论挤在同一个普通段落。
+- 相邻经文若分别承担不同论证作用，应分别呈现；同一出处的连续原句可以放在同一个 blockquote 中。
+
 {{CATEGORY_DEFINITIONS}}
 
 輸出結構：
@@ -40,7 +48,7 @@
 - 上述四個欄位只輸出該分類的正文，絕對不可在欄位內再次輸出 `### 釋經`、`### 神學意義`、`### 生活應用` 或 `### 附錄`；外層 Markdown 標題由程序統一加入。
 - 只輸出有來源支持的類別；沒有內容時該欄位為 null。
 - 每個欄位內可以有少量 `####` 小標題，但正文不得以 bullet points 或編號提綱為主。
-- 經文原句只有在來源確實提供時才使用 Markdown blockquote；經文轉述不可偽裝成直接引文。
+- 經文原句只有在來源確實提供時才使用 Markdown blockquote；經文轉述不可偽裝成直接引文。不得改写 `quoted_text`，也不得用省略号替换其内容。
 
 覆蓋自查：
 - `covered_evidence_ids` 必須逐一列出本單元實際已在正文中呈現的 evidence ID。

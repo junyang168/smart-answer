@@ -96,6 +96,20 @@ The transcript workflow operates on the complete transcript rather than first di
 3. **Manuscript generation**: writes each logical unit in calm, readable prose without flattening Scripture evidence or adding unsupported answers.
 4. **Whole-document Coverage Audit**: compares the complete manuscript with the evidence inventory and transcript.
 
+#### Scripture citation presentation
+
+Scripture evidence must retain both its argumentative role and its intended presentation. The evidence inventory distinguishes:
+
+* **Direct quotation**: show the compact reference (for example, `太 16:25`), place the transcript's exact biblical wording in a Markdown blockquote, and explain its evidential role in a separate paragraph.
+* **Paraphrase**: keep the paraphrase in prose, identify it as a paraphrase, and retain the reference; do not turn it into a quotation.
+* **Reference only**: retain the reference and its role without inventing biblical wording absent from the transcript.
+
+This follows the established notes-to-manuscript reading pattern of **reference → quoted Scripture → explanation**. Generation performs a deterministic check before accepting each unit. Coverage Audit repeats the check against the current human-edited Draft and lists the affected unit, Evidence ID, problem, and recommended correction. Coverage Audit is read-only and never applies the correction automatically.
+
+For an already reviewed manuscript, a verified **presentation-only Scripture migration** may retain its existing Coverage pass. This exception applies only when the editor moves an existing direct quotation into a blockquote, normalizes its reference, and verifies that the quoted wording is present in the linked transcript. It must not add or remove an argument, change an Evidence disposition, rewrite an interpretation, or alter the four-way classification. If any substantive content changes, Coverage becomes stale under the normal rule.
+
+The migration must update both **Generated Draft** and **Master Text** so that the editor does not review two different manuscripts. Because Master Text and its Review Chunks changed, the theological-review results are reset even though Coverage remains valid.
+
 There is no user-facing Unit Split stage. Generated units are implementation artifacts used for resumability and lineage, not separate Projects.
 
 #### Manuscript format

@@ -24,6 +24,13 @@
 1. 每条 evidence 必须有唯一 `evidence_id`，按 E001、E002……编号。
 2. 每条 evidence 必须保留一个或多个准确的 `source_ranges`，对应使用者提供的行号。
 3. 每一处交叉经文必须保留书卷章节目，并说明它在教授论证中支持什么；不可只列经文编号。
+   同时为每一处经文填写 `scripture_presentations`：
+   - `reference`：供 manuscript 显示的繁体中文出处，例如 `太 16:25`、`林前 15:20–26`；
+   - `mode=direct_quote`：教授在 transcript 中实际读出经文原句；`quoted_text` 必须逐字复制来源中的经文文字，不含讲员解释或引号；
+   - `mode=paraphrase`：教授转述经文内容；`quoted_text` 必须为 null；
+   - `mode=reference_only`：只提到出处而未引述或转述内容；`quoted_text` 必须为 null；
+   - `role`：说明该经文在论证中证明什么。
+   有 `scripture_refs` 的 evidence 不可省略 `scripture_presentations`；没有经文的 evidence 输出空数组。
 4. 问题若有回答，answer 必须通过 `answers_question` 指向 question；若全文没有回答，question 的 `question_status` 为 `unanswered`，不可自行补答。
 5. `supports` 只能引用同一清单中的 evidence ID。
 6. 教授只简短提及的有效细节也必须保留，不可擅自扩写。例如「云的出现显示神的临在」应作为独立 evidence 保留。

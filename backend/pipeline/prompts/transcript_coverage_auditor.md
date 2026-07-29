@@ -11,6 +11,7 @@
 6. 是否加入 transcript 没有支持的经文内容、背景资料、神学结论或应用。
 7. 语言是否平和清楚，同时保留教授实质立场。
 8. Markdown 是否维持 `## 单元标题` 与 `### 釋經 / 神學意義 / 生活應用 / 附錄` 的格式。
+9. 经文是否遵循 notes-to-manuscript 的可读格式：出处单独可见；`direct_quote` 的原句完整放在 Markdown blockquote；解释另起段落并说明证明作用；`paraphrase` 不可伪装成直接引文。违反此项必须产生 `tone_or_format` finding，严重程度至少为 medium。
 
 跨讲整合稿可能另附 `Integration Application`。在这种情况下：
 - `local_units` 是本 Project manuscript 应实际呈现的新正文或附录；

@@ -105,6 +105,15 @@ This preserves existing notes-to-sermon routes while keeping transcript manuscri
 * `chunks_meta.json` / `chunks/*.md`: final theological-review chunks
 * `theological_audit.json`: per-final-chunk theological results
 
+Each evidence item includes `scripture_refs` and a structured `scripture_presentations` array. Every presentation records:
+
+* `reference`: the reader-facing compact citation;
+* `mode`: `direct_quote`, `paraphrase`, or `reference_only`;
+* `quoted_text`: an exact source-transcript substring for `direct_quote`, otherwise `null`; and
+* `role`: what the cited passage proves or explains in Dr. Wang's argument.
+
+Evidence validation rejects a direct quotation not found verbatim in its declared transcript source range. Unit generation requires the reference and requires every direct quotation to appear inside a Markdown `>` blockquote. The deterministic whole-document check contributes `tone_or_format` findings to `coverage_audit.json`; the Stage 1 UI displays those findings as targeted, read-only correction proposals.
+
 ## 3. API Design
 
 ### 3.1. Trigger Generation
@@ -252,6 +261,21 @@ State invalidation rules:
 | Coverage Audit | Complete transcript, evidence inventory, plan, and current draft | Fidelity, completeness, logic, classification, and format | Must pass before final review |
 | Theological Boundary Review | One final Review Chunk | High-confidence major exegetical/theological boundary findings | Every chunk must be reviewed; findings remain advisory |
 | Fidelity Audit | Notes project source and draft chunks | Legacy notes-to-sermon source fidelity | Hidden for transcript projects |
+
+For Scripture formatting, Coverage Audit supplements semantic model review with deterministic checks. It verifies that each structured reference appears and that every `direct_quote` appears in a Markdown blockquote. A failure identifies the logical unit and Evidence ID; it does not rewrite `draft_v1.md`.
+
+A presentation-only migration of a previously reviewed transcript manuscript follows a narrower state transition:
+
+```text
+verify quoted text against unified_source.md
+  -> rewrite citation presentation in draft_v1.md
+  -> rebuild draft chunks
+  -> synchronize final.md and final review chunks
+  -> preserve audit_passed=true and coverage_audit_stale=false
+  -> reset theological_audit_completed/theological_audit_passed
+```
+
+This transition is valid only for formatting-preserving migrations. Ordinary Draft editing continues to invalidate Coverage because the system cannot assume that a general edit is non-substantive.
 
 ### 4.5. Model Configuration
 

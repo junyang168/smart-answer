@@ -47,6 +47,16 @@ type Stage1Unit = {
     plan_reason?: string;
 };
 
+type AuditFinding = {
+    finding_id?: string;
+    type?: string;
+    severity?: string;
+    unit_id?: string | null;
+    evidence_ids?: string[];
+    description?: string;
+    recommended_fix?: string;
+};
+
 type Stage1Status = {
     job: {
         running: boolean;
@@ -93,6 +103,10 @@ type Stage1Status = {
         applied_patch_count?: number;
         remaining_patch_count?: number;
     };
+    audit?: {
+        overall_status?: string;
+        findings?: AuditFinding[];
+    } | null;
     units: Stage1Unit[];
     logs: Stage1Log[];
 };
@@ -131,6 +145,7 @@ const DEFAULT_STATUS: Stage1Status = {
     },
     units: [],
     logs: [],
+    audit: null,
 };
 
 function statusBadge(status: string) {
@@ -189,6 +204,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                 project: { ...DEFAULT_STATUS.project, ...(data.project || {}) },
                 manifest: { ...DEFAULT_STATUS.manifest, ...(data.manifest || {}) },
                 summary: { ...DEFAULT_STATUS.summary, ...(data.summary || {}) },
+                audit: data.audit || null,
                 units: Array.isArray(data.units) ? data.units : [],
                 logs: Array.isArray(data.logs) ? data.logs : [],
             });
@@ -264,6 +280,7 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
     const analysisReady = Boolean(state.summary.analysis_completed);
     const integrationActive = Boolean(state.summary.integration_active);
     const failedUnits = state.units.filter((unit) => unit.status === "failed");
+    const auditFindings = Array.isArray(state.audit?.findings) ? state.audit.findings : [];
 
     return (
         <div className="min-h-screen bg-gray-50 py-10">
@@ -503,6 +520,43 @@ export default function GenerationPage({ params }: { params: { id: string } }) {
                                     {failedUnits.map((unit) => (
                                         <div key={unit.unit_id}>
                                             {unit.unit_id} {unit.unit_title}: {unit.error || "Unknown error"}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {auditFindings.length > 0 && (
+                            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                                <div className="mb-3 flex items-center font-semibold">
+                                    <AlertCircle className="mr-2 h-4 w-4" />
+                                    Coverage Audit Findings
+                                </div>
+                                <div className="space-y-3">
+                                    {auditFindings.map((finding, index) => (
+                                        <div
+                                            key={finding.finding_id || `${finding.unit_id || "document"}-${index}`}
+                                            className="rounded-lg border border-amber-200 bg-white p-3"
+                                        >
+                                            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                                                <span>{finding.severity || "review"}</span>
+                                                <span>·</span>
+                                                <span>{finding.type || "coverage"}</span>
+                                                {finding.unit_id ? <span>· {finding.unit_id}</span> : null}
+                                            </div>
+                                            {finding.description ? (
+                                                <p className="mt-2 leading-6 text-gray-900">{finding.description}</p>
+                                            ) : null}
+                                            {finding.evidence_ids?.length ? (
+                                                <p className="mt-1 text-xs text-gray-500">
+                                                    Evidence: {finding.evidence_ids.join(", ")}
+                                                </p>
+                                            ) : null}
+                                            {finding.recommended_fix ? (
+                                                <p className="mt-2 border-l-2 border-amber-300 pl-3 leading-6 text-gray-700">
+                                                    建议：{finding.recommended_fix}
+                                                </p>
+                                            ) : null}
                                         </div>
                                     ))}
                                 </div>

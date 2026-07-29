@@ -37,6 +37,22 @@ SOURCE_RANGE_SCHEMA: Dict[str, Any] = {
 }
 
 
+SCRIPTURE_PRESENTATION_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "reference": {"type": "string"},
+        "mode": {
+            "type": "string",
+            "enum": ["direct_quote", "paraphrase", "reference_only"],
+        },
+        "quoted_text": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        "role": {"type": "string"},
+    },
+    "required": ["reference", "mode", "quoted_text", "role"],
+}
+
+
 EVIDENCE_SCHEMA: Dict[str, Any] = {
     "name": "transcript_evidence_inventory_v1",
     "strict": True,
@@ -70,6 +86,10 @@ EVIDENCE_SCHEMA: Dict[str, Any] = {
                         },
                         "content": {"type": "string"},
                         "scripture_refs": {"type": "array", "items": {"type": "string"}},
+                        "scripture_presentations": {
+                            "type": "array",
+                            "items": SCRIPTURE_PRESENTATION_SCHEMA,
+                        },
                         "source_ranges": {"type": "array", "items": SOURCE_RANGE_SCHEMA},
                         "supports": {"type": "array", "items": {"type": "string"}},
                         "answers_question": {
@@ -88,6 +108,7 @@ EVIDENCE_SCHEMA: Dict[str, Any] = {
                         "category",
                         "content",
                         "scripture_refs",
+                        "scripture_presentations",
                         "source_ranges",
                         "supports",
                         "answers_question",
@@ -343,7 +364,9 @@ class TranscriptPipeline:
         self._save_json(manifest_path, manifest)
 
         evidence_payload = self._load_cached_payload(
-            output_dir / "evidence_inventory.json", source.sha256
+            output_dir / "evidence_inventory.json",
+            source.sha256,
+            allow_pipeline_mismatch=mode == "audit",
         )
         if not evidence_payload:
             self._progress("全文證據提取", 5)
@@ -353,7 +376,9 @@ class TranscriptPipeline:
             self._log("evidence", f"全文證據提取完成，共 {len(evidence_payload['evidence'])} 條。")
 
         plan_payload = self._load_cached_payload(
-            output_dir / "manuscript_plan.json", source.sha256
+            output_dir / "manuscript_plan.json",
+            source.sha256,
+            allow_pipeline_mismatch=mode == "audit",
         )
         if not plan_payload:
             self._progress("全文邏輯規劃", 25)
@@ -415,8 +440,6 @@ class TranscriptPipeline:
                         "Integration Application does not account for every evidence ID exactly once"
                     )
                 integration_context = candidate
-        if mode == "audit" and not integration_context and len(summary.generated_units) != len(summary.units):
-            raise ValueError("Coverage audit requires every planned manuscript unit to be generated")
         draft_path = output_dir / "draft_v1.md"
         if mode == "audit":
             if not draft_path.exists() or not draft_path.read_text(encoding="utf-8").strip():
@@ -428,7 +451,11 @@ class TranscriptPipeline:
             summary.combined_markdown = self._combine_units(summary.generated_units)
             draft_path.write_text(summary.combined_markdown, encoding="utf-8")
 
-        all_units_ready = bool(integration_context) or len(summary.generated_units) == len(summary.units)
+        all_units_ready = (
+            mode == "audit"
+            or bool(integration_context)
+            or len(summary.generated_units) == len(summary.units)
+        )
         if all_units_ready:
             self._progress("全文覆蓋審核", 85)
             self._log("auditor", "开始执行全文 coverage audit。")
@@ -506,6 +533,7 @@ class TranscriptPipeline:
             if not str(item.get("content") or "").strip():
                 raise ValueError(f"Evidence {evidence_id} has no content")
             self._validate_ranges(item.get("source_ranges", []), len(source.lines), evidence_id)
+            self._validate_scripture_evidence(item, source)
         for item in evidence:
             for ref in [*item.get("supports", []), *([item["answers_question"]] if item.get("answers_question") else [])]:
                 if ref not in ids:
@@ -583,10 +611,13 @@ class TranscriptPipeline:
         covered = set(payload.get("covered_evidence_ids", []))
         missing = [item for item in assigned if item not in covered]
         unknown = sorted(covered - set(assigned))
-        if missing or unknown:
+        normalized_sections = self._normalize_manuscript_sections(payload["manuscript_sections"])
+        scripture_format_issues = self._scripture_format_issues(normalized_sections, evidence)
+        if missing or unknown or scripture_format_issues:
             retry_prompt = (
                 f"{user_prompt}\n\n【确定性覆盖检查失败】\n"
                 f"遗漏 evidence IDs：{missing}\n非本单元 evidence IDs：{unknown}\n"
+                f"经文呈现问题：{scripture_format_issues}\n"
                 "请重新输出完整单元；保留已正确内容，明确补足遗漏，并移除非本单元材料。"
             )
             payload = self.llm.generate_json(
@@ -596,9 +627,13 @@ class TranscriptPipeline:
             covered = set(payload.get("covered_evidence_ids", []))
             missing = [item for item in assigned if item not in covered]
             unknown = sorted(covered - set(assigned))
-            if missing or unknown:
-                raise ValueError(f"Unit {unit['unit_id']} coverage failed: missing={missing}, unknown={unknown}")
-        normalized_sections = self._normalize_manuscript_sections(payload["manuscript_sections"])
+            normalized_sections = self._normalize_manuscript_sections(payload["manuscript_sections"])
+            scripture_format_issues = self._scripture_format_issues(normalized_sections, evidence)
+            if missing or unknown or scripture_format_issues:
+                raise ValueError(
+                    f"Unit {unit['unit_id']} coverage failed: missing={missing}, unknown={unknown}, "
+                    f"scripture_format={scripture_format_issues}"
+                )
         return {
             "unit_id": unit["unit_id"],
             "unit_title": unit["title"],
@@ -627,10 +662,22 @@ class TranscriptPipeline:
             f"【Integration Application】\n"
             f"{json.dumps(integration_context, ensure_ascii=False) if integration_context else 'null'}"
         )
-        return self.llm.generate_json(
+        audit = self.llm.generate_json(
             self.prompts["coverage_auditor"], user_prompt, AUDIT_SCHEMA,
             timeout_seconds=max(self.timeout_seconds, 300.0),
         )
+        if not integration_context:
+            deterministic_findings = self._whole_manuscript_scripture_findings(
+                evidence_payload, plan_payload, manuscript
+            )
+            if deterministic_findings:
+                existing_ids = {finding.get("finding_id") for finding in audit.get("findings", [])}
+                audit.setdefault("findings", []).extend(
+                    finding for finding in deterministic_findings
+                    if finding["finding_id"] not in existing_ids
+                )
+                audit["overall_status"] = "needs_revision"
+        return audit
 
     def _group_repairable_findings(self, audit: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
         grouped: Dict[str, List[Dict[str, Any]]] = {}
@@ -702,6 +749,130 @@ class TranscriptPipeline:
             normalized = heading_pattern.sub("", normalized, count=1).lstrip()
         return normalized or None
 
+    @staticmethod
+    def _compact_reference(value: str) -> str:
+        return re.sub(r"[\s《》〈〉]", "", str(value or "")).lower()
+
+    @staticmethod
+    def _compact_quote(value: str) -> str:
+        compact = re.sub(r"\s+", "", str(value or ""))
+        return compact.strip("「」『』“”‘’\"'")
+
+    @classmethod
+    def _blockquote_text(cls, markdown: str) -> str:
+        quote_lines = []
+        for line in str(markdown or "").splitlines():
+            match = re.match(r"^\s*>\s?(.*)$", line)
+            if match:
+                quote_lines.append(match.group(1))
+        return cls._compact_quote("\n".join(quote_lines))
+
+    def _validate_scripture_evidence(self, item: Dict[str, Any], source: SourceDocument) -> None:
+        evidence_id = item["evidence_id"]
+        scripture_refs = [str(ref).strip() for ref in item.get("scripture_refs", []) if str(ref).strip()]
+        presentations = item.get("scripture_presentations", [])
+        if scripture_refs and not presentations:
+            raise ValueError(f"Evidence {evidence_id} has Scripture references but no presentation data")
+        if not scripture_refs and presentations:
+            raise ValueError(f"Evidence {evidence_id} has presentation data without Scripture references")
+
+        source_text = "\n".join(
+            source.slice_by_lines(source_range["start_line"], source_range["end_line"])
+            for source_range in item.get("source_ranges", [])
+        )
+        compact_source = self._compact_quote(source_text)
+        for presentation in presentations:
+            reference = str(presentation.get("reference") or "").strip()
+            mode = presentation.get("mode")
+            quoted_text = presentation.get("quoted_text")
+            role = str(presentation.get("role") or "").strip()
+            if not reference or not role:
+                raise ValueError(f"Evidence {evidence_id} has incomplete Scripture presentation data")
+            if mode == "direct_quote":
+                compact_quote = self._compact_quote(str(quoted_text or ""))
+                if not compact_quote:
+                    raise ValueError(f"Evidence {evidence_id} direct quote has no quoted_text")
+                if compact_quote not in compact_source:
+                    raise ValueError(
+                        f"Evidence {evidence_id} quoted_text is not verbatim in its transcript source range"
+                    )
+            elif quoted_text is not None:
+                raise ValueError(
+                    f"Evidence {evidence_id} {mode} presentation must set quoted_text to null"
+                )
+
+    def _scripture_presentation_issues(
+        self, markdown: str, evidence: List[Dict[str, Any]]
+    ) -> List[Dict[str, str]]:
+        compact_markdown_reference = self._compact_reference(markdown)
+        compact_blockquotes = self._blockquote_text(markdown)
+        issues: List[Dict[str, str]] = []
+        for item in evidence:
+            evidence_id = str(item.get("evidence_id") or "")
+            for presentation in item.get("scripture_presentations", []):
+                reference = str(presentation.get("reference") or "").strip()
+                mode = presentation.get("mode")
+                compact_reference = self._compact_reference(reference)
+                if compact_reference and compact_reference not in compact_markdown_reference:
+                    issues.append({
+                        "evidence_id": evidence_id,
+                        "reason": f"缺少经文出处 {reference}",
+                    })
+                if mode == "direct_quote":
+                    quoted_text = str(presentation.get("quoted_text") or "")
+                    compact_quote = self._compact_quote(quoted_text)
+                    if compact_quote and compact_quote not in compact_blockquotes:
+                        issues.append({
+                            "evidence_id": evidence_id,
+                            "reason": f"经文原句未使用 Markdown blockquote：{reference}",
+                        })
+        return issues
+
+    def _scripture_format_issues(
+        self,
+        sections: Dict[str, Optional[str]],
+        evidence: List[Dict[str, Any]],
+    ) -> List[str]:
+        markdown = "\n\n".join(value for value in sections.values() if value)
+        return [
+            f"{issue['evidence_id']}: {issue['reason']}"
+            for issue in self._scripture_presentation_issues(markdown, evidence)
+        ]
+
+    def _whole_manuscript_scripture_findings(
+        self,
+        evidence_payload: Dict[str, Any],
+        plan_payload: Dict[str, Any],
+        manuscript: str,
+    ) -> List[Dict[str, Any]]:
+        evidence_by_id = {
+            item["evidence_id"]: item
+            for item in evidence_payload.get("evidence", [])
+        }
+        findings: List[Dict[str, Any]] = []
+        finding_index = 1
+        for unit in plan_payload.get("units", []):
+            unit_evidence = [
+                evidence_by_id[evidence_id]
+                for evidence_id in unit.get("evidence_ids", [])
+                if evidence_id in evidence_by_id
+            ]
+            for issue in self._scripture_presentation_issues(manuscript, unit_evidence):
+                findings.append({
+                    "finding_id": f"FMT{finding_index:03d}",
+                    "type": "tone_or_format",
+                    "severity": "medium",
+                    "unit_id": unit.get("unit_id"),
+                    "evidence_ids": [issue["evidence_id"]],
+                    "description": issue["reason"],
+                    "recommended_fix": (
+                        "按 notes-to-manuscript 格式单独标示经文出处；若 transcript 提供经文原句，"
+                        "将原句放入 Markdown blockquote，再另起段落说明这段经文在论证中的作用。"
+                    ),
+                })
+                finding_index += 1
+        return findings
+
     def _combine_units(self, units: List[Dict[str, Any]]) -> str:
         return "\n\n".join(unit["generated_markdown"].strip() for unit in units).strip()
 
@@ -749,13 +920,19 @@ class TranscriptPipeline:
         if generated_dir.exists():
             shutil.rmtree(generated_dir)
 
-    def _load_cached_payload(self, path: Path, source_hash: str) -> Optional[Dict[str, Any]]:
+    def _load_cached_payload(
+        self,
+        path: Path,
+        source_hash: str,
+        *,
+        allow_pipeline_mismatch: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         wrapper = self._load_json(path)
         if not wrapper:
             return None
         if wrapper.get("source_sha256") != source_hash:
             return None
-        if wrapper.get("pipeline_signature") != self.pipeline_signature:
+        if not allow_pipeline_mismatch and wrapper.get("pipeline_signature") != self.pipeline_signature:
             return None
         payload = wrapper.get("payload")
         return payload if isinstance(payload, dict) else None
