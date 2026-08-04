@@ -76,12 +76,14 @@ class RepositoryCompiler:
         topics: Dict[str, Dict[str, Any]] = {}
         for unit in units:
             summary = self._unit_summary(unit)
-            for reference in unit.primary_bible_refs:
-                bible[reference.osis].append(summary)
-            for assignment in unit.topic_assignments:
-                key = assignment.topic_ids[-1] if assignment.topic_ids else "/".join(assignment.path)
-                card = topics.setdefault(key, {"topic_id": key, "path": assignment.path, "units": []})
-                card["units"].append(summary)
+            if unit.unit_type == "passage":
+                for reference in unit.primary_bible_refs:
+                    bible[reference.osis].append(summary)
+            elif unit.unit_type == "concept":
+                for assignment in unit.topic_assignments:
+                    key = assignment.topic_ids[-1] if assignment.topic_ids else "/".join(assignment.path)
+                    card = topics.setdefault(key, {"topic_id": key, "path": assignment.path, "units": []})
+                    card["units"].append(summary)
 
         _write_json(build_dir / "bible_index.json", {"references": bible})
         _write_json(build_dir / "topic_index.json", {"topics": sorted(topics.values(), key=lambda item: item["path"])})

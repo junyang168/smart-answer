@@ -161,7 +161,7 @@ def test_notes_source_map_preserves_page_identity(repository_workspace):
     assert source_map.entries[0]["page_ocr_sha256"]
 
 
-def test_compiler_builds_one_unit_into_bible_and_topic_indexes(repository_workspace):
+def test_compiler_keeps_passage_and_concept_units_in_separate_indexes(repository_workspace):
     service = repository_workspace["service"]
     project_id, _ = _write_transcript_project(repository_workspace)
     registered = service.register_project_source(project_id)
@@ -171,7 +171,7 @@ def test_compiler_builds_one_unit_into_bible_and_topic_indexes(repository_worksp
     citation = service.create_citation_from_source_range(source_id, entry["source_line_start"], entry["source_line_end"])
     citation.status = "approved"
     service.store.save_citation(citation)
-    unit = CanonicalUnit(
+    passage_unit = CanonicalUnit(
         unit_id="CU-cloud",
         title="雲彩與神的臨在",
         unit_type="passage",
@@ -186,15 +186,31 @@ def test_compiler_builds_one_unit_into_bible_and_topic_indexes(repository_worksp
         ),
         citation_ids=[citation.citation_id],
     )
-    service.store.save_unit(unit)
+    concept_unit = CanonicalUnit(
+        unit_id="CU-presence",
+        title="神臨在的記號",
+        unit_type="concept",
+        status="published",
+        topic_assignments=[TopicAssignment(topic_ids=["theophany"], path=["神論", "神的臨在"])],
+        manuscript=ManuscriptLocator(
+            project_id=project_id,
+            project_type="transcript",
+            heading_title="一、登山變像",
+            heading_anchor="一-登山變像",
+        ),
+        citation_ids=[citation.citation_id],
+    )
+    service.store.save_unit(passage_unit)
+    service.store.save_unit(concept_unit)
 
     manifest = service.compiler.build()
-    assert manifest["unit_count"] == 1
+    assert manifest["unit_count"] == 2
     assert service.status().available is True
     bible = service.compiled_index("bible_index.json")
     topic = service.compiled_index("topic_index.json")
     assert bible["references"]["Matt.17.5"][0]["unit_id"] == "CU-cloud"
-    assert topic["topics"][0]["units"][0]["unit_id"] == "CU-cloud"
+    assert topic["topics"][0]["units"][0]["unit_id"] == "CU-presence"
+    assert all(unit["unit_id"] != "CU-cloud" for card in topic["topics"] for unit in card["units"])
 
 
 def test_saving_published_unit_refreshes_public_index(repository_workspace):
