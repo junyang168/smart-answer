@@ -6,6 +6,8 @@ The Sermon Manuscript Search and QA module provides a Perplexity-like question a
 
 The module is part of the `notes_to_manuscript_series` resource experience. It is not a replacement for browsing sermon manuscripts; it is a research and discovery layer that helps users locate relevant teaching across canonical passages and theological topics.
 
+The Exegesis and Topic Repository is the reviewed navigation and provenance layer over the same corpus. Search may retrieve repository canonical units and must return repository citation IDs when exact original-source citations are available. The repository requirements are defined in [Functional Specification: Exegesis and Topic Repository](./exegesis_topic_repository_functional_spec.md).
+
 ## 2. Scope
 
 In scope:
@@ -16,6 +18,7 @@ In scope:
 - Canonical Bible passage retrieval, theological topic retrieval, keyword retrieval, and semantic retrieval.
 - Coverage questions, such as which verses are covered by a chapter or document group.
 - Source cards, numbered citations, supporting quotes, and related questions.
+- Links from reviewed repository results to exact highlighted sermon or notes fragments.
 - Index status and reindexing APIs.
 - Series-admin Refresh Index control with background progress status.
 
@@ -26,6 +29,7 @@ Out of scope for the current version:
 - Answer caching.
 - Custom reranker service.
 - Editing source manuscripts from the search UI.
+- Treating search-result snippets as reviewed repository citations when no approved citation record exists.
 
 ## 3. Users
 
@@ -58,6 +62,8 @@ Important corpus assumptions:
 - Cross references must be indexed and searchable without being treated as the document's primary Matthew scope.
 - A Series may contain both notes and transcript Projects; Project type is evaluated per manuscript.
 - Transcript passage scope is derived from sustained exegesis in manuscript content when no explicit `bible_verse` hint exists. Project titles are not scripture evidence.
+- Bible and topic navigation should increasingly use reviewed canonical units rather than event/Project order.
+- A canonical topic unit may aggregate several original sermon or notes citations while retaining one manuscript.
 - The module must scale to at least 400 manuscript documents.
 
 ## 5. Primary Workflows
@@ -142,6 +148,8 @@ Required result regions:
 - **Citations**: inline answer citations displayed as `[1]`, `[2]`, etc.
 - **Quotes**: supporting quoted excerpts tied to numbered sources.
 - **Related Questions**: follow-up questions returned by the backend when available.
+
+When a result belongs to a published canonical unit, its source card also provides **查看原始內容**. That action resolves an approved repository citation and opens the exact highlighted original fragment, including media time or notes page. A normal search excerpt without an approved repository citation remains labeled as a manuscript excerpt and must not masquerade as original-source provenance.
 
 Citation display rules:
 
@@ -254,6 +262,7 @@ Indexed entities:
 - Topic tags.
 - Full-text search rows.
 - Optional embedding rows.
+- Canonical repository unit IDs and approved citation IDs when available.
 
 Indexing requirements:
 
@@ -261,6 +270,8 @@ Indexing requirements:
 - Include `sermon_note` and `transcript` Projects by default and filter by Project metadata rather than Series type.
 - Preserve series, lecture, project, document title, Google Doc ID, source path, content hash, and modification time.
 - Parse headings into source unit heading paths.
+- Join indexed manuscript sections to reviewed canonical units without deriving identity from editable titles alone.
+- Preserve approved repository citation IDs so search results can open exact original-source fragments.
 - Extract primary passage references, cross references, document scope references, topics, terms, and content types.
 - Support reindexing with or without embeddings.
 - Rebuilds should avoid leaving a corrupted partial index as the active index.
@@ -293,6 +304,10 @@ Backend API routes:
   - Streaming endpoint compatible with browser `EventSource`.
 - `GET /semantic_search/{q}`
   - Compatibility endpoint returning source cards.
+- `GET /canonical-repository/units/{unit_id}`
+  - Returns the reviewed unit and approved source-citation summaries.
+- `GET /canonical-repository/citations/{citation_id}`
+  - Resolves exact original text, context, and media/page positioning; never accepts raw client filesystem paths.
 
 Request shape:
 
@@ -419,6 +434,13 @@ Given a newly checked-in transcript with an empty `bible_verse` field:
 - The new manuscript becomes visible in chapter/topic navigation and searchable QA after the job completes.
 
 ### Streaming
+
+Given a source result associated with a published canonical unit:
+
+- The source card identifies the canonical unit.
+- **查看原始內容** uses an approved citation ID.
+- The source reader highlights the exact original fragment rather than only opening the complete source.
+- A result without an approved citation is clearly identified as a manuscript search result.
 
 Given a slow LLM response:
 

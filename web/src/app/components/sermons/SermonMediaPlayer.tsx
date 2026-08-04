@@ -1,17 +1,24 @@
-import React from 'react';
-import { useState, useEffect } from 'react';
-import { useParams, notFound } from 'next/navigation';
+import React, { useEffect, useRef } from 'react';
 import { Sermon} from '@/app/interfaces/article';
 import Link from 'next/link';
 
      
 // 在文件頂部或合適位置添加 SermonMediaPlayer 組件
-export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolean }> = ({ sermon, authenticated  }) => {
+export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolean, startTime?: number }> = ({ sermon, authenticated, startTime }) => {
+    const mediaRef = useRef<HTMLMediaElement | null>(null);
+
+    useEffect(() => {
+      if (mediaRef.current && typeof startTime === "number" && startTime >= 0) {
+        mediaRef.current.currentTime = startTime;
+      }
+    }, [startTime, sermon.id]);
+
     return ( authenticated ? (
         <div className="mb-8 shadow-lg rounded-lg overflow-hidden bg-gray-100 border">
           {sermon.videoUrl ? (
             // --- 如果有視頻，渲染視頻播放器 ---
             <video
+              ref={(element) => { mediaRef.current = element; }}
               key={`${sermon.id}-video`} // 使用唯一的 key
               controls
               className="w-full h-auto bg-black"
@@ -24,6 +31,7 @@ export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolea
             <div className="p-8 flex flex-col items-center justify-center text-center bg-gray-50">
                 <h2 className="text-lg font-semibold text-gray-700 mb-4">本篇講道僅提供音頻格式</h2>
                 <audio
+                  ref={(element) => { mediaRef.current = element; }}
                   key={`${sermon.id}-audio-main`} // 使用唯一的 key
                   controls
                   className="w-full max-w-md"
@@ -53,5 +61,4 @@ export const SermonMediaPlayer: React.FC<{ sermon: Sermon, authenticated: boolea
 };
 
     
-
 

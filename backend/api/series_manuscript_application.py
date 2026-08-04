@@ -69,6 +69,7 @@ def _review_patch(patch: Dict[str, Any], stored_result: Dict[str, Any]) -> Dict[
         "unit_title": patch.get("unit_title"),
         "change_summary": patch.get("change_summary"),
         "evidence_ids": patch.get("evidence_ids", []),
+        "evidence_lineage": patch.get("evidence_lineage", []),
         "status": "safe",
         "conflict_reason": None,
     }

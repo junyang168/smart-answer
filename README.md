@@ -41,7 +41,7 @@ The application follows a microservices-like architecture with a Next.js fronten
 
 ### Infrastructure
 
--   **Nginx**: Acts as a reverse proxy, 
+-   **Nginx**: Acts as a reverse proxy,
         For legacy app, routing traffic to the appropriate services based on URL paths (`/web`, `/sc_api`, etc.).
         For new app, routing internet traffic to the appropriate services (`/`, ).
 -   **Data Stores**:
@@ -49,6 +49,14 @@ The application follows a microservices-like architecture with a Next.js fronten
     -   Fellowship documents live under `DATA_BASE_DIR/fellowship/docs/YYYY-MM-DD` unless `FELLOWSHIP_DOCS_DIR` is set. Public fellowship Markdown pages are rendered server-side by Next.js and require the Next process to read that same directory.
     -   Fellowship public input files are the prepared manuscript Markdown, PPTX, and local MP4 recording copy. Generated analysis/transcript files, extracted audio, cache files, and Google Meet chat files are hidden from public document lists.
     -   Fellowship `sourceLinks` are for teaching/source material links only. Do not store the shared Google Meet Recordings folder there; recordings should be copied into the dated fellowship docs folder when they are meant to be public inputs.
+
+## Notes-to-Manuscript Documentation
+
+- [Transformation workflow functional specification](docs/notes-to-sermon-agent/functional_spec.md)
+- [Transformation workflow technical specification](docs/notes-to-sermon-agent/tech_spec.md)
+- [Sermon manuscript search and QA specification](docs/notes-to-sermon-agent/sermon_search_functional_spec.md)
+- [Exegesis and topic repository functional specification](docs/notes-to-sermon-agent/exegesis_topic_repository_functional_spec.md)
+- [Exegesis and topic repository technical specification](docs/notes-to-sermon-agent/exegesis_topic_repository_tech_spec.md)
 
 ## Getting Started
 

@@ -23,6 +23,7 @@
 严格要求：
 1. 每条 evidence 必须有唯一 `evidence_id`，按 E001、E002……编号。
 2. 每条 evidence 必须保留一个或多个准确的 `source_ranges`，对应使用者提供的行号。
+   同时填写 `verbatim_source_excerpt`：从其中一个 `source_ranges` 逐字复制一段足以定位该证据的连续原文。不可改写、纠错、省略或用省略号拼接；该字段必须是所声明范围内的精确 substring。
 3. 每一处交叉经文必须保留书卷章节目，并说明它在教授论证中支持什么；不可只列经文编号。
    同时为每一处经文填写 `scripture_presentations`：
    - `reference`：供 manuscript 显示的繁体中文出处，例如 `太 16:25`、`林前 15:20–26`；

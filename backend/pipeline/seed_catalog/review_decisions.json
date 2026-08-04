@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "description": "人工審閱已確認的種子單元決定。這些決定優先於自動推斷。",
+  "decisions": [
+    {
+      "source_topic_id": "topic_100",
+      "title": "句首「Amen」的宣告公式與耶穌的神性權柄",
+      "status": "confirmed_seed",
+      "content_categories": ["釋經", "神學意義"],
+      "topic_assignment": {
+        "path": ["基督論", "耶穌的神性與權柄"],
+        "topic_ids": ["christology", "deity-of-christ"],
+        "role": "primary"
+      },
+      "rationale": "教授多次使用并解释句首 Amen 的宣告公式；正文明确包含释经和神学意义，用户已确认这是稳定主题。"
+    }
+  ]
+}

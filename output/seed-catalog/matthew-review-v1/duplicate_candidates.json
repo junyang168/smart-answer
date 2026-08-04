@@ -1,0 +1,959 @@
+{
+  "schema_version": "1.0-review",
+  "same_primary_reference_groups": [],
+  "same_source_section_groups": [
+    {
+      "project_id": "6_章_-_登山寶訓_3",
+      "source_section": "五、願人尊你名為聖、願你的國降臨、願你的旨意成全",
+      "units": [
+        {
+          "unit_id": "CU-SEED-748d53132ffb",
+          "title": "太 6:10：願你的旨意成全"
+        },
+        {
+          "unit_id": "CU-SEED-5db4eef6f28e",
+          "title": "太 6:9–10：願人尊你名為聖、願你的國降臨"
+        }
+      ],
+      "decision": "review_unit_boundary"
+    },
+    {
+      "project_id": "使命與誠實",
+      "source_section": "五、接待門徒的意義與受苦和背十字架的辨析",
+      "units": [
+        {
+          "unit_id": "CU-SEED-258b77d29ffd",
+          "title": "受苦與背十字架的辨析"
+        },
+        {
+          "unit_id": "CU-SEED-646177e8370e",
+          "title": "太 10:40–41：接待門徒的屬靈意義與賞賜"
+        }
+      ],
+      "decision": "review_unit_boundary"
+    },
+    {
+      "project_id": "使命與誠實",
+      "source_section": "四、不懼逼迫：靈魂的保守與生命的優先次序",
+      "units": [
+        {
+          "unit_id": "CU-SEED-258b77d29ffd",
+          "title": "受苦與背十字架的辨析"
+        },
+        {
+          "unit_id": "CU-SEED-808772f9cf3c",
+          "title": "太 10:24–39：不懼逼迫、靈魂保守與生命優先次序"
+        },
+        {
+          "unit_id": "CU-SEED-646177e8370e",
+          "title": "太 10:40–41：接待門徒的屬靈意義與賞賜"
+        }
+      ],
+      "decision": "review_unit_boundary"
+    },
+    {
+      "project_id": "義的精意",
+      "source_section": "四、離婚後的處境、選擇小惡原則與再婚的聖經依據",
+      "units": [
+        {
+          "unit_id": "CU-SEED-f02eacf90b00",
+          "title": "選擇較小的惡"
+        },
+        {
+          "unit_id": "CU-SEED-6e94fdc5be6c",
+          "title": "太 5:32：離婚的釋經——從合法手續到盟約忠誠"
+        }
+      ],
+      "decision": "review_unit_boundary"
+    },
+    {
+      "project_id": "衝突與安息-12,13章",
+      "source_section": "一、施洗約翰的疑問與耶穌引用舊約彌賽亞預言的回應",
+      "units": [
+        {
+          "unit_id": "CU-SEED-d92d5603c527",
+          "title": "彌賽亞兩次降臨"
+        },
+        {
+          "unit_id": "CU-SEED-38f59aa7787f",
+          "title": "太 11:2–6：施洗約翰的疑問與耶穌引用舊約彌賽亞預言的回應"
+        }
+      ],
+      "decision": "review_unit_boundary"
+    }
+  ],
+  "overlapping_reference_pairs": [
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-f6f4682819ef",
+      "right_title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.11-Matt.8.13"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-707a6bd8d514",
+      "right_title": "太 8:17：耶穌擔當疾病與兩次降臨的救贖論架構",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.17"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-f896cd65b6dc",
+      "right_title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.18-Matt.8.22"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-6406e69802a4",
+      "right_title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.1-Matt.8.4"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-a0763044663e",
+      "right_title": "太 8:26：門徒「小信」的意義與信靠主的根基",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.26"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1056f3c091d4",
+      "left_title": "馬太8至9章的敘事結構與編排邏輯",
+      "right_unit_id": "CU-SEED-2c2132f32027",
+      "right_title": "太 8:4：耶穌吩咐潔淨者獻禮物作見證的意義",
+      "overlaps": [
+        {
+          "left": "Matt.8",
+          "right": "Matt.8.4"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-2f37dde3fccc",
+      "left_title": "太 10:23：原文解析與史懷哲詮釋錯誤的釋經回應",
+      "right_unit_id": "CU-SEED-b9505ecccb70",
+      "right_title": "太 10:5–23：兩段結構與共觀福音平行對照",
+      "overlaps": [
+        {
+          "left": "Matt.10.23",
+          "right": "Matt.10.5-Matt.10.23"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-8430f20d8e83",
+      "left_title": "太 13 章結構",
+      "right_unit_id": "CU-SEED-7d6793cbade6",
+      "right_title": "太 13:13–15：比喻目的的釋經問題（μήποτε 與 ἰάσομαι 的文法分析）",
+      "overlaps": [
+        {
+          "left": "Matt.13",
+          "right": "Matt.13.13-Matt.13.15"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-b422d338541e",
+      "left_title": "太 16:24–27：捨己與背十字架的釋經",
+      "right_unit_id": "CU-SEED-c4027814a6a8",
+      "right_title": "太 16:25–27：三個「因為」的釋經論證",
+      "overlaps": [
+        {
+          "left": "Matt.16.24-Matt.16.27",
+          "right": "Matt.16.25-Matt.16.27"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f7f18ab801a0",
+      "left_title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+      "right_unit_id": "CU-SEED-98abc756c0da",
+      "right_title": "太 16:28：山上變貌作為耶穌再臨的保證",
+      "overlaps": [
+        {
+          "left": "Matt.16.28-Matt.17.2",
+          "right": "Matt.16.28"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f7f18ab801a0",
+      "left_title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+      "right_unit_id": "CU-SEED-0de9be8ea129",
+      "right_title": "太 17:1 與路 9:28「六天」與「約八天」的計日差異",
+      "overlaps": [
+        {
+          "left": "Matt.16.28-Matt.17.2",
+          "right": "Matt.17.1"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f7f18ab801a0",
+      "left_title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+      "right_unit_id": "CU-SEED-d133823f3737",
+      "right_title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+      "overlaps": [
+        {
+          "left": "Matt.16.28-Matt.17.2",
+          "right": "Matt.17.1-Matt.17.8"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-0de9be8ea129",
+      "left_title": "太 17:1 與路 9:28「六天」與「約八天」的計日差異",
+      "right_unit_id": "CU-SEED-d133823f3737",
+      "right_title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+      "overlaps": [
+        {
+          "left": "Matt.17.1",
+          "right": "Matt.17.1-Matt.17.8"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-7c4f93c69a68",
+      "left_title": "太 1:18–21：耶穌的神聖來歷與救贖目的",
+      "right_unit_id": "CU-SEED-f0240c90ed78",
+      "right_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "overlaps": [
+        {
+          "left": "Matt.1.18-Matt.1.21",
+          "right": "Matt.1.1-Matt.4.16"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-d0b53b8116c5",
+      "left_title": "太 1:1–17：家譜三段十四代與大衛名字的數字奧秘",
+      "right_unit_id": "CU-SEED-f0240c90ed78",
+      "right_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.1.17",
+          "right": "Matt.1.1-Matt.4.16"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-d0b53b8116c5",
+      "left_title": "太 1:1–17：家譜三段十四代與大衛名字的數字奧秘",
+      "right_unit_id": "CU-SEED-f7b1e4799be3",
+      "right_title": "太 1:6：耶穌作王的正統性",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.1.17",
+          "right": "Matt.1.6"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-ef1576d0e2f0",
+      "right_title": "太 1:22–23：童女懷孕的希伯來文與希臘文詞義辨析",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.1.22-Matt.1.23"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-f7b1e4799be3",
+      "right_title": "太 1:6：耶穌作王的正統性",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.1.6"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-76fce1aae9f1",
+      "right_title": "太 2:15：πληρόω 的詞義與何西阿引用的正確解讀",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.2.15"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-80c9493b1ccf",
+      "right_title": "太 2:17–18：耶利米書引用與悲慘—盼望結構",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.2.17-Matt.2.18"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-bf1d889da977",
+      "right_title": "太 2:1–12：彌迦書預言與死海古卷的歷史確據",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.2.1-Matt.2.12"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-aa2aeeb55f99",
+      "right_title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.2.1-Matt.2.3"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-4dbad40c5d96",
+      "right_title": "太 2:23：拿撒勒人稱謂與複數先知的引用方式",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.2.23"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-5ae86988a920",
+      "right_title": "太 3:11：約翰水洗與耶穌聖靈火洗的關係",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.3.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-ddd59b367e22",
+      "right_title": "太 3:13–17：耶穌受洗的意義——盡諸般的義與三一神的顯現",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.3.13-Matt.3.17"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-2c3c2c916a96",
+      "right_title": "太 3:1–3：以賽亞書 40:3 在共觀福音中的重新解釋",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.3.1-Matt.3.3"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-121dddcaeb15",
+      "right_title": "太 4:12–23：耶穌呼召門徒與傳道事工的開始",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.4.12-Matt.4.23"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-f0240c90ed78",
+      "left_title": "太 1:1–4:16：大綱結構與創世記平行",
+      "right_unit_id": "CU-SEED-102ada4b73fa",
+      "right_title": "太 4:1–11：耶穌受試探與以色列曠野經歷的對比",
+      "overlaps": [
+        {
+          "left": "Matt.1.1-Matt.4.16",
+          "right": "Matt.4.1-Matt.4.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-bf1d889da977",
+      "left_title": "太 2:1–12：彌迦書預言與死海古卷的歷史確據",
+      "right_unit_id": "CU-SEED-aa2aeeb55f99",
+      "right_title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+      "overlaps": [
+        {
+          "left": "Matt.2.1-Matt.2.12",
+          "right": "Matt.2.1-Matt.2.3"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-d63ebed1c6c0",
+      "left_title": "太 5:17 的成全：潔淨食物與贖罪祭的具體實現",
+      "right_unit_id": "CU-SEED-2f64e26dd21b",
+      "right_title": "太 5:17–18：耶穌成全律法的意義與方式",
+      "overlaps": [
+        {
+          "left": "Matt.5.17",
+          "right": "Matt.5.17-Matt.5.18"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-c464e1e634bc",
+      "left_title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+      "right_unit_id": "CU-SEED-eb3dfcfb2e23",
+      "right_title": "太 5:3–5：八福頭三福與賽 61 的對應及彌賽亞身分",
+      "overlaps": [
+        {
+          "left": "Matt.5.3-Matt.5.10",
+          "right": "Matt.5.3-Matt.5.5"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-c464e1e634bc",
+      "left_title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+      "right_unit_id": "CU-SEED-f591f9336501",
+      "right_title": "太 5:6–8：飢渴慕義、憐恤、清心三福的釋經",
+      "overlaps": [
+        {
+          "left": "Matt.5.3-Matt.5.10",
+          "right": "Matt.5.6-Matt.5.8"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-c464e1e634bc",
+      "left_title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+      "right_unit_id": "CU-SEED-3b254665c1af",
+      "right_title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+      "overlaps": [
+        {
+          "left": "Matt.5.3-Matt.5.10",
+          "right": "Matt.5.9-Matt.5.12"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-748d53132ffb",
+      "left_title": "太 6:10：願你的旨意成全",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.10",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-748d53132ffb",
+      "left_title": "太 6:10：願你的旨意成全",
+      "right_unit_id": "CU-SEED-5db4eef6f28e",
+      "right_title": "太 6:9–10：願人尊你名為聖、願你的國降臨",
+      "overlaps": [
+        {
+          "left": "Matt.6.10",
+          "right": "Matt.6.9-Matt.6.10"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-1200497fe462",
+      "left_title": "太 6:11：日用飲食與神的供應方式",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.11",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-14aea69de660",
+      "left_title": "太 6:13：林前 10:13 是應許還是警告？",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.13",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-89f9a422388f",
+      "left_title": "太 6:14–18：饒恕的條件與禁食的動機",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.14-Matt.6.18",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-4213ec8f50e3",
+      "left_title": "太 6:19–24：財寶的價值觀與眼睛的專一性",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.19-Matt.6.24",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-90f8adf4550f",
+      "left_title": "太 6:25–34：不要憂慮與先求神的國",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.25-Matt.6.34",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-4763fb4fcbf0",
+      "left_title": "太 6:7–8：重複禱告的誤解與禱告增進神人關係",
+      "right_unit_id": "CU-SEED-fec514f6a2ad",
+      "right_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "overlaps": [
+        {
+          "left": "Matt.6.7-Matt.6.8",
+          "right": "Matt.6.8-Matt.7.11"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-fec514f6a2ad",
+      "left_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "right_unit_id": "CU-SEED-5db4eef6f28e",
+      "right_title": "太 6:9–10：願人尊你名為聖、願你的國降臨",
+      "overlaps": [
+        {
+          "left": "Matt.6.8-Matt.7.11",
+          "right": "Matt.6.9-Matt.6.10"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-fec514f6a2ad",
+      "left_title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+      "right_unit_id": "CU-SEED-f8ecefad6acb",
+      "right_title": "太 7:1–6：論斷與評估的辨析",
+      "overlaps": [
+        {
+          "left": "Matt.6.8-Matt.7.11",
+          "right": "Matt.7.1-Matt.7.6"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-6406e69802a4",
+      "left_title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+      "right_unit_id": "CU-SEED-2c2132f32027",
+      "right_title": "太 8:4：耶穌吩咐潔淨者獻禮物作見證的意義",
+      "overlaps": [
+        {
+          "left": "Matt.8.1-Matt.8.4",
+          "right": "Matt.8.4"
+        }
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    }
+  ],
+  "alias_group_candidates": [
+    {
+      "preferred": "人子",
+      "units": [
+        {
+          "unit_id": "CU-SEED-c74b23f20a7e",
+          "title": "「人子」稱號的原文、但以理書背景與耶穌神性的論證",
+          "matched_terms": [
+            "人子"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-f98b471a3c9b",
+          "title": "「那個人子」稱號與但以理書七章的神性身分",
+          "matched_terms": [
+            "人子",
+            "那個人子"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-f7f18ab801a0",
+          "title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+          "matched_terms": [
+            "人子"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-98abc756c0da",
+          "title": "太 16:28：山上變貌作為耶穌再臨的保證",
+          "matched_terms": [
+            "人子"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-f896cd65b6dc",
+          "title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+          "matched_terms": [
+            "人子"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-402d0c096f0e",
+          "title": "太 9:1–8：人子在地上赦罪的權柄",
+          "matched_terms": [
+            "人子"
+          ]
+        }
+      ],
+      "decision": "shared_topic_entry_not_automatic_merge"
+    },
+    {
+      "preferred": "天國與神的國",
+      "units": [
+        {
+          "unit_id": "CU-SEED-2edf4a439a67",
+          "title": "天國與神的國（βασιλεία 的詞義）",
+          "matched_terms": [
+            "天國與神的國",
+            "天國",
+            "神的國",
+            "βασιλεία"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-68c18102d243",
+          "title": "神國的歷史階段：D-Day 到 V-Day，直至新天新地",
+          "matched_terms": [
+            "神的國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-cb73a582ab6c",
+          "title": "神的國：現在已臨在，將來才完全實現",
+          "matched_terms": [
+            "神的國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-cb74865b1032",
+          "title": "太 11:10–11：施洗約翰的身份與地位——先鋒、最大先知與天國的關係",
+          "matched_terms": [
+            "天國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-bc0d7a556e3e",
+          "title": "太 11:12–13：βιάζεται 的希臘文語態分析與天國進展的正確詮釋",
+          "matched_terms": [
+            "天國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-c464e1e634bc",
+          "title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+          "matched_terms": [
+            "天國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-90f8adf4550f",
+          "title": "太 6:25–34：不要憂慮與先求神的國",
+          "matched_terms": [
+            "神的國"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-f6f4682819ef",
+          "title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+          "matched_terms": [
+            "天國",
+            "國度",
+            "βασιλεία"
+          ]
+        }
+      ],
+      "decision": "shared_topic_entry_not_automatic_merge"
+    },
+    {
+      "preferred": "釋經方法",
+      "units": [
+        {
+          "unit_id": "CU-SEED-d865faa41041",
+          "title": "以解經為根基的神學訓練",
+          "matched_terms": [
+            "以解經為根基的神學訓練"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-54c601facdb5",
+          "title": "正確理解耶穌比喻的釋經原則",
+          "matched_terms": [
+            "釋經原則"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-c8e22147ddd9",
+          "title": "準確解經的方法論：文體、原文限定、上下文與文化慣例",
+          "matched_terms": [
+            "準確解經"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-a4a051a9c476",
+          "title": "解經方法論：理性的正確使用",
+          "matched_terms": [
+            "解經方法",
+            "解經方法論"
+          ]
+        }
+      ],
+      "decision": "shared_topic_entry_not_automatic_merge"
+    },
+    {
+      "preferred": "彌賽亞",
+      "units": [
+        {
+          "unit_id": "CU-SEED-2f56378346d7",
+          "title": "Wrede彌賽亞秘密理論",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-d92d5603c527",
+          "title": "彌賽亞兩次降臨",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-525546834eb5",
+          "title": "彌賽亞身分與彌賽亞性質的兩階段教導",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-3bde594000a1",
+          "title": "耶和華僕人的金字塔結構：從以色列到彌賽亞",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-38f59aa7787f",
+          "title": "太 11:2–6：施洗約翰的疑問與耶穌引用舊約彌賽亞預言的回應",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-e1e2905bb595",
+          "title": "太 16:13–18：彼得的認信與教會的磐石根基",
+          "matched_terms": [
+            "基督"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-d0b53b8116c5",
+          "title": "太 1:1–17：家譜三段十四代與大衛名字的數字奧秘",
+          "matched_terms": [
+            "基督"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-aa2aeeb55f99",
+          "title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-eb3dfcfb2e23",
+          "title": "太 5:3–5：八福頭三福與賽 61 的對應及彌賽亞身分",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-3b254665c1af",
+          "title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-6406e69802a4",
+          "title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+          "matched_terms": [
+            "彌賽亞"
+          ]
+        }
+      ],
+      "decision": "shared_topic_entry_not_automatic_merge"
+    },
+    {
+      "preferred": "小信",
+      "units": [
+        {
+          "unit_id": "CU-SEED-9b17f099660e",
+          "title": "信心與人同神的合宜關係",
+          "matched_terms": [
+            "信心小"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-122731a53ead",
+          "title": "太 14:25–33：彼得的信心與認識耶穌為神的兒子",
+          "matched_terms": [
+            "小信"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-d0ceaabdb42b",
+          "title": "太 16:1–12：試探神蹟與門徒的小信",
+          "matched_terms": [
+            "小信",
+            "淺信"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-7190e2c6ab65",
+          "title": "太 17:14–21：被鬼附的孩子得醫治與門徒信心小",
+          "matched_terms": [
+            "信心小"
+          ]
+        },
+        {
+          "unit_id": "CU-SEED-a0763044663e",
+          "title": "太 8:26：門徒「小信」的意義與信靠主的根基",
+          "matched_terms": [
+            "小信"
+          ]
+        }
+      ],
+      "decision": "shared_topic_entry_not_automatic_merge"
+    }
+  ],
+  "similar_title_pairs": [
+    {
+      "left_unit_id": "CU-SEED-4be497b74894",
+      "left_title": "登山寶訓的整體結構",
+      "right_unit_id": "CU-SEED-3f0091431171",
+      "right_title": "登山寶訓的文學結構",
+      "title_similarity": 0.778,
+      "shared_aliases": [],
+      "decision": "review_merge_supplement_or_keep_separate"
+    },
+    {
+      "left_unit_id": "CU-SEED-c74b23f20a7e",
+      "left_title": "「人子」稱號的原文、但以理書背景與耶穌神性的論證",
+      "right_unit_id": "CU-SEED-f98b471a3c9b",
+      "right_title": "「那個人子」稱號與但以理書七章的神性身分",
+      "title_similarity": 0.513,
+      "shared_aliases": [
+        "人子"
+      ],
+      "decision": "review_merge_supplement_or_keep_separate"
+    }
+  ]
+}

@@ -405,6 +405,24 @@ def _rebuild_unified_source(project_id: str, pages: List[str]):
     unified_file = sermon_dir / "unified_source.md"
     with open(unified_file, "w", encoding="utf-8") as f:
         f.write(unified_content)
+    if pages:
+        _refresh_canonical_repository_source(project_id)
+
+
+def _refresh_canonical_repository_source(project_id: str) -> Optional[Dict[str, Any]]:
+    """Refresh provenance metadata without coupling manuscript availability to the repository."""
+    try:
+        from backend.api.canonical_repository.service import CanonicalRepositoryService
+
+        shared_data_root = Path(os.path.commonpath([NOTES_TO_SERMON_DIR, TRANSCRIPTS_TO_MANUSCRIPT_DIR]))
+        repository_service = CanonicalRepositoryService(shared_data_root / "canonical_repository")
+        return repository_service.register_project_source(project_id)
+    except Exception as exc:
+        # The existing manuscript workflow remains authoritative. Repository
+        # diagnostics are returned by explicit rebuild APIs and must not make a
+        # source import or notes rebuild unusable.
+        print(f"Canonical repository source-map refresh skipped for {project_id}: {exc}")
+        return None
 
 def _inject_newly_processed_pages(project_id: str, processed_files: List[str]):
     """
@@ -715,12 +733,14 @@ def import_sermon_transcript(project_id: str, transcript_id: str, overwrite: boo
     metadata["theological_review_stale"] = had_final_review
     with open(meta_file, "w", encoding="utf-8") as meta_handle:
         json.dump(metadata, meta_handle, ensure_ascii=False, indent=2)
+    repository_source = _refresh_canonical_repository_source(project_id)
     return {
         "status": "success",
         "content": content,
         "transcript_id": resolved["transcript_id"],
         "source_stage": resolved["source_stage"],
         "character_count": len(content),
+        "repository_source": repository_source,
     }
 
 def get_sermon_draft_path(project_id: str) -> Path:

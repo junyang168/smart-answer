@@ -23,6 +23,10 @@ from .sc_api.rag import router as rag_router
 from .sermon_converter_router import router as sermon_converter_router
 from .lecture_router import router as lecture_router, public_router as lecture_public_router
 from .sermon_search.router import router as sermon_search_router, compat_router as sermon_search_compat_router
+from .canonical_repository.router import (
+    router as canonical_repository_router,
+    admin_router as canonical_repository_admin_router,
+)
 
 app = FastAPI()
 
@@ -55,6 +59,8 @@ app.include_router(lecture_router)
 app.include_router(lecture_public_router)
 app.include_router(sermon_search_router)
 app.include_router(sermon_search_compat_router)
+app.include_router(canonical_repository_router)
+app.include_router(canonical_repository_admin_router)
 
 
 @app.get("/healthz")

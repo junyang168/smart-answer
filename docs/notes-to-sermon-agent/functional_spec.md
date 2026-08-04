@@ -269,6 +269,16 @@ The editor's operating sequence is:
 
 `final.md` and public navigation do not change merely because a patch is generated or applied to a Draft. The explicit review, Check In, and index-refresh steps remain separate editorial decisions.
 
+### 3.10. Exegesis and Topic Repository
+
+Checked-in Projects remain the production and audit boundary, but the long-term reader-facing collection is organized around reviewed **canonical units** rather than lecture schedules. The same unit may appear in both a Bible index and one or more theological-topic paths without duplicating its manuscript.
+
+Every published passage or topic unit must expose original-source citations. A citation opens the exact sermon transcript or notes fragment, highlights the relevant text, and seeks to the relevant media time or notes page when available. A link only to the top of a complete sermon, notes document, generated manuscript, or Google Doc does not satisfy repository provenance.
+
+Cross-lecture integration must preserve source lineage when repeated material is consolidated. A topic unit may contain one manuscript and several separately highlighted source occurrences from different lectures or notes.
+
+The complete product requirements, editorial workflows, source behavior, UI, migration plan, and acceptance criteria are defined in [Functional Specification: Exegesis and Topic Repository](./exegesis_topic_repository_functional_spec.md).
+
 ## 4. User Stories
 *   *As a Pastor, I want to see the "Exegetical Notes" before the draft is written, so I can trust the biblical foundation.*
 *   *As an Editor, I want to restart the generation if the "Architect" splits the beats incorrectly, so I can get a better structure.*
@@ -279,6 +289,9 @@ The editor's operating sequence is:
 *   *As an Editor, I want to refresh a Series index after publication and see when the new manuscript is available in chapter, topic, and search navigation.*
 *   *As an Editor, I want later lectures to enrich or correct the best existing manuscript location without forcing readers to encounter classroom repetition.*
 *   *As an Editor, I want safe cross-lecture updates applied to earlier Drafts while preserving published manuscripts and protecting any human-edited unit from automatic replacement.*
+*   *As a Reader, I want to browse the same reviewed material by Bible passage or theological topic without encountering duplicate manuscripts.*
+*   *As a Reader, I want every passage and topic unit to open the exact highlighted sermon or notes fragment that supports it.*
+*   *As an Editor, I want a repeated topic to retain sources from every relevant lecture while presenting one logically organized canonical manuscript.*
 
 ## 5. Non-Functional Requirements
 *   **Latency**: The full workflow can take 2-5 minutes depending on note length; the UI must handle this without timing out (using async polling).
@@ -287,3 +300,5 @@ The editor's operating sequence is:
 *   **Traceability**: Transcript evidence and planned units retain source line ranges and evidence IDs.
 *   **Index Integrity**: Index refreshes must not silently exclude transcript Projects or replace content-derived passage scope with assumptions from editorial titles.
 *   **Continuity Integrity**: Cross-lecture analysis must account for every current evidence ID exactly once and may never classify a new Scripture argument as an exact duplicate merely because the conclusion is familiar.
+*   **Repository Traceability**: Every published canonical unit has an approved exact-fragment citation or an explicit editor-approved source exception.
+*   **Stable Navigation**: Canonical unit and citation URLs use stable IDs rather than editable titles.

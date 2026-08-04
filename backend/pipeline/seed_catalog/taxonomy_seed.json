@@ -1,0 +1,125 @@
+{
+  "version": "1.0-review-seed",
+  "description": "供人工審閱的初始主題樹。signals 只用於提出候選歸類，不代表正式神學分類。",
+  "topics": [
+    {
+      "id": "bible-hermeneutics",
+      "label": "聖經論與釋經學",
+      "children": [
+        {"id": "scripture-reliability", "label": "聖經的性質、可靠性與歷史性", "signals": ["聖經無誤", "福音書的性質", "口傳傳統", "歷史準確", "死海古卷", "歷史確據", "作者意圖"]},
+        {"id": "original-language", "label": "原文、翻譯與文法", "signals": ["原文", "希臘文", "希伯來文", "詞義", "語義", "文法", "語態", "翻譯", "和合本", "辨析"]},
+        {"id": "literary-structure", "label": "文學結構、敘事編排與文體", "signals": ["結構", "分段", "編排", "文學", "文體", "大綱", "Inclusio", "啟示錄文體", "記號性"]},
+        {"id": "old-testament-fulfillment", "label": "舊約引用、預言與應驗", "signals": ["舊約", "應驗", "預言", "先知", "引用", "以賽亞", "耶利米", "彌迦", "何西阿", "創世記平行"]},
+        {"id": "hermeneutical-method", "label": "釋經原則與神學訓練", "signals": ["解經", "釋經原則", "方法論", "神學訓練", "上下文", "文化慣例", "理性的正確使用", "比喻的釋經"]}
+      ]
+    },
+    {
+      "id": "theology-proper-trinity",
+      "label": "神論與三一論",
+      "children": [
+        {"id": "attributes-providence", "label": "神的屬性、旨意與供應", "signals": ["神的信實", "信實", "神的旨意", "旨意成全", "神的供應", "天父", "阿爸父", "父神"]},
+        {"id": "trinity-father-son", "label": "三一神與父子關係", "signals": ["三一", "聖父", "聖子", "聖靈", "父子", "愛子", "父、子", "天上宣告"]}
+      ]
+    },
+    {
+      "id": "christology",
+      "label": "基督論",
+      "children": [
+        {"id": "deity-of-christ", "label": "耶穌的神性與權柄", "signals": ["耶穌神性", "神性", "神聖來歷", "以馬內利", "赦罪的權柄", "神性權柄", "比殿更大", "神的兒子", "首生"]},
+        {"id": "messiah-king-son-of-man", "label": "彌賽亞、君王與人子", "signals": ["彌賽亞", "基督", "君王", "王權", "大衛的子孫", "人子", "作王", "猶太人的王"]},
+        {"id": "servant", "label": "耶和華的僕人", "signals": ["耶和華的僕人", "僕人之歌", "受苦僕人", "我的僕人", "僕人的金字塔"]},
+        {"id": "cross-suffering-resurrection", "label": "十字架、受苦與復活", "signals": ["十字架", "受苦", "捨己", "死而復活", "復活", "贖罪祭"]},
+        {"id": "second-coming", "label": "基督再臨", "signals": ["再臨", "兩次降臨", "榮耀降臨", "人子降臨"]}
+      ]
+    },
+    {
+      "id": "pneumatology",
+      "label": "聖靈論",
+      "children": [
+        {"id": "spirit-work-baptism", "label": "聖靈的工作與洗", "signals": ["聖靈的工作", "聖靈的洗", "聖靈火洗", "聖靈降臨", "聖靈"]},
+        {"id": "blasphemy-spirit", "label": "褻瀆聖靈", "signals": ["褻瀆聖靈"]}
+      ]
+    },
+    {
+      "id": "soteriology",
+      "label": "救恩論",
+      "children": [
+        {"id": "sin-forgiveness-redemption", "label": "罪、赦罪與救贖", "signals": ["罪", "赦罪", "救贖", "拯救", "贖罪", "罪人"]},
+        {"id": "righteousness-justification", "label": "義與稱義", "signals": ["稱義", "因信稱義", "算為義", "義的首要意義", "勝過文士", "飢渴慕義", "諸般的義", "神的義"]},
+        {"id": "faith-repentance-obedience", "label": "信心、悔改與順服", "signals": ["信心", "悔改", "順服", "不信", "照著你們的信"]},
+        {"id": "grace-judgment-order", "label": "恩典、審判與救恩次序", "signals": ["恩典", "審判", "救恩次序", "刑罰", "救恩", "外邦人進入"]}
+      ]
+    },
+    {
+      "id": "kingdom-eschatology",
+      "label": "神國與末世論",
+      "children": [
+        {"id": "kingdom-of-god", "label": "天國與神的國", "signals": ["天國", "神的國", "國度", "君王", "王權", "βασιλεία"]},
+        {"id": "already-not-yet", "label": "已然未然與國度進展", "signals": ["已然", "未然", "現在已臨在", "將來才完全", "國度進展", "D-Day", "V-Day"]},
+        {"id": "millennium-resurrection", "label": "千禧年與復活次序", "signals": ["千禧年", "一千年", "復活的次序"]},
+        {"id": "apocalyptic-new-creation", "label": "啟示文學、新天新地與末世記號", "signals": ["啟示錄", "啟示文體", "新天新地", "新耶路撒冷", "哈米吉多頓", "記號性"]}
+      ]
+    },
+    {
+      "id": "covenant-law-history",
+      "label": "聖約、律法與救恩歷史",
+      "children": [
+        {"id": "abrahamic-covenant", "label": "亞伯拉罕之約與應許", "signals": ["亞伯拉罕", "亞伯拉罕之約", "應許之福", "應許"]},
+        {"id": "davidic-covenant", "label": "大衛之約與王權", "signals": ["大衛之約", "大衛的子孫", "大衛王", "王位", "作王的正統性"]},
+        {"id": "law-grace", "label": "律法、恩典與成全", "signals": ["律法", "成全律法", "法利賽人", "人的遺傳", "神的誡命", "安息日", "恩典"]},
+        {"id": "dispensationalism", "label": "時代論與救恩歷史", "signals": ["時代論", "司可福", "Scofield", "應許時代", "救恩史"]},
+        {"id": "israel-gentiles", "label": "以色列與外邦人", "signals": ["以色列", "外邦人", "本國的子民", "迦南婦人"]}
+      ]
+    },
+    {
+      "id": "ecclesiology-discipleship",
+      "label": "教會論與門徒",
+      "children": [
+        {"id": "church-authority", "label": "教會根基與權柄", "signals": ["教會", "磐石根基", "綑綁", "釋放", "耶路撒冷會議", "使徒權柄"]},
+        {"id": "disciple-identity-mission", "label": "門徒身分與使命", "signals": ["門徒的使命", "門徒使命", "鹽與光", "差你們去", "呼召門徒"]},
+        {"id": "disciple-faith-trust", "label": "門徒的信心、認識與信靠", "signals": ["小信", "信心小", "淺信", "門徒信心", "彼得的信心", "認識耶穌", "信靠主", "信心與人同神的合宜關係", "ὀλιγόπιστος"]},
+        {"id": "discipleship-cost", "label": "門徒訓練、跟隨與受苦", "signals": ["門徒訓練", "跟從耶穌", "跟隨", "捨己", "背十字架", "逼迫", "受苦"]},
+        {"id": "church-community", "label": "教會群體、接待與彼此關係", "signals": ["接待門徒", "教會群體", "家人", "彼此", "使人和睦"]}
+      ]
+    },
+    {
+      "id": "christian-life-ethics",
+      "label": "基督徒生活與倫理",
+      "children": [
+        {"id": "prayer-fasting-piety", "label": "禱告、禁食與敬虔", "signals": ["禱告", "主禱文", "禁食", "施捨", "暗中的父"]},
+        {"id": "love-mercy-relationships", "label": "愛、憐憫、饒恕與人際關係", "signals": ["愛仇敵", "愛人如己", "憐憫", "憐恤", "饒恕", "Agape", "Phileo", "接待"]},
+        {"id": "marriage-family-sexuality", "label": "婚姻、家庭與性倫理", "signals": ["婚姻", "離婚", "再婚", "姦淫", "家庭", "父親"]},
+        {"id": "money-work-anxiety", "label": "金錢、工作與憂慮", "signals": ["財寶", "金錢", "工作", "日用飲食", "供應", "憂慮", "先求"]},
+        {"id": "truth-justice-social-ethics", "label": "誠實、公義與社會倫理", "signals": ["誠實", "起誓", "以眼還眼", "社會倫理", "論斷", "公義", "選擇較小的惡", "言語"]}
+      ]
+    },
+    {
+      "id": "anthropology",
+      "label": "人論",
+      "children": [
+        {"id": "body-soul-spirit", "label": "靈、魂、體與人的整體性", "signals": ["靈魂體", "人的整體性", "魂", "靈與魂", "ψυχή"]},
+        {"id": "life-death", "label": "生命與死亡", "signals": ["生死觀", "生命", "死亡", "死人", "死後去向"]},
+        {"id": "heart-reason-will", "label": "人的內心、理性、意志與欲望", "signals": ["內心", "理性", "意志", "欲望", "動機", "心思", "心眼"]}
+      ]
+    },
+    {
+      "id": "history-theological-thought",
+      "label": "教會歷史與神學思想",
+      "children": [
+        {"id": "theological-schools", "label": "神學流派與思想史", "signals": ["神學史", "Wrede", "彌賽亞秘密", "史懷哲", "時代論", "Plymouth Brethren", "司可福"]},
+        {"id": "apologetics-history", "label": "護教與歷史論證", "signals": ["護教", "歷史確據", "死海古卷", "歷史知識", "科學", "碳定年"]}
+      ]
+    }
+  ],
+  "alias_groups": [
+    {"preferred": "人子", "aliases": ["那個人子", "那人子", "Son of Man"], "reason": "同一基督論稱號的不同表達；具體語法差異仍保留在內容單元。"},
+    {"preferred": "義與稱義", "aliases": ["義", "稱義", "因信稱義", "算為義", "成為義"], "reason": "歸入共同檢索入口，但不預先抹平教授對法律地位與合宜關係的區分。"},
+    {"preferred": "天國與神的國", "aliases": ["天國", "神的國", "國度", "βασιλεία"], "reason": "現有文稿明確討論這些稱呼的關係。"},
+    {"preferred": "釋經方法", "aliases": ["解經方法", "解經方法論", "準確解經", "釋經原則", "以解經為根基的神學訓練"], "reason": "作為方法論入口，具體方法仍分成獨立單元。"},
+    {"preferred": "彌賽亞", "aliases": ["基督", "彌賽亞君王", "Messiah", "Christ"], "reason": "同一稱號的中英文及角色表達。"},
+    {"preferred": "小信", "aliases": ["信心小", "淺信", "ὀλιγόπιστος"], "reason": "現有文稿對同一詞群使用不同中文表達。"},
+    {"preferred": "啟示文學", "aliases": ["啟示錄文體", "記號性閱讀", "啟示文體"], "reason": "共同指向文體与記號的解讀原則。"},
+    {"preferred": "千禧年", "aliases": ["一千年", "千年國度", "Millennium"], "reason": "同一末世論主題的不同稱呼。"},
+    {"preferred": "時代論", "aliases": ["近代時代論", "Scofield 體系", "司可福參考聖經", "Dispensationalism"], "reason": "歷史來源與神學批判共用的檢索入口。"}
+  ]
+}

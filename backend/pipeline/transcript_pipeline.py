@@ -86,6 +86,7 @@ EVIDENCE_SCHEMA: Dict[str, Any] = {
                             "enum": ["釋經", "神學", "應用", "附錄"],
                         },
                         "content": {"type": "string"},
+                        "verbatim_source_excerpt": {"type": "string"},
                         "scripture_refs": {"type": "array", "items": {"type": "string"}},
                         "scripture_presentations": {
                             "type": "array",
@@ -108,6 +109,7 @@ EVIDENCE_SCHEMA: Dict[str, Any] = {
                         "type",
                         "category",
                         "content",
+                        "verbatim_source_excerpt",
                         "scripture_refs",
                         "scripture_presentations",
                         "source_ranges",
@@ -544,6 +546,25 @@ class TranscriptPipeline:
             if not str(item.get("content") or "").strip():
                 raise ValueError(f"Evidence {evidence_id} has no content")
             self._validate_ranges(item.get("source_ranges", []), len(source.lines), evidence_id)
+            excerpt = str(item.get("verbatim_source_excerpt") or "").strip()
+            if not excerpt and item.get("source_ranges"):
+                # Safe compatibility for legacy inventories and deterministic
+                # test clients: use the complete first declared source range,
+                # never an inferred or paraphrased fragment.
+                first_range = item["source_ranges"][0]
+                excerpt = "\n".join(
+                    source.lines[int(first_range["start_line"]) - 1 : int(first_range["end_line"])]
+                ).strip()
+                item["verbatim_source_excerpt"] = excerpt
+            if not excerpt:
+                raise ValueError(f"Evidence {evidence_id} has no verbatim source excerpt")
+            source_fragments = []
+            for source_range in item.get("source_ranges", []):
+                start = int(source_range["start_line"])
+                end = int(source_range["end_line"])
+                source_fragments.append("\n".join(source.lines[start - 1 : end]))
+            if not any(excerpt in fragment for fragment in source_fragments):
+                raise ValueError(f"Evidence {evidence_id} verbatim source excerpt is not inside its source range")
             self._validate_scripture_evidence(item, source)
         for item in evidence:
             for ref in [*item.get("supports", []), *([item["answers_question"]] if item.get("answers_question") else [])]:

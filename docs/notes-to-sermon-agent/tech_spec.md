@@ -13,6 +13,7 @@ The system follows a monolithic architecture with a clear separation between the
 *   **Transcript Pipeline**: `backend/pipeline/transcript_pipeline.py`. Implements full-transcript evidence extraction, planning, generation, and coverage auditing.
 *   **OpenAI Gateway**: Transcript generation, Coverage Audit, and Theological Boundary Review use structured OpenAI responses. The current shared model is `gpt-5.6-sol`, configured by `OPENAI_GENERATION_MODEL`.
 *   **Series Index Refresh**: `backend/api/series_index_refresh.py`. Runs cache-aware topic extraction for one Series and then rebuilds the global manuscript search index.
+*   **Exegesis and Topic Repository**: A canonical-unit authoring store, compiled Bible/topic read model, and exact-fragment citation resolver over checked-in manuscripts and original sermon/notes sources. See [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md).
 
 ## 2. Data Models & Schemas
 
@@ -22,14 +23,14 @@ Persisted in `notes_to_surmon/{project_id}/agent_state.json`.
 ```python
 class AgentState(BaseModel):
     project_id: str
-    
+
     # Context (Immutable after init)
     sermon_series_title: str
     sermon_series_description: str
     lecture_title: str
     lecture_description: str
     source_notes: str # The unified markdown of raw notes
-    
+
     # Artifacts (Mutable)
     exegetical_notes: Optional[str] = None
     theological_analysis: Optional[str] = None
@@ -115,6 +116,16 @@ Each evidence item includes `scripture_refs` and a structured `scripture_present
 * `role`: what the cited passage proves or explains in Dr. Wang's argument.
 
 Evidence validation rejects a direct quotation not found verbatim in its declared transcript source range. Unit generation requires the reference and requires every direct quotation to appear inside a Markdown `>` blockquote. The deterministic whole-document check contributes `tone_or_format` findings to `coverage_audit.json`; the Stage 1 UI displays those findings as targeted, read-only correction proposals.
+
+### 2.6. Canonical Repository and Source Lineage
+
+Project files remain authoritative for manuscript production. The repository adds stable canonical-unit, source-document, source-map, citation, and unit-relationship records under `DATA_BASE_DIR/canonical_repository/`.
+
+Both passage and topic units use identical source-citation behavior. Transcript citations resolve to an exact paragraph/highlight and media time. Notes citations resolve to an exact page and highlighted OCR text. Generated manuscripts and Google Docs remain derived artifacts and do not count as original sources.
+
+New Evidence Inventory records include an exact `verbatim_source_excerpt` anchor in addition to line ranges. Existing inventories are migrated through source maps and remain candidates until exact fragments are validated. Cross-lecture merge and patch artifacts must retain the source IDs, evidence IDs, source ranges, and exact anchors associated with every contribution.
+
+The complete schemas, storage layout, invalidation rules, and compiler design are defined in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md).
 
 ## 3. API Design
 
@@ -208,6 +219,14 @@ Evidence validation rejects a direct quotation not found verbatim in its declare
   * For a transcript target, writes a deterministic patch Coverage pass only when reversing all applied patches reconstructs the complete reviewed `final.md`; otherwise leaves Coverage stale.
   * Marks a successfully certified transcript target's final review copy stale so the editor must explicitly restart theological review from the updated Draft.
   * Notes targets and uncertified transcript targets follow their normal audit and check-in workflow.
+
+### 3.8. Canonical Repository Endpoints
+
+Public repository endpoints provide status, Bible/topic indexes, canonical-unit details, direct relationships, and citation resolution. Admin endpoints rebuild source maps, import seed candidates, review units and citations, remap stale citations, publish reviewed units, and activate validated repository builds.
+
+Citation URLs contain stable citation IDs rather than client-supplied filesystem paths or raw offsets. The backend resolves and validates the stored locator before returning highlighted text or media/page positioning.
+
+The complete route definitions and payloads are specified in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md#9-api-design).
 
 ## 4. Implementation Details
 
@@ -430,7 +449,17 @@ Patch application records per-unit results in `integration_application.json`. Ap
 
 For transcript patch targets, `series_manuscript_application.py` reverses the applied units in memory and requires the reconstructed full Draft to equal the reviewed `final.md`. On success it writes `coverage_audit.json` with `audit_kind: integration_patch_coverage_check`, marks Coverage passed, and sets `theological_review_stale: true`. The editor UI then offers **Restart Theological Review**. `start_theological_review()` replaces `final.md` and its chunk bundle from the updated Draft only under this explicit stale-review state, clears the flag, and resets the theological audit. Check In remains disabled until every new review chunk has been completed.
 
+### 4.10. Canonical Repository Build and Source Readers
+
+The repository compiler consumes reviewed canonical-unit and citation authoring records and writes a new immutable build containing SQLite lookup tables plus Bible and topic JSON projections. It validates manuscript anchors, taxonomy assignments, source hashes, exact highlights, access policy, and publication gates before atomically changing the active-build pointer.
+
+The sermon reader must stop flattening all transcript paragraphs into an unaddressable Markdown string. It retains stable paragraph containers so citation resolution can scroll, focus, highlight, and seek media. The notes reader opens the correct source image beside its OCR text and highlights the resolved OCR range. A source checksum mismatch produces a stale state and never silently highlights a different passage.
+
+Implementation phases and rollback behavior are defined in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md#16-implementation-phases).
+
 ## 5. Security & Performance
 *   **Concurrency**: Uses FastAPI `BackgroundTasks`. Not scalable horizontally (state is local file-based), but sufficient for single-tenant use.
 *   **Rate Limits**: Bound by Vertex AI quotas. Retry logic handles basic transient 429s.
 *   **Index Refresh State**: Refresh status and the global concurrency guard are in process. A backend restart clears visible job status; index files and completed cache artifacts remain on disk.
+*   **Repository Integrity**: Repository builds are written beside the active build and activated atomically only after source, citation, unit, and access validation succeeds.
+*   **Citation Access**: Public citation resolution accepts stable IDs only. Raw/reviewed transcript stages and restricted notes remain editor-only.

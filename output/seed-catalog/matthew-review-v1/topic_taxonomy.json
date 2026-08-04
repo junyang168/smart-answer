@@ -1,0 +1,3586 @@
+{
+  "schema_version": "1.0-review",
+  "taxonomy_version": "1.0-review-seed",
+  "status": "candidate_requires_review",
+  "topics": [
+    {
+      "id": "bible-hermeneutics",
+      "label": "聖經論與釋經學",
+      "children": [
+        {
+          "id": "scripture-reliability",
+          "label": "聖經的性質、可靠性與歷史性",
+          "units": [
+            {
+              "unit_id": "CU-SEED-28b68fbc2e33",
+              "title": "口傳傳統的可信性",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "口傳傳統"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-bf1d889da977",
+              "title": "太 2:1–12：彌迦書預言與死海古卷的歷史確據",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "死海古卷",
+                "歷史確據"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cb122629d9c8",
+              "title": "福音書的性質",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "福音書的性質"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-242ad087a585",
+              "title": "聖經家譜跳代現象",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "聖經無誤",
+                "作者意圖"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-1335c18015a3",
+              "title": "路加書寫的歷史準確性",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "歷史準確"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "original-language",
+          "label": "原文、翻譯與文法",
+          "units": [
+            {
+              "unit_id": "CU-SEED-c6138b9864f3",
+              "title": "Agape 與 Phileo 的詞義辨析",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "原文",
+                "詞義",
+                "辨析"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c74b23f20a7e",
+              "title": "「人子」稱號的原文、但以理書背景與耶穌神性的論證",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "希臘文",
+                "文法"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-258b77d29ffd",
+              "title": "受苦與背十字架的辨析",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "辨析"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2edf4a439a67",
+              "title": "天國與神的國（βασιλεία 的詞義）",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "詞義",
+                "語態"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2f37dde3fccc",
+              "title": "太 10:23：原文解析與史懷哲詮釋錯誤的釋經回應",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-bc0d7a556e3e",
+              "title": "太 11:12–13：βιάζεται 的希臘文語態分析與天國進展的正確詮釋",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "希臘文",
+                "語義",
+                "語態",
+                "翻譯"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-0364b710902c",
+              "title": "太 11:25–27：亞蘭文語言結構與耶穌神性的論證",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "希臘文",
+                "希伯來文",
+                "語義"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7d6793cbade6",
+              "title": "太 13:13–15：比喻目的的釋經問題（μήποτε 與 ἰάσομαι 的文法分析）",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "文法",
+                "翻譯"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-ef1576d0e2f0",
+              "title": "太 1:22–23：童女懷孕的希伯來文與希臘文詞義辨析",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "原文",
+                "希臘文",
+                "希伯來文",
+                "詞義",
+                "翻譯",
+                "辨析"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2f64e26dd21b",
+              "title": "太 5:17–18：耶穌成全律法的意義與方式",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "希臘文",
+                "語態",
+                "和合本"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c76843f5556e",
+              "title": "太 6:5–6：公開禱告與私下禱告的動機辨析",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "辨析"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f8ecefad6acb",
+              "title": "太 7:1–6：論斷與評估的辨析",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "辨析"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-50217106dba3",
+              "title": "西 1:15 釋義：「首生」的語義與耶穌神性",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "希臘文",
+                "語義"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c640b098097f",
+              "title": "試探與試煉的語義區分",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "原文",
+                "語義"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "literary-structure",
+          "label": "文學結構、敘事編排與文體",
+          "units": [
+            {
+              "unit_id": "CU-SEED-f98b471a3c9b",
+              "title": "「那個人子」稱號與但以理書七章的神性身分",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "文體",
+                "啟示錄文體",
+                "記號性"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-57c877632dc1",
+              "title": "啟示錄文體的記號性閱讀：新耶路撒冷與哈米吉多頓",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "文學",
+                "文體",
+                "啟示錄文體",
+                "記號性"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-b9505ecccb70",
+              "title": "太 10:5–23：兩段結構與共觀福音平行對照",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構",
+                "編排"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-0364b710902c",
+              "title": "太 11:25–27：亞蘭文語言結構與耶穌神性的論證",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8430f20d8e83",
+              "title": "太 13 章結構",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f0240c90ed78",
+              "title": "太 1:1–4:16：大綱結構與創世記平行",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "結構",
+                "大綱"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c464e1e634bc",
+              "title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構",
+                "Inclusio"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-fec514f6a2ad",
+              "title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "結構",
+                "Inclusio"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-4be497b74894",
+              "title": "登山寶訓的整體結構",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構"
+              ],
+              "source_project_ids": [
+                "登山寶訓的結構"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3f0091431171",
+              "title": "登山寶訓的文學結構",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "結構",
+                "文學",
+                "Inclusio"
+              ],
+              "source_project_ids": [
+                "登山寶訓的文學結構"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3bde594000a1",
+              "title": "耶和華僕人的金字塔結構：從以色列到彌賽亞",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "結構"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-1056f3c091d4",
+              "title": "馬太8至9章的敘事結構與編排邏輯",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "結構",
+                "編排",
+                "Inclusio"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6fff47ccd665",
+              "title": "馬太福音的結構與分段標誌",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "結構",
+                "分段"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "old-testament-fulfillment",
+          "label": "舊約引用、預言與應驗",
+          "units": [
+            {
+              "unit_id": "CU-SEED-28b68fbc2e33",
+              "title": "口傳傳統的可信性",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "舊約",
+                "引用"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2f37dde3fccc",
+              "title": "太 10:23：原文解析與史懷哲詮釋錯誤的釋經回應",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "應驗",
+                "預言"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cb74865b1032",
+              "title": "太 11:10–11：施洗約翰的身份與地位——先鋒、最大先知與天國的關係",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "預言",
+                "先知",
+                "引用"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-65409a9b0848",
+              "title": "太 11:14–15：以利亞的應驗與先知職位的傳承脈絡",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "舊約",
+                "應驗",
+                "先知"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8fb211a0149b",
+              "title": "太 11:28–30：安息的應許與耶穌神性的舊約根據",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-38f59aa7787f",
+              "title": "太 11:2–6：施洗約翰的疑問與耶穌引用舊約彌賽亞預言的回應",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "舊約",
+                "應驗",
+                "預言",
+                "引用"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-31f3e64e232c",
+              "title": "太 12:1-7：掐麥穗爭議與耶穌比殿更大的宣告",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "引用",
+                "何西阿"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-94dd9f54dec6",
+              "title": "太 12:15-21：耶穌的事工應驗以賽亞書僕人詩歌",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "應驗",
+                "引用",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7d6793cbade6",
+              "title": "太 13:13–15：比喻目的的釋經問題（μήποτε 與 ἰάσομαι 的文法分析）",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "應驗",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f7f18ab801a0",
+              "title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "應驗"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-98abc756c0da",
+              "title": "太 16:28：山上變貌作為耶穌再臨的保證",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "預言",
+                "引用",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f0240c90ed78",
+              "title": "太 1:1–4:16：大綱結構與創世記平行",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "創世記平行"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-76fce1aae9f1",
+              "title": "太 2:15：πληρόω 的詞義與何西阿引用的正確解讀",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "應驗",
+                "預言",
+                "引用",
+                "何西阿"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-80c9493b1ccf",
+              "title": "太 2:17–18：耶利米書引用與悲慘—盼望結構",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "預言",
+                "先知",
+                "引用",
+                "耶利米"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-bf1d889da977",
+              "title": "太 2:1–12：彌迦書預言與死海古卷的歷史確據",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "預言",
+                "彌迦"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-aa2aeeb55f99",
+              "title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "應驗",
+                "預言",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-4dbad40c5d96",
+              "title": "太 2:23：拿撒勒人稱謂與複數先知的引用方式",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "舊約",
+                "應驗",
+                "預言",
+                "先知",
+                "引用"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2c3c2c916a96",
+              "title": "太 3:1–3：以賽亞書 40:3 在共觀福音中的重新解釋",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約",
+                "引用",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-121dddcaeb15",
+              "title": "太 4:12–23：耶穌呼召門徒與傳道事工的開始",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "應驗",
+                "預言",
+                "先知",
+                "以賽亞"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-eb3dfcfb2e23",
+              "title": "太 5:3–5：八福頭三福與賽 61 的對應及彌賽亞身分",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "舊約",
+                "預言"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3b254665c1af",
+              "title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "舊約",
+                "先知"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-707a6bd8d514",
+              "title": "太 8:17：耶穌擔當疾病與兩次降臨的救贖論架構",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約",
+                "應驗",
+                "預言",
+                "引用"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6406e69802a4",
+              "title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-44050069091f",
+              "title": "太 9:14–17：新郎已來——禁食與新舊約轉換的意義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d92d5603c527",
+              "title": "彌賽亞兩次降臨",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約",
+                "應驗",
+                "預言",
+                "引用"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3f0091431171",
+              "title": "登山寶訓的文學結構",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "舊約",
+                "先知"
+              ],
+              "source_project_ids": [
+                "登山寶訓的文學結構"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hermeneutical-method",
+          "label": "釋經原則與神學訓練",
+          "units": [
+            {
+              "unit_id": "CU-SEED-d865faa41041",
+              "title": "以解經為根基的神學訓練",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "解經",
+                "神學訓練"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-54c601facdb5",
+              "title": "正確理解耶穌比喻的釋經原則",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "解經",
+                "釋經原則",
+                "比喻的釋經"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c8e22147ddd9",
+              "title": "準確解經的方法論：文體、原文限定、上下文與文化慣例",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "解經",
+                "方法論",
+                "上下文",
+                "文化慣例"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-a4a051a9c476",
+              "title": "解經方法論：理性的正確使用",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "解經",
+                "方法論",
+                "理性的正確使用"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "theology-proper-trinity",
+      "label": "神論與三一論",
+      "children": [
+        {
+          "id": "attributes-providence",
+          "label": "神的屬性、旨意與供應",
+          "units": [
+            {
+              "unit_id": "CU-SEED-8508ed5ef7f7",
+              "title": "太 12:46-50：遵行天父旨意者是真正的家人",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神的旨意",
+                "天父"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-748d53132ffb",
+              "title": "太 6:10：願你的旨意成全",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "旨意成全",
+                "神的供應",
+                "天父"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-1200497fe462",
+              "title": "太 6:11：日用飲食與神的供應方式",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神的供應"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-49f816c8b60c",
+              "title": "稱神為阿爸父的神學意義",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "阿爸父"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "trinity-father-son",
+          "label": "三一神與父子關係",
+          "units": [
+            {
+              "unit_id": "CU-SEED-5ae86988a920",
+              "title": "太 3:11：約翰水洗與耶穌聖靈火洗的關係",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "聖靈"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-ddd59b367e22",
+              "title": "太 3:13–17：耶穌受洗的意義——盡諸般的義與三一神的顯現",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "三一",
+                "聖父",
+                "聖子",
+                "聖靈",
+                "愛子"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-17b9f60c46b9",
+              "title": "褻瀆聖靈",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "聖靈"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "christology",
+      "label": "基督論",
+      "children": [
+        {
+          "id": "deity-of-christ",
+          "label": "耶穌的神性與權柄",
+          "units": [
+            {
+              "unit_id": "CU-SEED-c74b23f20a7e",
+              "title": "「人子」稱號的原文、但以理書背景與耶穌神性的論證",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "耶穌神性",
+                "神性",
+                "赦罪的權柄"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f98b471a3c9b",
+              "title": "「那個人子」稱號與但以理書七章的神性身分",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神性"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-9b134dc0eb3b",
+              "title": "句首「Amen」的宣告公式與耶穌的神性權柄",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "神性",
+                "神性權柄"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-0364b710902c",
+              "title": "太 11:25–27：亞蘭文語言結構與耶穌神性的論證",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "耶穌神性",
+                "神性"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8fb211a0149b",
+              "title": "太 11:28–30：安息的應許與耶穌神性的舊約根據",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "耶穌神性",
+                "神性"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-31f3e64e232c",
+              "title": "太 12:1-7：掐麥穗爭議與耶穌比殿更大的宣告",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "比殿更大"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7c4f93c69a68",
+              "title": "太 1:18–21：耶穌的神聖來歷與救贖目的",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神聖來歷"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-aa2aeeb55f99",
+              "title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神性"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-402d0c096f0e",
+              "title": "太 9:1–8：人子在地上赦罪的權柄",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "赦罪的權柄"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f46f85e7e380",
+              "title": "耶穌使用比喻的神學策略——透過比喻宣告神性",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神性"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-50217106dba3",
+              "title": "西 1:15 釋義：「首生」的語義與耶穌神性",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "耶穌神性",
+                "神性",
+                "首生"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "messiah-king-son-of-man",
+          "label": "彌賽亞、君王與人子",
+          "units": [
+            {
+              "unit_id": "CU-SEED-2f56378346d7",
+              "title": "Wrede彌賽亞秘密理論",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞",
+                "基督",
+                "猶太人的王"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f98b471a3c9b",
+              "title": "「那個人子」稱號與但以理書七章的神性身分",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "人子"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-75211c5b902a",
+              "title": "太 12:22-30：神國的顯明與立場分化",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "彌賽亞",
+                "大衛的子孫"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f7f18ab801a0",
+              "title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "基督",
+                "人子"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-98abc756c0da",
+              "title": "太 16:28：山上變貌作為耶穌再臨的保證",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "君王",
+                "人子"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d133823f3737",
+              "title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "基督",
+                "君王",
+                "王權",
+                "作王"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d0b53b8116c5",
+              "title": "太 1:1–17：家譜三段十四代與大衛名字的數字奧秘",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "基督"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f7b1e4799be3",
+              "title": "太 1:6：耶穌作王的正統性",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "作王"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-aa2aeeb55f99",
+              "title": "太 2:1–3：以賽亞預言與彌賽亞的神性",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞",
+                "王權"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-102ada4b73fa",
+              "title": "太 4:1–11：耶穌受試探與以色列曠野經歷的對比",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "彌賽亞",
+                "王權"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-eb3dfcfb2e23",
+              "title": "太 5:3–5：八福頭三福與賽 61 的對應及彌賽亞身分",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3b254665c1af",
+              "title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞",
+                "作王"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f896cd65b6dc",
+              "title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "人子"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6406e69802a4",
+              "title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-402d0c096f0e",
+              "title": "太 9:1–8：人子在地上赦罪的權柄",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "人子"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d92d5603c527",
+              "title": "彌賽亞兩次降臨",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-525546834eb5",
+              "title": "彌賽亞身分與彌賽亞性質的兩階段教導",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞",
+                "王權"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3bde594000a1",
+              "title": "耶和華僕人的金字塔結構：從以色列到彌賽亞",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "彌賽亞"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "servant",
+          "label": "耶和華的僕人",
+          "units": [
+            {
+              "unit_id": "CU-SEED-d133823f3737",
+              "title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "受苦僕人"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-707a6bd8d514",
+              "title": "太 8:17：耶穌擔當疾病與兩次降臨的救贖論架構",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "耶和華的僕人",
+                "僕人之歌"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3bde594000a1",
+              "title": "耶和華僕人的金字塔結構：從以色列到彌賽亞",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "耶和華的僕人",
+                "僕人的金字塔"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cross-suffering-resurrection",
+          "label": "十字架、受苦與復活",
+          "units": [
+            {
+              "unit_id": "CU-SEED-258b77d29ffd",
+              "title": "受苦與背十字架的辨析",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "十字架",
+                "受苦"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-49001e5d4e93",
+              "title": "太 12:38-42：約拿的神蹟與耶穌的死而復活",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "死而復活",
+                "復活"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-b422d338541e",
+              "title": "太 16:24–27：捨己與背十字架的釋經",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "十字架",
+                "捨己"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c4027814a6a8",
+              "title": "太 16:25–27：三個「因為」的釋經論證",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "十字架",
+                "捨己"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d133823f3737",
+              "title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "受苦",
+                "復活"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d63ebed1c6c0",
+              "title": "太 5:17 的成全：潔淨食物與贖罪祭的具體實現",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "贖罪祭"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-525546834eb5",
+              "title": "彌賽亞身分與彌賽亞性質的兩階段教導",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "十字架",
+                "受苦",
+                "復活"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "second-coming",
+          "label": "基督再臨",
+          "units": [
+            {
+              "unit_id": "CU-SEED-f7f18ab801a0",
+              "title": "太 16:28–17:2：登山變像應驗並保證人子的榮耀降臨",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "再臨",
+                "榮耀降臨",
+                "人子降臨"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-98abc756c0da",
+              "title": "太 16:28：山上變貌作為耶穌再臨的保證",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "再臨",
+                "人子降臨"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-707a6bd8d514",
+              "title": "太 8:17：耶穌擔當疾病與兩次降臨的救贖論架構",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "兩次降臨"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d92d5603c527",
+              "title": "彌賽亞兩次降臨",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "兩次降臨"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pneumatology",
+      "label": "聖靈論",
+      "children": [
+        {
+          "id": "spirit-work-baptism",
+          "label": "聖靈的工作與洗",
+          "units": [
+            {
+              "unit_id": "CU-SEED-75211c5b902a",
+              "title": "太 12:22-30：神國的顯明與立場分化",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "聖靈的工作",
+                "聖靈"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-5ae86988a920",
+              "title": "太 3:11：約翰水洗與耶穌聖靈火洗的關係",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "聖靈火洗",
+                "聖靈"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-17b9f60c46b9",
+              "title": "褻瀆聖靈",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "聖靈的工作",
+                "聖靈"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "blasphemy-spirit",
+          "label": "褻瀆聖靈",
+          "units": [
+            {
+              "unit_id": "CU-SEED-17b9f60c46b9",
+              "title": "褻瀆聖靈",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "褻瀆聖靈"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "soteriology",
+      "label": "救恩論",
+      "children": [
+        {
+          "id": "sin-forgiveness-redemption",
+          "label": "罪、赦罪與救贖",
+          "units": [
+            {
+              "unit_id": "CU-SEED-4b10b7dfa249",
+              "title": "「義」的首要意義：人與神的合宜關係",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cd688fbd2db8",
+              "title": "太 12:43-45：污鬼回來的比喻",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "救贖"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-fe963c86d579",
+              "title": "太 12:8-14：醫治枯乾手與安息日行善的權柄",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "赦罪"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-0c378c055c24",
+              "title": "太 14:15–21：五餅二魚的釋經與歷史背景",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "贖罪"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7c4f93c69a68",
+              "title": "太 1:18–21：耶穌的神聖來歷與救贖目的",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "罪",
+                "救贖",
+                "拯救",
+                "贖罪",
+                "罪人"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d63ebed1c6c0",
+              "title": "太 5:17 的成全：潔淨食物與贖罪祭的具體實現",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "罪",
+                "贖罪"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6ed24a4fc21c",
+              "title": "太 5:27–28：論姦淫——欲望、意志與罪的演變",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "罪"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-707a6bd8d514",
+              "title": "太 8:17：耶穌擔當疾病與兩次降臨的救贖論架構",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "罪",
+                "救贖"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6406e69802a4",
+              "title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "贖罪"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2c2132f32027",
+              "title": "太 8:4：耶穌吩咐潔淨者獻禮物作見證的意義",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "贖罪"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-402d0c096f0e",
+              "title": "太 9:1–8：人子在地上赦罪的權柄",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "罪",
+                "赦罪"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3521e4538c3b",
+              "title": "太 9:9–13：憐恤與召罪人——耶穌與稅吏同席的意義",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "罪",
+                "罪人"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f46f85e7e380",
+              "title": "耶穌使用比喻的神學策略——透過比喻宣告神性",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "罪",
+                "赦罪"
+              ],
+              "source_project_ids": [
+                "13_章"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "righteousness-justification",
+          "label": "義與稱義",
+          "units": [
+            {
+              "unit_id": "CU-SEED-4b10b7dfa249",
+              "title": "「義」的首要意義：人與神的合宜關係",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "算為義"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-ddd59b367e22",
+              "title": "太 3:13–17：耶穌受洗的意義——盡諸般的義與三一神的顯現",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "諸般的義"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-628dfd2a642e",
+              "title": "太 5:19–20：誡命遵行與勝過文士法利賽人之義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "勝過文士"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f591f9336501",
+              "title": "太 5:6–8：飢渴慕義、憐恤、清心三福的釋經",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "飢渴慕義"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "faith-repentance-obedience",
+          "label": "信心、悔改與順服",
+          "units": [
+            {
+              "unit_id": "CU-SEED-9b17f099660e",
+              "title": "信心與人同神的合宜關係",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "信心"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-628e25236404",
+              "title": "太 15:21–28：迦南婦人信心的內涵與救恩次序",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "信心",
+                "不信"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7190e2c6ab65",
+              "title": "太 17:14–21：被鬼附的孩子得醫治與門徒信心小",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "信心",
+                "悔改",
+                "不信"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6f4682819ef",
+              "title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "信心"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cc6863ed9c2c",
+              "title": "太 9:27–31：信心的內容——照著你們的信",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "信心",
+                "照著你們的信"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6d80a94dbf9",
+              "title": "應許之福的享受與順服不可分割",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "悔改",
+                "順服"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "grace-judgment-order",
+          "label": "恩典、審判與救恩次序",
+          "units": [
+            {
+              "unit_id": "CU-SEED-408e8543eaaa",
+              "title": "太 11:20–24：拒絕恩典的城市與知識越多責任越大的審判原則",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "恩典",
+                "審判",
+                "刑罰"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-208cae352fd6",
+              "title": "太 12:35-37：言語反映內心與審判",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "審判"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-628e25236404",
+              "title": "太 15:21–28：迦南婦人信心的內涵與救恩次序",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "恩典",
+                "救恩次序",
+                "救恩"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6f4682819ef",
+              "title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "外邦人進入"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6406e69802a4",
+              "title": "太 8:1–4：大痲瘋的舊約意義與彌賽亞身份的顯明",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "審判",
+                "救恩"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d92d5603c527",
+              "title": "彌賽亞兩次降臨",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "審判",
+                "救恩"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kingdom-eschatology",
+      "label": "神國與末世論",
+      "children": [
+        {
+          "id": "kingdom-of-god",
+          "label": "天國與神的國",
+          "units": [
+            {
+              "unit_id": "CU-SEED-2edf4a439a67",
+              "title": "天國與神的國（βασιλεία 的詞義）",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "天國",
+                "神的國",
+                "王權",
+                "βασιλεία"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cb74865b1032",
+              "title": "太 11:10–11：施洗約翰的身份與地位——先鋒、最大先知與天國的關係",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "天國"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-90f8adf4550f",
+              "title": "太 6:25–34：不要憂慮與先求神的國",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "神的國",
+                "國度"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-5db4eef6f28e",
+              "title": "太 6:9–10：願人尊你名為聖、願你的國降臨",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "神的國",
+                "國度",
+                "王權"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6f4682819ef",
+              "title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "天國",
+                "國度",
+                "βασιλεία"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cb73a582ab6c",
+              "title": "神的國：現在已臨在，將來才完全實現",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "天國",
+                "神的國"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "already-not-yet",
+          "label": "已然未然與國度進展",
+          "units": [
+            {
+              "unit_id": "CU-SEED-c464e1e634bc",
+              "title": "太 5:3–10：八福的結構與天國的已然／未然張力",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "已然",
+                "未然",
+                "D-Day",
+                "V-Day"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-68c18102d243",
+              "title": "神國的歷史階段：D-Day 到 V-Day，直至新天新地",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "D-Day",
+                "V-Day"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-cb73a582ab6c",
+              "title": "神的國：現在已臨在，將來才完全實現",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "現在已臨在",
+                "將來才完全"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "millennium-resurrection",
+          "label": "千禧年與復活次序",
+          "units": [
+            {
+              "unit_id": "CU-SEED-907f7bf7ed5e",
+              "title": "復活的次序與千禧年的聖經根據",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "千禧年",
+                "一千年",
+                "復活的次序"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "apocalyptic-new-creation",
+          "label": "啟示文學、新天新地與末世記號",
+          "units": [
+            {
+              "unit_id": "CU-SEED-f98b471a3c9b",
+              "title": "「那個人子」稱號與但以理書七章的神性身分",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "啟示錄",
+                "記號性"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-57c877632dc1",
+              "title": "啟示錄文體的記號性閱讀：新耶路撒冷與哈米吉多頓",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "啟示錄",
+                "新天新地",
+                "新耶路撒冷",
+                "哈米吉多頓",
+                "記號性"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-68c18102d243",
+              "title": "神國的歷史階段：D-Day 到 V-Day，直至新天新地",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "新天新地"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "covenant-law-history",
+      "label": "聖約、律法與救恩歷史",
+      "children": [
+        {
+          "id": "abrahamic-covenant",
+          "label": "亞伯拉罕之約與應許",
+          "units": [
+            {
+              "unit_id": "CU-SEED-8fb211a0149b",
+              "title": "太 11:28–30：安息的應許與耶穌神性的舊約根據",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "應許"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d0b53b8116c5",
+              "title": "太 1:1–17：家譜三段十四代與大衛名字的數字奧秘",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "亞伯拉罕"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-14aea69de660",
+              "title": "太 6:13：林前 10:13 是應許還是警告？",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "亞伯拉罕",
+                "應許"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6d80a94dbf9",
+              "title": "應許之福的享受與順服不可分割",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "亞伯拉罕",
+                "應許之福",
+                "應許"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "davidic-covenant",
+          "label": "大衛之約與王權",
+          "units": [
+            {
+              "unit_id": "CU-SEED-75211c5b902a",
+              "title": "太 12:22-30：神國的顯明與立場分化",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "大衛的子孫"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f7b1e4799be3",
+              "title": "太 1:6：耶穌作王的正統性",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "大衛王",
+                "王位",
+                "作王的正統性"
+              ],
+              "source_project_ids": [
+                "1章-_耶穌的來歷"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "law-grace",
+          "label": "律法、恩典與成全",
+          "units": [
+            {
+              "unit_id": "CU-SEED-408e8543eaaa",
+              "title": "太 11:20–24：拒絕恩典的城市與知識越多責任越大的審判原則",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "律法",
+                "法利賽人",
+                "恩典"
+              ],
+              "source_project_ids": [
+                "衝突與安息-12,13章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-31f3e64e232c",
+              "title": "太 12:1-7：掐麥穗爭議與耶穌比殿更大的宣告",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "律法",
+                "法利賽人",
+                "安息日"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-fe963c86d579",
+              "title": "太 12:8-14：醫治枯乾手與安息日行善的權柄",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "律法",
+                "安息日"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6de9105642d2",
+              "title": "太 15:1–20：人的遺傳與神的誡命之對比",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "法利賽人",
+                "人的遺傳",
+                "神的誡命"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2f64e26dd21b",
+              "title": "太 5:17–18：耶穌成全律法的意義與方式",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "律法",
+                "成全律法"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-628dfd2a642e",
+              "title": "太 5:19–20：誡命遵行與勝過文士法利賽人之義",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "律法",
+                "法利賽人"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f633711bfdba",
+              "title": "太 5:21–22：論殺人——從行為到動機",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "律法",
+                "法利賽人"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8f9c4e589291",
+              "title": "太 5:33–37：起誓的釋經——誠實原則與法利賽人的詭詐",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "法利賽人"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-17b9f60c46b9",
+              "title": "褻瀆聖靈",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "法利賽人",
+                "恩典"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "dispensationalism",
+          "label": "時代論與救恩歷史",
+          "units": [
+            {
+              "unit_id": "CU-SEED-90ab5f9a7652",
+              "title": "近代時代論的傳播與割裂式救恩史之批判",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "時代論",
+                "司可福",
+                "應許時代",
+                "救恩史"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "israel-gentiles",
+          "label": "以色列與外邦人",
+          "units": [
+            {
+              "unit_id": "CU-SEED-2f37dde3fccc",
+              "title": "太 10:23：原文解析與史懷哲詮釋錯誤的釋經回應",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "以色列"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-b9505ecccb70",
+              "title": "太 10:5–23：兩段結構與共觀福音平行對照",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "以色列",
+                "外邦人"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-628e25236404",
+              "title": "太 15:21–28：迦南婦人信心的內涵與救恩次序",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "外邦人",
+                "迦南婦人"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-a38ed859d594",
+              "title": "太 15:29–39：外邦人歸榮耀給以色列的神與餵飽四千人",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "以色列",
+                "外邦人"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-102ada4b73fa",
+              "title": "太 4:1–11：耶穌受試探與以色列曠野經歷的對比",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "以色列"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f6f4682819ef",
+              "title": "太 8:11–13：百夫長的信心與外邦人進入天國的神學意義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "以色列",
+                "外邦人",
+                "本國的子民"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3bde594000a1",
+              "title": "耶和華僕人的金字塔結構：從以色列到彌賽亞",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "以色列",
+                "外邦人"
+              ],
+              "source_project_ids": [
+                "3_章-_施洗約翰，耶穌受洗"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ecclesiology-discipleship",
+      "label": "教會論與門徒",
+      "children": [
+        {
+          "id": "church-authority",
+          "label": "教會根基與權柄",
+          "units": [
+            {
+              "unit_id": "CU-SEED-e1e2905bb595",
+              "title": "太 16:13–18：彼得的認信與教會的磐石根基",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "教會",
+                "磐石根基"
+              ],
+              "source_project_ids": [
+                "16章釋經"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-ba9a1e8557cf",
+              "title": "太 16:19 的實踐：使徒行傳 15 章耶路撒冷會議",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "教會",
+                "綑綁",
+                "釋放",
+                "耶路撒冷會議"
+              ],
+              "source_project_ids": [
+                "16章釋經"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "disciple-identity-mission",
+          "label": "門徒身分與使命",
+          "units": [
+            {
+              "unit_id": "CU-SEED-b9505ecccb70",
+              "title": "太 10:5–23：兩段結構與共觀福音平行對照",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "差你們去"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-121dddcaeb15",
+              "title": "太 4:12–23：耶穌呼召門徒與傳道事工的開始",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "呼召門徒"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-83ccd74d66a3",
+              "title": "太 5:13–16：鹽與光——門徒的使命與身分",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "門徒的使命",
+                "鹽與光"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-4be497b74894",
+              "title": "登山寶訓的整體結構",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "門徒的使命",
+                "鹽與光"
+              ],
+              "source_project_ids": [
+                "登山寶訓的結構"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "disciple-faith-trust",
+          "label": "門徒的信心、認識與信靠",
+          "units": [
+            {
+              "unit_id": "CU-SEED-9b17f099660e",
+              "title": "信心與人同神的合宜關係",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "信心小",
+                "信心與人同神的合宜關係"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-122731a53ead",
+              "title": "太 14:25–33：彼得的信心與認識耶穌為神的兒子",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "小信",
+                "彼得的信心",
+                "認識耶穌"
+              ],
+              "source_project_ids": [
+                "14章"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d0ceaabdb42b",
+              "title": "太 16:1–12：試探神蹟與門徒的小信",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "小信",
+                "淺信"
+              ],
+              "source_project_ids": [
+                "16章釋經"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-7190e2c6ab65",
+              "title": "太 17:14–21：被鬼附的孩子得醫治與門徒信心小",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "信心小",
+                "門徒信心"
+              ],
+              "source_project_ids": [
+                "17_章_登山變像_醫治鬼附之子"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-a0763044663e",
+              "title": "太 8:26：門徒「小信」的意義與信靠主的根基",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "小信",
+                "信靠主"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "discipleship-cost",
+          "label": "門徒訓練、跟隨與受苦",
+          "units": [
+            {
+              "unit_id": "CU-SEED-258b77d29ffd",
+              "title": "受苦與背十字架的辨析",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "背十字架",
+                "受苦"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-808772f9cf3c",
+              "title": "太 10:24–39：不懼逼迫、靈魂保守與生命優先次序",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "背十字架",
+                "逼迫",
+                "受苦"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-b422d338541e",
+              "title": "太 16:24–27：捨己與背十字架的釋經",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "跟隨",
+                "捨己",
+                "背十字架"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c4027814a6a8",
+              "title": "太 16:25–27：三個「因為」的釋經論證",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "捨己",
+                "背十字架"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-d133823f3737",
+              "title": "太 17:1–8：登山變像的完整啟示——榮耀之子與受苦僕人",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "受苦"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3b254665c1af",
+              "title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "逼迫"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f896cd65b6dc",
+              "title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "跟從耶穌"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "church-community",
+          "label": "教會群體、接待與彼此關係",
+          "units": [
+            {
+              "unit_id": "CU-SEED-646177e8370e",
+              "title": "太 10:40–41：接待門徒的屬靈意義與賞賜",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "接待門徒",
+                "家人"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8508ed5ef7f7",
+              "title": "太 12:46-50：遵行天父旨意者是真正的家人",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "家人"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3b254665c1af",
+              "title": "太 5:9–12：使人和睦、為義受逼迫與彌賽亞身分確認",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "使人和睦"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "christian-life-ethics",
+      "label": "基督徒生活與倫理",
+      "children": [
+        {
+          "id": "prayer-fasting-piety",
+          "label": "禱告、禁食與敬虔",
+          "units": [
+            {
+              "unit_id": "CU-SEED-89f9a422388f",
+              "title": "太 6:14–18：饒恕的條件與禁食的動機",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "禱告",
+                "禁食",
+                "施捨",
+                "暗中的父"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6c3727ec97b4",
+              "title": "太 6:1–4：義行的定義與施捨的動機",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "禱告",
+                "禁食",
+                "施捨"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c76843f5556e",
+              "title": "太 6:5–6：公開禱告與私下禱告的動機辨析",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "禱告"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-4763fb4fcbf0",
+              "title": "太 6:7–8：重複禱告的誤解與禱告增進神人關係",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "禱告"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-fec514f6a2ad",
+              "title": "太 6:8–7:11：主禱文與行為的對應結構（Inclusio）",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "禱告",
+                "主禱文"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-5db4eef6f28e",
+              "title": "太 6:9–10：願人尊你名為聖、願你的國降臨",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "禱告",
+                "主禱文"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-44050069091f",
+              "title": "太 9:14–17：新郎已來——禁食與新舊約轉換的意義",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "禱告",
+                "禁食"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "love-mercy-relationships",
+          "label": "愛、憐憫、饒恕與人際關係",
+          "units": [
+            {
+              "unit_id": "CU-SEED-c6138b9864f3",
+              "title": "Agape 與 Phileo 的詞義辨析",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "愛仇敵",
+                "Agape",
+                "Phileo"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-646177e8370e",
+              "title": "太 10:40–41：接待門徒的屬靈意義與賞賜",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "接待"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-31f3e64e232c",
+              "title": "太 12:1-7：掐麥穗爭議與耶穌比殿更大的宣告",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "憐憫",
+                "憐恤"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-76c469e14c86",
+              "title": "太 5:44–48：愛仇敵的釋經——完全的定義與愛的本質",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "愛仇敵"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f591f9336501",
+              "title": "太 5:6–8：飢渴慕義、憐恤、清心三福的釋經",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "憐恤"
+              ],
+              "source_project_ids": [
+                "登山寶訓-八福"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-89f9a422388f",
+              "title": "太 6:14–18：饒恕的條件與禁食的動機",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "饒恕"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-3521e4538c3b",
+              "title": "太 9:9–13：憐恤與召罪人——耶穌與稅吏同席的意義",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "憐恤"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "marriage-family-sexuality",
+          "label": "婚姻、家庭與性倫理",
+          "units": [
+            {
+              "unit_id": "CU-SEED-808772f9cf3c",
+              "title": "太 10:24–39：不懼逼迫、靈魂保守與生命優先次序",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "家庭",
+                "父親"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8508ed5ef7f7",
+              "title": "太 12:46-50：遵行天父旨意者是真正的家人",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "家庭"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6ed24a4fc21c",
+              "title": "太 5:27–28：論姦淫——欲望、意志與罪的演變",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "姦淫"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6e94fdc5be6c",
+              "title": "太 5:32：離婚的釋經——從合法手續到盟約忠誠",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "婚姻",
+                "離婚",
+                "再婚"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f896cd65b6dc",
+              "title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "家庭",
+                "父親"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-49f816c8b60c",
+              "title": "稱神為阿爸父的神學意義",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "婚姻",
+                "父親"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f02eacf90b00",
+              "title": "選擇較小的惡",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "婚姻",
+                "離婚"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "money-work-anxiety",
+          "label": "金錢、工作與憂慮",
+          "units": [
+            {
+              "unit_id": "CU-SEED-1200497fe462",
+              "title": "太 6:11：日用飲食與神的供應方式",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "工作",
+                "日用飲食",
+                "供應"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-4213ec8f50e3",
+              "title": "太 6:19–24：財寶的價值觀與眼睛的專一性",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "財寶"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-90f8adf4550f",
+              "title": "太 6:25–34：不要憂慮與先求神的國",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "財寶",
+                "供應",
+                "憂慮",
+                "先求"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "truth-justice-social-ethics",
+          "label": "誠實、公義與社會倫理",
+          "units": [
+            {
+              "unit_id": "CU-SEED-208cae352fd6",
+              "title": "太 12:35-37：言語反映內心與審判",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "言語"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-8f9c4e589291",
+              "title": "太 5:33–37：起誓的釋經——誠實原則與法利賽人的詭詐",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "誠實",
+                "起誓",
+                "言語"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-885e5bb1f785",
+              "title": "太 5:38–41：以眼還眼的正確理解——社會倫理與個人倫理的區分",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "以眼還眼",
+                "社會倫理",
+                "公義"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f8ecefad6acb",
+              "title": "太 7:1–6：論斷與評估的辨析",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "論斷"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f02eacf90b00",
+              "title": "選擇較小的惡",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "選擇較小的惡"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anthropology",
+      "label": "人論",
+      "children": [
+        {
+          "id": "body-soul-spirit",
+          "label": "靈、魂、體與人的整體性",
+          "units": [
+            {
+              "unit_id": "CU-SEED-808772f9cf3c",
+              "title": "太 10:24–39：不懼逼迫、靈魂保守與生命優先次序",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "魂"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c4027814a6a8",
+              "title": "太 16:25–27：三個「因為」的釋經論證",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "ψυχή"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-1bea2cb0f8eb",
+              "title": "靈魂體（人的整體性）",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "靈魂體",
+                "人的整體性",
+                "魂",
+                "靈與魂",
+                "ψυχή"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "life-death",
+          "label": "生命與死亡",
+          "units": [
+            {
+              "unit_id": "CU-SEED-808772f9cf3c",
+              "title": "太 10:24–39：不懼逼迫、靈魂保守與生命優先次序",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "生命"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c4027814a6a8",
+              "title": "太 16:25–27：三個「因為」的釋經論證",
+              "role": "primary",
+              "confidence": "low",
+              "matched_signals": [
+                "生命"
+              ],
+              "source_project_ids": [
+                "16_章_-_生命"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f896cd65b6dc",
+              "title": "太 8:18–22：跟從耶穌的代價與門徒呼召的優先次序",
+              "role": "secondary",
+              "confidence": "low",
+              "matched_signals": [
+                "死人"
+              ],
+              "source_project_ids": [
+                "耶穌的權柄與人的回應"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c756391f6178",
+              "title": "聖經的生死觀：互動即生命",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "生死觀",
+                "生命"
+              ],
+              "source_project_ids": [
+                "9_章_-_权柄深化"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "heart-reason-will",
+          "label": "人的內心、理性、意志與欲望",
+          "units": [
+            {
+              "unit_id": "CU-SEED-208cae352fd6",
+              "title": "太 12:35-37：言語反映內心與審判",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "內心",
+                "理性"
+              ],
+              "source_project_ids": [
+                "_12章_-_安息日的爭議，褻瀆聖靈的罪"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-f633711bfdba",
+              "title": "太 5:21–22：論殺人——從行為到動機",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "動機"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6ed24a4fc21c",
+              "title": "太 5:27–28：論姦淫——欲望、意志與罪的演變",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "意志",
+                "欲望"
+              ],
+              "source_project_ids": [
+                "義的精意"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-89f9a422388f",
+              "title": "太 6:14–18：饒恕的條件與禁食的動機",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "動機"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-6c3727ec97b4",
+              "title": "太 6:1–4：義行的定義與施捨的動機",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "動機"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-c76843f5556e",
+              "title": "太 6:5–6：公開禱告與私下禱告的動機辨析",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "動機"
+              ],
+              "source_project_ids": [
+                "6_章_-_登山寶訓_3"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-a4a051a9c476",
+              "title": "解經方法論：理性的正確使用",
+              "role": "secondary",
+              "confidence": "high",
+              "matched_signals": [
+                "理性",
+                "心思",
+                "心眼"
+              ],
+              "source_project_ids": [
+                "4_章_-_耶穌受試探，耶穌應驗預言"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "history-theological-thought",
+      "label": "教會歷史與神學思想",
+      "children": [
+        {
+          "id": "theological-schools",
+          "label": "神學流派與思想史",
+          "units": [
+            {
+              "unit_id": "CU-SEED-2f56378346d7",
+              "title": "Wrede彌賽亞秘密理論",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "Wrede",
+                "彌賽亞秘密"
+              ],
+              "source_project_ids": [
+                "16_章_-_彌賽亞，捨己"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-2f37dde3fccc",
+              "title": "太 10:23：原文解析與史懷哲詮釋錯誤的釋經回應",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "史懷哲"
+              ],
+              "source_project_ids": [
+                "使命與誠實"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-90ab5f9a7652",
+              "title": "近代時代論的傳播與割裂式救恩史之批判",
+              "role": "secondary",
+              "confidence": "medium",
+              "matched_signals": [
+                "時代論",
+                "Plymouth Brethren",
+                "司可福"
+              ],
+              "source_project_ids": [
+                "16_章_-_榮耀、信心"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "apologetics-history",
+          "label": "護教與歷史論證",
+          "units": [
+            {
+              "unit_id": "CU-SEED-bf1d889da977",
+              "title": "太 2:1–12：彌迦書預言與死海古卷的歷史確據",
+              "role": "primary",
+              "confidence": "high",
+              "matched_signals": [
+                "歷史確據",
+                "死海古卷",
+                "碳定年"
+              ],
+              "source_project_ids": [
+                "2章-东方的博士"
+              ]
+            },
+            {
+              "unit_id": "CU-SEED-e787841b1297",
+              "title": "歷史知識的範圍與定義",
+              "role": "primary",
+              "confidence": "medium",
+              "matched_signals": [
+                "歷史知識"
+              ],
+              "source_project_ids": [
+                "馬太福音結構"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

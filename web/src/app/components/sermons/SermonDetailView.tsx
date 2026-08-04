@@ -2,7 +2,7 @@
 "use client";
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, notFound } from 'next/navigation';
+import { useParams, notFound, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -24,9 +24,13 @@ export const SermonDetailView = () => {
   const [sermon, setSermon] = useState<Sermon | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [citationStartTime, setCitationStartTime] = useState<number | undefined>();
+  const [citationNotice, setCitationNotice] = useState<string | null>(null);
 
   // --- Get ID from URL ---
   const params = useParams();
+  const searchParams = useSearchParams();
+  const citationId = searchParams.get("citation");
   const id = decodeURIComponent(Array.isArray(params.id) ? params.id[0] : params.id);
 
   const { data: session, status: sessionStatus } = useSession(); // ✅ 獲取 session 狀態
@@ -117,7 +121,30 @@ export const SermonDetailView = () => {
           paragraphs.push(data.script[i].text);
         }
 
-        article.markdownContent = paragraphs.join('\n\n');
+        let markdownContent = paragraphs.join('\n\n');
+        if (citationId) {
+          const citationResponse = await fetch(`/api/canonical-repository/citations/${encodeURIComponent(citationId)}`);
+          if (citationResponse.ok) {
+            const citation = await citationResponse.json();
+            if (citation.state === "valid" && citation.highlight_text) {
+              const escapedHighlight = String(citation.highlight_text)
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;");
+              markdownContent = markdownContent.replace(
+                citation.highlight_text,
+                `<mark id="citation-highlight" class="rounded bg-amber-200 px-1">${escapedHighlight}</mark>`,
+              );
+              setCitationStartTime(citation.locator?.start_time ?? undefined);
+              setCitationNotice("已定位到支持此單元的原始講道內容");
+              window.setTimeout(() => document.getElementById("citation-highlight")?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+            } else {
+              setCitationNotice(citation.message || "此引用需要重新確認，未自動高亮");
+            }
+          }
+        }
+
+        article.markdownContent = markdownContent;
 
         setSermon(article);
 
@@ -134,7 +161,7 @@ export const SermonDetailView = () => {
     };
 
     fetchSermon();
-  }, [id, status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
+  }, [citationId, id, status]); // 依賴數組中放入 id，當 id 變化時會重新觸發 fetch
 
   if (isLoading) {
     // 顯示加載中的條件：身份驗證中，或者已認證但在獲取數據中
@@ -194,7 +221,12 @@ export const SermonDetailView = () => {
         </div>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
 
-        <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} />
+        {citationNotice ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {citationNotice}
+          </div>
+        ) : null}
+        <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} startTime={citationStartTime} />
 
         {/* ✅ 新增的講道摘要區域 */}
         {sermon.summary && (

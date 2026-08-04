@@ -558,6 +558,16 @@ def build_series_draft(
                 "unit_title": result["unit_title"],
                 "change_summary": result["change_summary"],
                 "evidence_ids": operation["evidence_ids"],
+                "evidence_lineage": [
+                    {
+                        "evidence_id": evidence_id,
+                        "source_document_id": evidence_by_id[evidence_id].get("source_document_id"),
+                        "source_ranges": evidence_by_id[evidence_id].get("source_ranges", []),
+                        "verbatim_source_excerpt": evidence_by_id[evidence_id].get("verbatim_source_excerpt"),
+                        "citation_ids": evidence_by_id[evidence_id].get("citation_ids", []),
+                    }
+                    for evidence_id in operation["evidence_ids"]
+                ],
                 "markdown": result["generated_markdown"],
             }
         )
