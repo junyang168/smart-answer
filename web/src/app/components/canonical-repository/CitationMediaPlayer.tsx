@@ -57,7 +57,7 @@ export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerPr
           {source.media.kind === "audio" ? "讲道录音" : "讲道录像"}
           {typeof startTime === "number" ? ` · 已定位至 ${formatTime(startTime)}` : ""}
         </span>
-        <Link href={source.public_url} className="font-semibold text-indigo-700 hover:underline">
+        <Link href={source.public_url} target="_blank" rel="noopener noreferrer" className="font-semibold text-indigo-700 hover:underline">
           打开完整讲道与逐字稿
         </Link>
       </div>

@@ -95,6 +95,7 @@ def test_transcript_source_map_and_exact_citation_resolution(repository_workspac
     registered = service.register_project_source(project_id)
     assert registered["mapped_count"] == 3
     assert registered["missing"] == []
+    assert registered["source"]["title"] == "第四講"
     source_id = registered["source"]["source_id"]
     assert registered["source"]["media"]["kind"] == "video"
     assert registered["source"]["media"]["url"].endswith("lecture-four.mp4")

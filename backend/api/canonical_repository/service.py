@@ -41,21 +41,27 @@ class CanonicalRepositoryService:
         self.compiler = RepositoryCompiler(self.store)
 
     @staticmethod
-    def _sermon_media(transcript_id: str, transcript_metadata: Dict[str, Any]) -> MediaRecord:
-        """Resolve media type from the authoritative sermon catalog, with file fallback."""
-        media_type = transcript_metadata.get("type")
+    def _sermon_catalog_record(transcript_id: str) -> Dict[str, Any]:
         catalog_path = CONFIG_DIR / "sermon.json"
         if catalog_path.is_file():
             try:
                 catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-                record = next(
+                return next(
                     (item for item in catalog if isinstance(item, dict) and item.get("item") == transcript_id),
-                    None,
+                    {},
                 )
-                if record and record.get("type"):
-                    media_type = record["type"]
             except (json.JSONDecodeError, OSError):
                 pass
+        return {}
+
+    @staticmethod
+    def _sermon_media(
+        transcript_id: str,
+        transcript_metadata: Dict[str, Any],
+        catalog_record: Dict[str, Any],
+    ) -> MediaRecord:
+        """Resolve media type from the authoritative sermon catalog, with file fallback."""
+        media_type = catalog_record.get("type") or transcript_metadata.get("type")
 
         media_root = DATA_BASE_PATH.parent / "video"
         audio_path = media_root / f"{transcript_id}.mp3"
@@ -114,6 +120,7 @@ class CanonicalRepositoryService:
             resolved = sermon_service.resolve_sermon_transcript(transcript_id)
             transcript_payload = json.loads(resolved["path"].read_text(encoding="utf-8"))
             transcript_metadata = transcript_payload.get("metadata", {}) if isinstance(transcript_payload, dict) else {}
+            catalog_record = self._sermon_catalog_record(resolved["transcript_id"])
             source_id = stable_id("SD", "sermon_transcript", resolved["transcript_id"])
             source_map = build_transcript_source_map(source_id, resolved["path"], unified_path)
             source = SourceDocument(
@@ -121,10 +128,14 @@ class CanonicalRepositoryService:
                 source_type="sermon_transcript",
                 origin_id=resolved["transcript_id"],
                 project_id=project_id,
-                title=metadata.get("title") or resolved["transcript_id"],
+                title=(
+                    catalog_record.get("title")
+                    or transcript_metadata.get("title")
+                    or resolved["transcript_id"]
+                ),
                 source_stage=resolved["source_stage"],
                 public_url=f"/resources/sermons/{quote(resolved['transcript_id'], safe='')}",
-                media=self._sermon_media(resolved["transcript_id"], transcript_metadata),
+                media=self._sermon_media(resolved["transcript_id"], transcript_metadata, catalog_record),
                 source_sha256=source_map.source_sha256,
                 unified_source_sha256=source_map.unified_source_sha256,
             )
