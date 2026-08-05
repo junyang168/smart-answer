@@ -84,8 +84,18 @@ def rebuild_source_maps(payload: RebuildSourceMapsRequest):
 
 
 @admin_router.get("/units")
-def list_units(status: Optional[str] = None, unit_type: Optional[str] = None):
-    return {"units": canonical_repository_service.list_unit_summaries(status=status, unit_type=unit_type)}
+def list_units(
+    status: Optional[str] = None,
+    unit_type: Optional[str] = None,
+    source_origin_id: Optional[str] = None,
+):
+    return {
+        "units": canonical_repository_service.list_unit_summaries(
+            status=status,
+            unit_type=unit_type,
+            source_origin_id=source_origin_id,
+        )
+    }
 
 
 @admin_router.get("/units/{unit_id}")

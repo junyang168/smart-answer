@@ -476,6 +476,40 @@ def test_compiler_places_concept_only_in_primary_topic(repository_workspace):
     assert len(topics[0]["units"][0]["topic_assignments"]) == 2
 
 
+def test_unit_summaries_filter_by_sermon_transcript_origin(repository_workspace):
+    service = repository_workspace["service"]
+    project_id, transcript_id = _write_transcript_project(repository_workspace)
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+    entry = next(item for item in source_map.entries if item["paragraph_key"] == "49")
+    citation = service.create_citation_from_source_range(
+        registered["source"]["source_id"],
+        entry["source_line_start"],
+        entry["source_line_end"],
+    )
+    unit = CanonicalUnit(
+        unit_id="CU-sermon-rail",
+        title="雲彩與神的臨在",
+        unit_type="concept",
+        status="candidate",
+        manuscript=ManuscriptLocator(
+            project_id=project_id,
+            project_type="transcript",
+            heading_title="一、登山變像",
+            heading_anchor="一-登山變像",
+        ),
+        citation_ids=[citation.citation_id],
+    )
+    unrelated = unit.model_copy(update={"unit_id": "CU-unrelated", "citation_ids": []})
+    service.store.save_unit(unit)
+    service.store.save_unit(unrelated)
+
+    summaries = service.list_unit_summaries(source_origin_id=transcript_id)
+
+    assert [item["unit_id"] for item in summaries] == ["CU-sermon-rail"]
+    assert summaries[0]["status"] == "candidate"
+
+
 def test_saving_published_unit_refreshes_public_index(repository_workspace):
     service = repository_workspace["service"]
     project_id, _ = _write_transcript_project(repository_workspace)
@@ -581,10 +615,52 @@ def test_seed_import_backfills_transcript_citation(repository_workspace, tmp_pat
     unit = service.store.get_unit("CU-transfiguration")
     resolutions = [service.resolve_citation(item) for item in unit.citation_ids]
 
-    assert result["citations_created"] == 3
-    assert len(unit.citation_ids) == 3
+    assert result["citations_created"] == 2
+    assert len(unit.citation_ids) == 2
     assert all(item.state == "valid" for item in resolutions)
     assert any(item.locator.start_time == 130 for item in resolutions)
+
+
+def test_heading_only_transcript_citations_are_skipped_and_can_be_detached(repository_workspace):
+    service = repository_workspace["service"]
+    project_id, _ = _write_transcript_project(repository_workspace)
+    source_id = service.register_project_source(project_id)["source"]["source_id"]
+    source_map = service.store.get_source_map(source_id)
+    heading_entry, content_entry = source_map.entries[:2]
+    heading = service.create_citation_from_source_range(
+        source_id,
+        heading_entry["source_line_start"],
+        heading_entry["source_line_end"],
+    )
+    content = service.create_citation_from_source_range(
+        source_id,
+        content_entry["source_line_start"],
+        content_entry["source_line_end"],
+    )
+    unit = CanonicalUnit(
+        unit_id="CU-heading-cleanup",
+        title="登山變像",
+        unit_type="passage",
+        manuscript=ManuscriptLocator(
+            project_id=project_id,
+            project_type="transcript",
+            heading_title="一、登山變像",
+            heading_anchor="一-登山變像",
+        ),
+        citation_ids=[heading.citation_id, content.citation_id],
+    )
+    service.store.save_unit(unit)
+
+    assert service._is_heading_only_excerpt("## 登山變像") is True
+    assert service._is_heading_only_excerpt("## 登山變像\n\n耶穌帶著門徒上山。") is False
+
+    result = service.detach_heading_only_citations()
+    cleaned = service.store.get_unit(unit.unit_id)
+
+    assert result["removed_links"] == 1
+    assert result["units_without_substantive_sources"] == []
+    assert cleaned.citation_ids == [content.citation_id]
+    assert service.store.get_citation(heading.citation_id).citation_id == heading.citation_id
 
 
 def test_transcript_backfill_uses_evidence_ranges_not_generated_draft_lines(repository_workspace, tmp_path):

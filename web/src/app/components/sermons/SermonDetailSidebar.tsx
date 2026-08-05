@@ -3,9 +3,11 @@ import { Sermon } from '@/app/interfaces/article';
 import { ScriptureHover } from './ScriptureHover';
 import { SermonKeyPoints } from './SermonKeyPoints'
 import { SermonMediaPlayer } from './SermonMediaPlayer';
+import { SermonRepositoryUnits } from './SermonRepositoryUnits';
 interface SermonDetailSidebarProps {
   sermon: Sermon;
   authenticated: boolean;
+  canReviewRepository?: boolean;
 }
 
 import Link from 'next/link';
@@ -36,7 +38,7 @@ const MultiValueRow = ({ label, values }: { label: string, values: string[] }) =
   </div>
 );
 
-export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSidebarProps) => {
+export const SermonDetailSidebar = ({ sermon, authenticated, canReviewRepository = false }: SermonDetailSidebarProps) => {
   return (
     <aside className="lg:col-span-1 mt-12 lg:mt-0 lg:sticky lg:top-24 self-start">
       <div className="bg-gray-50 p-6 rounded-lg">
@@ -68,6 +70,8 @@ export const SermonDetailSidebar = ({ sermon, authenticated }: SermonDetailSideb
           )}
         </dl>
       </div>
+
+      {canReviewRepository ? <SermonRepositoryUnits sermonId={sermon.id} /> : null}
 
       {authenticated && <SermonKeyPoints sermon={sermon} />}
 

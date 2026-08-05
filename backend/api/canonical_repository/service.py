@@ -267,6 +267,14 @@ class CanonicalRepositoryService:
         return re.sub(r"[\s「」『』【】()（）,，、:：.．—–_-]+", "", text).casefold()
 
     @staticmethod
+    def _is_heading_only_excerpt(value: str) -> bool:
+        """Return true when a citation contains Markdown headings but no source prose."""
+        content_lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+        return bool(content_lines) and all(
+            re.fullmatch(r"#{1,6}\s+\S.*", line) is not None for line in content_lines
+        )
+
+    @staticmethod
     def _heading_ordinal(value: str) -> Optional[str]:
         match = re.match(r"^\s*([一二三四五六七八九十百零〇]+|\d+)\s*[、.．:：)）-]", str(value or ""))
         return match.group(1) if match else None
@@ -494,7 +502,7 @@ class CanonicalRepositoryService:
                     start = max(range_start, int(entry["source_line_start"]))
                     end = min(range_end, int(entry["source_line_end"]))
                     excerpt = "\n".join(lines[start - 1 : end]).strip()
-                    if not excerpt:
+                    if not excerpt or self._is_heading_only_excerpt(excerpt):
                         continue
                     locator_kind = "notes" if source_map.source_type == "scanned_notes" else "transcript"
                     locator_key = str(entry["page_file"] if locator_kind == "notes" else entry["paragraph_key"])
@@ -524,6 +532,35 @@ class CanonicalRepositoryService:
             "citations_created": created,
             "citations_reused": reused,
             "unresolved_sources": unresolved,
+        }
+
+    def detach_heading_only_citations(self) -> Dict[str, Any]:
+        """Detach non-evidentiary Markdown headings while preserving citation records."""
+        citations = {item.citation_id: item for item in self.store.list_citations()}
+        affected_units: List[Dict[str, Any]] = []
+        removed_links = 0
+        units_without_substantive_sources: List[str] = []
+
+        for unit in self.store.list_units():
+            removed = [
+                citation_id
+                for citation_id in unit.citation_ids
+                if citation_id in citations
+                and self._is_heading_only_excerpt(citations[citation_id].locator.highlight_text or "")
+            ]
+            if not removed:
+                continue
+            unit.citation_ids = [citation_id for citation_id in unit.citation_ids if citation_id not in removed]
+            self.store.save_unit(unit)
+            removed_links += len(removed)
+            affected_units.append({"unit_id": unit.unit_id, "removed_citation_ids": removed})
+            if not unit.citation_ids:
+                units_without_substantive_sources.append(unit.unit_id)
+
+        return {
+            "affected_units": affected_units,
+            "removed_links": removed_links,
+            "units_without_substantive_sources": units_without_substantive_sources,
         }
 
     def backfill_seed_citations(self, catalog_path: Path) -> Dict[str, Any]:
@@ -566,12 +603,31 @@ class CanonicalRepositoryService:
         """Backward-compatible alias for the original admin action."""
         return self.backfill_seed_citations(catalog_path)
 
-    def list_unit_summaries(self, status: Optional[str] = None, unit_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_unit_summaries(
+        self,
+        status: Optional[str] = None,
+        unit_type: Optional[str] = None,
+        source_origin_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         units = list(self.store.list_units())
         if status:
             units = [item for item in units if item.status == status]
         if unit_type:
             units = [item for item in units if item.unit_type == unit_type]
+        if source_origin_id:
+            citations = {item.citation_id: item for item in self.store.list_citations()}
+            sources = {item.source_id: item for item in self.store.list_sources()}
+
+            def cites_source(unit: CanonicalUnit) -> bool:
+                return any(
+                    citation is not None
+                    and (source := sources.get(citation.source_id)) is not None
+                    and source.origin_id == source_origin_id
+                    for citation_id in unit.citation_ids
+                    if (citation := citations.get(citation_id)) is not None
+                )
+
+            units = [item for item in units if cites_source(item)]
         def sort_key(item: CanonicalUnit):
             if item.unit_type == "passage" and item.primary_bible_refs:
                 match = re.match(r"^[A-Za-z0-9]+\.(\d+)(?:\.(\d+))?", item.primary_bible_refs[0].osis)

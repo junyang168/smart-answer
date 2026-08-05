@@ -253,7 +253,11 @@ export const SermonDetailView = () => {
       </main>
 
       {/* 右側邊欄 */}
-      <SermonDetailSidebar sermon={sermon} authenticated={status === "authenticated"} />
+      <SermonDetailSidebar
+        sermon={sermon}
+        authenticated={status === "authenticated"}
+        canReviewRepository={isEditor}
+      />
     </div>
   );
 };
