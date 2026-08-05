@@ -47,11 +47,20 @@ export default function CanonicalRepositoryPage() {
     if (response.ok) setMessage(`公開索引已建立：${result.unit_count} 個單元。`);
     else setMessage(`尚不能發布：${(result.detail?.findings ?? [result.detail?.message ?? result.detail ?? '驗證失敗']).join('；')}`);
   };
+  const backfillSources = async () => {
+    setMessage("正在回填原始來源…");
+    const response = await fetch("/api/admin/canonical-repository/units/backfill-source-citations", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const result = await response.json();
+    setMessage(response.ok
+      ? `已為 ${result.processed} 個單元建立來源，共新增 ${result.citations_created} 個待審閱引用；${result.errors.length} 個需要人工處理。`
+      : result.detail ?? "來源回填失敗");
+    await load();
+  };
 
   return <main className="mx-auto max-w-6xl px-6 py-10">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div><p className="text-sm font-semibold text-sky-700">王守仁教授釋經與專題講論文庫</p><h1 className="mt-1 text-3xl font-bold text-slate-950">單元審閱列表</h1><p className="mt-2 text-slate-600">候選單元不會自動發布；先檢查歸類、題目、manuscript 與來源。</p></div>
-      <div className="flex flex-wrap gap-2"><button onClick={importSeed} className="rounded-lg border border-indigo-300 px-4 py-2 font-semibold text-indigo-700 hover:bg-indigo-50">匯入 Seed 候選單元</button><button onClick={buildRepository} className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700">建立公開索引</button><Link href="/resources/wang-repository" className="rounded-lg border px-4 py-2 font-semibold text-slate-700">預覽公開頁</Link></div>
+      <div className="flex flex-wrap gap-2"><button onClick={importSeed} className="rounded-lg border border-indigo-300 px-4 py-2 font-semibold text-indigo-700 hover:bg-indigo-50">匯入 Seed 候選單元</button><button onClick={backfillSources} className="rounded-lg border border-amber-300 px-4 py-2 font-semibold text-amber-800 hover:bg-amber-50">回填原始來源</button><button onClick={buildRepository} className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700">建立公開索引</button><Link href="/resources/wang-repository" className="rounded-lg border px-4 py-2 font-semibold text-slate-700">預覽公開頁</Link></div>
     </div>
     {message ? <p className="mt-4 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800">{message}</p> : null}
     <div className="mt-8 flex flex-wrap gap-3 border-b border-slate-200 pb-4">

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
@@ -104,6 +105,7 @@ def build_notes_source_map(
     source_id: str,
     unified_source_path: Path,
     raw_ocr_dir: Path,
+    page_files: Iterable[str] = (),
 ) -> SourceMap:
     unified = unified_source_path.read_text(encoding="utf-8")
     lines = unified.splitlines()
@@ -113,11 +115,34 @@ def build_notes_source_map(
         if match:
             markers.append((line_number, match.group(1).strip()))
 
+    if markers and markers[0][0] > 5:
+        first_page = markers[0][1]
+        numbered = re.match(r"^(.*?/)(\d+)(\.[^.]+)$", first_page)
+        if numbered and int(numbered.group(2)) > 0:
+            previous_number = str(int(numbered.group(2)) - 1).zfill(len(numbered.group(2)))
+            previous_page = f"{numbered.group(1)}{previous_number}{numbered.group(3)}"
+            safe_name = previous_page.replace("/", "_").replace("\\", "_")
+            if (raw_ocr_dir / f"{safe_name}.md").is_file():
+                markers.insert(0, (1, previous_page))
+
+    if not markers:
+        candidates = [str(item).strip() for item in page_files if str(item).strip()]
+        qualified = [item for item in candidates if "/" in item or "\\" in item]
+        if qualified:
+            candidates = qualified
+        candidates = list(dict.fromkeys(candidates))
+        if candidates:
+            page_size = max(1, math.ceil(max(1, len(lines)) / len(candidates)))
+            markers = [
+                (min(len(lines), position * page_size + 1), page_file)
+                for position, page_file in enumerate(candidates)
+            ]
+
     entries: List[Dict[str, Any]] = []
     missing: List[Dict[str, Any]] = []
     for position, (marker_line, page_file) in enumerate(markers):
         next_marker = markers[position + 1][0] if position + 1 < len(markers) else len(lines) + 1
-        first_content = marker_line + 1
+        first_content = marker_line + 1 if PAGE_MARKER.match(lines[marker_line - 1]) else marker_line
         while first_content < next_marker and not lines[first_content - 1].strip():
             first_content += 1
         last_content = next_marker - 1

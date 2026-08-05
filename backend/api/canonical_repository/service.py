@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 from uuid import uuid4
+
+from opencc import OpenCC
 
 from backend.api.config import CONFIG_DIR, DATA_BASE_PATH
 from backend.api import sermon_converter_service as sermon_service
@@ -36,6 +39,8 @@ from .store import RepositoryStore
 
 
 class CanonicalRepositoryService:
+    _traditionalizer = OpenCC("s2t")
+
     def __init__(self, root: Optional[Path] = None):
         self.store = RepositoryStore(root or DATA_BASE_PATH / "canonical_repository")
         self.compiler = RepositoryCompiler(self.store)
@@ -141,7 +146,12 @@ class CanonicalRepositoryService:
             )
         else:
             source_id = stable_id("SD", "scanned_notes", project_id)
-            source_map = build_notes_source_map(source_id, unified_path, sermon_service.NOTES_TO_SERMON_DIR / "raw_ocr")
+            source_map = build_notes_source_map(
+                source_id,
+                unified_path,
+                sermon_service.NOTES_TO_SERMON_DIR / "raw_ocr",
+                metadata.get("pages") or [],
+            )
             source = SourceDocument(
                 source_id=source_id,
                 source_type="scanned_notes",
@@ -155,12 +165,34 @@ class CanonicalRepositoryService:
             )
         self.store.save_source(source)
         self.store.save_source_map(source_map)
+        refreshed_candidates = self._refresh_candidate_citations_for_source(source, unified_path)
         return {
             "source": source.model_dump(mode="json"),
             "mapped_count": len(source_map.entries),
             "missing": source_map.missing,
             "ambiguous": source_map.ambiguous,
+            "refreshed_candidate_citations": refreshed_candidates,
         }
+
+    def _refresh_candidate_citations_for_source(self, source: SourceDocument, unified_path: Path) -> int:
+        """Refresh only unreviewed citations that still resolve exactly after a source-map rebuild."""
+        if source.source_type != "scanned_notes" or not unified_path.is_file():
+            return 0
+        unified = unified_path.read_text(encoding="utf-8")
+        refreshed = 0
+        for citation in self.store.list_citations():
+            if (
+                citation.source_id != source.source_id
+                or citation.status != "candidate"
+                or citation.source_sha256 == source.source_sha256
+                or citation.locator.highlight_text not in unified
+            ):
+                continue
+            citation.source_sha256 = source.source_sha256
+            citation.revision += 1
+            self.store.save_citation(citation)
+            refreshed += 1
+        return refreshed
 
     def import_seed_catalog(self, catalog_path: Path) -> Dict[str, Any]:
         """Import seed candidates without approving or publishing editorial decisions."""
@@ -168,6 +200,7 @@ class CanonicalRepositoryService:
         records = payload.get("units", []) if isinstance(payload, dict) else []
         imported = 0
         skipped = 0
+        citations_created = 0
         errors: List[Dict[str, str]] = []
         for record in records:
             try:
@@ -211,10 +244,327 @@ class CanonicalRepositoryService:
                     aliases=[str(value) for value in record.get("aliases", [])],
                 )
                 self.store.save_unit(unit)
+                if unit.manuscript.project_type in {"sermon_note", "transcript"}:
+                    result = self._backfill_citations_for_record(record, unit)
+                    citations_created += result["citations_created"]
                 imported += 1
             except Exception as exc:
                 errors.append({"unit_id": str(record.get("unit_id") or "unknown"), "error": str(exc)})
-        return {"imported": imported, "skipped": skipped, "errors": errors, "total": len(records)}
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "citations_created": citations_created,
+            "errors": errors,
+            "total": len(records),
+        }
+
+    @staticmethod
+    def _normalized_heading(value: str) -> str:
+        text = CanonicalRepositoryService._traditionalizer.convert(
+            unicodedata.normalize("NFKC", str(value or ""))
+        ).strip().lstrip("#").strip()
+        text = re.sub(r"^[一二三四五六七八九十百零〇0-9]+\s*[、.．:：)）-]\s*", "", text)
+        return re.sub(r"[\s「」『』【】()（）,，、:：.．—–_-]+", "", text).casefold()
+
+    @staticmethod
+    def _heading_ordinal(value: str) -> Optional[str]:
+        match = re.match(r"^\s*([一二三四五六七八九十百零〇]+|\d+)\s*[、.．:：)）-]", str(value or ""))
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _ordinal_number(value: str) -> Optional[int]:
+        if value.isdigit():
+            return int(value)
+        digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+        if value == "十":
+            return 10
+        if "十" in value:
+            left, right = value.split("十", 1)
+            return (digits.get(left, 1) * 10) + digits.get(right, 0)
+        return digits.get(value)
+
+    def _parent_manuscript_headings(self, project_dir: Path, headings: List[str]) -> List[str]:
+        final_path = project_dir / "final.md"
+        if not final_path.is_file():
+            return []
+        targets = {self._normalized_heading(item) for item in headings if str(item).strip()}
+        parents: List[str] = []
+        current_h2: Optional[str] = None
+        for line in final_path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+            if not match:
+                continue
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            if level == 2:
+                current_h2 = title
+            normalized = self._normalized_heading(title)
+            if normalized in targets and current_h2 and current_h2 not in parents:
+                parents.append(current_h2)
+        return parents
+
+    def _unified_heading_ranges(self, project_dir: Path, headings: List[str]) -> List[tuple[int, int]]:
+        unified_path = project_dir / "unified_source.md"
+        if not unified_path.is_file():
+            return []
+        lines = unified_path.read_text(encoding="utf-8").splitlines()
+        targets = {self._normalized_heading(item) for item in headings if str(item).strip()}
+        parsed: List[tuple[int, int, str]] = []
+        for index, line in enumerate(lines, start=1):
+            match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+            if match:
+                parsed.append((index, len(match.group(1)), match.group(2).strip()))
+        ranges: List[tuple[int, int]] = []
+        for position, (start, level, title) in enumerate(parsed):
+            normalized = self._normalized_heading(title)
+            if normalized not in targets:
+                continue
+            end = len(lines)
+            for next_start, next_level, _ in parsed[position + 1 :]:
+                if next_level <= level:
+                    end = next_start - 1
+                    break
+            ranges.append((start, end))
+        return ranges
+
+    def _evidence_source_ranges_for_headings(
+        self,
+        project_dir: Path,
+        headings: List[str],
+    ) -> List[tuple[int, int]]:
+        """Resolve generated manuscript headings back to original transcript lines.
+
+        ``chunks_meta.json`` describes the generated manuscript and its line numbers
+        are therefore not safe to use as transcript coordinates.  Stage 1 preserves
+        the real provenance chain in ``draft_chunks_meta.json`` (heading -> evidence
+        IDs) and ``evidence_inventory.json`` (evidence ID -> source ranges).
+        """
+        chunks_path = project_dir / "draft_chunks_meta.json"
+        evidence_path = project_dir / "evidence_inventory.json"
+        if not chunks_path.is_file() or not evidence_path.is_file():
+            return []
+        chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
+        evidence_payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+        if not isinstance(chunks, list) or not isinstance(evidence_payload, dict):
+            return []
+        evidence_items = (evidence_payload.get("payload") or {}).get("evidence") or []
+        evidence_by_id = {
+            str(item.get("evidence_id")): item
+            for item in evidence_items
+            if isinstance(item, dict) and item.get("evidence_id")
+        }
+        wanted = {self._normalized_heading(item) for item in headings if str(item).strip()}
+        evidence_ids: List[str] = []
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            title = self._normalized_heading(str(chunk.get("title") or ""))
+            if title not in wanted:
+                continue
+            for evidence_id in chunk.get("evidence_ids") or []:
+                value = str(evidence_id)
+                if value not in evidence_ids:
+                    evidence_ids.append(value)
+        ranges: List[tuple[int, int]] = []
+        for evidence_id in evidence_ids:
+            evidence = evidence_by_id.get(evidence_id) or {}
+            for source_range in evidence.get("source_ranges") or []:
+                if not isinstance(source_range, dict):
+                    continue
+                start = source_range.get("start_line")
+                end = source_range.get("end_line")
+                if start is None or end is None:
+                    continue
+                pair = (int(start), int(end))
+                if pair not in ranges:
+                    ranges.append(pair)
+        return ranges
+
+    def _source_ranges_for_seed_source(self, project_id: str, source_record: Dict[str, Any]) -> List[tuple[int, int]]:
+        project_dir = self._project_dir(project_id)
+        chunks_path = project_dir / "chunks_meta.json"
+        if not chunks_path.is_file():
+            return []
+        chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
+        if not isinstance(chunks, list):
+            return []
+        headings = (
+            source_record.get("resolved_source_headings")
+            or source_record.get("source_sections")
+            or []
+        )
+        evidence_ranges = self._evidence_source_ranges_for_headings(
+            project_dir,
+            [str(item) for item in headings],
+        )
+        if evidence_ranges:
+            return evidence_ranges
+        direct_ranges = self._unified_heading_ranges(project_dir, [str(item) for item in headings])
+        if direct_ranges:
+            return direct_ranges
+        wanted = [self._normalized_heading(item) for item in headings if str(item).strip()]
+        parent_headings = self._parent_manuscript_headings(project_dir, [str(item) for item in headings])
+        parent_wanted = [self._normalized_heading(item) for item in parent_headings]
+        wanted_ordinals = {
+            item for item in (self._heading_ordinal(value) for value in [*headings, *parent_headings]) if item
+        }
+        wanted_positions = {
+            number for number in (self._ordinal_number(item) for item in wanted_ordinals) if number is not None
+        }
+        substantive_position = 0
+        ranges: List[tuple[int, int]] = []
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            raw_title = str(chunk.get("title", ""))
+            if raw_title != "(Preamble / Front Matter)":
+                substantive_position += 1
+            title = self._normalized_heading(raw_title)
+            ordinal_match = self._heading_ordinal(raw_title) in wanted_ordinals if wanted_ordinals else False
+            position_match = substantive_position in wanted_positions if wanted_positions else False
+            exact_match = title in wanted or title in parent_wanted
+            fuzzy_match = any(len(item) >= 8 and (title in item or item in title) for item in [*wanted, *parent_wanted])
+            if wanted and not (exact_match or ordinal_match or position_match or fuzzy_match):
+                continue
+            start = chunk.get("source_start_line", chunk.get("start_line"))
+            end = chunk.get("source_end_line", chunk.get("end_line"))
+            if start is None or end is None:
+                continue
+            pair = (int(start), int(end))
+            if pair not in ranges:
+                ranges.append(pair)
+        return ranges
+
+    def _existing_citation_for_excerpt(
+        self,
+        source_id: str,
+        locator_kind: str,
+        locator_key: str,
+        highlight_text: str,
+    ) -> Optional[Citation]:
+        highlight_hash = sha256_text(highlight_text)
+        for citation in self.store.list_citations():
+            if (
+                citation.source_id == source_id
+                and citation.locator.kind == locator_kind
+                and (
+                    (locator_kind == "notes" and citation.locator.page_file == locator_key)
+                    or (locator_kind == "transcript" and citation.locator.paragraph_keys == [locator_key])
+                )
+                and citation.locator.highlight_text_sha256 == highlight_hash
+            ):
+                return citation
+        return None
+
+    def _backfill_citations_for_record(
+        self,
+        record: Dict[str, Any],
+        unit: CanonicalUnit,
+        registered_sources: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        if unit.citation_ids:
+            return {"citations_created": 0, "citations_reused": 0, "unresolved_sources": []}
+        created = 0
+        reused = 0
+        unresolved: List[str] = []
+        source_cache = registered_sources if registered_sources is not None else {}
+        unified_cache: Dict[str, List[str]] = {}
+
+        for source_record in record.get("sources") or []:
+            if source_record.get("project_type") not in {"sermon_note", "transcript"}:
+                continue
+            project_id = str(source_record.get("project_id") or "").strip()
+            if not project_id:
+                continue
+            if project_id not in source_cache:
+                source_cache[project_id] = self.register_project_source(project_id)
+            source_id = source_cache[project_id]["source"]["source_id"]
+            source_map = self.store.get_source_map(source_id)
+            ranges = self._source_ranges_for_seed_source(project_id, source_record)
+            if not ranges:
+                unresolved.append(project_id)
+                continue
+            if project_id not in unified_cache:
+                project_dir = self._project_dir(project_id)
+                unified_cache[project_id] = (project_dir / "unified_source.md").read_text(encoding="utf-8").splitlines()
+            lines = unified_cache[project_id]
+
+            for range_start, range_end in ranges:
+                for entry in entries_for_line_range(source_map, range_start, range_end):
+                    start = max(range_start, int(entry["source_line_start"]))
+                    end = min(range_end, int(entry["source_line_end"]))
+                    excerpt = "\n".join(lines[start - 1 : end]).strip()
+                    if not excerpt:
+                        continue
+                    locator_kind = "notes" if source_map.source_type == "scanned_notes" else "transcript"
+                    locator_key = str(entry["page_file"] if locator_kind == "notes" else entry["paragraph_key"])
+                    existing = self._existing_citation_for_excerpt(
+                        source_id,
+                        locator_kind,
+                        locator_key,
+                        excerpt,
+                    )
+                    if existing is None:
+                        existing = self.create_citation_from_source_range(
+                            source_id=source_id,
+                            start_line=start,
+                            end_line=end,
+                            highlight_text=excerpt,
+                            supports_claim=unit.title,
+                        )
+                        created += 1
+                    else:
+                        reused += 1
+                    if existing.citation_id not in unit.citation_ids:
+                        unit.citation_ids.append(existing.citation_id)
+
+        if unit.citation_ids:
+            self.store.save_unit(unit)
+        return {
+            "citations_created": created,
+            "citations_reused": reused,
+            "unresolved_sources": unresolved,
+        }
+
+    def backfill_seed_citations(self, catalog_path: Path) -> Dict[str, Any]:
+        """Attach reviewable original-note or transcript citations to existing seed units."""
+        payload = json.loads(Path(catalog_path).read_text(encoding="utf-8"))
+        records = payload.get("units", []) if isinstance(payload, dict) else []
+        processed = 0
+        skipped = 0
+        citations_created = 0
+        citations_reused = 0
+        errors: List[Dict[str, str]] = []
+        registered_sources: Dict[str, Dict[str, Any]] = {}
+        for record in records:
+            unit_id = str(record.get("unit_id") or "")
+            try:
+                unit = self.store.get_unit(unit_id)
+                if unit.citation_ids:
+                    skipped += 1
+                    continue
+                result = self._backfill_citations_for_record(record, unit, registered_sources)
+                if result["unresolved_sources"]:
+                    raise ValueError(
+                        "No source ranges found for " + ", ".join(result["unresolved_sources"])
+                    )
+                citations_created += result["citations_created"]
+                citations_reused += result["citations_reused"]
+                processed += 1
+            except Exception as exc:
+                errors.append({"unit_id": unit_id or "unknown", "error": str(exc)})
+        return {
+            "processed": processed,
+            "skipped": skipped,
+            "citations_created": citations_created,
+            "citations_reused": citations_reused,
+            "errors": errors,
+            "total": len(records),
+        }
+
+    def backfill_seed_note_citations(self, catalog_path: Path) -> Dict[str, Any]:
+        """Backward-compatible alias for the original admin action."""
+        return self.backfill_seed_citations(catalog_path)
 
     def list_unit_summaries(self, status: Optional[str] = None, unit_type: Optional[str] = None) -> List[Dict[str, Any]]:
         units = list(self.store.list_units())
@@ -375,10 +725,7 @@ class CanonicalRepositoryService:
 
     def unit_detail(self, unit_id: str) -> Dict[str, Any]:
         unit = self.store.get_unit(unit_id)
-        project_dir = self._project_dir(unit.manuscript.project_id)
-        final_path = project_dir / "final.md"
-        full_manuscript = final_path.read_text(encoding="utf-8") if final_path.is_file() else ""
-        manuscript = self._extract_manuscript_section(full_manuscript, unit.manuscript.heading_title)
+        manuscript = self._manuscript_markdown_for_unit(unit)
         citations = [self.resolve_citation(item).model_dump(mode="json") for item in unit.citation_ids]
         relationships = [
             item.model_dump(mode="json")
@@ -386,6 +733,12 @@ class CanonicalRepositoryService:
             if item.from_unit_id == unit_id or item.to_unit_id == unit_id
         ]
         return {"unit": unit.model_dump(mode="json"), "manuscript_markdown": manuscript, "citations": citations, "relationships": relationships}
+
+    def _manuscript_markdown_for_unit(self, unit: CanonicalUnit) -> str:
+        project_dir = self._project_dir(unit.manuscript.project_id)
+        final_path = project_dir / "final.md"
+        full_manuscript = final_path.read_text(encoding="utf-8") if final_path.is_file() else ""
+        return self._extract_manuscript_section(full_manuscript, unit.manuscript.heading_title)
 
     @staticmethod
     def _extract_manuscript_section(markdown: str, heading_title: str) -> str:
@@ -420,6 +773,7 @@ class CanonicalRepositoryService:
             citations.append({"citation": citation.model_dump(mode="json"), "resolution": resolution.model_dump(mode="json")})
         return {
             "unit": unit.model_dump(mode="json"),
+            "manuscript_markdown": self._manuscript_markdown_for_unit(unit),
             "citations": citations,
             "relationships": [
                 item.model_dump(mode="json") for item in self.store.list_relationships()

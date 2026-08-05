@@ -98,14 +98,25 @@ def authoring_unit_detail(unit_id: str):
 
 @admin_router.post("/units/import-candidates")
 def import_candidates(payload: ImportSeedRequest):
+    requested = _validated_catalog_path(payload.catalog_path)
+    return canonical_repository_service.import_seed_catalog(requested)
+
+
+def _validated_catalog_path(catalog_path: str) -> Path:
     project_root = Path(__file__).resolve().parents[3]
-    requested = (project_root / payload.catalog_path).resolve()
+    requested = (project_root / catalog_path).resolve()
     allowed_root = (project_root / "output" / "seed-catalog").resolve()
     if not requested.is_relative_to(allowed_root) or requested.name != "canonical_units.json":
         raise HTTPException(status_code=400, detail="Catalog must be a canonical_units.json file under output/seed-catalog")
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="Seed catalog not found")
-    return canonical_repository_service.import_seed_catalog(requested)
+    return requested
+
+
+@admin_router.post("/units/backfill-source-citations")
+def backfill_source_citations(payload: ImportSeedRequest):
+    requested = _validated_catalog_path(payload.catalog_path)
+    return canonical_repository_service.backfill_seed_citations(requested)
 
 
 @admin_router.put("/units/{unit_id}", response_model=CanonicalUnit)

@@ -118,6 +118,27 @@ def test_transcript_source_map_and_exact_citation_resolution(repository_workspac
     assert "t=130" in resolution.deep_link_url
 
 
+def test_authoring_unit_detail_includes_renderable_manuscript_markdown(repository_workspace):
+    service = repository_workspace["service"]
+    project_id, _ = _write_transcript_project(repository_workspace)
+    unit = CanonicalUnit(
+        unit_id="CU-authoring-manuscript",
+        title="登山變像",
+        unit_type="passage",
+        manuscript=ManuscriptLocator(
+            project_id=project_id,
+            project_type="transcript",
+            heading_title="一、登山變像",
+            heading_anchor="一-登山變像",
+        ),
+    )
+    service.store.save_unit(unit)
+
+    detail = service.authoring_unit_detail(unit.unit_id)
+
+    assert detail["manuscript_markdown"] == "## 一、登山變像\n\n整理後的文稿。\n"
+
+
 def test_changed_transcript_makes_citation_stale(repository_workspace):
     service = repository_workspace["service"]
     project_id, transcript_id = _write_transcript_project(repository_workspace)
@@ -159,6 +180,200 @@ def test_notes_source_map_preserves_page_identity(repository_workspace):
     source_map = service.store.get_source_map(registered["source"]["source_id"])
     assert source_map.entries[0]["page_file"] == page_file
     assert source_map.entries[0]["page_ocr_sha256"]
+
+
+def test_notes_source_map_falls_back_to_project_pages_without_markers(repository_workspace):
+    service = repository_workspace["service"]
+    project_id = "notes-without-markers"
+    project = repository_workspace["notes"] / project_id
+    project.mkdir()
+    pages = ["notes_main/chapter5/25.jpg", "notes_main/chapter5/26.jpg"]
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "結構", "project_type": "sermon_note", "pages": pages}),
+        encoding="utf-8",
+    )
+    (project / "unified_source.md").write_text(
+        "## 登山寶訓的結構\n\n第一部分。\n第二部分。\n",
+        encoding="utf-8",
+    )
+
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+
+    assert [entry["page_file"] for entry in source_map.entries] == pages
+    assert source_map.entries[0]["source_line_start"] == 1
+    assert source_map.entries[-1]["source_line_end"] == 4
+
+
+def test_notes_source_map_infers_unmarked_previous_numbered_page(repository_workspace):
+    service = repository_workspace["service"]
+    project_id = "notes-with-unmarked-first-page"
+    project = repository_workspace["notes"] / project_id
+    project.mkdir()
+    page_10 = "notes_main/chapter9/10.jpg"
+    page_11 = "notes_main/chapter9/11.jpg"
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "權柄", "project_type": "sermon_note", "pages": [page_11]}),
+        encoding="utf-8",
+    )
+    (project / "unified_source.md").write_text(
+        "# 權柄\n\n人子有赦罪的權柄。\n\n更多說明。\n\n"
+        f"<!-- Page: {page_11} -->\n\n新郎已經來了。\n",
+        encoding="utf-8",
+    )
+    raw_dir = repository_workspace["notes"] / "raw_ocr"
+    (raw_dir / "notes_main_chapter9_10.jpg.md").write_text("人子有赦罪的權柄。", encoding="utf-8")
+    (raw_dir / "notes_main_chapter9_11.jpg.md").write_text("新郎已經來了。", encoding="utf-8")
+
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+
+    assert source_map.entries[0]["page_file"] == page_10
+    assert source_map.entries[0]["source_line_start"] == 1
+    assert source_map.entries[1]["page_file"] == page_11
+
+
+def test_rebuilding_note_source_refreshes_only_exact_candidate_citations(repository_workspace):
+    service = repository_workspace["service"]
+    project_id = "notes-refresh"
+    project = repository_workspace["notes"] / project_id
+    project.mkdir()
+    page = "notes_main/chapter5/1.jpg"
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "生命", "project_type": "sermon_note", "pages": [page]}),
+        encoding="utf-8",
+    )
+    (project / "unified_source.md").write_text("生命在基督裡。\n", encoding="utf-8")
+    registered = service.register_project_source(project_id)
+    source_id = registered["source"]["source_id"]
+    citation = service.create_citation_from_source_range(source_id, 1, 1)
+    old_hash = citation.source_sha256
+
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "生命", "project_type": "sermon_note", "pages": ["notes_main/chapter5/2.jpg"]}),
+        encoding="utf-8",
+    )
+    rebuilt = service.register_project_source(project_id)
+    refreshed = service.store.get_citation(citation.citation_id)
+
+    assert rebuilt["refreshed_candidate_citations"] == 1
+    assert refreshed.source_sha256 != old_hash
+    assert service.resolve_citation(citation.citation_id).state == "valid"
+
+    refreshed.status = "approved"
+    service.store.save_citation(refreshed)
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "生命", "project_type": "sermon_note", "pages": [page]}),
+        encoding="utf-8",
+    )
+    service.register_project_source(project_id)
+    assert service.resolve_citation(citation.citation_id).state == "stale"
+
+
+def test_seed_import_backfills_reviewable_note_citations_per_page(repository_workspace, tmp_path):
+    service = repository_workspace["service"]
+    project_id = "notes-matthew-5"
+    project = repository_workspace["notes"] / project_id
+    project.mkdir()
+    pages = ["notes_main/chapter5/1.jpg", "notes_main/chapter5/2.jpg"]
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "登山寶訓", "project_type": "sermon_note", "pages": pages}),
+        encoding="utf-8",
+    )
+    (project / "unified_source.md").write_text(
+        "# 登山寶訓\n\n"
+        "<!-- Page: notes_main/chapter5/1.jpg -->\n\n"
+        "虛心的人有福了。\n\n"
+        "<!-- Page: notes_main/chapter5/2.jpg -->\n\n"
+        "天國是他們的。\n",
+        encoding="utf-8",
+    )
+    (project / "chunks_meta.json").write_text(
+        json.dumps(
+            [{"title": "八福的開端", "source_start_line": 5, "source_end_line": 9}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    for page, text in zip(pages, ["虛心的人有福了。", "天國是他們的。"]):
+        safe_name = page.replace("/", "_")
+        (repository_workspace["notes"] / "raw_ocr" / f"{safe_name}.md").write_text(text, encoding="utf-8")
+
+    seed = {
+        "units": [
+            {
+                "unit_id": "CU-beatitudes",
+                "title": "太 5:3：虛心的人有福了",
+                "unit_type": "passage",
+                "primary_bible_refs": [{"osis": "Matt.5.3", "display": "太 5:3"}],
+                "topic_assignments": [],
+                "sources": [
+                    {
+                        "project_id": project_id,
+                        "project_type": "sermon_note",
+                        "resolved_source_headings": ["一、八福的開端"],
+                        "section_anchors": ["一-八福的開端"],
+                    }
+                ],
+            }
+        ]
+    }
+    path = tmp_path / "canonical_units.json"
+    path.write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+
+    result = service.import_seed_catalog(path)
+    unit = service.store.get_unit("CU-beatitudes")
+
+    assert result["citations_created"] == 2
+    assert len(unit.citation_ids) == 2
+    resolutions = [service.resolve_citation(item) for item in unit.citation_ids]
+    assert all(item.state == "valid" for item in resolutions)
+    assert {item.locator.page_file for item in resolutions} == set(pages)
+    assert all(service.store.get_citation(item).status == "candidate" for item in unit.citation_ids)
+
+
+def test_note_citation_backfill_is_idempotent(repository_workspace, tmp_path):
+    service = repository_workspace["service"]
+    project_id = "notes-matthew-6"
+    project = repository_workspace["notes"] / project_id
+    project.mkdir()
+    page = "notes_main/chapter6/1.jpg"
+    (project / "meta.json").write_text(
+        json.dumps({"id": project_id, "title": "主禱文", "project_type": "sermon_note", "pages": [page]}),
+        encoding="utf-8",
+    )
+    (project / "unified_source.md").write_text(
+        f"# 主禱文\n\n<!-- Page: {page} -->\n\n我們在天上的父。\n",
+        encoding="utf-8",
+    )
+    (project / "chunks_meta.json").write_text(
+        json.dumps([{"title": "禱告的對象", "source_start_line": 5, "source_end_line": 5}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    safe_name = page.replace("/", "_")
+    (repository_workspace["notes"] / "raw_ocr" / f"{safe_name}.md").write_text("我們在天上的父。", encoding="utf-8")
+    seed = {"units": [{
+        "unit_id": "CU-prayer",
+        "title": "禱告的對象",
+        "unit_type": "concept",
+        "topic_assignments": [],
+        "sources": [{
+            "project_id": project_id,
+            "project_type": "sermon_note",
+            "resolved_source_headings": ["一、禱告的對象"],
+            "section_anchors": ["一-禱告的對象"],
+        }],
+    }]}
+    path = tmp_path / "canonical_units.json"
+    path.write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+    service.import_seed_catalog(path)
+    citation_ids = list(service.store.get_unit("CU-prayer").citation_ids)
+
+    result = service.backfill_seed_note_citations(path)
+
+    assert result["skipped"] == 1
+    assert service.store.get_unit("CU-prayer").citation_ids == citation_ids
+    assert len(list(service.store.list_citations())) == 1
 
 
 def test_compiler_keeps_passage_and_concept_units_in_separate_indexes(repository_workspace):
@@ -285,6 +500,104 @@ def test_seed_import_stays_candidate_and_passages_sort_numerically(repository_wo
     assert result["imported"] == 2
     assert [unit["unit_id"] for unit in units] == ["CU-5", "CU-10"]
     assert all(unit["status"] == "candidate" for unit in units)
+
+
+def test_seed_import_backfills_transcript_citation(repository_workspace, tmp_path):
+    service = repository_workspace["service"]
+    project_id, _ = _write_transcript_project(repository_workspace)
+    project = repository_workspace["manuscripts"] / project_id
+    (project / "chunks_meta.json").write_text(
+        json.dumps(
+            [{"title": "登山變像", "source_start_line": 1, "source_end_line": 5}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    seed = {"units": [{
+        "unit_id": "CU-transfiguration",
+        "title": "登山變像",
+        "unit_type": "passage",
+        "primary_bible_refs": [{"osis": "Matt.17.1-Matt.17.8", "display": "太 17:1–8"}],
+        "topic_assignments": [],
+        "sources": [{
+            "project_id": project_id,
+            "project_type": "transcript",
+            "resolved_source_headings": ["一、登山變像"],
+            "section_anchors": ["一-登山變像"],
+        }],
+    }]}
+    path = tmp_path / "canonical_units.json"
+    path.write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+
+    result = service.import_seed_catalog(path)
+    unit = service.store.get_unit("CU-transfiguration")
+    resolutions = [service.resolve_citation(item) for item in unit.citation_ids]
+
+    assert result["citations_created"] == 3
+    assert len(unit.citation_ids) == 3
+    assert all(item.state == "valid" for item in resolutions)
+    assert any(item.locator.start_time == 130 for item in resolutions)
+
+
+def test_transcript_backfill_uses_evidence_ranges_not_generated_draft_lines(repository_workspace, tmp_path):
+    service = repository_workspace["service"]
+    project_id, _ = _write_transcript_project(repository_workspace)
+    project = repository_workspace["manuscripts"] / project_id
+    (project / "chunks_meta.json").write_text(
+        json.dumps(
+            [{"title": "一、登山變像", "start_line": 79, "end_line": 100}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (project / "draft_chunks_meta.json").write_text(
+        json.dumps(
+            [{"title": "一、登山變像", "evidence_ids": ["E-CLOUD"]}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (project / "evidence_inventory.json").write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "evidence": [
+                        {
+                            "evidence_id": "E-CLOUD",
+                            "source_ranges": [{"start_line": 5, "end_line": 5}],
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    seed = {"units": [{
+        "unit_id": "CU-cloud-evidence",
+        "title": "雲彩與神的臨在",
+        "unit_type": "passage",
+        "primary_bible_refs": [{"osis": "Matt.17.5", "display": "太 17:5"}],
+        "topic_assignments": [],
+        "sources": [{
+            "project_id": project_id,
+            "project_type": "transcript",
+            "resolved_source_headings": ["一、登山變像"],
+            "section_anchors": ["一-登山變像"],
+        }],
+    }]}
+    path = tmp_path / "canonical_units.json"
+    path.write_text(json.dumps(seed, ensure_ascii=False), encoding="utf-8")
+
+    result = service.import_seed_catalog(path)
+    unit = service.store.get_unit("CU-cloud-evidence")
+    resolutions = [service.resolve_citation(item) for item in unit.citation_ids]
+
+    assert result["citations_created"] == 1
+    assert len(unit.citation_ids) == 1
+    assert resolutions[0].state == "valid"
+    assert resolutions[0].locator.paragraph_keys == ["49"]
+    assert resolutions[0].locator.start_time == 130
 
 
 def test_merge_preview_then_apply_preserves_lineage(repository_workspace):
