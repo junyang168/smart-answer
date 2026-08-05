@@ -428,6 +428,54 @@ def test_compiler_keeps_passage_and_concept_units_in_separate_indexes(repository
     assert all(unit["unit_id"] != "CU-cloud" for card in topic["topics"] for unit in card["units"])
 
 
+def test_compiler_places_concept_only_in_primary_topic(repository_workspace):
+    service = repository_workspace["service"]
+    project_id, _ = _write_transcript_project(repository_workspace)
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+    entry = next(item for item in source_map.entries if item["paragraph_key"] == "49")
+    citation = service.create_citation_from_source_range(
+        registered["source"]["source_id"],
+        entry["source_line_start"],
+        entry["source_line_end"],
+    )
+    citation.status = "approved"
+    service.store.save_citation(citation)
+    unit = CanonicalUnit(
+        unit_id="CU-primary-topic-only",
+        title="啟示錄文體的記號性閱讀",
+        unit_type="concept",
+        status="published",
+        topic_assignments=[
+            TopicAssignment(
+                topic_ids=["eschatology", "apocalyptic"],
+                path=["神國與末世論", "啟示文學"],
+                role="primary",
+            ),
+            TopicAssignment(
+                topic_ids=["hermeneutics", "literary"],
+                path=["聖經論與釋經學", "文體"],
+                role="secondary",
+            ),
+        ],
+        manuscript=ManuscriptLocator(
+            project_id=project_id,
+            project_type="transcript",
+            heading_title="一、登山變像",
+            heading_anchor="一-登山變像",
+        ),
+        citation_ids=[citation.citation_id],
+    )
+    service.store.save_unit(unit)
+
+    service.compiler.build()
+
+    topics = service.compiled_index("topic_index.json")["topics"]
+    assert [topic["path"] for topic in topics] == [["神國與末世論", "啟示文學"]]
+    assert topics[0]["units"][0]["unit_id"] == unit.unit_id
+    assert len(topics[0]["units"][0]["topic_assignments"]) == 2
+
+
 def test_saving_published_unit_refreshes_public_index(repository_workspace):
     service = repository_workspace["service"]
     project_id, _ = _write_transcript_project(repository_workspace)

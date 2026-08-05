@@ -80,7 +80,13 @@ class RepositoryCompiler:
                 for reference in unit.primary_bible_refs:
                     bible[reference.osis].append(summary)
             elif unit.unit_type == "concept":
-                for assignment in unit.topic_assignments:
+                # A concept may carry secondary topic assignments so readers can
+                # understand related themes.  Those assignments are metadata, not
+                # additional catalogue locations: otherwise the same unit appears
+                # repeatedly under every related topic.
+                for assignment in (
+                    item for item in unit.topic_assignments if item.role == "primary"
+                ):
                     key = assignment.topic_ids[-1] if assignment.topic_ids else "/".join(assignment.path)
                     card = topics.setdefault(key, {"topic_id": key, "path": assignment.path, "units": []})
                     card["units"].append(summary)
