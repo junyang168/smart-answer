@@ -55,6 +55,7 @@ Current resource modules:
 
 - Sermon Center
 - Sermon Series
+- 王守仁教授釋經與專題講論文庫
 - Full Articles
 - Fellowship Study Reviews
 - Q&A
@@ -77,6 +78,37 @@ Functional behavior:
 - Sermon detail pages show title, speaker, date, media availability, summary, and study content.
 - Authenticated users may receive access to additional media or full content depending on the sermon module's access rules.
 - Sermon content is AI-generated and/or editor-reviewed before publication.
+- Editors see a right-rail list of every passage and topic repository unit sourced from the current sermon, including unpublished candidates; public readers do not see unpublished unit metadata.
+- Citation deep links highlight the relevant transcript excerpt and position the sermon audio or video at the corresponding time.
+
+## Wang Exegesis And Topic Repository
+
+Routes:
+
+- `/resources/wang-repository`
+- `/resources/wang-repository/[unitId]`
+- `/admin/canonical-repository`
+- `/admin/canonical-repository/[unitId]`
+
+Functional behavior:
+
+- Public readers browse the same reviewed units through a Bible index or a topic index.
+- The Bible index groups units by canonical book and chapter and sorts them by verse; a unit with multiple references appears once in the appropriate grouping.
+- The topic index groups concept units by reviewed taxonomy paths and does not duplicate passage units merely because they carry topic metadata.
+- Each public unit exposes approved original-source excerpts. Sermon sources include an embedded audio/video player positioned at the citation time and links that open the complete sermon in a new tab.
+- The public manuscript body is temporarily hidden while the editorial presentation is reviewed; manuscript content remains visible in the admin review page.
+- Editors review manuscript Markdown, source excerpts, media positioning, citation status, Bible references, topic paths, and publication state.
+- Pure Markdown headings are not accepted as source evidence. Existing heading-only source links can be detached without deleting their underlying audit records.
+- The long-term repository is a shared knowledge platform, not only an article catalog. Reviewed questions, claims, argument relations, Scripture evidence, original-language judgments, applications, and versioned thought-map decisions can drive passage lectures, topic essays, intelligent QA, search, comparison, and study tools.
+- Articles are publication projections of reviewed knowledge. They are not the sole machine-readable record of the professor's teaching.
+- Intelligent QA must distinguish the professor's explicit claims, reasoning conclusions, opposed views, editorial synthesis, pending fact checks, and insufficient evidence, and must resolve every public answer to approved exact sources.
+- Detailed specifications live in:
+  - `docs/wang-knowledge-platform/README.md`
+  - `docs/wang-knowledge-platform/project_mission_statement.md`
+  - `docs/wang-knowledge-platform/knowledge_platform_design.md`
+  - `docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md`
+  - `docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md`
+  - `docs/wang-knowledge-platform/sermon_search_functional_spec.md`
 
 ## Full Articles
 

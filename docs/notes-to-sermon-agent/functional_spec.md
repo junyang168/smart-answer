@@ -277,7 +277,12 @@ Every published passage or topic unit must expose original-source citations. A c
 
 Cross-lecture integration must preserve source lineage when repeated material is consolidated. A topic unit may contain one manuscript and several separately highlighted source occurrences from different lectures or notes.
 
-The complete product requirements, editorial workflows, source behavior, UI, migration plan, and acceptance criteria are defined in [Functional Specification: Exegesis and Topic Repository](./exegesis_topic_repository_functional_spec.md).
+The canonical repository is also the editorial gateway into a broader knowledge platform. Reviewed questions, claims, relations, Scripture evidence, original-language judgments, applications, and thought-map revisions are stored independently of article prose. The same reviewed structure can therefore support a passage lecture, a cross-sermon topic essay, an evidence-grounded answer, search, comparison, or a study tool without creating several incompatible versions of the professor's thought.
+
+The system must distinguish the professor's explicit statements and reasoning from views he rejects, editorial synthesis, unresolved questions, and later external fact checking. Public intelligent answers use only approved public records and exact approved sources; manuscript search remains a provisional fallback for material not yet curated.
+
+The complete product requirements, editorial workflows, source behavior, UI, migration plan, and acceptance criteria are defined in [Functional Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_functional_spec.md).
+The product-wide object model and multi-product design are defined in [Knowledge Platform Design](../wang-knowledge-platform/knowledge_platform_design.md), and the QA projection is defined in [Knowledge-Grounded Sermon Search and QA](../wang-knowledge-platform/sermon_search_functional_spec.md).
 
 ## 4. User Stories
 *   *As a Pastor, I want to see the "Exegetical Notes" before the draft is written, so I can trust the biblical foundation.*
@@ -292,6 +297,8 @@ The complete product requirements, editorial workflows, source behavior, UI, mig
 *   *As a Reader, I want to browse the same reviewed material by Bible passage or theological topic without encountering duplicate manuscripts.*
 *   *As a Reader, I want every passage and topic unit to open the exact highlighted sermon or notes fragment that supports it.*
 *   *As an Editor, I want a repeated topic to retain sources from every relevant lecture while presenting one logically organized canonical manuscript.*
+*   *As a Reader, I want an intelligent answer to show what the professor said, how he argued, what remains uncertain, and exactly where the evidence occurs.*
+*   *As an Editor, I want one reviewed claim and its sources to support articles, answers, search, comparison, and learning tools without duplicating its identity.*
 
 ## 5. Non-Functional Requirements
 *   **Latency**: The full workflow can take 2-5 minutes depending on note length; the UI must handle this without timing out (using async polling).
@@ -302,3 +309,5 @@ The complete product requirements, editorial workflows, source behavior, UI, mig
 *   **Continuity Integrity**: Cross-lecture analysis must account for every current evidence ID exactly once and may never classify a new Scripture argument as an exact duplicate merely because the conclusion is familiar.
 *   **Repository Traceability**: Every published canonical unit has an approved exact-fragment citation or an explicit editor-approved source exception.
 *   **Stable Navigation**: Canonical unit and citation URLs use stable IDs rather than editable titles.
+*   **Attribution Integrity**: Explicit claims, reasoning conclusions, opposed views, editorial synthesis, pending fact checks, and insufficient evidence remain distinguishable in every product projection.
+*   **Knowledge Reuse**: Article generation, QA, search, comparison, and learning features consume the same reviewed knowledge build rather than maintaining incompatible content stores.

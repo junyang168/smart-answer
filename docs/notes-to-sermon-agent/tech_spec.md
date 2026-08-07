@@ -13,7 +13,8 @@ The system follows a monolithic architecture with a clear separation between the
 *   **Transcript Pipeline**: `backend/pipeline/transcript_pipeline.py`. Implements full-transcript evidence extraction, planning, generation, and coverage auditing.
 *   **OpenAI Gateway**: Transcript generation, Coverage Audit, and Theological Boundary Review use structured OpenAI responses. The current shared model is `gpt-5.6-sol`, configured by `OPENAI_GENERATION_MODEL`.
 *   **Series Index Refresh**: `backend/api/series_index_refresh.py`. Runs cache-aware topic extraction for one Series and then rebuilds the global manuscript search index.
-*   **Exegesis and Topic Repository**: A canonical-unit authoring store, compiled Bible/topic read model, and exact-fragment citation resolver over checked-in manuscripts and original sermon/notes sources. See [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md).
+*   **Exegesis and Topic Repository**: A canonical-unit authoring store, compiled Bible/topic read model, and exact-fragment citation resolver over checked-in manuscripts and original sermon/notes sources. See [Technical Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_tech_spec.md).
+*   **Knowledge Platform Target**: Reviewed questions, claims, relations, Scripture evidence, original-language judgments, applications, and thought-map revisions compile into permission-aware knowledge builds used by manuscripts, QA, search, comparison, and learning projections. See [Knowledge Platform Design](../wang-knowledge-platform/knowledge_platform_design.md).
 
 ## 2. Data Models & Schemas
 
@@ -125,7 +126,7 @@ Both passage and topic units use identical source-citation behavior. Transcript 
 
 New Evidence Inventory records include an exact `verbatim_source_excerpt` anchor in addition to line ranges. Existing inventories are migrated through source maps and remain candidates until exact fragments are validated. Cross-lecture merge and patch artifacts must retain the source IDs, evidence IDs, source ranges, and exact anchors associated with every contribution.
 
-The complete schemas, storage layout, invalidation rules, and compiler design are defined in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md).
+The complete schemas, storage layout, invalidation rules, and compiler design are defined in [Technical Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_tech_spec.md). The target claim graph and QA contracts are architecture, not a claim that every component is already implemented.
 
 ## 3. API Design
 
@@ -226,7 +227,7 @@ Public repository endpoints provide status, Bible/topic indexes, canonical-unit 
 
 Citation URLs contain stable citation IDs rather than client-supplied filesystem paths or raw offsets. The backend resolves and validates the stored locator before returning highlighted text or media/page positioning.
 
-The complete route definitions and payloads are specified in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md#9-api-design).
+The complete route definitions and payloads are specified in [Technical Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_tech_spec.md#9-api-design).
 
 ## 4. Implementation Details
 
@@ -455,7 +456,15 @@ The repository compiler consumes reviewed canonical-unit and citation authoring 
 
 The sermon reader must stop flattening all transcript paragraphs into an unaddressable Markdown string. It retains stable paragraph containers so citation resolution can scroll, focus, highlight, and seek media. The notes reader opens the correct source image beside its OCR text and highlights the resolved OCR range. A source checksum mismatch produces a stale state and never silently highlights a different passage.
 
-Implementation phases and rollback behavior are defined in [Technical Specification: Exegesis and Topic Repository](./exegesis_topic_repository_tech_spec.md#16-implementation-phases).
+Implementation phases and rollback behavior are defined in [Technical Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_tech_spec.md#16-implementation-phases).
+
+### 4.11. Knowledge Build and Product Projections
+
+The target knowledge compiler validates and publishes reviewed questions, claims, relations, Scripture evidence, original-language judgments, applications, and thought-map revisions alongside canonical units and citations. Stable repository IDs remain independent of editable prose and project-local evidence IDs.
+
+Search first performs manuscript, passage, topic, and semantic recall, then selects and traverses a bounded permission-filtered claim subgraph. It creates an `AnswerEvidenceBundle` before calling a prose model. The bundle records the active knowledge build, claims, relations, citations, units, attribution labels, unresolved items, and access scope. The prose model may explain this bundle but may not add substantive claims that are absent from it.
+
+Passage lectures, topic essays, intelligent answers, comparison views, and study tools are separate projections over the same reviewed records. Updating an article does not silently rewrite a claim; updating a claim creates a revision, invalidates dependent projections, and requires a new validated build for public use.
 
 ## 5. Security & Performance
 *   **Concurrency**: Uses FastAPI `BackgroundTasks`. Not scalable horizontally (state is local file-based), but sufficient for single-tenant use.

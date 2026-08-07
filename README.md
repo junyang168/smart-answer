@@ -50,13 +50,19 @@ The application follows a microservices-like architecture with a Next.js fronten
     -   Fellowship public input files are the prepared manuscript Markdown, PPTX, and local MP4 recording copy. Generated analysis/transcript files, extracted audio, cache files, and Google Meet chat files are hidden from public document lists.
     -   Fellowship `sourceLinks` are for teaching/source material links only. Do not store the shared Google Meet Recordings folder there; recordings should be copied into the dated fellowship docs folder when they are meant to be public inputs.
 
+## Wang Knowledge Platform Documentation
+
+- [Documentation index](docs/wang-knowledge-platform/README.md)
+- [Project mission statement](docs/wang-knowledge-platform/project_mission_statement.md)
+- [Shared knowledge platform design](docs/wang-knowledge-platform/knowledge_platform_design.md)
+- [Knowledge-grounded sermon search and QA specification](docs/wang-knowledge-platform/sermon_search_functional_spec.md)
+- [Exegesis and topic repository functional specification](docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md)
+- [Exegesis and topic repository technical specification](docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md)
+
 ## Notes-to-Manuscript Documentation
 
 - [Transformation workflow functional specification](docs/notes-to-sermon-agent/functional_spec.md)
 - [Transformation workflow technical specification](docs/notes-to-sermon-agent/tech_spec.md)
-- [Sermon manuscript search and QA specification](docs/notes-to-sermon-agent/sermon_search_functional_spec.md)
-- [Exegesis and topic repository functional specification](docs/notes-to-sermon-agent/exegesis_topic_repository_functional_spec.md)
-- [Exegesis and topic repository technical specification](docs/notes-to-sermon-agent/exegesis_topic_repository_tech_spec.md)
 
 ## Getting Started
 
