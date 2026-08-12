@@ -311,20 +311,26 @@ class Stage1AnthropicClient:
                 max_retries=0,
                 timeout=effective_timeout,
             )
+        request: Dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_output_tokens,
+            "system": system_prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": user_prompt}],
+                }
+            ],
+        }
+        # Claude Sonnet 5 uses adaptive thinking by default and rejects the
+        # legacy sampling/thinking combination used by Claude 4.x.  Omitting
+        # these fields is both forward-compatible and records the real model
+        # behavior in the surrounding extraction/review fingerprint.
+        if not self.model.startswith("claude-sonnet-5"):
+            request["temperature"] = temperature
+            request["thinking"] = {"type": "disabled"}
         try:
-            message = client.messages.create(
-                model=self.model,
-                max_tokens=self.max_output_tokens,
-                temperature=temperature,
-                system=system_prompt,
-                thinking={"type": "disabled"},
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": user_prompt}],
-                    }
-                ],
-            )
+            message = client.messages.create(**request)
         except Exception as exc:
             raise RuntimeError(self._format_exception(exc)) from exc
 

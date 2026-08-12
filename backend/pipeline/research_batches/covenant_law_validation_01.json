@@ -1,0 +1,28 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-COVENANT-LAW-VALIDATION-01",
+  "purpose": "以约与律法相关检索词选取材料，验证系统能否在不预设专题的前提下发现跨讲重复、差异、释经单元、专题候选与问答候选。",
+  "semantic_assumption": "none",
+  "selection_note": "这些讲道只是同一处理批次，不表示它们属于同一专题。约、律法、义、信只是选材线索，不是预先批准的分类。",
+  "transcript_ids": [
+    "2022年 NYSC 專題 馬太福音釋經（九）王守仁 教授  第二堂",
+    "2019-3-24 罗马书3章21至31节",
+    "2019-3-31 宗主国与附庸国的约",
+    "2011 NYSC 專題：馬太福音釋經（二）1",
+    "2011 NYSC 專題：馬太福音釋經（二）2"
+  ],
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true,
+    "allow_multiple_topic_candidates": true,
+    "preserve_scripture_context": true,
+    "separate_questions_from_topic_exposition": true
+  },
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "independent_review": "claude-sonnet-5",
+    "adjudicator": "gpt-5.6-sol",
+    "reconsideration": "claude-sonnet-5"
+  }
+}

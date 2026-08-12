@@ -69,14 +69,28 @@
 
 每个候选主张至少保留一个 `anchor`：
 
-- `segment_index`
+- `segment_locator`：普查内部唯一的 `S0001...`；
+- `source_segment_id`：来源原有 ID，可重复或缺失；
+- `source_segment_index`：来源数组顺序；
 - `start_time`
 - `end_time`
 - `verbatim_excerpt`
 
 `verbatim_excerpt` 必须是该 segment 的精确连续子字符串。程序可以据此计算字符位置并发现逐字稿更新造成的失效。
 
+不得假设来源中的 segment ID 唯一。若同一篇逐字稿重复使用 `SEG-001` 一类 ID，验证和回链必须以该次普查分配的唯一 `segment_locator` 为准，同时保留原 ID、顺序和时间供审计。若模型返回旧 ID，只有在该 ID 或精确 excerpt 能唯一解析时才允许机械修复；否则该项必须重跑或人工处理。
+
 第一遍不要求为同一句话建立大量重叠锚点。若一个结论依赖多个相隔较远的理由，则保留多个 anchors。
+
+### 抽取世代
+
+每份当前 survey 必须带 `extraction`：
+
+- `generation_fingerprint_sha256` 识别共同的 prompt、model、generation settings 和 schema；
+- `fingerprint_sha256` 再绑定本篇逐字稿 SHA256；
+- 每条 `candidate_claim` 带同一个 `extraction_fingerprint`。
+
+没有这些字段的历史文件仍可单独阅读，但属于 legacy，不能进入新的跨讲综合。不同 generation 的 surveys 也不得在同一次综合中混用。被重抽结果替换的旧文件保存在 `generations/`，不静默删除。
 
 ## 五、经文依据与来源证据
 
@@ -86,6 +100,53 @@
 - `scripture_refs` 记录“教授用什么圣经支持或解释这项主张”。
 
 不得因为编辑者知道某节经文相关，就把教授没有使用的经文补入 `scripture_refs`。
+
+### v1 限制与 v2 经文伴随记录
+
+v1 的 `scripture_refs` 是原样字符串，足以防止凭空补经文，却不能可靠生成
+释经覆盖地图。为避免重写已经完成的 205 篇普查，v1 文件保持不变；每篇另有一份
+`wang_corpus_scripture_roles_v2` 伴随记录，把每一次引用展开为可审核对象：
+
+```json
+{
+  "ref_key": "claim:C017:0:0",
+  "owner_kind": "claim",
+  "owner_id": "C017",
+  "source_raw_text": "太 17:1–8；路 9:28–36",
+  "raw_text": "太 17:1–8",
+  "osis": "Matt.17.1-Matt.17.8",
+  "display": "馬太福音 17:1–8",
+  "role": "primary_passage",
+  "role_reason": "该处持续解释登山变像叙事。",
+  "confidence": "high",
+  "attribution": "professor_used",
+  "review_status": "candidate"
+}
+```
+
+同一个原始字符串若含多卷书或多个明确范围，必须拆成不同 `ref_key`，使马太福音
+可以是 `primary_passage`，路加福音可以是 `parallel_passage`。若只有“诗篇”或
+“保罗书信”等泛称而没有章节目，保留 `osis: null` 和
+`normalization_status: unresolved`，不得伪造章节目。
+
+伴随记录保存原 v1 文件的 SHA256；机械验证必须保证：
+
+1. 每个 v1 引用 occurrence 恰好有一个或多个可解释的展开记录；
+2. 模型只能为既有 `ref_key` 分类，不可增删经文；
+3. OSIS 由程序解析，不由模型填写；
+4. 所有角色初始都是 `candidate`，未经人工审核不得作为公开的重点覆盖结论。
+
+角色至少包括 `primary_passage`、`parallel_passage`、`lexical_support`、
+`historical_background`、`theological_support`、`counterexample` 和
+`application_basis`。若暂时无法判断角色，应保存 `unclassified`，不得默认为
+`primary_passage`。v1 数据在完成角色回填前只能称为“经文提及”，不能称为
+“重点释经覆盖”。
+
+实现与运行入口：
+
+- `backend/pipeline/corpus_scripture_enrichment.py`：拆分、OSIS 规范化和机械验证；
+- `backend/pipeline/corpus_scripture_enrichment_runner.py`：使用 Terra Medium 判断论证角色；
+- `backend/pipeline/prompts/corpus_scripture_role_enrichment.md`：角色边界与禁止事项。
 
 ## 六、人工审核
 
@@ -130,3 +191,15 @@ flowchart LR
 ```
 
 不是每项普查结果都需要升级为完整论证图。只有反复出现、跨经文、具有争议、或将用于正式写作的主张，才需要展开完整的理由、反对意见、限定和证据网络。
+
+## 八、跨讲道综合与覆盖计算
+
+全语料不能一次塞给模型。综合采用两级结构：
+
+1. 将每篇讲道压缩为保留全部 claim refs 的 sermon card；
+2. 分批建立 candidate batch themes；
+3. 全局综合只能选择真实存在的 `batch_theme_ref`；
+4. 程序将所选 batch themes 展开为完整 claim refs，并机械计算覆盖讲道数和主张数；
+5. 模型可以选择代表性 claims 供阅读，但不得把代表性 claims 冒充完整覆盖范围。
+
+跨讲道综合结果仍是 candidate。`repeats`、`extends`、`qualifies`、`tension` 与 `supersedes` 必须保留其选中主题、展开后的 claim refs、理由和人工审核状态。

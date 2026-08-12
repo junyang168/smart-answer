@@ -47,6 +47,8 @@ class CanonicalUnit(BaseModel):
     citation_ids: List[str] = Field(default_factory=list)
     relationship_ids: List[str] = Field(default_factory=list)
     aliases: List[str] = Field(default_factory=list)
+    knowledge_managed: bool = False
+    knowledge_dependency_ids: List[str] = Field(default_factory=list)
     review: ReviewRecord = Field(default_factory=ReviewRecord)
 
 

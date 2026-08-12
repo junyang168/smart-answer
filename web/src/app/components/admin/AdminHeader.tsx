@@ -8,6 +8,7 @@ const navItems = [
   { href: "/admin", label: "控制台", exact: true },
   { href: "/admin/notes-to-sermon/series", label: "講稿整理" },
   { href: "/admin/canonical-repository", label: "釋經文庫" },
+  { href: "/admin/thought-review", label: "思想審核" },
   { href: "/", label: "網站首頁", exact: true },
 ];
 

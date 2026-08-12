@@ -14,6 +14,17 @@ from backend.api.config import CONFIG_DIR, DATA_BASE_PATH
 from backend.api import sermon_converter_service as sermon_service
 
 from .compiler import RepositoryCompiler
+from .knowledge_importer import KnowledgePackageImporter
+from .knowledge_models import (
+    ClaimRecord,
+    EvidenceStepRecord,
+    ImpactEventRecord,
+    KnowledgeSourceDocument,
+    KnowledgeRouteRecord,
+    SourceFragmentRecord,
+    TopicNodeRecord,
+    ProductDependencyRecord,
+)
 from .models import (
     BibleReference,
     CanonicalUnit,
@@ -44,6 +55,578 @@ class CanonicalRepositoryService:
     def __init__(self, root: Optional[Path] = None):
         self.store = RepositoryStore(root or DATA_BASE_PATH / "canonical_repository")
         self.compiler = RepositoryCompiler(self.store)
+        self.knowledge_importer = KnowledgePackageImporter(
+            self.store,
+            provenance_binder=self._bind_knowledge_provenance,
+        )
+
+    def import_knowledge_package(self, package_path: Path) -> Dict[str, Any]:
+        self._seed_authoritative_topics()
+        result = self.knowledge_importer.import_path(package_path)
+        result["composition_dependencies"] = self._sync_composition_plan_dependencies()
+        result["topic_reconciliation"] = self.reconcile_topic_identity()
+        result["repository_counts"] = self.store.knowledge_counts()
+        return result
+
+    def _sync_composition_plan_dependencies(self) -> Dict[str, Any]:
+        claims_by_plan: Dict[str, List[str]] = {}
+        for decision in self.store.list_knowledge_records("composition_decisions"):
+            claims_by_plan.setdefault(decision.plan_id, []).extend(decision.claim_ids)
+        snapshots = []
+        for plan_id, claim_ids in claims_by_plan.items():
+            snapshots.append(
+                self.snapshot_product_dependencies(
+                    "composition_plan",
+                    plan_id,
+                    list(dict.fromkeys(claim_ids)),
+                )
+            )
+        return {
+            "plan_count": len(snapshots),
+            "dependency_count": sum(len(item["dependency_ids"]) for item in snapshots),
+        }
+
+    @staticmethod
+    def _topic_taxonomy_path() -> Path:
+        return (
+            Path(__file__).resolve().parents[3]
+            / "output"
+            / "seed-catalog"
+            / "matthew-review-v1"
+            / "topic_taxonomy.json"
+        )
+
+    @staticmethod
+    def _topic_identity_overrides() -> Dict[str, Dict[str, str]]:
+        """Explicit reviewed bridges; never infer topic identity from a title."""
+        return {
+            "faith-trust": {
+                "topic_id": "disciple-faith-trust",
+                "label": "門徒的信心、認識與信靠",
+                "parent_topic_id": "ecclesiology-discipleship",
+            },
+            "TOPIC-ESCHATOLOGY-APOCALYPTIC": {
+                "topic_id": "apocalyptic-new-creation",
+                "label": "啟示文學、新天新地與末世記號",
+                "parent_topic_id": "kingdom-eschatology",
+            },
+            "TOPIC-DISPENSATIONALISM": {
+                "topic_id": "dispensationalism",
+                "label": "時代論與救恩歷史",
+                "parent_topic_id": "covenant-law-history",
+            },
+            "TOPIC-RIGHTEOUSNESS-FAITH": {
+                "topic_id": "righteousness-faith-relationship",
+                "label": "義、信與人神關係",
+                "parent_topic_id": "soteriology",
+            },
+            "TOPIC-PROMISE-OBEDIENCE": {
+                "topic_id": "promise-obedience",
+                "label": "應許、順服與福分的享受",
+                "parent_topic_id": "covenant-law-history",
+            },
+        }
+
+    def _seed_authoritative_topics(self) -> None:
+        path = self._topic_taxonomy_path()
+        if path.is_file():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for parent in payload.get("topics", []):
+                self._save_topic_seed(parent, None)
+                for child in parent.get("children", []):
+                    self._save_topic_seed(child, str(parent["id"]))
+        for legacy_id, mapping in self._topic_identity_overrides().items():
+            topic_id = mapping["topic_id"]
+            try:
+                existing = self.store.get_knowledge_record("topic_nodes", topic_id)
+                aliases = list(dict.fromkeys([*existing.aliases, legacy_id]))
+                if aliases != existing.aliases:
+                    existing.aliases = aliases
+                    self.store.save_knowledge_record("topic_nodes", existing)
+            except FileNotFoundError:
+                self.store.save_knowledge_record(
+                    "topic_nodes",
+                    TopicNodeRecord(
+                        topic_id=topic_id,
+                        label=mapping["label"],
+                        parent_topic_id=mapping.get("parent_topic_id"),
+                        aliases=[legacy_id],
+                        legacy_ids=[legacy_id],
+                    ),
+                )
+
+    def _save_topic_seed(self, item: Dict[str, Any], parent_topic_id: Optional[str]) -> None:
+        topic_id = str(item["id"])
+        try:
+            existing = self.store.get_knowledge_record("topic_nodes", topic_id)
+            if existing.label != str(item["label"]) or existing.parent_topic_id != parent_topic_id:
+                existing.label = str(item["label"])
+                existing.parent_topic_id = parent_topic_id
+                self.store.save_knowledge_record("topic_nodes", existing)
+        except FileNotFoundError:
+            self.store.save_knowledge_record(
+                "topic_nodes",
+                TopicNodeRecord(
+                    topic_id=topic_id,
+                    label=str(item["label"]),
+                    parent_topic_id=parent_topic_id,
+                ),
+            )
+
+    def reconcile_topic_identity(self) -> Dict[str, Any]:
+        """Reconcile projections without pretending their IDs mean the same thing."""
+        self._seed_authoritative_topics()
+        topics = {
+            item.topic_id: item for item in self.store.list_knowledge_records("topic_nodes")
+        }
+        alias_to_topic = {
+            alias: item.topic_id for item in topics.values() for alias in item.aliases
+        }
+        unknown_unit_topics: Dict[str, List[str]] = {}
+        migrated_unit_topics: Dict[str, Dict[str, str]] = {}
+        unit_by_title = {item.title: item.unit_id for item in self.store.list_units()}
+        for unit in self.store.list_units():
+            replacements: Dict[str, str] = {}
+            for assignment in unit.topic_assignments:
+                normalized: List[str] = []
+                for topic_id in assignment.topic_ids:
+                    canonical_id = alias_to_topic.get(topic_id, topic_id)
+                    normalized.append(canonical_id)
+                    if canonical_id != topic_id:
+                        replacements[topic_id] = canonical_id
+                if unit.status == "candidate":
+                    assignment.topic_ids = list(dict.fromkeys(normalized))
+            if replacements and unit.status == "candidate":
+                self.store.save_unit(unit)
+                migrated_unit_topics[unit.unit_id] = replacements
+            unknown = sorted(
+                topic_id
+                for assignment in unit.topic_assignments
+                for topic_id in assignment.topic_ids
+                if topic_id not in topics
+            )
+            if unknown:
+                unknown_unit_topics[unit.unit_id] = unknown
+
+        route_results: List[Dict[str, Any]] = []
+        for route in self.store.list_knowledge_records("knowledge_routes"):
+            assert isinstance(route, KnowledgeRouteRecord)
+            if route.route_type != "topic_research":
+                continue
+            canonical_id = alias_to_topic.get(route.target_id)
+            if canonical_id and route.canonical_topic_ids != [canonical_id]:
+                route.canonical_topic_ids = [canonical_id]
+                self.store.save_knowledge_record("knowledge_routes", route)
+            route_results.append(
+                {
+                    "route_id": route.route_id,
+                    "legacy_target_id": route.target_id,
+                    "canonical_topic_ids": route.canonical_topic_ids,
+                    "state": "mapped" if route.canonical_topic_ids else "unresolved",
+                }
+            )
+
+        search_index = DATA_BASE_PATH / "sermon_search" / "topic_index.json"
+        search_projection: List[Dict[str, Any]] = []
+        if search_index.is_file():
+            payload = json.loads(search_index.read_text(encoding="utf-8"))
+            for item in payload.get("topics", []):
+                unit_id = unit_by_title.get(str(item.get("name") or ""))
+                search_projection.append(
+                    {
+                        "legacy_id": item.get("id"),
+                        "legacy_type": item.get("type"),
+                        "projection_kind": "canonical_unit" if unit_id else "discovery_only",
+                        "canonical_unit_id": unit_id,
+                    }
+                )
+
+        report = {
+            "schema_version": "topic_identity_reconciliation_v1",
+            "authority": "canonical_repository/knowledge/topic_nodes",
+            "topic_count": len(topics),
+            "unknown_unit_topics": unknown_unit_topics,
+            "migrated_candidate_unit_topics": migrated_unit_topics,
+            "knowledge_routes": route_results,
+            "legacy_search_projection": search_projection,
+            "rules": [
+                "topic_### is a legacy search-result ID, not a theological topic identity",
+                "CanonicalUnit is a content identity and references TopicNode by foreign key",
+                "KnowledgeRoute retains its legacy target for audit and adds canonical_topic_ids",
+            ],
+        }
+        self.store._write_json(
+            self.store.knowledge_dir / "reconciliation" / "topic_identity.json",
+            report,
+        )
+        return report
+
+    def _bind_knowledge_provenance(self, records: Dict[str, List[Any]]) -> None:
+        """Bind imported argument evidence to versioned Canonical Citations.
+
+        Logical IDs from an analysis run (for example ``SRC-L3``) are not a
+        provenance authority.  They are resolved here to registered source
+        documents, exact transcript paragraphs, and immutable citation hashes.
+        """
+        canonical_sources = list(self.store.list_sources())
+        by_origin = {item.origin_id: item for item in canonical_sources}
+        source_by_logical_id: Dict[str, SourceDocument] = {}
+        paragraph_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        map_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+        for knowledge_source in records["source_documents"]:
+            assert isinstance(knowledge_source, KnowledgeSourceDocument)
+            canonical = by_origin.get(str(knowledge_source.transcript_id or ""))
+            if canonical is None and knowledge_source.project_id:
+                registered = self.register_project_source(knowledge_source.project_id)
+                canonical = self.store.get_source(registered["source"]["source_id"])
+                by_origin[canonical.origin_id] = canonical
+            if canonical is None:
+                continue
+            knowledge_source.canonical_source_id = canonical.source_id
+            knowledge_source.source_sha256 = canonical.source_sha256
+            source_by_logical_id[knowledge_source.source_id] = canonical
+
+        for fragment in records["source_fragments"]:
+            assert isinstance(fragment, SourceFragmentRecord)
+            canonical = source_by_logical_id.get(fragment.source_id)
+            if canonical is None or canonical.source_type != "sermon_transcript":
+                fragment.anchor_state = "missing_canonical_source"
+                continue
+            source_id = canonical.source_id
+            if source_id not in paragraph_cache:
+                resolved = sermon_service.resolve_sermon_transcript(canonical.origin_id)
+                paragraph_cache[source_id] = {
+                    str(item.get("index") if item.get("index") is not None else position): item
+                    for position, item in enumerate(load_transcript_paragraphs(resolved["path"]))
+                }
+                source_map = self.store.get_source_map(source_id)
+                map_cache[source_id] = {
+                    str(item.get("paragraph_key")): item
+                    for item in source_map.entries
+                    if item.get("kind") == "transcript"
+                }
+            key = str(fragment.paragraph_key) if fragment.paragraph_key is not None else ""
+            paragraph = paragraph_cache[source_id].get(key)
+            map_entry = map_cache[source_id].get(key)
+            excerpt = fragment.verbatim_excerpt.strip()
+            if paragraph is None or map_entry is None:
+                fragment.anchor_state = "missing_paragraph"
+                continue
+            paragraph_text = str(paragraph.get("text") or "").strip()
+            paragraph_hash = sha256_text(paragraph_text)
+            if map_entry.get("paragraph_text_sha256") != paragraph_hash:
+                fragment.anchor_state = "stale_paragraph"
+                continue
+            if not excerpt or excerpt not in paragraph_text:
+                fragment.anchor_state = "non_verbatim"
+                continue
+
+            existing = self._existing_citation_for_excerpt(
+                source_id, "transcript", key, excerpt
+            )
+            if existing is None:
+                citation = Citation(
+                    citation_id=stable_id(
+                        "CITK", source_id, key, sha256_text(excerpt)
+                    ),
+                    source_id=source_id,
+                    source_sha256=canonical.source_sha256,
+                    locator=CitationLocator(
+                        kind="transcript",
+                        paragraph_keys=[key],
+                        highlight_text=excerpt,
+                        highlight_text_sha256=sha256_text(excerpt),
+                        char_start=paragraph_text.index(excerpt),
+                        char_end=paragraph_text.index(excerpt) + len(excerpt),
+                        start_time=map_entry.get("start_time"),
+                        end_time=map_entry.get("end_time"),
+                    ),
+                    evidence_ids=[],
+                    supports_claim="",
+                )
+            else:
+                citation = existing
+            self.store.save_citation(citation)
+            fragment.citation_id = citation.citation_id
+            fragment.source_sha256 = canonical.source_sha256
+            fragment.paragraph_text_sha256 = paragraph_hash
+            fragment.verbatim_excerpt_sha256 = sha256_text(excerpt)
+            fragment.anchor_state = "canonical_citation_bound"
+
+        fragments = {
+            item.fragment_id: item for item in records["source_fragments"]
+        }
+        for evidence in records["evidence_steps"]:
+            assert isinstance(evidence, EvidenceStepRecord)
+            fragment = fragments.get(evidence.source_fragment_id or "")
+            if fragment and fragment.citation_id:
+                evidence.citation_ids = [fragment.citation_id]
+                citation = self.store.get_citation(fragment.citation_id)
+                if evidence.evidence_step_id not in citation.evidence_ids:
+                    citation.evidence_ids.append(evidence.evidence_step_id)
+                    self.store.save_citation(citation)
+                continue
+            if evidence.support_eligibility in {"eligible", "eligible_with_label"}:
+                state = fragment.anchor_state if fragment else "missing_fragment"
+                evidence.support_eligibility = (
+                    "withheld_non_verbatim"
+                    if state == "non_verbatim"
+                    else "withheld_missing_anchor"
+                )
+                note = f"Canonical Citation binding failed: {state}."
+                evidence.review_note = " ".join(
+                    item for item in [str(getattr(evidence, "review_note", "") or "").strip(), note] if item
+                )
+
+        alias_to_topic = {
+            alias: item.topic_id
+            for item in self.store.list_knowledge_records("topic_nodes")
+            for alias in item.aliases
+        }
+        for route in records["knowledge_routes"]:
+            assert isinstance(route, KnowledgeRouteRecord)
+            if route.route_type == "topic_research" and route.target_id in alias_to_topic:
+                route.canonical_topic_ids = [alias_to_topic[route.target_id]]
+
+    def update_knowledge_record(
+        self,
+        collection: str,
+        record_id: str,
+        changes: Dict[str, Any],
+        expected_revision: Optional[int] = None,
+    ):
+        if changes.get("review_status") == "approved":
+            self._assert_knowledge_record_approvable(collection, record_id)
+        existing = self.store.get_knowledge_record(collection, record_id)
+        updated = self.store.update_knowledge_record(
+            collection, record_id, changes, expected_revision=expected_revision
+        )
+        if collection == "claims" and self._is_semantic_claim_change(existing, changes):
+            self._record_claim_impact(existing, updated, changes)
+        return updated
+
+    @staticmethod
+    def _is_semantic_claim_change(existing: Any, changes: Dict[str, Any]) -> bool:
+        semantic_fields = {
+            "statement",
+            "claim_type",
+            "attribution",
+            "corpus_scope",
+            "maturity",
+            "scripture_refs",
+            "topic_ids",
+            "evidence_step_ids",
+        }
+        if semantic_fields.intersection(changes):
+            return True
+        new_status = changes.get("review_status")
+        return bool(new_status in {"candidate", "rejected", "archived"} and new_status != existing.review_status)
+
+    def snapshot_product_dependencies(
+        self,
+        consumer_kind: str,
+        consumer_id: str,
+        claim_ids: List[str],
+        route_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        created: List[str] = []
+        for claim_id in list(dict.fromkeys(claim_ids)):
+            claim = self.store.get_knowledge_record("claims", claim_id)
+            assert isinstance(claim, ClaimRecord)
+            dependency = ProductDependencyRecord(
+                dependency_id=stable_id("KDEP", consumer_kind, consumer_id, claim_id),
+                consumer_kind=consumer_kind,
+                consumer_id=consumer_id,
+                claim_id=claim_id,
+                pinned_claim_revision=claim.revision,
+                route_ids=route_ids or [],
+            )
+            self.store.save_knowledge_record("product_dependencies", dependency)
+            created.append(dependency.dependency_id)
+        return {
+            "consumer_kind": consumer_kind,
+            "consumer_id": consumer_id,
+            "dependency_ids": created,
+        }
+
+    def analyze_claim_impact(self, claim_id: str) -> Dict[str, Any]:
+        claim = self.store.get_knowledge_record("claims", claim_id)
+        assert isinstance(claim, ClaimRecord)
+        targets: List[Dict[str, Any]] = []
+
+        for route in self.store.list_knowledge_records("knowledge_routes"):
+            if route.claim_id == claim_id:
+                targets.append(
+                    {
+                        "kind": "knowledge_route",
+                        "id": route.route_id,
+                        "consumer_id": route.target_id,
+                        "route_type": route.route_type,
+                    }
+                )
+        plan_ids: set[str] = set()
+        for decision in self.store.list_knowledge_records("composition_decisions"):
+            if claim_id in decision.claim_ids:
+                plan_ids.add(decision.plan_id)
+                targets.append(
+                    {
+                        "kind": "composition_decision",
+                        "id": decision.decision_id,
+                        "consumer_id": decision.plan_id,
+                    }
+                )
+        for synthesis in self.store.list_knowledge_records("editorial_syntheses"):
+            if claim_id in synthesis.claim_ids:
+                targets.append(
+                    {
+                        "kind": "editorial_synthesis",
+                        "id": synthesis.synthesis_id,
+                        "consumer_id": synthesis.synthesis_id,
+                    }
+                )
+        for question in self.store.list_knowledge_records("questions"):
+            if claim_id in question.answer_claim_ids:
+                targets.append(
+                    {
+                        "kind": "question_answer",
+                        "id": question.question_id,
+                        "consumer_id": question.question_id,
+                    }
+                )
+        for relation in self.store.list_knowledge_records("claim_relations"):
+            if claim_id in {relation.from_id, relation.to_id}:
+                targets.append(
+                    {
+                        "kind": "claim_relation",
+                        "id": relation.claim_relation_id,
+                        "consumer_id": relation.to_id,
+                        "relation_type": relation.relation_type,
+                    }
+                )
+
+        dependencies = [
+            item
+            for item in self.store.list_knowledge_records("product_dependencies")
+            if item.claim_id == claim_id
+        ]
+        for dependency in dependencies:
+            targets.append(
+                {
+                    "kind": dependency.consumer_kind,
+                    "id": dependency.dependency_id,
+                    "consumer_id": dependency.consumer_id,
+                    "dependency_status": dependency.status,
+                }
+            )
+        return {
+            "claim_id": claim_id,
+            "claim_revision": claim.revision,
+            "affected_targets": targets,
+            "product_dependency_ids": [item.dependency_id for item in dependencies],
+            "composition_plan_ids": sorted(plan_ids),
+        }
+
+    def _record_claim_impact(
+        self,
+        existing: ClaimRecord,
+        updated: ClaimRecord,
+        changes: Dict[str, Any],
+    ) -> ImpactEventRecord:
+        impact = self.analyze_claim_impact(updated.claim_id)
+        event_id = stable_id(
+            "IMPACT", updated.claim_id, str(existing.revision), str(updated.revision)
+        )
+        dependency_ids = impact["product_dependency_ids"]
+        for dependency_id in dependency_ids:
+            dependency = self.store.get_knowledge_record(
+                "product_dependencies", dependency_id
+            )
+            dependency.status = "invalidated"
+            if event_id not in dependency.invalidation_event_ids:
+                dependency.invalidation_event_ids.append(event_id)
+            self.store.save_knowledge_record("product_dependencies", dependency)
+        event = ImpactEventRecord(
+            impact_event_id=event_id,
+            changed_record_type="claim",
+            changed_record_id=updated.claim_id,
+            from_revision=existing.revision,
+            to_revision=updated.revision,
+            change_fields=sorted(changes),
+            affected_dependency_ids=dependency_ids,
+            affected_targets=impact["affected_targets"],
+            required_actions=[
+                "review_affected_targets",
+                "withdraw_or_rebuild_published_consumers",
+                "invalidate_qa_and_search_caches",
+            ],
+        )
+        self.store.save_knowledge_record("impact_events", event)
+        return event
+
+    def withdraw_impacted_units(self, impact_event_id: str) -> Dict[str, Any]:
+        event = self.store.get_knowledge_record("impact_events", impact_event_id)
+        assert isinstance(event, ImpactEventRecord)
+        dependency_ids = set(event.affected_dependency_ids)
+        affected_units = [
+            unit
+            for unit in self.store.list_units()
+            if dependency_ids.intersection(unit.knowledge_dependency_ids)
+            and unit.status == "published"
+        ]
+        previous = {unit.unit_id: unit.model_copy(deep=True) for unit in affected_units}
+        for unit in affected_units:
+            unit.status = "archived"
+            self.store.save_unit(unit)
+        try:
+            build = self.compiler.build() if affected_units else None
+        except Exception:
+            for unit in previous.values():
+                self.store.save_unit(unit)
+            raise
+        event.status = "withdrawn"
+        event.revision += 1
+        self.store.save_knowledge_record("impact_events", event)
+        return {
+            "impact_event_id": impact_event_id,
+            "withdrawn_unit_ids": [unit.unit_id for unit in affected_units],
+            "active_build": build,
+        }
+
+    def _assert_knowledge_record_approvable(self, collection: str, record_id: str) -> None:
+        evidence: List[EvidenceStepRecord]
+        if collection == "evidence_steps":
+            evidence = [self.store.get_knowledge_record(collection, record_id)]
+        elif collection == "claims":
+            claim = self.store.get_knowledge_record(collection, record_id)
+            assert isinstance(claim, ClaimRecord)
+            evidence = [
+                self.store.get_knowledge_record("evidence_steps", evidence_id)
+                for evidence_id in claim.evidence_step_ids
+            ]
+        else:
+            return
+        usable = 0
+        for step in evidence:
+            assert isinstance(step, EvidenceStepRecord)
+            if step.support_eligibility not in {"eligible", "eligible_with_label"}:
+                continue
+            for citation_id in step.citation_ids:
+                if self.resolve_citation(citation_id).state == "valid":
+                    usable += 1
+                    break
+        if usable == 0:
+            raise ValueError(
+                "Cannot approve a claim or evidence step without at least one valid Canonical Citation"
+            )
+
+    def knowledge_status(self) -> Dict[str, Any]:
+        packages = list(self.store.list_knowledge_packages())
+        return {
+            "schema_version": "canonical_knowledge_status_v1",
+            "counts": self.store.knowledge_counts(),
+            "packages": [item.model_dump(mode="json") for item in packages],
+        }
 
     @staticmethod
     def _sermon_catalog_record(transcript_id: str) -> Dict[str, Any]:

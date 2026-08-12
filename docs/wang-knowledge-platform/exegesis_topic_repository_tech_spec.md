@@ -17,7 +17,7 @@ The implemented repository currently separates four responsibilities:
 
 The target knowledge platform adds two responsibilities without replacing the four above:
 
-5. **Knowledge authoring records**: reviewed questions, claims, claim relations, Scripture evidence, original-language judgments, applications, and revisions.
+5. **Knowledge authoring records**: reviewed questions, claims, evidence steps, inference bridges, claim relations, Scripture and external evidence, original-language judgments, applications, passage interpretation chains, and revisions.
 6. **Knowledge services**: permission-aware hybrid retrieval, bounded graph traversal, answer evidence bundles, and product projections for manuscripts, QA, search, comparison, and study tools.
 
 ```mermaid
@@ -131,6 +131,24 @@ DATA_BASE_DIR/
       {judgment_id}.json
     applications/
       {application_id}.json
+    evidence_steps/
+      {evidence_step_id}.json
+    inference_bridges/
+      {inference_bridge_id}.json
+    passage_chains/
+      {passage_chain_id}.json
+    external_evidence/
+      {external_evidence_id}.json
+    publication_profiles/
+      {profile_id}.json
+    composition_plans/
+      {plan_id}.json
+    composition_decisions/
+      {decision_id}.json
+    review_scopes/
+      {review_scope_id}.json
+    review_work_items/
+      {work_item_id}.json
     thought_maps/
       {thought_map_id}.json
     revisions/
@@ -141,6 +159,10 @@ DATA_BASE_DIR/
       claim_reviews.json
       relation_reviews.json
       original_language_reviews.json
+      publication_profile_reviews.json
+      composition_plan_reviews.json
+      composition_decision_reviews.json
+      capacity_events.jsonl
     builds/
       {build_id}/
         repository.sqlite3
@@ -181,6 +203,12 @@ Examples of `origin_id`:
 
 Citation IDs remain stable when an editor adjusts a locator. The citation record stores revision and source hashes.
 
+Argument-layer `SourceFragment` and `EvidenceStep` do not define a second citation identity. A fragment stores `citation_id`, source/paragraph/excerpt hashes and an `anchor_state`; an evidence step stores `citation_ids`. Eligibility and approval require those IDs to resolve through the canonical citation service.
+
+### Topic ID
+
+`TopicNode.topic_id` is the only authoritative thematic identity. `CanonicalUnit.topic_assignments` and `KnowledgeRoute.canonical_topic_ids` are foreign keys to it. Legacy `topic_###` search IDs and analysis-time `TOPIC-*` route targets are retained only in reconciliation metadata or aliases; they are not valid substitutes for a `TopicNode` ID.
+
 ### Relationship ID
 
 `REL-{stable-hash(from_unit_id, to_unit_id, relationship_type)}`
@@ -194,7 +222,19 @@ Citation IDs remain stable when an editor adjusts a locator. The citation record
 ### Original-language and revision IDs
 
 * `OLJ-{content-independent-stable-id}` identifies one original-language or translation judgment.
+* `ES-{content-independent-stable-id}` identifies one evidence observation across wording edits.
+* `IB-{content-independent-stable-id}` identifies one attributed inference bridge.
+* `PIC-{passage-lineage-id}` identifies one passage interpretation chain across revisions.
+* `EE-{content-independent-stable-id}` identifies one external-evidence assertion.
 * `TMR-{monotonic-or-content-independent-id}` identifies a thought-map revision.
+
+### Publication and composition IDs
+
+* `PP-{content-independent-stable-id}` identifies a reusable Publication Profile across wording and rule revisions.
+* `CP-{content-independent-stable-id}` identifies the editorial plan for one authored work.
+* `CD-{content-independent-stable-id}` identifies one material composition decision within a plan.
+* `DRS-{content-independent-stable-id}` identifies one versioned deliverable review scope.
+* `RWI-{content-independent-stable-id}` identifies one review work item across assignment changes.
 
 Split and merge operations create new IDs and preserve redirects/lineage from earlier records. A title, Chinese wording, topic path, or model-generated summary must never be the sole identity input.
 
@@ -226,6 +266,12 @@ Split and merge operations create new IDs and preserve redirects/lineage from ea
     "heading_anchor": "二-那個人子-所指的是誰",
     "final_sha256": "..."
   },
+  "composition": {
+    "publication_profile_id": "PP-passage-commentary",
+    "publication_profile_revision": 2,
+    "composition_plan_id": "CP-matthew-17",
+    "composition_plan_revision": 4
+  },
   "citation_ids": ["CIT-01J...", "CIT-01K..."],
   "relationship_ids": ["REL-..."],
   "aliases": ["人子", "那個人子"],
@@ -253,6 +299,13 @@ Validation:
   "origin_id": "2016 NYSC 專題：馬太福音釋經（五）4",
   "title": "馬太福音釋經（五）第四講",
   "source_stage": "published",
+  "delivered_at": "2016-07-02T14:00:00-04:00",
+  "date_precision": "exact",
+  "date_source": "sermon_page_metadata",
+  "original_date_text": "2016 NYSC",
+  "event_title": "2016 NYSC 靈命進深會",
+  "venue": "New York",
+  "series_title": "馬太福音釋經（五）",
   "public_url": "/resources/sermons/2016%20NYSC%20...4",
   "media": {
     "kind": "video",
@@ -271,6 +324,13 @@ Validation:
 * future types may be added only with an implemented source reader.
 
 Derived manuscripts and Google Docs are not original source types.
+
+`delivered_at` records when the sermon or lecture was delivered, not when the
+file was imported or updated. It may be `null` when unknown. `date_precision`
+is `exact`, `month`, `year`, or `unknown`; `date_source` and
+`original_date_text` preserve how the normalized date was obtained. These
+fields are required for a defensible thought-development timeline. Filename
+parsing may propose values but may not silently mark them as editor-approved.
 
 ### 5.3. SourceMap
 
@@ -325,7 +385,8 @@ Source maps are generated when a source is imported or rebuilt and are versioned
     "char_start": 120,
     "char_end": 168,
     "start_time": 99.0,
-    "end_time": 236.0
+    "end_time": 236.0,
+    "time_status": "available"
   },
   "evidence_ids": ["E003", "E004"],
   "role": "historical_background",
@@ -338,6 +399,11 @@ Source maps are generated when a source is imported or rebuilt and are versioned
 ```
 
 `locator.kind` is `transcript` or `notes`.
+
+For transcript locators, exact text highlighting is required but media time is
+not. `start_time` and `end_time` may be `null`; `time_status` is `available`,
+`not_mapped`, `no_media`, or `unknown`. Adding a later transcript-to-media time
+map revises the locator without changing the citation or claim identity.
 
 Notes locator fields:
 
@@ -397,15 +463,30 @@ Citation IDs may appear directly on the unit for simple lookup. The compiled dat
   "question_type": "interpretive",
   "bible_refs": ["Matt.17.19-Matt.17.21"],
   "topic_ids": ["faith", "spiritual-authority"],
-  "citation_ids": ["CIT-..."],
+  "raised_citation_ids": ["CIT-..."],
   "answer_claim_ids": ["CL-...", "CL-..."],
   "answer_status": "answered",
+  "previous_question_ids": [],
+  "superseded_by_question_id": null,
+  "status_history": [
+    {
+      "status": "answered",
+      "claim_ids": ["CL-...", "CL-..."],
+      "citation_ids": ["CIT-..."],
+      "recorded_at": "2026-08-07T00:00:00Z"
+    }
+  ],
   "review_status": "approved",
   "visibility": "public"
 }
 ```
 
-`questioner` is `professor`, `audience`, or `editor`. `answer_status` is `answered`, `partially_answered`, or `unanswered`. An editor-created organizing question is never attributed to Dr. Wang.
+`questioner` is `professor`, `audience`, or `editor`. `answer_status` is
+`answered`, `partially_answered`, `unanswered`, `deferred`, or `superseded`.
+`raised_citation_ids` preserves where the question was actually raised;
+`status_history` may point to later-sermon answers without rewriting the
+earlier source. An editor-created organizing question is never attributed to
+Dr. Wang.
 
 ### 5.8. ClaimRecord
 
@@ -423,6 +504,14 @@ Citation IDs may appear directly on the unit for simple lookup. The compiled dat
     {"osis": "Matt.17.19-Matt.17.21", "role": "primary_passage"}
   ],
   "topic_ids": ["faith", "spiritual-authority"],
+  "scope_qualifiers": {
+    "biblical_context": ["Matt.17.19-Matt.17.21"],
+    "audience": ["disciples"],
+    "temporal_stage": "earthly_ministry",
+    "conditions": ["authority exercised in dependent trust"],
+    "consequences": [],
+    "opposed_view_claim_ids": []
+  },
   "citation_ids": ["CIT-..."],
   "source_local_ids": [
     {"project_id": "17_章_登山變像_醫治鬼附之子", "local_claim_id": "C005"}
@@ -435,6 +524,11 @@ Citation IDs may appear directly on the unit for simple lookup. The compiled dat
 ```
 
 `claim_type` values include `explicit_claim`, `reasoning_conclusion`, `interpretive_method`, `opposed_view`, `application`, `editorial_synthesis`, `open_question`, and `non_substantive`. `attribution` is independent of review status. Approving an editorial synthesis confirms the synthesis is editorially useful; it does not convert it into the professor's explicit statement.
+
+`scope_qualifiers` is optional but required when a claim would otherwise be
+misleading outside its passage, audience, salvation-discussion level, life
+stage, or stated conditions. It is especially important for salvation
+warnings, assurance, anthropology, church discipline, and situational ethics.
 
 ### 5.9. ClaimRelation
 
@@ -489,6 +583,11 @@ Supported relation types are `supports`, `answers`, `opposes`, `qualifies`, `app
     "rendering": "恐怕"
   },
   "professor_rendering": "或许／也许",
+  "semantic_role_in_argument": "opens the possibility of hearing and turning rather than stating a divine purpose to prevent it",
+  "scope": {
+    "kind": "this_passage_and_parallel_reading",
+    "bible_refs": ["Mark.4.12", "Matt.13.15"]
+  },
   "reason_claim_ids": ["CL-...", "CL-..."],
   "affected_claim_ids": ["CL-..."],
   "citation_ids": ["CIT-..."],
@@ -506,6 +605,8 @@ Supported relation types are `supports`, `answers`, `opposes`, `qualifies`, `app
 
 `representation_status` answers whether the record faithfully represents Dr. Wang. `fact_check.status` independently answers whether later language review is pending, confirmed, qualified, disputed, or unresolved. Implementations must never derive one from the other.
 
+`semantic_role_in_argument` and `scope` prevent lexical search from treating every occurrence of the same word as the same judgment. Cross-sermon merging requires compatible passage scope, semantic function, and argument path, not merely a shared lemma or Chinese keyword.
+
 ### 5.12. ApplicationReasoning
 
 ```json
@@ -515,13 +616,151 @@ Supported relation types are `supports`, `answers`, `opposes`, `qualifies`, `app
   "principle_claim_id": "CL-do-not-cause-stumbling...",
   "target_context": "Christian food practice in a different cultural setting",
   "application_claim_id": "CL-contextual-application...",
+  "audience": "believers_in_cross_cultural_fellowship",
+  "ecclesial_context": "congregational_fellowship",
+  "actor_roles": ["believer", "fellow_member"],
+  "governance_goals": ["edification", "protection_from_stumbling"],
+  "normative_level": "contextual_application_of_stable_principle",
+  "applicability_conditions": ["the practice is morally neutral", "another believer may be harmed"],
   "qualification_claim_ids": [],
+  "pastoral_risks": ["turning contextual restraint into a universal food law"],
   "citation_ids": ["CIT-..."],
   "review_status": "approved"
 }
 ```
 
-### 5.13. ThoughtMapRevision
+`normative_level` initially supports `direct_command`, `stable_principle`, `contextual_application_of_stable_principle`, `pastoral_counsel`, and `illustration`. The record must not silently promote a local pastoral application into a universal command.
+
+For church-practice material, `ecclesial_context`, `actor_roles`, and
+`governance_goals` distinguish theology of the church from a generic personal
+application. Initial actor roles include `congregation`, `leader`, `teacher`,
+`minister`, `disciplined_member`, `vulnerable_member`, and `external_audience`;
+the vocabulary remains versioned and extensible.
+
+### 5.13. EvidenceStep
+
+```json
+{
+  "schema_version": 1,
+  "evidence_step_id": "ES-01K...",
+  "claim_group_ids": ["CG-METHOD-CONTEXT-LINK", "CG-MATTHEW-TRANSFIGURATION"],
+  "step_type": "textual_observation",
+  "observation": "The passage uses a definite expression before 'Son of Man'.",
+  "evidence_refs": [
+    {"kind": "scripture_evidence", "id": "SE-..."},
+    {"kind": "original_language_judgment", "id": "OLJ-..."}
+  ],
+  "produced_claim_ids": ["CL-intermediate..."],
+  "citation_ids": ["CIT-..."],
+  "attribution": "professor_explicit",
+  "speaker": "professor",
+  "stance": "endorsed",
+  "discourse_role": "own_reasoning",
+  "anchor_quality": "verified_candidate",
+  "support_eligibility": "eligible",
+  "local_source_evidence_ids": ["E033"],
+  "canonical_evidence_step_ids": ["L3-E033"],
+  "review_status": "approved",
+  "visibility": "public",
+  "revision": 1
+}
+```
+
+`step_type` values initially include `textual_observation`,
+`contextual_observation`, `genre_observation`, `historical_observation`,
+`lexical_observation`, `grammatical_observation`, `structural_observation`,
+`translation_check`, `comparison`, `logical_exclusion`, `experiential_test`,
+and `counterexample`. `produced_claim_ids` is the explicit `used_for` link to
+the conclusions served by the step. An EvidenceStep records what Dr. Wang
+treats as evidence; it does not by itself assert that the evidence has been
+independently fact-checked.
+
+`claim_group_ids` is many-to-many: one EvidenceStep may support more than one
+Claim without being duplicated. Export must fail when a referenced local ID
+cannot be resolved to a canonical ID, or when a Claim group has no EvidenceStep
+membership. The source candidate uses explicit `local_source_evidence_ids`;
+repository-facing packages and joins use canonical IDs.
+
+`support_eligibility` is `eligible`, `eligible_with_label`,
+`contextual_only`, or a `withheld_*` state. Approval is enforced server-side:
+zero eligible steps returns a conflict response, while one eligible step adds a
+thin-evidence warning but remains an editorial decision.
+
+### 5.14. InferenceBridge
+
+```json
+{
+  "schema_version": 1,
+  "inference_bridge_id": "IB-01K...",
+  "input_refs": [
+    {"kind": "evidence_step", "id": "ES-..."},
+    {"kind": "claim", "id": "CL-premise..."}
+  ],
+  "output_claim_id": "CL-conclusion...",
+  "reasoning": "The definite title is read in light of Daniel 7, so the speaker identifies the title with the divine heavenly figure rather than generic humanity.",
+  "attribution": "professor_reasoning",
+  "citation_ids": ["CIT-..."],
+  "confidence": "high",
+  "review_status": "approved",
+  "visibility": "public",
+  "revision": 1
+}
+```
+
+`attribution` is `professor_explicit`, `professor_reasoning`, or `editorial_inference`. Public prose may use an approved editorial bridge, but attribution must remain visible in the evidence inspector and must never be converted into a professor-explicit claim.
+
+### 5.15. PassageInterpretationChain
+
+```json
+{
+  "schema_version": 1,
+  "passage_chain_id": "PIC-Matt-17-1-8",
+  "primary_bible_refs": ["Matt.17.1-Matt.17.8"],
+  "parallel_bible_refs": ["Mark.9.2-Mark.9.8", "Luke.9.28-Luke.9.36"],
+  "question_ids": ["Q-..."],
+  "ordered_nodes": [
+    {"kind": "evidence_step", "id": "ES-...", "order": 10},
+    {"kind": "inference_bridge", "id": "IB-...", "order": 20},
+    {"kind": "claim", "id": "CL-...", "order": 30}
+  ],
+  "cross_sermon_relation_ids": ["CR-..."],
+  "coverage_gaps": [
+    {"question_id": "Q-...", "status": "unanswered"}
+  ],
+  "review_status": "candidate",
+  "revision": 1
+}
+```
+
+The chain is a knowledge projection over multiple sources, not a manuscript outline. A CompositionPlan may select a reviewed subchain and still make independent editorial decisions about depth, order, and cross-links.
+
+### 5.16. ExternalEvidence
+
+```json
+{
+  "schema_version": 1,
+  "external_evidence_id": "EE-01K...",
+  "evidence_type": "historical_source_claim",
+  "statement": "Dr. Wang identifies a particular historical practice as background for the passage.",
+  "professor_cited_source": "source as named in the sermon, if any",
+  "supports_claim_ids": ["CL-..."],
+  "opposes_claim_ids": [],
+  "qualification_claim_ids": [],
+  "citation_ids": ["CIT-..."],
+  "uncertainty": "source_not_yet_verified",
+  "representation_status": "approved",
+  "fact_check": {
+    "status": "pending",
+    "conclusion": null,
+    "evidence": []
+  },
+  "visibility": "internal"
+}
+```
+
+`evidence_type` initially includes `historical_source_claim`, `cultural_background`, `church_tradition`, `scholarly_position`, `medical_or_psychological_claim`, `probability_argument`, and `personal_experience`. Representation review and independent fact checking are orthogonal, as with OriginalLanguageJudgment.
+
+### 5.17. ThoughtMapRevision
 
 ```json
 {
@@ -541,7 +780,7 @@ Supported relation types are `supports`, `answers`, `opposes`, `qualifies`, `app
 
 Allowed operations are `add`, `extend`, `promote`, `demote`, `split`, `merge`, `mark_tension`, and `supersede`. Activation is append-only: prior records remain addressable for audit and rollback.
 
-### 5.14. AnswerEvidenceBundle
+### 5.18. AnswerEvidenceBundle
 
 ```json
 {
@@ -561,7 +800,239 @@ Allowed operations are `add`, `extend`, `promote`, `demote`, `split`, `merge`, `
 
 The bundle is generated deterministically from retrieval and graph traversal before prose generation. It is logged for reproducibility but does not become a permanent theological claim.
 
+### 5.19. PublicationProfile
+
+```json
+{
+  "schema_version": 1,
+  "profile_id": "PP-passage-centered-academic",
+  "name": "以经文为中心的学术释经体例",
+  "aliases": ["Carson-style structure"],
+  "product_types": ["passage_lecture"],
+  "rules": [
+    {
+      "rule_id": "PP-R01",
+      "category": "organization",
+      "requirement": "按经文和论证顺序组织，不复制课堂顺序",
+      "priority": "required"
+    },
+    {
+      "rule_id": "PP-R02",
+      "category": "topic_depth",
+      "requirement": "神学主题只展开到解释当前经文所需的深度，较完整论述链接主题专论",
+      "priority": "required"
+    },
+    {
+      "rule_id": "PP-R03",
+      "category": "coverage",
+      "requirement": "教授没有讲解的经文显示资料缺口，不假托补写",
+      "priority": "required"
+    }
+  ],
+  "default_sections": ["释经", "神学意义", "生活应用", "附录"],
+  "tone": "平和、清晰、保留主张强度",
+  "citation_policy": "substantive claims resolve to approved sources",
+  "review_status": "approved",
+  "revision": 2,
+  "approved_by": "editor-id",
+  "approved_at": "2026-08-07T00:00:00Z"
+}
+```
+
+The profile stores explicit editorial rules, not imitation instructions for another author's distinctive prose. A published work snapshots the profile revision it used. Updating a profile never silently changes earlier works.
+
+### 5.20. CompositionPlan
+
+```json
+{
+  "schema_version": 1,
+  "plan_id": "CP-matthew-17",
+  "product_type": "passage_lecture",
+  "publication_profile_id": "PP-passage-centered-academic",
+  "publication_profile_revision": 2,
+  "title": "马太福音第17章释经讲座",
+  "scope": {
+    "primary_bible_refs": ["Matt.16.28-Matt.17.27"],
+    "topic_ids": []
+  },
+  "brief": {
+    "requested_by": "user-id",
+    "audience": "church_readers",
+    "purpose": "continuous_exposition",
+    "target_length": "long_form",
+    "special_requirements": ["Carson-style passage-centered structure"]
+  },
+  "central_question": "登山变像如何显明人子的荣耀，并连接受苦与信心？",
+  "thesis": "...",
+  "section_ids": ["CPS-01", "CPS-02", "CPS-03"],
+  "selected_question_ids": ["Q-..."],
+  "selected_claim_ids": ["CL-..."],
+  "selected_evidence_step_ids": ["ES-..."],
+  "selected_inference_bridge_ids": ["IB-..."],
+  "selected_passage_chain_ids": ["PIC-Matt-17-1-8"],
+  "selected_external_evidence_ids": [],
+  "selected_judgment_ids": ["OLJ-..."],
+  "selected_application_ids": ["APP-..."],
+  "decision_ids": ["CD-..."],
+  "coverage": [
+    {
+      "osis": "Matt.17.22-Matt.17.27",
+      "status": "gap",
+      "reason": "No approved Dr. Wang source has been located."
+    }
+  ],
+  "review_status": "approved",
+  "revision": 4,
+  "reviewed_by": "editor-id",
+  "reviewed_at": "2026-08-07T00:00:00Z"
+}
+```
+
+The plan is a first-class authored-work record. `brief` preserves the user's requirements separately from AI proposals and editor decisions. The plan may select only records visible to its editorial scope; publication later applies the stricter public gate.
+
+### 5.21. CompositionDecision
+
+```json
+{
+  "schema_version": 1,
+  "decision_id": "CD-matt17-human-son-brief",
+  "plan_id": "CP-matthew-17",
+  "decision_type": "include_briefly",
+  "target": {
+    "claim_ids": ["CL-son-of-man-..."],
+    "unit_ids": ["CU-son-of-man-topic"],
+    "bible_refs": ["Matt.16.28-Matt.17.8"]
+  },
+  "decision": "正文只说明理解本段所需的人子背景，完整论述链接人子主题专论。",
+  "reason": "保持当前经文为主线，避免跨经文主题压过登山变像。",
+  "governing_input": {
+    "kind": "publication_profile_rule",
+    "reference": "PP-R02"
+  },
+  "claim_hierarchy": {
+    "paragraph_thesis": "CL-transfiguration-summary",
+    "supporting_claims": ["CL-moses-elijah", "CL-cloud-presence"],
+    "theological_ground": ["CL-psalm-2-enthronement"],
+    "note": "Related title claims remain subordinate to the passage thesis."
+  },
+  "proposed_by": "ai",
+  "review_status": "approved",
+  "revision": 2,
+  "reviewed_by": "editor-id",
+  "reviewed_at": "2026-08-07T00:00:00Z"
+}
+```
+
+Allowed `decision_type` values initially include `include_as_core`, `include_briefly`, `move_to_topic_article`, `move_to_appendix`, `link_related_unit`, `omit_as_repetition`, `defer_due_to_missing_evidence`, `identify_as_climax`, and `set_order`.
+
+`governing_input.kind` is `user_requirement`, `publication_profile_rule`, `editor_judgment`, or `evidence_constraint`. An AI proposal cannot become approved merely because generation completed.
+
+### 5.22. DeliverableReviewScope
+
+```json
+{
+  "schema_version": 1,
+  "review_scope_id": "DRS-matthew-17-v1",
+  "deliverable": {
+    "kind": "composition_plan",
+    "id": "CP-matthew-17",
+    "revision": 4
+  },
+  "target_release": "matthew-17-pilot",
+  "dependency_closure": {
+    "claim_ids": ["CL-..."],
+    "relation_ids": ["CR-..."],
+    "evidence_step_ids": ["ES-..."],
+    "inference_bridge_ids": ["IB-..."],
+    "passage_chain_ids": ["PIC-Matt-17-1-8"],
+    "external_evidence_ids": ["EE-..."],
+    "citation_ids": ["CIT-..."],
+    "judgment_ids": ["OLJ-..."],
+    "application_ids": ["APP-..."],
+    "composition_decision_ids": ["CD-..."]
+  },
+  "required_maturity": {
+    "claims": "representation_reviewed",
+    "citations": "publication_approved",
+    "material_relations": "publication_approved",
+    "composition": "publication_approved"
+  },
+  "blocking_work_item_ids": ["RWI-..."],
+  "deferred_record_ids": ["CL-unrelated-..."],
+  "coverage_gap_ids": ["GAP-Matt.17.22-Matt.17.27"],
+  "status": "in_review",
+  "revision": 1,
+  "created_by": "editor-id",
+  "created_at": "2026-08-07T00:00:00Z"
+}
+```
+
+The closure is deterministic for the frozen deliverable revision. An editor may remove optional material by revising the deliverable, but cannot remove a supporting or qualifying dependency while retaining a conclusion whose validity or faithful representation requires it.
+
+Maturity values are `candidate`, `source_anchored`, `representation_reviewed`, and `publication_approved`. Publication approval is scoped to the named deliverable and revision rather than treated as proof that a record is sufficient for every future use.
+
+### 5.23. ReviewWorkItem
+
+```json
+{
+  "schema_version": 1,
+  "work_item_id": "RWI-01K...",
+  "review_scope_id": "DRS-matthew-17-v1",
+  "record_type": "claim_relation",
+  "record_id": "CR-...",
+  "required_role": "argument_editor",
+  "current_maturity": "source_anchored",
+  "target_maturity": "publication_approved",
+  "priority": "blocking_high",
+  "risk": "material_reasoning_bridge",
+  "estimated_minutes": 6,
+  "actual_minutes": 8,
+  "outcome": "changed_then_approved",
+  "rework_count": 1,
+  "assigned_to": "editor-id",
+  "status": "completed",
+  "started_at": "2026-08-07T00:00:00Z",
+  "completed_at": "2026-08-07T00:08:00Z"
+}
+```
+
+Allowed outcomes include `approved_unchanged`, `changed_then_approved`, `rejected`, `deferred`, and `blocked`. Capacity reports aggregate time and outcomes; they do not reinterpret theological content.
+
 ## 6. Evidence and Citation Pipeline
+
+### 6.0. Extraction generation fingerprint
+
+AI extraction cache identity is not the source checksum alone. Two hashes are stored. `generation_fingerprint_sha256` identifies the shared extraction generation:
+
+```json
+{
+  "prompt_sha256": "...",
+  "model_id": "gpt-5.6-terra",
+  "reasoning_effort": "medium",
+  "max_output_tokens": 6000,
+  "schema_version": "wang_corpus_first_pass_content_v1",
+  "response_schema_sha256": "..."
+}
+```
+
+The per-transcript `fingerprint_sha256` is SHA256 over the same deterministic identity plus the source checksum:
+
+```json
+{
+  "source_sha256": "...",
+  "prompt_sha256": "...",
+  "model_id": "gpt-5.6-terra",
+  "reasoning_effort": "medium",
+  "max_output_tokens": 6000,
+  "schema_version": "wang_corpus_first_pass_content_v1",
+  "response_schema_sha256": "...",
+  "generation_fingerprint_sha256": "..."
+}
+```
+
+The survey stores both fingerprints and `generated_at`; every candidate claim stores the per-transcript fingerprint. Resume/skip requires exact per-transcript fingerprint equality. Prompt, model, schema, reasoning setting, token budget, or source changes therefore force re-extraction. Before replacement, the previous canonical survey is copied to `output/corpus-survey/generations/` under its old fingerprint.
+
+Corpus synthesis requires one and only one `generation_fingerprint_sha256` across all selected surveys. It fails closed on legacy or mixed-generation input. Its own batch/final cache identities include source cards, source extraction generation, synthesis prompt, model, reasoning setting, token budget, and response schema.
 
 ### 6.1. New evidence schema requirement
 
@@ -613,6 +1084,8 @@ For each canonical unit:
 6. validate exact text and timing/page identity; and
 7. require editor approval before public publication.
 
+Shared-knowledge imports run the same resolver before records are written. The importer resolves logical transcript sources to `SourceDocument`, verifies source-map paragraph SHA256, requires the proposed excerpt to be an exact substring, creates or reuses a Canonical Citation, and attaches it to both fragment and evidence step. Non-verbatim or missing anchors are downgraded to `withheld_*`; they are not discarded, but cannot approve a claim.
+
 The builder rejects an excerpt when every non-empty line is only a Markdown heading (`#` through `######`). A range containing a heading and substantive prose remains valid. This prevents navigation headings from producing source cards with no transcript content or meaningful media timestamp.
 
 Existing heading-only links are repaired non-destructively: `detach_heading_only_citations()` removes their IDs from affected canonical units but preserves the citation JSON records for audit and recovery. The maintenance result reports affected units, removed links, and any unit left without a substantive source.
@@ -643,9 +1116,12 @@ The compiler consumes reviewed authoring records and produces:
 * Bible index JSON;
 * topic index JSON; and
 * approved question and claim rows;
-* claim relation and Scripture-evidence rows;
+* claim relation, EvidenceStep, InferenceBridge, Scripture-evidence, external-evidence, and passage-chain rows;
 * original-language index JSON;
 * active thought-map and revision metadata;
+* approved Publication Profile revisions;
+* approved Composition Plans and Decisions for published works;
+* frozen Deliverable Review Scopes for published works;
 * a build manifest.
 
 ### Build validation
@@ -666,6 +1142,18 @@ Before activation the compiler verifies:
 * original-language representation and fact-check states are independently valid;
 * question answer status agrees with its visible approved answering claims; and
 * split, merge, and supersession lineage is acyclic and resolves to active nodes.
+* every published authored work references an approved immutable Publication Profile revision and approved Composition Plan revision;
+* every material Composition Decision belongs to the referenced plan and has an approved or explicitly waived state;
+* every selected claim, evidence step, inference bridge, passage chain, external evidence record, judgment, application, unit, and citation exists and is permitted for the plan and publication scope;
+* every public inference bridge has an explicit attribution and a complete visible input/output path;
+* every external-evidence record preserves representation review separately from fact-check status;
+* every passage-chain node exists, follows an acyclic ordered chain, and retains cross-sermon source lineage;
+* every coverage gap has an explicit disposition and cannot be silently replaced by generated content; and
+* generated manuscript structure and selected knowledge do not materially diverge from the approved plan without a newer plan revision.
+* the Deliverable Review Scope is computed from the exact published plan or answer-bundle revision;
+* every blocking work item reaches its target maturity;
+* deferred records are outside the retained material dependency closure; and
+* no publication gate depends on unrelated candidate records from the same source or Project.
 
 The build manifest includes counts for units, passage units, topic units, relationships, citations, stale citations, unresolved citations, and source documents, plus every input checksum.
 
@@ -693,6 +1181,27 @@ claim_relations
 claim_scripture_evidence
 original_language_judgments
 application_reasoning
+evidence_steps
+inference_bridges
+passage_interpretation_chains
+passage_chain_nodes
+external_evidence
+publication_profiles
+publication_profile_rules
+composition_plans
+composition_plan_sections
+composition_decisions
+composition_plan_claims
+composition_plan_judgments
+composition_plan_applications
+composition_plan_evidence_steps
+composition_plan_inference_bridges
+composition_plan_passage_chains
+composition_plan_external_evidence
+deliverable_review_scopes
+review_scope_dependencies
+review_work_items
+review_capacity_events
 thought_map_nodes
 thought_map_revisions
 unit_claims
@@ -711,6 +1220,18 @@ Required indexes:
 * `claim_relations(from_claim_id, relation_type)` and `claim_relations(to_claim_id, relation_type)`;
 * `claim_scripture_evidence(book_order, chapter_start, verse_start, role)`;
 * `original_language_judgments(osis_start, language, representation_status, fact_check_status)`;
+* `evidence_steps(step_type, review_status, visibility)`;
+* `inference_bridges(output_claim_id, attribution, review_status, visibility)`;
+* `passage_interpretation_chains(book_order, chapter_start, verse_start, review_status)`;
+* `external_evidence(evidence_type, representation_status, fact_check_status, visibility)`;
+* `publication_profiles(review_status, revision)`;
+* `composition_plans(product_type, review_status, publication_profile_id)`;
+* `composition_decisions(plan_id, decision_type, review_status)`;
+* `composition_plan_claims(plan_id, display_order, role)`;
+* `deliverable_review_scopes(target_release, status, revision)`;
+* `review_scope_dependencies(review_scope_id, record_type, blocking)`;
+* `review_work_items(review_scope_id, required_role, status, priority)`;
+* `review_capacity_events(completed_at, required_role, record_type, outcome)`;
 * `unit_claims(unit_id, display_order, role)`;
 * full-text search over unit title, aliases, manuscript text, arguments, and source title.
 
@@ -860,6 +1381,66 @@ Updates faithful-representation review. Independent fact-check fields require th
 
 Creates and previews add, extend, promote, demote, split, merge, tension, or supersede operations. Activation requires an approved revision and a successful impact build.
 
+#### `GET /admin/canonical-repository/publication-profiles`
+
+Lists reusable profiles and revisions. Filters include product type, review status, and active revision.
+
+#### `POST /admin/canonical-repository/publication-profiles`
+
+Creates a candidate profile from explicit user requirements. The API stores structured rules and provenance; a prose label such as `Carson style` is not sufficient by itself.
+
+#### `PUT /admin/canonical-repository/publication-profiles/{profile_id}`
+
+Creates a reviewed revision. Existing published plans continue to reference their original profile revision.
+
+#### `POST /admin/canonical-repository/composition-plans`
+
+Creates a plan from a profile revision, user brief, selected scope, and available knowledge records. AI-generated outlines and decisions remain candidate until reviewed.
+
+#### `GET /admin/canonical-repository/composition-plans/{plan_id}`
+
+Returns the plan, profile snapshot, user brief, outline, selected knowledge, coverage matrix, decisions, review history, and generated-work links.
+
+#### `PUT /admin/canonical-repository/composition-plans/{plan_id}`
+
+Creates a new optimistic-concurrency revision. It never overwrites the plan revision used by an existing publication.
+
+#### `POST /admin/canonical-repository/composition-plans/{plan_id}/decisions`
+
+Creates a candidate material decision with its governing input and reason.
+
+#### `PATCH /admin/canonical-repository/composition-decisions/{decision_id}`
+
+Reviews, changes, rejects, or explicitly waives one decision. Major changes invalidate plan approval and downstream manuscript generation.
+
+#### `POST /admin/canonical-repository/composition-plans/{plan_id}/validate-manuscript`
+
+Compares a generated or edited manuscript with the approved plan. It reports missing core sections, unplanned claims, changed order, unresolved gaps, missing cross-links, and material divergence. Findings never rewrite the manuscript automatically.
+
+#### `POST /admin/canonical-repository/review-scopes`
+
+Freezes a deliverable revision and computes its minimum dependency closure. The response classifies dependencies as blocking, deferrable, already satisfied, restricted, stale, or inconsistent.
+
+#### `GET /admin/canonical-repository/review-scopes/{review_scope_id}`
+
+Returns scope revision, dependency graph, maturity targets, work items, progress, estimated/actual review time, gaps, deferrals, and publication-gate failures.
+
+#### `PUT /admin/canonical-repository/review-scopes/{review_scope_id}`
+
+Creates a new scope revision after an editor changes the deliverable or explicitly removes optional material. It rejects removal of a necessary dependency unless the dependent conclusion is also removed.
+
+#### `GET /admin/canonical-repository/review-queue`
+
+Lists work by deliverable, role, risk, maturity, status, passage/topic, and assignee. Default ordering prioritizes blocking items for the nearest editor-approved deliverable.
+
+#### `PATCH /admin/canonical-repository/review-work-items/{work_item_id}`
+
+Records assignment, timing, outcome, rework, notes, and resulting maturity. Completing a work item triggers review-scope gate recomputation.
+
+#### `GET /admin/canonical-repository/review-capacity`
+
+Reports median and percentile review time by record type and role, acceptance/change/rejection/deferral rates, weekly available hours, completed throughput, current backlog, and projected backlog growth. Candidate generation volume is reported separately from reviewed throughput.
+
 ## 10. Frontend Design
 
 ### 10.1. Routes
@@ -898,10 +1479,36 @@ Recommended components:
 * `ClaimRelationEditor`
 * `QuestionAnswerChainReview`
 * `OriginalLanguageJudgmentEditor`
+* `EvidenceStepEditor`
+* `InferenceBridgeEditor`
+* `PassageInterpretationChainView`
+* `ExternalEvidenceEditor`
 * `ThoughtMapRevisionPreview`
 * `AnswerEvidenceInspector`
+* `PublicationProfileLibrary`
+* `PublicationProfileEditor`
+* `CompositionPlanEditor`
+* `CompositionCoverageMatrix`
+* `CompositionDecisionList`
+* `CompositionManuscriptDiff`
+* `DeliverableReviewScopeView`
+* `ReviewDependencyGraph`
+* `CapacityAwareReviewQueue`
+* `ReviewCapacityDashboard`
+* `KnowledgeRoutePanel`
+* `ClaimHierarchyPanel`
+* `EditorialChecksPanel`
+* `InterpretiveTensionsPanel`
 
 `SermonRepositoryUnits` is editor-only and calls the admin unit-list endpoint with the current sermon transcript ID as `source_origin_id`. It renders passage and concept lists separately and includes every review status.
+
+`ClaimReviewEditor` receives a server-computed `review_gate`. The client disables
+approval when `can_approve` is false, but the PATCH review endpoint repeats the
+same check so direct requests cannot bypass the gate. `CompositionPlanEditor`
+renders `claim_hierarchy`, knowledge routes, editorial checks, and tensions from
+the API. A control that expands a distant review section assigns a stable DOM
+target and calls `scrollIntoView`; keyboard focus behavior must remain
+accessible.
 
 ### 10.3. Transcript rendering
 
@@ -951,6 +1558,10 @@ Required editor views are:
 * **Original-language review**: shows the Hebrew/Greek form, grammatical or semantic observation, translation under criticism, the professor's proposed reading, downstream claims, and exact source. Faithful-representation review and external fact-checking have separate controls.
 * **Thought-map revision preview**: shows the before/after graph and affected public units, questions, and saved answers before a split, merge, promotion, demotion, or supersession is activated.
 * **Answer evidence inspection**: shows the exact claims, relations, citations, permissions, and knowledge build used to construct an answer before prose generation.
+* **Publication Profile library**: translates a named editorial request into versioned, concrete rules and allows comparison between revisions.
+* **Composition Plan editor**: shows the user brief, governing profile, central question, thesis, outline, selected knowledge, target depth, coverage gaps, and approval state.
+* **Composition Decision review**: explains why content is core, brief, linked, moved, omitted, deferred, treated as a climax, or placed in a particular order.
+* **Plan/manuscript comparison**: detects material divergence while allowing ordinary prose editing that does not change the approved structure or knowledge selection.
 
 The UI must label `professor_explicit`, `professor_reasoning`, `opposed_view`, `editorial_synthesis`, `pending_fact_check`, and `insufficient_evidence` distinctly. Styling alone is insufficient; the label remains available to screen readers and exports.
 
@@ -992,6 +1603,10 @@ Public citation responses return the complete cited paragraph plus at most one a
 * Claim approval, relation approval, source approval, faithful-representation review, and original-language fact checking are separate permissions even when one person initially holds several roles.
 * A language reviewer may update `fact_check` without silently changing the faithful-representation record; an editor may faithfully record the professor's view without declaring that view externally verified.
 * Saved answer evidence bundles inherit the most restrictive visibility of their component records.
+* Approving a Publication Profile, Composition Plan, or Composition Decision requires editorial-planning permission; it does not grant claim, citation, language-review, or publication permission.
+* The user who supplies a brief may approve its requirements while an editor separately approves the resulting plan.
+* Public readers cannot access internal rejected alternatives or private user briefs unless deliberately included in public editorial notes.
+* Capacity reports expose reviewer identities only to authorized administrators; aggregate throughput may be visible to editors.
 
 ## 13. State and Invalidation Rules
 
@@ -1030,6 +1645,13 @@ When an approved claim's normalized wording, attribution, visibility, citations,
 * retain saved answer evidence bundles as historical records tied to their original knowledge build; and
 * require a new validated build before public QA or publication uses the revision.
 
+The implementation materializes this rule through two authoring records:
+
+* `ProductDependency(dependency_id, consumer_kind, consumer_id, claim_id, pinned_claim_revision, status)` records actual use, not merely a proposed `KnowledgeRoute`;
+* `ImpactEvent(impact_event_id, changed_record_id, from_revision, to_revision, affected_targets, required_actions, status)` records invalidation and its disposition.
+
+`GET /admin/canonical-repository/knowledge/claims/{claim_id}/impact` previews reverse impact. Semantic claim updates invalidate matching dependencies and create an event. `POST /admin/canonical-repository/knowledge/impact-events/{id}/withdraw` archives affected published units and activates the resulting build atomically; failure restores their previous state. A knowledge-managed published unit must pin dependency IDs, and compilation rejects missing, invalidated, or revision-mismatched dependencies.
+
 ### Question or answer relation changed
 
 Changing an `answers`, `qualifies`, `opposes`, or `unanswered` decision recomputes the question's answer status. A question cannot be marked answered merely because topically similar claims exist.
@@ -1041,6 +1663,30 @@ Representation changes and fact-check changes create independent revisions. A do
 ### Thought map changed
 
 Thought-map operations are previewed against the active build. Activation creates a new map revision, recompiles affected indexes, and preserves redirects or lineage for superseded nodes. It never rewrites source claims to fit the new map.
+
+### Publication Profile changed
+
+A profile edit creates a new revision. Existing plans and publications retain their pinned revision. Editors may explicitly clone or migrate a plan to the new profile revision and review the resulting impact.
+
+### Composition Plan changed
+
+A material plan change creates a new revision, marks its generated draft comparison stale, and requires renewed approval. Published manuscripts retain the previous plan snapshot until a new publication is explicitly activated.
+
+### Composition Decision changed
+
+Changing a decision invalidates plan approval when it affects core selection, scope, order, depth, cross-links, appendices, omissions, or coverage gaps. Rejecting an AI proposal leaves an audit record and does not delete the underlying claims.
+
+### Deliverable review scope changed
+
+A review scope pins one deliverable revision and its deterministic dependency closure. If the Composition Plan, Answer Evidence Bundle, selected claim revision, material relation, citation, or required maturity changes:
+
+* create a new review-scope revision and preserve the prior snapshot;
+* recompute the dependency closure and its blocking work items;
+* retain completed reviews when the exact reviewed record revision and required use remain unchanged;
+* reopen only newly added, changed, or newly material dependencies; and
+* prevent activation until every blocker in the new scope reaches its required maturity.
+
+Completing or rejecting a work item recomputes the scope gate. Deferring an unrelated candidate has no gate effect. Deferring a required dependency is allowed only after revising the deliverable so that no retained conclusion depends on it.
 
 ## 14. Observability
 
@@ -1066,6 +1712,8 @@ Knowledge and QA logs additionally include:
 * answer evidence bundle ID and prose-generation model/version; and
 * thought-map revision impact and activation result.
 
+Review-capacity events additionally record deliverable ID, frozen scope revision, record type, required role, estimated minutes, actual minutes, outcome, rework count, and gate effect. They must not record hidden reviewer activity outside an explicit work-item session as inferred labor time.
+
 Logs store IDs, scores, decisions, and hashes by default. Exact restricted transcript text is not duplicated into general application logs.
 
 Admin UI summaries must link every failure to the affected unit, citation, Project, or source.
@@ -1090,6 +1738,15 @@ Admin UI summaries must link every failure to the affected unit, citation, Proje
 * original-language representation/fact-check independence;
 * thought-map split, merge, tension, and supersession lineage; and
 * deterministic AnswerEvidenceBundle construction.
+* Publication Profile revision pinning;
+* Composition Plan optimistic concurrency and immutable publication snapshots;
+* Composition Decision type, target, governing-input, and review validation;
+* coverage-gap disposition; and
+* material versus non-material plan/manuscript divergence classification.
+* deterministic minimum dependency closure from a frozen deliverable;
+* prevention of orphaned conclusions when dependencies are removed;
+* deliverable-scoped maturity evaluation; and
+* review-time and outcome aggregation.
 
 ### API tests
 
@@ -1104,6 +1761,14 @@ Admin UI summaries must link every failure to the affected unit, citation, Proje
 * independent original-language review permissions;
 * thought-map optimistic concurrency and impact preview; and
 * QA evidence endpoint reproducibility for the same active build.
+* profile revision isolation across older and newer plans;
+* composition-plan permission separation;
+* decision review invalidation of plan approval; and
+* plan/manuscript validation findings without automatic mutation.
+* review-scope revision and optimistic concurrency;
+* publication success with unrelated candidates still pending;
+* publication rejection when one blocking dependency is incomplete; and
+* capacity report authorization and aggregation.
 
 ### Frontend tests
 
@@ -1119,6 +1784,13 @@ Admin UI summaries must link every failure to the affected unit, citation, Proje
 * original-language review separates faithful representation from fact checking;
 * thought-map revision preview lists affected units and questions; and
 * answer evidence inspection matches the citations rendered in the answer.
+* the profile editor exposes concrete rules rather than only a style label;
+* the plan editor distinguishes user requirements, editor judgments, AI proposals, and evidence constraints;
+* Matthew 17 coverage gaps remain visible and cannot be silently drafted; and
+* the manuscript comparison explains material divergence from the approved plan.
+* the queue groups work by deliverable and explains why each item blocks or can be deferred;
+* internal candidate maturity is visible while public pages remain free of candidate leakage; and
+* “not yet organized” is visually distinct from “no teaching found.”
 
 ### Migration tests
 
@@ -1132,7 +1804,7 @@ The Scofield test must confirm that one manuscript unit retains separate third- 
 
 ### Knowledge and QA evaluation
 
-Use the reviewed 15-sermon survey as the first evaluation set. It must include:
+Use the frozen 205-sermon survey and candidate baseline v3 as the discovery and structural baseline, while the first two deliverable-scoped review sets supply the human-reviewed evaluation cases. The evaluation must include:
 
 * an explicit claim with a direct answer;
 * a question the professor raises but does not answer;
@@ -1141,11 +1813,17 @@ Use the reviewed 15-sermon survey as the first evaluation set. It must include:
 * a repeated and an extended claim across sermons;
 * a genuine tension that must not be auto-merged;
 * a Hebrew or Greek translation criticism;
+* the recurring `δικαιόω` judgment in which Dr. Wang explicitly prefers “成义／成为义” over “称义”, including the linked opposed view and separate fact-check state;
 * a passage question requiring verse order and context;
 * a topic question requiring cross-sermon synthesis; and
-* a public query whose best internal evidence is unpublished or restricted.
+* a public query whose best internal evidence is unpublished or restricted;
+* a conclusion whose textual observation and inference bridge must both be visible;
+* a passage interpretation distributed across multiple sermons; and
+* an external historical or scientific premise whose fact-check state differs from its representation state.
 
 For each case, reviewers score attribution, completeness, relation accuracy, source precision, qualification, and permission safety separately. Fluent prose cannot compensate for a failed evidence bundle.
+
+The first Matthew 17 passage deliverable and the first cross-sermon “Son of Man” topic deliverable measure operational feasibility. They record actual active review minutes for source verification, representation, argument paths, composition, and optional fact checking; proposed/accepted/changed/rejected/deferred counts; rework causes; weekly editor availability; completed throughput; and projected backlog. The pilot report must state which measurements are observed and which remain estimates.
 
 ## 16. Implementation Phases
 
@@ -1185,8 +1863,10 @@ For each case, reviewers score attribution, completeness, relation accuracy, sou
 
 ### Phase 6: Knowledge authoring foundation
 
-* Import surveyed questions, claims, Scripture evidence, original-language judgments, applications, and relations as candidates.
-* Implement claim, relation, question-chain, and original-language review views.
+* Freeze the mechanically validated 205-sermon survey and candidate baseline v3 with source hashes, model, prompt, synthesis lineage, and the 17-group structural review decisions.
+* Import only records selected by a deliverable scope; retain the remainder as survey candidates rather than flooding the review queue.
+* Import selected questions, claims, EvidenceSteps, InferenceBridges, Scripture and external evidence, original-language judgments, applications, passage chains, and relations as candidates.
+* Implement claim, argument-path, question-chain, passage-chain, original-language, application, and external-evidence review views.
 * Preserve project-local evidence IDs while assigning stable repository IDs.
 * Publish only reviewed records into the active knowledge build.
 
@@ -1195,7 +1875,7 @@ For each case, reviewers score attribution, completeness, relation accuracy, sou
 * Seed the provisional theological and exegetical maps from reviewed claims, not manuscript titles.
 * Implement add, extend, promote, demote, split, merge, tension, and supersede previews.
 * Record reasons and evidence for every activated structural change.
-* Keep the map extensible while the remaining sermon corpus is surveyed.
+* Keep the map extensible as new published sermons and notes are added.
 
 ### Phase 8: Knowledge-grounded QA and research
 
@@ -1204,9 +1884,24 @@ For each case, reviewers score attribution, completeness, relation accuracy, sou
 * Support passage explanation, topic synthesis, original-language, comparison, and source-location questions.
 * Run blind evaluation before enabling public synthesized answers.
 
-### Phase 9: Additional projections
+### Phase 9: Publication profiles and composition planning
 
-* Generate Carson-style passage lectures and cross-sermon topic essays from selected reviewed subgraphs.
+* Implement Publication Profile, Composition Plan, and Composition Decision authoring records and review UI.
+* Convert the user's passage-centered academic commentary requirements into the first approved profile.
+* Migrate `matthew_17_exposition_blueprint.md` into the first versioned plan and decision set.
+* Validate plan/manuscript conformance without preventing ordinary line editing.
+
+### Phase 10: Deliverable-scoped review and capacity measurement
+
+* Compute a minimum publishable subgraph from the Matthew 17 plan.
+* Build the capacity-aware review queue and publication gate for that scope.
+* Leave unrelated candidates pending without blocking the pilot.
+* Measure real review time and rework across the first passage and topic deliverables.
+* Set later batch sizes from observed weekly throughput and backlog growth.
+
+### Phase 11: Additional authored works
+
+* Generate passage-centered academic lectures and cross-sermon topic essays from selected reviewed knowledge under approved profiles and plans.
 * Add research comparison, teaching outlines, study guides, and other projections without creating parallel knowledge stores.
 
 ## 17. Deployment and Rollback
@@ -1236,10 +1931,21 @@ For each case, reviewers score attribution, completeness, relation accuracy, sou
 * Public QA cannot reveal candidate, unpublished, or restricted records through answer text, citations, counts, or graph neighbors.
 * Thought-map revisions are append-only, evidence-backed, previewable, and rollback-capable.
 * The same reviewed claim can support a passage lecture, topic essay, QA answer, search result, and study tool without duplicating its identity or provenance.
+* Every published authored work pins an approved Publication Profile and Composition Plan revision.
+* Important editorial choices have stable IDs, reasons, governing inputs, review states, and revision history.
+* User requirements, editor judgments, AI proposals, and evidence constraints remain distinguishable.
+* A plan can keep `Amen` and “人子” brief in Matthew 17 while linking deeper topic works, without deleting their claims or sources.
+* Missing Matthew 17:22–27 evidence remains an explicit coverage gap; generation cannot fill it as Dr. Wang's exposition.
+* Updating a Publication Profile does not silently alter earlier publications.
+* A publication is gated by its frozen minimum dependency closure, not by the review state of the entire Project or corpus.
+* A required support or qualification cannot be deferred while its dependent conclusion remains in scope.
+* Unrelated Candidate records remain auditable and do not prevent a completed deliverable from publishing.
+* Public readers never see Candidate or Source-anchored records as approved teaching.
+* The pilot produces observed throughput, review-time, outcome, rework, capacity, and backlog metrics before wider extraction is scheduled.
 
 ## 19. Implementation Status
 
-This section describes implemented repository functionality only. The claim graph, original-language review workflow, evolving thought map, AnswerEvidenceBundle service, and knowledge-grounded QA described above are target architecture and are not yet complete unless explicitly listed below.
+This section describes implemented repository functionality only. The formal shared-knowledge authoring store and package importer are now implemented, but the complete original-language review workflow, evolving thought map, Publication Profile workflow, AnswerEvidenceBundle service, compiled knowledge build, and knowledge-grounded QA described above remain target architecture unless explicitly listed below.
 
 Phase 1 foundation is now represented in code under `backend/api/canonical_repository`:
 
@@ -1262,6 +1968,21 @@ Phase 1 foundation is now represented in code under `backend/api/canonical_repos
 * editor-only sermon right-rail lists of all citing passage and topic units, including unpublished statuses, using the `source_origin_id` lineage filter;
 * non-destructive heading-only citation cleanup and prevention of future heading-only source cards; and
 * Bible index grouping by canonical book and chapter, followed by verse-order sorting and per-unit deduplication across multiple Bible references.
+
+The shared-knowledge authoring foundation is now represented by `knowledge_models.py`, `knowledge_importer.py`, and the `RepositoryStore.knowledge_*` methods:
+
+* versioned atomic records for Source Fragment, Question, Observation, Claim, authoritative Topic Node, Evidence Step, evidence and claim relations, external Position, Knowledge Route, Editorial Synthesis, Composition Plan/Decision, Editorial Check, and Tension;
+* full-package validation before writes, including duplicate IDs and unresolved source, evidence, claim, position, route, synthesis, and composition references;
+* Canonical Citation binding before import, with exact-text/hash validation and approval gates for claims/evidence lacking a valid citation;
+* explicit topic reconciliation: taxonomy nodes are authoritative, candidate aliases may migrate, analysis routes gain canonical foreign keys, and old search IDs remain projections mapped to CanonicalUnit;
+* incremental package imports that may reference records already present in the canonical repository;
+* idempotent imports with SHA256 package manifests and protection for existing human review fields;
+* revision-guarded record updates for concurrent editorial work; and
+* admin endpoints for package import, collection status, collection reads, individual reads, and revision-guarded updates.
+
+Authoring records are stored under `canonical_repository/knowledge/<collection>/<record-id>.json`; package manifests are stored under `canonical_repository/knowledge/packages/`. These are internal authoring records. They are not included in the public active build until a later compiler and publication gate explicitly approves them.
+
+Topic reconciliation is written to `canonical_repository/knowledge/reconciliation/topic_identity.json` and can be rerun through `POST /admin/canonical-repository/knowledge/topics/reconcile`. The report must remain empty for unknown unit topics and unresolved `topic_research` routes before a topic build is activated.
 
 The Matthew pilot migration is implemented by `backend/pipeline/canonical_repository_pilot.py`. It attaches multi-lecture citations to the Amen, dispensationalism, and Transfiguration units, and creates a separate cross-passage `小信` concept unit related to—rather than replacing—the individual passage units.
 

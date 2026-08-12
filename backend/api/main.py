@@ -27,6 +27,7 @@ from .canonical_repository.router import (
     router as canonical_repository_router,
     admin_router as canonical_repository_admin_router,
 )
+from .thought_review import router as thought_review_router
 
 app = FastAPI()
 
@@ -61,6 +62,7 @@ app.include_router(sermon_search_router)
 app.include_router(sermon_search_compat_router)
 app.include_router(canonical_repository_router)
 app.include_router(canonical_repository_admin_router)
+app.include_router(thought_review_router)
 
 
 @app.get("/healthz")

@@ -13,7 +13,7 @@ The Exegesis and Topic Repository reorganizes Dr. Wang's notes, lectures, sermon
 
 Every published unit contains a readable manuscript and one or more traceable links to the exact source fragments from which the manuscript was derived. A source link must open the original sermon transcript or notes source, position the reader at the relevant fragment, and highlight that fragment. Opening only the top of a complete source document does not satisfy this requirement.
 
-The repository is also the reviewed knowledge foundation for evidence-backed QA, original-language search, thought-development comparison, and future study tools. Canonical manuscripts are publication projections over reviewed claims and evidence; they are not the only machine-readable representation of Dr. Wang's teaching.
+The repository is also the reviewed knowledge foundation for evidence-backed QA, original-language search, thought-development comparison, and future study tools. Canonical manuscripts are new editorial works built from reviewed claims and evidence under an approved publication profile and composition plan; they are not direct graph projections or the only machine-readable representation of Dr. Wang's teaching.
 
 ## 2. Problem Statement
 
@@ -67,6 +67,12 @@ Keyword, passage, and vector retrieval may discover candidate evidence. A public
 ### 3.9. The thought map remains open
 
 The current candidate thought trunks do not constrain later sermons. Editors may add, extend, promote, demote, split, merge, mark tension, or supersede nodes. Every change preserves evidence, reason, prior revision, and review state.
+
+### 3.10. Review follows deliverables, not total extraction volume
+
+AI may create many candidate records, but a publication does not wait for the entire corpus or Project to become approved. Each article, answer set, or report defines a minimum publishable subgraph containing only the knowledge, sources, relations, and composition decisions it materially uses. Records outside that dependency closure remain candidate and do not block the deliverable.
+
+“Important content requires human review” means important content used in the current public deliverable requires review. It does not mean every extracted record across 200-plus sermons must be reviewed before any result can ship.
 
 ## 4. Users and Permissions
 
@@ -196,13 +202,45 @@ A reviewed directed relation between claims. Supported types include `supports`,
 
 A structured record of Dr. Wang's Hebrew, Aramaic, or Greek argument and any translation criticism. It preserves the biblical reference, source-language form, grammatical or semantic issue, target translation, Dr. Wang's proposed rendering, reasons, interpretive effect, exact source, representation review, and separate fact-check state.
 
-### 6.12. Thought-map revision
+### 6.12. Evidence step
+
+A source-grounded observation Dr. Wang uses in an argument, such as wording, grammar, genre, context, history, comparison, or counterexample. It identifies the evidence without collapsing it into the final conclusion.
+
+### 6.13. Inference bridge
+
+A reviewable explanation of how one or more evidence steps or premise claims lead to a conclusion. It distinguishes Dr. Wang's explicit reasoning, reasoning closely reconstructed from his discourse, and an editor-supplied bridge.
+
+### 6.14. Passage interpretation chain
+
+A cross-sermon, passage-keyed sequence of questions, observations, inference bridges, conclusions, later extensions, qualifications, and unresolved gaps. It is reusable knowledge and does not determine the outline of a specific manuscript.
+
+### 6.15. External evidence
+
+A historical, cultural, scholarly, medical, psychological, probabilistic, traditional, or experiential premise used in an argument. It preserves Dr. Wang's use of that material while keeping independent fact checking separate.
+
+### 6.16. Application reasoning
+
+A structured transition from the biblical source context through a stable principle to a target context. It records audience, normative level, applicability conditions, qualifications, and pastoral risks so a local exhortation is not silently universalized.
+
+### 6.17. Thought-map revision
 
 An auditable change that adds, extends, promotes, demotes, splits, merges, marks tension, or supersedes a thought node. Superseded records remain available for history and rollback.
 
-### 6.13. Answer evidence bundle
+### 6.18. Answer evidence bundle
 
 The bounded, permission-filtered collection used to answer one question. It contains selected question/claim IDs, traversed relationships, approved citations, attribution labels, unresolved issues, and related units. The generated prose is not itself the evidence bundle.
+
+### 6.19. Publication profile
+
+A reusable, user-approved editorial specification for one product family. It converts a request such as an academically structured, passage-centered commentary into explicit rules for passage order, theological depth, original-language treatment, alternative interpretations, application, tone, citations, appendices, cross-links, and evidence gaps. It describes how editors intend to publish; it is not attributed to Dr. Wang.
+
+### 6.20. Composition plan
+
+The versioned plan for one specific passage lecture, topic essay, course, or other authored work. It records the publication profile, audience, purpose, scope, central question, thesis, outline, selected knowledge records, desired depth, expected length, coverage gaps, and approval state.
+
+### 6.21. Composition decision
+
+A reviewable editorial choice whose alternative could materially change the work. Examples include making material a core section, treating it briefly, moving it to a topic article or appendix, linking a related unit, omitting repetition, deferring for missing evidence, identifying a narrative climax, or setting section order. Each decision records its reason, affected knowledge records, governing user requirement or profile rule, version, and reviewer. It is never represented as the professor's claim.
 
 ## 7. Information Architecture
 
@@ -250,6 +288,8 @@ The unit page provides three primary views:
 * **關聯單元**: related passage and topic units.
 
 The page header displays the unit type, Bible references, topic paths, source count, and publication state.
+
+The publication metadata identifies the governing publication profile and composition-plan revision. Public presentation may summarize the editorial approach; editor views expose the complete plan and decision history.
 
 ### 8.4. Inspect a sermon source
 
@@ -358,9 +398,14 @@ A unit may be published only when:
 
 * its manuscript points to a checked-in `final.md` section or an approved repository manuscript;
 * its unit type and index assignments are reviewed;
+* it references an approved publication profile and composition plan;
+* every material composition decision is approved or explicitly waived with a reason;
+* coverage gaps and deferred passages are disclosed rather than silently filled;
 * every attached citation resolves against its recorded source version;
 * at least one source citation is approved, unless an editor-approved exception includes a reason; and
 * no required citation is stale or unresolved.
+
+The publication gate evaluates the deliverable's frozen review scope, not whether every candidate record in the source Project, sermon, chapter, or repository is approved. Excluded candidates remain visible to authorized editors and retain their lineage.
 
 Publishing a unit does not overwrite Project manuscripts. Refreshing repository indexes does not rerun manuscript generation.
 
@@ -386,6 +431,35 @@ The editor first approves whether the record faithfully states Dr. Wang's argume
 ### 9.8. Evolve the thought map
 
 When new sermons alter the current map, the editor previews the affected nodes and chooses add, extend, promote, demote, split, merge, mark tension, or supersede. The UI requires a change reason and shows the resulting effects on passage projections, topic projections, QA answers, and related units before activation.
+
+### 9.9. Plan and review an authored work
+
+1. The user selects a versioned Publication Profile or creates a candidate profile from explicit requirements.
+2. The user supplies the work's passage/topic scope, audience, purpose, desired depth, length, and special requirements.
+3. The system proposes a Composition Plan from available reviewed knowledge and reports missing coverage.
+4. The editor reviews the central question, thesis, selected knowledge records, outline, depth, cross-links, appendices, omissions, and deferred material.
+5. Every material choice becomes a Composition Decision with a reason and provenance to the user requirement or profile rule.
+6. The editor approves the plan before manuscript generation.
+7. Generation remains within the approved plan. A new claim, major reordering, new appendix, or changed scope returns the plan to review rather than entering prose silently.
+8. Publication snapshots the exact profile and plan revisions used.
+
+For the Matthew 17 pilot, the plan must explain why `Amen` and “人子” receive only passage-relevant treatment, why their full discussion links to topic studies, which units form the principal exegetical sections, and how Matthew 17:22–27 coverage gaps are handled.
+
+### 9.10. Create a deliverable review scope
+
+1. The editor freezes the Composition Plan or AnswerEvidenceBundle revision for the intended deliverable.
+2. The system computes the material dependency closure: selected claims, required relations, exact citations, language/application records, composition records, permissions, gaps, and unresolved items.
+3. The editor may remove optional material from the deliverable, but cannot waive a dependency while retaining the conclusion that requires it.
+4. Each dependency receives a target maturity and responsible review role.
+5. The UI shows blocking, deferrable, completed, and failed items plus estimated and actual review time.
+6. Publication becomes available when every blocking dependency reaches its target state and no access or stale-source gate fails.
+7. Later expansion creates a new review-scope revision; it does not retroactively change the published snapshot.
+
+### 9.11. Operate a capacity-aware review queue
+
+Editors can group work by deliverable, reviewer role, risk, passage/topic, or source. The default queue prioritizes records that unblock the nearest approved deliverable. It does not prioritize merely because AI generated the record earlier.
+
+The pilot records estimated and actual review minutes by record type and role; proposed, accepted, changed, rejected, and deferred counts; rework caused by bad source anchors or wrong attribution; weekly available editor hours; and projected backlog under the current extraction rate. These measurements determine batch size and future automation. The system must not hide editorial debt behind a large candidate count.
 
 ## 10. UI Requirements
 
@@ -460,8 +534,23 @@ Required knowledge-platform views are:
 * a source occurrence timeline;
 * a thought-map revision preview and history; and
 * a QA result view with direct answer, reasoning, Scripture evidence, qualifications, source cards, and related units.
+* a Publication Profile library with version comparison;
+* a Composition Plan editor showing outline, selected knowledge, coverage, and approval state; and
+* a Composition Decision list filterable by core, brief, cross-link, appendix, omission, deferral, climax, and order.
 
 The default UI renders a bounded local neighborhood, not the complete graph. Internal research mode must be visually distinct from public approved-content mode.
+
+### 10.8. Non-technical review safeguards
+
+The review UI is complete only when an editor can see and act on the judgments required for publication. Data that exists only in JSON or an API response does not satisfy this requirement.
+
+* A claim separates eligible professor evidence, audience/opposed-view context, and withheld evidence.
+* Every claim shows its intended knowledge route and any thin-evidence warning.
+* A claim with zero eligible evidence cannot be approved through either the UI or the API. One eligible item remains reviewable but is visibly marked as weak support.
+* Composition review displays claim hierarchy—paragraph thesis, supporting claims, theological ground, and editorial note—rather than a flat claim list.
+* Composition lists show `main_section`, `brief_note`, topic-link, and coverage-gap actions alongside review status.
+* Editorial checks and unresolved interpretive tensions appear in the publication review surface.
+* Controls that reveal content lower on the page must move focus or scroll to the revealed region and expose a clear accessible label; silent expansion is not acceptable.
 
 ## 11. Citation Requirements
 
@@ -564,7 +653,7 @@ Public readers may access only source stages and notes assets authorized for pub
 
 ### Observability
 
-Repository builds report unit, relationship, citation, stale-citation, and unresolved-citation counts. Every published snapshot records input hashes and generation time.
+Repository builds report unit, relationship, citation, stale-citation, and unresolved-citation counts. Every published snapshot records input hashes and generation time. Editorial reporting also shows the active deliverables, blocking review items, estimated and actual review time, approval/rejection/deferral outcomes, rework, weekly capacity, and projected backlog. It must distinguish “records extracted” from “records required by a deliverable” so a large candidate corpus does not create a misleading completion percentage.
 
 ## 15. Acceptance Criteria
 
@@ -606,6 +695,18 @@ Repository builds report unit, relationship, citation, stale-citation, and unres
 * A changed source checksum marks affected citations stale.
 * A unit with unresolved required citations cannot be published.
 * Repository refresh does not overwrite Project manuscripts.
+* The editor can choose an approved Publication Profile and create a plan for one work.
+* The plan distinguishes user requirements, editor decisions, and AI proposals.
+* Important decisions have IDs, reasons, revisions, and review states.
+* Regeneration cannot silently change an approved plan.
+
+### Composition behavior
+
+* The same reviewed claims can support different approved works without duplicating claim identity.
+* A passage-centered academic profile keeps the current passage primary while linking deeper cross-passage topics.
+* A missing passage is recorded as a coverage gap and deferred decision; AI does not invent Dr. Wang's exposition.
+* A published article resolves to the exact Publication Profile and Composition Plan revisions used to create it.
+* Changing a profile does not retroactively change existing publications.
 
 ### Pilot examples
 
@@ -619,10 +720,20 @@ Repository builds report unit, relationship, citation, stale-citation, and unres
 * A question whose only matching fragment is an opposed view does not return that view as Dr. Wang's position.
 * A significant question with no approved answering claim is returned as unanswered or evidence insufficient.
 * Original-language results distinguish faithful representation from independent fact-check status.
+* The “因信成义，而非因信称义” result preserves Dr. Wang's wording, links the `δικαιόω` judgment to its theological claim and opposed view, and does not normalize it back to conventional terminology.
 * Public QA cannot retrieve candidate claims or restricted source text.
 * Internal research QA clearly labels candidates, editorial synthesis, tension, and fact-check-pending material.
 * A thought node can be split or superseded without deleting its prior revision or source lineage.
 * One new out-of-sample sermon can create a new thought trunk rather than being forced into the current seven candidates.
+
+### Editorial-capacity behavior
+
+* A deliverable can publish when its minimum subgraph passes even if unrelated records from the same sermons remain candidate.
+* A required supporting or qualifying relation cannot be deferred while its dependent conclusion remains in the deliverable.
+* The review queue explains which deliverable each blocking item affects.
+* Candidate and source-anchored records remain internal and visibly labeled.
+* Public pages distinguish “not yet organized” from “Dr. Wang did not teach this.”
+* The first passage and topic deliverables report actual review minutes, acceptance, rejection, deferral, rework, weekly capacity, and projected backlog.
 
 ## 16. Rollout Sequence
 
@@ -634,7 +745,10 @@ Repository builds report unit, relationship, citation, stale-citation, and unres
 6. Migrate and approve the three-unit pilot.
 7. Migrate Matthew 1–17 and validate coverage.
 8. Extend the workflow incrementally to the full sermon corpus.
-9. Add repository-wide question, claim, relation, Scripture-evidence, original-language, and revision records.
-10. Import the fifteen-sample candidate baseline and complete claim-level review.
-11. Upgrade search/QA to hybrid retrieval plus reviewed graph traversal.
-12. Validate one unseen published sermon against passage, topic, original-language, and QA scenarios before wider migration.
+9. Add repository-wide question, claim, EvidenceStep, InferenceBridge, relation, Scripture/external-evidence, original-language, application, passage-chain, and revision records.
+10. Add Publication Profile, Composition Plan, and Composition Decision records and migrate the Matthew 17 blueprint as the first plan.
+11. Freeze the 205-sermon candidate survey, the reviewed 17-group structural decisions, and candidate baseline v3; create review scopes for the first passage and topic deliverables, and import/review only each complete dependency closure.
+12. Generate and review the Matthew 17 passage work from the approved plan; record review time, outcomes, rework, blockers, and deferred candidates.
+13. Use the measured pilot capacity to set the next deliverable queue and a realistic release cadence before expanding review volume.
+14. Upgrade search/QA to hybrid retrieval plus reviewed graph traversal, using a separate review scope for every public answer class or saved answer bundle.
+15. Validate one unseen published sermon against passage, topic, composition, original-language, QA, and editorial-capacity scenarios before wider migration.

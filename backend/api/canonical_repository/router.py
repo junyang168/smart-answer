@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .compiler import RepositoryValidationError
+from .knowledge_importer import KnowledgePackageValidationError
+from .knowledge_models import KNOWLEDGE_COLLECTIONS
 from .models import CanonicalUnit, Citation, CitationResolution, RepositoryStatus
 from .service import canonical_repository_service
 
@@ -36,6 +39,22 @@ class ImportSeedRequest(BaseModel):
 class MergeUnitsRequest(BaseModel):
     absorbed_unit_ids: List[str]
     apply: bool = False
+
+
+class ImportKnowledgePackageRequest(BaseModel):
+    package_path: str = "output/claim-layer/shared_knowledge_pilot_v1.json"
+
+
+class UpdateKnowledgeRecordRequest(BaseModel):
+    changes: Dict[str, Any]
+    expected_revision: Optional[int] = None
+
+
+class SnapshotDependenciesRequest(BaseModel):
+    consumer_kind: str
+    consumer_id: str
+    claim_ids: List[str]
+    route_ids: List[str] = Field(default_factory=list)
 
 
 @router.get("/status", response_model=RepositoryStatus)
@@ -121,6 +140,116 @@ def _validated_catalog_path(catalog_path: str) -> Path:
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="Seed catalog not found")
     return requested
+
+
+def _validated_knowledge_package_path(package_path: str) -> Path:
+    project_root = Path(__file__).resolve().parents[3]
+    requested = (project_root / package_path).resolve()
+    allowed_root = (project_root / "output").resolve()
+    if not requested.is_relative_to(allowed_root) or requested.suffix != ".json":
+        raise HTTPException(status_code=400, detail="Knowledge package must be a JSON file under output")
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail="Knowledge package not found")
+    return requested
+
+
+@admin_router.get("/knowledge/status")
+def knowledge_status():
+    return canonical_repository_service.knowledge_status()
+
+
+@admin_router.post("/knowledge/topics/reconcile")
+def reconcile_topic_identity():
+    return canonical_repository_service.reconcile_topic_identity()
+
+
+@admin_router.get("/knowledge/claims/{claim_id}/impact")
+def claim_impact(claim_id: str):
+    try:
+        return canonical_repository_service.analyze_claim_impact(claim_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Claim not found") from exc
+
+
+@admin_router.post("/knowledge/dependencies/snapshot")
+def snapshot_dependencies(payload: SnapshotDependenciesRequest):
+    try:
+        return canonical_repository_service.snapshot_product_dependencies(
+            payload.consumer_kind,
+            payload.consumer_id,
+            payload.claim_ids,
+            payload.route_ids,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="A dependency claim was not found") from exc
+
+
+@admin_router.post("/knowledge/impact-events/{impact_event_id}/withdraw")
+def withdraw_impacted_units(impact_event_id: str):
+    try:
+        return canonical_repository_service.withdraw_impacted_units(impact_event_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Impact event not found") from exc
+    except RepositoryValidationError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc), "findings": exc.findings}) from exc
+
+
+@admin_router.post("/knowledge/import-package")
+def import_knowledge_package(payload: ImportKnowledgePackageRequest):
+    requested = _validated_knowledge_package_path(payload.package_path)
+    try:
+        return canonical_repository_service.import_knowledge_package(requested)
+    except (json.JSONDecodeError, KnowledgePackageValidationError) as exc:
+        findings = getattr(exc, "findings", [str(exc)])
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Knowledge package validation failed", "findings": findings},
+        ) from exc
+
+
+@admin_router.get("/knowledge/{collection}")
+def list_knowledge_records(collection: str):
+    if collection not in KNOWLEDGE_COLLECTIONS:
+        raise HTTPException(status_code=404, detail="Knowledge collection not found")
+    return {
+        "collection": collection,
+        "records": [
+            item.model_dump(mode="json")
+            for item in canonical_repository_service.store.list_knowledge_records(collection)
+        ],
+    }
+
+
+@admin_router.get("/knowledge/{collection}/{record_id}")
+def get_knowledge_record(collection: str, record_id: str):
+    if collection not in KNOWLEDGE_COLLECTIONS:
+        raise HTTPException(status_code=404, detail="Knowledge collection not found")
+    try:
+        return canonical_repository_service.store.get_knowledge_record(collection, record_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge record not found") from exc
+
+
+@admin_router.patch("/knowledge/{collection}/{record_id}")
+def update_knowledge_record(
+    collection: str,
+    record_id: str,
+    payload: UpdateKnowledgeRecordRequest,
+):
+    if collection not in KNOWLEDGE_COLLECTIONS:
+        raise HTTPException(status_code=404, detail="Knowledge collection not found")
+    try:
+        updated = canonical_repository_service.update_knowledge_record(
+            collection,
+            record_id,
+            payload.changes,
+            expected_revision=payload.expected_revision,
+        )
+        return updated.model_dump(mode="json")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Knowledge record not found") from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @admin_router.post("/units/backfill-source-citations")

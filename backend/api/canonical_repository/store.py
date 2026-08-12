@@ -8,6 +8,11 @@ from typing import Any, Dict, Iterable, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 
+from .knowledge_models import (
+    KNOWLEDGE_COLLECTIONS,
+    EvolvingKnowledgeRecord,
+    KnowledgePackageManifest,
+)
 from .models import CanonicalUnit, Citation, SourceDocument, SourceMap, UnitRelationship
 
 
@@ -24,6 +29,8 @@ class RepositoryStore:
         self.source_maps_dir = self.root / "source_maps"
         self.citations_dir = self.root / "citations"
         self.relationships_dir = self.root / "relationships"
+        self.knowledge_dir = self.root / "knowledge"
+        self.knowledge_packages_dir = self.knowledge_dir / "packages"
         self.builds_dir = self.root / "builds"
 
     def ensure_dirs(self) -> None:
@@ -33,6 +40,8 @@ class RepositoryStore:
             self.source_maps_dir,
             self.citations_dir,
             self.relationships_dir,
+            self.knowledge_dir,
+            self.knowledge_packages_dir,
             self.builds_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
@@ -119,3 +128,73 @@ class RepositoryStore:
     def get_active_build(self) -> Optional[Dict[str, Any]]:
         path = self.root / "active.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+    @staticmethod
+    def _knowledge_definition(collection: str) -> tuple[type[EvolvingKnowledgeRecord], str]:
+        try:
+            return KNOWLEDGE_COLLECTIONS[collection]
+        except KeyError as exc:
+            raise ValueError(f"Unknown knowledge collection: {collection}") from exc
+
+    def knowledge_record_path(self, collection: str, record_id: str) -> Path:
+        self._knowledge_definition(collection)
+        return self.knowledge_dir / collection / f"{self._validate_id(record_id)}.json"
+
+    def save_knowledge_record(self, collection: str, record: EvolvingKnowledgeRecord) -> None:
+        model, id_field = self._knowledge_definition(collection)
+        if not isinstance(record, model):
+            raise TypeError(f"{collection} requires {model.__name__}")
+        record_id = getattr(record, id_field)
+        self._write_json(self.knowledge_record_path(collection, record_id), record)
+
+    def get_knowledge_record(self, collection: str, record_id: str) -> EvolvingKnowledgeRecord:
+        model, _ = self._knowledge_definition(collection)
+        return self._read_model(self.knowledge_record_path(collection, record_id), model)
+
+    def list_knowledge_records(self, collection: str) -> Iterable[EvolvingKnowledgeRecord]:
+        model, _ = self._knowledge_definition(collection)
+        return self._list_models(self.knowledge_dir / collection, model)
+
+    def update_knowledge_record(
+        self,
+        collection: str,
+        record_id: str,
+        changes: Dict[str, Any],
+        expected_revision: Optional[int] = None,
+    ) -> EvolvingKnowledgeRecord:
+        model, id_field = self._knowledge_definition(collection)
+        existing = self.get_knowledge_record(collection, record_id)
+        if expected_revision is not None and existing.revision != expected_revision:
+            raise ValueError(
+                f"Revision conflict: expected {expected_revision}, current {existing.revision}"
+            )
+        if id_field in changes and str(changes[id_field]) != record_id:
+            raise ValueError(f"{id_field} cannot be changed")
+        payload = existing.model_dump(mode="json")
+        payload.update(changes)
+        payload[id_field] = record_id
+        payload["revision"] = existing.revision + 1
+        updated = model.model_validate(payload)
+        self.save_knowledge_record(collection, updated)
+        return updated
+
+    def knowledge_counts(self) -> Dict[str, int]:
+        return {
+            collection: len(list(self.list_knowledge_records(collection)))
+            for collection in KNOWLEDGE_COLLECTIONS
+        }
+
+    def save_knowledge_package(self, manifest: KnowledgePackageManifest) -> None:
+        self._write_json(
+            self.knowledge_packages_dir / f"{self._validate_id(manifest.package_id)}.json",
+            manifest,
+        )
+
+    def get_knowledge_package(self, package_id: str) -> KnowledgePackageManifest:
+        return self._read_model(
+            self.knowledge_packages_dir / f"{self._validate_id(package_id)}.json",
+            KnowledgePackageManifest,
+        )
+
+    def list_knowledge_packages(self) -> Iterable[KnowledgePackageManifest]:
+        return self._list_models(self.knowledge_packages_dir, KnowledgePackageManifest)

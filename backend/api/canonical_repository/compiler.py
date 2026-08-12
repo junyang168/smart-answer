@@ -37,11 +37,30 @@ class RepositoryCompiler:
         citations = {item.citation_id: item for item in self.store.list_citations()}
         units = list(self.store.list_units())
         unit_ids = {item.unit_id for item in units}
+        dependencies = {
+            item.dependency_id: item
+            for item in self.store.list_knowledge_records("product_dependencies")
+        }
+        claims = {
+            item.claim_id: item for item in self.store.list_knowledge_records("claims")
+        }
         for unit in units:
             if unit.unit_type == "passage" and not unit.primary_bible_refs:
                 findings.append(f"{unit.unit_id}: passage unit has no primary Bible reference")
             if unit.status == "published" and not unit.citation_ids and not unit.review.source_exception_reason:
                 findings.append(f"{unit.unit_id}: published unit has no approved citation")
+            if unit.status == "published" and unit.knowledge_managed and not unit.knowledge_dependency_ids:
+                findings.append(f"{unit.unit_id}: knowledge-managed published unit has no claim dependency snapshot")
+            for dependency_id in unit.knowledge_dependency_ids:
+                dependency = dependencies.get(dependency_id)
+                if dependency is None:
+                    findings.append(f"{unit.unit_id}: missing knowledge dependency {dependency_id}")
+                    continue
+                claim = claims.get(dependency.claim_id)
+                if dependency.status != "current":
+                    findings.append(f"{unit.unit_id}: dependency {dependency_id} is invalidated")
+                elif claim is None or claim.revision != dependency.pinned_claim_revision:
+                    findings.append(f"{unit.unit_id}: dependency {dependency_id} no longer matches its claim revision")
             for citation_id in unit.citation_ids:
                 citation = citations.get(citation_id)
                 if citation is None:
