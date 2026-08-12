@@ -48,6 +48,37 @@ export interface Sermon {
   theme: string; // 主題
   core_bible_verses?: { [key: string]: string }; // 可選的核心經文列表
   series_id?: string;
+  series_title?: string;
+  series_order?: number;
+  organization_mode?: 'scripture_led' | 'topic_led' | 'mixed';
+  organization_mode_label?: string;
+  classification_confidence?: 'high' | 'medium' | 'low';
+  classification_reason?: string;
+  catalog_year?: number;
+  catalog_primary_passage?: {
+    osis: string;
+    book_osis: string;
+    book: string;
+    chapter: number;
+    verse_start?: number | null;
+    chapter_end?: number | null;
+    verse_end?: number | null;
+    display: string;
+  } | null;
+  substantial_passages?: Array<{
+    osis: string;
+    book?: string;
+    chapter?: number;
+    display: string;
+  }>;
+  supporting_passages?: Array<{
+    osis: string;
+    display: string;
+  }>;
+  catalog_assignment?: 'automatic' | 'reviewed_override';
+  catalog_assignment_note?: string | null;
+  scripture_catalog_eligible?: boolean;
+  scripture_catalog_reason?: string | null;
 }
 
 // ✅ 新增：定義講道系列的類型

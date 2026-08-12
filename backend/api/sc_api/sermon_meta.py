@@ -1,6 +1,6 @@
 
 from typing import List, Union, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import os
 import json
 import pytz
@@ -28,6 +28,23 @@ class Sermon(BaseModel):
     core_bible_verse: Optional[List[dict]] = None
     source: Optional[str] = None
     series_id: Optional[str] = None
+    series_title: Optional[str] = None
+    series_order: Optional[int] = None
+    organization_mode: Optional[str] = None
+    organization_mode_label: Optional[str] = None
+    classification_confidence: Optional[str] = None
+    classification_reason: Optional[str] = None
+    scripture: List[str] = Field(default_factory=list)
+    book: List[str] = Field(default_factory=list)
+    topic: List[str] = Field(default_factory=list)
+    catalog_year: Optional[int] = None
+    catalog_primary_passage: Optional[dict] = None
+    substantial_passages: List[dict] = Field(default_factory=list)
+    supporting_passages: List[dict] = Field(default_factory=list)
+    catalog_assignment: Optional[str] = None
+    catalog_assignment_note: Optional[str] = None
+    scripture_catalog_eligible: bool = False
+    scripture_catalog_reason: Optional[str] = None
 
 class SermonMetaManager:
 
@@ -35,6 +52,7 @@ class SermonMetaManager:
         self.base_folder = base_folder
         self.config_folder =  os.path.join(self.base_folder, "config")
         self.metadata_file_path =  os.path.join(self.config_folder,"sermon.json")
+        self.catalog_file_path = os.path.join(self.base_folder, "sermon_catalog.json")
         self.user_getter = user_getter
 #        aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
 #        aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -63,6 +81,9 @@ class SermonMetaManager:
 
     def get_refresher(self):
         return ('sermon.json', self.load_sermon_metadata)
+
+    def get_catalog_refresher(self):
+        return ('sermon_catalog.json', self.load_sermon_metadata)
     
     def load_dev_sermon(self):
         response = self.s3.get_object(Bucket=self.bucket_name, Key='config/sermon_dev.json')
@@ -99,6 +120,19 @@ class SermonMetaManager:
         with open(self.metadata_file_path) as f:            
             self.sermon_meta = json.load(f)
 
+        catalog_by_id = {}
+        if os.path.isfile(self.catalog_file_path):
+            try:
+                with open(self.catalog_file_path, encoding="utf-8") as catalog_file:
+                    catalog_payload = json.load(catalog_file)
+                catalog_by_id = {
+                    str(record.get("transcript_id")): record
+                    for record in catalog_payload.get("records", [])
+                    if isinstance(record, dict) and record.get("transcript_id")
+                }
+            except (OSError, json.JSONDecodeError):
+                catalog_by_id = {}
+
 #        sermon_dev = self.load_dev_sermon()
 #        self.merge_dev(sermon_meta, sermon_dev)
         
@@ -118,7 +152,25 @@ class SermonMetaManager:
                                        thumbnail= '/web/data/thumbnail/' + m.get('item') + '.jpg',
                                        keypoints= self.kps_to_str(m.get('keypoints')),
                                        core_bible_verse=m.get('core_bible_verse', []),
-                                       source=m.get('source')  
+                                       source=m.get('source'),
+                                       series_id=(catalog_by_id.get(m.get('item')) or {}).get('series_id') or m.get('series_id'),
+                                       series_title=(catalog_by_id.get(m.get('item')) or {}).get('series_title'),
+                                       series_order=(catalog_by_id.get(m.get('item')) or {}).get('series_order'),
+                                       organization_mode=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode'),
+                                       organization_mode_label=(catalog_by_id.get(m.get('item')) or {}).get('organization_mode_label'),
+                                       classification_confidence=(catalog_by_id.get(m.get('item')) or {}).get('classification_confidence'),
+                                       classification_reason=(catalog_by_id.get(m.get('item')) or {}).get('classification_reason'),
+                                       scripture=(catalog_by_id.get(m.get('item')) or {}).get('primary_scriptures', []),
+                                       book=(catalog_by_id.get(m.get('item')) or {}).get('books', []),
+                                       topic=(catalog_by_id.get(m.get('item')) or {}).get('topics', []),
+                                       catalog_year=(catalog_by_id.get(m.get('item')) or {}).get('year'),
+                                       catalog_primary_passage=(catalog_by_id.get(m.get('item')) or {}).get('catalog_primary_passage'),
+                                       substantial_passages=(catalog_by_id.get(m.get('item')) or {}).get('substantial_passages', []),
+                                       supporting_passages=(catalog_by_id.get(m.get('item')) or {}).get('supporting_passages', []),
+                                       catalog_assignment=(catalog_by_id.get(m.get('item')) or {}).get('catalog_assignment'),
+                                       catalog_assignment_note=(catalog_by_id.get(m.get('item')) or {}).get('catalog_assignment_note'),
+                                       scripture_catalog_eligible=bool((catalog_by_id.get(m.get('item')) or {}).get('scripture_catalog_eligible')),
+                                       scripture_catalog_reason=(catalog_by_id.get(m.get('item')) or {}).get('scripture_catalog_reason'),
                                        ) for m in self.sermon_meta]
         self.format_delivery_date()
 

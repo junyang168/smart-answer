@@ -29,7 +29,8 @@ export const SeriesPlayerView = () => {
   const params = useParams();
   const searchParams = useSearchParams();
   const seriesId = decodeURIComponent(params.seriesId as string);
-  const currentSermonId = decodeURIComponent(searchParams.get('sermon') as string) || '';
+  const sermonParam = searchParams.get('sermon');
+  const currentSermonId = sermonParam ? decodeURIComponent(sermonParam) : '';
 
 
 
@@ -140,6 +141,12 @@ export const SeriesPlayerView = () => {
     return <div className="text-center py-20">系列或講道數據不存在。</div>;
   }
 
+  const activeIndex = series.sermons.findIndex(sermon => sermon.item === activeSermon.item);
+  const previousSermon = activeIndex > 0 ? series.sermons[activeIndex - 1] : null;
+  const nextSermon = activeIndex >= 0 && activeIndex < series.sermons.length - 1
+    ? series.sermons[activeIndex + 1]
+    : null;
+
   return (
     <>
       <div className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
@@ -218,7 +225,7 @@ export const SeriesPlayerView = () => {
                 const isActive = sermon.item === activeSermon.item;
                 return (
                   <li key={sermon.id}>
-                    <Link href={`/resources/series/${series.id}?sermon=${sermon.item}`} className={`flex items-start gap-3 p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100' : 'hover:bg-gray-200'}`}>
+                    <Link href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(sermon.item || sermon.id)}`} className={`flex items-start gap-3 p-3 rounded-md transition-colors ${isActive ? 'bg-blue-100' : 'hover:bg-gray-200'}`}>
                       <div className="text-gray-500 mt-1">{isActive ? <PlayCircle className="w-5 h-5 text-blue-600" /> : `${index + 1}`}</div>
                       <div>
                         <p className={`font-semibold ${isActive ? 'text-blue-800' : 'text-gray-800'}`}>{sermon.title}</p>
@@ -233,6 +240,32 @@ export const SeriesPlayerView = () => {
 
         {/* 左側主內容區 */}
         <div className="lg:w-2/3">
+
+          <nav className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4" aria-label="系列前後講導航">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                {previousSermon ? (
+                  <Link
+                    href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(previousSermon.item || previousSermon.id)}`}
+                    className="block truncate font-semibold text-blue-700 hover:underline"
+                  >
+                    ← 上一講：{previousSermon.title}
+                  </Link>
+                ) : <span className="text-sm text-gray-400">已是第一講</span>}
+              </div>
+              <div className="shrink-0 text-sm font-bold text-slate-600">第 {activeIndex + 1}／{series.sermons.length} 講</div>
+              <div className="min-w-0 flex-1 text-right">
+                {nextSermon ? (
+                  <Link
+                    href={`/resources/series/${encodeURIComponent(series.id)}?sermon=${encodeURIComponent(nextSermon.item || nextSermon.id)}`}
+                    className="block truncate font-semibold text-blue-700 hover:underline"
+                  >
+                    下一講：{nextSermon.title} →
+                  </Link>
+                ) : <span className="text-sm text-gray-400">已是最後一講</span>}
+              </div>
+            </div>
+          </nav>
 
           <article className="prose lg:prose-lg max-w-none">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{activeSermon.summary}</ReactMarkdown>

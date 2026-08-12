@@ -19,7 +19,7 @@ export default function SermonsPage() {
       <div className="text-center mb-12">
         <h1 className="text-4xl font-bold font-display text-gray-800">講道中心</h1>
         <p className="mt-4 text-lg text-gray-600 max-w-2xl mx-auto">
-          使用左側的篩選器來精準定位您想重溫的寶貴信息。
+          可按經卷釋經、講論專題、系列、年份與聖經書卷瀏覽王守仁教授的講道。
         </p>
       </div>
       

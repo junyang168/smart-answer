@@ -15,6 +15,7 @@ import { getBookOrderIndex } from '@/app/utils/bible-order'; // ✅ 1. 引入我
 import { BrainCircuit, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { useSession } from "next-auth/react";
 import { SermonListRow } from '@/app/components/sermons/SermonListRow';
+import { ScriptureSermonCatalog } from '@/app/components/sermons/ScriptureSermonCatalog';
 
 
 export const SermonBrowser = () => {
@@ -38,7 +39,8 @@ export const SermonBrowser = () => {
 
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
-  const { data: session, status } = useSession(); // ✅ 獲取 session 狀態
+  const organizationMode = searchParams.get('mode') || '';
+  const { status } = useSession(); // ✅ 獲取 session 狀態
   const authenticated = status === 'authenticated';
 
   // --- Data Fetching ---
@@ -57,8 +59,6 @@ export const SermonBrowser = () => {
         setIsLoadingInitialData(false);
       }
     };
-
-    console.debug('here')
 
     fetchAllSermons();
   }, []); // 空依賴數組確保只運行一次
@@ -111,7 +111,9 @@ export const SermonBrowser = () => {
             if (isArray && Array.isArray(value)) {
                 // 如果是數組，遍歷數組中的每一項
                 for (const item of value) {
-                    if (item) counts.set(item, (counts.get(item) || 0) + 1);
+                    if (typeof item === 'string' && item) {
+                      counts.set(item, (counts.get(item) || 0) + 1);
+                    }
                 }
             } else if (typeof value === 'string' && value) {
                 // 如果是字符串，直接計數
@@ -139,18 +141,20 @@ export const SermonBrowser = () => {
     return  {
         books: getOptionsWithCounts('book', true), // 標記 book 為數組
         topics: getOptionsWithCounts('topic', true), // 標記 topic 為數組
+        series: getOptionsWithCounts('series_title'),
         speakers: getOptionsWithCounts('speaker'),
-//        years: [...new Set(allSermons.map(s => s.date.substring(0, 4)).filter(Boolean))].map(y => ({value: y, count: allSermons.filter(s => s.date.startsWith(y)).length})).sort((a,b)=>b.value.localeCompare(a.value)),
+        years: [...new Set(allSermons.map(s => String(s.catalog_year || '').trim()).filter(Boolean))]
+          .map(y => ({value: y, count: allSermons.filter(s => String(s.catalog_year || '') === y).length}))
+          .sort((a,b)=>b.value.localeCompare(a.value)),
         statuses: authenticated ? getOptionsWithCounts('status') : [],
         assignees: authenticated ? getOptionsWithCounts('assigned_to_name') : [],
         source: getOptionsWithCounts('source')
     };
-  }, [allSermons]);
+  }, [allSermons, authenticated]);
 
   // ✅ 2. 在客戶端進行篩選和分頁 (保持不變)
   const filteredAndPaginatedData = useMemo(() => {
     let filtered = [...allSermons];
-    const q = searchParams.get('q');
     const rawQuery = searchParams.get('q');
     const query = rawQuery ? decodeURIComponent(rawQuery).toLowerCase() : null;
     const speaker = searchParams.get('speaker');
@@ -161,6 +165,8 @@ export const SermonBrowser = () => {
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
     const source = searchParams.get('source');
+    const mode = searchParams.get('mode');
+    const series = searchParams.get('series');
     const limit = 12;
 
     if (query) {
@@ -170,9 +176,15 @@ export const SermonBrowser = () => {
 
     if (book) { filtered = filtered.filter(s => s.book.includes(book)); }
     if (topic) { filtered = filtered.filter(s => s.topic.includes(topic)); }    
+    if (mode === 'scripture_led') {
+      filtered = filtered.filter(s => s.scripture_catalog_eligible);
+    } else if (mode) {
+      filtered = filtered.filter(s => s.organization_mode === mode);
+    }
+    if (series) { filtered = filtered.filter(s => s.series_title === series); }
     
     if (speaker) { filtered = filtered.filter(s => s.speaker === speaker); }
-    if (year) { filtered = filtered.filter(s => s.date.startsWith(year)); }
+    if (year) { filtered = filtered.filter(s => String(s.catalog_year || '') === year); }
     if (status) { filtered = filtered.filter(s => s.status === status); }
     if (assignee) { filtered = filtered.filter(s => s.assigned_to_name === assignee); }
     if (source) { filtered = filtered.filter(s => (s.source ? '公開' : '聖道教會') === source); }
@@ -182,12 +194,13 @@ export const SermonBrowser = () => {
     const endIndex = page * limit;
     
     return {
+      filteredSermons: filtered,
       paginatedSermons: filtered.slice(startIndex, endIndex),
       totalCount,
       hasNextPage: endIndex < totalCount,
       hasPrevPage: startIndex > 0,
     };
-  }, [allSermons, searchParams, searchResultIds, query]);
+  }, [allSermons, searchParams, searchResultIds]);
 
 
   // --- Render Logic ---
@@ -217,18 +230,42 @@ export const SermonBrowser = () => {
       );
     }
 
-  const { paginatedSermons, totalCount, hasNextPage, hasPrevPage } = filteredAndPaginatedData;
+  const { filteredSermons, paginatedSermons, totalCount, hasNextPage, hasPrevPage } = filteredAndPaginatedData;
 
   return (
     <div className="flex flex-col lg:flex-row">
       <SermonSidebar options={filterOptions} />
       <main className="flex-1">
         <SermonSearchBar isSearching={isSearching} />
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm sm:grid-cols-4">
+          {[
+            { value: '', label: '全部講道' },
+            { value: 'scripture_led', label: '聖經目錄' },
+            { value: 'topic_led', label: '專題講論' },
+            { value: 'mixed', label: '釋經與專題並重' },
+          ].map(item => {
+            const params = new URLSearchParams(searchParams);
+            if (item.value) params.set('mode', item.value); else params.delete('mode');
+            params.set('page', '1');
+            const active = organizationMode === item.value;
+            return (
+              <a
+                key={item.value || 'all'}
+                href={`?${params.toString()}`}
+                className={`rounded-lg px-3 py-2 text-center text-sm font-semibold transition-colors ${
+                  active ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-blue-50'
+                }`}
+              >
+                {item.label}
+              </a>
+            );
+          })}
+        </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <div className="text-sm text-gray-600">
             共找到 <span className="font-bold">{totalCount}</span> 篇講道
           </div>
-          <div className="inline-flex self-start overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
+          {organizationMode !== 'scripture_led' && <div className="inline-flex self-start overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm">
             <button
               type="button"
               onClick={() => setViewMode('card')}
@@ -255,9 +292,11 @@ export const SermonBrowser = () => {
               <ListIcon className="h-4 w-4" />
               <span className="hidden sm:inline">列表</span>
             </button>
-          </div>
+          </div>}
         </div>
-        {paginatedSermons.length > 0 ? (
+        {organizationMode === 'scripture_led' && filteredSermons.length > 0 ? (
+          <ScriptureSermonCatalog sermons={filteredSermons} />
+        ) : paginatedSermons.length > 0 ? (
           <>
             {viewMode === 'card' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">

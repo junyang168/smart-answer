@@ -8,7 +8,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 
-import { Sermon } from '@/app/interfaces/article';
+import { Sermon, SermonSeries } from '@/app/interfaces/article';
 import { BibleVerse } from '@/app/interfaces/article';
 
 import { SermonDetailSidebar } from '@/app/components/sermons/SermonDetailSidebar';
@@ -22,6 +22,7 @@ export const SermonDetailView = () => {
 
   // --- State Management ---
   const [sermon, setSermon] = useState<Sermon | null>(null);
+  const [seriesContext, setSeriesContext] = useState<SermonSeries | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [citationStartTime, setCitationStartTime] = useState<number | undefined>();
@@ -66,6 +67,7 @@ export const SermonDetailView = () => {
     const fetchSermon = async () => {
       setIsLoading(true);
       setError(null);
+      setSeriesContext(null);
 
       // ✅ 使用您提供的新 API 端點
       const apiUrl = `/api/sc_api/final_sermon/junyang168@gmail.com/${id}`;
@@ -100,6 +102,13 @@ export const SermonDetailView = () => {
           theme: data.metadata.theme || '',
           core_bible_verses: {},
           series_id: data.metadata.series_id,
+          series_title: data.metadata.series_title,
+          series_order: data.metadata.series_order,
+          organization_mode: data.metadata.organization_mode,
+          organization_mode_label: data.metadata.organization_mode_label,
+          catalog_primary_passage: data.metadata.catalog_primary_passage,
+          substantial_passages: data.metadata.substantial_passages || [],
+          supporting_passages: data.metadata.supporting_passages || [],
         }
 
         if (data.metadata && data.metadata.core_bible_verse) {
@@ -148,6 +157,25 @@ export const SermonDetailView = () => {
 
         setSermon(article);
 
+        if (article.series_id) {
+          const seriesResponse = await fetch('/api/sc_api/sermon_series');
+          if (seriesResponse.ok) {
+            const allSeries: SermonSeries[] = await seriesResponse.json();
+            const matchedSeries = allSeries.find(item => item.id === article.series_id) || null;
+            setSeriesContext(matchedSeries);
+            if (matchedSeries) {
+              const matchedOrder = matchedSeries.sermons.findIndex(
+                item => (item.item || item.id) === article.id,
+              );
+              setSermon(current => current ? {
+                ...current,
+                series_title: current.series_title || matchedSeries.title,
+                series_order: current.series_order || (matchedOrder >= 0 ? matchedOrder + 1 : undefined),
+              } : current);
+            }
+          }
+        }
+
       } catch (err: any) {
         if (err.message === '404') {
           // 將 404 錯誤單獨處理，以便後續可以調用 notFound()
@@ -183,10 +211,21 @@ export const SermonDetailView = () => {
     return <div className="text-center py-20">未找到該篇講道。</div>;
   }
 
+  const seriesSermons = seriesContext?.sermons ?? [];
+  const currentSeriesIndex = seriesSermons.findIndex(item => (item.item || item.id) === sermon.id);
+  const previousSermon = currentSeriesIndex > 0 ? seriesSermons[currentSeriesIndex - 1] : null;
+  const nextSermon = currentSeriesIndex >= 0 && currentSeriesIndex < seriesSermons.length - 1
+    ? seriesSermons[currentSeriesIndex + 1]
+    : null;
+  const seriesHref = sermon.series_id
+    ? `/resources/series/${encodeURIComponent(sermon.series_id)}?sermon=${encodeURIComponent(sermon.id)}`
+    : undefined;
+
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: 'AI 輔助查經', href: '/resources' },
     { name: '講道中心', href: '/resources/sermons' },
+    ...(seriesHref ? [{ name: sermon.series_title || '講道系列', href: seriesHref }] : []),
     { name: sermon.title }, // 當前講道標題，沒有 href
   ];
 
@@ -220,6 +259,38 @@ export const SermonDetailView = () => {
           ) : null}
         </div>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
+
+        {seriesHref ? (
+          <nav className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4" aria-label="講道系列導航">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-bold tracking-wide text-indigo-600">原始講課次序</div>
+                <Link href={seriesHref} className="mt-1 block font-bold text-indigo-950 hover:underline">
+                  {sermon.series_title || seriesContext?.title || '查看完整系列'}
+                  {currentSeriesIndex >= 0 ? ` · 第 ${currentSeriesIndex + 1} 講／共 ${seriesSermons.length} 講` : ''}
+                </Link>
+              </div>
+              <div className="flex flex-wrap gap-2 text-sm font-semibold">
+                {previousSermon ? (
+                  <Link
+                    href={`/resources/sermons/${encodeURIComponent(previousSermon.item || previousSermon.id)}`}
+                    className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-indigo-700 hover:bg-indigo-100"
+                  >
+                    ← 上一講
+                  </Link>
+                ) : null}
+                {nextSermon ? (
+                  <Link
+                    href={`/resources/sermons/${encodeURIComponent(nextSermon.item || nextSermon.id)}`}
+                    className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-indigo-700 hover:bg-indigo-100"
+                  >
+                    下一講 →
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          </nav>
+        ) : null}
 
         {citationNotice ? (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

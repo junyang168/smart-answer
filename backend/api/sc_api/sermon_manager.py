@@ -92,10 +92,15 @@ class SermonManager:
 
 
 
-        refreshers = [self._acl.get_refresher(), self._sm.get_refresher()]
+        refreshers = [
+            self._acl.get_refresher(),
+            self._sm.get_refresher(),
+            self._sm.get_catalog_refresher(),
+        ]
         event_handler = ConfigFileEventHandler(refreshers)
         observer = Observer()
         observer.schedule(event_handler, os.path.dirname(self.config_folder + '/config.json'), recursive=False)
+        observer.schedule(event_handler, self.base_folder, recursive=False)
         observer.start()
 
     def get_next_fellowship(self):
@@ -1119,13 +1124,26 @@ class ConfigFileEventHandler(FileSystemEventHandler):
     def __init__(self, refreshers: list):
         self._refresheres = refreshers
 
+    def _refresh(self, path: str):
+        for refresher in self._refresheres:
+            if path.endswith(refresher[0]):
+                refresher[1]()
+                break
+
     def on_modified(self, event):
         if event.is_directory:
             return
-        for refresher in self._refresheres:
-            if event.src_path.endswith(refresher[0]):
-                refresher[1]()
-                break
+        self._refresh(event.src_path)
+
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        self._refresh(event.src_path)
+
+    def on_moved(self, event):
+        if event.is_directory:
+            return
+        self._refresh(event.dest_path)
 
 
 

@@ -46,9 +46,12 @@ export const SermonDetailSidebar = ({ sermon, authenticated, canReviewRepository
         <dl>
           <InfoRow
             label="講道系列"
-            value={sermon.series_id || 'None'}
-            link={sermon.series_id ? `/resources/series/${sermon.series_id}` : undefined}
+            value={sermon.series_title || sermon.series_id || '未編入系列'}
+            link={sermon.series_id
+              ? `/resources/series/${encodeURIComponent(sermon.series_id)}?sermon=${encodeURIComponent(sermon.id)}`
+              : undefined}
           />
+          {sermon.series_order ? <InfoRow label="系列次序" value={`第 ${sermon.series_order} 講`} /> : null}
 
           {sermon.scripture && sermon.scripture.length > 0 && (
             <div className="flex justify-between items-baseline py-3 border-b border-gray-200">

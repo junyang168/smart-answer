@@ -51,6 +51,7 @@
 - [代表样本普查 v1](./corpus_survey_sample_v1.md)
 - [经文角色与释经覆盖格式 v2：15 篇校准报告](./scripture_roles_v2_pilot_validation.md)
 - [全语料第一遍普查与设计审查 v1](./full_corpus_survey_findings_v1.md)
+- [講道目錄分類與 ingestion 邊界](./sermon_catalog_ingestion.md)
 - [205 篇讲道普查后的总体设计验证 v1](./full_corpus_205_design_validation_v1.md)
 - [205 篇讲道：17 个候选归组结构审核 v1](./candidate_group_review_205_v1.md)
 - [王守仁教授释经与思想候选基线 v3（当前）](./candidate_baseline_v3.md)

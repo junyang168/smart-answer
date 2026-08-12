@@ -70,6 +70,7 @@ interface SermonSidebarProps {
   options: {
     books?: FacetOption[];
     topics?: FacetOption[];
+    series?: FacetOption[];
     speakers?: FacetOption[];
     years?: FacetOption[];
     statuses?: FacetOption[];
@@ -85,13 +86,15 @@ export const SermonSidebar = ({ options }: SermonSidebarProps) => {
   const facets = [
     { title: '編輯狀態', paramName: 'status', options: options.statuses || [] },
     { title: '認領人', paramName: 'assignee', options: options.assignees || [] },
+    { title: '講道系列', paramName: 'series', options: options.series || [] },
     { title: '講道主題', paramName: 'topic', options: options.topics || [] },
+    { title: '年份', paramName: 'year', options: options.years || [] },
     { title: '講道來源', paramName: 'source', options: options.source || [] },
     { title: '聖經書卷', paramName: 'book', options: options.books || [] },
   ].filter(f => f.options.length > 0);
 
   return (
-    <aside className="w-full lg:w-64 xl:w-72 lg:pr-8">
+    <aside className="hidden w-full lg:block lg:w-64 lg:pr-8 xl:w-72">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-bold">篩選</h2>
         <Link href={pathname} className="text-sm text-gray-500 hover:underline">
