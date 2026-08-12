@@ -215,6 +215,63 @@ def test_database_only_claim_gets_legacy_ui_defaults() -> None:
     ]
 
 
+def test_postgres_workspace_does_not_require_pilot_json(tmp_path: Path, monkeypatch) -> None:
+    """Production authoring must not depend on the historical pilot artifact."""
+
+    class FakeStore:
+        def compile_package(self, package_id=None):
+            assert package_id is None
+            return {
+                "package_id": "DB-PACKAGE",
+                "summary": {"counts": {"claims": 1}},
+                "claims": [{"claim_id": "CL-DB", "statement": "資料庫主張"}],
+            }
+
+    missing = tmp_path / "missing-pilot.json"
+    monkeypatch.setattr(thought_review, "SHARED_KNOWLEDGE_PATH", missing)
+    monkeypatch.setattr(thought_review, "_postgres_store", lambda: FakeStore())
+
+    payload = thought_review._shared_payload()
+
+    assert payload["authoring_authority"] == "postgresql"
+    assert payload["claims"][0]["claim_id"] == "CL-DB"
+    assert payload["summary"]["counts"]["claims"] == 1
+
+
+def test_postgres_workspace_is_not_filtered_to_pilot_package(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The optional pilot must not restrict the production authoring corpus."""
+
+    class FakeStore:
+        def compile_package(self, package_id=None):
+            assert package_id is None
+            return {
+                "package_id": "FULL-DATABASE",
+                "summary": {"counts": {"claims": 2}},
+                "claims": [
+                    {"claim_id": "CL-PILOT", "statement": "試驗主張"},
+                    {"claim_id": "CL-NEW", "statement": "後來匯入的主張"},
+                ],
+            }
+
+    pilot = tmp_path / "shared.json"
+    _write(
+        pilot,
+        {
+            "package_id": "PILOT-ONLY",
+            "claims": [{"claim_id": "CL-PILOT", "title": "舊顯示標題"}],
+        },
+    )
+    monkeypatch.setattr(thought_review, "SHARED_KNOWLEDGE_PATH", pilot)
+    monkeypatch.setattr(thought_review, "_postgres_store", lambda: FakeStore())
+
+    payload = thought_review._shared_payload()
+
+    assert [item["claim_id"] for item in payload["claims"]] == ["CL-PILOT", "CL-NEW"]
+    assert payload["claims"][0]["title"] == "舊顯示標題"
+
+
 def test_candidate_evidence_is_visible_but_does_not_unlock_approval(
     tmp_path: Path, monkeypatch
 ) -> None:

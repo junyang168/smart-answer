@@ -92,15 +92,29 @@ def _merge_rows(base_rows: list[dict], database_rows: list[dict], id_key: str) -
 
 
 def _shared_payload() -> dict:
-    """Read live records from PostgreSQL and retain non-record pilot metadata."""
-    base = _read_json(SHARED_KNOWLEDGE_PATH)
+    """Read the PostgreSQL authoring store, with JSON only as a dev fallback.
+
+    ``shared_knowledge_pilot_v1.json`` is a rebuildable candidate exchange
+    artifact, not the active snapshot and not the production authoring
+    authority.  When PostgreSQL is configured it may enrich display-only
+    legacy fields, but its absence must never prevent the review workspace
+    from loading.
+    """
     store = _postgres_store()
     if not store:
-        return base
+        return _read_json(SHARED_KNOWLEDGE_PATH)
+
+    base = _read_optional_json(SHARED_KNOWLEDGE_PATH)
     try:
-        database = store.compile_package(package_id=base.get("package_id"))
-    except Exception:
-        return base
+        # The pilot package is only optional display enrichment.  Filtering by
+        # its package_id would hide newer PostgreSQL records and make the
+        # review workspace appear to contain only the original experiment.
+        database = store.compile_package()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="PostgreSQL 編輯主庫目前無法讀取，請檢查知識庫服務。",
+        ) from exc
     collection_ids = {
         "source_documents": "source_id",
         "source_fragments": "fragment_id",
