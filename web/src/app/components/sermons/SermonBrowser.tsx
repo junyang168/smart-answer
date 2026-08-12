@@ -39,7 +39,7 @@ export const SermonBrowser = () => {
 
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
-  const organizationMode = searchParams.get('mode') || '';
+  const organizationMode = searchParams.get('mode') || 'scripture_led';
   const { status } = useSession(); // ✅ 獲取 session 狀態
   const authenticated = status === 'authenticated';
 
@@ -165,7 +165,7 @@ export const SermonBrowser = () => {
     const assignee = searchParams.get('assignee');
     const page = Number(searchParams.get('page') ?? '1');
     const source = searchParams.get('source');
-    const mode = searchParams.get('mode');
+    const mode = searchParams.get('mode') || 'scripture_led';
     const series = searchParams.get('series');
     const limit = 12;
 
@@ -178,7 +178,7 @@ export const SermonBrowser = () => {
     if (topic) { filtered = filtered.filter(s => s.topic.includes(topic)); }    
     if (mode === 'scripture_led') {
       filtered = filtered.filter(s => s.scripture_catalog_eligible);
-    } else if (mode) {
+    } else if (mode !== 'all') {
       filtered = filtered.filter(s => s.organization_mode === mode);
     }
     if (series) { filtered = filtered.filter(s => s.series_title === series); }
@@ -239,18 +239,18 @@ export const SermonBrowser = () => {
         <SermonSearchBar isSearching={isSearching} />
         <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-gray-200 bg-white p-2 shadow-sm sm:grid-cols-4">
           {[
-            { value: '', label: '全部講道' },
             { value: 'scripture_led', label: '聖經目錄' },
             { value: 'topic_led', label: '專題講論' },
             { value: 'mixed', label: '釋經與專題並重' },
+            { value: 'all', label: '全部講道' },
           ].map(item => {
             const params = new URLSearchParams(searchParams);
-            if (item.value) params.set('mode', item.value); else params.delete('mode');
+            if (item.value === 'scripture_led') params.delete('mode'); else params.set('mode', item.value);
             params.set('page', '1');
             const active = organizationMode === item.value;
             return (
               <a
-                key={item.value || 'all'}
+                key={item.value}
                 href={`?${params.toString()}`}
                 className={`rounded-lg px-3 py-2 text-center text-sm font-semibold transition-colors ${
                   active ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-700 hover:bg-blue-50'
