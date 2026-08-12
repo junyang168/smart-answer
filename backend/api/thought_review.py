@@ -758,7 +758,17 @@ def candidates_data() -> dict:
         reviewed_decisions = [
             {
                 "decision_id": decision.get("decision_id"),
-                "title": decision.get("section_title") or decision.get("passage") or decision.get("decision_id"),
+                # Legacy composition plans stored the reader-facing heading in
+                # ``section_title``/``passage``.  PostgreSQL-native plans use
+                # ``decision`` for the same purpose.  Never expose an internal
+                # decision ID merely because the record came from the new
+                # authoring store.
+                "title": (
+                    decision.get("section_title")
+                    or decision.get("passage")
+                    or decision.get("decision")
+                    or "未命名編排段落"
+                ),
                 "review": _review_for(
                     decision,
                     state["composition_decisions"].get(str(decision.get("decision_id"))),

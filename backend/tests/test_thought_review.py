@@ -305,6 +305,27 @@ def test_candidates_project_scripture_and_topic_plans_with_readable_routes(
     )
 
 
+def test_candidates_use_postgres_decision_text_instead_of_internal_id(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _fixture_paths(tmp_path, monkeypatch)
+    shared = json.loads(thought_review.SHARED_KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+    topic_plan = next(item for item in shared["product_plans"] if item["plan_id"] == "CP-TOPIC-1")
+    topic_plan["decisions"] = [{
+        "decision_id": "CD-INTERNAL-01",
+        "decision": "先說明『人子』稱號的原文限定",
+        "decision_type": "topic_main_section",
+        "claim_ids": ["CL-1"],
+        "review_status": "candidate",
+    }]
+    _write(thought_review.SHARED_KNOWLEDGE_PATH, shared)
+
+    payload = thought_review.candidates_data()
+    decision = payload["topic_candidates"][0]["decisions"][0]
+    assert decision["title"] == "先說明『人子』稱號的原文限定"
+    assert decision["title"] != decision["decision_id"]
+
+
 def test_qa_projection_keeps_answers_separate_from_context(tmp_path: Path, monkeypatch) -> None:
     _fixture_paths(tmp_path, monkeypatch)
 

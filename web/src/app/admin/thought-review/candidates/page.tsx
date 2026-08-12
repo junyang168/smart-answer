@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, FileText, Layers3, Loader2 } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, FileText, Layers3, Loader2, RefreshCw } from "lucide-react";
 
 type Candidate = {
   candidate_id: string;
@@ -37,18 +37,42 @@ export default function ThoughtReviewCandidatesPage() {
   const [axis, setAxis] = useState<"scripture" | "topic">("scripture");
   const [target, setTarget] = useState("");
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+
+  async function loadCandidates({ background = false }: { background?: boolean } = {}) {
+    if (!background) setRefreshing(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/thought-review/candidates?fresh=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!response.ok) throw new Error((await response.json()).detail ?? "無法載入候選內容");
+      setPayload(await response.json());
+      setLoadedAt(new Date());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法載入候選內容");
+    } finally {
+      if (!background) setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("axis") === "topic") setAxis("topic");
     setTarget(params.get("target") ?? "");
-    fetch("/api/admin/thought-review/candidates", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error((await response.json()).detail ?? "無法載入候選內容");
-        return response.json();
-      })
-      .then(setPayload)
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "無法載入候選內容"));
+    void loadCandidates();
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadCandidates({ background: true });
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -78,10 +102,24 @@ export default function ThoughtReviewCandidatesPage() {
         <Link href="/admin/thought-review" className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-700">
           <ChevronLeft className="h-4 w-4" />返回思想審核
         </Link>
-        <header className="mt-4 rounded-3xl bg-slate-900 p-7 text-white shadow-sm">
-          <p className="text-sm font-semibold text-indigo-300">共享知識的產品出口</p>
-          <h1 className="mt-2 text-3xl font-bold">{payload?.title}</h1>
-          <p className="mt-3 max-w-3xl leading-7 text-slate-300">{payload?.description}</p>
+        <header className="mt-4 flex flex-wrap items-end justify-between gap-5 rounded-3xl bg-slate-900 p-7 text-white shadow-sm">
+          <div>
+            <p className="text-sm font-semibold text-indigo-300">共享知識的產品出口</p>
+            <h1 className="mt-2 text-3xl font-bold">{payload?.title}</h1>
+            <p className="mt-3 max-w-3xl leading-7 text-slate-300">{payload?.description}</p>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              onClick={() => void loadCandidates()}
+              disabled={refreshing}
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-400 disabled:cursor-wait disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "正在更新…" : "重新載入最新資料"}
+            </button>
+            {loadedAt && <p className="text-xs text-slate-400">本頁更新於 {loadedAt.toLocaleTimeString("zh-TW")}</p>}
+          </div>
         </header>
 
         <div className="mt-6 grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">

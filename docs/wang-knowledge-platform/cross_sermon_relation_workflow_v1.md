@@ -28,7 +28,14 @@ flowchart LR
     E -->|"拒绝 Claude"| F["Claude 再审"]
     F -->|"接受 OpenAI"| G
     F -->|"仍不同意"| H["只将这一项交给人工"]
-    G --> I["后续专题／释经／问答候选归纳"]
+    G --> I["OpenAI 提出释经／专题候选编排"]
+    I --> J["Claude 逐项独立复核"]
+    J -->|"通过"| K["写入候选工作台"]
+    J -->|"建议替换"| L["OpenAI 仲裁"]
+    L -->|"接受 Claude"| K
+    L -->|"维持原案"| M["Claude 再审"]
+    M -->|"接受 OpenAI"| K
+    M -->|"仍不同意"| N["只转交该候选给人工"]
 ```
 
 因此有两种不同的“合并”：
@@ -143,7 +150,33 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_sermon_relation_runner \
 - `reconsideration.json`：Claude 对被拒意见的再审；
 - `reviewed-relations.json`：最终 AI 共识关系与仅含真实分歧的人工队列。
 
-这个结果仍然**不是专题目录**。下一步应当以共识关系图为输入，提出候选主题群、释经链、问答链和方法模式；该归纳必须保存为独立的编辑综合对象，并允许一条主张进入多个候选产品。原始主张和来源不能因候选归组而消失。
+关系图本身仍然**不是专题目录**。关系审核完成后，`candidate_projection_runner.py` 以共识关系图和共享主张为输入，提出彼此独立的释经候选与专题候选。OpenAI 先建立候选编排，Claude 按候选逐项独立复核；有修改意见时由 OpenAI 仲裁，若 OpenAI 不接受，再交 Claude 复审。只有两个模型持续不同意的单项候选进入人工队列。
+
+复核采用逐项、可恢复运行，而不是把全部主张和全部主题一次交给模型。这样可以避免长请求把输出额度全部耗在推理中，也使一项失败不会丢掉整批结果。每项结果按计划指纹保存在 `candidate-projection/plan-reviews/`，同一输入可以安全续跑。
+
+候选投影仍不改写原始主张。一条主张可以同时进入释经和专题产品；释经轴必须直接服务目标经文，专题轴必须围绕跨讲问题，不能因同批处理或共享关键词而强行合并。
+
+运行命令：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python \
+  -m backend.pipeline.candidate_projection_runner --apply
+```
+
+`--apply` 将 AI 共识候选写入 PostgreSQL authoring store；不代表人工批准或可以出版。管理员 UI `/admin/thought-review/candidates` 直接从数据库读取这些 `ProductPlan`、`CompositionDecision`、`KnowledgeRoute` 与 `EditorialSynthesis`。
+
+本轮五篇讲道实测得到：
+
+| 项目 | 数量 |
+|---|---:|
+| 进入逐项复核的候选计划 | 16 |
+| Claude 直接通过原案 | 15 |
+| Claude 建议改轴且 OpenAI 接受 | 1 |
+| 持续分歧、转人工 | 0 |
+| 最终释经候选 | 9 |
+| 最终专题候选 | 7 |
+
+被调整的一项原本把同一篇罗马书讲道的四条主张列为跨讲专题；Claude 指出它实际集中解释罗马书 3:25，OpenAI 接受并改为释经候选。这说明双模型复核能够纠正“有神学主题就自动变成专题”的归轴错误。
 
 ## 七、代码位置
 
@@ -151,3 +184,7 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_sermon_relation_runner \
 - 可恢复 runner：`backend/pipeline/cross_sermon_relation_runner.py`
 - 四个模型 prompt：`backend/pipeline/prompts/cross_sermon_relation_*.md`
 - 测试：`backend/tests/test_cross_sermon_relation.py`
+- 候选投影 schema 与稳定 ID：`backend/pipeline/candidate_projection.py`
+- 候选投影双模型 runner：`backend/pipeline/candidate_projection_runner.py`
+- 候选投影 prompts：`backend/pipeline/prompts/candidate_projection_*.md`
+- 候选投影测试：`backend/tests/test_candidate_projection.py`
