@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, FileText, Layers3, Loader2, RefreshCw } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, FileText, GitBranch, Layers3, Loader2, RefreshCw } from "lucide-react";
 
 type Candidate = {
   candidate_id: string;
@@ -23,6 +23,41 @@ type Payload = {
   description: string;
   scripture_candidates: Candidate[];
   topic_candidates: Candidate[];
+  topic_structures: TopicStructureBatch[];
+};
+
+type TopicStructureBatch = {
+  batch_id: string;
+  status: string;
+  summary: string;
+  family_count: number;
+  subtopic_count: number;
+  claim_count: number;
+  unassigned_claim_count: number;
+  families: {
+    family_id: string;
+    title: string;
+    organizing_question: string;
+    editorial_rationale: string;
+    review_state: "ai_consensus" | "human_review_required";
+    claim_count: number;
+    subtopic_count: number;
+    subtopics: {
+      subtopic_id: string;
+      title: string;
+      central_question: string;
+      editorial_rationale: string;
+      claim_count: number;
+      sections: {
+        section_id: string;
+        title: string;
+        role: string;
+        purpose: string;
+        claim_count: number;
+        claims: { claim_id: string; title: string }[];
+      }[];
+    }[];
+  }[];
 };
 
 const statusLabels: Record<string, string> = {
@@ -34,7 +69,7 @@ const statusLabels: Record<string, string> = {
 
 export default function ThoughtReviewCandidatesPage() {
   const [payload, setPayload] = useState<Payload | null>(null);
-  const [axis, setAxis] = useState<"scripture" | "topic">("scripture");
+  const [axis, setAxis] = useState<"scripture" | "topic" | "structure">("scripture");
   const [target, setTarget] = useState("");
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -61,6 +96,7 @@ export default function ThoughtReviewCandidatesPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("axis") === "topic") setAxis("topic");
+    if (params.get("axis") === "structure") setAxis("structure");
     setTarget(params.get("target") ?? "");
     void loadCandidates();
 
@@ -81,11 +117,11 @@ export default function ThoughtReviewCandidatesPage() {
   }, [payload, target, axis]);
 
   const items = useMemo(
-    () => (axis === "scripture" ? payload?.scripture_candidates : payload?.topic_candidates) ?? [],
+    () => axis === "scripture" ? payload?.scripture_candidates ?? [] : axis === "topic" ? payload?.topic_candidates ?? [] : [],
     [axis, payload],
   );
 
-  function selectAxis(nextAxis: "scripture" | "topic") {
+  function selectAxis(nextAxis: "scripture" | "topic" | "structure") {
     setAxis(nextAxis);
     setTarget("");
     window.history.replaceState(null, "", `/admin/thought-review/candidates?axis=${nextAxis}`);
@@ -122,16 +158,21 @@ export default function ThoughtReviewCandidatesPage() {
           </div>
         </header>
 
-        <div className="mt-6 grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm md:grid-cols-3">
           <button onClick={() => selectAxis("scripture")} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-bold ${axis === "scripture" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
             <BookOpen className="h-5 w-5" />釋經候選（{payload?.scripture_candidates.length ?? 0}）
           </button>
           <button onClick={() => selectAxis("topic")} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-bold ${axis === "topic" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
             <Layers3 className="h-5 w-5" />專題候選（{payload?.topic_candidates.length ?? 0}）
           </button>
+          <button onClick={() => selectAxis("structure")} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-bold ${axis === "structure" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+            <GitBranch className="h-5 w-5" />專題結構（{payload?.topic_structures.reduce((total, batch) => total + batch.family_count, 0) ?? 0}）
+          </button>
         </div>
 
-        <div className="mt-6 space-y-5">
+        {axis === "structure" ? (
+          <TopicStructureView batches={payload?.topic_structures ?? []} />
+        ) : <div className="mt-6 space-y-5">
           {items.map((item) => {
             const highlighted = item.candidate_id === target;
             return (
@@ -186,8 +227,107 @@ export default function ThoughtReviewCandidatesPage() {
               </article>
             );
           })}
-        </div>
+        </div>}
       </div>
     </main>
   );
+}
+
+const roleLabels: Record<string, string> = {
+  question_frame: "提出問題",
+  core_thesis: "核心主張",
+  scripture_evidence: "經文依據",
+  reasoning: "論證推理",
+  qualification: "限制與澄清",
+  application: "生活應用",
+  appendix: "附錄背景",
+};
+
+function TopicStructureView({ batches }: { batches: TopicStructureBatch[] }) {
+  if (!batches.length) {
+    return <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900">尚未產生專題結構候選。</div>;
+  }
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 text-sky-950">
+        <h2 className="font-bold">這裡顯示 AI 發現的候選層級</h2>
+        <p className="mt-1 leading-7">母題是較大的研究領域；子專題回答一個集中問題；篇章段落是未來文章的寫作順序。它們尚未等同於已批准的專題文章。</p>
+      </div>
+      {batches.map((batch) => (
+        <section key={batch.batch_id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-bold text-indigo-700">核心語料驗證</p>
+              <h2 className="mt-1 text-2xl font-bold text-slate-950">自動發現的專題結構</h2>
+              {batch.summary && <p className="mt-2 max-w-4xl leading-7 text-slate-600">{batch.summary}</p>}
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+              <Metric value={batch.family_count} label="母題" />
+              <Metric value={batch.subtopic_count} label="子專題" />
+              <Metric value={batch.claim_count} label="主張" />
+            </div>
+          </div>
+          <div className="mt-6 space-y-4">
+            {batch.families.map((family) => (
+              <details key={family.family_id} className="group rounded-2xl border border-slate-200 bg-slate-50 open:bg-white">
+                <summary className="cursor-pointer list-none p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800">候選母題</span>
+                        <span className={`rounded-full px-3 py-1 text-xs font-bold ${family.review_state === "ai_consensus" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                          {family.review_state === "ai_consensus" ? "雙模型共識" : "需要同工判斷"}
+                        </span>
+                      </div>
+                      <h3 className="mt-3 text-xl font-bold text-slate-950">{family.title}</h3>
+                      <p className="mt-2 leading-7 text-slate-600">{family.organizing_question}</p>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-slate-500">{family.subtopic_count} 個子專題 · {family.claim_count} 條主張</span>
+                  </div>
+                </summary>
+                <div className="border-t border-slate-200 p-5 sm:p-6">
+                  <p className="rounded-xl bg-slate-50 p-4 leading-7 text-slate-700"><strong>為何形成這個母題：</strong>{family.editorial_rationale}</p>
+                  <div className="mt-5 space-y-4">
+                    {family.subtopics.map((subtopic) => (
+                      <details key={subtopic.subtopic_id} className="rounded-xl border border-indigo-100 bg-indigo-50/40">
+                        <summary className="cursor-pointer list-none p-4 sm:p-5">
+                          <span className="text-xs font-bold text-indigo-700">候選子專題</span>
+                          <h4 className="mt-1 text-lg font-bold text-slate-950">{subtopic.title}</h4>
+                          <p className="mt-2 leading-6 text-slate-600">{subtopic.central_question}</p>
+                          <p className="mt-2 text-sm font-semibold text-slate-500">{subtopic.sections.length} 個篇章段落 · {subtopic.claim_count} 條主張</p>
+                        </summary>
+                        <div className="space-y-3 border-t border-indigo-100 p-4 sm:p-5">
+                          {subtopic.sections.map((section, index) => (
+                            <details key={section.section_id} className="rounded-xl border border-slate-200 bg-white p-4">
+                              <summary className="cursor-pointer list-none">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <span className="text-xs font-bold text-sky-700">篇章段落 {index + 1} · {roleLabels[section.role] ?? section.role}</span>
+                                    <h5 className="mt-1 font-bold text-slate-900">{section.title}</h5>
+                                    <p className="mt-1 text-sm leading-6 text-slate-600">{section.purpose}</p>
+                                  </div>
+                                  <span className="text-sm font-semibold text-slate-500">{section.claim_count} 條主張</span>
+                                </div>
+                              </summary>
+                              <ul className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700">
+                                {section.claims.map((claim) => <li key={claim.claim_id} className="flex gap-2"><FileText className="mt-1 h-4 w-4 shrink-0 text-indigo-500" /><span>{claim.title}</span></li>)}
+                              </ul>
+                            </details>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function Metric({ value, label }: { value: number; label: string }) {
+  return <div className="min-w-20 rounded-xl bg-slate-100 px-3 py-2"><strong className="block text-lg text-slate-950">{value}</strong><span className="text-slate-500">{label}</span></div>;
 }

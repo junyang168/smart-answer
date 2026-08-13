@@ -18,6 +18,9 @@ def _fixture_paths(tmp_path: Path, monkeypatch) -> None:
     # local .env may point at a populated PostgreSQL authoring store, which must
     # never leak into deterministic fixture assertions.
     monkeypatch.delenv("KNOWLEDGE_DATABASE_URL", raising=False)
+    topic_structure_root = tmp_path / "research-batches"
+    topic_structure_root.mkdir()
+    monkeypatch.setattr(thought_review, "TOPIC_STRUCTURE_ROOT", topic_structure_root)
     claims = {
         "source_projects": [{"project_id": "p1", "transcript_id": "讲道 3"}],
         "claims": [{
@@ -324,6 +327,53 @@ def test_candidates_use_postgres_decision_text_instead_of_internal_id(
     decision = payload["topic_candidates"][0]["decisions"][0]
     assert decision["title"] == "先說明『人子』稱號的原文限定"
     assert decision["title"] != decision["decision_id"]
+
+
+def test_candidates_show_discovered_topic_hierarchy_as_separate_stage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _fixture_paths(tmp_path, monkeypatch)
+    artifact = thought_review.TOPIC_STRUCTURE_ROOT / "RB-TEST" / "topic-structure" / "reviewed-topic-structure.json"
+    artifact.parent.mkdir(parents=True)
+    _write(artifact, {
+        "status": "ai_consensus",
+        "final": {
+            "summary": "跨講主張形成候選結構。",
+            "unassigned_claim_ids": [],
+            "topic_families": [{
+                "title": "約、恩典與關係",
+                "organizing_question": "約如何組織恩典與順服？",
+                "editorial_rationale": "多篇講道共同形成此問題。",
+                "subtopics": [{
+                    "title": "宗主國之約",
+                    "central_question": "宗主國之約的結構是什麼？",
+                    "editorial_rationale": "先界定概念，再整理論證。",
+                    "sections": [{
+                        "title": "先施恩、後要求",
+                        "role": "core_thesis",
+                        "purpose": "說明中心結構。",
+                        "claim_ids": ["CL-1"],
+                    }],
+                }],
+            }],
+        },
+        "family_reviews": [{
+            "family_key": "FAMILY-1",
+            "openai_family": {"title": "約、恩典與關係"},
+        }],
+        "human_review_items": [],
+    })
+
+    payload = thought_review.candidates_data()
+    batch = payload["topic_structures"][0]
+    assert batch["family_count"] == 1
+    assert batch["subtopic_count"] == 1
+    assert batch["claim_count"] == 1
+    family = batch["families"][0]
+    assert family["title"] == "約、恩典與關係"
+    assert family["review_state"] == "ai_consensus"
+    section = family["subtopics"][0]["sections"][0]
+    assert section["claims"] == [{"claim_id": "CL-1", "title": "主张一"}]
 
 
 def test_qa_projection_keeps_answers_separate_from_context(tmp_path: Path, monkeypatch) -> None:
