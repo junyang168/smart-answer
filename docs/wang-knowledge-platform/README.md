@@ -33,6 +33,7 @@
 21. [馬太福音釋經教學文集：成書體例 v2](./matthew_exposition_publication_profile_v1.md)
 22. [馬太福音釋經：來源進入論證層與跨來源整合流程 v1](./matthew_source_to_argument_workflow_v1.md)
 23. [釋經初稿的程序化審計流程 v1](./editorial_draft_audit_workflow_v1.md)
+24. [篇章釋經快速路徑 v1](./fast_passage_editorial_workflow_v1.md)
 
 共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`output/claim-layer/shared_knowledge_pilot_v1.json` 仍是候选交换包，不等于 canonical repository，也不会直接进入公开文库。
 
