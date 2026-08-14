@@ -1,0 +1,24 @@
+{
+  "schema_version": "wang_cross_sermon_relation_adjudication_v1",
+  "generated_at": "2026-08-14T18:58:30.224520+00:00",
+  "generation": {
+    "pipeline_schema_version": "wang_cross_sermon_relation_runner_v1",
+    "source_sha256": "0c35013ed5524a7b8d797961181383a9644fe3ed28211f46e5db50f03f6282f4",
+    "prompt_sha256": "d80625a5ef6b7aaf35643279c6a10dfe4b25c6755a97276164a1702da6e446ff",
+    "model_id": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "temperature": 0.0,
+    "response_schema_sha256": "76727ddc8fcf7e4da93310efe4dc87ac6d529adf0101b874862dd605f0b02aa8",
+    "fingerprint_sha256": "87cd3eaa48d43c362f09a083170ac3f667205d98b11aa9fefe670d807acd4a12"
+  },
+  "result": {
+    "adjudications": [
+      {
+        "candidate_id": "XSR-5536aafbfbb5f220",
+        "decision": "accept",
+        "reason": "接受删除。目标主张的结构核心是以太16:19与太18:18的单复数对象对读，反对仅凭太16:19把权柄限于彼得；来源主张则借使徒行传中彼得受差派和受问责来否定其教皇地位。两者虽共享“彼得并无个人独占权柄”的宽泛结论，但来源材料并未支持目标所主张的特定跨文本解释方法或论证步骤，不足以构成直接的supports关系。"
+      }
+    ],
+    "scope_confirmation": "cross_sermon_structure_no_theological_critique"
+  }
+}

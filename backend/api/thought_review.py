@@ -79,7 +79,10 @@ def _resolved_presentation_source(source_document: dict) -> dict:
     if source_path.is_file():
         try:
             payload = json.loads(source_path.read_text(encoding="utf-8"))
-            metadata = payload.get("metadata") or {}
+            # Published transcripts have appeared both as an object with a
+            # metadata field and as a top-level segment array.  The latter is
+            # still a valid source; it simply has no embedded metadata.
+            metadata = payload.get("metadata") or {} if isinstance(payload, dict) else {}
         except (json.JSONDecodeError, OSError):
             pass
     catalog = CanonicalRepositoryService._sermon_catalog_record(transcript_id)
@@ -121,6 +124,7 @@ def _editorial_drafts() -> list[dict]:
                     "candidate_id": candidate_id,
                     "decision_id": decision_id,
                     "title": item.get("title") or draft_path.stem,
+                    "passage": str(item.get("passage") or "").strip(),
                     "status": item.get("status") or "editorial_draft",
                     "status_label": item.get("status_label") or "編輯初稿可審閱",
                     "draft_path": draft_path,
@@ -172,7 +176,7 @@ def editorial_draft_data(draft_id: str) -> dict:
 
     shared = _shared_payload()
     candidate_id = draft.get("candidate_id") or None
-    passage = ""
+    passage = str(draft.get("passage") or "").strip()
     decision_title = ""
     for plan in shared.get("product_plans", []):
         if candidate_id and str(plan.get("plan_id") or "") == candidate_id:
@@ -921,9 +925,30 @@ def candidates_data() -> dict:
     claims_by_id = {item["claim_id"]: item for item in shared.get("claims", [])}
     plans_by_id = {item.get("plan_id"): item for item in shared.get("product_plans", [])}
     topics_by_id = {item.get("topic_id"): item for item in shared.get("topic_nodes", [])}
+    drafts = _editorial_drafts()
+    # A new editorial package can be reviewed before it is promoted into the
+    # global shared snapshot.  Use the package bound by its manifest to make
+    # that candidate discoverable in the UI, while keeping the global snapshot
+    # authoritative whenever it already contains the plan.
+    for draft in drafts:
+        candidate_id = str(draft.get("candidate_id") or "")
+        if not candidate_id or candidate_id in plans_by_id:
+            continue
+        package = _draft_presentation_payload(draft, shared)
+        package_plan = next(
+            (
+                plan
+                for plan in package.get("product_plans", []) or []
+                if str(plan.get("plan_id") or "") == candidate_id
+            ),
+            None,
+        )
+        if package_plan:
+            plans_by_id[candidate_id] = package_plan
+
     drafts_by_decision_id: dict[str, list[dict]] = {}
     drafts_by_candidate_id: dict[str, list[dict]] = {}
-    for draft in _editorial_drafts():
+    for draft in drafts:
         if draft.get("candidate_id"):
             drafts_by_candidate_id.setdefault(draft["candidate_id"], []).append(draft)
         if draft.get("decision_id"):

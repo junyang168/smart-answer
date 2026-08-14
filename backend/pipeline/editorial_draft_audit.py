@@ -760,7 +760,12 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
                 )
 
         claim_ids = [str(value) for value in decision.get("claim_ids", []) if value]
-        if not claim_ids:
+        declared_coverage_gap = (
+            decision.get("action") == "coverage_gap"
+            and decision.get("coverage") == "missing"
+            and editorial_boundary.get("required") is True
+        )
+        if not claim_ids and not declared_coverage_gap:
             findings.append(
                 _finding(
                     "decision_without_claims",

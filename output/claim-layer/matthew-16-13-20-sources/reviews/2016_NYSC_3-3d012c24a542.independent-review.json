@@ -1,0 +1,1084 @@
+{
+  "schema_version": "wang_corpus_independent_review_v1",
+  "source": {
+    "input_mode": "curated_claim_layer",
+    "projection_version": "wang_claim_layer_review_projection_v2",
+    "package_sha256": "557251a8c66b6d94c3ca28f7b7a93f868a043b5567d0b73e64f02deba46aff5d",
+    "transcript_sha256": {
+      "SRC-2016_NYSC_3-3d012c24a542": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496"
+    },
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_3-3d012c24a542.detailed-knowledge.json",
+    "transcript_paths": {
+      "SRC-2016_NYSC_3-3d012c24a542": "/opt/homebrew/var/www/church/web/data/script_review/2016 NYSC 專題：馬太福音釋經（四）3.json"
+    },
+    "source_candidate_fingerprint": "5ce7810c226ad850ac0d4ea4eb354ef93169858f4b6eaf3c13a00cefa739440b",
+    "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+  },
+  "reviewer": {
+    "source_extraction_fingerprint": "5ce7810c226ad850ac0d4ea4eb354ef93169858f4b6eaf3c13a00cefa739440b",
+    "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+    "review_model_id": "claude-sonnet-5",
+    "max_output_tokens": 32000,
+    "review_schema_version": "wang_corpus_independent_review_v1",
+    "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+    "fingerprint_sha256": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+    "provider": "anthropic",
+    "generated_at": "2026-08-14T18:00:27.866215+00:00"
+  },
+  "spot_check_percent": 10,
+  "reviewed_claims": [
+    {
+      "claim_id": "DK-3d012c24a542-CL001",
+      "statement": "耶稣所说建造教会的“磐石”不是彼得这个人，而是彼得对耶稣为基督、为神儿子的信仰告白，或彼得从耶稣领受并传下来的真理。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:16-18",
+        "马太福音16:21-23"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-3d012c24a542-CL015",
+          "relation_id": "DK-3d012c24a542-CR007"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E001",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授进行希腊文词形与语法判断",
+          "assertive": true,
+          "verbatim_excerpt": "希臘文講的是說：「你是彼得（Petrus），」希臘文，「我要把我的教會建在這個磐石上。」這個「磐石」是Petra，不同的文法上的這個性別。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E002",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授提出磐石解释",
+          "assertive": true,
+          "verbatim_excerpt": "這個磐石不是建立在彼得這個人身上，等一下我再給你看證據，不是彼得這個人身上，乃是彼得所有的一個特徵，其實乃是建立在彼得的信仰、對耶穌有準確的認識的這件事情上。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E020",
+          "evidence_type": "literary_context",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟耶稣说明弥赛亚使命",
+          "assertive": true,
+          "verbatim_excerpt": "我來做彌賽亞不是要來做王，我現在的彌賽亞是什麼？要到耶路撒冷去被殺、受苦，為你們贖罪，三天之後要復活。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E021",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以紧邻叙事反问反驳彼得本人是根基",
+          "assertive": true,
+          "verbatim_excerpt": "「撒但，退我後邊去吧！」你看，耶穌罵彼得是撒但！你說啊，教會建立在撒但身上嗎？",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL002",
+      "statement": "马太福音十六章的捆绑与释放不是让彼得任意决定后由天上服从，而是要求彼得按照天上已经决定的标准行事和宣告。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-3d012c24a542-CL003",
+          "relation_id": "DK-3d012c24a542-CR001"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E003",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授进行希腊文时态语态解释",
+          "assertive": true,
+          "verbatim_excerpt": "其實希臘文不是這樣，它的意思是：「你在地上所捆綁的，在天上將是『已經被捆綁了的』。」",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL003",
+      "statement": "神赐给彼得和教会的权柄，是依据天上与圣灵已经显明的原则，宣告人在何种条件下得释放、受捆绑以及应当如何行事；这权柄也赐给其他门徒，并非彼得个人独有。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:19",
+        "约翰福音20:23",
+        "使徒行传15章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E003",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授进行希腊文时态语态解释",
+          "assertive": true,
+          "verbatim_excerpt": "其實希臘文不是這樣，它的意思是：「你在地上所捆綁的，在天上將是『已經被捆綁了的』。」",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E004",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释赦罪宣告的条件",
+          "assertive": true,
+          "verbatim_excerpt": "是天上已經有標準：不管你犯什麼罪，只要你真的悔改，誰就要赦免他的罪。聽懂了嗎？如果有人犯罪不肯悔改的話，誰的罪就留下了。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E017",
+          "evidence_type": "scripture_evidence",
+          "speaker": "quoted_source",
+          "stance": "quoted",
+          "discourse_role": "教授引用耶路撒冷会议写给外邦信徒的信",
+          "assertive": false,
+          "verbatim_excerpt": "因為聖靈和我們定意，不將別的重擔放在你們身上。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E019",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授限定会议所列禁戒事项的适用背景",
+          "assertive": true,
+          "verbatim_excerpt": "那個是有當時的文化背景，現在我沒有時間講那樣東西，當時的文化背景，為了要使猶太人不至跌倒，他才要求他們這麼做而已。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E022",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授限定权柄的领受者范围",
+          "assertive": true,
+          "verbatim_excerpt": "而且這個權柄不只是給彼得，也給其他的門徒，不要忘掉。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL004",
+      "statement": "约翰福音二十章二十三节的“谁”是指“什么样的人”而不是任意指定的某个人；真正悔改的人其罪得赦免，不肯悔改的人其罪留下。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E004",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释赦罪宣告的条件",
+          "assertive": true,
+          "verbatim_excerpt": "是天上已經有標準：不管你犯什麼罪，只要你真的悔改，誰就要赦免他的罪。聽懂了嗎？如果有人犯罪不肯悔改的話，誰的罪就留下了。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL005",
+      "statement": "耶稣向门徒吹气时，门徒并未在当时领受圣灵；这行动是让他们知道将来五旬节所领受的圣灵是耶稣所差来的。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:22",
+        "使徒行传2章"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-3d012c24a542-CL006",
+          "relation_id": "DK-3d012c24a542-CR002"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E005",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授回答约翰福音与使徒行传的表面矛盾",
+          "assertive": true,
+          "verbatim_excerpt": "耶穌向門徒吹一口氣，並沒有說門徒就領受聖靈，那個時候沒有。耶穌只要讓他們知道說，你將來五旬節領受聖靈，就是因為我差來的聖靈。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL006",
+      "statement": "约翰福音关于耶稣吹气的记载与使徒行传关于五旬节圣灵降临的记载并不矛盾；所谓矛盾源于误解经文。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:22",
+        "使徒行传2章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0002",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E005",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授回答约翰福音与使徒行传的表面矛盾",
+          "assertive": true,
+          "verbatim_excerpt": "耶穌向門徒吹一口氣，並沒有說門徒就領受聖靈，那個時候沒有。耶穌只要讓他們知道說，你將來五旬節領受聖靈，就是因為我差來的聖靈。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL007",
+      "statement": "保罗所说的“奥秘”不是不可理解的话，而是神启示以前无人知道、启示以后众人可以明白的事。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E009",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授定义术语",
+          "assertive": true,
+          "verbatim_excerpt": "奧祕就是神還沒有啟示以前，沒有人知道，神啟示之後，大家都聽懂。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL008",
+      "statement": "旧约时代犹太人知道外邦人可以得救，但所理解的途径是外邦人先接受犹太教、成为犹太教徒。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "创世记12:3"
+      ],
+      "relations": [
+        {
+          "type": "contextualizes",
+          "target_claim_id": "DK-3d012c24a542-CL009",
+          "relation_id": "DK-3d012c24a542-CR003"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E010",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟保罗说明所得启示",
+          "assertive": true,
+          "verbatim_excerpt": "現在神已經不再分猶太人、外邦人，不分了。不管是猶太人也好，不管外邦人也好，只要你不必相信猶太教，只要你相信主耶穌基督為你的救主，你就可以得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL009",
+      "statement": "神在福音中不再区分犹太人与外邦人；外邦人不必受割礼或遵守摩西律法，只要持续相信主耶稣基督就可以得救。",
+      "claim_kind": "explicit_claim",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传10章",
+        "使徒行传15章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E006",
+          "evidence_type": "historical_background",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授转述保罗福音内容",
+          "assertive": true,
+          "verbatim_excerpt": "你們不管是猶太人也好，不管是外邦人也好，你只要信主耶穌基督，你就必得救，你就可以進到神的國度裡面去。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E010",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟保罗说明所得启示",
+          "assertive": true,
+          "verbatim_excerpt": "現在神已經不再分猶太人、外邦人，不分了。不管是猶太人也好，不管外邦人也好，只要你不必相信猶太教，只要你相信主耶穌基督為你的救主，你就可以得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E014",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授概括会议的察验过程",
+          "assertive": true,
+          "verbatim_excerpt": "所以這些使徒們說：「好，我們現在在這個地方，是要來尋求、要來察驗、來領會聖靈教導我們，外邦人要不要受割禮？外邦人要不要遵守摩西律法就可以得救？」",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E015",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以动词时式限定“相信”",
+          "assertive": true,
+          "verbatim_excerpt": "其實聖經也講，我們要得救的話，必須要「繼續信」。所以不要忘掉，比如說五年前信了一次，現在都不信了，無所謂。不是，你要繼續這麼做，很重要。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E018",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释会议书信的救恩含义",
+          "assertive": true,
+          "verbatim_excerpt": "意思就是說你不要再受割禮，你不要再…你不要受割禮，你不要遵守摩西的律法，你只要繼續相信，就可以得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL010",
+      "statement": "使徒行传十五章的耶路撒冷会议不是使徒凭意见、辩论或投票创造救恩标准，而是共同察验圣灵在外邦宣教中已经显明的带领，并依此作出宣告。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传15:13-28"
+      ],
+      "relations": [
+        {
+          "type": "applies",
+          "target_claim_id": "DK-3d012c24a542-CL003",
+          "relation_id": "DK-3d012c24a542-CR004"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E007",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释耶路撒冷会议的目的",
+          "assertive": true,
+          "verbatim_excerpt": "他們不是在那裡辯論，不是在那裡決定，也不是他們投票決定，不是。他們在那裡做什麼呢？他們說：「我們要來看聖靈如何帶領我們去參與外邦人…向外邦人傳福音、外邦宣教，聖靈要我們怎麼做。」",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E008",
+          "evidence_type": "question",
+          "speaker": "quoted_source",
+          "stance": "questioned",
+          "discourse_role": "安提阿教会交付给保罗、巴拿巴处理的问题",
+          "assertive": false,
+          "verbatim_excerpt": "外邦人要不要受割禮？外邦人需不需要來遵守摩西的律法？",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E014",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授概括会议的察验过程",
+          "assertive": true,
+          "verbatim_excerpt": "所以這些使徒們說：「好，我們現在在這個地方，是要來尋求、要來察驗、來領會聖靈教導我們，外邦人要不要受割禮？外邦人要不要遵守摩西律法就可以得救？」",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E016",
+          "evidence_type": "scripture_evidence",
+          "speaker": "quoted_source",
+          "stance": "quoted",
+          "discourse_role": "教授朗读雅各在会议中的经文论证",
+          "assertive": false,
+          "verbatim_excerpt": "方才西門述說，神當初怎樣眷顧外邦人，從他們中間選取百姓歸於自己的名下。眾先知的話也與這意思相合。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E017",
+          "evidence_type": "scripture_evidence",
+          "speaker": "quoted_source",
+          "stance": "quoted",
+          "discourse_role": "教授引用耶路撒冷会议写给外邦信徒的信",
+          "assertive": false,
+          "verbatim_excerpt": "因為聖靈和我們定意，不將別的重擔放在你們身上。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E018",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释会议书信的救恩含义",
+          "assertive": true,
+          "verbatim_excerpt": "意思就是說你不要再受割禮，你不要再…你不要受割禮，你不要遵守摩西的律法，你只要繼續相信，就可以得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E019",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授限定会议所列禁戒事项的适用背景",
+          "assertive": true,
+          "verbatim_excerpt": "那個是有當時的文化背景，現在我沒有時間講那樣東西，當時的文化背景，為了要使猶太人不至跌倒，他才要求他們這麼做而已。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL011",
+      "statement": "神因爱信徒而把传福音的特权留给他们，使他们参与祂的工作，而没有把传福音的工作交给天使。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传10章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E012",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授从哥尼流叙事作出的应用",
+          "assertive": true,
+          "verbatim_excerpt": "神不准天使去傳福音，因為神愛我們，把傳福音的特權留給我們這些人。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL012",
+      "statement": "耶稣的弥赛亚身份不是门徒所期待的政治君王角色；祂当时弥赛亚使命的内容是到耶路撒冷受苦、被杀、为人赎罪并在第三日复活。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:21"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-3d012c24a542-CL013",
+          "relation_id": "DK-3d012c24a542-CR005"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E020",
+          "evidence_type": "literary_context",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟耶稣说明弥赛亚使命",
+          "assertive": true,
+          "verbatim_excerpt": "我來做彌賽亞不是要來做王，我現在的彌賽亞是什麼？要到耶路撒冷去被殺、受苦，為你們贖罪，三天之後要復活。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL013",
+      "statement": "耶稣命令门徒暂时不要宣扬祂是基督，不表示祂否认自己是弥赛亚，而是避免人按照错误的弥赛亚观念理解祂；“弥赛亚秘密”理论是断章取义。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:20-21"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E023",
+          "evidence_type": "question",
+          "speaker": "professor",
+          "stance": "questioned",
+          "discourse_role": "教授提出待解释的释经问题",
+          "assertive": false,
+          "verbatim_excerpt": "很多人問我，奇怪，耶穌怕人家知道祂是彌賽亞？",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0006",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E024",
+          "evidence_type": "literary_context",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授提出解释保密命令的方法原则",
+          "assertive": true,
+          "verbatim_excerpt": "所以說你們要特別小心，不要把聖經拿來斷章取義，你要把整個的聖經整套來看。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0009",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E025",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "opposed",
+          "discourse_role": "教授复述不信派的弥赛亚秘密理论以备反驳",
+          "assertive": false,
+          "verbatim_excerpt": "耶穌其實不是彌賽亞，是耶穌死了以後，他的門徒說完了，我們沒有辦法生活下去，所以門徒造謠說耶穌是彌賽亞。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL014",
+      "statement": "耶稣医病只是其工作的一小部分而非主要工作；祂禁止受医治者到处宣扬，是为了防止人把祂来的目的误解为主要替人医病和满足即时需要。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [
+        {
+          "type": "contextualizes",
+          "target_claim_id": "DK-3d012c24a542-CL013",
+          "relation_id": "DK-3d012c24a542-CR006"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0010",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E026",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授回答医病后禁止宣传的原因",
+          "assertive": true,
+          "verbatim_excerpt": "醫病不是耶穌主要的工作，醫病是什麼？耶穌工作的一個小部分而已，不是主要的工作。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0010",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E027",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授用巧克力与支票的类比作应用",
+          "assertive": true,
+          "verbatim_excerpt": "成熟的人能夠postpone，就是說把你滿足你的需要延遲長一點，使你可以得到更大的幫助。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL015",
+      "statement": "教会必须借着深度而准确的解经建立圣经真理的根基，这样教会才会稳固。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "paragraph_key": "S0009",
+          "media_time": null,
+          "evidence_id": "DK-3d012c24a542-E028",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授把释经方法应用于教会建造",
+          "assertive": true,
+          "verbatim_excerpt": "所以為什麼我一天到晚講，這個深度解經很重要。你如果深度解經，根基打好之後，教會就很穩固。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    }
+  ],
+  "sermon_assessment": {
+    "summary": "候选主张大体忠实呈现教授关于彼得认信、教会磐石、捆绑释放权、五旬节圣灵、外邦人得救奥秘、耶路撒冷会议及弥赛亚秘密的论证。多数主张的经文与语境锚点充分且没有把反方（不信派学者）或听众话语误记为教授立场——候选正确地将不信派理论的复述标记为 stance=opposed/questioned 而非教授主张。但存在若干具体问题：(1) 部分主张所引锚点未覆盖主张陈述中的关键限定语，需要补充更贴切的逐字引文；(2) CL008 引用的锚点实际讲的是“现在”的新启示，而非主张所述“旧约时代犹太人的理解”，锚点与陈述内容不匹配；(3) CL001→CL015 的“supports”关系似为主题联想式的编辑推断，逐字稿中两处论证分属不同语境（磐石释经 vs. 深度解经护教），教授并未明示两者因果关联；(4) CL013 的后半句（“避免人按照错误的弥赛亚观念理解祂”）在提供的锚点中未见教授就“为何禁止宣扬祂是基督”给出该具体理由，该理由更贴近 CL014 中关于医病保密的解释，存在把邻近论证的理由套用到另一命令上的编辑推论风险。",
+    "systemic_risks": [
+      "存在个别主张所附锚点未覆盖陈述中的关键限定语（如“不是任意决定”“旧约时代的理解方式”），需要核对是否有更贴切的逐字引文可用。",
+      "存在把主题上相似（如“磐石”与“根基”）但语境、论证链条不同的两处论述通过 supports 关系连接的编辑推断风险。",
+      "在讨论“弥赛亚秘密”理论时，教授先提出问题（为何耶稣命门徒保密）后经过长篇插叙才在别处（医病保密）给出理由，候选主张可能把针对医病保密的理由套用到“不可说祂是基督”的保密命令上，需核实是否有更直接的原文依据。"
+    ]
+  },
+  "claim_reviews": [
+    {
+      "claim_id": "DK-3d012c24a542-CL001",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "relation_error",
+          "severity": "medium",
+          "explanation": "CL001（磐石=信仰告白/真理）与 CL015（深度解经打根基使教会稳固）分属逐字稿中不同语境（S0002/S0006 的磐石释经 vs. S0009 关于护教与深度解经的应用），教授并未在文本中明确说“正因磐石非彼得个人，所以教会须靠深度解经建根基”。将两者以 supports 关系连接似为主题联想式的编辑推断，而非逐字稿中明示的论证链条。",
+          "affected_anchor_indexes": []
+        }
+      ],
+      "proposed_statement": "耶稣所说建造教会的“磐石”不是彼得这个人，而是彼得对耶稣为基督、为神儿子的信仰告白，或彼得从耶稣领受并传下来的真理。",
+      "proposed_claim_kind": "interpretive_judgment",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张本身的陈述与锚点（希腊文词性区分、磐石非彼得本人、耶稣斥彼得为撒但）相符，问题仅在于与 CL015 的 supports 关系缺乏逐字稿内明确支持，建议复核或移除该跨主张关系。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL002",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "唯一锚点 E003 只包含希腊文完成时态的解释（“在天上將是已經被捆綁了的”），并未包含陈述中“不是让彼得任意决定后由天上服从”这一对比句。支持该对比的原文紧随其后（“不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」”），但未被列为锚点。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "马太福音十六章的捆绑与释放不是让彼得任意决定后由天上服从，而是要求彼得按照天上已经决定的标准行事和宣告。",
+      "proposed_claim_kind": "interpretive_judgment",
+      "proposed_route_type": "unchanged",
+      "rationale": "陈述内容与逐字稿整体一致，但建议补入紧邻的“不是給彼得說…乃是彼得要說：「你要按照天上已經決定的標準」”一句作为锚点，以完整支持该对比性论证。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL003",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "陈述内容由多处锚点（希腊文时态、赦罪标准、耶路撒冷会议信件、文化背景限定、权柄不限于彼得）共同支持，符合逐字稿整体论证。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL004",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E004 直接支持“谁”指“什么样的人”及悔改/不悔改的赦罪留罪标准。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL005",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E005 直接支持该释经判断。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL006",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "与 CL005 共用同一锚点，但作为更概括性的结论（矛盾源于误解经文），与 CL005 的具体释经判断构成合理的支持关系而非纯重复，予以通过。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL007",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E009 直接支持该术语定义。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL008",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "high",
+          "explanation": "陈述内容是关于“舊約時代”犹太人对外邦人得救途径（先成为猶太教徒）的理解，但所附锚点 E010 的逐字引文（“現在神已經不再分猶太人、外邦人…只要你相信主耶穌基督為你的救主，你就可以得救”）讲的是保罗所得的“新”启示，并非旧约时代犹太人的理解。逐字稿中真正支持该主张的原文是：“舊約時代猶太人知道外邦人可以得救，可是外邦人要得救的方法是什麼呢？外邦人要先成為猶太教的教徒…”，该句未被列为锚点。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "旧约时代犹太人知道外邦人可以得救，但所理解的途径是外邦人先接受犹太教、成为犹太教徒。",
+      "proposed_claim_kind": "interpretive_judgment",
+      "proposed_route_type": "unchanged",
+      "rationale": "陈述内容与教授论证方向一致，但当前锚点讲的是新启示（保罗福音），并非旧约时代的理解，建议替换为逐字稿中“舊約時代猶太人知道外邦人可以得救，可是外邦人要得救的方法是什麼呢？外邦人要先成為猶太教的教徒”一句作为锚点。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL009",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "多处锚点（E006、E010、E014、E015、E018）共同支持该福音内容与持续相信的限定，符合逐字稿。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL010",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点组合（教授解释会议目的、雅各引经、书信内容、文化背景限定）充分支持该释经判断。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL011",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E012 直接支持该应用性主张。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL012",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E020 直接支持该释经判断（耶稣模拟弥赛亚使命内容）。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL013",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "editorial_inference",
+          "severity": "medium",
+          "explanation": "陈述后半句“而是避免人按照错误的弥赛亚观念理解祂”在所附锚点中缺乏直接支持。锚点 E023 只是教授提出的问题，E024 是方法论提示（不要断章取义），E025 是教授复述并反驳的不信派“弥赛亚秘密”理论。逐字稿在此处并未紧接给出“为何耶稣命门徒不可说祂是基督”的具体理由；该理由的雏形出现在后段（S0010）关于医病保密的解释（“耶穌不要人對祂誤會，以為耶穌來的目的主要是要醫病”），但那是针对医病保密命令，而非“不可说祂是基督”这一命令的直接原文依据。将该理由套用到本命令，存在把邻近论证的理由移植过来的编辑推断风险。",
+          "affected_anchor_indexes": [
+            0,
+            1,
+            2
+          ]
+        }
+      ],
+      "proposed_statement": "耶稣命令门徒暂时不要宣扬祂是基督，教授指出这不代表祂否认自己是弥赛亚；教授将“弥赛亚秘密”理论（主张门徒在耶稣死后编造祂是弥赛亚）判定为断章取义，并主张应把整本圣经作为一套来理解。",
+      "proposed_claim_kind": "reasoning_conclusion",
+      "proposed_route_type": "unchanged",
+      "rationale": "建议移除或弱化“而是避免人按照错误的弥赛亚观念理解祂”这一具体理由的表述，因为逐字稿在此段尚未给出该具体理由，仅表明教授反驳“弥赛亚秘密”理论为断章取义并主张整体解经。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL014",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E026、E027 直接支持医病非主要工作及巧克力/支票类比的应用性论证。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL015",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点 E028 直接支持该应用性主张（深度解经打根基使教会稳固）。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "routing_summary": {
+    "ai_reviewed": 9,
+    "awaiting_openai_adjudication": 4,
+    "human_spot_check": 2
+  }
+}

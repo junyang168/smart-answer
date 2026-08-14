@@ -216,6 +216,8 @@ def build_integration_package(
             "editorial_attribution": "editor",
             "section_role": section.get("role"),
         }
+        if section.get("editorial_boundary"):
+            decision["editorial_boundary"] = section["editorial_boundary"]
         presentations, presentation_summary = _source_presentations(claim_ids, comparison)
         decision["source_presentations"] = presentations
         decision["source_presentation_summary"] = presentation_summary

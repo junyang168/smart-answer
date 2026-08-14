@@ -1,0 +1,402 @@
+{
+  "batch_id": "RB-MATTHEW-16-13-20-SOURCES-01",
+  "semantic_assumption": "none",
+  "transcripts": [
+    "2016 NYSC 專題：馬太福音釋經（四）1",
+    "2016 NYSC 專題：馬太福音釋經（四）2",
+    "2016 NYSC 專題：馬太福音釋經（四）3",
+    "2016 NYSC 專題：馬太福音釋經（五）1",
+    "S 220206",
+    "220-426-110-1139"
+  ],
+  "selected_stage": "all",
+  "commands": [
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.detailed_knowledge_extraction_runner",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--output-dir",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions",
+        "--ids",
+        "2016 NYSC 專題：馬太福音釋經（四）2",
+        "--model",
+        "gpt-5.6-sol",
+        "--reasoning-effort",
+        "medium"
+      ]
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_review_runner",
+        "--claim-layer-package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_2-e50720f3684d.detailed-knowledge.json",
+        "--claim-layer-output",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_2-e50720f3684d.independent-review.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_adjudication_runner",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_2-e50720f3684d.detailed-knowledge.json",
+        "--review",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_2-e50720f3684d.independent-review.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/adjudications/2016_NYSC_2-e50720f3684d.ai-adjudication.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_2-e50720f3684d.consensus-overrides.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--openai-model",
+        "gpt-5.6-sol",
+        "--openai-reasoning-effort",
+        "medium",
+        "--claude-model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.knowledge_consensus_applier",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_2-e50720f3684d.detailed-knowledge.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_2-e50720f3684d.consensus-overrides.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_2-e50720f3684d.reviewed-candidate.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review"
+      ]
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.detailed_knowledge_extraction_runner",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--output-dir",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions",
+        "--ids",
+        "2016 NYSC 專題：馬太福音釋經（四）3",
+        "--model",
+        "gpt-5.6-sol",
+        "--reasoning-effort",
+        "medium"
+      ]
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_review_runner",
+        "--claim-layer-package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_3-3d012c24a542.detailed-knowledge.json",
+        "--claim-layer-output",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_3-3d012c24a542.independent-review.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_adjudication_runner",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_3-3d012c24a542.detailed-knowledge.json",
+        "--review",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_3-3d012c24a542.independent-review.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/adjudications/2016_NYSC_3-3d012c24a542.ai-adjudication.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_3-3d012c24a542.consensus-overrides.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--openai-model",
+        "gpt-5.6-sol",
+        "--openai-reasoning-effort",
+        "medium",
+        "--claude-model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.knowledge_consensus_applier",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_3-3d012c24a542.detailed-knowledge.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_3-3d012c24a542.consensus-overrides.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_3-3d012c24a542.reviewed-candidate.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review"
+      ]
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.detailed_knowledge_extraction_runner",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--output-dir",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions",
+        "--ids",
+        "2016 NYSC 專題：馬太福音釋經（五）1",
+        "--model",
+        "gpt-5.6-sol",
+        "--reasoning-effort",
+        "medium"
+      ]
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_review_runner",
+        "--claim-layer-package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_1-6f059dbca908.detailed-knowledge.json",
+        "--claim-layer-output",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_1-6f059dbca908.independent-review.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_adjudication_runner",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_1-6f059dbca908.detailed-knowledge.json",
+        "--review",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_1-6f059dbca908.independent-review.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/adjudications/2016_NYSC_1-6f059dbca908.ai-adjudication.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_1-6f059dbca908.consensus-overrides.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--openai-model",
+        "gpt-5.6-sol",
+        "--openai-reasoning-effort",
+        "medium",
+        "--claude-model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.knowledge_consensus_applier",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_1-6f059dbca908.detailed-knowledge.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/2016_NYSC_1-6f059dbca908.consensus-overrides.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_1-6f059dbca908.reviewed-candidate.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review"
+      ]
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "220-426-110-1139",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.detailed_knowledge_extraction_runner",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--output-dir",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions",
+        "--ids",
+        "220-426-110-1139",
+        "--model",
+        "gpt-5.6-sol",
+        "--reasoning-effort",
+        "medium"
+      ]
+    },
+    {
+      "stage": "review",
+      "transcript_id": "220-426-110-1139",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_review_runner",
+        "--claim-layer-package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/220_426_110_1139-0d5b2062b148.detailed-knowledge.json",
+        "--claim-layer-output",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/220_426_110_1139-0d5b2062b148.independent-review.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "220-426-110-1139",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.corpus_ai_adjudication_runner",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/220_426_110_1139-0d5b2062b148.detailed-knowledge.json",
+        "--review",
+        "output/claim-layer/matthew-16-13-20-sources/reviews/220_426_110_1139-0d5b2062b148.independent-review.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/adjudications/220_426_110_1139-0d5b2062b148.ai-adjudication.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/220_426_110_1139-0d5b2062b148.consensus-overrides.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review",
+        "--openai-model",
+        "gpt-5.6-sol",
+        "--openai-reasoning-effort",
+        "medium",
+        "--claude-model",
+        "claude-sonnet-5"
+      ]
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "220-426-110-1139",
+      "command": [
+        "/Users/junyang/app/smart-answer/.venv/bin/python",
+        "-m",
+        "backend.pipeline.knowledge_consensus_applier",
+        "--package",
+        "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/220_426_110_1139-0d5b2062b148.detailed-knowledge.json",
+        "--overrides",
+        "output/claim-layer/matthew-16-13-20-sources/overrides/220_426_110_1139-0d5b2062b148.consensus-overrides.json",
+        "--output",
+        "output/claim-layer/matthew-16-13-20-sources/reviewed/220_426_110_1139-0d5b2062b148.reviewed-candidate.json",
+        "--transcript-dir",
+        "/opt/homebrew/var/www/church/web/data/script_review"
+      ]
+    }
+  ],
+  "reused_reviewed_packages": {
+    "2016 NYSC 專題：馬太福音釋經（四）1": "/Users/junyang/app/smart-answer/output/claim-layer/detailed-extractions/2016_NYSC_1-a26f0a7e9ba4.reviewed-candidate.json",
+    "S 220206": "/Users/junyang/app/smart-answer/output/claim-layer/matthew-16-13-20-sources/reviewed/S_220206-566e8ca150dd.reviewed-candidate.json"
+  },
+  "merged_output": "output/claim-layer/matthew-16-13-20-sources/merged/research-batch-knowledge.json",
+  "would_call_models": true,
+  "started_at": "2026-08-14T18:39:56.009539+00:00",
+  "status": "completed",
+  "completed_commands": [
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2"
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2"
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2"
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2"
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3"
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3"
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3"
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3"
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1"
+    },
+    {
+      "stage": "review",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1"
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1"
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1"
+    },
+    {
+      "stage": "extract",
+      "transcript_id": "220-426-110-1139"
+    },
+    {
+      "stage": "review",
+      "transcript_id": "220-426-110-1139"
+    },
+    {
+      "stage": "adjudicate",
+      "transcript_id": "220-426-110-1139"
+    },
+    {
+      "stage": "apply",
+      "transcript_id": "220-426-110-1139"
+    }
+  ],
+  "completed_at": "2026-08-14T18:49:16.855481+00:00"
+}

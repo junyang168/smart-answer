@@ -1,0 +1,433 @@
+{
+  "schema_version": "wang_corpus_independent_review_v1",
+  "source": {
+    "input_mode": "curated_claim_layer",
+    "projection_version": "wang_claim_layer_review_projection_v2",
+    "package_sha256": "2f43ab9c0fecb4aa76ad1f0b0c95b3bd7b710ae313a81e0df5e26c3b7cbb1204",
+    "transcript_sha256": {
+      "SRC-S_220206-566e8ca150dd": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863"
+    },
+    "review_batch": {
+      "batch_index": 4,
+      "batch_count": 4,
+      "claim_count": 5,
+      "claim_ids": [
+        "DK-566e8ca150dd-CL025",
+        "DK-566e8ca150dd-CL026",
+        "DK-566e8ca150dd-CL027",
+        "DK-566e8ca150dd-CL028",
+        "DK-566e8ca150dd-CL029"
+      ],
+      "source_package_id": "DETAILED-S_220206-566e8ca150dd",
+      "source_package_sha256": "809e11626ad4b4e77095b08e699540d71bc0ac4e17c178366f649c70353fd824",
+      "partition_policy": "claims_only_all_sources_and_relations_retained"
+    },
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review-batches/inputs/batch-04.json",
+    "transcript_paths": {
+      "SRC-S_220206-566e8ca150dd": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json"
+    },
+    "source_candidate_fingerprint": "2eba369819dbc949ac871e89f51db671b53f27e1016b0e414981e227840d009b",
+    "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+  },
+  "reviewer": {
+    "source_extraction_fingerprint": "2eba369819dbc949ac871e89f51db671b53f27e1016b0e414981e227840d009b",
+    "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+    "review_model_id": "claude-sonnet-5",
+    "max_output_tokens": 24000,
+    "review_schema_version": "wang_corpus_independent_review_v1",
+    "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+    "fingerprint_sha256": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+    "provider": "anthropic",
+    "generated_at": "2026-08-14T18:36:50.217044+00:00"
+  },
+  "spot_check_percent": 10,
+  "reviewed_claims": [
+    {
+      "claim_id": "DK-566e8ca150dd-CL025",
+      "statement": "圣灵印记不取消人的自由意志；人若主动不要神、不继续作门徒并听神的话，就会失掉神的恩典。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "以弗所书1:13",
+        "约翰福音6章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0044",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E032",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释关身语态并作限定",
+          "assertive": true,
+          "verbatim_excerpt": "神打了印記之後，影響到自己。所以神打了印之後，神對自己負責：『這個人是屬我的。』除非你得到神的印記之後，你說『我就不要祢了』，神也不強迫你。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0047",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E033",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以约翰福音六章作警告",
+          "assertive": true,
+          "verbatim_excerpt": "第一組是什麼？就是沒有繼續信的人。你沒有繼續信，等於你沒有信。聖經講得非常非常清楚！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL026",
+      "statement": "得救要求信徒继续相信并维持信心到底；没有继续相信就等于没有信。",
+      "claim_kind": "explicit_claim",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音6章",
+        "提摩太后书2:12"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-566e8ca150dd-CL024",
+          "relation_id": "DK-566e8ca150dd-CR012"
+        },
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL027",
+          "relation_id": "DK-566e8ca150dd-CR013"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0001",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E001",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授开篇断言",
+          "assertive": true,
+          "verbatim_excerpt": "聖經強調：你信主要繼續地信，你維持信心到底，你就得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0047",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E033",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以约翰福音六章作警告",
+          "assertive": true,
+          "verbatim_excerpt": "第一組是什麼？就是沒有繼續信的人。你沒有繼續信，等於你沒有信。聖經講得非常非常清楚！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL027",
+      "statement": "把一次口里承认耶稣为主、心里相信复活解释为此后无论如何都永远不受审判，是曲解圣经并会误导人。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "罗马书10:9（由对方引用）"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0049",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E035",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授叙述自己对宣教士的回应",
+          "assertive": true,
+          "verbatim_excerpt": "我當場告訴他：『抱歉，你來台灣是在傳異端！』",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL028",
+      "statement": "有真理之灵印记的人不应是不信实或不可靠的人；保罗改变访问哥林多的行程，是因处境和服事安排改变，并不能证明他说话反复、不可信。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "哥林多后书1章（未在逐字稿中注明具体节数）"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0051",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E036",
+          "evidence_type": "historical_background",
+          "speaker": "quoted_source",
+          "stance": "opposed",
+          "discourse_role": "教授引述哥林多反对者",
+          "assertive": false,
+          "verbatim_excerpt": "這些反對者就指控：『看哪！保羅說話反覆，根本不可信！』",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0050",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E037",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以圣灵印记回应可靠性问题",
+          "assertive": true,
+          "verbatim_excerpt": "因為聖靈的緣故，帶有真理之靈印記的人，不可能不信實，絕不可能！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL029",
+      "statement": "解释圣经必须考察上下文、平行经文、原文语法与救赎历史，不能凭翻译或经文碎片建立权柄和教义。",
+      "claim_kind": "interpretive_method",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E004",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释权柄范围",
+          "assertive": true,
+          "verbatim_excerpt": "關鍵在於『奉差遣』的前提——門徒乃是蒙召傳揚福音，非擅自定罪。正如醫生診斷病症，但醫治權柄在神。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0011",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E007",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文语法论证",
+          "assertive": true,
+          "verbatim_excerpt": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0016",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E011",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文时态判断",
+          "assertive": true,
+          "verbatim_excerpt": "因為這裡的時態是未來完成式，將已經被捆綁了。那什麼意思？你們在地上所捆綁的，在天上也將已經被捆綁了。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0023",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E018",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授警告听众",
+          "assertive": true,
+          "verbatim_excerpt": "所以各位要小心，你聖經的基礎還沒建好以前，到處想要去跟人家傳福音，到處跟人家傳什麼教導聖經，大有問題。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0036",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E025",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟神发出警告并据此应用",
+          "assertive": true,
+          "verbatim_excerpt": "你沒有把我的真理搞清楚以前，不要去亂教；亂教，我要審判。你要先把他學好，學對了才去做。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    }
+  ],
+  "sermon_assessment": {
+    "summary": "本组主张涉及圣灵印记、持守信心得救、以及正确解经方法（原文语法、上下文、权柄范围）等主题。多数主张的核心论点在逐字稿中有清晰对应，但若干主张的具体措辞（尤其是复合句中的某一分句）所选锚点与该分句的确切表述不完全对应，例如'失掉神的恩典'一语的确切出处（S0046）未被选为锚点，'处境和服事安排改变'的具体说明（S0052）未被选为锚点，以及方法论主张中提及的'平行经文'与'救赎历史'缺乏直接对应锚点。这些属于锚点覆盖不足的问题，而非说话者归属或立场错误。",
+    "systemic_risks": [
+      "部分复合陈述（含多个分句）仅部分分句有对应锚点，另一分句的确切措辞出自未被引用的邻近段落，存在锚点覆盖不足的风险。",
+      "方法论类主张（如CL029）罗列多项解经原则，但并非每项原则都有对应锚点直接支持，存在主张范围超出锚点证据的风险。"
+    ]
+  },
+  "claim_reviews": [
+    {
+      "claim_id": "DK-566e8ca150dd-CL025",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张后半句'若人主动不要神、不继续作门徒并听神的话，就会失掉神的恩典'的确切措辞几乎逐字对应S0046（'可是如果，我們如果沒有繼續做神的門徒，我們沒有繼續要聽神的話，我們就失掉了神的恩典'），但该段并未被列为锚点；现有锚点E033（S0047）讨论的是'没有继续信等于没有信'，与'失掉恩典'的具体表述并非同一处。建议补充S0046作为锚点，以直接支持该分句。",
+          "affected_anchor_indexes": [
+            1
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "核心论点（自由意志与恩典可失落）与逐字稿一致，但支持'失掉神的恩典'具体措辞的最贴切锚点（S0046）未被引用，属锚点覆盖不足，建议补充而非否定主张本身。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL026",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张与S0001开篇断言及S0047约翰福音六章论证直接对应，措辞准确，说话者为教授本人，关系设定（qualifies/supports）与上下文逻辑一致。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL027",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张准确反映教授对宣教士教导的评价（'传异端'），锚点S0049处于同一段落，虽然摘录较短，但段落上下文（含'你這樣會害死他們'）支持'曲解圣经并会误导人'的判断，scripture_refs正确标注该经文为对方引用，未误将对方立场归为教授主张。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL028",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张后半句'保罗改变访问哥林多的行程，是因处境和服事安排改变'的具体说明见于S0052（'我現在情況變了，所以我現在乾脆我要去馬其頓以前，然後我來看你們...'），但该段未被列为锚点。现有锚点S0051（反对者指控）与S0050（教授关于印记与信实的论证）均未直接说明'处境改变'这一具体理由。建议补充S0052作为锚点。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张的第一分句（受印记者不应不信实）有S0050充分支持；第二分句（行程改变的具体原因）缺乏直接锚点，建议补充S0052以完整支撑该复合论证。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL029",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张列举的解经要素包括'上下文、平行经文、原文语法与救赎历史'，但所附五个锚点（S0004、S0011、S0016、S0023、S0036）中未有一处明确论及'平行经文'（该论证实际见于未被引用的S0012'跟這個平行的經文'）或'救赎历史'（该论证散见于S0026-S0031等未被引用段落）。现有锚点主要支持'原文语法'（S0011、S0016）与'不可凭经文碎片建立权柄'（S0004），S0023、S0036则更偏向'未打好圣经基础前勿随意教导'的应用性警告，与解经方法本身有所区别。建议：（a）补充S0012等锚点以支持'平行经文'，或从主张中移除该要素；（b）补充相关锚点支持'救赎历史'要素，或移除；（c）考虑是否将S0023/S0036的应用性警告拆分为独立主张。",
+          "affected_anchor_indexes": [
+            3,
+            4
+          ]
+        },
+        {
+          "issue_type": "claim_should_split",
+          "severity": "low",
+          "explanation": "S0023与S0036的内容更接近'未学好圣经前不可随意教导人，否则受审判'的应用性警告，与'解经方法论'（上下文、原文语法等）在论证性质上不完全同类，可能构成两条独立主张被合并的情况。",
+          "affected_anchor_indexes": [
+            3,
+            4
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张核心（不能凭翻译或经文碎片建立权柄和教义，须重视原文语法与上下文）有较强锚点支持，但'平行经文'与'救赎历史'两要素缺乏对应锚点，且部分锚点（S0023、S0036）性质上更偏应用性警告而非方法论本身，建议人工核实是否需要拆分或补充锚点。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "routing_summary": {
+    "ai_reviewed": 1,
+    "awaiting_openai_adjudication": 3,
+    "human_spot_check": 1
+  }
+}

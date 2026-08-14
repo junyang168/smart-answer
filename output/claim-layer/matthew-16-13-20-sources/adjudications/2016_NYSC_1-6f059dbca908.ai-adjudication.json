@@ -1,0 +1,176 @@
+{
+  "schema_version": "wang_corpus_ai_adjudication_v1",
+  "source": {
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_1-6f059dbca908.detailed-knowledge.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_1-6f059dbca908.independent-review.json"
+  },
+  "adjudicator": {
+    "review_fingerprint": "adbbb7294c88f20b60332bfedfee7a2e69a813d7593e4a54ffa11bbcd64eb291",
+    "openai_prompt_sha256": "24faed534874274b93c30575d1471db07565435b95a131e3962f584e0812e229",
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_prompt_sha256": "a7484bc13e329465cf25623e6418cc91d9ef8c59476e79093e96dbbd203f72f6",
+    "claude_model": "claude-sonnet-5",
+    "schema_version": "wang_corpus_ai_adjudication_v1",
+    "fingerprint_sha256": "13c89cce5ae3d9890a50cf17598333e38040f4cd264d447de745fd01d83aa26a",
+    "generated_at": "2026-08-14T18:09:34.862570+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "claim_id": "DK-6f059dbca908-CL014",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有第0号锚点“三千个魂”用于说明“魂”可指整个人，与本主张所聚焦的并列项目不能机械对应实体分部的论证关联较弱；S0030的其余两个锚点已直接支持该主张，故最小修正是排除第0号锚点，其他内容不变。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-6f059dbca908-CL016",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "1363",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+              "verbatim_excerpt": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有第0号锚点只支持不同枚举不能导出机械分部，并未直接支持本主张关于“尽理性爱神”及“动用理性就不属灵”的内容。S0030中存在逐字直接匹配的证据，故排除原锚点并添加该证据，陈述及其他字段不变。",
+        "source_anchor_indexes": [
+          0
+        ]
+      }
+    ],
+    "scope_confirmation": "source_fidelity_only_no_theological_critique"
+  },
+  "claude_reconsideration": null,
+  "results": [
+    {
+      "claim_id": "DK-6f059dbca908-CL014",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-6f059dbca908-CL014",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有第0号锚点“三千个魂”用于说明“魂”可指整个人，与本主张所聚焦的并列项目不能机械对应实体分部的论证关联较弱；S0030的其余两个锚点已直接支持该主张，故最小修正是排除第0号锚点，其他内容不变。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-6f059dbca908-CL016",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-6f059dbca908-CL016",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "1363",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+              "verbatim_excerpt": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有第0号锚点只支持不同枚举不能导出机械分部，并未直接支持本主张关于“尽理性爱神”及“动用理性就不属灵”的内容。S0030中存在逐字直接匹配的证据，故排除原锚点并添加该证据，陈述及其他字段不变。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "claim_overrides": {
+    "DK-6f059dbca908-CL014": {
+      "anchor_additions": [],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [
+        0
+      ],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-6f059dbca908-CL016": {
+      "anchor_additions": [
+        {
+          "evidence_type": "scripture_evidence",
+          "source_index": "1363",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "verbatim_excerpt": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [
+        0
+      ],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    }
+  },
+  "pending_patches": {},
+  "summary": {
+    "auto_applied": 2,
+    "withdrawn": 0,
+    "human_confirmation_required": 0,
+    "human_disagreement_required": 0
+  }
+}

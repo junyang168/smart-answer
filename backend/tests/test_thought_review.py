@@ -21,6 +21,7 @@ def _fixture_paths(tmp_path: Path, monkeypatch) -> None:
     topic_structure_root = tmp_path / "research-batches"
     topic_structure_root.mkdir()
     monkeypatch.setattr(thought_review, "TOPIC_STRUCTURE_ROOT", topic_structure_root)
+    monkeypatch.setattr(thought_review, "EDITORIAL_DRAFT_ROOT", tmp_path / "drafts")
     claims = {
         "source_projects": [{"project_id": "p1", "transcript_id": "讲道 3"}],
         "claims": [{
@@ -412,6 +413,85 @@ def test_editorial_draft_is_attached_to_its_composition_candidate(
             "source_presentation_summary": {"mode": "continuous"},
         }
     ]
+
+
+def test_manifest_package_makes_draft_candidate_discoverable_before_snapshot_promotion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _fixture_paths(tmp_path, monkeypatch)
+    draft_root = tmp_path / "drafts"
+    draft_root.mkdir()
+    (draft_root / "draft.md").write_text("# 新初稿\n", encoding="utf-8")
+    _write(
+        draft_root / "presentation-package.json",
+        {
+            "product_plans": [
+                {
+                    "plan_id": "CP-NEW",
+                    "product_type": "scripture_exposition",
+                    "title": "新釋經編排",
+                    "decisions": [
+                        {
+                            "decision_id": "CD-NEW-1",
+                            "passage": "太16:13–20",
+                            "section_title": "認信與教會",
+                            "claim_ids": [],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    _write(
+        draft_root / "editorial-draft-manifest.json",
+        {
+            "drafts": [
+                {
+                    "draft_id": "DRAFT-NEW",
+                    "candidate_id": "CP-NEW",
+                    "title": "新初稿",
+                    "passage": "太16:13–20",
+                    "relative_path": "draft.md",
+                    "presentation_package_path": "presentation-package.json",
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(thought_review, "EDITORIAL_DRAFT_ROOT", draft_root)
+
+    payload = thought_review.candidates_data()
+
+    candidate = next(
+        item for item in payload["scripture_candidates"] if item["candidate_id"] == "CP-NEW"
+    )
+    assert candidate["title"] == "新釋經編排"
+    assert candidate["decision_count"] == 1
+    assert candidate["editorial_drafts"][0]["draft_id"] == "DRAFT-NEW"
+
+
+def test_top_level_transcript_array_has_no_embedded_metadata(tmp_path: Path, monkeypatch) -> None:
+    transcript = tmp_path / "transcript.json"
+    transcript.write_text('[{"start": 1, "text": "內容"}]', encoding="utf-8")
+    monkeypatch.setattr(
+        "backend.api.canonical_repository.service.CanonicalRepositoryService._sermon_catalog_record",
+        lambda transcript_id: None,
+    )
+    monkeypatch.setattr(
+        "backend.api.canonical_repository.service.CanonicalRepositoryService._sermon_media",
+        lambda transcript_id, metadata, catalog: type(
+            "Media", (), {"model_dump": lambda self, mode: {"kind": "none"}}
+        )(),
+    )
+
+    resolved = thought_review._resolved_presentation_source(
+        {
+            "source_type": "sermon_transcript",
+            "transcript_id": "講道",
+            "source_path": str(transcript),
+        }
+    )
+
+    assert resolved["media"] == {"kind": "none"}
 
 
 def test_candidates_use_postgres_decision_text_instead_of_internal_id(

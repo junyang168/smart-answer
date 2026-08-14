@@ -1,0 +1,184 @@
+{
+  "schema_version": "wang_composition_ai_adjudication_v2",
+  "source": {
+    "plan_path": "output/claim-layer/matthew-16-13-20-sources/composition-plan-matt16-13-20.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/composition-reviews/CP-matthew-16-13-20.independent-review.json",
+    "plan_sha256": "124cbd4afda843f826f4b979985dcd547071a5190211e4c9d5e28ee68120203e"
+  },
+  "adjudicator": {
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_model": "claude-sonnet-5",
+    "generated_at": "2026-08-14T19:04:57.978467+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "decision": "accept",
+        "decision_id": "CD-M16-002-04",
+        "patch": {
+          "action": "",
+          "add_claim_ids": [],
+          "argument_layer_followups": [
+            "在論證層登記並核驗 tension_with：以 DK-91b546f25db1-CL009、DK-a26f0a7e9ba4-CL010 為一組，以 DK-e50720f3684d-CL002、DK-3d012c24a542-CL001、DK-566e8ca150dd-CL007 為另一組；DK-e50720f3684d-CL001 與 DK-566e8ca150dd-CL006 僅支撐共同否定『教會建立在彼得個人本身上』，不納入正面指認的張力關係。不得以此後續任務新增或改寫證據。"
+          ],
+          "claim_hierarchy": {
+            "corroborating_claims": [],
+            "evidence_step_scopes": [
+              {
+                "claim_id": "DK-566e8ca150dd-CL006",
+                "evidence_step_ids": [
+                  "DK-566e8ca150dd-E007"
+                ]
+              }
+            ],
+            "methodological_entry": "",
+            "note": "",
+            "original_language_support": "",
+            "paragraph_thesis": "",
+            "parallel_context": [],
+            "supporting_claims": [],
+            "supporting_context": [],
+            "theological_structure": []
+          },
+          "coverage": "",
+          "decision_text": "",
+          "rationale": "",
+          "remove_claim_ids": [],
+          "topic_plan_ids": []
+        },
+        "rationale": "接受論證層缺少形式化張力關係及跨段證據消費範圍不明的意見。現有編排已明示保留張力，無須改寫決定文字；以 argument_layer_followups 補登關係任務，並以 evidence_step_scopes 限定本段只消費 CL006 的『非建於彼得個人』證據，是可自動套用的最小修正。"
+      },
+      {
+        "decision": "accept",
+        "decision_id": "CD-M16-002-06",
+        "patch": {
+          "action": "",
+          "add_claim_ids": [],
+          "argument_layer_followups": [
+            "在論證層登記並核驗 DK-91b546f25db1-CL010、DK-e50720f3684d-CL015 與 DK-0d5b2062b148-CL015 之間的 tension_with；DK-566e8ca150dd-CL009 僅支撐雙方共有的『禁止／准許』語義，不應單獨列作張力端點。不得為補足關係而新增證據。",
+            "核實 transcript_id 220-426-110-1139 的正式來源標題；核實前正文使用 transcript_id 或『另一來源』等中性標示。"
+          ],
+          "claim_hierarchy": {
+            "corroborating_claims": [],
+            "evidence_step_scopes": [],
+            "methodological_entry": "",
+            "note": "",
+            "original_language_support": "",
+            "paragraph_thesis": "",
+            "parallel_context": [],
+            "supporting_claims": [],
+            "supporting_context": [],
+            "theological_structure": []
+          },
+          "coverage": "",
+          "decision_text": "說明捆綁與釋放在拉比語境可指禁止與准許，同時保留筆記與（四）2所述可涉及事或人的較廣表述；另一來源（transcript_id 220-426-110-1139）把它限定為禁止與准許、否定決定人能否進天國，兩者不得靜默調和。",
+          "rationale": "",
+          "remove_claim_ids": [],
+          "topic_plan_ids": []
+        },
+        "rationale": "接受兩項意見。現有主張內容足以顯示所述張力，但 claim_relations 為空，應在論證層補登而不能假造新證據；輸入也未提供『《解經的原則》』與 transcript_id 220-426-110-1139 的對應依據，因此以可核驗的中性來源標示替換。"
+      },
+      {
+        "decision": "accept",
+        "decision_id": "CD-M16-002-07",
+        "patch": {
+          "action": "",
+          "add_claim_ids": [],
+          "argument_layer_followups": [],
+          "claim_hierarchy": {
+            "corroborating_claims": [],
+            "evidence_step_scopes": [
+              {
+                "claim_id": "DK-566e8ca150dd-CL006",
+                "evidence_step_ids": [
+                  "DK-566e8ca150dd-E008"
+                ]
+              }
+            ],
+            "methodological_entry": "",
+            "note": "",
+            "original_language_support": "",
+            "paragraph_thesis": "",
+            "parallel_context": [],
+            "supporting_claims": [],
+            "supporting_context": [],
+            "theological_structure": []
+          },
+          "coverage": "",
+          "decision_text": "",
+          "rationale": "",
+          "remove_claim_ids": [],
+          "topic_plan_ids": []
+        },
+        "rationale": "僅接受 CL006 跨段復用需要結構化分層的意見：本段只消費其太18:18所支持的『權柄不由彼得個人獨占』證據。對 AI-ADJ 前綴的疑慮不予採納為本決定的證據不足：相關步驟附有 transcript_id、source_fragment 與逐字摘錄，而且本段核心論證另有多個非 AI-ADJ 證據步驟獨立支撐；僅憑命名前綴不足以要求改動編排。"
+      },
+      {
+        "decision": "reject",
+        "decision_id": "CD-M16-002-09",
+        "patch": {
+          "action": "",
+          "add_claim_ids": [],
+          "argument_layer_followups": [],
+          "claim_hierarchy": {
+            "corroborating_claims": [],
+            "evidence_step_scopes": [],
+            "methodological_entry": "",
+            "note": "",
+            "original_language_support": "",
+            "paragraph_thesis": "",
+            "parallel_context": [],
+            "supporting_claims": [],
+            "supporting_context": [],
+            "theological_structure": []
+          },
+          "coverage": "",
+          "decision_text": "",
+          "rationale": "",
+          "remove_claim_ids": [],
+          "topic_plan_ids": []
+        },
+        "rationale": "拒絕。AI-ADJ-DK-3d012c24a542-CL013-01 已附 transcript_id、source_fragment 與逐字摘錄，命名前綴本身不能證明它是 AI 生成內容；此外，DK-3d012c24a542-CL013 尚有 DK-3d012c24a542-E024 等非 AI-ADJ 證據，而本段關於保密命令歷史處境及十字架使命的核心編排也由其他多項主張獨立支撐。沒有足夠的篇章或論證結構理由要求 patch。"
+      }
+    ],
+    "scope_confirmation": "composition_and_argument_structure_no_theological_critique"
+  },
+  "claude_reconsideration": {
+    "scope_confirmation": "composition_and_argument_structure_no_theological_critique",
+    "reconsiderations": [
+      {
+        "decision_id": "CD-M16-002-09",
+        "decision": "withdraw",
+        "rationale": "OpenAI的反驳成立。原意见仅因evidence_step_id带有'AI-ADJ-'前缀便要求核实其来源真实性，但该证据步骤（AI-ADJ-DK-3d012c24a542-CL013-01）已附完整transcript_id与verbatim_excerpt，格式与同一claim下其他证据（如DK-3d012c24a542-E023/E024/E025）一致，命名前缀本身不构成怀疑其为AI生成或编造的实质依据。此外，DK-3d012c24a542-CL013用于CD-M16-002-09的核心编排论点（保密命令须整体查考、不可断章取义地据以否认弥赛亚身分）并非单独依赖该条AI-ADJ证据，claim内的E024（eligible_candidate）已独立提供'不可断章取义、须整套圣经合看'的论证支撑，本段落其余论证（DK-72483dc200ad-CL001/002/007/009、DK-6f059dbca908-CL007）与该主张也各自独立成立。因此，原意见所指并非编排或论证结构层面的缺陷，而是对单一证据命名惯例的过度推测，缺乏可从现有候选材料中得出的具体理由，应予撤回。"
+      }
+    ]
+  },
+  "outcomes": [
+    {
+      "decision_id": "CD-M16-002-04",
+      "status": "auto_applied"
+    },
+    {
+      "decision_id": "CD-M16-002-06",
+      "status": "auto_applied"
+    },
+    {
+      "decision_id": "CD-M16-002-07",
+      "status": "auto_applied"
+    },
+    {
+      "decision_id": "CD-M16-002-09",
+      "status": "withdrawn"
+    }
+  ],
+  "summary": {
+    "reviewed_decisions": 9,
+    "claude_pass": 5,
+    "claude_actionable": 4,
+    "auto_applied": 3,
+    "withdrawn": 1,
+    "human_required": 0,
+    "argument_layer_status": "usable_with_gaps",
+    "argument_layer_findings": 4
+  }
+}

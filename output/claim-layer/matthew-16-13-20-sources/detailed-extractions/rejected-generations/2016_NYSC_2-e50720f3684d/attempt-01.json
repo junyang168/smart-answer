@@ -1,0 +1,1955 @@
+{
+  "validation_error": "mechanical validation failed: ER002: unknown evidence endpoint | ER003: unknown evidence endpoint | ER004: unknown evidence endpoint | ER008: unknown evidence endpoint | ER009: unknown evidence endpoint | ER011: unknown evidence endpoint | ER012: unknown evidence endpoint | ER013: unknown evidence endpoint | ER016: unknown evidence endpoint | ER017: unknown evidence endpoint | ER018: unknown evidence endpoint | ER020: unknown evidence endpoint | ER022: unknown evidence endpoint | ER024: unknown evidence endpoint | ER026: unknown evidence endpoint | ER027: unknown evidence endpoint | CR005: unknown claim endpoint | CR007: unknown claim endpoint | CR012: unknown claim endpoint | CR015: unknown claim endpoint",
+  "candidate": {
+    "claim_relations": [
+      {
+        "claim_relation_id": "CR001",
+        "from_id": "CL002",
+        "reason": "对磐石所指对象作进一步限定：不是彼得整个人，而是彼得身上的特征。",
+        "relation_type": "qualifies",
+        "to_id": "CL001"
+      },
+      {
+        "claim_relation_id": "CR002",
+        "from_id": "CL005",
+        "reason": "对“作先知讲道”的主要内容作翻译性归纳。",
+        "relation_type": "supports",
+        "to_id": "CL004"
+      },
+      {
+        "claim_relation_id": "CR003",
+        "from_id": "CL006",
+        "reason": "说明预言未来事件在先知职分中的证明作用。",
+        "relation_type": "qualifies",
+        "to_id": "CL004"
+      },
+      {
+        "claim_relation_id": "CR004",
+        "from_id": "CL009",
+        "reason": "原文训练的必要性被应用于教会领袖及神学生。",
+        "relation_type": "applies",
+        "to_id": "CL008"
+      },
+      {
+        "claim_relation_id": "CR005",
+        "from_id": "CL012",
+        "reason": "马太十六章的未来完成式翻译直接否定彼得支配天上决定的解释。",
+        "relation_type": "refutes",
+        "to_id": "POS006"
+      },
+      {
+        "claim_relation_id": "CR006",
+        "from_id": "CL013",
+        "reason": "天上预先设定标准，解释了彼得在地上权柄的性质。",
+        "relation_type": "supports",
+        "to_id": "CL012"
+      },
+      {
+        "claim_relation_id": "CR007",
+        "from_id": "CL014",
+        "reason": "马太十八章把同样权柄交给教会，因此反驳权柄只属于彼得及历代教皇的说法。",
+        "relation_type": "refutes",
+        "to_id": "POS007"
+      },
+      {
+        "claim_relation_id": "CR008",
+        "from_id": "CL015",
+        "reason": "拉比用法与马太十八章语境共同扩展了綑綁、釋放的对象范围。",
+        "relation_type": "contextualizes",
+        "to_id": "CL014"
+      },
+      {
+        "claim_relation_id": "CR009",
+        "from_id": "CL016",
+        "reason": "既然权柄是执行天上标准，教会领袖就必须从圣经查验该标准。",
+        "relation_type": "applies",
+        "to_id": "CL013"
+      },
+      {
+        "claim_relation_id": "CR010",
+        "from_id": "CL017",
+        "reason": "准确解经是教会查验和执行天上标准的实际必要条件。",
+        "relation_type": "supports",
+        "to_id": "CL016"
+      },
+      {
+        "claim_relation_id": "CR011",
+        "from_id": "CL019",
+        "reason": "悔改与不悔改的类别解释了约翰福音二十章中赦免或留下罪的标准。",
+        "relation_type": "supports",
+        "to_id": "CL018"
+      },
+      {
+        "claim_relation_id": "CR012",
+        "from_id": "CL018",
+        "reason": "“哪一种人”的解释反驳使徒可按个人喜恶赦免具体个人的看法。",
+        "relation_type": "refutes",
+        "to_id": "POS008"
+      },
+      {
+        "claim_relation_id": "CR013",
+        "from_id": "CL021",
+        "reason": "明白、遵行和持守真理是灵命成长的条件，因此限定查经与成长的关系。",
+        "relation_type": "qualifies",
+        "to_id": "CL020"
+      },
+      {
+        "claim_relation_id": "CR014",
+        "from_id": "CL022",
+        "reason": "爱的环境是灵命成长所需的另一项条件。",
+        "relation_type": "qualifies",
+        "to_id": "CL020"
+      },
+      {
+        "claim_relation_id": "CR015",
+        "from_id": "CL011",
+        "reason": "客观实在带来的满足感被用来反驳把喜乐等同持续情绪高昂的看法。",
+        "relation_type": "refutes",
+        "to_id": "POS005"
+      }
+    ],
+    "claims": [
+      {
+        "attribution": "professor",
+        "claim_id": "CL001",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E001",
+          "E002"
+        ],
+        "opposed_position_ids": [
+          "POS001"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "statement": "马太福音十六章的教会不是建立在彼得这个人本身之上。",
+        "topic_terms": [
+          "彼得",
+          "磐石",
+          "Petrus",
+          "Petra",
+          "教会根基"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL002",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E002"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "statement": "磐石所指的是彼得身上所具有的一个特征。",
+        "topic_terms": [
+          "彼得的特征",
+          "磐石",
+          "阴阳性"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL003",
+        "claim_kind": "explicit_claim",
+        "evidence_step_ids": [
+          "E003"
+        ],
+        "opposed_position_ids": [
+          "POS002"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "新约中被称为先知或使徒的人并不都具有真正使徒的同等权柄；巴拿巴虽有时被称为使徒，也没有那种使徒权柄。",
+        "topic_terms": [
+          "使徒",
+          "先知",
+          "巴拿巴",
+          "权柄层级"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL004",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E004",
+          "E005",
+          "E006"
+        ],
+        "opposed_position_ids": [
+          "POS003"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "哥林多前书12-14",
+          "以赛亚书"
+        ],
+        "statement": "prophēteuō所表达的先知工作主要是替神向当时的人传出信息，而预测未来只是其中较小的一部分。",
+        "topic_terms": [
+          "prophēteuō",
+          "forth-telling",
+          "fore-telling",
+          "先知讲道"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL005",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E007"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "哥林多前书12-14"
+        ],
+        "statement": "中文“作先知讲道”较好的表达是“传神的信息”。",
+        "topic_terms": [
+          "翻译",
+          "作先知讲道",
+          "传神的信息"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL006",
+        "claim_kind": "reasoning_conclusion",
+        "evidence_step_ids": [
+          "E006",
+          "E008"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "弥迦书",
+          "以赛亚书"
+        ],
+        "statement": "神赐先知预告未来事件的能力，是为了给听众证据，使人可以判断先知当下所传的信息确实来自神。",
+        "topic_terms": [
+          "预言",
+          "先知凭证",
+          "启示来源"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL007",
+        "claim_kind": "interpretive_method",
+        "evidence_step_ids": [
+          "E009",
+          "E010"
+        ],
+        "opposed_position_ids": [
+          "POS004"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "只查编号或简略字典而不懂原文文法，不能充分确定经文字词在具体语境中的真正意思。",
+        "topic_terms": [
+          "原文",
+          "文法",
+          "Strong编号",
+          "字典",
+          "语境"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL008",
+        "claim_kind": "interpretive_method",
+        "evidence_step_ids": [
+          "E009",
+          "E010"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "准确理解圣经需要从原有证据和具体语境查考，而不能把读者自己的观念读进经文。",
+        "topic_terms": [
+          "释经方法",
+          "语境",
+          "原文证据",
+          "读者观念"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL009",
+        "claim_kind": "application",
+        "evidence_step_ids": [
+          "E009"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "并非每位平信徒都可能学习希腊文，但重视圣经权威的神学院应要求教会领袖候选人学习希腊文和希伯来文。",
+        "topic_terms": [
+          "神学教育",
+          "希腊文",
+          "希伯来文",
+          "教会领袖"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL010",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E011",
+          "E012"
+        ],
+        "opposed_position_ids": [
+          "POS005"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "圣经所说的喜乐不是持续的情绪高昂或情感冲动。",
+        "topic_terms": [
+          "喜乐",
+          "情绪",
+          "感觉",
+          "释义"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL011",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E012"
+        ],
+        "opposed_position_ids": [
+          "POS005"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "喜乐是因客观实在的存在而产生的完全满足感，是sense而不只是feeling。",
+        "topic_terms": [
+          "喜乐",
+          "客观实在",
+          "满足感",
+          "sense",
+          "feeling"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL012",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E013",
+          "E014"
+        ],
+        "opposed_position_ids": [
+          "POS006"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "statement": "马太福音十六章十九节应按未来完成式理解为：彼得在地上所綑綁或釋放的，在天上将是已经被綑綁或釋放了；这不是天上服从彼得的决定。",
+        "topic_terms": [
+          "天国钥匙",
+          "綑綁",
+          "釋放",
+          "未来完成式",
+          "彼得权柄"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL013",
+        "claim_kind": "reasoning_conclusion",
+        "evidence_step_ids": [
+          "E015",
+          "E016"
+        ],
+        "opposed_position_ids": [
+          "POS006"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "statement": "能否进入天国的条件和标准由天上预先决定；彼得的职权只是继续按该标准审核、宣告并执行。",
+        "topic_terms": [
+          "天上标准",
+          "执行权柄",
+          "彼得",
+          "审判标准"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL014",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E017"
+        ],
+        "opposed_position_ids": [
+          "POS007"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音18:15-18",
+          "马太福音16:19"
+        ],
+        "statement": "綑綁与釋放的权柄不只给彼得，也给门徒和整个教会。",
+        "topic_terms": [
+          "教会权柄",
+          "彼得",
+          "门徒",
+          "綑綁釋放"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL015",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E018",
+          "E019"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音18:15-18"
+        ],
+        "statement": "“綑綁”与“釋放”既可涉及禁止或准许某件事，也可涉及接纳或排除某个人，两方面都包含在其用法中。",
+        "topic_terms": [
+          "綑綁",
+          "釋放",
+          "拉比用语",
+          "教会纪律",
+          "人和事"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL016",
+        "claim_kind": "application",
+        "evidence_step_ids": [
+          "E020"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "马太福音16:19",
+          "马太福音18:18"
+        ],
+        "statement": "使徒和教会不能随意决定，而有责任查验天上的标准，再把该标准应用于现实处境。",
+        "topic_terms": [
+          "查验",
+          "discern",
+          "天上标准",
+          "教会领导"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL017",
+        "claim_kind": "application",
+        "evidence_step_ids": [
+          "E020"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "教会及基督徒若要遵行神的旨意，准确查考和解释圣经不是仅仅重要，而是不可缺少。",
+        "topic_terms": [
+          "查经",
+          "准确释经",
+          "神的旨意",
+          "不可缺少"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL018",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E021"
+        ],
+        "opposed_position_ids": [
+          "POS008"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "约翰福音20:23"
+        ],
+        "statement": "约翰福音二十章二十三节中的“谁”应理解为“哪一种人”，而不是由使徒任意选择的某一个人。",
+        "topic_terms": [
+          "赦罪",
+          "留下罪",
+          "哪一种人",
+          "代词解释"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL019",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E022"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "约翰福音20:23",
+          "约翰一书1:9"
+        ],
+        "statement": "真悔改这一类人的罪得赦免；不肯悔改这一类人的罪被留下。",
+        "topic_terms": [
+          "悔改",
+          "赦罪",
+          "不悔改",
+          "罪被留下"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL020",
+        "claim_kind": "reasoning_conclusion",
+        "evidence_step_ids": [
+          "E025"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "以弗所书4:15"
+        ],
+        "statement": "查经本身不是与生命成长脱节的知识活动；查经使人知道真理以及神所预备的福分，从而可以遵行真理。",
+        "topic_terms": [
+          "查经",
+          "生命成长",
+          "真理",
+          "祝福"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL021",
+        "claim_kind": "application",
+        "evidence_step_ids": [
+          "E025"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "以弗所书4:15"
+        ],
+        "statement": "灵命若要长进，人必须明白、遵行并持守真理。",
+        "topic_terms": [
+          "灵命成长",
+          "明白真理",
+          "遵行真理",
+          "持守真理"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL022",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E025"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "以弗所书4:15"
+        ],
+        "statement": "灵命成长必须发生在爱的环境中。",
+        "topic_terms": [
+          "爱",
+          "成长环境",
+          "灵命成长"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL023",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E023",
+          "E024"
+        ],
+        "opposed_position_ids": [
+          "POS007"
+        ],
+        "review_status": "candidate",
+        "scripture_refs": [
+          "使徒行传"
+        ],
+        "statement": "彼得不是第一任教皇，因为使徒行传呈现他受其他使徒差派，并须向耶路撒冷教会交代其对外邦人的事工。",
+        "topic_terms": [
+          "彼得",
+          "教皇",
+          "使徒行传",
+          "耶路撒冷教会",
+          "哥尼流"
+        ]
+      },
+      {
+        "attribution": "professor",
+        "claim_id": "CL024",
+        "claim_kind": "interpretive_judgment",
+        "evidence_step_ids": [
+          "E016"
+        ],
+        "opposed_position_ids": [],
+        "review_status": "candidate",
+        "scripture_refs": [],
+        "statement": "经文中“信就必得救”应理解为持续地信，而不是一度相信后即不再持续。",
+        "topic_terms": [
+          "信心",
+          "持续相信",
+          "得救",
+          "动词时态"
+        ]
+      }
+    ],
+    "evidence_relations": [
+      {
+        "from_id": "E001",
+        "reason": "马太现存正典文本使用希腊文，并区分Petrus与Petra，为解释该差异提供文本基础。",
+        "relation_id": "ER001",
+        "relation_type": "contextualizes",
+        "to_id": "E002"
+      },
+      {
+        "from_id": "E002",
+        "reason": "直接回答磐石是否就是彼得本人。",
+        "relation_id": "ER002",
+        "relation_type": "answers",
+        "to_id": "Q001"
+      },
+      {
+        "from_id": "E003",
+        "reason": "以大学教授称谓与决策权的层级作类比，说明同一称号不必表示相同权柄。",
+        "relation_id": "ER003",
+        "relation_type": "answers",
+        "to_id": "Q002"
+      },
+      {
+        "from_id": "E004",
+        "reason": "原文字形及两种构成意义启动对“作先知讲道”的解释。",
+        "relation_id": "ER004",
+        "relation_type": "answers",
+        "to_id": "Q003"
+      },
+      {
+        "from_id": "E005",
+        "reason": "以以赛亚书大量劝当代以色列悔改为例，支持forth-telling占主要部分。",
+        "relation_id": "ER005",
+        "relation_type": "supports",
+        "to_id": "E004"
+      },
+      {
+        "from_id": "E006",
+        "reason": "说明fore-telling的目的在于证明信息来源。",
+        "relation_id": "ER006",
+        "relation_type": "qualifies",
+        "to_id": "E004"
+      },
+      {
+        "from_id": "E008",
+        "reason": "弥迦关于伯利恒的预告被用作预言具有验证作用的实例。",
+        "relation_id": "ER007",
+        "relation_type": "supports",
+        "to_id": "E006"
+      },
+      {
+        "from_id": "E007",
+        "reason": "提出“传神的信息”作为中文翻译答案。",
+        "relation_id": "ER008",
+        "relation_type": "answers",
+        "to_id": "Q003"
+      },
+      {
+        "from_id": "E009",
+        "reason": "说明平信徒与教会领袖在原文学习责任上的差异。",
+        "relation_id": "ER009",
+        "relation_type": "answers",
+        "to_id": "Q004"
+      },
+      {
+        "from_id": "E010",
+        "reason": "以“没有吃饭”的语境歧义说明单查字典不足。",
+        "relation_id": "ER010",
+        "relation_type": "supports",
+        "to_id": "E009"
+      },
+      {
+        "from_id": "E011",
+        "reason": "指出把喜乐理解为持续情绪高昂在生理和经验上不可持续。",
+        "relation_id": "ER011",
+        "relation_type": "refutes",
+        "to_id": "POS005"
+      },
+      {
+        "from_id": "E012",
+        "reason": "正面界定喜乐为客观实在带来的满足感。",
+        "relation_id": "ER012",
+        "relation_type": "answers",
+        "to_id": "Q005"
+      },
+      {
+        "from_id": "E013",
+        "reason": "未来完成式的原文判断否定一般中文译法所暗示的天上随后服从地上决定。",
+        "relation_id": "ER013",
+        "relation_type": "refutes",
+        "to_id": "POS006"
+      },
+      {
+        "from_id": "E014",
+        "reason": "以准确译文重述马太十六章十九节。",
+        "relation_id": "ER014",
+        "relation_type": "supports",
+        "to_id": "E013"
+      },
+      {
+        "from_id": "E015",
+        "reason": "招生委员会类比说明执行者按照已由更高权威确定的标准审核。",
+        "relation_id": "ER015",
+        "relation_type": "contextualizes",
+        "to_id": "E016"
+      },
+      {
+        "from_id": "E016",
+        "reason": "完成式解释标准已定，未来式解释彼得继续执行。",
+        "relation_id": "ER016",
+        "relation_type": "answers",
+        "to_id": "Q006"
+      },
+      {
+        "from_id": "E017",
+        "reason": "马太十八章以复数“你们”在教会纪律语境中重述相同表述，支持权柄属于教会。",
+        "relation_id": "ER017",
+        "relation_type": "answers",
+        "to_id": "Q007"
+      },
+      {
+        "from_id": "E017",
+        "reason": "同样权柄也给教会，反驳彼得专属及教皇继承说。",
+        "relation_id": "ER018",
+        "relation_type": "refutes",
+        "to_id": "POS007"
+      },
+      {
+        "from_id": "E018",
+        "reason": "拉比口头用法显示綑綁、釋放可以表示禁止和准许事项。",
+        "relation_id": "ER019",
+        "relation_type": "supports",
+        "to_id": "E019"
+      },
+      {
+        "from_id": "E019",
+        "reason": "结合马太十八章赶出教会的语境，说明其也涉及人。",
+        "relation_id": "ER020",
+        "relation_type": "answers",
+        "to_id": "Q008"
+      },
+      {
+        "from_id": "E020",
+        "reason": "由权柄受天上标准约束，推导教会领袖必须查验并应用圣经所启示的标准。",
+        "relation_id": "ER021",
+        "relation_type": "applies",
+        "to_id": "E016"
+      },
+      {
+        "from_id": "E021",
+        "reason": "将“谁”判定为类别而非任意个人。",
+        "relation_id": "ER022",
+        "relation_type": "answers",
+        "to_id": "Q009"
+      },
+      {
+        "from_id": "E022",
+        "reason": "约翰一书一章关于认罪得赦免的教导，具体说明可得赦免者的类别。",
+        "relation_id": "ER023",
+        "relation_type": "supports",
+        "to_id": "E021"
+      },
+      {
+        "from_id": "E023",
+        "reason": "彼得受差派并受问责的叙事不符合至高教皇权柄。",
+        "relation_id": "ER024",
+        "relation_type": "answers",
+        "to_id": "Q011"
+      },
+      {
+        "from_id": "E024",
+        "reason": "哥尼流事件进一步说明彼得需向耶路撒冷教会交代。",
+        "relation_id": "ER025",
+        "relation_type": "supports",
+        "to_id": "E023"
+      },
+      {
+        "from_id": "E025",
+        "reason": "以弗所书四章十五节被用于回答查经与生命成长的关系。",
+        "relation_id": "ER026",
+        "relation_type": "answers",
+        "to_id": "Q012"
+      },
+      {
+        "from_id": "E025",
+        "reason": "生命成长还取决于遵行、持守真理以及爱的环境，限定了“查好经就自动成长”的理解。",
+        "relation_id": "ER027",
+        "relation_type": "qualifies",
+        "to_id": "Q012"
+      }
+    ],
+    "evidence_steps": [
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "可是我們今天所有的聖經，就是希臘文的聖經，我們沒有馬太寫的亞蘭文的福音書，沒有。"
+          }
+        ],
+        "discourse_role": "教授对现存正典文本及写作语言的判断",
+        "evidence_step_id": "E001",
+        "produced_claim_ids": [
+          "CL001"
+        ],
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "现存正典中的马太福音是希腊文文本；教授同时认为马太很可能先用亚兰文写作再翻成希腊文，并主张翻译过程受圣灵带领。",
+        "step_type": "historical_background",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "不是建立在彼得這個「人」身上，乃是在彼得這個人身上所有的一個特徵，彼得的特徵。"
+          }
+        ],
+        "discourse_role": "教授给出磐石所指的释经结论",
+        "evidence_step_id": "E002",
+        "produced_claim_ids": [
+          "CL001",
+          "CL002"
+        ],
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "教会不是建立在彼得这个人本身上，而是在彼得所具有的特征上；Petrus到Petra的阳性、阴性变化被视为具有解释意义。",
+        "step_type": "answer",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0005",
+            "start_time": null,
+            "verbatim_excerpt": "可是那種先知沒有使徒那種權柄。他們雖然稱稱他是先知，可是他沒有使徒的權柄。還有像巴拿巴，聖經有時候也叫他做什麼？使徒。可是巴拿巴沒有那種真正的使徒的權柄。"
+          }
+        ],
+        "discourse_role": "教授以职称与实际决策权的层级类比新约称号",
+        "evidence_step_id": "E003",
+        "produced_claim_ids": [
+          "CL003"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "新约中某些人虽被称为先知或使徒，仍不具有真正使徒的权柄；称号本身不能证明权柄等同。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "prophetize 其實有兩個很重要的部分：一部分就是 forth-telling。"
+          },
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "可是第二個意思是什麼？fore-telling。"
+          }
+        ],
+        "discourse_role": "教授分析希腊文动词的语义构成",
+        "evidence_step_id": "E004",
+        "produced_claim_ids": [
+          "CL004"
+        ],
+        "scripture_refs": [
+          "哥林多前书12-14"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "prophēteuō包含forth-telling（传出、讲出信息）和fore-telling（预告未来）两个因素。",
+        "step_type": "original_language",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "以賽亞書大部分講什麼？他替誰講話？講給當時的人聽：「你應該悔改，你不應該這麼做。」一直在強調悔改、強調悔改，那個叫做 forth-telling，替神講出話來，來傳神的信息。"
+          }
+        ],
+        "discourse_role": "教授以先知书内容比例说明主要职能",
+        "evidence_step_id": "E005",
+        "produced_claim_ids": [
+          "CL004"
+        ],
+        "scripture_refs": [
+          "以赛亚书"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "以赛亚书的大部分内容是向当时的人传达神的信息并要求悔改，而不是预告遥远未来。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "所以神才給這些替祂傳信息的人，有一些能力能夠預測將來的事。"
+          }
+        ],
+        "discourse_role": "教授解释预告未来与先知信息可信度的关系",
+        "evidence_step_id": "E006",
+        "produced_claim_ids": [
+          "CL004",
+          "CL006"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "神赐传信息者预测未来的能力，用来回应听众对信息是否来自神的质疑。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0008",
+            "start_time": null,
+            "verbatim_excerpt": "最好的翻譯，不要把它翻成「作先知講道」，其實乾脆把它翻成「傳神的信息」。"
+          }
+        ],
+        "discourse_role": "教授提出中文译法建议",
+        "evidence_step_id": "E007",
+        "produced_claim_ids": [
+          "CL005"
+        ],
+        "scripture_refs": [
+          "哥林多前书12-14"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "“作先知讲道”最好译为“传神的信息”，以避免华人把先知工作误解为全是未来预言。",
+        "step_type": "answer",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "彌迦書談到將來耶穌出生在伯利恆。那果然彌迦講完之後，耶穌果然出生在伯利恆，所以他們就不得不承認：「你所傳來的信息真是從神那裡來的，不然誰能夠知道七百年以後耶穌出生在伯利恆？」"
+          }
+        ],
+        "discourse_role": "教授举出预言发挥验证功能的经文例证",
+        "evidence_step_id": "E008",
+        "produced_claim_ids": [
+          "CL006"
+        ],
+        "scripture_refs": [
+          "弥迦书"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "弥迦预告耶稣出生在伯利恒，后来应验，被用来说明预言可验证先知信息来自神。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0008",
+            "start_time": null,
+            "verbatim_excerpt": "比較注重聖經權威的神學院，都要求他們的神學生，就唸那個道學碩士的學生，一定要學希臘文，一定要學希伯來文，就是這個原因"
+          }
+        ],
+        "discourse_role": "教授把原文释经原则应用于神学教育",
+        "evidence_step_id": "E009",
+        "produced_claim_ids": [
+          "CL007",
+          "CL008",
+          "CL009"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "平信徒未必有时间学习希腊文，但牧师等领导者需要设法掌握原文，因此重视圣经权威的神学院要求道学硕士学生学习希腊文和希伯来文。",
+        "step_type": "application",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0012",
+            "start_time": null,
+            "verbatim_excerpt": "那你去查字典，什麼叫「沒有吃飯」？字典告訴你說，「沒有吃東西就是沒有吃飯」。可是「沒有吃飯」還有一個很重要的意思是什麼？你吃了很多東西，可是沒有吃白米飯。那這字典怎麼查？查不到。"
+          }
+        ],
+        "discourse_role": "教授以日常语言歧义说明词典限制",
+        "evidence_step_id": "E010",
+        "produced_claim_ids": [
+          "CL007",
+          "CL008"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "单查字典不能穷尽语句在具体使用中的意义；“没有吃饭”既可指没吃东西，也可指没吃白米饭，必须由语境和证据判断。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0011",
+            "start_time": null,
+            "verbatim_excerpt": "聖經所說的喜樂不是那喜樂潮。如果我們像保羅說要這樣「常常喜樂」，我們常常（情緒高昂地）喜樂的話，在喜樂七天之後，可能死掉了。"
+          }
+        ],
+        "discourse_role": "教授反驳把喜乐等同持续情绪高昂",
+        "evidence_step_id": "E011",
+        "produced_claim_ids": [
+          "CL010"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "若“常常喜乐”指持续保持高昂情绪，这在身体上不可持续，因此不是圣经所说喜乐的本义。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0011",
+            "start_time": null,
+            "verbatim_excerpt": "喜樂就是因為我們有客觀的實體所存在，帶給我們那種完全的滿足感。不是 feeling（感覺），是 sense（感）。"
+          }
+        ],
+        "discourse_role": "教授正面界定喜乐",
+        "evidence_step_id": "E012",
+        "produced_claim_ids": [
+          "CL010",
+          "CL011"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "喜乐源自客观实在所带来的完全满足感，应区分sense与feeling。",
+        "step_type": "answer",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0016",
+            "start_time": null,
+            "verbatim_excerpt": "那個 ἔσται δεδεμένον 是什麼？未來完成式。"
+          }
+        ],
+        "discourse_role": "教授对希腊文时态作判断",
+        "evidence_step_id": "E013",
+        "produced_claim_ids": [
+          "CL012"
+        ],
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "马太福音十六章十九节的ἔσται δεδεμένον是未来完成式。",
+        "step_type": "original_language",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0016",
+            "start_time": null,
+            "verbatim_excerpt": "準確的翻譯：「凡你在地上所綑綁的，在天上將是已經被綑綁了。」「凡你在地上所釋放的，在天上將是已經被釋放了。」"
+          }
+        ],
+        "discourse_role": "教授依据时态给出准确译文",
+        "evidence_step_id": "E014",
+        "produced_claim_ids": [
+          "CL012"
+        ],
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "地上綑綁或釋放的对象，在天上将是已经被綑綁或釋放，而非天上随后接受彼得的决定。",
+        "step_type": "original_language",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0017",
+            "start_time": null,
+            "verbatim_excerpt": "不是按照我的標準來評判，是按照教授會議決定的標準去評判。"
+          }
+        ],
+        "discourse_role": "教授以招生委员会主任作执行既定标准的类比",
+        "evidence_step_id": "E015",
+        "produced_claim_ids": [
+          "CL013"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "招生主任并非自行决定录取资格，而是按教授会议已经决定的标准审核申请人；这被用来类比彼得的权柄。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0018",
+            "start_time": null,
+            "verbatim_excerpt": "為什麼完成式？因為這個條件，這個標準，天上已經決定好了。可是為什麼要用未來式？為什麼？因為彼得還要繼續地執行這個工作，不但是今天執行，將來還要執行，所以才是未來式。"
+          }
+        ],
+        "discourse_role": "教授解释未来完成式各部分的神学意义",
+        "evidence_step_id": "E016",
+        "produced_claim_ids": [
+          "CL013",
+          "CL024"
+        ],
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "完成式表示条件和标准已由天上决定；未来式表示彼得此后仍要继续执行按标准判断的工作。教授并以此强调相关信心表述中的持续性。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0020",
+            "start_time": null,
+            "verbatim_excerpt": "第十八節：「我實在告訴你們，凡你們在地上所綑綁的，在天上將是已經被綑綁；凡你們在地上所釋放的，在天上也將是已經被釋放。」所以同樣的權柄，耶穌不只是給彼得，也給教會。"
+          }
+        ],
+        "discourse_role": "教授用平行经文确定权柄对象",
+        "evidence_step_id": "E017",
+        "produced_claim_ids": [
+          "CL014"
+        ],
+        "scripture_refs": [
+          "马太福音18:15-18",
+          "马太福音16:19"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "马太福音十八章在教会纪律语境中把同样的綑綁、釋放表述给复数的“你们”，表明该权柄也给教会。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "所以「綑綁」是什麼意思？可以禁止做一些事，或者是不准人進天國，兩個都有。"
+          }
+        ],
+        "discourse_role": "教授依据拉比习语说明词义范围",
+        "evidence_step_id": "E018",
+        "produced_claim_ids": [
+          "CL015"
+        ],
+        "scripture_refs": [],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "拉比用“綑綁”表示禁止，用“釋放”表示准许；该组词既能指对行为的禁准，也能指人是否被接纳。",
+        "step_type": "historical_background",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "所以這個權柄是跟「事」有關，也跟「人」有關。"
+          }
+        ],
+        "discourse_role": "教授综合拉比用法与马太十八章语境",
+        "evidence_step_id": "E019",
+        "produced_claim_ids": [
+          "CL015"
+        ],
+        "scripture_refs": [
+          "马太福音18:15-18"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "綑綁和釋放的权柄既涉及事情，也涉及人；马太十八章把不听教会者视为外邦人和税吏，显示其与教会成员身份有关。",
+        "step_type": "reasoning",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "使徒、教會，必須要查驗天上的標準是什麼。不是使徒、教會的決定，是天上所決定的標準。使徒、教會要查驗天上的標準，然後按照天上的標準來做事。"
+          }
+        ],
+        "discourse_role": "教授由释经结论推出教会实践责任",
+        "evidence_step_id": "E020",
+        "produced_claim_ids": [
+          "CL016",
+          "CL017"
+        ],
+        "scripture_refs": [
+          "马太福音16:19",
+          "马太福音18:18"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "使徒和教会必须从圣经查验天上已经决定的标准，并据此行动；因此准确查经和释经对教会不可缺少。",
+        "step_type": "application",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0024",
+            "start_time": null,
+            "verbatim_excerpt": "中文翻成「誰」那個字，「誰」不是 which person，不是哪一個人，是什麼？是「哪一種人」。"
+          }
+        ],
+        "discourse_role": "教授对代词所指作语义判断",
+        "evidence_step_id": "E021",
+        "produced_claim_ids": [
+          "CL018"
+        ],
+        "scripture_refs": [
+          "约翰福音20:23"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "约翰福音二十章二十三节的“谁”不是指使徒任意选定的某个人，而是指具有某种特征的一类人。",
+        "step_type": "original_language",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0024",
+            "start_time": null,
+            "verbatim_excerpt": "就是那些真悔改的人，他們的罪就得赦免；那些不肯悔改的人，他們的罪就留下來了。"
+          }
+        ],
+        "discourse_role": "教授以认罪悔改经文具体界定两类人",
+        "evidence_step_id": "E022",
+        "produced_claim_ids": [
+          "CL019"
+        ],
+        "scripture_refs": [
+          "约翰福音20:23",
+          "约翰一书1:9"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "根据圣经关于认罪得赦免的教导，真悔改者属于罪得赦免的一类，不悔改者属于罪被留下的一类。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0025",
+            "start_time": null,
+            "verbatim_excerpt": "彼得受其他的使徒差派他出去做工。"
+          }
+        ],
+        "discourse_role": "教授以使徒行传叙事反驳彼得是最高教皇",
+        "evidence_step_id": "E023",
+        "produced_claim_ids": [
+          "CL023"
+        ],
+        "scripture_refs": [
+          "使徒行传"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "彼得曾受其他使徒差派出去工作，这与他拥有不受其他使徒约束的教皇地位不符。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0025",
+            "start_time": null,
+            "verbatim_excerpt": "還有彼得到哥尼流到那邊去傳福音的時候，他回來要向耶路撒冷報告，要向耶路撒冷交代。"
+          }
+        ],
+        "discourse_role": "教授引用哥尼流事件说明彼得受教会问责",
+        "evidence_step_id": "E024",
+        "produced_claim_ids": [
+          "CL023"
+        ],
+        "scripture_refs": [
+          "使徒行传"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "彼得向哥尼流传福音后须向耶路撒冷教会报告并交代，显示他并非拥有无人可问责的教皇权柄。",
+        "step_type": "scripture_evidence",
+        "support_eligibility": "eligible_candidate"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0026",
+            "start_time": null,
+            "verbatim_excerpt": "你要靈命長進的話，以弗所書第四章第十五節明講，如果你靈命要長進的話，你必須要明白真理、必須要遵行真理、必須要持守真理。"
+          }
+        ],
+        "discourse_role": "教授回答查经与生命成长的关系",
+        "evidence_step_id": "E025",
+        "produced_claim_ids": [
+          "CL020",
+          "CL021",
+          "CL022"
+        ],
+        "scripture_refs": [
+          "以弗所书4:15"
+        ],
+        "speaker": "professor",
+        "stance": "asserted",
+        "statement": "查经使人知道真理；灵命成长要求人明白、遵行并持守真理，而且成长必须在爱的环境中。",
+        "step_type": "answer",
+        "support_eligibility": "eligible_candidate"
+      }
+    ],
+    "observations": [
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "Petrus、Petra 是希臘文。"
+          }
+        ],
+        "observation_id": "OBS001",
+        "observation_type": "original_language",
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "statement": "Petrus与Petra是希腊文形式。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "雖然亞蘭文沒有 Petrus、Petra 的那一個陽性、陰性的分別"
+          }
+        ],
+        "observation_id": "OBS002",
+        "observation_type": "original_language",
+        "scripture_refs": [
+          "马太福音16:18"
+        ],
+        "statement": "亚兰文没有Petrus与Petra所呈现的阳性、阴性区别。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "當時要把這個福音傳到全世界去，最普遍的語言就是希臘文，通用希臘文（Koine Greek）。"
+          }
+        ],
+        "observation_id": "OBS003",
+        "observation_type": "historical_language_context",
+        "scripture_refs": [
+          "马太福音"
+        ],
+        "statement": "教授描述当时向广泛世界传播福音所使用的普遍语言为通用希腊文。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "原文（希臘文）叫做 προφητεύητε（propheteuō），英文翻成 prophetize。"
+          }
+        ],
+        "observation_id": "OBS004",
+        "observation_type": "original_language",
+        "scripture_refs": [
+          "哥林多前书12-14"
+        ],
+        "statement": "中文“作先知讲道”所对应的希腊文被教授标作προφητεύητε（propheteuō），英文为prophetize。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "forth-telling 是什麼東西？傳出來、講出來，speak out。"
+          }
+        ],
+        "observation_id": "OBS005",
+        "observation_type": "lexical_semantics",
+        "scripture_refs": [],
+        "statement": "forth-telling被解释为传出、讲出，即speak out。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "fore-telling。f-o-r-e telling，就是我們中文所說的「預言」。"
+          }
+        ],
+        "observation_id": "OBS006",
+        "observation_type": "lexical_semantics",
+        "scripture_refs": [],
+        "statement": "fore-telling被解释为中文所说的预言，即预告未来。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0016",
+            "start_time": null,
+            "verbatim_excerpt": "ἔσται δεδεμένον 是什麼？未來完成式。"
+          }
+        ],
+        "observation_id": "OBS007",
+        "observation_type": "greek_grammar",
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "statement": "教授将ἔσται δεδεμένον判定为未来完成式。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0018",
+            "start_time": null,
+            "verbatim_excerpt": "這個東西，ἔσται δεδεμένον就是未來完成時態（Future Perfect Passive）。"
+          }
+        ],
+        "observation_id": "OBS008",
+        "observation_type": "greek_grammar",
+        "scripture_refs": [
+          "马太福音16:19"
+        ],
+        "statement": "教授进一步将ἔσται δεδεμένον标作Future Perfect Passive。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0020",
+            "start_time": null,
+            "verbatim_excerpt": "馬太十六章十九節，這個權柄給彼得，同樣的權柄，馬太十八章十八節給教會。"
+          }
+        ],
+        "observation_id": "OBS009",
+        "observation_type": "parallel_passage",
+        "scripture_refs": [
+          "马太福音16:19",
+          "马太福音18:18"
+        ],
+        "statement": "马太福音十六章十九节向彼得说綑綁与釋放，十八章十八节在教会语境中使用同样表述。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0020",
+            "start_time": null,
+            "verbatim_excerpt": "若是不聽教會，就看他像外邦人和稅吏一樣。"
+          }
+        ],
+        "observation_id": "OBS010",
+        "observation_type": "literary_context",
+        "scripture_refs": [
+          "马太福音18:17"
+        ],
+        "statement": "马太福音十八章的上下文涉及不听教会者被视为外邦人和税吏。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "拉比的口頭禪：「我不准你們帶食物到教室裡面來。」他們就說：「我綑綁你們帶食物到教室來。」"
+          }
+        ],
+        "observation_id": "OBS011",
+        "observation_type": "historical_cultural_usage",
+        "scripture_refs": [],
+        "statement": "教授描述拉比学校以“綑綁”表达禁止某项行为。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "「我……這是什麼？釋放你們在課堂上喝水。」這是他們的說法。"
+          }
+        ],
+        "observation_id": "OBS012",
+        "observation_type": "historical_cultural_usage",
+        "scripture_refs": [],
+        "statement": "教授描述拉比学校以“釋放”表达准许某项行为。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "過去所發生的事，它的效果今天還存在。"
+          }
+        ],
+        "observation_id": "OBS013",
+        "observation_type": "grammatical_aspect",
+        "scripture_refs": [
+          "马太福音16:19",
+          "马太福音18:18"
+        ],
+        "statement": "教授将完成式的观念说明为过去发生之事的效果在现在仍然存在。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0024",
+            "start_time": null,
+            "verbatim_excerpt": "我們若認自己的罪，神是信實的，是公義的，必要赦免我們的罪，洗淨我們一切的不義。"
+          }
+        ],
+        "observation_id": "OBS014",
+        "observation_type": "scripture_text",
+        "scripture_refs": [
+          "约翰一书1:9"
+        ],
+        "statement": "讲道引用约翰一书一章关于认罪、赦免和洗净不义的表述。"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0026",
+            "start_time": null,
+            "verbatim_excerpt": "你應該在什麼？愛的環境裡面才能夠長進。"
+          }
+        ],
+        "observation_id": "OBS015",
+        "observation_type": "literary_context",
+        "scripture_refs": [
+          "以弗所书4:15"
+        ],
+        "statement": "教授在解释以弗所书四章十五节时注意到成长发生在爱的环境中。"
+      }
+    ],
+    "positions": [
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "他們說耶穌當時講的時候，耶穌不是講希臘文，耶穌是講亞蘭文"
+          }
+        ],
+        "attribution": "提出亚兰文背景以弱化Petrus与Petra区别的人",
+        "position_id": "POS001",
+        "title": "耶稣说亚兰文，因此希腊文Petrus与Petra的性别差异不具解释意义"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0005",
+            "start_time": null,
+            "verbatim_excerpt": "有些人很喜歡說他是使徒、他是先知"
+          }
+        ],
+        "attribution": "自称使徒或先知并主张同等权柄的人",
+        "position_id": "POS002",
+        "title": "今日自称使徒或先知者具有新约使徒、先知同等权柄"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "完全是講預言將來要發生的事"
+          }
+        ],
+        "attribution": "教授所述很多华人对先知书的常见理解",
+        "position_id": "POS003",
+        "title": "先知书完全是在预告将来发生的事"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0009",
+            "start_time": null,
+            "verbatim_excerpt": "學希臘文、學希伯來文很困難，我們乾脆就不要教好了"
+          }
+        ],
+        "attribution": "教授所述部分神学院",
+        "position_id": "POS004",
+        "title": "神学院可不教希腊文、希伯来文，让学生靠工具书和编号查字即可"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0009",
+            "start_time": null,
+            "verbatim_excerpt": "喜樂就是你情感上的高昂，就是喜樂，對不對？"
+          }
+        ],
+        "attribution": "教授所述教会中常见的喜乐观",
+        "position_id": "POS005",
+        "title": "圣经中的喜乐就是情感高昂或持续的喜乐潮"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0014",
+            "start_time": null,
+            "verbatim_excerpt": "他們說什麼？耶穌給彼得絕對的權柄。你要叫一個人不能夠進天堂，你就不能進天堂，天上都聽你的話。"
+          }
+        ],
+        "attribution": "教授所述多数解经家及相关传统解释",
+        "position_id": "POS006",
+        "title": "耶稣给彼得绝对权柄，天上服从彼得对人上天堂或下地狱的决定"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0014",
+            "start_time": null,
+            "verbatim_excerpt": "彼得就是第一任的教皇，所以彼得過世之後，他就把耶穌給他的權柄，傳給繼續他位子的每一代的教皇。"
+          }
+        ],
+        "attribution": "罗马天主教传统，按教授的复述",
+        "position_id": "POS007",
+        "title": "彼得是第一任教皇，其天国钥匙权柄传给历代教皇"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0024",
+            "start_time": null,
+            "verbatim_excerpt": "並不是神、並不是耶穌給這個使徒們說：「這個人你不喜歡他，所以你的罪……他的罪留下來了。」"
+          }
+        ],
+        "attribution": "教授反驳的对约翰福音20:23之任意个人化理解",
+        "position_id": "POS008",
+        "title": "使徒可按个人喜恶决定某一个人的罪得赦免或被留下"
+      }
+    ],
+    "questions": [
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0003",
+            "start_time": null,
+            "verbatim_excerpt": "什麼意思？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL001",
+          "CL002"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q001",
+        "question_type": "exegetical_question",
+        "questioner": "professor",
+        "text": "马太福音十六章中Petrus与Petra的变化是什么意思，教会所建于其上的磐石是否就是彼得本人？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0005",
+            "start_time": null,
+            "verbatim_excerpt": "問題就是權柄的問題。"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL003"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q002",
+        "question_type": "theological_authority_question",
+        "questioner": "professor",
+        "text": "新约中称为先知或使徒的人是否都具有与真正使徒相同的权柄？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0007",
+            "start_time": null,
+            "verbatim_excerpt": "那個字是什麼意思？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL004",
+          "CL005",
+          "CL006"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q003",
+        "question_type": "original_language_question",
+        "questioner": "professor",
+        "text": "哥林多前书十二至十四章的prophēteuō究竟是什么意思？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0008",
+            "start_time": null,
+            "verbatim_excerpt": "你要要求我們每一個平信徒都學希臘文嗎？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL009"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q004",
+        "question_type": "audience_objection_revoiced",
+        "questioner": "professor",
+        "text": "是否应要求每一位平信徒都学习希腊文？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0011",
+            "start_time": null,
+            "verbatim_excerpt": "所以喜樂是什麼？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL010",
+          "CL011"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q005",
+        "question_type": "lexical_theological_question",
+        "questioner": "professor",
+        "text": "圣经所说的喜乐是什么？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0018",
+            "start_time": null,
+            "verbatim_excerpt": "所以為什麼未來完成式？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL012",
+          "CL013"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q006",
+        "question_type": "grammar_exegesis_question",
+        "questioner": "professor",
+        "text": "马太福音十六章十九节为什么使用未来完成式？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0020",
+            "start_time": null,
+            "verbatim_excerpt": "這個權柄，耶穌不只是給彼得而已，給誰？給教會。"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL014"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q007",
+        "question_type": "authority_recipient_question",
+        "questioner": "professor",
+        "text": "綑綁与釋放的权柄只给彼得，还是也给教会？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0022",
+            "start_time": null,
+            "verbatim_excerpt": "你再看，「綑綁」什麼意思？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL015"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q008",
+        "question_type": "lexical_contextual_question",
+        "questioner": "professor",
+        "text": "“綑綁”与“釋放”在拉比用法和马太福音语境中是什么意思？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0024",
+            "start_time": null,
+            "verbatim_excerpt": "乃是什麼樣的人？What kind of person。"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL018",
+          "CL019"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q009",
+        "question_type": "referent_question",
+        "questioner": "professor",
+        "text": "约翰福音二十章二十三节所说罪得赦免或被留下的“谁”，究竟是哪一种人？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0025",
+            "start_time": null,
+            "verbatim_excerpt": "你準備什麼時候出那本書？"
+          }
+        ],
+        "answer_claim_ids": [],
+        "answer_state": "partially_answered",
+        "question_id": "Q010",
+        "question_type": "audience_publication_question",
+        "questioner": "audience",
+        "text": "教授准备什么时候出版那本汇集常被误解经文观念的书？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0025",
+            "start_time": null,
+            "verbatim_excerpt": "你對這個天主教把彼得當作第一任教皇的看法？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL023"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q011",
+        "question_type": "audience_doctrinal_question",
+        "questioner": "audience",
+        "text": "教授如何看待天主教把彼得视为第一任教皇？"
+      },
+      {
+        "anchors": [
+          {
+            "end_time": null,
+            "segment_index": "S0026",
+            "start_time": null,
+            "verbatim_excerpt": "但是是不是說這個經查好了，他的生命就成長了？"
+          }
+        ],
+        "answer_claim_ids": [
+          "CL020",
+          "CL021",
+          "CL022"
+        ],
+        "answer_state": "answered",
+        "question_id": "Q012",
+        "question_type": "audience_application_question",
+        "questioner": "audience",
+        "text": "是否只要把经文查考好了，人的生命就会成长？"
+      }
+    ]
+  }
+}

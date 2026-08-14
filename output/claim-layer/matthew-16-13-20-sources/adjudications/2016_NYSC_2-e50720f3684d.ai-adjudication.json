@@ -1,0 +1,436 @@
+{
+  "schema_version": "wang_corpus_ai_adjudication_v1",
+  "source": {
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_2-e50720f3684d.detailed-knowledge.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_2-e50720f3684d.independent-review.json"
+  },
+  "adjudicator": {
+    "review_fingerprint": "5697731aff83379b7256fe0eb1fa552d28ce2d9d598aed2a444db4bdd57400e0",
+    "openai_prompt_sha256": "24faed534874274b93c30575d1471db07565435b95a131e3962f584e0812e229",
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_prompt_sha256": "a7484bc13e329465cf25623e6418cc91d9ef8c59476e79093e96dbbd203f72f6",
+    "claude_model": "claude-sonnet-5",
+    "schema_version": "wang_corpus_ai_adjudication_v1",
+    "fingerprint_sha256": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+    "generated_at": "2026-08-14T17:53:07.059893+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "claim_id": "DK-e50720f3684d-CL007",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "287",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "因為你不懂文法，有些人說：「你看，我現在就查一個字，這個字，它就有一個比如說 Strong （注：Strong’s Numbers编号法）裡面這樣就給你一個號碼，我看到這個號碼，就曉得這個字是希臘文是什麼字，去查是什麼意思。」其實那個字典告訴你什麼意思，它只是告訴你小部分的意思而已，真正的意思沒有辦法告訴你。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude指出的锚点缺口成立。S0009直接论及不懂文法而仅凭Strong编号和字典查词的局限；补入该原文即可覆盖主张中的“查编号或简略字典”细节，无需改写主张。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-e50720f3684d-CL008",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "interpretive_method",
+              "source_index": "287",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "你要真的懂得怎麼去了解，你必須要學會怎麼去查那個字是什麼意思，從原有的證據去查。"
+            },
+            {
+              "evidence_type": "reasoning",
+              "source_index": "546",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "我們常常對聖經有很多觀念，我們自己的觀念，唸到聖經裡面去，大有問題。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。新增的S0009引文直接支持从原有证据查考，S0011引文直接支持不可把自己的观念读入圣经；现有S0012语义歧义例证仍可辅助支持具体语境的重要性。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-e50720f3684d-CL012",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "822",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude指出的后半句锚点缺口成立。S0016明确否定彼得的权柄能够支配天上，补入该句即可直接支持“不是天上服从彼得的决定”，其余时态与译文已有现有锚点支持。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-e50720f3684d-CL017",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "application",
+              "source_index": "1106",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "一樣的，對教會，都要查驗天上的標準，我們基督徒要研究聖經，基督徒要準確的解經是不可缺的。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有锚点支持教会须查验天上标准，但未直接覆盖“不可缺”；新增同段原文明确把研究圣经和准确解经称为基督徒不可缺少之事。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-e50720f3684d-CL020",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "1389",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "如果你不查經，你就不知道神為我們預備的東西在哪裡。那奇妙的是什麼東西？你查經以後知道說，神要怎麼樣給、祂要給我們的那個祝福，你不知道你怎麼去求？你查經知道真理之後，你才會遵行真理。你不遵行真理，靈命不會長進。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。新增S0026引文直接串联查经、认识神所预备的福分、知道并遵行真理以及灵命成长，完整覆盖CL020的核心推论；现有锚点可继续作为灵命成长条件的补充证据。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      }
+    ],
+    "scope_confirmation": "source_fidelity_only_no_theological_critique"
+  },
+  "claude_reconsideration": null,
+  "results": [
+    {
+      "claim_id": "DK-e50720f3684d-CL007",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-e50720f3684d-CL007",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "287",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "因為你不懂文法，有些人說：「你看，我現在就查一個字，這個字，它就有一個比如說 Strong （注：Strong’s Numbers编号法）裡面這樣就給你一個號碼，我看到這個號碼，就曉得這個字是希臘文是什麼字，去查是什麼意思。」其實那個字典告訴你什麼意思，它只是告訴你小部分的意思而已，真正的意思沒有辦法告訴你。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude指出的锚点缺口成立。S0009直接论及不懂文法而仅凭Strong编号和字典查词的局限；补入该原文即可覆盖主张中的“查编号或简略字典”细节，无需改写主张。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-e50720f3684d-CL008",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-e50720f3684d-CL008",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "interpretive_method",
+              "source_index": "287",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "你要真的懂得怎麼去了解，你必須要學會怎麼去查那個字是什麼意思，從原有的證據去查。"
+            },
+            {
+              "evidence_type": "reasoning",
+              "source_index": "546",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "我們常常對聖經有很多觀念，我們自己的觀念，唸到聖經裡面去，大有問題。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。新增的S0009引文直接支持从原有证据查考，S0011引文直接支持不可把自己的观念读入圣经；现有S0012语义歧义例证仍可辅助支持具体语境的重要性。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-e50720f3684d-CL012",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-e50720f3684d-CL012",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "822",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude指出的后半句锚点缺口成立。S0016明确否定彼得的权柄能够支配天上，补入该句即可直接支持“不是天上服从彼得的决定”，其余时态与译文已有现有锚点支持。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-e50720f3684d-CL017",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-e50720f3684d-CL017",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "application",
+              "source_index": "1106",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "一樣的，對教會，都要查驗天上的標準，我們基督徒要研究聖經，基督徒要準確的解經是不可缺的。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。现有锚点支持教会须查验天上标准，但未直接覆盖“不可缺”；新增同段原文明确把研究圣经和准确解经称为基督徒不可缺少之事。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-e50720f3684d-CL020",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-e50720f3684d-CL020",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "1389",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+              "verbatim_excerpt": "如果你不查經，你就不知道神為我們預備的東西在哪裡。那奇妙的是什麼東西？你查經以後知道說，神要怎麼樣給、祂要給我們的那個祝福，你不知道你怎麼去求？你查經知道真理之後，你才會遵行真理。你不遵行真理，靈命不會長進。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "Claude意见成立。新增S0026引文直接串联查经、认识神所预备的福分、知道并遵行真理以及灵命成长，完整覆盖CL020的核心推论；现有锚点可继续作为灵命成长条件的补充证据。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "claim_overrides": {
+    "DK-e50720f3684d-CL007": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "287",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "因為你不懂文法，有些人說：「你看，我現在就查一個字，這個字，它就有一個比如說 Strong （注：Strong’s Numbers编号法）裡面這樣就給你一個號碼，我看到這個號碼，就曉得這個字是希臘文是什麼字，去查是什麼意思。」其實那個字典告訴你什麼意思，它只是告訴你小部分的意思而已，真正的意思沒有辦法告訴你。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-e50720f3684d-CL008": {
+      "anchor_additions": [
+        {
+          "evidence_type": "interpretive_method",
+          "source_index": "287",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "你要真的懂得怎麼去了解，你必須要學會怎麼去查那個字是什麼意思，從原有的證據去查。"
+        },
+        {
+          "evidence_type": "reasoning",
+          "source_index": "546",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "我們常常對聖經有很多觀念，我們自己的觀念，唸到聖經裡面去，大有問題。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-e50720f3684d-CL012": {
+      "anchor_additions": [
+        {
+          "evidence_type": "answer",
+          "source_index": "822",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-e50720f3684d-CL017": {
+      "anchor_additions": [
+        {
+          "evidence_type": "application",
+          "source_index": "1106",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "一樣的，對教會，都要查驗天上的標準，我們基督徒要研究聖經，基督徒要準確的解經是不可缺的。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-e50720f3684d-CL020": {
+      "anchor_additions": [
+        {
+          "evidence_type": "answer",
+          "source_index": "1389",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "如果你不查經，你就不知道神為我們預備的東西在哪裡。那奇妙的是什麼東西？你查經以後知道說，神要怎麼樣給、祂要給我們的那個祝福，你不知道你怎麼去求？你查經知道真理之後，你才會遵行真理。你不遵行真理，靈命不會長進。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    }
+  },
+  "pending_patches": {},
+  "summary": {
+    "auto_applied": 5,
+    "withdrawn": 0,
+    "human_confirmation_required": 0,
+    "human_disagreement_required": 0
+  }
+}

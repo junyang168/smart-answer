@@ -1,0 +1,354 @@
+{
+  "schema_version": "wang_corpus_ai_adjudication_v1",
+  "source": {
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/2016_NYSC_3-3d012c24a542.detailed-knowledge.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/reviews/2016_NYSC_3-3d012c24a542.independent-review.json"
+  },
+  "adjudicator": {
+    "review_fingerprint": "94a27eca4bb243d69e94bc6970975dc7284ae08d068bd5a616794dbbc6764f4e",
+    "openai_prompt_sha256": "24faed534874274b93c30575d1471db07565435b95a131e3962f584e0812e229",
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_prompt_sha256": "a7484bc13e329465cf25623e6418cc91d9ef8c59476e79093e96dbbd203f72f6",
+    "claude_model": "claude-sonnet-5",
+    "schema_version": "wang_corpus_ai_adjudication_v1",
+    "fingerprint_sha256": "20a1c52c616d1b2beb79149c1a80708a5dc884ef1c861e2ea3d0a3f1e46d8e2b",
+    "generated_at": "2026-08-14T18:01:06.774068+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "claim_id": "DK-3d012c24a542-CL001",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-3d012c24a542-CR007"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "仅删除 CL001 对 CL015 的 supports 关系；两个主张本身及其现有锚点保持不变。"
+          ]
+        },
+        "rationale": "逐字稿分别陈述了“磐石”是彼得的信仰或所传真理，以及深度解经能使教会根基稳固，但没有把两者明确组成因果或支持链条。Claude 对 relation_error 的判断成立，应按最小修正原则直接删除该关系。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      {
+        "claim_id": "DK-3d012c24a542-CL002",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "1",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "现有锚点只直接支持“天上已经被捆绑”的语法解释，未完整覆盖主张中的对比论证。逐字稿紧邻原文明确说这不是彼得决定后天上听从，而是彼得按照天上已经决定的标准行事，因此应补入该逐字锚点。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-3d012c24a542-CL008",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "166",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "舊約時代猶太人知道外邦人可以得救，可是外邦人要得救的方法是什麼呢？外邦人要先成為猶太教的教徒。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "以直接陈述旧约时代犹太人理解的原文替换现有仅陈述保罗新启示的锚点。"
+          ]
+        },
+        "rationale": "候选陈述忠实于逐字稿，但现有唯一锚点讲的是神现在不再区分犹太人与外邦人的新启示，不能直接证明旧约时代所理解的得救途径。Claude 的锚点不足意见成立，应排除现有锚点并添加直接匹配该主张的原文。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-3d012c24a542-CL013",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "literary_context",
+              "source_index": "794",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "耶稣命令门徒不要告诉别人祂是基督；教授反对据此主张耶稣不是弥赛亚、门徒在祂死后才编造其弥赛亚身份的“弥赛亚秘密”理论，并称这种读法是断章取义，主张把整套圣经合起来看。",
+          "structural_notes": [
+            "移除把“避免人按照错误的弥赛亚观念理解祂”直接设为保密命令原因的编辑性因果推断；保留教授对“弥赛亚秘密”理论及断章取义读法的反对。"
+          ]
+        },
+        "rationale": "逐字稿明确记载教授谈到耶稣禁止门徒告诉别人祂是基督，并明确反对“耶稣不是弥赛亚、门徒死后编造其身份”的理论，也称不信派的处理为断章取义。然而，逐字稿没有明确把“避免错误的弥赛亚观念”说成这一保密命令的直接原因；S0010 的防止误解理由针对的是医病后的保密命令。因此 Claude 对 editorial_inference 的判断成立，应收窄陈述并补入保密命令的直接锚点。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2
+        ]
+      }
+    ],
+    "scope_confirmation": "source_fidelity_only_no_theological_critique"
+  },
+  "claude_reconsideration": null,
+  "results": [
+    {
+      "claim_id": "DK-3d012c24a542-CL001",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-3d012c24a542-CL001",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-3d012c24a542-CR007"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "仅删除 CL001 对 CL015 的 supports 关系；两个主张本身及其现有锚点保持不变。"
+          ]
+        },
+        "rationale": "逐字稿分别陈述了“磐石”是彼得的信仰或所传真理，以及深度解经能使教会根基稳固，但没有把两者明确组成因果或支持链条。Claude 对 relation_error 的判断成立，应按最小修正原则直接删除该关系。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL002",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-3d012c24a542-CL002",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "1",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "现有锚点只直接支持“天上已经被捆绑”的语法解释，未完整覆盖主张中的对比论证。逐字稿紧邻原文明确说这不是彼得决定后天上听从，而是彼得按照天上已经决定的标准行事，因此应补入该逐字锚点。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL008",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-3d012c24a542-CL008",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "166",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "舊約時代猶太人知道外邦人可以得救，可是外邦人要得救的方法是什麼呢？外邦人要先成為猶太教的教徒。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            0
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "以直接陈述旧约时代犹太人理解的原文替换现有仅陈述保罗新启示的锚点。"
+          ]
+        },
+        "rationale": "候选陈述忠实于逐字稿，但现有唯一锚点讲的是神现在不再区分犹太人与外邦人的新启示，不能直接证明旧约时代所理解的得救途径。Claude 的锚点不足意见成立，应排除现有锚点并添加直接匹配该主张的原文。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-3d012c24a542-CL013",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-3d012c24a542-CL013",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "literary_context",
+              "source_index": "794",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+              "verbatim_excerpt": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "耶稣命令门徒不要告诉别人祂是基督；教授反对据此主张耶稣不是弥赛亚、门徒在祂死后才编造其弥赛亚身份的“弥赛亚秘密”理论，并称这种读法是断章取义，主张把整套圣经合起来看。",
+          "structural_notes": [
+            "移除把“避免人按照错误的弥赛亚观念理解祂”直接设为保密命令原因的编辑性因果推断；保留教授对“弥赛亚秘密”理论及断章取义读法的反对。"
+          ]
+        },
+        "rationale": "逐字稿明确记载教授谈到耶稣禁止门徒告诉别人祂是基督，并明确反对“耶稣不是弥赛亚、门徒死后编造其身份”的理论，也称不信派的处理为断章取义。然而，逐字稿没有明确把“避免错误的弥赛亚观念”说成这一保密命令的直接原因；S0010 的防止误解理由针对的是医病后的保密命令。因此 Claude 对 editorial_inference 的判断成立，应收窄陈述并补入保密命令的直接锚点。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "claim_overrides": {
+    "DK-3d012c24a542-CL001": {
+      "anchor_additions": [],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [
+        "DK-3d012c24a542-CR007"
+      ],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "仅删除 CL001 对 CL015 的 supports 关系；两个主张本身及其现有锚点保持不变。"
+      ]
+    },
+    "DK-3d012c24a542-CL002": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "verbatim_excerpt": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-3d012c24a542-CL008": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "166",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "verbatim_excerpt": "舊約時代猶太人知道外邦人可以得救，可是外邦人要得救的方法是什麼呢？外邦人要先成為猶太教的教徒。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [
+        0
+      ],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "以直接陈述旧约时代犹太人理解的原文替换现有仅陈述保罗新启示的锚点。"
+      ]
+    },
+    "DK-3d012c24a542-CL013": {
+      "anchor_additions": [
+        {
+          "evidence_type": "literary_context",
+          "source_index": "794",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "verbatim_excerpt": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "耶稣命令门徒不要告诉别人祂是基督；教授反对据此主张耶稣不是弥赛亚、门徒在祂死后才编造其弥赛亚身份的“弥赛亚秘密”理论，并称这种读法是断章取义，主张把整套圣经合起来看。",
+      "structural_notes": [
+        "移除把“避免人按照错误的弥赛亚观念理解祂”直接设为保密命令原因的编辑性因果推断；保留教授对“弥赛亚秘密”理论及断章取义读法的反对。"
+      ]
+    }
+  },
+  "pending_patches": {},
+  "summary": {
+    "auto_applied": 4,
+    "withdrawn": 0,
+    "human_confirmation_required": 0,
+    "human_disagreement_required": 0
+  }
+}

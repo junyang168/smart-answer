@@ -1,0 +1,184 @@
+{
+  "schema_version": "wang_composition_plan_v1",
+  "plan_id": "CP-matthew-16-13-20",
+  "title": "馬太福音16:13–20釋經編排",
+  "description": "編輯部按經文次序整合筆記講稿與六篇相關講道；跨來源共識用於去重和補足論證，兩項實質張力明示保留，不替教授消解。",
+  "product_type": "scripture_exposition",
+  "review_status": "candidate",
+  "editorial_attribution": "editor",
+  "decisions": [
+    {
+      "decision_id": "CD-M16-002-01",
+      "passage": "太16:13–15",
+      "section_title": "在該撒利亞腓立比追問耶穌是誰",
+      "action": "main_section",
+      "decision": "以該撒利亞腓立比的政治與宗教背景提出全篇核心問題；合併筆記與講道的重複主張，不把地點背景擴寫成獨立歷史專題。",
+      "rationale": "地點使該撒與基督之間的王權對照成為彼得認信的重要背景，但正文仍須以耶穌的提問為主線。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL007",
+        "DK-a26f0a7e9ba4-CL008"
+      ],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M16-002-02",
+      "passage": "太16:16",
+      "section_title": "基督、永生神的兒子",
+      "action": "main_section",
+      "decision": "保留彼得認信的兩個稱號，並用受膏者的先知、祭司、君王三重職分解釋『基督』；不把後續完整基督論全部帶入本段。",
+      "rationale": "兩個來源實質重複且互相印證，足以形成清楚的身分解釋。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL008",
+        "DK-a26f0a7e9ba4-CL009"
+      ],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M16-002-03",
+      "passage": "太16:17",
+      "section_title": "不是血肉指示，乃是天父啟示",
+      "action": "coverage_gap",
+      "decision": "直接引用經文並明示材料邊界；現有候選知識沒有形成可歸屬於教授的獨立解釋主張，不以一般神學知識補寫。",
+      "rationale": "文章必須保留經文敘事，但不能把編輯推論假託為教授解釋。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate",
+      "editorial_boundary": {
+        "required": true,
+        "label": "編輯說明",
+        "reason": "現有材料未形成王教授對太16:17的獨立展開；正文只保留經文及材料缺口。"
+      }
+    },
+    {
+      "decision_id": "CD-M16-002-04",
+      "passage": "太16:18a",
+      "section_title": "彼得、磐石與教會根基",
+      "action": "main_section",
+      "decision": "先呈現各來源共同否定『教會建立在彼得個人本身上』，再保留正面判定的兩種表述：筆記與（四）1強調基督是終極根基，（四）2、（四）3與S 220206強調彼得的認信或所領受的真理。不得把兩者靜默合併成教授從未明說的單一公式。",
+      "rationale": "跨來源共識確認共同否定面，也確認『基督本身』與『彼得的認信／真理』在正面指認上構成實質張力；文章須如實呈現。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL009",
+        "DK-a26f0a7e9ba4-CL010",
+        "DK-e50720f3684d-CL001",
+        "DK-e50720f3684d-CL002",
+        "DK-3d012c24a542-CL001",
+        "DK-566e8ca150dd-CL006",
+        "DK-566e8ca150dd-CL007"
+      ],
+      "coverage": "available_with_tension",
+      "review_status": "candidate",
+      "tension_note": "正面指認保留為來源張力，待編輯與人工神學審閱；目前不裁定為完全等同。"
+    },
+    {
+      "decision_id": "CD-M16-002-05",
+      "passage": "太16:18b",
+      "section_title": "陰間的權柄不能勝過教會",
+      "action": "coverage_gap",
+      "decision": "直接引用經文並明示現有材料沒有足夠的獨立解釋，不補作『陰間的門』之語義或末世論專論。",
+      "rationale": "經文屬於本段，不可省略；教授未講透之處也不可由AI填滿。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate",
+      "editorial_boundary": {
+        "required": true,
+        "label": "編輯說明",
+        "reason": "目前候選知識沒有足以支撐王教授對『陰間的門』之獨立解釋。"
+      }
+    },
+    {
+      "decision_id": "CD-M16-002-06",
+      "passage": "太16:19a",
+      "section_title": "天國鑰匙與捆綁、釋放的語義",
+      "action": "main_section",
+      "decision": "說明捆綁與釋放在拉比語境可指禁止與准許，同時保留筆記與（四）2所述可涉及事或人的較廣表述；《解經的原則》把它限定為禁止與准許、否定決定人能否進天國，兩者不得靜默調和。",
+      "rationale": "跨來源共識確認這是第二項實質張力；正文可清楚呈現材料差異，不能替教授選擇其一。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL010",
+        "DK-e50720f3684d-CL015",
+        "DK-566e8ca150dd-CL009",
+        "DK-0d5b2062b148-CL015"
+      ],
+      "coverage": "available_with_tension",
+      "review_status": "candidate",
+      "tension_note": "『可涉及人與事』和『只指禁止與准許，不指進天國』按來源分別呈現，待人工判讀。"
+    },
+    {
+      "decision_id": "CD-M16-002-07",
+      "passage": "太16:19；太18:18",
+      "section_title": "權柄不屬彼得個人，方向是天上先定、地上執行",
+      "action": "main_section",
+      "decision": "以太18:18的複數『你們』說明權柄也給門徒與教會；保留未來完成式的原文觀察，說明天上先有標準，彼得與教會在地上辨認、宣告並執行，而不是地上決定後要求天上服從。",
+      "rationale": "這是筆記與多篇講道反覆出現、跨來源關係最成熟的核心論證。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL011",
+        "DK-91b546f25db1-CL012",
+        "DK-91b546f25db1-CL013",
+        "DK-91b546f25db1-CL015",
+        "DK-e50720f3684d-CL012",
+        "DK-e50720f3684d-CL013",
+        "DK-e50720f3684d-CL014",
+        "DK-e50720f3684d-CL016",
+        "DK-3d012c24a542-CL002",
+        "DK-3d012c24a542-CL003",
+        "DK-6f059dbca908-CL001",
+        "DK-6f059dbca908-CL002",
+        "DK-6f059dbca908-CL003",
+        "DK-6f059dbca908-CL004",
+        "DK-6f059dbca908-CL005",
+        "DK-566e8ca150dd-CL006",
+        "DK-566e8ca150dd-CL008",
+        "DK-566e8ca150dd-CL010",
+        "DK-566e8ca150dd-CL011"
+      ],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M16-002-08",
+      "passage": "約20:23；徒15",
+      "section_title": "赦罪宣告與耶路撒冷會議的兩個實例",
+      "action": "main_with_topic_link",
+      "decision": "正文用兩個有限實例說明太16:19的權柄方向：教會按悔改與福音條件宣告赦罪，耶路撒冷會議察驗並確認聖靈已顯明的旨意。徒15細節與一般教會權柄論轉介專題，不在本篇展開。",
+      "rationale": "兩個實例可使語法結論落實為可理解的教會判斷，但過度展開會使正文離開太16。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL014",
+        "DK-91b546f25db1-CL016",
+        "DK-e50720f3684d-CL018",
+        "DK-e50720f3684d-CL019",
+        "DK-3d012c24a542-CL004",
+        "DK-3d012c24a542-CL010",
+        "DK-6f059dbca908-CL006",
+        "DK-566e8ca150dd-CL003",
+        "DK-566e8ca150dd-CL004"
+      ],
+      "topic_route_ids": [
+        "kingdom-keys-church-authority"
+      ],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M16-002-09",
+      "passage": "太16:20",
+      "section_title": "為何暫時不可宣告耶穌是基督",
+      "action": "main_with_topic_link",
+      "decision": "把第20節作為本篇收束與下一段過渡：保密命令有具體歷史與救贖使命原因，不足以證明耶穌沒有彌賽亞身分；正文只說明當時政治彌賽亞期待可能妨礙十字架使命，Wrede與彌賽亞秘密的完整討論轉介專題。",
+      "rationale": "本節既回應彼得的認信，又開啟21節以後對彌賽亞受苦使命的教導；適合作為連續文章的收束。",
+      "claim_ids": [
+        "DK-72483dc200ad-CL001",
+        "DK-72483dc200ad-CL002",
+        "DK-72483dc200ad-CL007",
+        "DK-72483dc200ad-CL009",
+        "DK-3d012c24a542-CL013",
+        "DK-6f059dbca908-CL007"
+      ],
+      "topic_route_ids": [
+        "messianic-secret-history-and-interpretation"
+      ],
+      "coverage": "available",
+      "review_status": "candidate"
+    }
+  ]
+}

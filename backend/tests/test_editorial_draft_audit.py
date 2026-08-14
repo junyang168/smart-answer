@@ -144,6 +144,32 @@ def test_audit_accepts_context_when_claim_has_eligible_support(tmp_path: Path) -
     assert result["summary"]["valid_source_fragment_total"] == 2
 
 
+def test_audit_accepts_explicit_coverage_gap_without_claims(tmp_path: Path) -> None:
+    manifest = _fixture(
+        tmp_path,
+        editorial_boundary=True,
+        include_editor_label=True,
+    )
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    decision = snapshot["product_plans"][0]["decisions"][0]
+    decision.update(
+        {
+            "action": "coverage_gap",
+            "coverage": "missing",
+            "claim_ids": [],
+        }
+    )
+    _write_json(snapshot_path, snapshot)
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "pass"
+    assert not any(
+        item["code"] == "decision_without_claims" for item in result["findings"]
+    )
+
+
 def test_audit_rejects_stale_source_anchor(tmp_path: Path) -> None:
     result = audit_editorial_draft(
         _fixture(tmp_path, anchor_state="stale_paragraph"), "DRAFT-1"

@@ -1,0 +1,1991 @@
+{
+  "schema_version": "wang_shared_knowledge_review_batch_v1",
+  "package_id": "M16-NOTES-CANDIDATE-V1-claim-slice",
+  "source_documents": [
+    {
+      "source_id": "notes_manuscript:16章釋經",
+      "source_type": "notes_manuscript",
+      "transcript_id": "notes_manuscript:16章釋經",
+      "title": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+      "review_status": "candidate",
+      "project_id": "16章釋經",
+      "source_url": "/resources/notes_to_manuscript_series/d5c55bdf-6375-49e9-a08d-22eda1eaf21d/16章釋經",
+      "lineage": {
+        "upstream_kind": "professor_notes",
+        "transformation": "notes_to_manuscript",
+        "fidelity_status": "current_passed",
+        "meta_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/meta.json",
+        "source_pages": [
+          "notes_main/chapter16/15.jpeg",
+          "notes_main/chapter16/16.jpeg",
+          "notes_main/chapter16/17.jpeg",
+          "notes_main/chapter16/18.jpeg"
+        ]
+      }
+    },
+    {
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "source_type": "notes_manuscript",
+      "transcript_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "title": "16 章 - 彌賽亞的身分、性質與捨己的呼召",
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_彌賽亞，捨己/final.md",
+      "review_status": "candidate",
+      "project_id": "16_章_-_彌賽亞，捨己",
+      "source_url": "/resources/notes_to_manuscript_series/d5c55bdf-6375-49e9-a08d-22eda1eaf21d/16_章_-_彌賽亞，捨己",
+      "lineage": {
+        "upstream_kind": "professor_notes",
+        "transformation": "notes_to_manuscript",
+        "fidelity_status": "previous_pass_stale_after_integration_patch",
+        "meta_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_彌賽亞，捨己/meta.json",
+        "source_pages": [
+          "notes_main/chapter16/19.jpeg",
+          "notes_main/chapter16/20.jpeg",
+          "notes_main/chapter16/21.jpeg",
+          "notes_main/chapter16/22.jpg"
+        ]
+      }
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS001-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "天主教從太 16:18 認定耶穌把教會建立在彼得身上",
+      "paragraph_key": "S0054",
+      "source_segment_index": 54,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "bf268e7dc85f5dbeae4f3523d13516c02e5bb36b752340d69f00856a10afe36f",
+      "verbatim_excerpt_sha256": "2703de6fe16fb84d2fd93d3de2f252d4e3bc3d304b2145443d6098270871a9da",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS002-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "天主教從太 16:19 推導出「耶穌把教會交給彼得」的主張",
+      "paragraph_key": "S0081",
+      "source_segment_index": 81,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "ef066dca7fe1f9d4791ceec7ad2636155f63221b7c39259d602f0fea5fea002d",
+      "verbatim_excerpt_sha256": "c97d5f4c2044be945637419588bd8b6a5ca1215ce90b16208176b68c2ae77faa",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS004-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "有不少解經書在處理徒15章時，將耶路撒冷會議的決定理解為使徒自行裁定外邦人要不要守摩西律法。",
+      "paragraph_key": "S0128",
+      "source_segment_index": 128,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "ea3b49453bf63b3f58cfb9fbaa05460286a3a5510ad03784a6f38deee319715e",
+      "verbatim_excerpt_sha256": "0b7fba69998d766bf9d1ab845623344b8876ed51dbbd948ef45716dfe10981d2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-OBS010-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "「你是基督，是永生神的兒子。」",
+      "paragraph_key": "S0041",
+      "source_segment_index": 41,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "c78fd9db0029e4554eee31a6b5e2847970622418ab846aac77ee90364a10ad10",
+      "verbatim_excerpt_sha256": "0e445669811390f6c97291fd95b8d8d968346882e4d8afd2e393e50e0cb5146b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-OBS016-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "這裡的代名詞 σύ 是單數，明確指向彼得一人。",
+      "paragraph_key": "S0064",
+      "source_segment_index": 64,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "e0ffae32c1bff5d63618e97b96fb50d8636c070a54a803e3d80b03f41e86c6ec",
+      "verbatim_excerpt_sha256": "6a05bcfdac81493ef3a5fba1740694a71a4bc115715f6c2bacb6047f316d8c7b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E009-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "耶穌選擇在這個地方提出這個問題，帶有明確的目的指向——在一個以羅馬皇帝命名的城市境內，「到底要誰做王」的問題具有特殊的對照意義，這一邏輯延續至第15、16節的進一步追問。",
+      "paragraph_key": "S0036",
+      "source_segment_index": 36,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "233d06ff098ad816e31054323508a71e4ae97a0320542df981613adce6475029",
+      "verbatim_excerpt_sha256": "e1ab903038126973831842627b0e7ff81b9e4a236dd5f6ad7967b69aa7fa8268",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E011-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "「基督」一詞來自希臘文 Χριστὸς，意為「受膏者」；對應的希伯來文詞彙即「彌賽亞」。在猶太人的社會傳統中，受膏者涵蓋三種職分：先知、祭司、君王。",
+      "paragraph_key": "S0042",
+      "source_segment_index": 42,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "37d688ed1764fc00aa8e3dd4f3f50c1461bbd556971ec4bb151b82745aa02866",
+      "verbatim_excerpt_sha256": "9555f6f021bd32cf416d813ecba5f17f627151fff7b053c354af8baf4018c0f6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E012-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "Πέτρος 是陽性名詞，πέτρα 是陰性名詞。兩個詞雖然字根相近，卻是不同的詞。這一語法差異說明，「這磐石」與彼得之間有某種關聯，但「這磐石」所指的並不是彼得這個人本身。",
+      "paragraph_key": "S0046",
+      "source_segment_index": 46,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "ba02c2c4cfec1d1933c20e23651c582580aa78b04af480acd5434890bbf6f95c",
+      "verbatim_excerpt_sha256": "822ebd1e462a77014da2b80c9ea808af3bd9a655d8035a46cfe856718f7db568",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E013-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "由此可以推論：使徒和先知的根基就是基督耶穌本身，即房角石，即磐石。這同時也說明，彼得並非教會唯一的根基，使徒群體共同指向的根基是基督耶穌。",
+      "paragraph_key": "S0049",
+      "source_segment_index": 49,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "43c254d0b6267517ccb138697ea535762bd2b82372a6cf7d180f803d43fb5e79",
+      "verbatim_excerpt_sha256": "d538ed0ea6c3e7567658ba928755e5db50fa15b492a193e13f045acf6ca48f90",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E014-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "「綑綁」在原文語法上是中性，因此其指涉對象可以是人，也可以是事。指事時，意為禁止某件事；指人時，意為不准某人進入天國。「釋放」同理，指事時意為准許某事，指人時意為准人入天國。",
+      "paragraph_key": "S0066",
+      "source_segment_index": 66,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "24c95891072368cbe966fc9991878d55b8d9e95639f4e74f1db1d7f4e0b924f8",
+      "verbatim_excerpt_sha256": "e643f8133bfc65709449d1f671c0676a1d4f6a7e89fd24d780d775f2ed07e6a9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E016-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "它所表達的不是「彼得在地上決定，天上隨後跟從」，而是「天上早已決定，彼得在地上執行天上已定的標準」。換言之，決定者不是彼得，而是神；彼得的角色是把天上的標準應用在世上。",
+      "paragraph_key": "S0068",
+      "source_segment_index": 68,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "7471a3f13ad554b7f5af07101182d475a43497afacecd973b3dc89bfadbd3a1e",
+      "verbatim_excerpt_sha256": "dfad181cb87a4393d29d15ed95934397c270e9a576f9a2d58e9d4b1328d9dd1f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E017-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "此處代名詞由單數 σύ 轉為複數 ὑμῖν，指向的是教會整體，而非單指彼得。這一語法轉換直接說明，太 16:19 中給予彼得的權柄，在太 18:18 已明確擴展至所有門徒與教會。",
+      "paragraph_key": "S0072",
+      "source_segment_index": 72,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "31bdf690028d92c75f101c78e5a46c88a113f3a701976715958c346b02af22b5",
+      "verbatim_excerpt_sha256": "31bdf690028d92c75f101c78e5a46c88a113f3a701976715958c346b02af22b5",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E018-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "此處同樣使用未來完成式，其含義是「你們所赦免的，在天上就已經被赦免了」，而不是天上聽從人的意思隨意赦免。三段經文在語法結構上相互印證，共同指向同一個原則：執行者是使徒與教會，但標準的制定者是神。",
+      "paragraph_key": "S0076",
+      "source_segment_index": 76,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "a909ec0fd6643b4ade07d4b1f6fee18fc16898393ce17aa52dd167dacf9e52dc",
+      "verbatim_excerpt_sha256": "a909ec0fd6643b4ade07d4b1f6fee18fc16898393ce17aa52dd167dacf9e52dc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E019-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "太 18:18 使用複數 ὑμῖν，將同樣的綑綁與釋放的權柄明確賦予整個教會，而非單一個人。將太 16:19 孤立解讀而不參照太 18:18，是斷章取義的做法，無法成立。",
+      "paragraph_key": "S0081",
+      "source_segment_index": 81,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "ef066dca7fe1f9d4791ceec7ad2636155f63221b7c39259d602f0fea5fea002d",
+      "verbatim_excerpt_sha256": "e736887064079d41b47ffce6b35fecc8a40b22dc779aebe4f372cad4ffa4061b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E020-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "赦免某人的罪或宣告某事被禁止，必須根據聖經所啟示的原則進行，不可隨意赦免。若脫離聖經的標準而任意赦罪，不僅違背了未來完成式所揭示的神學邏輯，也會對當事人造成實質的傷害。",
+      "paragraph_key": "S0085",
+      "source_segment_index": 85,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "f4fa8213df59f843d928b74c8fbad37ba088c34e2638748b4a41765115529f68",
+      "verbatim_excerpt_sha256": "cfc21253c58521c30d2cbd230db9c6c6ab3c3e933abadaaf06fb6c9620700780",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E021-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "太16:19 所揭示的，是一个原则：教会的判断，应当与天上已经确立的判断一致。那么，这个原则在实际中是如何运作的？《使徒行传》15章正提供了一个具体的历史案例。",
+      "paragraph_key": "S0092",
+      "source_segment_index": 92,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "fcb284b4ca790d9fec25708fa2540082d81a9307d96250eba28b80bcafa8c82b",
+      "verbatim_excerpt_sha256": "fcb284b4ca790d9fec25708fa2540082d81a9307d96250eba28b80bcafa8c82b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E025-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "15:28明確說「聖靈和我們定意」，決定權在聖靈，使徒的角色是查驗與確認，而非自主立法。",
+      "paragraph_key": "S0113",
+      "source_segment_index": 113,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "f6efbd53020ce2b5d2cb14d9c511c8781a7b1d41c361933a7e41b9a04a2ac940",
+      "verbatim_excerpt_sha256": "536599156b8c7a57bc112cfe47630697807a1f686c77b07f39fc44f8af6b6645",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-POS001-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "耶穌從未認為自己是彌賽亞，馬可（及其他新約作者）將耶穌神化並塑造成彌賽亞。",
+      "paragraph_key": "S0012",
+      "source_segment_index": 12,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "fc5f24f8770433a8f915e18addfd92c46fec53e538e9d5de59c2fe04d0e4efb3",
+      "verbatim_excerpt_sha256": "819e94d33c2c183dd63d65092957d8c7f557d8de3bcdc72ef6eec0951a758541",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-POS002-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "他們期待的是征服羅馬壓迫的猶太彌賽亞概念。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 18,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "9c531a9debf03dc18793f9c6137b6d1939ea43d000bbcb45be911fb6885b8c78",
+      "verbatim_excerpt_sha256": "03df0e3b7bf67495b19e57f4e017e45a6f3977b044e66df56ac8007bc95cb15c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-OBS010-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "第一，在該撒利亞腓立比，彼得公開說耶穌是彌賽亞；第二，耶穌榮耀地進入耶路撒冷城；第三，大祭司在審訊中直接問耶穌是不是基督。",
+      "paragraph_key": "S0050",
+      "source_segment_index": 50,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "63896b20b59a393a55e86f56b97ec3578709ecc1e7699d7a6588d16705308584",
+      "verbatim_excerpt_sha256": "3fe94607a223df4c866f954ed91f0d270d6150bd148459aa15200a67593f31f7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E001-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "這節經文記載耶穌在彼得宣認祂是基督之後，立即命令門徒對外保密。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 5,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "2c9243794ec246a3ee8f07426ec671a7a8103f015827ad82269785e82106cca3",
+      "verbatim_excerpt_sha256": "f993c4ab45684154487c6a12cd2e24a2e9a8501d94dd1a39c7f0be3eeacc9ebc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E002-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "彼得在該撒利亞腓立比宣認耶穌為基督，這一認信本身是正確的；然而彼得與門徒尚未明白，這位彌賽亞來到世上真正的工作，是受苦並死在十字架上，為罪付上代價。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 8,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "a3d760d8d0cbebfcf2e3e16eeb33840384f1f1ee64bf903d510084d528096444",
+      "verbatim_excerpt_sha256": "885434fbefb3126ae77cffb2484f33fef7a64fcdf890d776c418b343be4c3229",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E004-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "原因是耶穌知道醫病的宣傳會妨礙祂在該地區的事工。結果正如所料——痲瘋病人違命後，耶穌無法再公開進城，只能留在曠野，眾人從四方來找祂。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 14,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "f3c5680572bee837413fee1bdcf7018d6a1ab8dae2b70f640598b81a946266e0",
+      "verbatim_excerpt_sha256": "ef9928d0b9602a14eb0e67a727e16e0e58ee03c4a2c5d6f54597a037adaa3d06",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E005-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "這並非保密的請求，而是神聖啟示的說明——神國的奧秘向有耳可聽的人顯明，對心硬拒絕真理者（如法利賽人）則不顯明。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "258be0cd3188af6956ee9ee9e629738271b8e9c45e8255b0fe9c0fb23e70ea29",
+      "verbatim_excerpt_sha256": "fd500ecf9e397e61c550736286e5996e5924fd9d2a55f900935e0978303ecd6a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E006-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "原因並非否認彌賽亞身份，而是當時眾人（包括門徒）尚未明白祂來是要為罪死在十字架上。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 18,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "9c531a9debf03dc18793f9c6137b6d1939ea43d000bbcb45be911fb6885b8c78",
+      "verbatim_excerpt_sha256": "e4e4399ce2e17a61498ea48416f9931b534ff0b138c042b1b2e0bb7183b54ccf",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E007-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "若太早公開宣布，極可能引發政治動亂乃至戰爭，從而妨礙耶穌真正的工作——傳天國的福音，以及為全人類完成救贖。此外，鬼並非傳揚耶穌身分的適當媒介；而耶穌也不希望人誤以為醫病是祂來到世上的主要工作。",
+      "paragraph_key": "S0028",
+      "source_segment_index": 28,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "43825e84bf26c26fc71b2f26f3743e04655c48da7fcf4b761c40481cc467e0d7",
+      "verbatim_excerpt_sha256": "1c06e3d4295f025adb3d8baa8cff335620bf28deb7ed79e016191cecf629c9e1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E008-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "這一例外本身也說明，馬可福音中對彌賽亞身分的處理並非一刀切的掩蓋，而是有其具體的處境判斷。",
+      "paragraph_key": "S0044",
+      "source_segment_index": 44,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "e3b81d78ccaff6d7297585c43138722842eca222bd26db7bcd1c72c56ce014a8",
+      "verbatim_excerpt_sha256": "02c479a01d29c053adc9a20c5d7e038f154c7ae77df379b7690aca1404f5eb3a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E009-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "彼得的反應清楚顯示，門徒難以明白的並非耶穌彌賽亞的身分本身，而是彌賽亞的性質——被釘十字架受死、三天後復活。",
+      "paragraph_key": "S0034",
+      "source_segment_index": 34,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "b844ad415ef7cf62931ecac7166f9a1d4ae1cddea7ad482d002b3280e556437f",
+      "verbatim_excerpt_sha256": "ed03bf13dec41cb65e8f83189086b939c56c36238c8704db44991fc99b69a9b6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E012-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "彼拉多最終寫下的罪名是「猶太人的王」；祭司要求改寫為「他說他是猶太人的王」，彼拉多拒絕，說「我怎麼寫就是了」。",
+      "paragraph_key": "S0052",
+      "source_segment_index": 52,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "8319b55e826358f1410f238f3d63f041e0ba7df6e7a6a030960adf88d6c38840",
+      "verbatim_excerpt_sha256": "d33644a90ef7858bc64f66f98eb1a936ffb70dcb4fd9decb93d8f461dd2214b9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E014-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "同樣，解釋「彌賽亞」的意義，也必須回到相關的歷史事實與上下文，而不能只抓住字面或表面現象就下結論。",
+      "paragraph_key": "S0061",
+      "source_segment_index": 61,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "0d02c3b9ccd25ebc078d3c2a499a2524e17fda4bbe7aae5a7b3f1802bf166a7e",
+      "verbatim_excerpt_sha256": "58caca18bc5046ac03fee2e76e5224b2085da88ad02a093686bc685e916b9b54",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E020-01",
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "verbatim_excerpt": "彼得並非不認識耶穌是彌賽亞，他的問題在於他不認識彌賽亞的性質。",
+      "paragraph_key": "S0082",
+      "source_segment_index": 82,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "paragraph_text_sha256": "c85053c8207a8db8045998d74ebd464a7e6d4aa156c2af43ab5ad0e8305e794a",
+      "verbatim_excerpt_sha256": "885ea0cde3e9cfac371b76eb929223cf527b0220660e85c6ad80639adbd0e402",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    }
+  ],
+  "questions": [],
+  "position_nodes": [
+    {
+      "attribution": "天主教对太16:18的解释",
+      "position_id": "DK-91b546f25db1-POS001",
+      "title": "教会建立在彼得个人身上",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "天主教对太16:19的解释",
+      "position_id": "DK-91b546f25db1-POS002",
+      "title": "耶稣把教会及其权柄交给彼得个人",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "不少处理徒15章的解经书",
+      "position_id": "DK-91b546f25db1-POS004",
+      "title": "耶路撒冷会议由使徒自行裁定律法要求",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "William Wrede",
+      "position_id": "DK-72483dc200ad-POS001",
+      "title": "「彌賽亞的秘密」是馬可或門徒事後塑造耶穌為彌賽亞的敘事框架",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "當時眾人及門徒所持的猶太政治彌賽亞觀念",
+      "position_id": "DK-72483dc200ad-POS002",
+      "title": "彌賽亞主要是征服羅馬、做王並建立政治王國",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-POS002-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "observations": [],
+  "evidence_steps": [
+    {
+      "discourse_role": "以地点政治背景解释身份提问",
+      "evidence_step_id": "DK-91b546f25db1-E009",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL007"
+      ],
+      "scripture_refs": [
+        "太16:13-16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "该撒利亚腓立比的皇帝命名背景使耶稣身份问题具有“谁作王”的对照。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "给出门徒对耶稣身份的回答",
+      "evidence_step_id": "DK-91b546f25db1-E010",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL007"
+      ],
+      "scripture_refs": [
+        "太16:16"
+      ],
+      "speaker": "quoted_source",
+      "stance": "quoted",
+      "statement": "彼得认信耶稣是基督、永生神的儿子。",
+      "step_type": "answer",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-OBS010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "解释基督称号及其职分含义",
+      "evidence_step_id": "DK-91b546f25db1-E011",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL008"
+      ],
+      "scripture_refs": [
+        "太16:16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "Χριστός意为受膏者，对应弥赛亚，并承载先知、祭司、君王三种职分。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以词性差异判断磐石所指",
+      "evidence_step_id": "DK-91b546f25db1-E012",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL009"
+      ],
+      "scripture_refs": [
+        "太16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "Πέτρος与πέτρα的词性差异被用于说明磐石与彼得相关却不等同彼得本人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以弗2:20确认教会根基",
+      "evidence_step_id": "DK-91b546f25db1-E013",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL009"
+      ],
+      "scripture_refs": [
+        "弗2:20",
+        "太16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "弗2:20的根基和房角石语言被用于推论教会磐石是基督，使徒群体共同指向基督。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "界定捆绑与释放的对象范围",
+      "evidence_step_id": "DK-91b546f25db1-E014",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL010"
+      ],
+      "scripture_refs": [
+        "太16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "捆绑与释放在语法和语义上均可应用于人或事。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "确定钥匙话语的初始对象",
+      "evidence_step_id": "DK-91b546f25db1-E015",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL011"
+      ],
+      "scripture_refs": [
+        "太16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "太16:19的单数代词σύ初始指向彼得一人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-OBS016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "解释未来完成式的决定次序",
+      "evidence_step_id": "DK-91b546f25db1-E016",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL012"
+      ],
+      "scripture_refs": [
+        "太16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "未来完成式表示神在天上决定，彼得在地上执行，而非相反。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以代词转换说明权柄扩展",
+      "evidence_step_id": "DK-91b546f25db1-E017",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL011"
+      ],
+      "scripture_refs": [
+        "太16:19",
+        "太18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "由单数σύ到复数ὑμῖν的变化说明权柄由彼得扩展至门徒与教会。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以约20:23平行句式确认原则",
+      "evidence_step_id": "DK-91b546f25db1-E018",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL012"
+      ],
+      "scripture_refs": [
+        "约20:23",
+        "太16:19",
+        "太18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "约20:23的未来完成式与马太两段相互印证，表明使徒和教会执行、神制定标准。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "反驳彼得个人独占权柄的解释",
+      "evidence_step_id": "DK-91b546f25db1-E019",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL013"
+      ],
+      "scripture_refs": [
+        "太16:19",
+        "太18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "太18:18的复数对象使孤立太16:19、把权柄限于彼得个人的解释不能成立。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "把语法结论应用于教会判断",
+      "evidence_step_id": "DK-91b546f25db1-E020",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL014",
+        "DK-91b546f25db1-CL015"
+      ],
+      "scripture_refs": [
+        "约20:23",
+        "太16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "赦罪与禁止事项必须依据圣经标准，任意决定会违背经文逻辑并伤害人。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "连接太16:19原则与徒15案例",
+      "evidence_step_id": "DK-91b546f25db1-E021",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL016"
+      ],
+      "scripture_refs": [
+        "太16:19",
+        "徒15"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "徒15被提出为教会判断与天上判断一致这一原则的具体历史案例。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "确定耶路撒冷会议的决定权",
+      "evidence_step_id": "DK-91b546f25db1-E025",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL016"
+      ],
+      "scripture_refs": [
+        "徒15:28"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“圣灵和我们定意”被解释为决定权在圣灵，使徒只负责查验与确认。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "提出太16:20需要解釋的保密現象及其基本語境。",
+      "evidence_step_id": "DK-72483dc200ad-E001",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "太16:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得宣認耶穌為基督後，耶穌立即命令門徒保密；這一命令應從當時歷史與宣教處境理解。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "區分正確的身分認信與尚未理解的使命性質。",
+      "evidence_step_id": "DK-72483dc200ad-E002",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL002"
+      ],
+      "scripture_refs": [
+        "太16:16-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得正確認出耶穌是彌賽亞，卻仍不明白彌賽亞要受苦、死於十字架並為罪付代價。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以敘事結果說明一項保密命令的實際原因。",
+      "evidence_step_id": "DK-72483dc200ad-E004",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "可1:43-45",
+        "太8:1-4",
+        "路5:12-16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "痲瘋病人違命宣傳醫治後，耶穌無法公開進城，顯示保密命令具有避免事工受妨礙的實際理由；平行經文也表明此事並非馬可獨有。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "排除把可4:11歸類為保密要求的解釋。",
+      "evidence_step_id": "DK-72483dc200ad-E005",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "可4:11",
+        "太13:11-17"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "可4:11說明神國奧秘如何向人顯明，而不是請求門徒保密；該教導亦見於馬太福音。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "解釋彼得宣認後保密命令的目的。",
+      "evidence_step_id": "DK-72483dc200ad-E006",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "可8:27-33"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "可8:27-30的保密命令並非否認彌賽亞身分，而是為避免人按政治彌賽亞觀妨礙耶穌為罪受死的使命。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "綜合列出禁止過早宣布的三項處境原因。",
+      "evidence_step_id": "DK-72483dc200ad-E007",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "可1:43-45",
+        "可8:27-33"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "過早公開彌賽亞身分可能引發政治動亂並妨礙福音與救贖工作；鬼不是適當見證者，醫病也不應被誤認為耶穌的主要使命。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以可以傳揚的例外限定保密現象。",
+      "evidence_step_id": "DK-72483dc200ad-E008",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL001"
+      ],
+      "scripture_refs": [
+        "可5:17-20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "低加波利居民沒有猶太政治彌賽亞期待，因此耶穌准許被釋放者傳揚；這一例外顯示保密命令按處境作判斷。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "由彼得反應推斷門徒理解的真正困難。",
+      "evidence_step_id": "DK-72483dc200ad-E009",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL002"
+      ],
+      "scripture_refs": [
+        "太16:21-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得反對耶穌受苦的預告，證明門徒接受了彌賽亞身分，卻不能接受彌賽亞受死並復活的性質。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "列舉與 Wrede 理論矛盾的三項福音書記載。",
+      "evidence_step_id": "DK-72483dc200ad-E010",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL007"
+      ],
+      "scripture_refs": [
+        "太16:13-20",
+        "可11:1-11",
+        "可14:61-62"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得公開宣認、耶穌榮耀進城及大祭司詢問基督身分，構成難以用 Wrede 理論解釋的三項事實。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-OBS010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "補充十字架罪名及審判的歷史背景。",
+      "evidence_step_id": "DK-72483dc200ad-E012",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL007"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "祭司以政治做王的罪名向彼拉多控告耶穌，彼拉多最終寫下「猶太人的王」，形成彌賽亞爭議的歷史背景。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "從詞義類比提出一般解經方法。",
+      "evidence_step_id": "DK-72483dc200ad-E014",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL009"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "如同多義詞須按事實與語境判斷，解釋彌賽亞也必須回到歷史事實和上下文。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以彼得的反應驗證兩階段教導及理解限制。",
+      "evidence_step_id": "DK-72483dc200ad-E020",
+      "produced_claim_ids": [
+        "DK-72483dc200ad-CL002"
+      ],
+      "scripture_refs": [
+        "太16:22-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得已認識耶穌的彌賽亞身分，但尚不能理解受苦、被殺與復活的彌賽亞性質。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-72483dc200ad-DK-72483dc200ad-E020-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL007",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E009",
+        "DK-91b546f25db1-E010"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:13-16"
+      ],
+      "topic_terms": [
+        "该撒利亚腓立比",
+        "彼得认信",
+        "基督",
+        "谁作王",
+        "叙事背景"
+      ],
+      "title": "耶稣在以罗马皇帝命名、外邦人口居多的该撒利亚腓立比询问自己的身份，使“谁作王”的对照成为彼得认信的重要背景；彼得回答耶稣是基督、永生神的儿子。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0036",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E009",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以地点政治背景解释身份提问",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌選擇在這個地方提出這個問題，帶有明確的目的指向——在一個以羅馬皇帝命名的城市境內，「到底要誰做王」的問題具有特殊的對照意義，這一邏輯延續至第15、16節的進一步追問。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0041",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E010",
+              "evidence_type": "answer",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "给出门徒对耶稣身份的回答",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "「你是基督，是永生神的兒子。」",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL008",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E011"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:16"
+      ],
+      "topic_terms": [
+        "基督",
+        "弥赛亚",
+        "受膏者",
+        "先知",
+        "祭司",
+        "君王"
+      ],
+      "title": "“基督”即受膏者或弥赛亚，耶稣同时拥有先知、祭司、君王三重职分，显示其身份的独特与至高。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0042",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E011",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "解释基督称号及其职分含义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「基督」一詞來自希臘文 Χριστὸς，意為「受膏者」；對應的希伯來文詞彙即「彌賽亞」。在猶太人的社會傳統中，受膏者涵蓋三種職分：先知、祭司、君王。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL009",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E012",
+        "DK-91b546f25db1-E013"
+      ],
+      "opposed_position_ids": [
+        "DK-91b546f25db1-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:18",
+        "弗2:20"
+      ],
+      "topic_terms": [
+        "磐石",
+        "彼得",
+        "教会根基",
+        "基督",
+        "房角石"
+      ],
+      "title": "太16:18所说教会的磐石根基更可能指向基督耶稣，而不是彼得个人；彼得及使徒群体共同指向基督这一根基。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0046",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E012",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以词性差异判断磐石所指",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "Πέτρος 是陽性名詞，πέτρα 是陰性名詞。兩個詞雖然字根相近，卻是不同的詞。這一語法差異說明，「這磐石」與彼得之間有某種關聯，但「這磐石」所指的並不是彼得這個人本身。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0049",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E013",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以弗2:20确认教会根基",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "由此可以推論：使徒和先知的根基就是基督耶穌本身，即房角石，即磐石。這同時也說明，彼得並非教會唯一的根基，使徒群體共同指向的根基是基督耶穌。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL010",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E014"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19"
+      ],
+      "topic_terms": [
+        "捆绑",
+        "释放",
+        "人",
+        "事",
+        "天国钥匙"
+      ],
+      "title": "“捆绑”与“释放”既可指人，也可指事：对事表示禁止或准许，对人表示不准或准许进入天国。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0066",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E014",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "界定捆绑与释放的对象范围",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「綑綁」在原文語法上是中性，因此其指涉對象可以是人，也可以是事。指事時，意為禁止某件事；指人時，意為不准某人進入天國。「釋放」同理，指事時意為准許某事，指人時意為准人入天國。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL011",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E015",
+        "DK-91b546f25db1-E017"
+      ],
+      "opposed_position_ids": [
+        "DK-91b546f25db1-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19",
+        "太18:18"
+      ],
+      "topic_terms": [
+        "天国钥匙",
+        "彼得",
+        "教会",
+        "单数代词",
+        "复数代词"
+      ],
+      "title": "天国钥匙及捆绑、释放的权柄在太16:19首先对彼得陈述，但太18:18以复数代词将同样权柄扩展到门徒与教会整体。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0064",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E015",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "确定钥匙话语的初始对象",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這裡的代名詞 σύ 是單數，明確指向彼得一人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0072",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以代词转换说明权柄扩展",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "此處代名詞由單數 σύ 轉為複數 ὑμῖν，指向的是教會整體，而非單指彼得。這一語法轉換直接說明，太 16:19 中給予彼得的權柄，在太 18:18 已明確擴展至所有門徒與教會。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL012",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E016",
+        "DK-91b546f25db1-E018"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19",
+        "太18:18",
+        "约20:23"
+      ],
+      "topic_terms": [
+        "未来完成式",
+        "天上标准",
+        "教会权柄",
+        "执行",
+        "决定权"
+      ],
+      "title": "捆绑、释放及赦罪句式中的未来完成式表示天上已经作出决定，使徒与教会在地上查验并执行神所定的标准，而不是让天上跟随人的决定。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0068",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E016",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "解释未来完成式的决定次序",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "它所表達的不是「彼得在地上決定，天上隨後跟從」，而是「天上早已決定，彼得在地上執行天上已定的標準」。換言之，決定者不是彼得，而是神；彼得的角色是把天上的標準應用在世上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0076",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E018",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以约20:23平行句式确认原则",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "此處同樣使用未來完成式，其含義是「你們所赦免的，在天上就已經被赦免了」，而不是天上聽從人的意思隨意赦免。三段經文在語法結構上相互印證，共同指向同一個原則：執行者是使徒與教會，但標準的制定者是神。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL013",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E019"
+      ],
+      "opposed_position_ids": [
+        "DK-91b546f25db1-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19",
+        "太18:18"
+      ],
+      "topic_terms": [
+        "天主教诠释",
+        "彼得",
+        "教会",
+        "上下文",
+        "断章取义"
+      ],
+      "title": "孤立太16:19而不参照太18:18，不能成立“耶稣把教会交给彼得个人”的解释。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0081",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E019",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "反驳彼得个人独占权柄的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "太 18:18 使用複數 ὑμῖν，將同樣的綑綁與釋放的權柄明確賦予整個教會，而非單一個人。將太 16:19 孤立解讀而不參照太 18:18，是斷章取義的做法，無法成立。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL014",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E020"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约20:23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "圣经标准",
+        "教会实践",
+        "伤害",
+        "约翰福音"
+      ],
+      "title": "教会赦罪或宣告某事被禁止时，必须依据圣经所启示的天上标准，不可任意决定，否则会在神学和实践上伤害当事人。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0085",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E020",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "把语法结论应用于教会判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "赦免某人的罪或宣告某事被禁止，必須根據聖經所啟示的原則進行，不可隨意赦免。若脫離聖經的標準而任意赦罪，不僅違背了未來完成式所揭示的神學邏輯，也會對當事人造成實質的傷害。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL015",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E020"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19",
+        "约20:23"
+      ],
+      "topic_terms": [
+        "查验",
+        "执行",
+        "钥匙权柄",
+        "赦罪",
+        "教会职责"
+      ],
+      "title": "使徒与教会的职责是查验并执行天上的条件，而不是自行制定进入天国、禁止事项或赦罪的条件。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0085",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E020",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "把语法结论应用于教会判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "赦免某人的罪或宣告某事被禁止，必須根據聖經所啟示的原則進行，不可隨意赦免。若脫離聖經的標準而任意赦罪，不僅違背了未來完成式所揭示的神學邏輯，也會對當事人造成實質的傷害。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL016",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E021",
+        "DK-91b546f25db1-E025"
+      ],
+      "opposed_position_ids": [
+        "DK-91b546f25db1-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:19",
+        "徒15:28"
+      ],
+      "topic_terms": [
+        "耶路撒冷会议",
+        "圣灵",
+        "查验",
+        "教会判断",
+        "使徒行传15章"
+      ],
+      "title": "使徒行传15章是教会实行太16:19原则的历史案例：会议不是自主立法，而是查验并确认圣灵已经显明的旨意。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0092",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E021",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "连接太16:19原则与徒15案例",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "太16:19 所揭示的，是一个原则：教会的判断，应当与天上已经确立的判断一致。那么，这个原则在实际中是如何运作的？《使徒行传》15章正提供了一个具体的历史案例。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0113",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E025",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "确定耶路撒冷会议的决定权",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "15:28明確說「聖靈和我們定意」，決定權在聖靈，使徒的角色是查驗與確認，而非自主立法。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-72483dc200ad-CL001",
+      "evidence_step_ids": [
+        "DK-72483dc200ad-E001",
+        "DK-72483dc200ad-E004",
+        "DK-72483dc200ad-E005",
+        "DK-72483dc200ad-E006",
+        "DK-72483dc200ad-E007",
+        "DK-72483dc200ad-E008"
+      ],
+      "opposed_position_ids": [
+        "DK-72483dc200ad-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:20",
+        "可1:43-45",
+        "可4:11",
+        "可5:17-20",
+        "可8:27-33"
+      ],
+      "topic_terms": [
+        "彌賽亞的秘密",
+        "保密命令",
+        "歷史處境",
+        "宣教處境"
+      ],
+      "title": "耶穌在事工中確曾於特定時候命令人對其身分或作為保密，但這些命令都有具體、合理的歷史與宣教處境原因，並非事後捏造的統一掩蓋策略。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "e4a6ea89e67d5121e6e0ea0a1132a04a95138a3326ceb3ef02a54c232ee761b0"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "transcript_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "lecture": "16 章 - 彌賽亞的身分、性質與捨己的呼召",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E001",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "提出太16:20需要解釋的保密現象及其基本語境。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這節經文記載耶穌在彼得宣認祂是基督之後，立即命令門徒對外保密。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E004",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以敘事結果說明一項保密命令的實際原因。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "原因是耶穌知道醫病的宣傳會妨礙祂在該地區的事工。結果正如所料——痲瘋病人違命後，耶穌無法再公開進城，只能留在曠野，眾人從四方來找祂。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E005",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "排除把可4:11歸類為保密要求的解釋。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這並非保密的請求，而是神聖啟示的說明——神國的奧秘向有耳可聽的人顯明，對心硬拒絕真理者（如法利賽人）則不顯明。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E006",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "解釋彼得宣認後保密命令的目的。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "原因並非否認彌賽亞身份，而是當時眾人（包括門徒）尚未明白祂來是要為罪死在十字架上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0028",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E007",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "綜合列出禁止過早宣布的三項處境原因。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "若太早公開宣布，極可能引發政治動亂乃至戰爭，從而妨礙耶穌真正的工作——傳天國的福音，以及為全人類完成救贖。此外，鬼並非傳揚耶穌身分的適當媒介；而耶穌也不希望人誤以為醫病是祂來到世上的主要工作。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0044",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E008",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以可以傳揚的例外限定保密現象。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這一例外本身也說明，馬可福音中對彌賽亞身分的處理並非一刀切的掩蓋，而是有其具體的處境判斷。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-72483dc200ad-CL002",
+      "evidence_step_ids": [
+        "DK-72483dc200ad-E002",
+        "DK-72483dc200ad-E009",
+        "DK-72483dc200ad-E020"
+      ],
+      "opposed_position_ids": [
+        "DK-72483dc200ad-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:16-23",
+        "可8:27-33"
+      ],
+      "topic_terms": [
+        "彌賽亞身分",
+        "彌賽亞性質",
+        "門徒理解"
+      ],
+      "title": "門徒此時真正難以明白的不是耶穌是否為彌賽亞的身分問題，而是彌賽亞受苦、受死、復活並施行救贖的性質與使命。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "e4a6ea89e67d5121e6e0ea0a1132a04a95138a3326ceb3ef02a54c232ee761b0"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "transcript_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "lecture": "16 章 - 彌賽亞的身分、性質與捨己的呼召",
+          "anchors": [
+            {
+              "paragraph_key": "S0008",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E002",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "區分正確的身分認信與尚未理解的使命性質。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得在該撒利亞腓立比宣認耶穌為基督，這一認信本身是正確的；然而彼得與門徒尚未明白，這位彌賽亞來到世上真正的工作，是受苦並死在十字架上，為罪付上代價。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0034",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E009",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由彼得反應推斷門徒理解的真正困難。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得的反應清楚顯示，門徒難以明白的並非耶穌彌賽亞的身分本身，而是彌賽亞的性質——被釘十字架受死、三天後復活。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0082",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E020",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以彼得的反應驗證兩階段教導及理解限制。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得並非不認識耶穌是彌賽亞，他的問題在於他不認識彌賽亞的性質。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-72483dc200ad-CL007",
+      "evidence_step_ids": [
+        "DK-72483dc200ad-E010",
+        "DK-72483dc200ad-E012"
+      ],
+      "opposed_position_ids": [
+        "DK-72483dc200ad-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:13-20",
+        "可11:1-11",
+        "可14:61-62",
+        "可15:26"
+      ],
+      "topic_terms": [
+        "歷史事實",
+        "彼得宣認",
+        "榮耀進城",
+        "大祭司審訊"
+      ],
+      "title": "彼得認耶穌為彌賽亞、耶穌榮耀進入耶路撒冷，以及大祭司審訊時直接詢問其是否為基督等事實，使「耶穌從未自稱或暗示自己是彌賽亞」的說法難以解釋。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "e4a6ea89e67d5121e6e0ea0a1132a04a95138a3326ceb3ef02a54c232ee761b0"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "transcript_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "lecture": "16 章 - 彌賽亞的身分、性質與捨己的呼召",
+          "anchors": [
+            {
+              "paragraph_key": "S0050",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E010",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "列舉與 Wrede 理論矛盾的三項福音書記載。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "第一，在該撒利亞腓立比，彼得公開說耶穌是彌賽亞；第二，耶穌榮耀地進入耶路撒冷城；第三，大祭司在審訊中直接問耶穌是不是基督。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0052",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E012",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "補充十字架罪名及審判的歷史背景。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼拉多最終寫下的罪名是「猶太人的王」；祭司要求改寫為「他說他是猶太人的王」，彼拉多拒絕，說「我怎麼寫就是了」。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-72483dc200ad-CL009",
+      "evidence_step_ids": [
+        "DK-72483dc200ad-E014"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:20",
+        "可8:27-33"
+      ],
+      "topic_terms": [
+        "解經方法",
+        "語境",
+        "歷史事實",
+        "文本內涵"
+      ],
+      "title": "解釋「彌賽亞」及保密現象不能只抓字面或表面現象，必須查考相關歷史事實、語境與文本內涵。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "e4a6ea89e67d5121e6e0ea0a1132a04a95138a3326ceb3ef02a54c232ee761b0"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "transcript_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "lecture": "16 章 - 彌賽亞的身分、性質與捨己的呼召",
+          "anchors": [
+            {
+              "paragraph_key": "S0061",
+              "media_time": null,
+              "evidence_id": "DK-72483dc200ad-E014",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "從詞義類比提出一般解經方法。",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "同樣，解釋「彌賽亞」的意義，也必須回到相關的歷史事實與上下文，而不能只抓住字面或表面現象就下結論。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "knowledge_relations": [],
+  "claim_relations": [],
+  "source_packages": [
+    "M16-NOTES-CANDIDATE-V1"
+  ],
+  "summary": {
+    "source_documents_count": 2,
+    "source_fragments_count": 31,
+    "evidence_steps_count": 26,
+    "claims_count": 14,
+    "claim_relations_count": 0,
+    "position_nodes_count": 5
+  },
+  "consensus_application": {
+    "schema_version": "wang_ai_consensus_application_v1",
+    "adjudication_fingerprint": "30e0a7a45a943a160ccc223c8449e9117a1115b9b6eda09c5357d49b11b3ed16",
+    "applied_claim_ids": [
+      "DK-2bd0c0df7ecd-CL008",
+      "DK-2bd0c0df7ecd-CL011",
+      "DK-2bd0c0df7ecd-CL015",
+      "DK-2bd0c0df7ecd-CL018",
+      "DK-2bd0c0df7ecd-CL022",
+      "DK-2bd0c0df7ecd-CL026",
+      "DK-72483dc200ad-CL003",
+      "DK-72483dc200ad-CL008",
+      "DK-91b546f25db1-CL017",
+      "DK-91b546f25db1-CL026"
+    ],
+    "removed_claim_relation_ids": [
+      "DK-2bd0c0df7ecd-CR013",
+      "DK-2bd0c0df7ecd-CR021"
+    ],
+    "approval_status": "not_human_approved"
+  },
+  "slice_scope": {
+    "selection_policy": "explicit_reviewed_claim_ids",
+    "claim_ids": [
+      "DK-72483dc200ad-CL001",
+      "DK-72483dc200ad-CL002",
+      "DK-72483dc200ad-CL007",
+      "DK-72483dc200ad-CL009",
+      "DK-91b546f25db1-CL007",
+      "DK-91b546f25db1-CL008",
+      "DK-91b546f25db1-CL009",
+      "DK-91b546f25db1-CL010",
+      "DK-91b546f25db1-CL011",
+      "DK-91b546f25db1-CL012",
+      "DK-91b546f25db1-CL013",
+      "DK-91b546f25db1-CL014",
+      "DK-91b546f25db1-CL015",
+      "DK-91b546f25db1-CL016"
+    ]
+  }
+}

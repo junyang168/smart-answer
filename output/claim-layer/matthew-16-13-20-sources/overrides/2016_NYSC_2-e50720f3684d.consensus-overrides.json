@@ -1,0 +1,123 @@
+{
+  "schema_version": "wang_corpus_ai_adjudication_v1",
+  "generated_at": "2026-08-14T17:53:07.060467+00:00",
+  "adjudication_fingerprint": {
+    "review_fingerprint": "5697731aff83379b7256fe0eb1fa552d28ce2d9d598aed2a444db4bdd57400e0",
+    "openai_prompt_sha256": "24faed534874274b93c30575d1471db07565435b95a131e3962f584e0812e229",
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_prompt_sha256": "a7484bc13e329465cf25623e6418cc91d9ef8c59476e79093e96dbbd203f72f6",
+    "claude_model": "claude-sonnet-5",
+    "schema_version": "wang_corpus_ai_adjudication_v1",
+    "fingerprint_sha256": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799"
+  },
+  "claims": {
+    "DK-e50720f3684d-CL007": {
+      "title": null,
+      "claim_type": null,
+      "route_type": null,
+      "scripture_refs": null,
+      "excluded_anchors": [],
+      "excluded_claim_relation_ids": [],
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "287",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "因為你不懂文法，有些人說：「你看，我現在就查一個字，這個字，它就有一個比如說 Strong （注：Strong’s Numbers编号法）裡面這樣就給你一個號碼，我看到這個號碼，就曉得這個字是希臘文是什麼字，去查是什麼意思。」其實那個字典告訴你什麼意思，它只是告訴你小部分的意思而已，真正的意思沒有辦法告訴你。"
+        }
+      ],
+      "structural_notes": [],
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+      "status": "ai_consensus_applied",
+      "approval_status": "not_human_approved"
+    },
+    "DK-e50720f3684d-CL008": {
+      "title": null,
+      "claim_type": null,
+      "route_type": null,
+      "scripture_refs": null,
+      "excluded_anchors": [],
+      "excluded_claim_relation_ids": [],
+      "anchor_additions": [
+        {
+          "evidence_type": "interpretive_method",
+          "source_index": "287",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "你要真的懂得怎麼去了解，你必須要學會怎麼去查那個字是什麼意思，從原有的證據去查。"
+        },
+        {
+          "evidence_type": "reasoning",
+          "source_index": "546",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "我們常常對聖經有很多觀念，我們自己的觀念，唸到聖經裡面去，大有問題。"
+        }
+      ],
+      "structural_notes": [],
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+      "status": "ai_consensus_applied",
+      "approval_status": "not_human_approved"
+    },
+    "DK-e50720f3684d-CL012": {
+      "title": null,
+      "claim_type": null,
+      "route_type": null,
+      "scripture_refs": null,
+      "excluded_anchors": [],
+      "excluded_claim_relation_ids": [],
+      "anchor_additions": [
+        {
+          "evidence_type": "answer",
+          "source_index": "822",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！"
+        }
+      ],
+      "structural_notes": [],
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+      "status": "ai_consensus_applied",
+      "approval_status": "not_human_approved"
+    },
+    "DK-e50720f3684d-CL017": {
+      "title": null,
+      "claim_type": null,
+      "route_type": null,
+      "scripture_refs": null,
+      "excluded_anchors": [],
+      "excluded_claim_relation_ids": [],
+      "anchor_additions": [
+        {
+          "evidence_type": "application",
+          "source_index": "1106",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "一樣的，對教會，都要查驗天上的標準，我們基督徒要研究聖經，基督徒要準確的解經是不可缺的。"
+        }
+      ],
+      "structural_notes": [],
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+      "status": "ai_consensus_applied",
+      "approval_status": "not_human_approved"
+    },
+    "DK-e50720f3684d-CL020": {
+      "title": null,
+      "claim_type": null,
+      "route_type": null,
+      "scripture_refs": null,
+      "excluded_anchors": [],
+      "excluded_claim_relation_ids": [],
+      "anchor_additions": [
+        {
+          "evidence_type": "answer",
+          "source_index": "1389",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "verbatim_excerpt": "如果你不查經，你就不知道神為我們預備的東西在哪裡。那奇妙的是什麼東西？你查經以後知道說，神要怎麼樣給、祂要給我們的那個祝福，你不知道你怎麼去求？你查經知道真理之後，你才會遵行真理。你不遵行真理，靈命不會長進。"
+        }
+      ],
+      "structural_notes": [],
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+      "status": "ai_consensus_applied",
+      "approval_status": "not_human_approved"
+    }
+  },
+  "note": "OpenAI accepted Claude fidelity corrections. These are candidate overrides, not human approval or publication."
+}

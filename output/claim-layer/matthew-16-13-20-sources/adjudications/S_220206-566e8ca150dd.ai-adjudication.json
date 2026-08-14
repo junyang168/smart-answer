@@ -1,0 +1,993 @@
+{
+  "schema_version": "wang_corpus_ai_adjudication_v1",
+  "source": {
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/S_220206-566e8ca150dd.detailed-knowledge.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review.json"
+  },
+  "adjudicator": {
+    "review_fingerprint": "1ed1f20797f5f59723d94be799ca65bbcae360a17227894d06dc55fa05bb8813",
+    "openai_prompt_sha256": "24faed534874274b93c30575d1471db07565435b95a131e3962f584e0812e229",
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_prompt_sha256": "a7484bc13e329465cf25623e6418cc91d9ef8c59476e79093e96dbbd203f72f6",
+    "claude_model": "claude-sonnet-5",
+    "schema_version": "wang_corpus_ai_adjudication_v1",
+    "fingerprint_sha256": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3",
+    "generated_at": "2026-08-14T18:39:35.252265+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "claim_id": "DK-566e8ca150dd-CL005",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            3,
+            4
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "排除讨论否认基督后果与圣灵印记之信实性的两个跨主题锚点；其余锚点已覆盖本主张。"
+          ]
+        },
+        "rationale": "E027与E037分别属于否认基督和圣灵印记的论证脉络，不能直接支持本主张；排除二者即可，无须扩大或改写主张。",
+        "source_anchor_indexes": [
+          3,
+          4
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL006",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "277",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "逐字稿明确否定彼得拥有决定他人下地狱或到天堂的权柄；补入对应原文即可完整覆盖主张后半部分。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL007",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "277",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "逐字稿包含把彼得承认耶稣为神儿子与建造教会的磐石相连的正面陈述，现有摘录未覆盖该部分；补充锚点即可。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL010",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "435",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0017直接说明天上已经决定的准许与禁止由圣经讲明，补入该锚点可完整支持主张中的限定。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL011",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "application",
+              "source_index": "454",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0018逐字支持教会领袖不可按个人喜好决定，而应实行天上已经确定的禁止；应补作直接锚点。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL012",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "544",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "因此呢，神禁止古時候的猶太人說『你不可以吃血』，因為神把血分別出來要他們來獻這個贖罪祭。我們現在不要了，所以我們現在就可以吃了。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "完整的S0021本身明确陈述旧约禁血理由及新约基督徒可以吃血，但现有摘录未包含这些句子；补入同段原文即可。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL013",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "514",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "因為聖經明講為什麼神不要猶太人不要吃血？因為血有生命，所以啊，血被神分別出來要做贖罪祭用，所以你不可以吃。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "CL013与CL012共享同一推理链，但CL013可保留为支持CL012的理由性结论；后续去重时应避免重复扩写。"
+          ]
+        },
+        "rationale": "主张的推理结论需要同时覆盖禁血的献祭理由与基督赎罪祭已经完成；现有S0021锚点支持后者，补入S0020即可补全前者。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL015",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "722",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "所以耶穌基督的救恩不只是給猶太人，也要給外邦人。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-566e8ca150dd-CR008"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "移除CL015支持CL016的关系；两者在讲道中相邻，但未构成明确的支持推论。"
+          ]
+        },
+        "rationale": "S0027直接逐字支持主张，应补为锚点；救恩临到外邦人的结论并不直接支持下一段关于新旧约整体与个人结构差异的主张，因此应删除CR008。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL023",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-566e8ca150dd-CR011"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "活祭的应用与随后关于圣灵印记及关身语态的解释属于不同论述内容，逐字稿未将前者设为后者的限定条件，应直接删除该关系。",
+        "source_anchor_indexes": []
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL025",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "qualification",
+              "source_index": "1381",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "可是如果，我們如果沒有繼續做神的門徒，我們沒有繼續要聽神的話，我們就失掉了神的恩典。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0046逐字支持不继续作门徒、不继续听神的话便失掉恩典，补入该锚点可完整覆盖主张后半句。",
+        "source_anchor_indexes": [
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL028",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "historical_background",
+              "source_index": "1565",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "我現在情況變了，所以我現在乾脆我要去馬其頓以前，然後我來看你們。我就先到馬其頓去，在馬其頓該做的工作我做完之後，我就到你們哥林多的地方住得長一點，住得很長的時間，對你們幫助更大。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0052直接说明保罗因情况和服事安排变化而调整行程，现有锚点只包含反对者的指控和教授对信实的结论；补充该段即可。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      {
+        "claim_id": "DK-566e8ca150dd-CL029",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "literary_context",
+              "source_index": "37",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "這句話很重要，但許多人沒有對照上下文，因此誤以為門徒當時已接受聖靈。"
+            },
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "311",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "第一個，我先跟各位講：跟這個平行的經文，給大家看平行的經文。"
+            },
+            {
+              "evidence_type": "reasoning",
+              "source_index": "544",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "可是現在耶穌已經來了，耶穌已經為我們獻上永遠、永遠有效的贖罪祭。所以我們今天的新約基督徒，我們不要再獻贖罪祭。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            3,
+            4
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "排除两处主要针对教导者的应用性警告，使本主张集中于解经方法；相关警告已由CL005表达。"
+          ]
+        },
+        "rationale": "现有锚点充分支持不可凭经文碎片及须重视原文语法，但对上下文、平行经文和救赎历史的覆盖不足；补入对应段落并排除两处教导警告锚点，是保持方法主张边界的最小修正。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      }
+    ],
+    "scope_confirmation": "source_fidelity_only_no_theological_critique"
+  },
+  "claude_reconsideration": null,
+  "results": [
+    {
+      "claim_id": "DK-566e8ca150dd-CL005",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL005",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            3,
+            4
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "排除讨论否认基督后果与圣灵印记之信实性的两个跨主题锚点；其余锚点已覆盖本主张。"
+          ]
+        },
+        "rationale": "E027与E037分别属于否认基督和圣灵印记的论证脉络，不能直接支持本主张；排除二者即可，无须扩大或改写主张。",
+        "source_anchor_indexes": [
+          3,
+          4
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL006",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL006",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "answer",
+              "source_index": "277",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "逐字稿明确否定彼得拥有决定他人下地狱或到天堂的权柄；补入对应原文即可完整覆盖主张后半部分。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL007",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL007",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "277",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "逐字稿包含把彼得承认耶稣为神儿子与建造教会的磐石相连的正面陈述，现有摘录未覆盖该部分；补充锚点即可。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL010",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL010",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "435",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0017直接说明天上已经决定的准许与禁止由圣经讲明，补入该锚点可完整支持主张中的限定。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL011",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL011",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "application",
+              "source_index": "454",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0018逐字支持教会领袖不可按个人喜好决定，而应实行天上已经确定的禁止；应补作直接锚点。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL012",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL012",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "544",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "因此呢，神禁止古時候的猶太人說『你不可以吃血』，因為神把血分別出來要他們來獻這個贖罪祭。我們現在不要了，所以我們現在就可以吃了。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "完整的S0021本身明确陈述旧约禁血理由及新约基督徒可以吃血，但现有摘录未包含这些句子；补入同段原文即可。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL013",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL013",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "514",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "因為聖經明講為什麼神不要猶太人不要吃血？因為血有生命，所以啊，血被神分別出來要做贖罪祭用，所以你不可以吃。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "CL013与CL012共享同一推理链，但CL013可保留为支持CL012的理由性结论；后续去重时应避免重复扩写。"
+          ]
+        },
+        "rationale": "主张的推理结论需要同时覆盖禁血的献祭理由与基督赎罪祭已经完成；现有S0021锚点支持后者，补入S0020即可补全前者。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL015",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL015",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "reasoning",
+              "source_index": "722",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "所以耶穌基督的救恩不只是給猶太人，也要給外邦人。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-566e8ca150dd-CR008"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "移除CL015支持CL016的关系；两者在讲道中相邻，但未构成明确的支持推论。"
+          ]
+        },
+        "rationale": "S0027直接逐字支持主张，应补为锚点；救恩临到外邦人的结论并不直接支持下一段关于新旧约整体与个人结构差异的主张，因此应删除CR008。",
+        "source_anchor_indexes": [
+          0
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL023",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL023",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [
+            "DK-566e8ca150dd-CR011"
+          ],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "活祭的应用与随后关于圣灵印记及关身语态的解释属于不同论述内容，逐字稿未将前者设为后者的限定条件，应直接删除该关系。",
+        "source_anchor_indexes": []
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL025",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL025",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "qualification",
+              "source_index": "1381",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "可是如果，我們如果沒有繼續做神的門徒，我們沒有繼續要聽神的話，我們就失掉了神的恩典。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0046逐字支持不继续作门徒、不继续听神的话便失掉恩典，补入该锚点可完整覆盖主张后半句。",
+        "source_anchor_indexes": [
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL028",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL028",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "historical_background",
+              "source_index": "1565",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "我現在情況變了，所以我現在乾脆我要去馬其頓以前，然後我來看你們。我就先到馬其頓去，在馬其頓該做的工作我做完之後，我就到你們哥林多的地方住得長一點，住得很長的時間，對你們幫助更大。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": []
+        },
+        "rationale": "S0052直接说明保罗因情况和服事安排变化而调整行程，现有锚点只包含反对者的指控和教授对信实的结论；补充该段即可。",
+        "source_anchor_indexes": [
+          0,
+          1
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL029",
+      "status": "auto_applied",
+      "claude_decision": "changes_suggested",
+      "human_review_reason": "",
+      "openai": {
+        "claim_id": "DK-566e8ca150dd-CL029",
+        "decision": "accept",
+        "patch": {
+          "anchor_additions": [
+            {
+              "evidence_type": "literary_context",
+              "source_index": "37",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "這句話很重要，但許多人沒有對照上下文，因此誤以為門徒當時已接受聖靈。"
+            },
+            {
+              "evidence_type": "scripture_evidence",
+              "source_index": "311",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "第一個，我先跟各位講：跟這個平行的經文，給大家看平行的經文。"
+            },
+            {
+              "evidence_type": "reasoning",
+              "source_index": "544",
+              "transcript_id": "S 220206",
+              "verbatim_excerpt": "可是現在耶穌已經來了，耶穌已經為我們獻上永遠、永遠有效的贖罪祭。所以我們今天的新約基督徒，我們不要再獻贖罪祭。"
+            }
+          ],
+          "claim_kind": "",
+          "excluded_anchor_indexes": [
+            3,
+            4
+          ],
+          "excluded_claim_relation_ids": [],
+          "route_type": "unchanged",
+          "scripture_refs": [],
+          "statement": "",
+          "structural_notes": [
+            "排除两处主要针对教导者的应用性警告，使本主张集中于解经方法；相关警告已由CL005表达。"
+          ]
+        },
+        "rationale": "现有锚点充分支持不可凭经文碎片及须重视原文语法，但对上下文、平行经文和救赎历史的覆盖不足；补入对应段落并排除两处教导警告锚点，是保持方法主张边界的最小修正。",
+        "source_anchor_indexes": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "claude_reconsideration": null,
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "claim_overrides": {
+    "DK-566e8ca150dd-CL005": {
+      "anchor_additions": [],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [
+        3,
+        4
+      ],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "排除讨论否认基督后果与圣灵印记之信实性的两个跨主题锚点；其余锚点已覆盖本主张。"
+      ]
+    },
+    "DK-566e8ca150dd-CL006": {
+      "anchor_additions": [
+        {
+          "evidence_type": "answer",
+          "source_index": "277",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL007": {
+      "anchor_additions": [
+        {
+          "evidence_type": "scripture_evidence",
+          "source_index": "277",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL010": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "435",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL011": {
+      "anchor_additions": [
+        {
+          "evidence_type": "application",
+          "source_index": "454",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL012": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "544",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "因此呢，神禁止古時候的猶太人說『你不可以吃血』，因為神把血分別出來要他們來獻這個贖罪祭。我們現在不要了，所以我們現在就可以吃了。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL013": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "514",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "因為聖經明講為什麼神不要猶太人不要吃血？因為血有生命，所以啊，血被神分別出來要做贖罪祭用，所以你不可以吃。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "CL013与CL012共享同一推理链，但CL013可保留为支持CL012的理由性结论；后续去重时应避免重复扩写。"
+      ]
+    },
+    "DK-566e8ca150dd-CL015": {
+      "anchor_additions": [
+        {
+          "evidence_type": "reasoning",
+          "source_index": "722",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "所以耶穌基督的救恩不只是給猶太人，也要給外邦人。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [
+        "DK-566e8ca150dd-CR008"
+      ],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "移除CL015支持CL016的关系；两者在讲道中相邻，但未构成明确的支持推论。"
+      ]
+    },
+    "DK-566e8ca150dd-CL023": {
+      "anchor_additions": [],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [
+        "DK-566e8ca150dd-CR011"
+      ],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL025": {
+      "anchor_additions": [
+        {
+          "evidence_type": "qualification",
+          "source_index": "1381",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "可是如果，我們如果沒有繼續做神的門徒，我們沒有繼續要聽神的話，我們就失掉了神的恩典。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL028": {
+      "anchor_additions": [
+        {
+          "evidence_type": "historical_background",
+          "source_index": "1565",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "我現在情況變了，所以我現在乾脆我要去馬其頓以前，然後我來看你們。我就先到馬其頓去，在馬其頓該做的工作我做完之後，我就到你們哥林多的地方住得長一點，住得很長的時間，對你們幫助更大。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": []
+    },
+    "DK-566e8ca150dd-CL029": {
+      "anchor_additions": [
+        {
+          "evidence_type": "literary_context",
+          "source_index": "37",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "這句話很重要，但許多人沒有對照上下文，因此誤以為門徒當時已接受聖靈。"
+        },
+        {
+          "evidence_type": "scripture_evidence",
+          "source_index": "311",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "第一個，我先跟各位講：跟這個平行的經文，給大家看平行的經文。"
+        },
+        {
+          "evidence_type": "reasoning",
+          "source_index": "544",
+          "transcript_id": "S 220206",
+          "verbatim_excerpt": "可是現在耶穌已經來了，耶穌已經為我們獻上永遠、永遠有效的贖罪祭。所以我們今天的新約基督徒，我們不要再獻贖罪祭。"
+        }
+      ],
+      "claim_kind": "",
+      "excluded_anchor_indexes": [
+        3,
+        4
+      ],
+      "excluded_claim_relation_ids": [],
+      "route_type": "unchanged",
+      "scripture_refs": [],
+      "statement": "",
+      "structural_notes": [
+        "排除两处主要针对教导者的应用性警告，使本主张集中于解经方法；相关警告已由CL005表达。"
+      ]
+    }
+  },
+  "pending_patches": {},
+  "summary": {
+    "auto_applied": 12,
+    "withdrawn": 0,
+    "human_confirmation_required": 0,
+    "human_disagreement_required": 0
+  }
+}

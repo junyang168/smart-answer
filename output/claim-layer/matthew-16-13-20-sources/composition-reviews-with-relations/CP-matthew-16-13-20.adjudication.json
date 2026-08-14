@@ -1,0 +1,63 @@
+{
+  "schema_version": "wang_composition_ai_adjudication_v2",
+  "source": {
+    "plan_path": "output/claim-layer/matthew-16-13-20-sources/composition-plan-matt16-13-20.json",
+    "review_path": "output/claim-layer/matthew-16-13-20-sources/composition-reviews-with-relations/CP-matthew-16-13-20.independent-review.json",
+    "plan_sha256": "124cbd4afda843f826f4b979985dcd547071a5190211e4c9d5e28ee68120203e"
+  },
+  "adjudicator": {
+    "openai_model": "gpt-5.6-sol",
+    "openai_reasoning_effort": "medium",
+    "claude_reconsideration_model": "claude-sonnet-5",
+    "generated_at": "2026-08-14T19:09:11.242623+00:00"
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "decision": "accept",
+        "decision_id": "CD-M16-002-06",
+        "patch": {
+          "action": "",
+          "add_claim_ids": [],
+          "argument_layer_followups": [],
+          "claim_hierarchy": {
+            "corroborating_claims": [],
+            "evidence_step_scopes": [],
+            "methodological_entry": "",
+            "note": "",
+            "original_language_support": "",
+            "paragraph_thesis": "",
+            "parallel_context": [],
+            "supporting_claims": [],
+            "supporting_context": [],
+            "theological_structure": []
+          },
+          "coverage": "",
+          "decision_text": "說明捆綁與釋放在拉比語境可指禁止與准許，同時保留筆記與（四）2所述可涉及事或人的較廣表述；S 220206補充禁止與准許的用法，但其本項主張不承擔排除對人指涉的論證；《解經的原則》則明確把它限定為禁止與准許，並否定其指決定人能否進天國。較廣表述與《解經的原則》的明確限定不得靜默調和。",
+          "rationale": "",
+          "remove_claim_ids": [],
+          "topic_plan_ids": []
+        },
+        "rationale": "接受來源歸屬需要澄清的意見，但不接受把S 220206與《解經的原則》共同表述為明確否定對人指涉。DK-566e8ca150dd-CL009只直接支持禁止與准許的語義；明確排除決定人能否進天國的是DK-0d5b2062b148-CL015。CR-XSR-24951e31429d74e2的extends關係也表示後者在前者基礎上增加了這項排除，因此patch按證據邊界區分兩者。"
+      }
+    ],
+    "scope_confirmation": "composition_and_argument_structure_no_theological_critique"
+  },
+  "claude_reconsideration": null,
+  "outcomes": [
+    {
+      "decision_id": "CD-M16-002-06",
+      "status": "auto_applied"
+    }
+  ],
+  "summary": {
+    "reviewed_decisions": 9,
+    "claude_pass": 8,
+    "claude_actionable": 1,
+    "auto_applied": 1,
+    "withdrawn": 0,
+    "human_required": 0,
+    "argument_layer_status": "solid",
+    "argument_layer_findings": 0
+  }
+}

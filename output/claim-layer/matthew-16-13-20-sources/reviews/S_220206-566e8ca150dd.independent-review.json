@@ -1,0 +1,2067 @@
+{
+  "schema_version": "wang_corpus_independent_review_batched_v1",
+  "source": {
+    "input_mode": "curated_claim_layer_batched",
+    "package_path": "output/claim-layer/matthew-16-13-20-sources/detailed-extractions/S_220206-566e8ca150dd.detailed-knowledge.json",
+    "package_id": "DETAILED-S_220206-566e8ca150dd",
+    "package_sha256": "95829dd181f7039af3f24cc33bcaac0c5a9965bc539e3d3b1c5195f6ce0a0e14",
+    "claim_count": 29
+  },
+  "review_strategy": {
+    "batch_count": 4,
+    "partition_policy": "claims_only_all_sources_and_relations_retained",
+    "exact_claim_coverage_verified": true,
+    "reviewer_batches": [
+      {
+        "batch_index": 1,
+        "reviewer": {
+          "source_extraction_fingerprint": "48cb5f34eb0313cdd36d547ecb6e44f3175d0670ed5fb1a8a5be75a741a49b56",
+          "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+          "review_model_id": "claude-sonnet-5",
+          "max_output_tokens": 24000,
+          "review_schema_version": "wang_corpus_independent_review_v1",
+          "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+          "fingerprint_sha256": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+          "provider": "anthropic",
+          "generated_at": "2026-08-14T18:31:13.655827+00:00"
+        },
+        "source": {
+          "input_mode": "curated_claim_layer",
+          "projection_version": "wang_claim_layer_review_projection_v2",
+          "package_sha256": "fdb8173ab027bc55ed6eaaa8041eef021ae6bb6d1f7cd08e712c298be33164b2",
+          "transcript_sha256": {
+            "SRC-S_220206-566e8ca150dd": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863"
+          },
+          "review_batch": {
+            "batch_index": 1,
+            "batch_count": 4,
+            "claim_count": 8,
+            "claim_ids": [
+              "DK-566e8ca150dd-CL001",
+              "DK-566e8ca150dd-CL002",
+              "DK-566e8ca150dd-CL003",
+              "DK-566e8ca150dd-CL004",
+              "DK-566e8ca150dd-CL005",
+              "DK-566e8ca150dd-CL006",
+              "DK-566e8ca150dd-CL007",
+              "DK-566e8ca150dd-CL008"
+            ],
+            "source_package_id": "DETAILED-S_220206-566e8ca150dd",
+            "source_package_sha256": "809e11626ad4b4e77095b08e699540d71bc0ac4e17c178366f649c70353fd824",
+            "partition_policy": "claims_only_all_sources_and_relations_retained"
+          },
+          "package_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review-batches/inputs/batch-01.json",
+          "transcript_paths": {
+            "SRC-S_220206-566e8ca150dd": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json"
+          },
+          "source_candidate_fingerprint": "48cb5f34eb0313cdd36d547ecb6e44f3175d0670ed5fb1a8a5be75a741a49b56",
+          "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+        }
+      },
+      {
+        "batch_index": 2,
+        "reviewer": {
+          "source_extraction_fingerprint": "61fb97bc39bc6bbd8ce40ea0bcace16a9573be6171f70d6ccb79b6613b61ea2f",
+          "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+          "review_model_id": "claude-sonnet-5",
+          "max_output_tokens": 24000,
+          "review_schema_version": "wang_corpus_independent_review_v1",
+          "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+          "fingerprint_sha256": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+          "provider": "anthropic",
+          "generated_at": "2026-08-14T18:33:10.254041+00:00"
+        },
+        "source": {
+          "input_mode": "curated_claim_layer",
+          "projection_version": "wang_claim_layer_review_projection_v2",
+          "package_sha256": "b1eb01aa5585f1fc53d5c11dfc641354739c15116d9416d7183551e0fbabb913",
+          "transcript_sha256": {
+            "SRC-S_220206-566e8ca150dd": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863"
+          },
+          "review_batch": {
+            "batch_index": 2,
+            "batch_count": 4,
+            "claim_count": 8,
+            "claim_ids": [
+              "DK-566e8ca150dd-CL009",
+              "DK-566e8ca150dd-CL010",
+              "DK-566e8ca150dd-CL011",
+              "DK-566e8ca150dd-CL012",
+              "DK-566e8ca150dd-CL013",
+              "DK-566e8ca150dd-CL014",
+              "DK-566e8ca150dd-CL015",
+              "DK-566e8ca150dd-CL016"
+            ],
+            "source_package_id": "DETAILED-S_220206-566e8ca150dd",
+            "source_package_sha256": "809e11626ad4b4e77095b08e699540d71bc0ac4e17c178366f649c70353fd824",
+            "partition_policy": "claims_only_all_sources_and_relations_retained"
+          },
+          "package_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review-batches/inputs/batch-02.json",
+          "transcript_paths": {
+            "SRC-S_220206-566e8ca150dd": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json"
+          },
+          "source_candidate_fingerprint": "61fb97bc39bc6bbd8ce40ea0bcace16a9573be6171f70d6ccb79b6613b61ea2f",
+          "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+        }
+      },
+      {
+        "batch_index": 3,
+        "reviewer": {
+          "source_extraction_fingerprint": "c0961b06fb199defeb4021b861ffec00d5c77291369782265676839b83bffa60",
+          "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+          "review_model_id": "claude-sonnet-5",
+          "max_output_tokens": 24000,
+          "review_schema_version": "wang_corpus_independent_review_v1",
+          "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+          "fingerprint_sha256": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+          "provider": "anthropic",
+          "generated_at": "2026-08-14T18:35:13.982806+00:00"
+        },
+        "source": {
+          "input_mode": "curated_claim_layer",
+          "projection_version": "wang_claim_layer_review_projection_v2",
+          "package_sha256": "16285c713e126f5cfe7f310f7e08e3c05b2a65cd4694238e01425fd17f5e5675",
+          "transcript_sha256": {
+            "SRC-S_220206-566e8ca150dd": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863"
+          },
+          "review_batch": {
+            "batch_index": 3,
+            "batch_count": 4,
+            "claim_count": 8,
+            "claim_ids": [
+              "DK-566e8ca150dd-CL017",
+              "DK-566e8ca150dd-CL018",
+              "DK-566e8ca150dd-CL019",
+              "DK-566e8ca150dd-CL020",
+              "DK-566e8ca150dd-CL021",
+              "DK-566e8ca150dd-CL022",
+              "DK-566e8ca150dd-CL023",
+              "DK-566e8ca150dd-CL024"
+            ],
+            "source_package_id": "DETAILED-S_220206-566e8ca150dd",
+            "source_package_sha256": "809e11626ad4b4e77095b08e699540d71bc0ac4e17c178366f649c70353fd824",
+            "partition_policy": "claims_only_all_sources_and_relations_retained"
+          },
+          "package_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review-batches/inputs/batch-03.json",
+          "transcript_paths": {
+            "SRC-S_220206-566e8ca150dd": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json"
+          },
+          "source_candidate_fingerprint": "c0961b06fb199defeb4021b861ffec00d5c77291369782265676839b83bffa60",
+          "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+        }
+      },
+      {
+        "batch_index": 4,
+        "reviewer": {
+          "source_extraction_fingerprint": "2eba369819dbc949ac871e89f51db671b53f27e1016b0e414981e227840d009b",
+          "review_prompt_sha256": "2bc941cea64dc48d6145db2c8ac4c8e90a9571449ca93faedfeac88471220ebc",
+          "review_model_id": "claude-sonnet-5",
+          "max_output_tokens": 24000,
+          "review_schema_version": "wang_corpus_independent_review_v1",
+          "response_schema_sha256": "5ba3f991296ce2d89e5799b69bda22bb6767b8c3ec3fece1e9975f2375a31b36",
+          "fingerprint_sha256": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+          "provider": "anthropic",
+          "generated_at": "2026-08-14T18:36:50.217044+00:00"
+        },
+        "source": {
+          "input_mode": "curated_claim_layer",
+          "projection_version": "wang_claim_layer_review_projection_v2",
+          "package_sha256": "2f43ab9c0fecb4aa76ad1f0b0c95b3bd7b710ae313a81e0df5e26c3b7cbb1204",
+          "transcript_sha256": {
+            "SRC-S_220206-566e8ca150dd": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863"
+          },
+          "review_batch": {
+            "batch_index": 4,
+            "batch_count": 4,
+            "claim_count": 5,
+            "claim_ids": [
+              "DK-566e8ca150dd-CL025",
+              "DK-566e8ca150dd-CL026",
+              "DK-566e8ca150dd-CL027",
+              "DK-566e8ca150dd-CL028",
+              "DK-566e8ca150dd-CL029"
+            ],
+            "source_package_id": "DETAILED-S_220206-566e8ca150dd",
+            "source_package_sha256": "809e11626ad4b4e77095b08e699540d71bc0ac4e17c178366f649c70353fd824",
+            "partition_policy": "claims_only_all_sources_and_relations_retained"
+          },
+          "package_path": "output/claim-layer/matthew-16-13-20-sources/reviews/S_220206-566e8ca150dd.independent-review-batches/inputs/batch-04.json",
+          "transcript_paths": {
+            "SRC-S_220206-566e8ca150dd": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json"
+          },
+          "source_candidate_fingerprint": "2eba369819dbc949ac871e89f51db671b53f27e1016b0e414981e227840d009b",
+          "extraction_provenance": "curated package snapshot; original model generation metadata unavailable"
+        }
+      }
+    ]
+  },
+  "reviewer": {
+    "provider": "anthropic_batched",
+    "fingerprint_sha256": "1ed1f20797f5f59723d94be799ca65bbcae360a17227894d06dc55fa05bb8813"
+  },
+  "sermon_assessments": [
+    {
+      "batch_index": 1,
+      "summary": "本篇讲道核心围绕约翰福音二十章「吹气受圣灵」与「赦罪留罪」之言、马太福音十六、十八章「磐石」与「捆绑释放」之言展开释经，教授反复强调「奉差遣」范围内的权柄而非个人绝对权柄，并借此警告随意曲解圣经、自称为神同工却误人者必受审判。候选主张大体忠实反映教授的释经论证与应用劝诫，但存在若干锚点覆盖不完整（部分关键论断句子未被完整摘入证据字段）以及一条应用类主张（CL005）合并了来源中彼此独立、主题不同的段落证据，导致部分锚点与主张陈述之间的直接支持关系较弱，需要编辑复核以决定是否拆分或补足摘录。",
+      "systemic_risks": [
+        "部分主张（如 CL006、CL007）所引用锚点的 verbatim_excerpt 未完整涵盖教授在同一段落中做出的关键论断句子（如彼得‘天国的钥匙’与天堂地狱权柄的具体否定语句、‘磐石即彼得认信’的具体表述），仅凭现有摘录尚不能完全坐实主张全部内容。",
+        "CL005 将多个来源于不同段落、议题并不完全相同的证据（自称神同工者误导他人受审判；‘不认耶稣祂也不认我们’异端的驳斥；因圣灵印记而‘不可能不信实’）合并为一条应用主张，存在证据支持不均衡、主张范围过广的风险。"
+      ]
+    },
+    {
+      "batch_index": 2,
+      "summary": "本组主张聚焦马太福音16:19/18:18的捆绑释放解经、旧约禁血规定的救赎历史解释，以及以赛亚书42章“众民”译文问题与新旧约结构差异。整体上锚点与教授逐字稿內容基本对应，但部分主张（CL010、CL011、CL012、CL013、CL015）存在锚点未能完整覆盖论证链条中关键环节（如S0017「聖經已經決定了」、S0018「不是看你喜歡做什麼決定」、S0020关于血分别作赎罪祭的原文说明、S0027直接陈述救恩传外邦人）的情况，建议在编辑阶段补充或调整锚点。CL015与CL016之间的“支持”关系在原文中转折较生硬，可能是话题过渡而非逻辑支持，建议复核。",
+      "systemic_risks": [
+        "部分主张的anchors仅覆盖论证的一部分，遗漏了同一段落中支持该主张关键措辞的语句，可能导致主张听起来比逐字稿实际论证更完整。",
+        "CL012与CL013共享同一锚点，内容有重叠，需注意是否造成重复主张。",
+        "CL015与CL016之间的supports关系可能是话题转折而非逻辑支持，需要复核关系类型。"
+      ]
+    },
+    {
+      "batch_index": 3,
+      "summary": "本组主张涉及使徒行传13:47对以赛亚书的引用与保罗使命应用、诗篇105:15“受膏者”原文数的辨析及大卫扫罗例证、罗马书6章与自我能力不足靠神恩典的论证、提摩太后书2:11-12的经文纠偏，以及以弗所书1:13圣灵印记的关身语态解释与应用献祭的教导。大多数主张有清晰的逐字稿锚点支持，教授的立场（原文语法、经文引用与应用）标注基本准确。主要问题集中在CL023与CL024之间标注的“qualifies”关系，在逐字稿中未见明确的限定/资格关系，两段内容（活祭的奉献 vs. 圣灵印记的关身语态）属顺序讲解但无逻辑限定证据，建议复核该关系类型或移除。",
+      "systemic_risks": [
+        "部分主张的verbatim_excerpt仅截取段落前半部分，完整限定或结论出现在同一paragraph_key的后续文字中，虽不算严重但复核时需留意锚点是否覆盖完整论证。",
+        "CL023与CL024之间标注的‘qualifies’关系缺乏逐字稿内在逻辑支持，可能是编辑过程中误加的关系标签。"
+      ]
+    },
+    {
+      "batch_index": 4,
+      "summary": "本组主张涉及圣灵印记、持守信心得救、以及正确解经方法（原文语法、上下文、权柄范围）等主题。多数主张的核心论点在逐字稿中有清晰对应，但若干主张的具体措辞（尤其是复合句中的某一分句）所选锚点与该分句的确切表述不完全对应，例如'失掉神的恩典'一语的确切出处（S0046）未被选为锚点，'处境和服事安排改变'的具体说明（S0052）未被选为锚点，以及方法论主张中提及的'平行经文'与'救赎历史'缺乏直接对应锚点。这些属于锚点覆盖不足的问题，而非说话者归属或立场错误。",
+      "systemic_risks": [
+        "部分复合陈述（含多个分句）仅部分分句有对应锚点，另一分句的确切措辞出自未被引用的邻近段落，存在锚点覆盖不足的风险。",
+        "方法论类主张（如CL029）罗列多项解经原则，但并非每项原则都有对应锚点直接支持，存在主张范围超出锚点证据的风险。"
+      ]
+    }
+  ],
+  "reviewed_claims": [
+    {
+      "claim_id": "DK-566e8ca150dd-CL001",
+      "statement": "耶稣在约翰福音二十章吹气并说“你们受圣灵”，是预表五旬节圣灵将完全降临，并显明圣灵由基督差遣，不表示门徒当时已经完全领受圣灵。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:21-23",
+        "使徒行传1:4-8",
+        "使徒行传2章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0003",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E002",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授反驳常见解释",
+          "assertive": true,
+          "verbatim_excerpt": "這句話很重要，但許多人沒有對照上下文，因此誤以為門徒當時已接受聖靈。其實不然，這些門徒真正被聖靈充滿，是在五旬節時。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0003",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E003",
+          "evidence_type": "literary_context",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授依据上下文解释",
+          "assertive": true,
+          "verbatim_excerpt": "直到十日後五旬節，聖靈如火焰降臨，他們才得著能力。所以耶穌當時吹氣說『你們受聖靈』，乃預表聖靈將在五旬節完全降臨。這正顯明聖靈的降下是出於基督的差遣。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL002",
+      "statement": "门徒真正得着圣灵能力是在耶稣升天约十日后的五旬节。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传1:4-8",
+        "使徒行传2章"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL001",
+          "relation_id": "DK-566e8ca150dd-CR001"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0003",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E003",
+          "evidence_type": "literary_context",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授依据上下文解释",
+          "assertive": true,
+          "verbatim_excerpt": "直到十日後五旬節，聖靈如火焰降臨，他們才得著能力。所以耶穌當時吹氣說『你們受聖靈』，乃預表聖靈將在五旬節完全降臨。這正顯明聖靈的降下是出於基督的差遣。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL003",
+      "statement": "约翰福音二十章的赦罪与留罪之言，不是把任意决定个人是否蒙赦免的绝对权柄交给门徒，而是在奉差遣传福音的范围内宣告神的赦免。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:21-23"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E004",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释权柄范围",
+          "assertive": true,
+          "verbatim_excerpt": "關鍵在於『奉差遣』的前提——門徒乃是蒙召傳揚福音，非擅自定罪。正如醫生診斷病症，但醫治權柄在神。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0010",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E005",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文时态解释",
+          "assertive": true,
+          "verbatim_excerpt": "那是什麼意思？你要赦免不是哪一個人，而是哪一種人——只有那些悔改的人，罪才會得到赦免。所以這裡是用完成式，完成十字架工作。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL004",
+      "statement": "约翰福音二十章赦罪动词的完成式指向十字架已经完成的工作；门徒所宣告的不是任意赦免某个人，而是悔改之人的罪得赦免。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-566e8ca150dd-CL003",
+          "relation_id": "DK-566e8ca150dd-CR002"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0010",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E005",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文时态解释",
+          "assertive": true,
+          "verbatim_excerpt": "那是什麼意思？你要赦免不是哪一個人，而是哪一種人——只有那些悔改的人，罪才會得到赦免。所以這裡是用完成式，完成十字架工作。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL005",
+      "statement": "自称为神作工却不明白并歪曲神真理的人不是神的同伴，反会因误导他人而受神审判；教导者应先学好、学对圣经。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "撒迦利亚书（未注明具体章节）"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL029",
+          "relation_id": "DK-566e8ca150dd-CR015"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0008",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E006",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授回答先前听众问题",
+          "assertive": true,
+          "verbatim_excerpt": "那裡所講的是講三種人：第一種人是宗教領袖，祭司，真學人；第二種人自己以為他們是神的同伴，來做神的工作的人。為什麼？他們不懂聖經，就把聖經亂講，傳到我的審判裡面。最後第三種人是什麼？就是這些有心的人，神要熬煉他們，訓練他們，使他們像神熬煉金、神熬煉銅一樣。這些人得到神的祝福。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0023",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E018",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授警告听众",
+          "assertive": true,
+          "verbatim_excerpt": "所以各位要小心，你聖經的基礎還沒建好以前，到處想要去跟人家傳福音，到處跟人家傳什麼教導聖經，大有問題。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0036",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E025",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟神发出警告并据此应用",
+          "assertive": true,
+          "verbatim_excerpt": "你沒有把我的真理搞清楚以前，不要去亂教；亂教，我要審判。你要先把他學好，學對了才去做。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0037",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E027",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "opposed",
+          "discourse_role": "教授复述并驳斥外部立场",
+          "assertive": false,
+          "verbatim_excerpt": "所以很多人說無所謂：『我們不認耶穌，耶穌也一定認我們。』誰講的？撒但講的！魔鬼講的！騙人的！",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0050",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E037",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以圣灵印记回应可靠性问题",
+          "assertive": true,
+          "verbatim_excerpt": "因為聖靈的緣故，帶有真理之靈印記的人，不可能不信實，絕不可能！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL006",
+      "statement": "耶稣没有把教会建立在彼得个人身上，也没有把决定他人天堂或地狱命运的绝对权柄单独交给彼得。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:13-23",
+        "马太福音18:18"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0011",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E007",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文语法论证",
+          "assertive": true,
+          "verbatim_excerpt": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0012",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E008",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授援引平行经文",
+          "assertive": true,
+          "verbatim_excerpt": "馬太福音十八章十八節，耶穌告訴門徒：『我實在告訴你們』——門徒不是彼得一個人，是門徒——『你們門徒，凡你們在地上所捆綁的，在天上也要捆綁。』",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL007",
+      "statement": "马太福音十六章中彼得与“磐石”的语法性别不同，教会所建造的磐石是彼得对耶稣为神儿子的承认，而不是彼得本人。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL006",
+          "relation_id": "DK-566e8ca150dd-CR003"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0011",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E007",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文语法论证",
+          "assertive": true,
+          "verbatim_excerpt": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL008",
+      "statement": "捆绑与释放的托付属于所有受差遣的门徒，不只属于彼得一人。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL006",
+          "relation_id": "DK-566e8ca150dd-CR004"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0012",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E008",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授援引平行经文",
+          "assertive": true,
+          "verbatim_excerpt": "馬太福音十八章十八節，耶穌告訴門徒：『我實在告訴你們』——門徒不是彼得一個人，是門徒——『你們門徒，凡你們在地上所捆綁的，在天上也要捆綁。』",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL009",
+      "statement": "“捆绑”和“释放”在当时文士与法利赛人的用法中，分别表示禁止某事和准许某事。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "relations": [
+        {
+          "type": "contextualizes",
+          "target_claim_id": "DK-566e8ca150dd-CL010",
+          "relation_id": "DK-566e8ca150dd-CR005"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0013",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E009",
+          "evidence_type": "historical_background",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释历史词义",
+          "assertive": true,
+          "verbatim_excerpt": "『捆綁』就是禁止，禁止你不可做這件事，就是捆綁；『我讓你做』就是釋放，就讓你做。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0014",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E010",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以课堂情境作类比",
+          "assertive": true,
+          "verbatim_excerpt": "所以我不捆綁你，不禁止你吃飯、吃東西，你可以，我釋放你可以吃。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL010",
+      "statement": "捆绑与释放句子的未来完成式表示：地上的门徒和历代教会领袖应把天上已经决定并由圣经说明的禁止与准许应用于各时代，而不是让天上服从地上的个人决定。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0016",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E011",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文时态判断",
+          "assertive": true,
+          "verbatim_excerpt": "因為這裡的時態是未來完成式，將已經被捆綁了。那什麼意思？你們在地上所捆綁的，在天上也將已經被捆綁了。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0019",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E012",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授说明时态的神学应用",
+          "assertive": true,
+          "verbatim_excerpt": "所以完成式在天上已經完成，然後呢？你要把天上所決定的事，現在要應用在今天的世界裡面。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL011",
+      "statement": "教会领袖判断可以做或不可做的事，不应根据个人喜好，而应遵照圣经中天上已经确定的原则。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-566e8ca150dd-CL010",
+          "relation_id": "DK-566e8ca150dd-CR006"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0019",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E012",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授说明时态的神学应用",
+          "assertive": true,
+          "verbatim_excerpt": "所以完成式在天上已經完成，然後呢？你要把天上所決定的事，現在要應用在今天的世界裡面。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL012",
+      "statement": "新约基督徒可以吃血；旧约禁止以色列人吃血，是因为血被分别出来供献贖罪祭使用。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "旧约献祭与禁血规定（未注明具体经节）"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0021",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E013",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以救赎历史解释禁血",
+          "assertive": true,
+          "verbatim_excerpt": "可是現在耶穌已經來了，耶穌已經為我們獻上永遠、永遠有效的贖罪祭。所以我們今天的新約基督徒，我們不要再獻贖罪祭。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL013",
+      "statement": "耶稣已经献上永远有效且完整的贖罪祭，因此新约信徒不再献贖罪祭，旧约禁血规定的献祭理由也不再适用。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "旧约献祭与禁血规定（未注明具体经节）"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL012",
+          "relation_id": "DK-566e8ca150dd-CR007"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0021",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E013",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以救赎历史解释禁血",
+          "assertive": true,
+          "verbatim_excerpt": "可是現在耶穌已經來了，耶穌已經為我們獻上永遠、永遠有效的贖罪祭。所以我們今天的新約基督徒，我們不要再獻贖罪祭。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL014",
+      "statement": "以赛亚书四十二章六节被译为“众民”的词，原文是指盟约之民以色列；弥赛亚作犹太人的中保，并作外邦人的光。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "以赛亚书42:1,6"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0026",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E014",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授批评译文并解释原文",
+          "assertive": true,
+          "verbatim_excerpt": "其實原文是指「盟約之民」，也就是猶太人。可是合本翻譯成什麼？這裡把祂變成「眾民」的中保，作外邦人的光。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL015",
+      "statement": "耶稣基督的救恩不只给犹太人，也要传给外邦人。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "以赛亚书42:6"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL016",
+          "relation_id": "DK-566e8ca150dd-CR008"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0026",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E014",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授批评译文并解释原文",
+          "assertive": true,
+          "verbatim_excerpt": "其實原文是指「盟約之民」，也就是猶太人。可是合本翻譯成什麼？這裡把祂變成「眾民」的中保，作外邦人的光。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL016",
+      "statement": "旧约是宗主神与以色列整体所立的宗主国—附庸国之约；新约则是宗主神与每一个信主者个人所立的约。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0028",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E015",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释两约结构",
+          "assertive": true,
+          "verbatim_excerpt": "舊約是宗主國神與附庸國以色列人整體的。神跟以色列人整體的宗主國附庸國的約。可是什麼？新約是什麼？新約是宗主國神跟每一個、跟每一個信主的人。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL017",
+      "statement": "使徒行传十三章四十七节所引旧约中的单数“你”原指耶稣基督，但保罗把这使命视为主对自己和同工的吩咐。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传13:47",
+        "以赛亚书49:6"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL018",
+          "relation_id": "DK-566e8ca150dd-CR009"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0029",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E016",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释旧约引文的使命转用",
+          "assertive": true,
+          "verbatim_excerpt": "舊約聖經所講的『我已經立你作外邦人的光』，這個『你』是指什麼？指耶穌基督！可是保羅怎麼說？保羅說主耶穌基督這樣吩咐我們。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL018",
+      "statement": "所有与基督联合的人都应承接基督的使命，把基督已经完成的救恩传到地极。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "使徒行传13:47",
+        "以赛亚书49:6"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0029",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E016",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释旧约引文的使命转用",
+          "assertive": true,
+          "verbatim_excerpt": "舊約聖經所講的『我已經立你作外邦人的光』，這個『你』是指什麼？指耶穌基督！可是保羅怎麼說？保羅說主耶穌基督這樣吩咐我們。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0031",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E017",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授由经文作宣教应用",
+          "assertive": true,
+          "verbatim_excerpt": "所有我們與基督聯合的人，我們信主以後與基督連結為一，所以我們現在要承接神託付耶穌做的事。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL019",
+      "statement": "诗篇一百零五篇十五节的“受膏者”在原文是复数，不只指耶稣，也包括神呼召承担特殊使命的人和先知；人不应越权难为或自行处置他们。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "诗篇105:15",
+        "历代志上16:22"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0032",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E019",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文数的判断",
+          "assertive": true,
+          "verbatim_excerpt": "因為原文明確講『受膏者』是複數，是誰呢？除了耶穌以外，在基督徒中被呼召的來做特別事工的人，也會受聖靈的恩膏。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0033",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E020",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以大卫和扫罗作经文例证",
+          "assertive": true,
+          "verbatim_excerpt": "大衛有機會把掃羅殺掉，卻不敢觸碰他，因為他是神的受膏者。掃羅要做以色列的王，所以即便掃羅犯罪之後，仍由神親自處理。我們人不要越權處理",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL020",
+      "statement": "将来与基督作王的信徒现在不可让罪在身体中作王，并必须倚靠神的恩典与圣灵抵挡罪。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "罗马书6:12,14"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0033",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E021",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "quoted",
+          "discourse_role": "教授引用保罗的劝告",
+          "assertive": false,
+          "verbatim_excerpt": "不要容罪在你們必死的身體上作王，使你們順從身子的私慾。罪必不能作你們的主，因你們不在律法之下，乃在恩典之下。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0034",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E022",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释恩典与能力",
+          "assertive": true,
+          "verbatim_excerpt": "你靠自己絕對沒有辦法！你靠自己沒有辦法做一個基督徒。講清楚的話，可是我們靠著神的能力，我們靠著神的能力來遵循神的教導。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL021",
+      "statement": "人靠自己绝对无法抵挡罪或活出基督徒生命，但靠神所赐的能力可以做到。",
+      "claim_kind": "explicit_claim",
+      "attribution": "professor",
+      "scripture_refs": [
+        "罗马书6:12,14"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL020",
+          "relation_id": "DK-566e8ca150dd-CR010"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0034",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E022",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释恩典与能力",
+          "assertive": true,
+          "verbatim_excerpt": "你靠自己絕對沒有辦法！你靠自己沒有辦法做一個基督徒。講清楚的話，可是我們靠著神的能力，我們靠著神的能力來遵循神的教導。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0035",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E023",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授个人经历类比",
+          "assertive": true,
+          "verbatim_excerpt": "因為不是我不願意站起來寫在黑板上，不是因為我沒有能力，我的那個手那時候剛好不曉得什麼事發生，還沒有我要做沒有辦法做，沒有能力。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL022",
+      "statement": "信徒若忍耐便与基督一同作王；若不认基督，基督也必不认他，不能宣称否认基督仍必蒙基督承认。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "提摩太后书2:11-12"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0037",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E026",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授引用经文反驳相反说法",
+          "assertive": true,
+          "verbatim_excerpt": "聖經明講的：我們若不認他，他也必不認我們。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL023",
+      "statement": "蒙神恩膏的基督徒应把整个自己献给神作为圣洁、蒙悦纳的活祭，并与神保持活的互动。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "罗马书12:1"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-566e8ca150dd-CL024",
+          "relation_id": "DK-566e8ca150dd-CR011"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0038",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E028",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授把祭司职分应用于信徒",
+          "assertive": true,
+          "verbatim_excerpt": "我們現在成為基督徒，被神所膏的，所以我們要獻什麼祭？就是把我們自己獻上給神。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL024",
+      "statement": "信徒相信基督时领受所应许的圣灵为印记；关身语态表示神借此认领信徒并对自己所印的人负责，不会主动丢弃他。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "以弗所书1:13"
+      ],
+      "relations": [
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL028",
+          "relation_id": "DK-566e8ca150dd-CR014"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0043",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E031",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释以弗所书的时态",
+          "assertive": true,
+          "verbatim_excerpt": "神已經——你信主的時候，神就給你聖靈，那個時候神藉著聖靈做印記。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0044",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E032",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释关身语态并作限定",
+          "assertive": true,
+          "verbatim_excerpt": "神打了印記之後，影響到自己。所以神打了印之後，神對自己負責：『這個人是屬我的。』除非你得到神的印記之後，你說『我就不要祢了』，神也不強迫你。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL025",
+      "statement": "圣灵印记不取消人的自由意志；人若主动不要神、不继续作门徒并听神的话，就会失掉神的恩典。",
+      "claim_kind": "interpretive_judgment",
+      "attribution": "professor",
+      "scripture_refs": [
+        "以弗所书1:13",
+        "约翰福音6章"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0044",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E032",
+          "evidence_type": "qualification",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释关身语态并作限定",
+          "assertive": true,
+          "verbatim_excerpt": "神打了印記之後，影響到自己。所以神打了印之後，神對自己負責：『這個人是屬我的。』除非你得到神的印記之後，你說『我就不要祢了』，神也不強迫你。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0047",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E033",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以约翰福音六章作警告",
+          "assertive": true,
+          "verbatim_excerpt": "第一組是什麼？就是沒有繼續信的人。你沒有繼續信，等於你沒有信。聖經講得非常非常清楚！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL026",
+      "statement": "得救要求信徒继续相信并维持信心到底；没有继续相信就等于没有信。",
+      "claim_kind": "explicit_claim",
+      "attribution": "professor",
+      "scripture_refs": [
+        "约翰福音6章",
+        "提摩太后书2:12"
+      ],
+      "relations": [
+        {
+          "type": "qualifies",
+          "target_claim_id": "DK-566e8ca150dd-CL024",
+          "relation_id": "DK-566e8ca150dd-CR012"
+        },
+        {
+          "type": "supports",
+          "target_claim_id": "DK-566e8ca150dd-CL027",
+          "relation_id": "DK-566e8ca150dd-CR013"
+        }
+      ],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0001",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E001",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授开篇断言",
+          "assertive": true,
+          "verbatim_excerpt": "聖經強調：你信主要繼續地信，你維持信心到底，你就得救。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0047",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E033",
+          "evidence_type": "scripture_evidence",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以约翰福音六章作警告",
+          "assertive": true,
+          "verbatim_excerpt": "第一組是什麼？就是沒有繼續信的人。你沒有繼續信，等於你沒有信。聖經講得非常非常清楚！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL027",
+      "statement": "把一次口里承认耶稣为主、心里相信复活解释为此后无论如何都永远不受审判，是曲解圣经并会误导人。",
+      "claim_kind": "application",
+      "attribution": "professor",
+      "scripture_refs": [
+        "罗马书10:9（由对方引用）"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0049",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E035",
+          "evidence_type": "answer",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授叙述自己对宣教士的回应",
+          "assertive": true,
+          "verbatim_excerpt": "我當場告訴他：『抱歉，你來台灣是在傳異端！』",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL028",
+      "statement": "有真理之灵印记的人不应是不信实或不可靠的人；保罗改变访问哥林多的行程，是因处境和服事安排改变，并不能证明他说话反复、不可信。",
+      "claim_kind": "reasoning_conclusion",
+      "attribution": "professor",
+      "scripture_refs": [
+        "哥林多后书1章（未在逐字稿中注明具体节数）"
+      ],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0051",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E036",
+          "evidence_type": "historical_background",
+          "speaker": "quoted_source",
+          "stance": "opposed",
+          "discourse_role": "教授引述哥林多反对者",
+          "assertive": false,
+          "verbatim_excerpt": "這些反對者就指控：『看哪！保羅說話反覆，根本不可信！』",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0050",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E037",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授以圣灵印记回应可靠性问题",
+          "assertive": true,
+          "verbatim_excerpt": "因為聖靈的緣故，帶有真理之靈印記的人，不可能不信實，絕不可能！",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL029",
+      "statement": "解释圣经必须考察上下文、平行经文、原文语法与救赎历史，不能凭翻译或经文碎片建立权柄和教义。",
+      "claim_kind": "interpretive_method",
+      "attribution": "professor",
+      "scripture_refs": [],
+      "relations": [],
+      "anchors": [
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0004",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E004",
+          "evidence_type": "reasoning",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授解释权柄范围",
+          "assertive": true,
+          "verbatim_excerpt": "關鍵在於『奉差遣』的前提——門徒乃是蒙召傳揚福音，非擅自定罪。正如醫生診斷病症，但醫治權柄在神。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0011",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E007",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文语法论证",
+          "assertive": true,
+          "verbatim_excerpt": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0016",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E011",
+          "evidence_type": "original_language",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授原文时态判断",
+          "assertive": true,
+          "verbatim_excerpt": "因為這裡的時態是未來完成式，將已經被捆綁了。那什麼意思？你們在地上所捆綁的，在天上也將已經被捆綁了。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0023",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E018",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授警告听众",
+          "assertive": true,
+          "verbatim_excerpt": "所以各位要小心，你聖經的基礎還沒建好以前，到處想要去跟人家傳福音，到處跟人家傳什麼教導聖經，大有問題。",
+          "highlight_status": "proposed",
+          "review_note": null
+        },
+        {
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "paragraph_key": "S0036",
+          "media_time": null,
+          "evidence_id": "DK-566e8ca150dd-E025",
+          "evidence_type": "application",
+          "speaker": "professor",
+          "stance": "asserted",
+          "discourse_role": "教授模拟神发出警告并据此应用",
+          "assertive": true,
+          "verbatim_excerpt": "你沒有把我的真理搞清楚以前，不要去亂教；亂教，我要審判。你要先把他學好，學對了才去做。",
+          "highlight_status": "proposed",
+          "review_note": null
+        }
+      ],
+      "current_review_status": "candidate",
+      "opposes": null
+    }
+  ],
+  "claim_reviews": [
+    {
+      "claim_id": "DK-566e8ca150dd-CL001",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "两条锚点直接支持该释经判断：门徒当时未领受圣灵，五旬节才真正降临，吹气之举预表并显明圣灵由基督差遣。表述与逐字稿一致，未见立场混淆或遗漏关键限定。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL002",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点E003直接陈述‘直到十日後五旬節...他們才得著能力’，与主张一致，关系supports CL001亦准确。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL003",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "E004说明‘奉差遣’前提排除擅自定罪的绝对权柄，E005补充‘赦免的是哪一种人（悔改者）而非哪一个人’，两处证据合起来支持该释经结论，未见张冠李戴或立场混淆。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL004",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点E005逐字包含完成式与十字架已完成工作、以及‘赦免的是哪一种人（悔改者）’的论述，与主张吻合，qualifies关系设置合理。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL005",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "claim_too_broad",
+          "severity": "medium",
+          "explanation": "该主张合并了五处来源于不同段落、主题并不完全一致的证据：E006/E018/E025 明确支持‘自称为神同工却曲解真理者将受审判、应先学好圣经再教导’；但E027讨论的是教授驳斥‘我们不认耶稣，耶稣也必认我们’这一异端说法（关于得救确据/否认基督的后果），E037讨论的是因圣灵印记而‘信实可靠’（回应哥林多教会对保罗可靠性的质疑）。这两处内容与主张陈述的‘自称为神作工却不明白并歪曲神真理者受审判、教导者应先学好圣经’并非同一论证脉络，直接支持力较弱，存在把不同主题证据强行归入同一主张的风险。",
+          "affected_anchor_indexes": [
+            3,
+            4
+          ]
+        }
+      ],
+      "proposed_statement": "自称为神作工却不明白并歪曲神真理的人不是神的同伴，反会因误导他人而受神审判；教导者应先学好、学对圣经再去教导他人。",
+      "proposed_claim_kind": "application",
+      "proposed_route_type": "question_answer",
+      "rationale": "建议将该主张限定于前三个锚点（E006、E018、E025）所支持的核心内容——自称神同工却曲解真理者受审判、教导者应先学对圣经；E027与E037所涉及的‘得救确据/圣灵印记与信实可靠’主题建议拆分为独立主张或删除作为本主张的支持证据，以避免证据与陈述范围不匹配。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL006",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "low",
+          "explanation": "主张后半部分‘也没有把决定他人天堂或地狱命运的绝对权柄单独交给彼得’在逐字稿S0011中确有对应陈述（‘很多人說彼得有這種權柄——我把你捆綁下地獄...是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！’），但该句并未被纳入锚点E007的verbatim_excerpt，现有摘录仅涵盖磐石阴阳性语法论证部分，未直接摘录‘天堂地狱权柄’的否定语句，导致锚点对主张后半部分的字面支持不完整。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "scripture_exposition",
+      "rationale": "建议扩充E007锚点的verbatim_excerpt，纳入S0011中‘我把你捆綁下地獄...是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！’一句，以使锚点完整覆盖主张关于‘天堂地狱命运权柄’部分的论证。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL007",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "low",
+          "explanation": "主张中‘教会所建造的磐石是彼得对耶稣为神儿子的承认’这一正面论断，在逐字稿S0011中确有依据（‘各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：我要把我的教會建在這一個「盤石」上’），但该句未被纳入锚点E007的verbatim_excerpt，现有摘录仅包含‘彼得不是盤石...很清楚’的语法论证部分，未直接摘录‘磐石即彼得认信’的正面陈述，锚点对该部分论断的字面支持不完整。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "scripture_exposition",
+      "rationale": "建议扩充E007锚点的verbatim_excerpt，纳入S0011中‘各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：我要把我的教會建在這一個「盤石」上’一句，以使锚点完整支持‘磐石是彼得认信’这一正面论断。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL008",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点E008逐字支持‘门徒不是彼得一个人，是门徒’，与主张一致，supports关系设置合理。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "14a4449cc5b0e85bfcbb897e2300a4491820e797394730b2a24e5a1f029981b9",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL009",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "两个锚点（S0013历史词义说明、S0014课堂类比）均支持“捆绑=禁止，释放=准许”的用法解释，归属明确为教授本人主张，未见混淆听众或反方立场。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL010",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "low",
+          "explanation": "主张提到「天上已经决定并由圣经说明的禁止与准许」，这一具体表述（“聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了”）出现在S0017，但当前锚点未包含S0017，仅锚定S0016（时态说明）与S0019（应用说明）。建议补充S0017锚点以完整支持“由聖經说明”这一限定。",
+          "affected_anchor_indexes": [
+            0,
+            1
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张整体准确反映教授对未来完成式的解经与应用逻辑，但“由圣经说明”这一具体限定的直接支持语句(S0017)未被纳入锚点，建议补充以增强完整性，不影响归属或关系判断。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL011",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张核心措辞“不应根据个人喜好”直接对应逐字稿S0018中“什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好”，但当前锚点仅为S0019，其内容（“完成式在天上已經完成…應用在今天的世界裡面”）并未出现“个人喜好”这一具体措辞，未能充分支持该限定。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张内容与教授整体论证方向一致，但“不应根据个人喜好”这一具体措辞的直接来源（S0018）未被列为锚点，建议补充锚点以完整支持该表述，而非仅凭S0019推断。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL012",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张的后半部分“旧约禁止以色列人吃血，是因为血被分别出来供献贖罪祭使用”直接对应S0020原文（“因為聖經明講為什麼神不要猶太人不要吃血？因為血有生命，所以啊，血被神分別出來要做贖罪祭用，所以你不可以吃。”），但当前锚点仅为S0021，S0021本身并未明确提及“旧约禁血原因”的具体说明，仅讨论赎罪祭已完成。建议补充S0020作为锚点。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张内容准确反映教授观点，但支持“旧约禁血原因”这一关键部分的原文语句（S0020）未被纳入锚点，导致来源支持不完整，建议补充。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL013",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "low",
+          "explanation": "主张结论“旧约禁血规定的献祭理由也不再适用”依赖于将S0020（禁血理由）与S0021（赎罪祭已完成）两处内容合并推理，但当前只锚定S0021，S0020未被引用，导致该结论环节的来源支持不完整。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        },
+        {
+          "issue_type": "duplicate_claim",
+          "severity": "low",
+          "explanation": "CL013与CL012内容高度重叠（同一锚点、同一推理链条），CL013作为“reasoning_conclusion”与CL012作为“interpretive_judgment”虽然claim_kind不同，但表达的核心内容基本相同，建议编辑阶段确认是否需要合并或进一步区分二者的独立贡献。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张与CL012逻辑关联紧密，但锚点未能覆盖论证的完整链条（尤其是禁血原因的原文说明），且与CL012存在较高重复度，建议编辑复核是否拆分得当。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL014",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0026逐字稿直接支持“众民”应为“盟约之民”即犹太人的原文解释，以及弥赛亚作犹太人中保、外邦人光的表述，归属与关系判断准确。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL015",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张“耶稣基督的救恩不只给犹太人，也要传给外邦人”在逐字稿中最直接、明确的表述出现在S0027（“所以耶穌基督的救恩不只是給猶太人，也要給外邦人。”），但当前锚点使用的是S0026，其内容主要是关于“眾民”原文考据，虽然S0026末尾也含“神的救恩也要傳給外邦人”一句，但未在verbatim_excerpt中体现，建议改用或补充S0027作为锚点以更精确对应主张。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        },
+        {
+          "issue_type": "relation_error",
+          "severity": "low",
+          "explanation": "CL015到CL016的supports关系值得商榷：逐字稿中S0026-S0027讨论救恩临及外邦人的话题后，S0028转而讨论旧约/新约盟约结构差异（宗主国-附庸国之约的整体与个人区别），两者之间更像是话题转折而非CL015直接支持CL016的逻辑推论，建议复核该supports关系是否成立或应改为其他关系类型/删除关系。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张内容本身符合教授原意，但锚点选择不是最直接支持该表述的段落，且与CL016的supports关系在逐字稿中的论证连贯性较弱，建议编辑复核锚点与关系设置。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL016",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0028逐字稿直接对应主张中关于旧约（宗主国—以色列整体之约）与新约（宗主国—每个信主个人之约）的区分，归属明确，无混淆听众或反方立场之处。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "88b918973217981056c0c8e65dc381edbdac1435e92fa792678b121c715298a0",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL017",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0029准确支持：原文单数‘你’指基督，保罗将此吩咐用于自己与同工身上。属教授本人的解经判断，归属与关系（supports CL018）均与逐字稿一致。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL018",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0029、S0031支持信徒与基督联合应承接使命的应用；‘传到地极’一语虽未逐字出现在锚点摘录中，但同一paragraph_key（S0029/S0031）完整文本包含该内容，属合理概括,不构成实质性偏差。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL019",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0032、S0033准确支持：原文‘受膏者’为复数，包括先知与被呼召的特别事工者；大卫不敢下手扫罗为经文例证，说明人不应越权处置神所膏立的人。归属与切分恰当。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL020",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0033（引用经文，stance=quoted）与S0034（推理，stance=asserted）准确支持信徒不可让罪作王且须靠恩典与圣灵抵挡罪的应用主张。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL021",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0034清晰陈述‘靠自己绝对没有办法’与‘靠神的能力’的对比；S0035个人经历（手部无法使用后靠神能力恢复）被教授明确用作同一原则的类比说明，属教授本人应用，未见归属或立场问题。与CL020虽共享部分文本，但侧重点不同（一般性依靠神能力原则 vs. 具体作王/抵罪应用），不构成重复。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL022",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0037准确支持教授对提摩太后书2:11-12的经文纠偏，明确反驳‘不认基督仍必蒙基督承认’的说法为撒但所言，逐字稿态度清晰，主张完整。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL023",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "relation_error",
+          "severity": "medium",
+          "explanation": "CL023被标注为‘qualifies’CL024（关于以弗所书1:13圣灵印记与关身语态的主张），但逐字稿中S0038（活祭的献上）与S0043-044（圣灵印记的关身语态）之间并无明确的限定/资格关系，两段内容在讲道中属顺序展开的不同主题（受膏者的第二种类型：祭司献祭 vs. 圣灵的印记与神的应许），未见教授明确将前者作为后者的限定条件。建议移除该‘qualifies’关系或复核其依据。",
+          "affected_anchor_indexes": []
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张本身（S0038锚点支持的献祭应用）表述准确，但其对外的‘qualifies’关系缺乏逐字稿依据，属关系标注问题而非主张内容问题。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL024",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "锚点S0043、S0044准确支持教授对以弗所书1:13关身语态的原文解释：神信主时赐圣灵为印，神对自己所印之人负责，除非信徒自己拒绝，否则神不会主动丢弃。归属、立场与限定均与逐字稿一致。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "32cf34aeca34503fb4785e0d72553c12374c2a2193cc9a44a381cc2cf1c482ab",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL025",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张后半句'若人主动不要神、不继续作门徒并听神的话，就会失掉神的恩典'的确切措辞几乎逐字对应S0046（'可是如果，我們如果沒有繼續做神的門徒，我們沒有繼續要聽神的話，我們就失掉了神的恩典'），但该段并未被列为锚点；现有锚点E033（S0047）讨论的是'没有继续信等于没有信'，与'失掉恩典'的具体表述并非同一处。建议补充S0046作为锚点，以直接支持该分句。",
+          "affected_anchor_indexes": [
+            1
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "核心论点（自由意志与恩典可失落）与逐字稿一致，但支持'失掉神的恩典'具体措辞的最贴切锚点（S0046）未被引用，属锚点覆盖不足，建议补充而非否定主张本身。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL026",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张与S0001开篇断言及S0047约翰福音六章论证直接对应，措辞准确，说话者为教授本人，关系设定（qualifies/supports）与上下文逻辑一致。",
+      "confidence": "high",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": true,
+      "routing_status": "human_spot_check",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL027",
+      "decision": "pass",
+      "issues": [],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张准确反映教授对宣教士教导的评价（'传异端'），锚点S0049处于同一段落，虽然摘录较短，但段落上下文（含'你這樣會害死他們'）支持'曲解圣经并会误导人'的判断，scripture_refs正确标注该经文为对方引用，未误将对方立场归为教授主张。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "ai_reviewed",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL028",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张后半句'保罗改变访问哥林多的行程，是因处境和服事安排改变'的具体说明见于S0052（'我現在情況變了，所以我現在乾脆我要去馬其頓以前，然後我來看你們...'），但该段未被列为锚点。现有锚点S0051（反对者指控）与S0050（教授关于印记与信实的论证）均未直接说明'处境改变'这一具体理由。建议补充S0052作为锚点。",
+          "affected_anchor_indexes": [
+            0
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张的第一分句（受印记者不应不信实）有S0050充分支持；第二分句（行程改变的具体原因）缺乏直接锚点，建议补充S0052以完整支撑该复合论证。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    },
+    {
+      "claim_id": "DK-566e8ca150dd-CL029",
+      "decision": "changes_suggested",
+      "issues": [
+        {
+          "issue_type": "insufficient_anchor",
+          "severity": "medium",
+          "explanation": "主张列举的解经要素包括'上下文、平行经文、原文语法与救赎历史'，但所附五个锚点（S0004、S0011、S0016、S0023、S0036）中未有一处明确论及'平行经文'（该论证实际见于未被引用的S0012'跟這個平行的經文'）或'救赎历史'（该论证散见于S0026-S0031等未被引用段落）。现有锚点主要支持'原文语法'（S0011、S0016）与'不可凭经文碎片建立权柄'（S0004），S0023、S0036则更偏向'未打好圣经基础前勿随意教导'的应用性警告，与解经方法本身有所区别。建议：（a）补充S0012等锚点以支持'平行经文'，或从主张中移除该要素；（b）补充相关锚点支持'救赎历史'要素，或移除；（c）考虑是否将S0023/S0036的应用性警告拆分为独立主张。",
+          "affected_anchor_indexes": [
+            3,
+            4
+          ]
+        },
+        {
+          "issue_type": "claim_should_split",
+          "severity": "low",
+          "explanation": "S0023与S0036的内容更接近'未学好圣经前不可随意教导人，否则受审判'的应用性警告，与'解经方法论'（上下文、原文语法等）在论证性质上不完全同类，可能构成两条独立主张被合并的情况。",
+          "affected_anchor_indexes": [
+            3,
+            4
+          ]
+        }
+      ],
+      "proposed_statement": "",
+      "proposed_claim_kind": "",
+      "proposed_route_type": "unchanged",
+      "rationale": "主张核心（不能凭翻译或经文碎片建立权柄和教义，须重视原文语法与上下文）有较强锚点支持，但'平行经文'与'救赎历史'两要素缺乏对应锚点，且部分锚点（S0023、S0036）性质上更偏应用性警告而非方法论本身，建议人工核实是否需要拆分或补充锚点。",
+      "confidence": "medium",
+      "human_review_reason": "",
+      "reviewer_fingerprint": "419530c3476630f1719c25d6605aca6eea3db9b982ebfa9fd74b45fa08ca7d67",
+      "spot_check_selected": false,
+      "routing_status": "awaiting_openai_adjudication",
+      "approval_status": "not_human_approved"
+    }
+  ],
+  "routing_summary": {
+    "ai_reviewed": 13,
+    "awaiting_openai_adjudication": 12,
+    "human_spot_check": 4
+  }
+}

@@ -1,0 +1,4158 @@
+{
+  "schema_version": "wang_shared_knowledge_v1.2",
+  "package_id": "DETAILED-2016_NYSC_1-6f059dbca908",
+  "source_documents": [
+    {
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "title": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/2016 NYSC 專題：馬太福音釋經（五）1.json",
+      "review_status": "candidate"
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "人說我到底是誰？",
+      "paragraph_key": "S0003",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "cd00509981c8c88cddae1bc8ac92ff15bb70b218651e2f212a79bbcff8a34db0",
+      "verbatim_excerpt_sha256": "e3ecf758380877bff282f16f01c17b77e903e2b713d79611957ba7abca87c39a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "你們說我是誰？",
+      "paragraph_key": "S0003",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "cd00509981c8c88cddae1bc8ac92ff15bb70b218651e2f212a79bbcff8a34db0",
+      "verbatim_excerpt_sha256": "e67c2501c8205d745636ac5d89706f99a6cec8560566892923109afbd2f973a8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "什麼叫做說「把天國的鑰匙給你」？",
+      "paragraph_key": "S0006",
+      "source_segment_index": 122,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c360931176420d6f25080877495856fa98f93f06786de31289f53ef0c74b4622",
+      "verbatim_excerpt_sha256": "1e2f9f335228f7b74e3eb09b46593058ec961ef6961596525165b31c21316dcd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "這裡未來完成式的意思是什麼？",
+      "paragraph_key": "S0006",
+      "source_segment_index": 122,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c360931176420d6f25080877495856fa98f93f06786de31289f53ef0c74b4622",
+      "verbatim_excerpt_sha256": "f0dec769d8b45e4fffa43a3ba6e15bd605bce88b0592cbdc4bf7930600112658",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q005-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "那捆綁什麼事？",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "a0eb7aae24252c1f6f2a9de5ebb723758941cb1573e1d375e01048b4fa8b789a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "其實一個人的罪能不能得赦免，在乎他有沒有真正的悔改。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "dbb08d33fed81e01c54db143c43b3d77068f358c6521e4a57e6e5c923361bbe6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q007-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "耶穌說：「你不要告訴別人我是基督。」為什麼？",
+      "paragraph_key": "S0013",
+      "source_segment_index": 554,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "5eb2f5c3c015c95204bf017e3974d2777c2752d20ecc42d904f1b08364735d8b",
+      "verbatim_excerpt_sha256": "6253023ba6b8451c799d23b3bd122a0785f3161727612761621febeb03c5252c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q008-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "我要告訴各位為什麼。耶穌明講：「我要你們捨己，背起你們的十字架來跟從我。」為什麼？",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "f9b41dab4eabe555315b38960729006ec0818fb9f898308ec534ee3f8f24a8ea",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q009-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "什麼叫做「捨己」？",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "0ce87ec00346789ae09fc429cf7530ebcae85b9345703c2046e34a22a567b068",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q010-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "「背十字架」什麼意思呢？",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "d43f772e32aadfea577ef2e89b5ba4d15be6c1e071196fd8991e026327566d77",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q011-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以「魂」不是我們靈、魂、體當中的一部分而已，「魂」是指整個人。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 936,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "57469b92d49aeb12fa58f20a071791f4f1d57fc41565e258e1b8175186a3208b",
+      "verbatim_excerpt_sha256": "f5ae46ab3be4a48c2f9b5d3231da79f0992e8b2859e8d244f658c95bd8af650a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q012-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以「我的靈」也就是「我的心」，看到沒有？",
+      "paragraph_key": "S0021",
+      "source_segment_index": 1043,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "6d4c34e18f3be54024f60f84dcccca4b9393422cddbf3b01027b94cd15faa512",
+      "verbatim_excerpt_sha256": "b3908b57064012dce6ba44a384f04c01127b58ecf7d8ed7132441738cece9d30",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q013-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "聖靈住在你們身體裡面」什麼意思？",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1202,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "529b767762d72d87eacccc5737299fd45ba585d9ec97266423333129a743d066",
+      "verbatim_excerpt_sha256": "83dab6d4ce7448318d343f57b1b0e8129e43a6805cbe9e1a571bbffb4a0556bb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q014-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "到底人是分三部分，還是分四部分，還是分五部分？",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "94f8e2df9e6d8319074b51f59419c51bb98014d9ac04583424322cffcf848db2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q015-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以神有魂嗎？所以神跟我們一樣，神也分成靈、魂、體三部分？",
+      "paragraph_key": "S0031",
+      "source_segment_index": 1500,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "997ac4fc0ad4b425b45a1f814932c0f2664fb48826135fb49721ea11b0dc6339",
+      "verbatim_excerpt_sha256": "c14eca9fc3126bf4b3519cfbc09b38215b5b12c6719aeb0843c95db6fd37313a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q016-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以我們得救只有我們魂得救？我們的靈跟身體不得救？",
+      "paragraph_key": "S0033",
+      "source_segment_index": 1592,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a7959e697f8e4e6a2895f76550a08b29995684f4d6a041f330f354cb2821297b",
+      "verbatim_excerpt_sha256": "9fce7e4a4527bfb148e2991a2818d0d5ae2c68ffb9b79f7c24ed2ca5b92f90b2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q017-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "關於這個離婚的問題，我可能在明天下午以前有機會談。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 348,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a99af22002c97e99703bfb5a207f2b1ce702ced31d5b8dacfc1af2d6bcbf91c7",
+      "verbatim_excerpt_sha256": "4052d36a9f10b3077b927f9b77ab9f7cb7934b1de64ec8f75756e61f07fe672c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q018-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "基督再來的時候，信主的死人要復活，他裡面的人和外面的人聯合在一起，全人得救，永遠和神同在。",
+      "paragraph_key": "S0035",
+      "source_segment_index": 1647,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "24568bd5bfbe89aeb29dd669d5c80696b9c797399dd1d57d7fda7f26caabc9dc",
+      "verbatim_excerpt_sha256": "c24893e14888cf65f18ebc6c609537ba3d830f64a098c117f3077fc986f4c1bc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彼得有完全的權柄。他要做什麼，他所釋放的、所捆綁的人，神就要聽他的話",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "f101a5fcb0cc3bb0da8b5da013ce4ebb87e629ebee9d2d0b9e17346e9ef3775f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以天主教說神把這個絕對的權柄交給這個什麼？教皇。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "29342628bd85f2a327fceb30d2029c62b48c26558e788f66b44e51630e37c24c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "有一個人得罪我，我不喜歡他，我就留下他的罪，他的罪就被留下了。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "b82670cc6815c0b52bdfe91d4d7ace7cb65980f4aba8c04d0e21a291371397a5",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彌賽亞來就是要為猶太人建立一個獨立的國家！",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "4c0cda7a84f0b59f030ba945aeb9a20c4d24f407c20a1661448117fc41eca2b1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS005-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "很多人以為是說，我這次到北京去，是某一個很有名的大學請我去講學，他們讓我住在一個很好的旅館。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "dc83bcaced8f714e8d084371fb23dd1299d795458c5e52604d6966e2e15f257e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "今天有人很喜歡自討苦吃，有人說：「我這樣就是背十字架。」",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "590c65f3f9ff4c4a87b2c893a1160456cfb660a8b0ce9ca4cbe1abd1bd8596c2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS007-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "說我們人分成三部分：一部分是靈，一部分是魂，一部分是身體。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 936,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "57469b92d49aeb12fa58f20a071791f4f1d57fc41565e258e1b8175186a3208b",
+      "verbatim_excerpt_sha256": "911aa524dcd4a08397b25d4d2fda92f733691c6722c7acdd1b3b98b87163c06b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS008-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "常常講一個人動用理性就不屬靈",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "192429a41ec2106a8367d3338c755512b4f6472557a1db223a4d471cb492a1cf",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "你是基督，是永生神的兒子。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "cd00509981c8c88cddae1bc8ac92ff15bb70b218651e2f212a79bbcff8a34db0",
+      "verbatim_excerpt_sha256": "1df6fa195c54f8c9484638b9fa043465cefaff2016a4a3480b0f75e4667debec",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "我要把天國的鑰匙給你，凡你在地上所捆綁的，在天上也要捆綁；凡你在地上所釋放的，在天上也要釋放。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "cd00509981c8c88cddae1bc8ac92ff15bb70b218651e2f212a79bbcff8a34db0",
+      "verbatim_excerpt_sha256": "974c6a351fa4b43902dcb594886abb9d640fe0cb86c1732e3c7d412008ba85f7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "那個地方是未來完成式。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "f3228a5ec857ba00ec2caf0bed77fbcd58823cbfa6bd5621600c66176670b071",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "「被捆綁」、「捆綁」或者「釋放」，也是他們當時拉比學校裡面所用的專用名詞。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 278,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c8a44c16a8305598b289677f060d2ea64cab4b124a5eb4692769706564971838",
+      "verbatim_excerpt_sha256": "655bcc1a0c66c22780095a795ef9411e0e85f8cb5ac89cc13905e5edc5f89b64",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS005-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "也有可能，還有一個可能，就是「准許的」或者「不准許的」，也可以這麼說。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 278,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c8a44c16a8305598b289677f060d2ea64cab4b124a5eb4692769706564971838",
+      "verbatim_excerpt_sha256": "d05058949906570ae42c1131dc842e8a3238f3a35715fe9e749034a86d427e81",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "凡你（個人）在地上所捆綁的",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "5b2e9cf399aa4e72226f4877ad8e52f6b20deb48c581756aab3d30b739acad26",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS007-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "凡你們在地上所捆綁的",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "cef8a75fefe9c6f0991af24e1853f57b52467826acf5c0ab6a81192208a250d1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS008-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "當下，耶穌吩咐門徒說：「不可對人說祂是基督。」",
+      "paragraph_key": "S0013",
+      "source_segment_index": 554,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "5eb2f5c3c015c95204bf017e3974d2777c2752d20ecc42d904f1b08364735d8b",
+      "verbatim_excerpt_sha256": "7f24126482e7b953e692e4204c2b285d32ff12b9a492620646bdc42e6ffabe30",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS009-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "從此」（從那個時候開始），耶穌才指示門徒",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "30d3e630b6848bc26fcde7e41b3aa7597abe12234ba16a49820ee3b0b1420583",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS010-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "祂必須上耶路撒冷去，受長老、祭司長、文士許多的苦，並且被殺，第三日復活。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "3db006004de20b86c48e7d27323416e1a1c07b6e1bde6c414f8edf7085f7b67a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS011-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "這個字，ἀπαρνέομαι (aparneomai)",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "b750560253a10a1a277de6ba272df3b06557e79c2d2521c971035e2a19d7ffd0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS012-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "願你們的靈與魂與身子得蒙保守",
+      "paragraph_key": "S0018",
+      "source_segment_index": 936,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "57469b92d49aeb12fa58f20a071791f4f1d57fc41565e258e1b8175186a3208b",
+      "verbatim_excerpt_sha256": "9c5d4d10ef05f29779a7e3c58234740a0ae3afded821bfefa0c104ccd043d063",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS013-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "從希伯來文翻成這個希臘文那本聖經，就是所謂七十士譯本",
+      "paragraph_key": "S0018",
+      "source_segment_index": 936,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "57469b92d49aeb12fa58f20a071791f4f1d57fc41565e258e1b8175186a3208b",
+      "verbatim_excerpt_sha256": "1226fb3b8e8d1ce2130a58c67fb93956842c5db17e69da97e1bdd088d6fe88eb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS014-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "原文是「我的魂」(nephesh)",
+      "paragraph_key": "S0020",
+      "source_segment_index": 1008,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "4b8cc1f862d05e69908072b95e9e9003845e2c311fd91e38affc7cd88f513d67",
+      "verbatim_excerpt_sha256": "cbaba18c3cc4e29bae321bee699c759475971da51f3b5c7a5ebdc04dba3a978c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS015-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "是靈 (ruach)",
+      "paragraph_key": "S0021",
+      "source_segment_index": 1043,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "6d4c34e18f3be54024f60f84dcccca4b9393422cddbf3b01027b94cd15faa512",
+      "verbatim_excerpt_sha256": "7539c9bfdb536ce9540bd33d78ec2f07a8c54cfc1562ad06fc408c2411faf90d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS016-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "「我的魂羨慕你……我裡面的靈切切尋求你。」",
+      "paragraph_key": "S0021",
+      "source_segment_index": 1043,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "6d4c34e18f3be54024f60f84dcccca4b9393422cddbf3b01027b94cd15faa512",
+      "verbatim_excerpt_sha256": "e4258adad785a7f9f3e72c5bf193f88258f85da919cce1df4453310e35945f2d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS017-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "父啊！我將我的靈",
+      "paragraph_key": "S0023",
+      "source_segment_index": 1128,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "11091384f299de5921f21a5d21380c20d960e5ad6c593e7b59c084fff9af1180",
+      "verbatim_excerpt_sha256": "f4bc72a45b40e731b0b154686be5155674d7569625d6caa374877da617899295",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS018-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "願主耶穌基督的恩常在你們的靈裡！",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1174,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ff9b37e6b635a197f7166a33f3dde086c2dc268d4139cdd15cc8810b2b63ce47",
+      "verbatim_excerpt_sha256": "2fd03c6bdbd19aa9de0ccea84039ba356e5cc7bb260f358486b26877412db132",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS019-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "豈不知你們的身子就是聖靈的殿嗎？",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1202,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "529b767762d72d87eacccc5737299fd45ba585d9ec97266423333129a743d066",
+      "verbatim_excerpt_sha256": "0405adc1e2241d614cc4d1d39aaf076cf033f8a28f5bda2419d15e13c63d2621",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS020-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "我們在船上，一共有二百七十六個魂。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1252,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "dfe97dfdd0fc034cef084256dc0ad3729336deddaafde0acb3f10bdc9a0bcdba",
+      "verbatim_excerpt_sha256": "b45fd11fa6b0c1a4b1f6b46758cc296a0d375944733339051852e77bc2f36500",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS021-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "只有八個魂。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1252,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "dfe97dfdd0fc034cef084256dc0ad3729336deddaafde0acb3f10bdc9a0bcdba",
+      "verbatim_excerpt_sha256": "ebfc03c9a4f05e3faf5e3050a9562b5aeb6ddc010cd07846078dedf6e665345b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS022-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "英文叫做 ark。沒有 ship，沒有 boat，沒有。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1252,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "dfe97dfdd0fc034cef084256dc0ad3729336deddaafde0acb3f10bdc9a0bcdba",
+      "verbatim_excerpt_sha256": "b9ce5e1c188dbf48d2f064f100beb14e3a1dbb4a62e86fae39890f851c4ca20e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS023-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "甚至魂與靈、骨節與骨髓，都能刺入、剖開",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "d621d167c6eb85e6c0a390354c0c3c37d985f134b0fa9bf5b8549a5efd4dee74",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS024-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "你要盡心、盡你的魂、還有什麼？盡你的理性、還有加上什麼？盡你的力量",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "12421ccba42d235f76a65b3e8594869501705f83190c96667ffaa31e872c995c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS025-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "sarx是被罪控制、被罪敗壞的人性。",
+      "paragraph_key": "S0033",
+      "source_segment_index": 1592,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a7959e697f8e4e6a2895f76550a08b29995684f4d6a041f330f354cb2821297b",
+      "verbatim_excerpt_sha256": "c0b4bb0d409615ec84cafe622f427e624e27d2c8bac4fa3711b483a6f5010250",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS026-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "這是希望式，不是說你把他的身體搞掉，他一定會得救，沒有。",
+      "paragraph_key": "S0033",
+      "source_segment_index": 1592,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a7959e697f8e4e6a2895f76550a08b29995684f4d6a041f330f354cb2821297b",
+      "verbatim_excerpt_sha256": "71657f34214e50f826cd28080ff7b49a99025dcfa84bd51e01f778eb40e1468c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS027-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "哥林多後書四章十六節提到我們「裡面的人」和我們「外面的人」",
+      "paragraph_key": "S0035",
+      "source_segment_index": 1647,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "24568bd5bfbe89aeb29dd669d5c80696b9c797399dd1d57d7fda7f26caabc9dc",
+      "verbatim_excerpt_sha256": "135d3c618f2e9eac487f74cb7bfbdbc349f1c13e00dfd833e055c4652f1721dd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "那其實這句話，是中文翻錯了，所以很多人就不知道，就出了很多的問題。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "2ac39b70b7210310d20848694ae7110b3db22034d2a86cb810424351ec71f14f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "9f871bf09a2ea4082caca2e85c5dd8407b7d78fea657fc594acca062f486c919",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "我乃是執行教授會議所決定的條件。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 122,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c360931176420d6f25080877495856fa98f93f06786de31289f53ef0c74b4622",
+      "verbatim_excerpt_sha256": "524dc4074151f26c649af8bc1d68781c4d085cb6b82bae6a2d6c5301ac8495bc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 201,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "82ad7ac05116b1466c1c06858583f381c586212c524bb2af7a1a2315189379c9",
+      "verbatim_excerpt_sha256": "3389cbf9f5df64edb0bcf2cf6d24d4813d71ecae4ab2a502d3eb398f3f197b4f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E005-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "不是彼得有完全的權柄，不是。彼得乃是來執行天上所規定的捆綁的條件，來看你的情況是不是合乎那個條件。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 201,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "82ad7ac05116b1466c1c06858583f381c586212c524bb2af7a1a2315189379c9",
+      "verbatim_excerpt_sha256": "4c36dd8bdee3fb0dc9aca45fa4cbe40c7f19b5fca9d6dad2c79f6223869a144a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "馬太十八章十八節，耶穌說：「我實在告訴你們，凡『你們』……」單數還是複數？複數！不是彼得，是「你們」，教會！",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "f693b59a959d743ae9a3f1490b5ddad349b6e9adea2a3706e7957d947492afd3",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E007-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "只要你悔改，你繼續地相信耶穌基督，你就可以進天國。這個不是教會決定的，這是神在天上早就決定的。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "5aec23bd153a6ef6d8c929ce10cb646ce76eb558f9fe8234400bf7f877fda0b6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E009-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "很多人就沒有把聖經都擺在一起，一起來看。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 348,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a99af22002c97e99703bfb5a207f2b1ce702ced31d5b8dacfc1af2d6bcbf91c7",
+      "verbatim_excerpt_sha256": "a4ae25d2bcf6a90722630bed2a00a0fd387e2070cd5d8f5dae08adf1619b0efa",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E010-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "因為當時猶太人對「基督」、對「受膏者」有錯誤的觀念。所以耶穌要先把這些人的觀念改正過來之後，才會准許門徒們去告訴別人，耶穌就是那個基督。",
+      "paragraph_key": "S0013",
+      "source_segment_index": 554,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "5eb2f5c3c015c95204bf017e3974d2777c2752d20ecc42d904f1b08364735d8b",
+      "verbatim_excerpt_sha256": "2a859c52abcff901f813515c37ece84e6a189787e208bdd92e67049802504f8f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E011-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彼得認耶穌為基督、是彌賽亞，但是彼得不認識彌賽亞的性質，不知道、不認識彌賽亞的使命。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "c668f76d7e76b4f825e4d57e177f56d9b1f07c0a838aa312262808460f10110c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E012-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "你不體貼φρονέω（phroneō）那個是什麼意思呢？你不關心、你不重視）神的意思，只關心、重視人的意思。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "d420f86ea20e708f931fdca006e9ef56b44febfe35c817a77765dee198d2f2b9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E013-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "你有自由可以決定你要不要跟從我。可是如果你決心要跟從我的話，「你就當捨己，背起你的十字架來跟從我。」",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "624a9eb0cbdc4df38f21676068c6620f01dcb18bf5aab61528bb78ebb3cd5266",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E014-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "因為你這樣做，你才能夠救自己的生命。如果你不肯這麼做的話，你必喪掉你的生命。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "0042a18a2250f7cab09c6a2c9d04654ce2cba7a91237dde5f398627fdc995b9e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E015-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "這個字，ἀπαρνέομαι (aparneomai)，那個字是用在彼得三次不認耶穌的那件事上。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "79f92dc735f7227afae3fd34a1f8687566a6caacfe90bb69fa13864725a75cb9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E016-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "當天國的利益和自己的利益衝突的時候，犧牲自己的利益，以成全天國的利益。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "32fb5c093e395c55ef1259b531972459e4a402dc3ecd83766e4e447c176606b6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E017-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "背十字架不是受苦就是背十字架，其實不是，是為神的緣故，為遵行神的旨意，肯犧牲自己，甚至到死的地步為止。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 686,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ba4a10644e7a63dd2efb465c80544c407566d00a0f5ade45e5bc699ff7adfecc",
+      "verbatim_excerpt_sha256": "3288909bd400975d0fc7d6e2d9afd969326c1afaed7bffce346347333285a800",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E018-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "根據這句話，說我們人分成三部分：一部分是靈，一部分是魂，一部分是身體。而且把這三部分分得很開，出問題了。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 936,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "57469b92d49aeb12fa58f20a071791f4f1d57fc41565e258e1b8175186a3208b",
+      "verbatim_excerpt_sha256": "222eac569cb4a389add73ef6315b72e17271c6fb92ca0dffeccabf5a04172e43",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E020-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以「我的魂」就是「我」，不是我靈、魂、體當中的一部分的「魂」，是我整個人。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 1008,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "4b8cc1f862d05e69908072b95e9e9003845e2c311fd91e38affc7cd88f513d67",
+      "verbatim_excerpt_sha256": "ea65d7022453a80af3b3f441ce8ee51c2078a1e056b597e2bd35c4db2c9afef7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E021-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以這裡是什麼？「我的魂」也就是「我裡面的靈」，看到沒有？「我的魂」就是「我裡面的靈」。",
+      "paragraph_key": "S0021",
+      "source_segment_index": 1043,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "6d4c34e18f3be54024f60f84dcccca4b9393422cddbf3b01027b94cd15faa512",
+      "verbatim_excerpt_sha256": "83a240ccadee2a0a98d7caddace938d1d9819c7934aadb815e62ca05738ff13d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E022-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以一個人死了，神說：「我要你的魂。」",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1082,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "3b5d2e468af9efd210cca418cfa271fa327e4e7cac7d35d64eca709a13f5ca08",
+      "verbatim_excerpt_sha256": "c62928e643e0d64e668a54d626ac7a08e70c82706e1876214cca38c2abd33a67",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E023-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以神要一個人的魂，跟神要一個人的靈，意思一樣。",
+      "paragraph_key": "S0023",
+      "source_segment_index": 1128,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "11091384f299de5921f21a5d21380c20d960e5ad6c593e7b59c084fff9af1180",
+      "verbatim_excerpt_sha256": "267b239bd579ab3426564975018003b8e863fd2400b5908cf90611628e6a1f4b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E024-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "「願神與你們的靈同在」，跟「願神與你們同在」，意思完全一樣。",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1174,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "ff9b37e6b635a197f7166a33f3dde086c2dc268d4139cdd15cc8810b2b63ce47",
+      "verbatim_excerpt_sha256": "c4582b468b84672ac14da3426b2b46b618e333c712b93a1e79afb1aee7d8a5bc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E025-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "不是你的身體，是你整個人要獻給神！",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1202,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "529b767762d72d87eacccc5737299fd45ba585d9ec97266423333129a743d066",
+      "verbatim_excerpt_sha256": "0906d71629851a3ecdcb92db10417050ab72e996c3f73b26ef2d0df1d61573be",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E026-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "愛妻子就是愛自己的身體，愛妻子就是愛自己。所以「身體」就是「自己」，就是整個人。",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1202,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "529b767762d72d87eacccc5737299fd45ba585d9ec97266423333129a743d066",
+      "verbatim_excerpt_sha256": "5436859b55e45385ca2078e59d062fdc4c95d81d3084ef4618bd7efe4e699fbc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E027-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "那一天，門徒約添了三千個魂 (psyche)。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1252,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "dfe97dfdd0fc034cef084256dc0ad3729336deddaafde0acb3f10bdc9a0bcdba",
+      "verbatim_excerpt_sha256": "7c3f918ef847112dd7ab29cf3a8f304171ed080d16a90299142f8725abf26830",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E028-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "人應該是魂、靈、骨節與骨髓才對！你為什麼不這麼做？",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "fd0626fbd1c9d59bd3591fe5150ecba2e9b9bfe148e4fd260ab982726f88bcfb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E029-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以你要按照聖經這樣做的話，到底人是分三部分，還是分四部分，還是分五部分？你怎麼分？不可能。",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "202b943850c6620f358142e35b9dee0f16a3e37d8838518529d8a95120b5bf6e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E030-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "他們自己先找一個結論，然後找聖經來支持他們的結論來給你看。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1252,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "dfe97dfdd0fc034cef084256dc0ad3729336deddaafde0acb3f10bdc9a0bcdba",
+      "verbatim_excerpt_sha256": "3daae11de3724e630d90cec8dba0ab2ef0383c45920b8cafb26203c514f1872c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E031-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "其實那裡所說的魂是什麼？是指神整個人、整個一位。",
+      "paragraph_key": "S0031",
+      "source_segment_index": 1500,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "997ac4fc0ad4b425b45a1f814932c0f2664fb48826135fb49721ea11b0dc6339",
+      "verbatim_excerpt_sha256": "908c3904c06e3e0dd222ae8fce22105f931fe03e6aa41939e66dae27667f1a16",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E032-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "聖經很強調人的整體，我們是整個的人。人活在世上的時候，他是一個整體的人。",
+      "paragraph_key": "S0035",
+      "source_segment_index": 1647,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "24568bd5bfbe89aeb29dd669d5c80696b9c797399dd1d57d7fda7f26caabc9dc",
+      "verbatim_excerpt_sha256": "d85632d1d01cc0428b5a26a48b849ad395e2a0ea9e3eb9aa40db8cda2d761aed",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-6f059dbca908-CL016-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。",
+      "paragraph_key": "S0030",
+      "source_segment_index": 1363,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "8d5c260255729249897bc4c5f84d2b71b98b0e58d838d04afd21baaa316e726e",
+      "verbatim_excerpt_sha256": "0b42442f9e8016ca1ac22936a4ec394f3fa48111f19081440cc280dcd3538f17",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    }
+  ],
+  "questions": [
+    {
+      "answer_claim_ids": [],
+      "answer_state": "unanswered",
+      "question_id": "DK-6f059dbca908-Q001",
+      "question_type": "经文中的耶稣提问",
+      "questioner": "professor",
+      "text": "人说耶稣到底是谁？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL008"
+      ],
+      "answer_state": "partially_answered",
+      "question_id": "DK-6f059dbca908-Q002",
+      "question_type": "经文中的耶稣提问",
+      "questioner": "professor",
+      "text": "门徒说耶稣是谁？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL002",
+        "DK-6f059dbca908-CL003",
+        "DK-6f059dbca908-CL004"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q003",
+      "question_type": "释经问题",
+      "questioner": "professor",
+      "text": "“把天国的钥匙给你”是什么意思？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL002"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q004",
+      "question_type": "原文文法问题",
+      "questioner": "professor",
+      "text": "马太福音16章19节未来完成式是什么意思？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL003",
+        "DK-6f059dbca908-CL005"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q005",
+      "question_type": "词义与对象问题",
+      "questioner": "professor",
+      "text": "捆绑所涉及的对象或事情是什么？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL006"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q006",
+      "question_type": "赦罪条件问题",
+      "questioner": "professor",
+      "text": "一个人的罪能不能得赦免取决于什么？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL007",
+        "DK-6f059dbca908-CL008"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q007",
+      "question_type": "叙事动机问题",
+      "questioner": "professor",
+      "text": "耶稣为什么不准门徒告诉别人他是基督？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL009"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q008",
+      "question_type": "门徒要求理由问题",
+      "questioner": "professor",
+      "text": "耶稣为什么要求跟从者捨己并背起十字架？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL010"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q009",
+      "question_type": "词义问题",
+      "questioner": "professor",
+      "text": "“捨己”是什么意思？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL011"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q010",
+      "question_type": "词义问题",
+      "questioner": "professor",
+      "text": "“背十字架”是什么意思？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL013"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q011",
+      "question_type": "人观词义问题",
+      "questioner": "professor",
+      "text": "圣经中的“我的魂”是否只是灵、魂、体三部分中的一部分？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL013"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q012",
+      "question_type": "平行词义问题",
+      "questioner": "professor",
+      "text": "灵、魂和心在相关平行经文中是什么关系？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL013"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q013",
+      "question_type": "身体用语释经问题",
+      "questioner": "professor",
+      "text": "“圣灵住在你们身体里面”是什么意思？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL014"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q014",
+      "question_type": "反证式人观问题",
+      "questioner": "professor",
+      "text": "若按经文列举机械分部，人究竟应分为三、四还是五部分？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL013"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q015",
+      "question_type": "反证式词义问题",
+      "questioner": "professor",
+      "text": "“神的魂”是否表示神也被分成灵、魂、体三部分？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL015"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q016",
+      "question_type": "救恩与人观问题",
+      "questioner": "professor",
+      "text": "“魂的救恩”是否表示只有魂得救而灵和身体不得救？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [],
+      "answer_state": "unanswered",
+      "question_id": "DK-6f059dbca908-Q017",
+      "question_type": "讲道留下的后续专题",
+      "questioner": "professor",
+      "text": "离婚者是否一生没有希望，以及相关经文应如何解释？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-6f059dbca908-CL015"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-6f059dbca908-Q018",
+      "question_type": "死亡与复活人观问题",
+      "questioner": "professor",
+      "text": "人在死亡与基督再来复活时，里面的人、外面的人和全人之间是什么关系？",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q018-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "position_nodes": [
+    {
+      "attribution": "教授归于天主教的解释",
+      "position_id": "DK-6f059dbca908-POS001",
+      "title": "彼得拥有完全权柄且天上必须服从其捆绑释放决定",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于天主教的教皇权柄立场",
+      "position_id": "DK-6f059dbca908-POS002",
+      "title": "马太福音的绝对权柄由彼得转交教皇",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授模拟的误解者",
+      "position_id": "DK-6f059dbca908-POS003",
+      "title": "教会可按个人好恶留下得罪者的罪",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于彼得及当时犹太社会的弥赛亚观",
+      "position_id": "DK-6f059dbca908-POS004",
+      "title": "弥赛亚的使命是推翻罗马并建立独立犹太国",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所反驳的通俗捨己观念",
+      "position_id": "DK-6f059dbca908-POS005",
+      "title": "拒绝合理便利或任意刻苦本身就是捨己",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所反驳的通俗背十字架观念",
+      "position_id": "DK-6f059dbca908-POS006",
+      "title": "自讨苦吃或任何受苦都等于背十字架",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于普利茅斯弟兄会并影响华人教会的三分法",
+      "position_id": "DK-6f059dbca908-POS007",
+      "title": "人由彼此分离的灵、魂、身体三个部分构成",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所批评的华人教会观念",
+      "position_id": "DK-6f059dbca908-POS008",
+      "title": "运用理性就不属灵",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS008-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "observations": [
+    {
+      "observation_id": "DK-6f059dbca908-OBS001",
+      "observation_type": "经文叙事观察",
+      "scripture_refs": [
+        "马太福音16:16"
+      ],
+      "statement": "彼得回答耶稣说，他是基督，是永生神的儿子。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS002",
+      "observation_type": "传统中文译文观察",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "statement": "教授引用的传统中文译文把地上与天上的捆绑、释放表达为相继对应的动作。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS003",
+      "observation_type": "希腊文文法观察",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "statement": "教授认定马太福音16章19节相关动词形式为未来完成式。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS004",
+      "observation_type": "历史文化用语观察",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "statement": "教授称“捆绑”和“释放”是当时拉比学校使用的专门用语。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS005",
+      "observation_type": "词义范围观察",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "statement": "教授指出“捆绑／释放”既可能涉及禁止或准许进入天国，也可能表示不准许或准许某事。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS006",
+      "observation_type": "语法数观察",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "statement": "教授指出马太福音16章19节对彼得使用单数“你”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS007",
+      "observation_type": "语法数观察",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "statement": "教授指出马太福音18章18节使用复数“你们”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS008",
+      "observation_type": "经文叙事观察",
+      "scripture_refs": [
+        "马太福音16:20"
+      ],
+      "statement": "彼得认信后，耶稣吩咐门徒不可告诉别人他是基督。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS009",
+      "observation_type": "叙事结构观察",
+      "scripture_refs": [
+        "马太福音16:21"
+      ],
+      "statement": "教授强调“从此”标志耶稣在彼得认信后开始教导门徒自己必须受苦、被杀并复活。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS010",
+      "observation_type": "经文内容观察",
+      "scripture_refs": [
+        "马太福音16:21"
+      ],
+      "statement": "耶稣预告自己必须到耶路撒冷受苦、被杀，并在第三日复活。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS011",
+      "observation_type": "原文词汇观察",
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "statement": "教授指出“捨己”使用希腊词aparneomai。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS012",
+      "observation_type": "经文列举观察",
+      "scripture_refs": [
+        "帖撒罗尼迦前书5:23"
+      ],
+      "statement": "帖撒罗尼迦前书5章23节并列“灵、魂、身子”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS013",
+      "observation_type": "译本观察",
+      "scripture_refs": [
+        "创世记27:4"
+      ],
+      "statement": "教授援引由希伯来文翻成希腊文的七十士译本。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS014",
+      "observation_type": "希伯来文词汇观察",
+      "scripture_refs": [
+        "诗篇34:2"
+      ],
+      "statement": "教授指出和合本译作“我的心”的位置，原文为nephesh，即“我的魂”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS015",
+      "observation_type": "希伯来文词汇观察",
+      "scripture_refs": [
+        "诗篇143:4"
+      ],
+      "statement": "教授指出诗篇143篇4节“我的灵”使用ruach。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS016",
+      "observation_type": "平行结构观察",
+      "scripture_refs": [
+        "以赛亚书26:9"
+      ],
+      "statement": "以赛亚书26章9节把“我的魂羡慕你”和“我里面的灵切切寻求你”平行排列。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS017",
+      "observation_type": "经文用词观察",
+      "scripture_refs": [
+        "路加福音23:46"
+      ],
+      "statement": "教授指出耶稣临死时所说的是把“灵”交在父手里，而不是和合本所加的“灵魂”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS018",
+      "observation_type": "书信公式观察",
+      "scripture_refs": [
+        "加拉太书6:18",
+        "腓立比书4:23",
+        "腓利门书1:25"
+      ],
+      "statement": "教授列举保罗书信末尾以“与你们的灵”表达祝福的经文。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS019",
+      "observation_type": "经文用词观察",
+      "scripture_refs": [
+        "哥林多前书6:19"
+      ],
+      "statement": "哥林多前书6章19节称信徒的身子为圣灵的殿。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS020",
+      "observation_type": "人数表达观察",
+      "scripture_refs": [
+        "使徒行传27:37"
+      ],
+      "statement": "教授按原文将船上的人数表达为二百七十六个“魂”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS021",
+      "observation_type": "人数表达观察",
+      "scripture_refs": [
+        "彼得前书3:20"
+      ],
+      "statement": "教授按原文把方舟中得救的八人称为八个“魂”。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS022",
+      "observation_type": "原文及文物形态观察",
+      "scripture_refs": [
+        "创世记6-8"
+      ],
+      "statement": "教授指出挪亚所造之物英文称ark，不称ship或boat，并描述其为盒状而非流线型船只。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS023",
+      "observation_type": "经文列举观察",
+      "scripture_refs": [
+        "希伯来书4:12"
+      ],
+      "statement": "希伯来书4章12节并列魂、灵、骨节与骨髓。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS024",
+      "observation_type": "平行经文观察",
+      "scripture_refs": [
+        "马可福音12:30"
+      ],
+      "statement": "教授所引马可福音12章30节列出心、魂、理性和力量。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS025",
+      "observation_type": "希腊文词义观察",
+      "scripture_refs": [
+        "哥林多前书5:5"
+      ],
+      "statement": "教授把哥林多前书5章5节的sarx解释为被罪控制、败坏的人性，而非单指肉体。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS026",
+      "observation_type": "语气观察",
+      "scripture_refs": [
+        "哥林多前书5:5"
+      ],
+      "statement": "教授称该节“灵在主耶稣的日子或者可以得救”为希望式，表示可能得救而非必然得救。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS026-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-6f059dbca908-OBS027",
+      "observation_type": "经文人观用语观察",
+      "scripture_refs": [
+        "哥林多后书4:16"
+      ],
+      "statement": "教授以哥林多后书4章16节“里面的人”和“外面的人”作为说明死亡与复活中人的较合适用语。",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-OBS027-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "evidence_steps": [
+    {
+      "discourse_role": "教授对传统译法的判断",
+      "evidence_step_id": "DK-6f059dbca908-E001",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "传统中文译法没有准确表达马太福音16章19节的文法，因此引发权柄理解上的问题。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授给出的准确译法",
+      "evidence_step_id": "DK-6f059dbca908-E002",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL001",
+        "DK-6f059dbca908-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授将该句译为地上所捆绑的在天上“也将是已经被捆绑的”，并认定其为未来完成式。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "招生委员会类比",
+      "evidence_step_id": "DK-6f059dbca908-E003",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授以招生委员会只评估申请人是否符合教授会议既定条件作类比，说明执行权不等于制定条件的绝对权柄。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "时态构成的解释",
+      "evidence_step_id": "DK-6f059dbca908-E004",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL002",
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "完成式表示捆绑与释放的条件早已在天上决定，未来式表示彼得日后会遇见并判断符合这些条件的人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对彼得职能的结论",
+      "evidence_step_id": "DK-6f059dbca908-E005",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得没有制定标准的完全权柄，只负责执行天上所规定的标准并判断具体情形是否相符。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "相关经文与数的观察",
+      "evidence_step_id": "DK-6f059dbca908-E006",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL004"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "马太福音18章18节使用复数“你们”，教授据此认定同样的权柄属于教会，而不是彼得个人独占。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "进入天国条件的说明",
+      "evidence_step_id": "DK-6f059dbca908-E007",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003",
+        "DK-6f059dbca908-CL005"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "悔改并持续相信耶稣是进入天国的既定条件，教会传福音时只可按此告诉人是否可以进入天国。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "约翰福音赦罪经文的解释",
+      "evidence_step_id": "DK-6f059dbca908-E008",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL006"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "罪是否得赦免取决于真正悔改；教会只能向悔改者宣告罪已赦免，向不悔改者警告罪仍留下。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "释经方法说明",
+      "evidence_step_id": "DK-6f059dbca908-E009",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL017"
+      ],
+      "scripture_refs": [
+        "利未记17-18",
+        "使徒行传15",
+        "哥林多前书8-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授以祭偶像之物等经文为例，要求把相关经文放在一起并按各自对象、条件和语境理解，不能仅凭表面差异断言矛盾。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对禁止宣告基督身份的回答",
+      "evidence_step_id": "DK-6f059dbca908-E010",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL007"
+      ],
+      "scripture_refs": [
+        "马太福音16:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣禁止门徒立即宣告他是基督，是因为当时犹太人对基督的观念错误，必须先予纠正。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "彼得反应的解释",
+      "evidence_step_id": "DK-6f059dbca908-E011",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL007",
+        "DK-6f059dbca908-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音16:21-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得承认耶稣是弥赛亚，却不了解弥赛亚必须受苦、被杀并复活的性质与使命。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "希腊词语义解释",
+      "evidence_step_id": "DK-6f059dbca908-E012",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音16:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授把phroneō解释为关心、重视，认为耶稣责备彼得只重视人的意思而不重视神的意思。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "跟从呼召的说明",
+      "evidence_step_id": "DK-6f059dbca908-E013",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "人可选择是否跟从耶稣，但一旦决定跟从，就必须捨己并背起十字架。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "捨己背十字架的理由",
+      "evidence_step_id": "DK-6f059dbca908-E014",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音16:25"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "捨己并背十字架的理由，是这样才能得着生命；拒绝这样做则会丧掉生命。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "捨己一词的原文说明",
+      "evidence_step_id": "DK-6f059dbca908-E015",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "捨己所用的aparneomai也用于彼得三次不认耶稣，教授据此强调该词有“不认”的意义。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "捨己的定义",
+      "evidence_step_id": "DK-6f059dbca908-E016",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "捨己是在天国利益和自身利益冲突时牺牲自身利益，以成全天国利益；无缘无故降低工作效率的刻苦不属于捨己。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "背十字架的定义",
+      "evidence_step_id": "DK-6f059dbca908-E017",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL011"
+      ],
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "背十字架并非泛指受苦，而是为神、为遵行神旨意甘愿牺牲自己甚至至死。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "引入三分法争议",
+      "evidence_step_id": "DK-6f059dbca908-E018",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL017"
+      ],
+      "scripture_refs": [
+        "帖撒罗尼迦前书5:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授指出，根据帖撒罗尼迦前书5章23节把灵、魂、身体严格分开的解释会造成许多释经问题。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "创世记用例的结论",
+      "evidence_step_id": "DK-6f059dbca908-E019",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "创世记27:4",
+        "创世记27:25"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "七十士译本中的“我的魂给你祝福”表示以撒整个人祝福以扫，因此“魂”在此指全人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "诗篇与创世记用例归纳",
+      "evidence_step_id": "DK-6f059dbca908-E020",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "创世记27:25",
+        "诗篇34:1-3",
+        "诗篇77:2-3"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“我的魂”在祝福、称颂和拒绝受安慰等经文中就是“我”，指说话者的整个人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "灵与魂平行用法",
+      "evidence_step_id": "DK-6f059dbca908-E021",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "诗篇143:4",
+        "约伯记12:10",
+        "以赛亚书26:9"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "诗篇、约伯记和以赛亚书的平行表达显示“灵”“魂”“心”在这些语境中意义相通。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "死亡时魂的用法",
+      "evidence_step_id": "DK-6f059dbca908-E022",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "路加福音12:20",
+        "马太福音2:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "路加福音12章20节以神索取人的“魂”表达死亡，马太福音2章20节以寻求小孩子的“魂”表达寻求其性命。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "死亡时灵与魂的比较",
+      "evidence_step_id": "DK-6f059dbca908-E023",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "路加福音23:46",
+        "使徒行传7:59"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣和司提反死亡时把“灵”交给神，与神索取人的“魂”意义相同，故不能由此把灵与魂视为两个独立实体。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "书信祝福语比较",
+      "evidence_step_id": "DK-6f059dbca908-E024",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "加拉太书6:18",
+        "腓立比书4:23",
+        "腓利门书1:25",
+        "罗马书16:20",
+        "哥林多前书16:23",
+        "歌罗西书4:18",
+        "帖撒罗尼迦前书5:28",
+        "提摩太前书6:21",
+        "提摩太后书4:22"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "保罗书信结尾“与你们的灵同在”和“与你们同在”的祝福被教授视为等义，说明“灵”可指收信者全人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "身体指全人的解释",
+      "evidence_step_id": "DK-6f059dbca908-E025",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "哥林多前书6:19",
+        "罗马书12:1-2"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“身体是圣灵的殿”及“将身体献上”中的身体被教授解释为整个人，而非只把肉体献给神。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以弗所书平行表达",
+      "evidence_step_id": "DK-6f059dbca908-E026",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "以弗所书5:28"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“爱自己的身子”与“爱自己”平行，显示“身体”可指自己或整个人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E026-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以魂计数人数的经文证据",
+      "evidence_step_id": "DK-6f059dbca908-E027",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL014"
+      ],
+      "scripture_refs": [
+        "使徒行传7:10",
+        "使徒行传27:37",
+        "使徒行传2:41",
+        "彼得前书3:20",
+        "罗马书13:1",
+        "使徒行传3:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "使徒行传及其他经文以“魂”表示七十五人、二百七十六人、三千受洗者或八个得救者；教授以此论证psyche指整个人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E027-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对机械分部推理的反证",
+      "evidence_step_id": "DK-6f059dbca908-E028",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL014"
+      ],
+      "scripture_refs": [
+        "希伯来书4:12"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "若从帖撒罗尼迦前书的并列直接推出三部分，也应从希伯来书4章12节推出魂、灵、骨节、骨髓等部分；教授以此显示该推理不一致。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E028-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "福音书列举差异的反证",
+      "evidence_step_id": "DK-6f059dbca908-E029",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL014",
+        "DK-6f059dbca908-CL016"
+      ],
+      "scripture_refs": [
+        "马太福音22:37",
+        "马可福音12:30",
+        "路加福音10:27"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "马太、马可、路加列出心、魂、理性、力量的项目和数目不完全相同，因此不能把每个列项机械认作人的独立组成部分；这些经文同时要求人尽理性爱神。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E029-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对选择性释经的批评",
+      "evidence_step_id": "DK-6f059dbca908-E030",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL017"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授批评三分法倡导者先形成结论，再选择支持结论的经文，并忽略推翻结论的证据。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E030-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "神与其他人物之魂用例",
+      "evidence_step_id": "DK-6f059dbca908-E031",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL013"
+      ],
+      "scripture_refs": [
+        "马太福音12:18",
+        "马太福音26:38",
+        "路加福音1:46",
+        "路加福音12:19",
+        "约翰福音10:24",
+        "使徒行传14:2"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "经文提到神的魂、耶稣的魂、马利亚的魂等，教授认为这些用法指整个主体，而不是主体的三分之一。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E031-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "整全人观总结",
+      "evidence_step_id": "DK-6f059dbca908-E032",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL012",
+        "DK-6f059dbca908-CL015"
+      ],
+      "scripture_refs": [
+        "帖撒罗尼迦前书5:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授总结，圣经强调人的整体性，并常以灵、魂或身体指称整个的人。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E032-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "死亡与复活中的全人说明",
+      "evidence_step_id": "DK-6f059dbca908-E033",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL015"
+      ],
+      "scripture_refs": [
+        "哥林多后书4:16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "死亡时里面的人与主同在、外面的人留在地上；基督再来时二者在复活中联合，全人得救。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-6f059dbca908-CL016-01",
+      "statement": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。",
+      "step_type": "scripture_evidence",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL016"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-6f059dbca908-CL016-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    }
+  ],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL001",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E001",
+        "DK-6f059dbca908-E002"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001",
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "天国的钥匙",
+        "未来完成式",
+        "彼得",
+        "翻译"
+      ],
+      "title": "马太福音16章19节的传统中文译法没有译出希腊文未来完成式，因而容易造成彼得拥有绝对权柄、天上必须服从其决定的误解。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E001",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对传统译法的判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那其實這句話，是中文翻錯了，所以很多人就不知道，就出了很多的問題。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出的准确译法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL002",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E002",
+        "DK-6f059dbca908-E004"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "捆绑",
+        "释放",
+        "未来完成式",
+        "天上标准"
+      ],
+      "title": "马太福音16章19节应理解为：彼得在地上所捆绑或释放的，在天上将是已经被捆绑或释放的；完成式表示标准早已由天上决定，未来式表示彼得以后会执行该工作。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出的准确译法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E004",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "时态构成的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL003",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E003",
+        "DK-6f059dbca908-E004",
+        "DK-6f059dbca908-E005"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001",
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "教会权柄",
+        "执行",
+        "宣告",
+        "天国条件"
+      ],
+      "title": "彼得和教会并不自行决定谁被捆绑、释放或进入天国，而是辨认、执行并宣告天上预先决定的条件。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E003",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "招生委员会类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我乃是執行教授會議所決定的條件。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E004",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "时态构成的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E005",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对彼得职能的结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是彼得有完全的權柄，不是。彼得乃是來執行天上所規定的捆綁的條件，來看你的情況是不是合乎那個條件。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL004",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E006"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "彼得",
+        "教会",
+        "复数",
+        "权柄"
+      ],
+      "title": "捆绑与释放的权柄不只给彼得；马太福音18章18节用复数“你们”，表明同样的权柄也给教会。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E006",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "相关经文与数的观察",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "馬太十八章十八節，耶穌說：「我實在告訴你們，凡『你們』……」單數還是複數？複數！不是彼得，是「你們」，教會！",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL005",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E007"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "悔改",
+        "信心",
+        "进入天国",
+        "福音宣告"
+      ],
+      "title": "人进入天国的条件不是由教会制定；真正悔改并持续相信耶稣基督的人可以进入天国，教会可据此作出宣告。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E007",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "进入天国条件的说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "只要你悔改，你繼續地相信耶穌基督，你就可以進天國。這個不是教會決定的，這是神在天上早就決定的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL006",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E008"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "留罪",
+        "悔改",
+        "教会权柄"
+      ],
+      "title": "约翰福音20章23节不是赋予教会按个人好恶赦免或留下罪的权柄；罪是否得赦免取决于犯罪者是否真正悔改。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E008",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "约翰福音赦罪经文的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實一個人的罪能不能得赦免，在乎他有沒有真正的悔改。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL007",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E010",
+        "DK-6f059dbca908-E011"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:20-23"
+      ],
+      "topic_terms": [
+        "弥赛亚秘密",
+        "政治弥赛亚",
+        "罗马",
+        "十字架",
+        "赎罪"
+      ],
+      "title": "耶稣暂时禁止门徒宣告他是基督，因为当时犹太人把弥赛亚理解为发动反罗马革命、建立独立国家的政治领袖，这会妨碍耶稣完成十字架赎罪使命。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0013",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E010",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对禁止宣告基督身份的回答",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為當時猶太人對「基督」、對「受膏者」有錯誤的觀念。所以耶穌要先把這些人的觀念改正過來之後，才會准許門徒們去告訴別人，耶穌就是那個基督。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E011",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "彼得反应的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得認耶穌為基督、是彌賽亞，但是彼得不認識彌賽亞的性質，不知道、不認識彌賽亞的使命。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL008",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E011",
+        "DK-6f059dbca908-E012"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:21-23"
+      ],
+      "topic_terms": [
+        "彼得",
+        "弥赛亚使命",
+        "受苦",
+        "复活"
+      ],
+      "title": "彼得虽承认耶稣是基督，却不认识弥赛亚受苦、被杀和复活的使命；他阻止耶稣受死，正显出其错误的政治弥赛亚观。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E011",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "彼得反应的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得認耶穌為基督、是彌賽亞，但是彼得不認識彌賽亞的性質，不知道、不認識彌賽亞的使命。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E012",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "希腊词语义解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "你不體貼φρονέω（phroneō）那個是什麼意思呢？你不關心、你不重視）神的意思，只關心、重視人的意思。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL009",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E013",
+        "DK-6f059dbca908-E014"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:24-25"
+      ],
+      "topic_terms": [
+        "跟从耶稣",
+        "自由选择",
+        "生命",
+        "完整救恩"
+      ],
+      "title": "耶稣不强迫人跟从他，但选择跟从者必须捨己、背十字架；这样的要求是为使人得生命并经历完整救恩。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E013",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "跟从呼召的说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "你有自由可以決定你要不要跟從我。可是如果你決心要跟從我的話，「你就當捨己，背起你的十字架來跟從我。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E014",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "捨己背十字架的理由",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為你這樣做，你才能夠救自己的生命。如果你不肯這麼做的話，你必喪掉你的生命。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL010",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E015",
+        "DK-6f059dbca908-E016"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS005"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "topic_terms": [
+        "捨己",
+        "天国利益",
+        "个人利益",
+        "刻苦"
+      ],
+      "title": "捨己不是无缘无故刻苦或拒绝合理便利，而是在天国利益与个人利益冲突时，为神的缘故牺牲自己的利益以成全天国利益。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E015",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "捨己一词的原文说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這個字，ἀπαρνέομαι (aparneomai)，那個字是用在彼得三次不認耶穌的那件事上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E016",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "捨己的定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "當天國的利益和自己的利益衝突的時候，犧牲自己的利益，以成全天國的利益。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL011",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E017"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:24"
+      ],
+      "topic_terms": [
+        "背十字架",
+        "受苦",
+        "神的旨意",
+        "牺牲"
+      ],
+      "title": "背十字架不是任何受苦或自讨苦吃，而是为神并为遵行神旨意甘愿牺牲自己，甚至到死。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E017",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "背十字架的定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "背十字架不是受苦就是背十字架，其實不是，是為神的緣故，為遵行神的旨意，肯犧牲自己，甚至到死的地步為止。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL012",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E018",
+        "DK-6f059dbca908-E019",
+        "DK-6f059dbca908-E020",
+        "DK-6f059dbca908-E021",
+        "DK-6f059dbca908-E022",
+        "DK-6f059dbca908-E023",
+        "DK-6f059dbca908-E024",
+        "DK-6f059dbca908-E025",
+        "DK-6f059dbca908-E026",
+        "DK-6f059dbca908-E027",
+        "DK-6f059dbca908-E028",
+        "DK-6f059dbca908-E029",
+        "DK-6f059dbca908-E030",
+        "DK-6f059dbca908-E031"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "帖撒罗尼迦前书5:23",
+        "创世记27:4",
+        "创世记27:25",
+        "诗篇34:1-3",
+        "诗篇77:2-3",
+        "诗篇143:4",
+        "约伯记12:10",
+        "以赛亚书26:9",
+        "腓立比书1:27",
+        "路加福音12:20",
+        "马太福音2:20",
+        "路加福音23:46",
+        "使徒行传7:59",
+        "罗马书1:9",
+        "提摩太后书1:3",
+        "哥林多前书6:19",
+        "罗马书12:1-2",
+        "以弗所书5:28",
+        "使徒行传7:10",
+        "使徒行传27:37",
+        "使徒行传2:41",
+        "彼得前书3:20",
+        "罗马书13:1",
+        "使徒行传3:23",
+        "希伯来书4:12",
+        "马太福音22:37",
+        "马可福音12:30",
+        "路加福音10:27"
+      ],
+      "topic_terms": [
+        "三分法",
+        "整全人观",
+        "灵",
+        "魂",
+        "身体"
+      ],
+      "title": "仅凭帖撒罗尼迦前书5章23节把人机械划分为彼此分离的灵、魂、体三部分，会与大量经文的实际用法冲突；圣经更强调人是一个整体。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E018",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "引入三分法争议",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "根據這句話，說我們人分成三部分：一部分是靈，一部分是魂，一部分是身體。而且把這三部分分得很開，出問題了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E019",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "创世记用例的结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以「魂」不是我們靈、魂、體當中的一部分而已，「魂」是指整個人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0020",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E020",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "诗篇与创世记用例归纳",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以「我的魂」就是「我」，不是我靈、魂、體當中的一部分的「魂」，是我整個人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0021",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E021",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "灵与魂平行用法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以這裡是什麼？「我的魂」也就是「我裡面的靈」，看到沒有？「我的魂」就是「我裡面的靈」。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E022",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "死亡时魂的用法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以一個人死了，神說：「我要你的魂。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0023",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E023",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "死亡时灵与魂的比较",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以神要一個人的魂，跟神要一個人的靈，意思一樣。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0024",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E024",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "书信祝福语比较",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「願神與你們的靈同在」，跟「願神與你們同在」，意思完全一樣。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0026",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E025",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "身体指全人的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是你的身體，是你整個人要獻給神！",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0026",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E026",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以弗所书平行表达",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "愛妻子就是愛自己的身體，愛妻子就是愛自己。所以「身體」就是「自己」，就是整個人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0027",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E027",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以魂计数人数的经文证据",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那一天，門徒約添了三千個魂 (psyche)。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0030",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E028",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对机械分部推理的反证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "人應該是魂、靈、骨節與骨髓才對！你為什麼不這麼做？",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0030",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E029",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "福音书列举差异的反证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以你要按照聖經這樣做的話，到底人是分三部分，還是分四部分，還是分五部分？你怎麼分？不可能。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0027",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E030",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对选择性释经的批评",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他們自己先找一個結論，然後找聖經來支持他們的結論來給你看。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0031",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E031",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "神与其他人物之魂用例",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實那裡所說的魂是什麼？是指神整個人、整個一位。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL013",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E019",
+        "DK-6f059dbca908-E020",
+        "DK-6f059dbca908-E021",
+        "DK-6f059dbca908-E022",
+        "DK-6f059dbca908-E023",
+        "DK-6f059dbca908-E024",
+        "DK-6f059dbca908-E025",
+        "DK-6f059dbca908-E026"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "创世记27:4",
+        "诗篇34:1-3",
+        "诗篇143:4",
+        "以赛亚书26:9",
+        "腓立比书1:27",
+        "路加福音12:20",
+        "路加福音23:46",
+        "哥林多前书6:19",
+        "以弗所书5:28"
+      ],
+      "topic_terms": [
+        "提喻",
+        "全人",
+        "魂",
+        "灵",
+        "身体"
+      ],
+      "title": "圣经中的“魂”“灵”或“身体”常可作为提喻指向整个的人，而非必然指一个可与其他部分分离的实体成分。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E019",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "创世记用例的结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以「魂」不是我們靈、魂、體當中的一部分而已，「魂」是指整個人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0020",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E020",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "诗篇与创世记用例归纳",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以「我的魂」就是「我」，不是我靈、魂、體當中的一部分的「魂」，是我整個人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0021",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E021",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "灵与魂平行用法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以這裡是什麼？「我的魂」也就是「我裡面的靈」，看到沒有？「我的魂」就是「我裡面的靈」。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E022",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "死亡时魂的用法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以一個人死了，神說：「我要你的魂。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0023",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E023",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "死亡时灵与魂的比较",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以神要一個人的魂，跟神要一個人的靈，意思一樣。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0024",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E024",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "书信祝福语比较",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「願神與你們的靈同在」，跟「願神與你們同在」，意思完全一樣。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0026",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E025",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "身体指全人的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是你的身體，是你整個人要獻給神！",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0026",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E026",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以弗所书平行表达",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "愛妻子就是愛自己的身體，愛妻子就是愛自己。所以「身體」就是「自己」，就是整個人。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL014",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E028",
+        "DK-6f059dbca908-E029"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "希伯来书4:12",
+        "马太福音22:37",
+        "马可福音12:30",
+        "路加福音10:27"
+      ],
+      "topic_terms": [
+        "经文列举",
+        "三分法",
+        "四分法",
+        "论证"
+      ],
+      "title": "经文并列魂、灵、骨节、骨髓，或心、魂、理性、力量，并不表示人必须按所列项目分成相应数目的实体部分；否则不同经文会导出互相冲突的三分、四分或更多分法。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0030",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E028",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对机械分部推理的反证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "人應該是魂、靈、骨節與骨髓才對！你為什麼不這麼做？",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0030",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E029",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "福音书列举差异的反证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以你要按照聖經這樣做的話，到底人是分三部分，還是分四部分，還是分五部分？你怎麼分？不可能。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "13c89cce5ae3d9890a50cf17598333e38040f4cd264d447de745fd01d83aa26a",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL015",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E032",
+        "DK-6f059dbca908-E033"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "哥林多后书4:16"
+      ],
+      "topic_terms": [
+        "里面的人",
+        "外面的人",
+        "死亡",
+        "复活",
+        "全人得救"
+      ],
+      "title": "人在今生是整体的人；死亡时“里面的人”与主同在、“外面的人”留在地上，基督再来时二者在复活中联合，全人得救并永远与主同在。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0035",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E032",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "整全人观总结",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "聖經很強調人的整體，我們是整個的人。人活在世上的時候，他是一個整體的人。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0035",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E033",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "死亡与复活中的全人说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "基督再來的時候，信主的死人要復活，他裡面的人和外面的人聯合在一起，全人得救，永遠和神同在。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL016",
+      "evidence_step_ids": [
+        "AI-ADJ-DK-6f059dbca908-CL016-01"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS008"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音22:37",
+        "马可福音12:30",
+        "路加福音10:27"
+      ],
+      "topic_terms": [
+        "理性",
+        "爱神",
+        "属灵",
+        "华人教会"
+      ],
+      "title": "爱神包括尽理性；把运用理性视为不属灵，会违背福音书所记的最大诫命。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0030",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-6f059dbca908-CL016-01",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "而且聖經明講，耶穌明講，你要盡你的理性愛主。可是華人教會，理性不重要。常常講一個人動用理性就不屬靈，非常可怕。",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "13c89cce5ae3d9890a50cf17598333e38040f4cd264d447de745fd01d83aa26a",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL017",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E009",
+        "DK-6f059dbca908-E018",
+        "DK-6f059dbca908-E030"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "释经方法",
+        "证据",
+        "全本圣经",
+        "选择性引用"
+      ],
+      "title": "解释圣经应提出证据，并把与同一问题有关的经文放在一起考察，而不是先定结论后只选择支持自己的经文。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E009",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "释经方法说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "很多人就沒有把聖經都擺在一起，一起來看。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E018",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "引入三分法争议",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "根據這句話，說我們人分成三部分：一部分是靈，一部分是魂，一部分是身體。而且把這三部分分得很開，出問題了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0027",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E030",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对选择性释经的批评",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他們自己先找一個結論，然後找聖經來支持他們的結論來給你看。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "from_id": "DK-6f059dbca908-E002",
+      "reason": "准确译法说明天上不是被动服从彼得，而是已有先行决定。",
+      "relation_id": "DK-6f059dbca908-ER002",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E004"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E003",
+      "reason": "招生委员会只执行教授会议既定条件，被用作彼得执行天上标准的类比。",
+      "relation_id": "DK-6f059dbca908-ER003",
+      "relation_type": "contextualizes",
+      "to_id": "DK-6f059dbca908-E004"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E004",
+      "reason": "完成式与未来式的分别解释构成天上预定标准、地上以后执行的论证。",
+      "relation_id": "DK-6f059dbca908-ER004",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E005"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E006",
+      "reason": "马太十八章的复数“你们”限定马太十六章不能被理解为彼得个人独占权柄。",
+      "relation_id": "DK-6f059dbca908-ER005",
+      "relation_type": "qualifies",
+      "to_id": "DK-6f059dbca908-E005"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E007",
+      "reason": "悔改与持续相信提供教会宣告进入天国时所依据的标准。",
+      "relation_id": "DK-6f059dbca908-ER006",
+      "relation_type": "applies",
+      "to_id": "DK-6f059dbca908-E005"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E008",
+      "reason": "约翰福音赦罪与留罪的说明把同一执行既定标准原则应用到罪得赦免。",
+      "relation_id": "DK-6f059dbca908-ER007",
+      "relation_type": "applies",
+      "to_id": "DK-6f059dbca908-E005"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E009",
+      "reason": "祭偶像之物的经文例子用来说明相关经文需结合语境综合解释。",
+      "relation_id": "DK-6f059dbca908-ER008",
+      "relation_type": "contextualizes",
+      "to_id": "DK-6f059dbca908-E006"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E011",
+      "reason": "彼得反对耶稣受苦受死，证明他尚未正确认识弥赛亚使命。",
+      "relation_id": "DK-6f059dbca908-ER009",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E010"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E012",
+      "reason": "phroneō被解释为关心、重视，说明彼得重视人的政治期待而非神的使命。",
+      "relation_id": "DK-6f059dbca908-ER010",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E011"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E014",
+      "reason": "得生命与丧生命的对比回答为何跟从者必须捨己背十字架。",
+      "relation_id": "DK-6f059dbca908-ER011",
+      "relation_type": "answers",
+      "to_id": "DK-6f059dbca908-E013"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E015",
+      "reason": "aparneomai的不认含义为教授界定捨己提供原文依据。",
+      "relation_id": "DK-6f059dbca908-ER012",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E016"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E019",
+      "reason": "“我的魂”在祝福语境中指以撒本人，支持魂可指全人。",
+      "relation_id": "DK-6f059dbca908-ER015",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E021"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E020",
+      "reason": "诗篇中的魂被解释为说话和敬拜的整个人。",
+      "relation_id": "DK-6f059dbca908-ER016",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E021"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E022",
+      "reason": "同一处境可说神要人的魂，也可说人把灵交给神。",
+      "relation_id": "DK-6f059dbca908-ER018",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E023"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E024",
+      "reason": "书信结尾“与你们的灵同在”和“与你们同在”被视为等义。",
+      "relation_id": "DK-6f059dbca908-ER020",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E021"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E025",
+      "reason": "身体作为圣灵的殿及献上身体被解释为全人。",
+      "relation_id": "DK-6f059dbca908-ER021",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E026"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E029",
+      "reason": "三卷福音书的列举项目与次序不同，进一步反驳机械分部法。",
+      "relation_id": "DK-6f059dbca908-ER025",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E028"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E031",
+      "reason": "神、耶稣、马利亚等经文中的“魂”用法说明该词常代表位格或全人。",
+      "relation_id": "DK-6f059dbca908-ER027",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-E021"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E032",
+      "reason": "总结性陈述把前述个别用例归纳为圣经的整全人观。",
+      "relation_id": "DK-6f059dbca908-ER028",
+      "relation_type": "answers",
+      "to_id": "DK-6f059dbca908-E018"
+    },
+    {
+      "from_id": "DK-6f059dbca908-E033",
+      "reason": "死亡与复活的说明限定整全人观并不否认死亡期间里面与外面的区别。",
+      "relation_id": "DK-6f059dbca908-ER029",
+      "relation_type": "qualifies",
+      "to_id": "DK-6f059dbca908-E032"
+    }
+  ],
+  "claim_relations": [
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR001",
+      "from_id": "DK-6f059dbca908-CL002",
+      "reason": "天上预先决定捆绑与释放的标准，因此彼得和教会的职能是执行并宣告该标准。",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-CL003"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR002",
+      "from_id": "DK-6f059dbca908-CL004",
+      "reason": "马太十八章把同样的话改用复数“你们”，扩展到教会。",
+      "relation_type": "qualifies",
+      "to_id": "DK-6f059dbca908-CL003"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR003",
+      "from_id": "DK-6f059dbca908-CL005",
+      "reason": "悔改与持续相信是天上既定的入国条件，教会只能据此宣告。",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-CL003"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR004",
+      "from_id": "DK-6f059dbca908-CL006",
+      "reason": "赦罪与留罪同样取决于人是否悔改，而不是教会成员的个人好恶。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-6f059dbca908-CL003"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR005",
+      "from_id": "DK-6f059dbca908-CL008",
+      "reason": "彼得拒绝受苦受死的弥赛亚使命，显示门徒尚未正确认识“基督”。",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-CL007"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR006",
+      "from_id": "DK-6f059dbca908-CL010",
+      "reason": "捨己不是任意制造痛苦，而是在利益冲突时选择天国利益。",
+      "relation_type": "qualifies",
+      "to_id": "DK-6f059dbca908-CL009"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR007",
+      "from_id": "DK-6f059dbca908-CL011",
+      "reason": "背十字架具体说明跟从基督可能要求为神旨意牺牲至死。",
+      "relation_type": "applies",
+      "to_id": "DK-6f059dbca908-CL009"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR008",
+      "from_id": "DK-6f059dbca908-CL013",
+      "reason": "灵、魂和身体均可在不同经文中代指全人，因此不能机械视为三个独立组成部分。",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-CL012"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR009",
+      "from_id": "DK-6f059dbca908-CL014",
+      "reason": "不同经文并列项目数目不一，说明列举不等于把人划分为相同数目的实体部分。",
+      "relation_type": "supports",
+      "to_id": "DK-6f059dbca908-CL012"
+    },
+    {
+      "claim_relation_id": "DK-6f059dbca908-CR010",
+      "from_id": "DK-6f059dbca908-CL015",
+      "reason": "死亡与复活中的里面之人、外面之人模型是教授对整全人观的正面说明。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-6f059dbca908-CL012"
+    }
+  ],
+  "extraction": {
+    "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+    "prompt_sha256": "d85abb01fb5c6530e2104b6d74ceab345f1d82bea79fa67cb6ceed22a3ad8982",
+    "model_id": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "max_output_tokens": 32000,
+    "schema_version": "wang_detailed_knowledge_extraction_v1",
+    "response_schema_sha256": "fd6c3946c70568df7fcdfcfa26abf4b360105444f690add63c11751447d99ec1",
+    "generation_fingerprint_sha256": "6e6a591dd640ebe6f97bc095c3ea57ca90983a6650c1cbe6a90322ae188a1f48",
+    "fingerprint_sha256": "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643",
+    "generated_at": "2026-08-14T18:06:54.930463+00:00"
+  },
+  "summary": {
+    "source_fragment_count": 83,
+    "question_count": 18,
+    "position_count": 8,
+    "observation_count": 27,
+    "evidence_step_count": 33,
+    "claim_count": 17,
+    "evidence_relation_count": 20,
+    "claim_relation_count": 10,
+    "source_fragments_count": 84,
+    "evidence_steps_count": 34,
+    "claim_relations_count": 10
+  },
+  "consensus_application": {
+    "schema_version": "wang_ai_consensus_application_v1",
+    "adjudication_fingerprint": "13c89cce5ae3d9890a50cf17598333e38040f4cd264d447de745fd01d83aa26a",
+    "applied_claim_ids": [
+      "DK-6f059dbca908-CL014",
+      "DK-6f059dbca908-CL016"
+    ],
+    "removed_claim_relation_ids": [],
+    "approval_status": "not_human_approved"
+  }
+}

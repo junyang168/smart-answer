@@ -1,0 +1,3488 @@
+{
+  "schema_version": "wang_shared_knowledge_v1.2",
+  "package_id": "DETAILED-220_426_110_1139-0d5b2062b148",
+  "source_documents": [
+    {
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "source_type": "sermon_transcript",
+      "transcript_id": "220-426-110-1139",
+      "title": "220-426-110-1139",
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/220-426-110-1139.json",
+      "review_status": "candidate"
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q001-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "我怎麼曉得這個聖經是可靠的？",
+      "paragraph_key": "S0001",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "2917d32874dcfd7edb1f2285c599921cd7a6fecf3cc00ec956dc27708d409b28",
+      "verbatim_excerpt_sha256": "daa92cc1151987b31183229f62a0d99ea5bdf63db6acd7998bb75914fc17e9c9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q002-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "到底聖經所講的是什麼。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 53,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "d2e922a29951ac3a6d8bf62e22c175118b34d9feb9f3c933db5bb8ff3bc6a339",
+      "verbatim_excerpt_sha256": "0b596e9fb5471c085dcc1894c3ea5e201615647e5f1ce64119aa8179d70c71db",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q003-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "為什麼我們用這個邏輯看第一章沒有問題，我們把邏輯用在第二章就有問題？什麼原因？",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "4b7de8f098343566da9244675c547412b916ff7ce7c119fd3064f0d59bcafb9e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q004-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "神的大能跟神的義有沒有關係？",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "56e052e9e289876a33e2cc7f55f81ce630c7a55aa319ac3d7ad3c9a7695d4961",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q005-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "我們禱告是向誰禱告？向誰？向神。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 1343,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "c481136ab2e8edd5e647b2862a26b12ee80f5d206cfad297fb01d6a2220bd83b",
+      "verbatim_excerpt_sha256": "d831d21b92959a444ebbd614205e2a3da8609d9a1856552f1174a83903c1bbbc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q006-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "這個天使起來吹那個七支的號筒，代表什麼，我們不很清楚，我們只是猜而已。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 1620,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "9d7a635d607626ce11d39824d438a5b9cdf678fed4ff57f6e6b8319bc848590e",
+      "verbatim_excerpt_sha256": "c6aa73efc58334c6979b3122fd6261ee33dbb2c581dac340a1f3a4f9b97eed7b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q007-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "為什麼緣故拉班那麼關心要找那個神像？",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "c506719771c6e38b77b01902f92f3ac50ca5c578f1055501eb690edb138dcdcc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q008-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "你看，保羅所寫的書信裡面，很少提到耶穌在地上的工作。所以保羅對耶穌、對歷史上的耶穌根本不大注意。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "913a1e5f43c3acf8a9fa271d4a3fd666080c56a18f3c9d810fa88a9010702dd4",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q009-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "可是我如果我告訴公司，『公司，你這個錢拿去用，你不能給我付利息』，那我怎麼吃飯呢？",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "7d38faaba3c50e770ac9f112be229026a34cc10d6f5f1c66c4e6cb3bc74aa1af",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q010-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "欸！聖經矛盾呢！是不是？不是。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "573bf0eda42382e4d213f9dd2c756a94c66204a3ab2c11ab19091fe35553ea2d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q011-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "所以他們說：「我們今天基督徒啊，就不能吃豬肉，不能吃這個，不能吃那個。」",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "e75d0024c4ceb2f41c2a37a09ba9557029ce27de36822bcc2aabab81cf56647f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS001-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "高臺是被人建造的。所以什麼呢？很逻辑，耶和華是被人建造的。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "b9889027a439c82cf8cbfcbec47c08789d058e59ee3ed338c441d24de523c66a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS002-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "常常有很多人，很喜歡寫書或者是講講道，很喜歡把耶穌所講的比喻的每一個細節拿出來講，講一大堆，事實上那個不是耶穌的意思。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 1343,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "c481136ab2e8edd5e647b2862a26b12ee80f5d206cfad297fb01d6a2220bd83b",
+      "verbatim_excerpt_sha256": "9acf57da8178730e9fc1c763a78ace75dd51158c51f3a3576a0862b87d0e1f72",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS003-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "不要隨便地定下將來的日程表，好像一些人很喜歡弄這套東西。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 1620,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "9d7a635d607626ce11d39824d438a5b9cdf678fed4ff57f6e6b8319bc848590e",
+      "verbatim_excerpt_sha256": "7d8105b59c0c9d978cf974d965742491f72a75fbe88f65c8737d4d16aa59793a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS004-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "他們以為說「捆綁」就是把人綁起來，說他不能進天國，下地獄。「釋放」就是說把人釋放在那裡，進天國。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "81b1647910bd97cd164f75683524fe64536038b1eb3bb68f807904d0c433de6b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS005-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "有些神學家這麼講，他說保羅不大關心historical Jesus。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "1d44e499815265faec27df65849d852331f09ce4ebef615cda0eaf7563207e14",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS006-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "因為我這個錢借給這某一個公司，這某一個公司付我利息，我犯了聖經的誡命。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "6f82ff21c495831dcb732205dc9061d3eff0ba41fdc39a1eebe76be502577d79",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS007-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "欸！聖經矛盾呢！是不是？",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "39688771f289e0260b5e44e2318227af0aed78a93d0f0059df4fdb95da35f504",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS009-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "很多人講，就是說神的拯救是發生在我們這個歷史之外，跟我們歷史沒有關係。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "264d7ca7867548936302b87f05ac2bbdfe37ceed0f260f42fa040991ea2a26e5",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS001-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "在提摩太後書三章十六節：「聖經都是神所默示的，於教訓、督責、使人歸正、教導人學義都是有益的，叫屬神的人得以完全，預備行各樣的善事。」",
+      "paragraph_key": "S0002",
+      "source_segment_index": 53,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "d2e922a29951ac3a6d8bf62e22c175118b34d9feb9f3c933db5bb8ff3bc6a339",
+      "verbatim_excerpt_sha256": "58fd131532a872024842b4673075caf4383fc535872a0f516c0b50115b5a7e56",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS002-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "約翰福音三章十六節講得非常之清楚：「神愛世人」。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "c643cb1d2a4715e4d57d3f9ad80418ac6c95a690a1edeaf2be855681d5ae8bbf",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS003-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "詩篇十八篇第二節說啊：「耶和華是我的高臺」。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "2b433789d56625b06fbf40ca794ea0698a795fabe34f41411060999852b819ce",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS004-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "就是在新約聖經的書信，保羅書信、希伯來書信，這種一些書信裡面很多都是這種文體。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "a7ae29ad7f0bddf8648b86006e03b398d987620188d433cda29c37ca78608db5",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS005-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "第十六節，很重要的一個詞，我們中文沒有翻出來，「我不以福音為恥」。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "156508db940980ea618a4bfd9d24a16ff3ca2d8a90583eff6325ec78b7d4d18d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS006-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "十七節：「因為」，「因為」，「因為神的義正在這福音上顯明出來。」",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "35b580f311e073316b4c4ad407cedc759eae0e0148574f0e3a8a174a42f932f0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS007-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "《創世記》、《出埃及記》，或者是《福音書》，講到耶穌的事蹟等等。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "c250eecc8f124257b50a2ae862404ac5b8eb2a0f8e0ec2d5dcde21fcad998687",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS008-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "a report of the event as well as an explication……我特別選這個詞，我想了半天， an explication of the significance  of the event。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "de8f7ba5391ea65b61ec0ee00525ec41f5f02a664aefa42eb4cd788f6f225966",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS009-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "詩歌有三個特徵。第一個特徵呢，就是喻意字",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "d66852a1a57efe4428e8717e6f29216f6d7649eb9a7261729c80887c276e6341",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS010-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「諸天述說神的榮耀，穹蒼傳揚祂的手段。」",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "641936f8c151151df5888279995e6d8cd8688fc3d055f2058845a63395d5b148",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS011-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「因為掩藏的事，沒有不顯出來的；隱瞞的事，沒有不露出來的。」",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "4036b6eb63ac44b1d13bd9f0c17a82178f0ac1b3a11a188a57b2812eafda0be9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS012-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「義人的紀念被稱讚；惡人的名字必朽爛。」",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "93e240fe2e52b41e0e43fe35455c8fef8ef4b4fb394d0a0bfcec1e185ca7516d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS013-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「凡要救自己生命的，必喪掉生命；凡為……凡為福音和我喪掉生命的，必救了生命。」",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "2d2c7cd1cc6b4701ee23e5f24b29be075d58a2a8b09def000dfea509c459c3cb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS014-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "耶穌設一個比喻，是要人常常禱告，不可灰心。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 1343,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "c481136ab2e8edd5e647b2862a26b12ee80f5d206cfad297fb01d6a2220bd83b",
+      "verbatim_excerpt_sha256": "ce8a9c7498a1ef7258e232f0e44818349fee34ff4fcfa77b4a4dcd8ca799fd22",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS015-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "裡面包含很多的異象，而且用很多的記號、很多的symbolism、很多的記號在那裡。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 1620,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "9d7a635d607626ce11d39824d438a5b9cdf678fed4ff57f6e6b8319bc848590e",
+      "verbatim_excerpt_sha256": "648fb7a39b6d58b73fa5d8be3820ffcf9a5cd9c436695ff8c9c5a637a918c87f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS016-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「凡你在地上所捆綁的，在天上也要捆綁；你在地上所釋放的，在天上也要釋放。」",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "2c0a18c1809285dea8560b1e96f460ae1b7beea7d8163c6b9b40e872cce8f6d1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS017-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「不可向他取利，也不可向他多要；只要敬畏你的神，使你的弟兄與你同住。」",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "452bfcf58b80a21e9a2bdc5cd8357330c7944912ef1299ca88cc624c375d562f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS018-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「使徒和作長老的弟兄們問……的外邦人……在全世界各地的外邦人……」是不是？沒有。「問安提阿、敘利亞、基利家外邦的眾弟兄安。」",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "c5b7417c6b0c3fbb1324d08daef8e2ac460c45d44c946462fe8da12e80897fc7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS019-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "神在古時，神在過去，曾經用各種不同的方法來啟示，可是最後，ultimate，最後就藉著祂兒子，來曉諭我們，耶穌基督。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "9a11f6287a0fb4269846cfc6aa7eafc169770fd5b155cf0bc8d392ed323678b9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS020-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "神是說我揀選亞伯拉罕，乃是要使天下萬國因你而蒙福。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "7d00c7848ada525aa6fe2354c15fc085366adb1bf7d0878018eda3103a6e4ed8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E001-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "常常有人說：「我怎麼曉得這個聖經是可靠的？」比如說，《新約聖經》裡面所說的很多歷史性的可靠性，我怎麼曉得？那這一本書呢，它是給我們一個比較好一點的介紹。",
+      "paragraph_key": "S0001",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "2917d32874dcfd7edb1f2285c599921cd7a6fecf3cc00ec956dc27708d409b28",
+      "verbatim_excerpt_sha256": "c5bd1949f9db7f232d306f384934aa4ad0e96a220881f08ef46940cc4bde9798",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E002-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "聖經的權威的根基，聖經所有的權威，就是因為聖經是神所默示的。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 53,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "d2e922a29951ac3a6d8bf62e22c175118b34d9feb9f3c933db5bb8ff3bc6a339",
+      "verbatim_excerpt_sha256": "0f1a2c5f02ffa1d3f5e120add3c8ca86a0f7d7c8aa477ae72e3454bb77bd389d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E003-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "如果我們亂解經，如果我們不把聖經的implication或者聖經的interpretation怎麼能夠把聖經的真的旨意把它瞭解出來的話，我們誤解聖經，把聖經的信息把它歪曲掉，如果是這樣的話，聖經的權威也是不存在的。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 53,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "d2e922a29951ac3a6d8bf62e22c175118b34d9feb9f3c933db5bb8ff3bc6a339",
+      "verbatim_excerpt_sha256": "9f2c9aaeb81cc8f005d517f53cb1f2f0a3d12b278311b10cd2baf230ac13344c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E004-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "解經就是要我們去找出到底聖經所講的是什麼，叫做 exegesis，就是要把聖經原來所講的，原來的作者……因為聖經其實是原來作者寫給原來的讀者，他所講的意義到底是怎麼一回事。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 53,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "d2e922a29951ac3a6d8bf62e22c175118b34d9feb9f3c933db5bb8ff3bc6a339",
+      "verbatim_excerpt_sha256": "4c658b49aa4c185ead23aa43cd7438355b320c1c9a558a448704883ab5d1beed",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E005-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "詩篇二十八篇第七節講：「耶和華是我的盾牌」。是聖經講的，不是我講的啊，不是我亂吹，是聖經講的。「耶和華是我的盾牌」。不是說是盾牌嗎？我們知道盾牌沒有意識，沒有思想，不能夠呼吸，那盾牌是死的東西，動也不能動，沒有意識，沒有思想，不能呼吸。所以怎麼樣呢？很逻辑，耶和華沒有意識，耶和華沒有思想，耶和華不能呼吸。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "3fa496f552c1a04f9b883d04bcf22ffc6dd7b8742864a0cdf8112d9fb6d38a4c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E006-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "就表示聖經裡面有各種不同的文體。所以如果我們不把聖經各種不同的文體分别的話，我們就搞得一塌糊塗，搞得亂七八糟。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 156,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "5bb586bc7e943059cfc9952569efd2c1349d9c9ae8b05bf32bc89acfd34ad6f6",
+      "verbatim_excerpt_sha256": "3b31311cb9e1cd9161029aef592645378d2fd484950bba2853f5b3ef598e0fa0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E007-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "第一種文體，叫做discursive，或者說議論，叫 discourse literature  or logical literature。這種文體，它的特性是什麼呢？它是用議論的方式來傳達它的信息，這是它的特徵。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "0ca38e40a9d2ae2c0bef87b67b95203895d048b236269d2d78c1248741a4bc15",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E008-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "所以當我們在念這種 discourse or logical reasoning……就講到這議論文的時候，我們要特別小心看到他們的這些連接詞，比如說：「因為」、「因此」、「所以」等等。這種連接詞變成非常非常重要，因為這個就是要把兩個不同的思想連接起來的一個方法。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "35c4e267eec33b2278a008b360fcec10547ff8a9919c146b134b00f05bcb9669",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E009-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "他所說的，說福音就是神的大能。為什麼緣故福音是神的大能？因為「神的義正在這福音上顯明出來」。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "78fe72743f20b0e5037c3a99d99d1c9895447ec0a5bc9aae6d4834cec6927173",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E010-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "所以啊，羅馬書第六章開始講到，不但是神稱我們為義，第六章第一節開始講到祂的大能要使聖徒過著一個聖潔的生活。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 357,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f7d4581dc93d9afe29d0c38481b1282095013e530e033cfdf1243f9f735f255c",
+      "verbatim_excerpt_sha256": "74c019fee90e33486ce8f4b4205da481a805466f83d17352cf1a02cf7c3d64b1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E011-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "我所說的「救恩的歷史」，乃是神在我們歷史當中施行救贖的歷史。我故意把那個「歷史」重複兩遍。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "36c3de4db1bfab9af3d6ca94e217d49157bb31878b6cdaac5c8187ca53fdda8e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E012-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "在這種聖經的敘说文裡面啊，平常包括兩部分。第一個就是報導事實，同時要來詳明它的意義。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "e91b566d5ce58844117cf54dff8792a0eb323327d1a80f620c138dd1ea627a0f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E013-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "我們要分辨什麼是重要的essential，什麼是次要的，就是用來裝飾用的，使這個文章能夠活動一點、生動一點的，那一種我們就不必花那麼多的時間想要把那個意義找出來。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 731,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "78cf24a3b8e6e2db5236936005e17a35148865d70513ad5920ad6ebf110dd91b",
+      "verbatim_excerpt_sha256": "1642f8a3616b69149cd0a7e1611e2eddfcffdeb9aca2e6e4de14634417a863a2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E014-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "詩篇講說：「耶和華是我的盾牌」。那是一個 figurative language，那個並不是說耶和華是我的盾牌。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "0981ba70e8229c5f58fcad3ee2099e71651135a7ef971cf8e8a973c2e67c6d31",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E015-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "第一種叫做「同义的平行法」，就是 synonymous parallelism。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 979,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "ed1ef7aeca58d2e3693aef444932758eb3086c1def6214995b84ac031e92f64c",
+      "verbatim_excerpt_sha256": "91cf032ca3dc99867bfa5db56f2314b80e206a6806528c557db03223545cc2da",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E016-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "平常是什麼呢？就是用一個故事來說明，或者說闡明一個主要的真理，那是它的特徵。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 1343,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "c481136ab2e8edd5e647b2862a26b12ee80f5d206cfad297fb01d6a2220bd83b",
+      "verbatim_excerpt_sha256": "569bd55534f48f61024e92ee60e6a1ae6495cbb2ff0e85d986e289da506ee85f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E017-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "OK，寡婦代表我們，所以這個不義的官代表神。」那一种說法，讓我們看出那個 absurdity，那個荒唐。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 1343,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "c481136ab2e8edd5e647b2862a26b12ee80f5d206cfad297fb01d6a2220bd83b",
+      "verbatim_excerpt_sha256": "9a6c7d095169c432473257fc97ae90b88c5c40ce06fef450a9dc8dbb357ab1ee",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E018-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "我們沒有百分之百的把握，這個某一個記號，比如說七個天使吹响七个号筒，倾倒七个碗……揭開七個印，在啟示錄裡面。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 1620,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "9d7a635d607626ce11d39824d438a5b9cdf678fed4ff57f6e6b8319bc848590e",
+      "verbatim_excerpt_sha256": "3cd1d1bbd3b80c23432609a38e62c0be64de2c7e41f7d84e4a4df1b6ac7764fb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E019-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "不管世界上的人如何對待神，我們的主到底還是坐在寶座上，祂還是宇宙的主宰，祂還是這個世界歷史的主宰。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 1620,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "9d7a635d607626ce11d39824d438a5b9cdf678fed4ff57f6e6b8319bc848590e",
+      "verbatim_excerpt_sha256": "dc5d11030da794a0f4b2c716757ed8776ca0a289673917c15299c9ea60879237",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E020-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "因為在我們的這種文化裡面，大家都曉得「吹牛」是講大話，是講誇大的話。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "4a7579b17b7c9c728623c6dee3b0a88df023f30d75560dbde30545883e818806",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E021-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "誰可以拿到那個神像，那個人就可以繼承父親的財產。所以那個神像，拉班所找的那個神像，就是繼承父親產業權的憑據。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "6fa08ad1bb1539bd8e941b3930f1b14a417fed00ebebce89f1b9e0af2d8763ca",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E022-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「捆綁」跟「釋放」就是當時猶太人的拉比學校，他們的Rabbi，或者拉比學派，拉比學院等等，這些人啊，拉比，他們所用的，實際上他們的slang。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "54614a0dda49382a3f001d2b6147f8c744e2f54b5626510e36d8b7f14e92903d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E023-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "保羅的書信不是寫給還沒有信主的人看的。保羅的書信是寫給那些他已經傳道、帶領归主以後、已經信主的基督徒看的。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "7e0ce8ba82a3c52d05fca5e3f837802691e028a977b26560509f5743d5047d7c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E024-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "你的弟兄、你的朋友啊，就是因為很貧窮，沒有辦法，在這種情況底下向你借錢的。所以聖經說要可憐他，你不要向他拿利息。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "efd8870e2d3dacad41cd4878ca7c91b1ad9dd17e9d94237ca10b16d26a32711e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E025-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "三十五節說：「你的弟兄在你那裡若漸漸貧窮，手中缺乏，你就要幫助他，使他與你同住，像外人和寄居的一樣。」所以那是完全不同的情況。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "84595a1008af7ec4b48a3c39e7aaea53494420f5d7d6a5b29b83ed6831f5e703",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E026-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "使徒行傳十五章那裡說基督徒要禁戒祭偶像的物。哥林多前書第十章二十三節底下，這章長一點，所以我不念了。哥林多教會寫信問保羅說：「這些祭過偶像的東西，我們是不是可以吃？」保羅跟他講：「你吃啊，沒有問題，沒有錯事，你吃啊！只要你吃那個祭偶像的東西不叫別人跌倒就好了。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "ebaca6a9d332308c373b366cecee0d27fa533aea6b87595f10b7740bdb5f78ff",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E027-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "所以在這種情況底下，情況不一樣。保羅說：「你們吃祭偶像的物，沒關係，因為偶像根本就不存在。」",
+      "paragraph_key": "S0010",
+      "source_segment_index": 2162,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "eca0a447fd08aefe75e250b1db3afc62640a4f298427216b22fff3b68d2c0f4e",
+      "verbatim_excerpt_sha256": "12fab8975956bd91a5cd38d10cbd55e7027c4c7fcd8f47ed88f6a46c4de19caa",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E029-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "因為你要學代數以前，你要先學某種算術做你代數的基礎。這按部就班，一步一步來。照樣，神對我們的啟示也是 progressive revelation。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "bb5c796d4206e57df080b5bd254d369eadc134f7b280a942e5d4642ecbd95098",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E030-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "神教猶太人不能夠吃豬，不能夠吃這個，不能夠吃那個的目的，乃是要使猶太人跟外邦人當中保持一個距離，使得這個外邦人的錯誤的思想、錯誤的這種多神的、拜偶像的思想不去污染你們這些人",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "83643f691bd4ca7afa8896bea69df24c30545585c411049acf58e7c891920f53",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E031-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "這樣，律法是我們訓蒙的師傅……",
+      "paragraph_key": "S0011",
+      "source_segment_index": 2485,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "f3e64fd2039e48c3d2fb9324012968080857607bf94073a612cff73635a1f234",
+      "verbatim_excerpt_sha256": "982b54fea23f62eae0d56afc2f20c4fdb08094039c13f08f7c9155a7f41a3a45",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E032-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "所以如果各位真的有心、想要好好研究聖經的話，我真是推薦各位買，不是因為他是我的好朋友，而是因為這本書的價格。",
+      "paragraph_key": "S0001",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "2917d32874dcfd7edb1f2285c599921cd7a6fecf3cc00ec956dc27708d409b28",
+      "verbatim_excerpt_sha256": "7dc0cd0dc64db8e0adcb56f7fc44f468d9344e1076b368b684eff1598660b9d8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    }
+  ],
+  "questions": [
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL021"
+      ],
+      "answer_state": "partially_answered",
+      "question_id": "DK-0d5b2062b148-Q001",
+      "question_type": "听众常见护教问题",
+      "questioner": "professor",
+      "text": "人如何知道圣经，特别是新约所述历史，是可靠的？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL003"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q002",
+      "question_type": "释经定义问题",
+      "questioner": "professor",
+      "text": "解经究竟要找出圣经所讲的什么？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL004"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q003",
+      "question_type": "文体与逻辑问题",
+      "questioner": "professor",
+      "text": "为什么同一种逻辑用于“神爱世人”等命题没有问题，用于“耶和华是盾牌、高台”却产生问题？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL006",
+        "DK-0d5b2062b148-CL007"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q004",
+      "question_type": "经文思想关系问题",
+      "questioner": "professor",
+      "text": "罗马书一章中神的大能与神的义有没有关系？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL011"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q005",
+      "question_type": "比喻解释归谬问题",
+      "questioner": "professor",
+      "text": "若祷告是向神祷告，是否应把不义之官这个角色逐项对应为神？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL012"
+      ],
+      "answer_state": "partially_answered",
+      "question_id": "DK-0d5b2062b148-Q006",
+      "question_type": "启示录象征解释问题",
+      "questioner": "professor",
+      "text": "启示录中天使吹号等具体记号究竟代表什么？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL014"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q007",
+      "question_type": "历史文化背景问题",
+      "questioner": "professor",
+      "text": "拉班为什么如此急切地寻找被带走的家神？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL016"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q008",
+      "question_type": "外部神学立场提出的问题",
+      "questioner": "professor",
+      "text": "保罗书信很少提到耶稣在地上的工作，是否证明保罗不关心历史上的耶稣？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL017"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q009",
+      "question_type": "听众伦理与经文应用问题",
+      "questioner": "audience",
+      "text": "把钱借给公司并收取利息，是否违反利未记二十五章禁止取利的命令？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL018"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q010",
+      "question_type": "表面经文矛盾问题",
+      "questioner": "professor",
+      "text": "使徒行传十五章禁止祭偶像之物，而哥林多前书容许在不使人跌倒时食用，两处是否矛盾？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-0d5b2062b148-CL020"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-0d5b2062b148-Q011",
+      "question_type": "旧约律法现代适用问题",
+      "questioner": "professor",
+      "text": "旧约关于洁净与不洁净食物的条例是否意味着今日基督徒不能吃猪肉？",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q011-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "position_nodes": [
+    {
+      "attribution": "教授为归谬而模拟的字面主义解释",
+      "position_id": "DK-0d5b2062b148-POS001",
+      "title": "诗歌隐喻可按所指物体的全部字面属性推论",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "常见讲道或著作中的解释方式",
+      "position_id": "DK-0d5b2062b148-POS002",
+      "title": "比喻的每一个细节都可逐项解释为属灵真理",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "一些启示录解释者",
+      "position_id": "DK-0d5b2062b148-POS003",
+      "title": "可凭启示录象征确定未来事件日程表",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "不了解拉比俗语的解释者",
+      "position_id": "DK-0d5b2062b148-POS004",
+      "title": "捆绑和释放是决定某人下地狱或进天国的权力",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "有些神学家",
+      "position_id": "DK-0d5b2062b148-POS005",
+      "title": "保罗不大关心历史上的耶稣",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "前来求助的一位弟兄",
+      "position_id": "DK-0d5b2062b148-POS006",
+      "title": "从公司收取借款利息违反利未记的命令",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授为提出表面难题而模拟的结论",
+      "position_id": "DK-0d5b2062b148-POS007",
+      "title": "使徒行传与哥林多前书关于祭偶像之物彼此矛盾",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "忽略渐进启示的人",
+      "position_id": "DK-0d5b2062b148-POS008",
+      "title": "旧约食物条例直接禁止今日基督徒吃猪肉",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-Q011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "神学界中对“救恩历史”的一种用法",
+      "position_id": "DK-0d5b2062b148-POS009",
+      "title": "神的拯救发生在现实历史之外，与现实历史无关",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS009-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "observations": [
+    {
+      "observation_id": "DK-0d5b2062b148-OBS001",
+      "observation_type": "scripture_text",
+      "scripture_refs": [
+        "提摩太后书3:16-17"
+      ],
+      "statement": "讲道引用提摩太后书三章十六至十七节，内容包括圣经由神默示及其教训、督责、归正、学义和预备善事的功用。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS002",
+      "observation_type": "scripture_text",
+      "scripture_refs": [
+        "约翰福音3:16"
+      ],
+      "statement": "教授以“神爱世人”作为可按普通命题逻辑展开的例子。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS003",
+      "observation_type": "figurative_expression",
+      "scripture_refs": [
+        "诗篇18:2"
+      ],
+      "statement": "诗篇称耶和华为“我的高台”，在讲道中被识别为诗歌性的比喻表达。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS004",
+      "observation_type": "genre_distribution",
+      "scripture_refs": [
+        "保罗书信",
+        "希伯来书"
+      ],
+      "statement": "教授观察，新约书信中有许多议论文体；先知演讲和耶稣较长教训中也可出现这种文体。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS005",
+      "observation_type": "translation_observation",
+      "scripture_refs": [
+        "罗马书1:16"
+      ],
+      "statement": "教授指出罗马书一章十六节与上下文连接的一个重要词在其所用中文译本中没有译出。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS006",
+      "observation_type": "connective_observation",
+      "scripture_refs": [
+        "罗马书1:17"
+      ],
+      "statement": "教授强调罗马书一章十七节以“因为”连接福音是神的大能与神的义在福音中显明。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS007",
+      "observation_type": "genre_examples",
+      "scripture_refs": [
+        "创世记",
+        "出埃及记",
+        "福音书"
+      ],
+      "statement": "创世记、出埃及记及记述耶稣事迹的福音书被列为圣经记叙文的例子。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS008",
+      "observation_type": "literary_structure",
+      "scripture_refs": [],
+      "statement": "教授以英文术语把记叙文的两方面表述为事件报告及事件意义的阐明。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS009",
+      "observation_type": "genre_feature",
+      "scripture_refs": [],
+      "statement": "教授把比喻性语言列为诗歌的第一个特征，并进一步列出情感和平行法。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS010",
+      "observation_type": "synonymous_parallelism",
+      "scripture_refs": [
+        "诗篇19:1"
+      ],
+      "statement": "诗篇十九篇一节中“诸天”与“穹苍”、“述说”与“传扬”被观察为同义平行关系。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS011",
+      "observation_type": "synonymous_parallelism",
+      "scripture_refs": [
+        "马可福音4:22"
+      ],
+      "statement": "马可福音四章二十二节的两半句被观察为近义平行，显示耶稣讲论中也有诗歌样式。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS012",
+      "observation_type": "antithetical_parallelism",
+      "scripture_refs": [
+        "箴言10:7"
+      ],
+      "statement": "箴言十章七节以义人与恶人、被称赞与必朽烂构成反义平行。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS013",
+      "observation_type": "antithetical_parallelism",
+      "scripture_refs": [
+        "马可福音8:35"
+      ],
+      "statement": "马可福音八章三十五节以救生命与丧掉生命构成反义平行。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS014",
+      "observation_type": "stated_parable_purpose",
+      "scripture_refs": [
+        "路加福音18:1"
+      ],
+      "statement": "路加福音直接交代不义之官比喻的目的，是要人常常祷告、不可灰心。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS015",
+      "observation_type": "genre_feature",
+      "scripture_refs": [
+        "但以理书",
+        "启示录"
+      ],
+      "statement": "启示文体的特征包括许多异象、记号与象征。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS016",
+      "observation_type": "scripture_text",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "statement": "讲道引用马太福音关于地上捆绑、释放与天上对应的说法。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS017",
+      "observation_type": "scripture_text",
+      "scripture_refs": [
+        "利未记25:36"
+      ],
+      "statement": "利未记二十五章三十六节明文禁止向所述对象取利或多要。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS018",
+      "observation_type": "audience_context",
+      "scripture_refs": [
+        "使徒行传15:23"
+      ],
+      "statement": "使徒行传十五章的信明确寄给安提阿、叙利亚、基利家的外邦信徒，而非笼统寄给世界各地所有外邦人。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS019",
+      "observation_type": "canonical_context",
+      "scripture_refs": [
+        "希伯来书1:1-2"
+      ],
+      "statement": "希伯来书一章呈现从古时多方启示到最终借儿子晓谕的次序。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-0d5b2062b148-OBS020",
+      "observation_type": "canonical_theme",
+      "scripture_refs": [
+        "创世记12:1-3"
+      ],
+      "statement": "教授观察，亚伯拉罕蒙拣选的目的不是排除其他民族，而是使天下万国因他蒙福。",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS020-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "evidence_steps": [
+    {
+      "discourse_role": "转述常见提问并推荐参考书",
+      "evidence_step_id": "DK-0d5b2062b148-E001",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL021"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授说F.F. Bruce的著作可对新约历史可靠性问题提供不太专门也不太浅薄的介绍。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "主题命题",
+      "evidence_step_id": "DK-0d5b2062b148-E002",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL001"
+      ],
+      "scripture_refs": [
+        "提摩太后书3:16-17"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "圣经全部权威的根基是它由神默示。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "由权威推论解经必要性",
+      "evidence_step_id": "DK-0d5b2062b148-E003",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL002"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "若误解或歪曲圣经的信息，圣经权威就不能在人的理解与实践中成立。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "术语定义",
+      "evidence_step_id": "DK-0d5b2062b148-E004",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL003"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "Exegesis是找出经文原作者向原读者表达的原来意义。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "反面归谬示范；模拟错误解释者推论",
+      "evidence_step_id": "DK-0d5b2062b148-E005",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL004"
+      ],
+      "scripture_refs": [
+        "诗篇28:7",
+        "诗篇18:2"
+      ],
+      "speaker": "professor",
+      "stance": "opposed",
+      "statement": "若把诗篇的“盾牌”按字面物体属性推论，就会错误地说耶和华没有意识、思想或呼吸。",
+      "step_type": "reasoning",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "回答归谬示范提出的问题",
+      "evidence_step_id": "DK-0d5b2062b148-E006",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL004"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "逻辑在前两例可用、在盾牌与高台例中却导致错误，是因为圣经包含不同文体，解释前必须加以分辨。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "文体定义",
+      "evidence_step_id": "DK-0d5b2062b148-E007",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL005"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "议论文或逻辑文体以议论方式传达信息。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "议论文解释方法",
+      "evidence_step_id": "DK-0d5b2062b148-E008",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL005"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "阅读议论文要特别注意“因为”“因此”“所以”等连接词，因为它们标明思想之间的关系。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "罗马书逻辑链条释经",
+      "evidence_step_id": "DK-0d5b2062b148-E009",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL006"
+      ],
+      "scripture_refs": [
+        "罗马书1:15-17"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "罗马书的“因为”表明福音是神的大能，与神的义在福音中显明具有因果关系。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "由罗马书逻辑结构得出的神学结论",
+      "evidence_step_id": "DK-0d5b2062b148-E010",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL007"
+      ],
+      "scripture_refs": [
+        "罗马书6:1"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "罗马书第六章继续说明神的大能使圣徒过圣洁生活，因此福音不止于称义。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "术语限定并排除另一神学用法",
+      "evidence_step_id": "DK-0d5b2062b148-E011",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL008"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授所说的救恩历史，是神在现实历史中施行救赎的历史，不是历史之外的拯救。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "记叙文结构观察",
+      "evidence_step_id": "DK-0d5b2062b148-E012",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL008"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "圣经记叙文通常既报告事实，也阐明事件本来包含的意义。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "记叙文阅读方法",
+      "evidence_step_id": "DK-0d5b2062b148-E013",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL009"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "阅读记叙文应区别重要内容与使叙事生动的次要细节。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "诗歌比喻性语言说明",
+      "evidence_step_id": "DK-0d5b2062b148-E014",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL010"
+      ],
+      "scripture_refs": [
+        "诗篇28:7"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "诗篇中“耶和华是我的盾牌”属于比喻性语言，不是按字面说神是一件盾牌。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "诗歌结构分类",
+      "evidence_step_id": "DK-0d5b2062b148-E015",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL010"
+      ],
+      "scripture_refs": [
+        "诗篇19:1",
+        "马可福音4:22",
+        "箴言10:7",
+        "马可福音8:35"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "希伯来诗歌常用平行法，教授重点说明同义平行和反义平行，并以多处经文展示其结构。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "比喻文体定义",
+      "evidence_step_id": "DK-0d5b2062b148-E016",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL011"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "比喻通常用一个故事阐明一个主要真理。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "反面归谬；模拟逐项对应比喻细节的解释者",
+      "evidence_step_id": "DK-0d5b2062b148-E017",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL011"
+      ],
+      "scripture_refs": [
+        "路加福音18:1-8"
+      ],
+      "speaker": "professor",
+      "stance": "opposed",
+      "statement": "把寡妇对应信徒后再把不义之官对应为神，是强迫每个比喻细节对应属灵对象而产生的荒唐结果。",
+      "step_type": "reasoning",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "启示文体解释限制",
+      "evidence_step_id": "DK-0d5b2062b148-E018",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL012"
+      ],
+      "scripture_refs": [
+        "启示录"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "解释启示录具体记号时没有百分之百把握，所以最多只能谨慎提出猜想，不能武断自信。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "启示录整体信息总结",
+      "evidence_step_id": "DK-0d5b2062b148-E019",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL012"
+      ],
+      "scripture_refs": [
+        "启示录"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "启示录清楚的信息是主仍坐在宝座上，是宇宙和世界历史的主宰。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "文化俗语类比",
+      "evidence_step_id": "DK-0d5b2062b148-E020",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL013"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“吹牛”不能按“吹”和“牛”的字面组合理解，说明解释语言必须知道其文化俗语背景。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "古代制度背景解释",
+      "evidence_step_id": "DK-0d5b2062b148-E021",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL014"
+      ],
+      "scripture_refs": [
+        "创世记31:30"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授引述其所说的考古文化背景，认为拥有家神者可继承父亲财产，家神是继承权凭据。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "拉比语言背景解释",
+      "evidence_step_id": "DK-0d5b2062b148-E022",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL015"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“捆绑”和“释放”是当时犹太拉比使用的俗语，分别表示禁止和准许。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "书信受众背景反驳",
+      "evidence_step_id": "DK-0d5b2062b148-E023",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL016"
+      ],
+      "scripture_refs": [
+        "保罗书信"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "保罗书信写给已由保罗传道并带领归主的基督徒，并非面向尚未听过福音者的布道文本。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "利未记经济背景解释",
+      "evidence_step_id": "DK-0d5b2062b148-E024",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL017"
+      ],
+      "scripture_refs": [
+        "利未记25:36"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "利未记禁止取利的原初处境，是弟兄因贫穷、缺乏生活所需而借钱。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "直接上下文限定",
+      "evidence_step_id": "DK-0d5b2062b148-E025",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL017"
+      ],
+      "scripture_refs": [
+        "利未记25:35-36"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "前一节把禁止取利的对象限定为渐渐贫穷、手中缺乏的弟兄。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "提出表面经文张力",
+      "evidence_step_id": "DK-0d5b2062b148-E026",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL018"
+      ],
+      "scripture_refs": [
+        "使徒行传15:19-29",
+        "哥林多前书10:23-33"
+      ],
+      "speaker": "professor",
+      "stance": "neutral",
+      "statement": "使徒行传要求禁戒祭偶像之物，而哥林多前书在不使人跌倒的条件下容许食用，表面上形成张力。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E026-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "按地区处境消解表面矛盾",
+      "evidence_step_id": "DK-0d5b2062b148-E027",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL018"
+      ],
+      "scripture_refs": [
+        "使徒行传15:23",
+        "哥林多前书10:23-33"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "安提阿、叙利亚、基利家的保守犹太信徒处境与哥林多不同，因此两处针对祭偶像之物的实际指示不同而不矛盾。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E027-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "渐进启示的经文依据",
+      "evidence_step_id": "DK-0d5b2062b148-E028",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL019"
+      ],
+      "scripture_refs": [
+        "希伯来书1:1-2"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "希伯来书一章表明神过去以不同方法启示，最后借着祂儿子晓谕人。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-OBS019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教育类比论证",
+      "evidence_step_id": "DK-0d5b2062b148-E029",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL019"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "如同学习代数前要先以算术为基础，神的启示也按部就班、一步一步展开。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E029-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "旧约食物条例的阶段性目的",
+      "evidence_step_id": "DK-0d5b2062b148-E030",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL020"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "旧约食物限制的目的，是使犹太人与外邦人保持距离，避免多神及偶像崇拜思想污染他们。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E030-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "讲道在逐字稿结尾处引用但未完成展开的经文依据",
+      "evidence_step_id": "DK-0d5b2062b148-E031",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL020"
+      ],
+      "scripture_refs": [
+        "加拉太书3:23-24"
+      ],
+      "speaker": "professor",
+      "stance": "quoted",
+      "statement": "教授引用加拉太书称律法为训蒙的师傅，以支持律法在启示进程中的预备性作用；逐字稿在此处中断。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E031-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "研经资源应用与推荐",
+      "evidence_step_id": "DK-0d5b2062b148-E032",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL021"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授向有心认真研究圣经的听众推荐Robert A. Traina关于系统查经方法的著作。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E032-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL001",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E002"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "提摩太后书3:16-17"
+      ],
+      "topic_terms": [
+        "圣经权威",
+        "神所默示",
+        "信仰根基",
+        "生活伦理"
+      ],
+      "title": "圣经权威的根基在于圣经是神所默示的，因此圣经是信仰与生活行事为人的根据。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E002",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "主题命题",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "聖經的權威的根基，聖經所有的權威，就是因為聖經是神所默示的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL002",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E003"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "解经必要性",
+        "圣经权威",
+        "误解圣经"
+      ],
+      "title": "承认圣经有权威却误解或歪曲其信息，会使圣经权威在实际运用中落空，因此正确解经非常重要。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E003",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由权威推论解经必要性",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "如果我們亂解經，如果我們不把聖經的implication或者聖經的interpretation怎麼能夠把聖經的真的旨意把它瞭解出來的話，我們誤解聖經，把聖經的信息把它歪曲掉，如果是這樣的話，聖經的權威也是不存在的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL003",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E004"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "解经定义",
+        "exegesis",
+        "作者原意",
+        "原读者"
+      ],
+      "title": "解经不是把经文解释成自己的意思，而是找出原作者写给原读者时所表达的原来意义。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E004",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "术语定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "解經就是要我們去找出到底聖經所講的是什麼，叫做 exegesis，就是要把聖經原來所講的，原來的作者……因為聖經其實是原來作者寫給原來的讀者，他所講的意義到底是怎麼一回事。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL004",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E005",
+        "DK-0d5b2062b148-E006"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音3:16",
+        "歌罗西书1:14",
+        "诗篇28:7",
+        "诗篇18:2"
+      ],
+      "topic_terms": [
+        "文体",
+        "解释方法",
+        "字面解释",
+        "诗歌"
+      ],
+      "title": "解释一段圣经时，首先必须辨别其文体；若对不同文体使用同一种字面逻辑，就会得出荒谬结论。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E005",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "opposed",
+              "discourse_role": "反面归谬示范；模拟错误解释者推论",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "詩篇二十八篇第七節講：「耶和華是我的盾牌」。是聖經講的，不是我講的啊，不是我亂吹，是聖經講的。「耶和華是我的盾牌」。不是說是盾牌嗎？我們知道盾牌沒有意識，沒有思想，不能夠呼吸，那盾牌是死的東西，動也不能動，沒有意識，沒有思想，不能呼吸。所以怎麼樣呢？很逻辑，耶和華沒有意識，耶和華沒有思想，耶和華不能呼吸。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E006",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "回答归谬示范提出的问题",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "就表示聖經裡面有各種不同的文體。所以如果我們不把聖經各種不同的文體分别的話，我們就搞得一塌糊塗，搞得亂七八糟。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL005",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E007",
+        "DK-0d5b2062b148-E008"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "罗马书1:14-17"
+      ],
+      "topic_terms": [
+        "议论文",
+        "逻辑",
+        "连接词",
+        "思想发展"
+      ],
+      "title": "议论文以逻辑方式传达信息，解释时必须追踪思想发展及因果、结论等连接词之间的关系。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E007",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "文体定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "第一種文體，叫做discursive，或者說議論，叫 discourse literature  or logical literature。這種文體，它的特性是什麼呢？它是用議論的方式來傳達它的信息，這是它的特徵。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E008",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "议论文解释方法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以當我們在念這種 discourse or logical reasoning……就講到這議論文的時候，我們要特別小心看到他們的這些連接詞，比如說：「因為」、「因此」、「所以」等等。這種連接詞變成非常非常重要，因為這個就是要把兩個不同的思想連接起來的一個方法。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL006",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E009"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "罗马书1:15-17"
+      ],
+      "topic_terms": [
+        "罗马书",
+        "福音",
+        "神的大能",
+        "神的义",
+        "连接词"
+      ],
+      "title": "罗马书一章十五至十七节的连接词表明：保罗愿意传福音，因为不以福音为耻；不以福音为耻，因为福音是神的大能；福音是神的大能，因为神的义在其中显明。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E009",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "罗马书逻辑链条释经",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他所說的，說福音就是神的大能。為什麼緣故福音是神的大能？因為「神的義正在這福音上顯明出來」。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL007",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E010"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "罗马书1:16-17",
+        "罗马书6:1"
+      ],
+      "topic_terms": [
+        "福音全貌",
+        "称义",
+        "成圣",
+        "圣洁生活",
+        "神的大能"
+      ],
+      "title": "福音的全貌不只是罪得赦免和被称义；神的大能也要使圣徒过成圣、圣洁的生活。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E010",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由罗马书逻辑结构得出的神学结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以啊，羅馬書第六章開始講到，不但是神稱我們為義，第六章第一節開始講到祂的大能要使聖徒過著一個聖潔的生活。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL008",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E011",
+        "DK-0d5b2062b148-E012"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS009"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "创世记",
+        "出埃及记",
+        "福音书"
+      ],
+      "topic_terms": [
+        "记叙文",
+        "救恩历史",
+        "历史事件",
+        "事件意义"
+      ],
+      "title": "圣经记叙文主要叙述神在真实历史中施行救赎的历史，并且同时报告事件及阐明事件本来所含的意义。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E011",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "术语限定并排除另一神学用法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我所說的「救恩的歷史」，乃是神在我們歷史當中施行救贖的歷史。我故意把那個「歷史」重複兩遍。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E012",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "记叙文结构观察",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "在這種聖經的敘说文裡面啊，平常包括兩部分。第一個就是報導事實，同時要來詳明它的意義。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL009",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E013"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "记叙文细节",
+        "主要与次要",
+        "解释重点"
+      ],
+      "title": "阅读记叙文时应分辨承载主要意义的关键内容与为使故事生动而存在的次要细节，不必对每个装饰性细节投入同等解释力度。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E013",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "记叙文阅读方法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我們要分辨什麼是重要的essential，什麼是次要的，就是用來裝飾用的，使這個文章能夠活動一點、生動一點的，那一種我們就不必花那麼多的時間想要把那個意義找出來。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL010",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E014",
+        "DK-0d5b2062b148-E015"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "诗篇28:7",
+        "诗篇18:2",
+        "诗篇19:1",
+        "马可福音4:22",
+        "箴言10:7",
+        "马可福音8:35"
+      ],
+      "topic_terms": [
+        "诗歌",
+        "比喻性语言",
+        "情感",
+        "平行法",
+        "同义平行",
+        "反义平行"
+      ],
+      "title": "诗歌具有比喻性语言、强烈情感和平行法等特征；解释时不可把比喻性表达当成字面描述，并应借同义或反义平行关系理解词义。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E014",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "诗歌比喻性语言说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "詩篇講說：「耶和華是我的盾牌」。那是一個 figurative language，那個並不是說耶和華是我的盾牌。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E015",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "诗歌结构分类",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "第一種叫做「同义的平行法」，就是 synonymous parallelism。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL011",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E016",
+        "DK-0d5b2062b148-E017"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "路加福音18:1-8",
+        "路加福音11:5-10"
+      ],
+      "topic_terms": [
+        "比喻",
+        "相似点",
+        "主要真理",
+        "灵意解经"
+      ],
+      "title": "比喻通常用一个故事阐明一个主要真理，故事与真理之间通常只有一个重要相似点，因此不可强解或灵意化每一个细节。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E016",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "比喻文体定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "平常是什麼呢？就是用一個故事來說明，或者說闡明一個主要的真理，那是它的特徵。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E017",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "opposed",
+              "discourse_role": "反面归谬；模拟逐项对应比喻细节的解释者",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "OK，寡婦代表我們，所以這個不義的官代表神。」那一种說法，讓我們看出那個 absurdity，那個荒唐。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL012",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E018",
+        "DK-0d5b2062b148-E019"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "但以理书",
+        "启示录"
+      ],
+      "topic_terms": [
+        "启示文体",
+        "异象",
+        "象征",
+        "末世日程",
+        "神的主权"
+      ],
+      "title": "启示文体充满异象和象征，解释具体记号及安排未来日程时必须谦慎，不能把猜测当作确定结论；但启示录清楚宣告主仍坐在宝座上，掌管宇宙和历史。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0008",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E018",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "启示文体解释限制",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我們沒有百分之百的把握，這個某一個記號，比如說七個天使吹响七个号筒，倾倒七个碗……揭開七個印，在啟示錄裡面。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0008",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E019",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "启示录整体信息总结",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不管世界上的人如何對待神，我們的主到底還是坐在寶座上，祂還是宇宙的主宰，祂還是這個世界歷史的主宰。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL013",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E020"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "文化背景",
+        "历史背景",
+        "俗语",
+        "解经方法"
+      ],
+      "title": "文化历史背景是正确理解圣经的重要因素；离开原有文化中的俗语、制度和处境，容易产生字面误解。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E020",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "文化俗语类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為在我們的這種文化裡面，大家都曉得「吹牛」是講大話，是講誇大的話。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL014",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E021"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "创世记31:30"
+      ],
+      "topic_terms": [
+        "拉班",
+        "家神",
+        "继承权",
+        "考古背景"
+      ],
+      "title": "拉班急于追回家神的主要原因，是家神在当时文化中作为继承父亲产业权的凭据。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E021",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "古代制度背景解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "誰可以拿到那個神像，那個人就可以繼承父親的財產。所以那個神像，拉班所找的那個神像，就是繼承父親產業權的憑據。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL015",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E022"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "捆绑与释放",
+        "拉比俗语",
+        "禁止",
+        "准许"
+      ],
+      "title": "马太福音十六章的“捆绑”和“释放”是当时拉比用来表示禁止与准许的俗语，不是指决定某人能否进入天国。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E022",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "拉比语言背景解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「捆綁」跟「釋放」就是當時猶太人的拉比學校，他們的Rabbi，或者拉比學派，拉比學院等等，這些人啊，拉比，他們所用的，實際上他們的slang。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL016",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E023"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS005"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "保罗书信"
+      ],
+      "topic_terms": [
+        "历史上的耶稣",
+        "保罗书信",
+        "书信受众",
+        "写作处境"
+      ],
+      "title": "不能因保罗书信较少重述耶稣在地上的事迹，就断定保罗不关心历史上的耶稣；这些书信写给已经听过保罗传道并归主的基督徒。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E023",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "书信受众背景反驳",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "保羅的書信不是寫給還沒有信主的人看的。保羅的書信是寫給那些他已經傳道、帶領归主以後、已經信主的基督徒看的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL017",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E024",
+        "DK-0d5b2062b148-E025"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "利未记25:35-36"
+      ],
+      "topic_terms": [
+        "利息",
+        "贫困借贷",
+        "利未记",
+        "上下文",
+        "商业投资"
+      ],
+      "title": "利未记二十五章禁止取利，是针对贫穷弟兄为生活所需而借贷的情形，不是禁止投资者从使用其资金获利的公司收取合理回报。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E024",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "利未记经济背景解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "你的弟兄、你的朋友啊，就是因為很貧窮，沒有辦法，在這種情況底下向你借錢的。所以聖經說要可憐他，你不要向他拿利息。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E025",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "直接上下文限定",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "三十五節說：「你的弟兄在你那裡若漸漸貧窮，手中缺乏，你就要幫助他，使他與你同住，像外人和寄居的一樣。」所以那是完全不同的情況。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL018",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E026",
+        "DK-0d5b2062b148-E027"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "使徒行传15:19-29",
+        "哥林多前书10:23-33"
+      ],
+      "topic_terms": [
+        "祭偶像之物",
+        "使徒行传",
+        "哥林多前书",
+        "处境化",
+        "绊倒"
+      ],
+      "title": "使徒行传十五章与哥林多前书关于祭偶像之物的指示并不矛盾；前者针对保守犹太基督徒与外邦信徒共处的地区，后者处于不同的哥林多环境，并仍以不使人跌倒为限制。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E026",
+              "evidence_type": "question",
+              "speaker": "professor",
+              "stance": "neutral",
+              "discourse_role": "提出表面经文张力",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "使徒行傳十五章那裡說基督徒要禁戒祭偶像的物。哥林多前書第十章二十三節底下，這章長一點，所以我不念了。哥林多教會寫信問保羅說：「這些祭過偶像的東西，我們是不是可以吃？」保羅跟他講：「你吃啊，沒有問題，沒有錯事，你吃啊！只要你吃那個祭偶像的東西不叫別人跌倒就好了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E027",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "按地区处境消解表面矛盾",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以在這種情況底下，情況不一樣。保羅說：「你們吃祭偶像的物，沒關係，因為偶像根本就不存在。」",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL019",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E028",
+        "DK-0d5b2062b148-E029"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "希伯来书1:1-2"
+      ],
+      "topic_terms": [
+        "渐进启示",
+        "希伯来书",
+        "启示进程",
+        "基督"
+      ],
+      "title": "神的启示是渐进的：神按人的接受能力一步一步预备人，最终借着祂的儿子晓谕人。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E028",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "渐进启示的经文依据",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "神在古時，神在過去，曾經用各種不同的方法來啟示，可是最後，ultimate，最後就藉著祂兒子，來曉諭我們，耶穌基督。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E029",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教育类比论证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為你要學代數以前，你要先學某種算術做你代數的基礎。這按部就班，一步一步來。照樣，神對我們的啟示也是 progressive revelation。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL020",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E030",
+        "DK-0d5b2062b148-E031"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS008"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "创世记12:1-3",
+        "加拉太书3:23-24"
+      ],
+      "topic_terms": [
+        "旧约律法",
+        "食物条例",
+        "猪肉",
+        "以色列",
+        "渐进启示"
+      ],
+      "title": "旧约食物条例在启示进程中具有阶段性目的，即使以色列人与外邦偶像崇拜保持距离；该目的完成后，不能直接把这些条例当成今日基督徒不得吃猪肉的普遍命令。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E030",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "旧约食物条例的阶段性目的",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "神教猶太人不能夠吃豬，不能夠吃這個，不能夠吃那個的目的，乃是要使猶太人跟外邦人當中保持一個距離，使得這個外邦人的錯誤的思想、錯誤的這種多神的、拜偶像的思想不去污染你們這些人",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E031",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "quoted",
+              "discourse_role": "讲道在逐字稿结尾处引用但未完成展开的经文依据",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "這樣，律法是我們訓蒙的師傅……",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL021",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E001",
+        "DK-0d5b2062b148-E032"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "研经方法",
+        "参考书",
+        "圣经可靠性",
+        "方法论"
+      ],
+      "title": "认真研究圣经的人应学习有系统的查经方法，并可借助兼顾可读性与学术性的参考书。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0001",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E001",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "转述常见提问并推荐参考书",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "常常有人說：「我怎麼曉得這個聖經是可靠的？」比如說，《新約聖經》裡面所說的很多歷史性的可靠性，我怎麼曉得？那這一本書呢，它是給我們一個比較好一點的介紹。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0001",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E032",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "研经资源应用与推荐",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以如果各位真的有心、想要好好研究聖經的話，我真是推薦各位買，不是因為他是我的好朋友，而是因為這本書的價格。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "from_id": "DK-0d5b2062b148-E002",
+      "reason": "圣经由神默示并具有权威，构成必须正确解释圣经的前提。",
+      "relation_id": "DK-0d5b2062b148-ER045",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E003"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E003",
+      "reason": "正确解经的必要性为随后定义解经的目标提供语境。",
+      "relation_id": "DK-0d5b2062b148-ER046",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E004"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E005",
+      "reason": "字面化诗歌隐喻产生的荒谬结论，引出不同文体必须区别处理的回答。",
+      "relation_id": "DK-0d5b2062b148-ER047",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E006"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E007",
+      "reason": "议论文以议论方式传达信息，因此需要追踪其逻辑连接。",
+      "relation_id": "DK-0d5b2062b148-ER048",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E008"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E008",
+      "reason": "连接词解释原则为罗马书一章的逻辑链条分析提供方法。",
+      "relation_id": "DK-0d5b2062b148-ER049",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E009"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E009",
+      "reason": "神的义与神的大能在福音中相连，支持继续从罗马书论及圣洁生活。",
+      "relation_id": "DK-0d5b2062b148-ER050",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E010"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E011",
+      "reason": "对救恩历史的限定说明记叙文所报告的是现实历史中的救赎事件。",
+      "relation_id": "DK-0d5b2062b148-ER051",
+      "relation_type": "qualifies",
+      "to_id": "DK-0d5b2062b148-E012"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E012",
+      "reason": "记叙文同时报告事实和阐明意义，因此需要辨别承载意义的重要细节。",
+      "relation_id": "DK-0d5b2062b148-ER052",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E013"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E014",
+      "reason": "盾牌表达展示诗歌比喻性语言的解释方式，为平行法等诗歌结构观察提供语境。",
+      "relation_id": "DK-0d5b2062b148-ER053",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E015"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E016",
+      "reason": "比喻用故事阐明主要真理的定义，为反对逐项对应细节提供解释原则。",
+      "relation_id": "DK-0d5b2062b148-ER054",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E017"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E018",
+      "reason": "具体象征的意义缺乏充分把握，但不妨碍辨认启示录整体清楚的信息。",
+      "relation_id": "DK-0d5b2062b148-ER055",
+      "relation_type": "qualifies",
+      "to_id": "DK-0d5b2062b148-E019"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E020",
+      "reason": "文化俗语类比为解释圣经中的拉比俗语提供一般方法背景。",
+      "relation_id": "DK-0d5b2062b148-ER056",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E022"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E020",
+      "reason": "文化历史背景原则也为理解家神与继承权的关系提供方法背景。",
+      "relation_id": "DK-0d5b2062b148-ER057",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E021"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E020",
+      "reason": "文化历史背景原则为按书信受众解释保罗材料提供方法背景。",
+      "relation_id": "DK-0d5b2062b148-ER058",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E023"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E025",
+      "reason": "利未记二十五章三十五节明确限定借款者为渐渐贫穷、手中缺乏的弟兄。",
+      "relation_id": "DK-0d5b2062b148-ER034",
+      "relation_type": "qualifies",
+      "to_id": "DK-0d5b2062b148-E024"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E027",
+      "reason": "地区与群体处境的差异回答了两处祭偶像之物指示表面上的张力。",
+      "relation_id": "DK-0d5b2062b148-ER059",
+      "relation_type": "answers",
+      "to_id": "DK-0d5b2062b148-E026"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E028",
+      "reason": "希伯来书关于古时启示与最终借儿子晓谕的次序，是渐进启示类比论证的经文依据。",
+      "relation_id": "DK-0d5b2062b148-ER060",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E029"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E029",
+      "reason": "启示按阶段逐步展开，为解释旧约食物条例的阶段性目的提供语境。",
+      "relation_id": "DK-0d5b2062b148-ER061",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E030"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E031",
+      "reason": "律法为训蒙师傅的经文支持旧约条例具有预备性和阶段性作用。",
+      "relation_id": "DK-0d5b2062b148-ER062",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-E030"
+    },
+    {
+      "from_id": "DK-0d5b2062b148-E001",
+      "reason": "关于圣经可靠性的参考书推荐，与系统查经方法著作的推荐共同构成研经资源应用。",
+      "relation_id": "DK-0d5b2062b148-ER063",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-E032"
+    }
+  ],
+  "claim_relations": [
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR001",
+      "from_id": "DK-0d5b2062b148-CL001",
+      "reason": "圣经既因神默示而具有权威，就必须正确理解其实际所说的内容，权威才能落实于信仰和生活。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL002"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR002",
+      "from_id": "DK-0d5b2062b148-CL003",
+      "reason": "寻找原作者对原读者所表达的原意，要求解释者辨认作者采用的文体。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL004"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR003",
+      "from_id": "DK-0d5b2062b148-CL005",
+      "reason": "罗马书是议论文，连接词揭示其思想之间的因果关系。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-0d5b2062b148-CL006"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR004",
+      "from_id": "DK-0d5b2062b148-CL006",
+      "reason": "福音中神的义与神的大能不可分，因此福音不仅涉及称义，也涉及圣洁生活。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL007"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR005",
+      "from_id": "DK-0d5b2062b148-CL008",
+      "reason": "记叙文同时报告事件与阐明事件意义，因此阅读时需要判断哪些细节承载主要意义。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL009"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR009",
+      "from_id": "DK-0d5b2062b148-CL013",
+      "reason": "历史文化背景是理解拉比俗语、家神、借贷取息、书信受众及祭偶像之物等经文的共同解释原则。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL014"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR010",
+      "from_id": "DK-0d5b2062b148-CL013",
+      "reason": "历史文化背景说明保罗书信的对象是已经听过其传道的基督徒。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL016"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR011",
+      "from_id": "DK-0d5b2062b148-CL013",
+      "reason": "利未记的贫困借贷背景限定了禁止取利命令的适用情境。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL017"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR012",
+      "from_id": "DK-0d5b2062b148-CL013",
+      "reason": "安提阿等地与哥林多的不同处境解释了祭偶像之物指示的差异。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL018"
+    },
+    {
+      "claim_relation_id": "DK-0d5b2062b148-CR013",
+      "from_id": "DK-0d5b2062b148-CL019",
+      "reason": "渐进启示要求把旧约规定放在整本圣经启示进程中的阶段性位置来理解。",
+      "relation_type": "supports",
+      "to_id": "DK-0d5b2062b148-CL020"
+    }
+  ],
+  "extraction": {
+    "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+    "prompt_sha256": "d85abb01fb5c6530e2104b6d74ceab345f1d82bea79fa67cb6ceed22a3ad8982",
+    "model_id": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "max_output_tokens": 32000,
+    "schema_version": "wang_detailed_knowledge_extraction_v1",
+    "response_schema_sha256": "fd6c3946c70568df7fcdfcfa26abf4b360105444f690add63c11751447d99ec1",
+    "generation_fingerprint_sha256": "6e6a591dd640ebe6f97bc095c3ea57ca90983a6650c1cbe6a90322ae188a1f48",
+    "fingerprint_sha256": "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949",
+    "generated_at": "2026-08-14T18:46:19.913069+00:00"
+  },
+  "summary": {
+    "source_fragment_count": 70,
+    "question_count": 11,
+    "position_count": 9,
+    "observation_count": 20,
+    "evidence_step_count": 32,
+    "claim_count": 21,
+    "evidence_relation_count": 20,
+    "claim_relation_count": 10
+  }
+}

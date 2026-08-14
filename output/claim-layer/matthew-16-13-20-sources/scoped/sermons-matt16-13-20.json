@@ -1,0 +1,5109 @@
+{
+  "schema_version": "wang_research_batch_knowledge_v1",
+  "batch": {
+    "batch_id": "RB-MATTHEW-16-13-20-SOURCES-01",
+    "purpose": "按太16:13–20的来源地图选取笔记基线相关讲道，逐篇建立可审核论证层，再比较彼得认信、教会根基、天国钥匙与第20节叙事收束；本批次不预设各讲道主张彼此等同。",
+    "semantic_assumption": "none",
+    "selection_is_not_classification": true,
+    "batch_config_path": "backend/pipeline/research_batches/matthew_16_13_20_sources_01.json",
+    "batch_config_sha256": "3f9acf3af504cc93bfa798708a3b88659b044ba8ee50153d7e6d0597e93c191b"
+  },
+  "source_documents": [
+    {
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+      "title": "2016 NYSC 專題：馬太福音釋經（四）1",
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_published/2016 NYSC 專題：馬太福音釋經（四）1.json",
+      "review_status": "candidate"
+    },
+    {
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "title": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/2016 NYSC 專題：馬太福音釋經（四）2.json",
+      "review_status": "candidate"
+    },
+    {
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "title": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/2016 NYSC 專題：馬太福音釋經（四）3.json",
+      "review_status": "candidate"
+    },
+    {
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "title": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/2016 NYSC 專題：馬太福音釋經（五）1.json",
+      "review_status": "candidate"
+    },
+    {
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "source_type": "sermon_transcript",
+      "transcript_id": "S 220206",
+      "title": "S 220206",
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/S 220206.json",
+      "review_status": "candidate"
+    },
+    {
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "source_type": "sermon_transcript",
+      "transcript_id": "220-426-110-1139",
+      "title": "220-426-110-1139",
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_review/220-426-110-1139.json",
+      "review_status": "candidate"
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS006-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "羅馬天主教就說：「你看，耶穌把教會建立在彼得這個人身上。」",
+      "paragraph_key": "S0019",
+      "source_segment_index": 1014,
+      "media_time": 2507,
+      "media_end_time": 2784,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "bfe6f6a3b7a4873ffb244b40128b3fec34dfed763a69ab2117dfaa321ed98c74",
+      "verbatim_excerpt_sha256": "680b676779b63f641a380ba962513ecceb0e8f71858d08d1a25f6724dee85acd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E019-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "耶穌告訴門徒說：「你要避免撒都該人跟法利賽人錯誤，他們不接受耶穌是彌賽亞。」可是接著下面那一段很重要。",
+      "paragraph_key": "S0017",
+      "source_segment_index": 895,
+      "media_time": 2099,
+      "media_end_time": 2507,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "d37041b329e284b4892ad5d0440d7eca31ef5ce6ae343bef7bb0f816f72771e6",
+      "verbatim_excerpt_sha256": "8756d4309aa15d5a3e26ea69df253b50ec309d4b2aed143c4711a761fd44673f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E020-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "在這裡，腓力比要來強調羅馬皇帝的權柄。耶穌就在這個地方問門徒：「你們說我是誰？」耶穌選的那個背景很有意思。你到底是要順從該撒呢？還是要服從耶穌？",
+      "paragraph_key": "S0017",
+      "source_segment_index": 895,
+      "media_time": 2099,
+      "media_end_time": 2507,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "d37041b329e284b4892ad5d0440d7eca31ef5ce6ae343bef7bb0f816f72771e6",
+      "verbatim_excerpt_sha256": "a7262d3c9d1eb7f33e6dc25984e028c6cf95518933a35922aea590acc1f093ec",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E021-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "西門‧彼得就回答說：「你是基督，是永生神的兒子。」",
+      "paragraph_key": "S0017",
+      "source_segment_index": 895,
+      "media_time": 2099,
+      "media_end_time": 2507,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "d37041b329e284b4892ad5d0440d7eca31ef5ce6ae343bef7bb0f816f72771e6",
+      "verbatim_excerpt_sha256": "e8d78e56120e686e306a87b63954e8c87386d9b22f9cc060ecd7ead9a3e70c66",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E022-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "君王、祭司、先知的職位，通通集中在耶穌基督的身上。",
+      "paragraph_key": "S0017",
+      "source_segment_index": 895,
+      "media_time": 2099,
+      "media_end_time": 2507,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "d37041b329e284b4892ad5d0440d7eca31ef5ce6ae343bef7bb0f816f72771e6",
+      "verbatim_excerpt_sha256": "9e23b262ef5673640fae2bb352bc447692b233505f3a03889af5cbe1f35700ff",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E023-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "如果耶穌要把祂的教會建立在彼得身上，祂才不會說：「你是彼得（Petrus）」，陽性，「我要把我的教會建造在這磐石（petra）上」，是陰性。",
+      "paragraph_key": "S0019",
+      "source_segment_index": 1014,
+      "media_time": 2507,
+      "media_end_time": 2784,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "bfe6f6a3b7a4873ffb244b40128b3fec34dfed763a69ab2117dfaa321ed98c74",
+      "verbatim_excerpt_sha256": "4345dfa3a33931d0ed5544d6c1712e70eb514e89ac2f39c00f8c9f86b7c2f24e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E024-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "以弗所書二章二十節：「教會被建造在使徒和先知的根基上，有基督耶穌自己為房角石。」",
+      "paragraph_key": "S0021",
+      "source_segment_index": 1092,
+      "media_time": 2785,
+      "media_end_time": 3202,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "fd45b9ffa7507d8e1804917e1061e1ed62ce223146a20694b3eb9a7e54c5250b",
+      "verbatim_excerpt_sha256": "d0c5e8f0cddca369b7e92d3f6c76b1a48a6c7d1ee37d452ab6cd7f9a36383a15",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E025-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "所以不要忘掉，不只是建立在彼得的身上，乃是建立在使徒和先知們的身上。",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1408,
+      "media_time": 3795,
+      "media_end_time": 3971,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "dd76f34acb4cf08550694c23958ca956590b2e875775a579c07504e7421757d6",
+      "verbatim_excerpt_sha256": "2a99dfef3b4eb9dfac63b731aa44890768265dc68e408d3ebbfc9f007f59b26f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS001-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "他們說耶穌當時講的時候，耶穌不是講希臘文，耶穌是講亞蘭文",
+      "paragraph_key": "S0003",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "a6e0af8e0b542e2f9ff7b78f5457160aab46997afd1fd389ea5d668378972b02",
+      "verbatim_excerpt_sha256": "9ee90c451a2a5ce92901dfe01ad05a2ba0fe64f1176081adcd0c982dec02f1a7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS006-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "他們說什麼？耶穌給彼得絕對的權柄。你要叫一個人不能夠進天堂，你就不能進天堂，天上都聽你的話。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 706,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "ea42a29945bd71a017f232db01a396d41150e830643ced94936f9e3b6ac8c53d",
+      "verbatim_excerpt_sha256": "b0a6bc9033d86c0afb9542e0c804d93f8e71a9a10522fd169ce0ef540b34dbdc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS007-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "彼得就是第一任的教皇，所以彼得過世之後，他就把耶穌給他的權柄，傳給繼續他位子的每一代的教皇。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 706,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "ea42a29945bd71a017f232db01a396d41150e830643ced94936f9e3b6ac8c53d",
+      "verbatim_excerpt_sha256": "b898b4270c71ecd80e959ca6e94da59e40ebc1867eea4a4f313e1bd32740387c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS008-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "並不是神、並不是耶穌給這個使徒們說：「這個人你不喜歡他，所以你的罪……他的罪留下來了。」",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1234,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "5808147f9e50a11585d94f3ef44d7e73fb1e602a1dee91d666ad81d9d9fdc828",
+      "verbatim_excerpt_sha256": "6bd400d5bfdb81f224b97a02c9115f2b4bbd34bd8b3a86afa5110e1530fa0a4e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E001-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "可是我們今天所有的聖經，就是希臘文的聖經，我們沒有馬太寫的亞蘭文的福音書，沒有。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "a6e0af8e0b542e2f9ff7b78f5457160aab46997afd1fd389ea5d668378972b02",
+      "verbatim_excerpt_sha256": "b83d52b084cd5e1a6edc4226b481bf4c1540c512d627637a3cb35bf2ceaf5c9e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E001-02",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "當馬太來寫希臘文的馬太福音的時候，乃是在聖靈的啟示底下，在聖靈的監管底下、帶領底下，所以雖然亞蘭文沒有 Petrus、Petra 的那一個陽性、陰性的分別，可是當他來翻成希臘文的時候，也有聖靈的帶領，聖靈要他這麼寫。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "a6e0af8e0b542e2f9ff7b78f5457160aab46997afd1fd389ea5d668378972b02",
+      "verbatim_excerpt_sha256": "c82b35b09beb0a20f727470a016cce3f6e39a6a95147bab21404ffbbe9d86034",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E002-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "不是建立在彼得這個「人」身上，乃是在彼得這個人身上所有的一個特徵，彼得的特徵。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "a6e0af8e0b542e2f9ff7b78f5457160aab46997afd1fd389ea5d668378972b02",
+      "verbatim_excerpt_sha256": "13521896fc7f018301c96f1eb9ab1d1a206fa0daa1d5db5e3c2427943b8eaa72",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E013-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "那個 ἔσται δεδεμένον 是什麼？未來完成式。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 822,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4902c9ed66cb212df80d9b0d20b4e141e913e726e08c2a1571e9a06e5a91b501",
+      "verbatim_excerpt_sha256": "6770ff4422b6c975a35439b24373eee837fb0017e943dcf6afe150ef2fa8edcd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E014-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "準確的翻譯：「凡你在地上所綑綁的，在天上將是已經被綑綁了。」「凡你在地上所釋放的，在天上將是已經被釋放了。」",
+      "paragraph_key": "S0016",
+      "source_segment_index": 822,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4902c9ed66cb212df80d9b0d20b4e141e913e726e08c2a1571e9a06e5a91b501",
+      "verbatim_excerpt_sha256": "a58803b264e9ffa2af2a44673c166111a5352a51347c75f788bd1604bd7a3ab8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E015-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "不是按照我的標準來評判，是按照教授會議決定的標準去評判。",
+      "paragraph_key": "S0017",
+      "source_segment_index": 860,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "91c56fa2796ef56793bc884be0e545df72c48d528cd4deb7be107ec608ff85ab",
+      "verbatim_excerpt_sha256": "2f3d2b943cf238b2dbd72ca2ed3f786963af5d79866bc0e3b28615f6e37cd6a2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E016-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "為什麼完成式？因為這個條件，這個標準，天上已經決定好了。可是為什麼要用未來式？為什麼？因為彼得還要繼續地執行這個工作，不但是今天執行，將來還要執行，所以才是未來式。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 973,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "e876dcd69b848940a790a125767380d7ce02c04c25adf91cb4c5af3e2c1e0b04",
+      "verbatim_excerpt_sha256": "78f94314d117a0a992fafb1a70aa5c09c6b20f3ed50eb377237a9c873ba1b51d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E017-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "第十八節：「我實在告訴你們，凡你們在地上所綑綁的，在天上將是已經被綑綁；凡你們在地上所釋放的，在天上也將是已經被釋放。」所以同樣的權柄，耶穌不只是給彼得，也給教會。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 1049,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4b041afe697030e100a368f16a9ff2b2412936869c14b669294b31b3cad59848",
+      "verbatim_excerpt_sha256": "ab18516e4bb12f6ee1bb0eb28bf6c89269c96ada48168e74575d4a23ce9a54a2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E018-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "所以「綑綁」是什麼意思？可以禁止做一些事，或者是不准人進天國，兩個都有。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1106,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4c7fbd87a7655a693c658931813807c0ce2ff596536dc6036c1b5dd4c177f7e5",
+      "verbatim_excerpt_sha256": "5a2efc5247eb30fb85776b2967bcb100ca73ef3379c29f7838af6377f7f623ad",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E019-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "所以這個權柄是跟「事」有關，也跟「人」有關。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1106,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4c7fbd87a7655a693c658931813807c0ce2ff596536dc6036c1b5dd4c177f7e5",
+      "verbatim_excerpt_sha256": "ecb530b955a73f43c574147bb0faee594b01423dd95cc7d99d9e9a2497966a5b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E020-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "使徒、教會，必須要查驗天上的標準是什麼。不是使徒、教會的決定，是天上所決定的標準。使徒、教會要查驗天上的標準，然後按照天上的標準來做事。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1106,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4c7fbd87a7655a693c658931813807c0ce2ff596536dc6036c1b5dd4c177f7e5",
+      "verbatim_excerpt_sha256": "110b2ab32d4feae1a68671c477579583f282f45d50762a1fd0005c572ebafd6c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E021-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "中文翻成「誰」那個字，「誰」不是 which person，不是哪一個人，是什麼？是「哪一種人」。",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1234,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "5808147f9e50a11585d94f3ef44d7e73fb1e602a1dee91d666ad81d9d9fdc828",
+      "verbatim_excerpt_sha256": "d42e82a8a7fe6b687e2d1a10402680b5a3d70900e32165f6ca7996cad53feadb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E022-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "就是那些真悔改的人，他們的罪就得赦免；那些不肯悔改的人，他們的罪就留下來了。",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1234,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "5808147f9e50a11585d94f3ef44d7e73fb1e602a1dee91d666ad81d9d9fdc828",
+      "verbatim_excerpt_sha256": "fd813acc74352b7ded1bb1eef3e6d5a3ff873258111353f8cef58ce22b86d5bd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E023-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "彼得受其他的使徒差派他出去做工。",
+      "paragraph_key": "S0025",
+      "source_segment_index": 1299,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "5f5359423a0312086d58b62a9efa4a3d2bee9a159a6dd5bcaef792faa955515b",
+      "verbatim_excerpt_sha256": "973b28585b1ee58b9e5fe6a741494653a436766c63d02156c9a15849fa1e59ed",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E024-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "還有彼得到哥尼流到那邊去傳福音的時候，他回來要向耶路撒冷報告，要向耶路撒冷交代。",
+      "paragraph_key": "S0025",
+      "source_segment_index": 1299,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "5f5359423a0312086d58b62a9efa4a3d2bee9a159a6dd5bcaef792faa955515b",
+      "verbatim_excerpt_sha256": "d64283e693d1e8e6e90fa99da7ab025a585919ce31e0c2928385ce0c446a969f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-e50720f3684d-CL012-01",
+      "source_id": "SRC-2016_NYSC_2-e50720f3684d",
+      "verbatim_excerpt": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！",
+      "paragraph_key": "S0016",
+      "source_segment_index": 822,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "331a64775ce669759cbfcc05d442edf68b173356e9c11cc70347ca9e0e28286e",
+      "paragraph_text_sha256": "4902c9ed66cb212df80d9b0d20b4e141e913e726e08c2a1571e9a06e5a91b501",
+      "verbatim_excerpt_sha256": "4671e1c05cb69a64eb4794d2f9bbfd4277e6f5e17d2e86f60794b98f151626aa",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-Q005-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "外邦人要不要受割禮？外邦人需不需要來遵守摩西的律法？",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "64f2d336f2988798e3887b266a6b700680efdb958bf5e059619efe46aeebb759",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS001-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "這個磐石不是建立在彼得這個人身上",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "2333b957a11f6db466537743097bdd319f135258d9219ab69d5ae829aa4f9bd0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS002-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "彼得你不管你做什麼事，你決定，我們天上就聽你的話。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "565370530f868f0a504aeb6b57ea654eb27320a6005ab0c6342f04b26f8daa0b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS004-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "他們就到耶路撒冷那裡去開會，來討論，甚至有些人說他們投票",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "0861b5c63e2f3ea6cd5785fe58728d49f127e01ff572af3a492cb813a27ca1eb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS005-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "這些外邦人信耶穌還不夠！你要真的做第一等的天國的子民的話，你信主耶穌之外，還要加上要受割禮，還要加上要來遵守摩西的律法。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "fbe83dcd9cf7390c71850f215c6e57f0a7290fe540b25cfb0a3ab1b87c4ec609",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS006-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "耶穌根本不是彌賽亞。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1163,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "abaa35c554bbd5451060a3d6dd93950bd1a8096a5b6192c7cc5df4a14c5700a5",
+      "verbatim_excerpt_sha256": "64a6f6fc9f5b72daf744c7b04176b8737aafae9edfdea891673f6248d4fb16f3",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E001-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "希臘文講的是說：「你是彼得（Petrus），」希臘文，「我要把我的教會建在這個磐石上。」這個「磐石」是Petra，不同的文法上的這個性別。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "a7592379e26314dd42b1f467ef7b83225fa24a4caf069f03f6d92719259c70d4",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E002-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "這個磐石不是建立在彼得這個人身上，等一下我再給你看證據，不是彼得這個人身上，乃是彼得所有的一個特徵，其實乃是建立在彼得的信仰、對耶穌有準確的認識的這件事情上。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "ac359ffcdc324cde0691fa059dbc6258f2f81409e35a31bccb95d66ec35b55f0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E003-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "其實希臘文不是這樣，它的意思是：「你在地上所捆綁的，在天上將是『已經被捆綁了的』。」",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "585dc91a9e020e95fdcf41abc338f3318bc17c154fc61b7e0200bc1c3aa510e9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E004-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "是天上已經有標準：不管你犯什麼罪，只要你真的悔改，誰就要赦免他的罪。聽懂了嗎？如果有人犯罪不肯悔改的話，誰的罪就留下了。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "6ba930a835451d6be599df66974f9a3dd07669102c6508319f06de3e22165f99",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E007-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "他們不是在那裡辯論，不是在那裡決定，也不是他們投票決定，不是。他們在那裡做什麼呢？他們說：「我們要來看聖靈如何帶領我們去參與外邦人…向外邦人傳福音、外邦宣教，聖靈要我們怎麼做。」",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "5c4d0da182bb3a4f4d9bc1d8e2ee43ec594a69e990125fd5818bd4bda8ac9b36",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E014-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "所以這些使徒們說：「好，我們現在在這個地方，是要來尋求、要來察驗、來領會聖靈教導我們，外邦人要不要受割禮？外邦人要不要遵守摩西律法就可以得救？」",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "660395a764dc609f21572799db30ec2a226743e8dda321471e13dff5c13be72b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E016-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "方才西門述說，神當初怎樣眷顧外邦人，從他們中間選取百姓歸於自己的名下。眾先知的話也與這意思相合。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "d803f15403d609088a360b3729dbd200675095769e034814ba1cb53170bfb962",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E017-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "因為聖靈和我們定意，不將別的重擔放在你們身上。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "baf46c0e86092de59a63a9eace8e30582a647059cbb2c31de6c2875d12d377dc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E018-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "意思就是說你不要再受割禮，你不要再…你不要受割禮，你不要遵守摩西的律法，你只要繼續相信，就可以得救。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "e4037c7e466e8ffc16dffe182730fa3f90fb039b9060837029c056fe42a00444",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E019-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "那個是有當時的文化背景，現在我沒有時間講那樣東西，當時的文化背景，為了要使猶太人不至跌倒，他才要求他們這麼做而已。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 166,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "76625b66f62af1c6ab5a23494919d200839c32189b23c1b9546c7eee662a470c",
+      "verbatim_excerpt_sha256": "95327220e2f3aa2faba56ae808ddafa40eed70989a5328e844b75f517d4825b8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E020-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "我來做彌賽亞不是要來做王，我現在的彌賽亞是什麼？要到耶路撒冷去被殺、受苦，為你們贖罪，三天之後要復活。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "4a474b227744d502ddfbc712984e47476869e4774a044ef3fff7f1847f862b2e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E021-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "「撒但，退我後邊去吧！」你看，耶穌罵彼得是撒但！你說啊，教會建立在撒但身上嗎？",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "ebd805c2eb3af064474bd0c7c95e40531c4221df55d64b4d01fd866f59d25655",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E022-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "而且這個權柄不只是給彼得，也給其他的門徒，不要忘掉。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "e5a393d20980df2a090b7081fddf6d32a5c721d88a04cc4b9defd59474af280e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E023-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "很多人問我，奇怪，耶穌怕人家知道祂是彌賽亞？",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "520d2748d1e4a2122974ded76bf254756dd45a44244c636a82809c722b9e78fc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E024-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "所以說你們要特別小心，不要把聖經拿來斷章取義，你要把整個的聖經整套來看。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "f0548d47545f75e748bc3a0ab07cbf09bcf5fc98e8039665e6b1aed81b93c651",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E025-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "耶穌其實不是彌賽亞，是耶穌死了以後，他的門徒說完了，我們沒有辦法生活下去，所以門徒造謠說耶穌是彌賽亞。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1163,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "abaa35c554bbd5451060a3d6dd93950bd1a8096a5b6192c7cc5df4a14c5700a5",
+      "verbatim_excerpt_sha256": "a19e5a743bbe4260d0c58af831481f7ebbd0aa01920d9d4af0fcffee6e636b08",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-3d012c24a542-CL002-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」",
+      "paragraph_key": "S0002",
+      "source_segment_index": 1,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "441505d7aaa199d861ff21f6944420e823ae7db7eef3793065b70a05c8f81135",
+      "verbatim_excerpt_sha256": "b7c30965ac0e984f423d8f87bb5ffa18cea7f006ad7149865044217929d2c537",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-3d012c24a542-CL013-01",
+      "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+      "verbatim_excerpt": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」",
+      "paragraph_key": "S0006",
+      "source_segment_index": 794,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "4a9070d1ecaccfc2ce11798fc717bbca81eb443dadfdd7fc18d4e70546e73496",
+      "paragraph_text_sha256": "71586fb896803588be80210607dcdf38f09b5e2da5a585f8256cfb2c0d66740f",
+      "verbatim_excerpt_sha256": "a7363691fc56ac655d84d4ece4e9b377ac817a2103b454241858b273ce7a67a6",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "其實一個人的罪能不能得赦免，在乎他有沒有真正的悔改。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "dbb08d33fed81e01c54db143c43b3d77068f358c6521e4a57e6e5c923361bbe6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彼得有完全的權柄。他要做什麼，他所釋放的、所捆綁的人，神就要聽他的話",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "f101a5fcb0cc3bb0da8b5da013ce4ebb87e629ebee9d2d0b9e17346e9ef3775f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "所以天主教說神把這個絕對的權柄交給這個什麼？教皇。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "29342628bd85f2a327fceb30d2029c62b48c26558e788f66b44e51630e37c24c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "有一個人得罪我，我不喜歡他，我就留下他的罪，他的罪就被留下了。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "b82670cc6815c0b52bdfe91d4d7ace7cb65980f4aba8c04d0e21a291371397a5",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彌賽亞來就是要為猶太人建立一個獨立的國家！",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "4c0cda7a84f0b59f030ba945aeb9a20c4d24f407c20a1661448117fc41eca2b1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E001-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "那其實這句話，是中文翻錯了，所以很多人就不知道，就出了很多的問題。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "2ac39b70b7210310d20848694ae7110b3db22034d2a86cb810424351ec71f14f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E002-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 79,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "fbb9fcc93a5fdcc8c086c6dce1a36962568933c302c66661e730c6fee05cdf34",
+      "verbatim_excerpt_sha256": "9f871bf09a2ea4082caca2e85c5dd8407b7d78fea657fc594acca062f486c919",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E003-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "我乃是執行教授會議所決定的條件。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 122,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "c360931176420d6f25080877495856fa98f93f06786de31289f53ef0c74b4622",
+      "verbatim_excerpt_sha256": "524dc4074151f26c649af8bc1d68781c4d085cb6b82bae6a2d6c5301ac8495bc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E004-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 201,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "82ad7ac05116b1466c1c06858583f381c586212c524bb2af7a1a2315189379c9",
+      "verbatim_excerpt_sha256": "3389cbf9f5df64edb0bcf2cf6d24d4813d71ecae4ab2a502d3eb398f3f197b4f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E005-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "不是彼得有完全的權柄，不是。彼得乃是來執行天上所規定的捆綁的條件，來看你的情況是不是合乎那個條件。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 201,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "82ad7ac05116b1466c1c06858583f381c586212c524bb2af7a1a2315189379c9",
+      "verbatim_excerpt_sha256": "4c36dd8bdee3fb0dc9aca45fa4cbe40c7f19b5fca9d6dad2c79f6223869a144a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E006-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "馬太十八章十八節，耶穌說：「我實在告訴你們，凡『你們』……」單數還是複數？複數！不是彼得，是「你們」，教會！",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "f693b59a959d743ae9a3f1490b5ddad349b6e9adea2a3706e7957d947492afd3",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E007-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "只要你悔改，你繼續地相信耶穌基督，你就可以進天國。這個不是教會決定的，這是神在天上早就決定的。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 429,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "a9bd2af3e3327c44009cc77312b99ffd01a03231bb8ff7ee80714c7cda3ad98a",
+      "verbatim_excerpt_sha256": "5aec23bd153a6ef6d8c929ce10cb646ce76eb558f9fe8234400bf7f877fda0b6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E010-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "因為當時猶太人對「基督」、對「受膏者」有錯誤的觀念。所以耶穌要先把這些人的觀念改正過來之後，才會准許門徒們去告訴別人，耶穌就是那個基督。",
+      "paragraph_key": "S0013",
+      "source_segment_index": 554,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "5eb2f5c3c015c95204bf017e3974d2777c2752d20ecc42d904f1b08364735d8b",
+      "verbatim_excerpt_sha256": "2a859c52abcff901f813515c37ece84e6a189787e208bdd92e67049802504f8f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E011-01",
+      "source_id": "SRC-2016_NYSC_1-6f059dbca908",
+      "verbatim_excerpt": "彼得認耶穌為基督、是彌賽亞，但是彼得不認識彌賽亞的性質，不知道、不認識彌賽亞的使命。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 609,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "02cf7b917b546607e411eba41df5d5d1bbd11b3247b8fd15facf011c03a10a3b",
+      "paragraph_text_sha256": "21a04de1a545712e6c8e224216e7532c92fdfb25fa94e6e4010fb9cf64b674a3",
+      "verbatim_excerpt_sha256": "c668f76d7e76b4f825e4d57e177f56d9b1f07c0a838aa312262808460f10110c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS002-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "他們宣稱：『我們有絕對權柄，能決定罪得赦免與否。』",
+      "paragraph_key": "S0004",
+      "source_segment_index": 72,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "60f23e9dd9ff7cf42619a2ffbe3e9b62751291331b2659b111a72a924a5fa219",
+      "verbatim_excerpt_sha256": "9e5c23c52cc096490c1e06885a2143f3ce69c12abb5e1573e00d9fd074ae03f9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS003-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "甚至到羅馬天主教，也就用這幾句聖經，說：『你看，彼得有一切的權柄！』",
+      "paragraph_key": "S0011",
+      "source_segment_index": 277,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "335a256bd0f4b449596ce35509bb25539f5f981d3db590ca53b812bf68a7c146",
+      "verbatim_excerpt_sha256": "1de5bcfcce369122bd34c1b3463effbf32d74654cbe9076cb061f6e82155892e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS004-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "所以天上聽你的話，聽你們的話",
+      "paragraph_key": "S0012",
+      "source_segment_index": 311,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "3d61325acfd2ca400a100d5507c54be7be3b2f5da2a477e156ddb9b59ffddb35",
+      "verbatim_excerpt_sha256": "a97b352158747d0b9190959fa46baae1cf131ac279ea6321d6a9f201a8a066fb",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E004-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "關鍵在於『奉差遣』的前提——門徒乃是蒙召傳揚福音，非擅自定罪。正如醫生診斷病症，但醫治權柄在神。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 72,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "60f23e9dd9ff7cf42619a2ffbe3e9b62751291331b2659b111a72a924a5fa219",
+      "verbatim_excerpt_sha256": "f67b74121d8e97178db9ee7a6a178cd57c92408a68ce781ca55913de2fc63a39",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E005-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "那是什麼意思？你要赦免不是哪一個人，而是哪一種人——只有那些悔改的人，罪才會得到赦免。所以這裡是用完成式，完成十字架工作。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 257,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "55a4605f89d5734d81afe179520bcada65a6376d620038bb5461abfcbd2d7ae5",
+      "verbatim_excerpt_sha256": "c50014faee48b6ab3b22b36417e8c51ffa6a0e5c5179fb9958834ec2905733b2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E007-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+      "paragraph_key": "S0011",
+      "source_segment_index": 277,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "335a256bd0f4b449596ce35509bb25539f5f981d3db590ca53b812bf68a7c146",
+      "verbatim_excerpt_sha256": "63b7bb612300b4e865dd37d99dfeb8273f69720f2e10cca56134cd0e00067b91",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E008-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "馬太福音十八章十八節，耶穌告訴門徒：『我實在告訴你們』——門徒不是彼得一個人，是門徒——『你們門徒，凡你們在地上所捆綁的，在天上也要捆綁。』",
+      "paragraph_key": "S0012",
+      "source_segment_index": 311,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "3d61325acfd2ca400a100d5507c54be7be3b2f5da2a477e156ddb9b59ffddb35",
+      "verbatim_excerpt_sha256": "3a891797ea78c47a05b6793ef3186ea6ea244683e9d9e4531d8659ef1ef60c91",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E009-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "『捆綁』就是禁止，禁止你不可做這件事，就是捆綁；『我讓你做』就是釋放，就讓你做。",
+      "paragraph_key": "S0013",
+      "source_segment_index": 328,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "72961e1b80a76f6aeed50c4742eb035e99489bd77aab746a8d8b46a0cf2622d1",
+      "verbatim_excerpt_sha256": "cb243abcbdc7f6085f6013440f6f4d824cbcb55ed9f8119cf42a6674badea039",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E010-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "所以我不捆綁你，不禁止你吃飯、吃東西，你可以，我釋放你可以吃。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 345,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "b25b5624b6aa30d3f4a68d9e87179a2f21364170d50dcd0db34e89c7a905ed94",
+      "verbatim_excerpt_sha256": "a7b3660756fa397028322dd35162fccac46f90881df26c2c22f533dd2b373cd9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E011-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "因為這裡的時態是未來完成式，將已經被捆綁了。那什麼意思？你們在地上所捆綁的，在天上也將已經被捆綁了。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 404,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "5502e0a999603dc38c9d1addfa80cf7d560868f6d234a2cdb0040037aea501bf",
+      "verbatim_excerpt_sha256": "4490b3a3947f5b32c082f38f754be7a06f915c2ae9e4b30f7251f205f02fd6a7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E012-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "所以完成式在天上已經完成，然後呢？你要把天上所決定的事，現在要應用在今天的世界裡面。",
+      "paragraph_key": "S0019",
+      "source_segment_index": 487,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "ea9c04607985266cb55a70b9f26a7cf194a26c2bd0d67062030e695eb3ed5f54",
+      "verbatim_excerpt_sha256": "ac300ee4ced79a48b9753cb2ac7c4e6eb2d5a9c5bc8024824b908608569c33e8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-566e8ca150dd-CL006-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！",
+      "paragraph_key": "S0011",
+      "source_segment_index": 277,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "335a256bd0f4b449596ce35509bb25539f5f981d3db590ca53b812bf68a7c146",
+      "verbatim_excerpt_sha256": "e4bca3f758f2342a3800f3f07fee576dd171a789a56c89cf3c621f236bb63df1",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-566e8ca150dd-CL007-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』",
+      "paragraph_key": "S0011",
+      "source_segment_index": 277,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "335a256bd0f4b449596ce35509bb25539f5f981d3db590ca53b812bf68a7c146",
+      "verbatim_excerpt_sha256": "406e0428e19a70a5d98b091e00b6991c8951abaa543a91e1863723b78ca6e2e2",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-566e8ca150dd-CL010-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。",
+      "paragraph_key": "S0017",
+      "source_segment_index": 435,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "69cefab2a4965d80f72796e8afec145099e7209f0bb6ef45c448f7a6577a1b09",
+      "verbatim_excerpt_sha256": "e59ab36fc1fef117ce225167281d40bbbf428d872a059a9b3f007130b32e73f3",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-566e8ca150dd-CL011-01",
+      "source_id": "SRC-S_220206-566e8ca150dd",
+      "verbatim_excerpt": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 454,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "26910c727630b030e1313104a7192cdbb4a113adf9b4fe66c6fd64d2dd25d863",
+      "paragraph_text_sha256": "88a279ada5a2827d8c3b4becf9f4fd495185dc594521712dd23d9b2cc7bb7be7",
+      "verbatim_excerpt_sha256": "6d71dc272cb0cbe81c936e0acf23d50f226e5af49625709faef89be2e8c5f08a",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS004-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "他們以為說「捆綁」就是把人綁起來，說他不能進天國，下地獄。「釋放」就是說把人釋放在那裡，進天國。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "81b1647910bd97cd164f75683524fe64536038b1eb3bb68f807904d0c433de6b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E022-01",
+      "source_id": "SRC-220_426_110_1139-0d5b2062b148",
+      "verbatim_excerpt": "「捆綁」跟「釋放」就是當時猶太人的拉比學校，他們的Rabbi，或者拉比學派，拉比學院等等，這些人啊，拉比，他們所用的，實際上他們的slang。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 1813,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "1738b7a911452c35f492b17558b445e86549644242d783a5eaf8db3c6dff63b9",
+      "paragraph_text_sha256": "a66022cb65fed1463e124e02f2fcc79eba08f3cafcb8ce0ed123fe3117fff55b",
+      "verbatim_excerpt_sha256": "54614a0dda49382a3f001d2b6147f8c744e2f54b5626510e36d8b7f14e92903d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    }
+  ],
+  "questions": [],
+  "position_nodes": [
+    {
+      "attribution": "罗马天主教，按教授复述",
+      "position_id": "DK-a26f0a7e9ba4-POS006",
+      "title": "教会建立在彼得个人身上",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "提出亚兰文背景以弱化Petrus与Petra区别的人",
+      "position_id": "DK-e50720f3684d-POS001",
+      "title": "耶稣说亚兰文，因此希腊文Petrus与Petra的性别差异不具解释意义",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所述多数解经家及相关传统解释",
+      "position_id": "DK-e50720f3684d-POS006",
+      "title": "耶稣给彼得绝对权柄，天上服从彼得对人上天堂或下地狱的决定",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "罗马天主教传统，按教授的复述",
+      "position_id": "DK-e50720f3684d-POS007",
+      "title": "彼得是第一任教皇，其天国钥匙权柄传给历代教皇",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授反驳的对约翰福音20:23之任意个人化理解",
+      "position_id": "DK-e50720f3684d-POS008",
+      "title": "使徒可按个人喜恶决定某一个人的罪得赦免或被留下",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-POS008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所否定的教会根基解释",
+      "position_id": "DK-3d012c24a542-POS001",
+      "title": "马太福音十六章十八节的磐石就是彼得本人，教会建立在彼得个人身上",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授模拟并反驳的权柄观",
+      "position_id": "DK-3d012c24a542-POS002",
+      "title": "彼得可以任意决定捆绑或释放，天上随后服从彼得的决定",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授引述并反驳的解经家观点",
+      "position_id": "DK-3d012c24a542-POS004",
+      "title": "耶路撒冷会议由使徒讨论、投票并凭自己的意见决定外邦人是否受割礼和守律法",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "耶路撒冷来的犹太主义者",
+      "position_id": "DK-3d012c24a542-POS005",
+      "title": "外邦人仅相信耶稣仍不够，还必须受割礼并遵守摩西律法才能成为完整的天国子民",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所称不信派德国学者及其《Messianic Secret in the Gospel》理论",
+      "position_id": "DK-3d012c24a542-POS006",
+      "title": "耶稣不是弥赛亚；门徒在耶稣死后虚构其弥赛亚身份，并编造保密命令解释生前的沉默",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-POS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于天主教的解释",
+      "position_id": "DK-6f059dbca908-POS001",
+      "title": "彼得拥有完全权柄且天上必须服从其捆绑释放决定",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于天主教的教皇权柄立场",
+      "position_id": "DK-6f059dbca908-POS002",
+      "title": "马太福音的绝对权柄由彼得转交教皇",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授模拟的误解者",
+      "position_id": "DK-6f059dbca908-POS003",
+      "title": "教会可按个人好恶留下得罪者的罪",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授归于彼得及当时犹太社会的弥赛亚观",
+      "position_id": "DK-6f059dbca908-POS004",
+      "title": "弥赛亚的使命是推翻罗马并建立独立犹太国",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "断章取义约翰福音二十章的人和教会",
+      "position_id": "DK-566e8ca150dd-POS002",
+      "title": "门徒或教会可绝对决定谁的罪得赦免",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所指的罗马天主教解释及其他持相同观点者",
+      "position_id": "DK-566e8ca150dd-POS003",
+      "title": "彼得是教会根基并拥有一切权柄",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "按中文译文误解捆绑与释放的人",
+      "position_id": "DK-566e8ca150dd-POS004",
+      "title": "地上的捆绑与释放决定天上的行动",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "不了解拉比俗语的解释者",
+      "position_id": "DK-0d5b2062b148-POS004",
+      "title": "捆绑和释放是决定某人下地狱或进天国的权力",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-POS004-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "observations": [],
+  "evidence_steps": [
+    {
+      "discourse_role": "连接酵的段落与彼得认信段落",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E019",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音16:6-16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "两派不接受耶稣为弥赛亚的前文，构成耶稣随后询问门徒自己是谁的直接背景。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "该撒利亚腓立比地点的象征解释",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E020",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音16:13-15"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "该撒利亚腓立比强调罗马皇帝权柄，耶稣在此提问使门徒面对顺从该撒还是顺从基督的选择。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "彼得对耶稣问题的经文回答",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E021",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音16:16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得认信耶稣是基督，是永生神的儿子。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对基督即受膏者的职分解释",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E022",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音16:16"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "基督意为受膏者；耶稣一身集中君王、祭司和先知三种受膏职分。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以Petros与petra的语法性反驳彼得个人根基说",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E023",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "Petros是阳性而petra是阴性；语法性变化被用作教会并非建立在彼得个人身上的证据。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "引用以弗所书说明教会根基",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E024",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL010"
+      ],
+      "scripture_refs": [
+        "以弗所书2:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "以弗所书二章二十节说教会建立在使徒和先知的根基上，基督耶稣自己为房角石。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "综合马太福音与以弗所书所得结论",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E025",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音16:18",
+        "以弗所书2:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教会的根基不能只归于彼得，而应理解为使徒和先知的根基。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授对现存正典文本及写作语言的判断",
+      "evidence_step_id": "DK-e50720f3684d-E001",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "现存正典中的马太福音是希腊文文本；教授同时认为马太很可能先用亚兰文写作再翻成希腊文，并主张翻译过程受圣灵带领。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E001-01",
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E001-02"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授给出磐石所指的释经结论",
+      "evidence_step_id": "DK-e50720f3684d-E002",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL001",
+        "DK-e50720f3684d-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教会不是建立在彼得这个人本身上，而是在彼得所具有的特征上；Petrus到Petra的阳性、阴性变化被视为具有解释意义。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授对希腊文时态作判断",
+      "evidence_step_id": "DK-e50720f3684d-E013",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL012"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "马太福音十六章十九节的ἔσται δεδεμένον是未来完成式。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授依据时态给出准确译文",
+      "evidence_step_id": "DK-e50720f3684d-E014",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL012"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "地上綑綁或釋放的对象，在天上将是已经被綑綁或釋放，而非天上随后接受彼得的决定。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授以招生委员会主任作执行既定标准的类比",
+      "evidence_step_id": "DK-e50720f3684d-E015",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL013"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "招生主任并非自行决定录取资格，而是按教授会议已经决定的标准审核申请人；这被用来类比彼得的权柄。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释未来完成式各部分的神学意义",
+      "evidence_step_id": "DK-e50720f3684d-E016",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL013"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "完成式表示条件和标准已由天上决定；未来式表示彼得此后仍要继续执行按标准判断的工作。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授用平行经文确定权柄对象",
+      "evidence_step_id": "DK-e50720f3684d-E017",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL014"
+      ],
+      "scripture_refs": [
+        "马太福音18:15-18",
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "马太福音十八章在教会纪律语境中把同样的綑綁、釋放表述给复数的“你们”，表明该权柄也给教会。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授依据拉比习语说明词义范围",
+      "evidence_step_id": "DK-e50720f3684d-E018",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL015"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "拉比用“綑綁”表示禁止，用“釋放”表示准许；该组词既能指对行为的禁准，也能指人是否被接纳。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授综合拉比用法与马太十八章语境",
+      "evidence_step_id": "DK-e50720f3684d-E019",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL015"
+      ],
+      "scripture_refs": [
+        "马太福音18:15-18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "綑綁和釋放的权柄既涉及事情，也涉及人；马太十八章把不听教会者视为外邦人和税吏，显示其与教会成员身份有关。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授由释经结论推出教会实践责任",
+      "evidence_step_id": "DK-e50720f3684d-E020",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL016"
+      ],
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "使徒和教会必须从圣经查验天上已经决定的标准，并据此行动；因此准确查经和释经对教会不可缺少。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授对代词所指作语义判断",
+      "evidence_step_id": "DK-e50720f3684d-E021",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL018"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "约翰福音二十章二十三节的“谁”不是指使徒任意选定的某个人，而是指具有某种特征的一类人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授以认罪悔改经文具体界定两类人",
+      "evidence_step_id": "DK-e50720f3684d-E022",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL019"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23",
+        "约翰一书1:9"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "根据圣经关于认罪得赦免的教导，真悔改者属于罪得赦免的一类，不悔改者属于罪被留下的一类。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授以使徒行传叙事反驳彼得是最高教皇",
+      "evidence_step_id": "DK-e50720f3684d-E023",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL023"
+      ],
+      "scripture_refs": [
+        "使徒行传"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得曾受其他使徒差派出去工作，这与他拥有不受其他使徒约束的教皇地位不符。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授引用哥尼流事件说明彼得受教会问责",
+      "evidence_step_id": "DK-e50720f3684d-E024",
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL023"
+      ],
+      "scripture_refs": [
+        "使徒行传"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得向哥尼流传福音后须向耶路撒冷教会报告并交代，显示他并非拥有无人可问责的教皇权柄。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_2-e50720f3684d-DK-e50720f3684d-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-e50720f3684d-CL012-01",
+      "statement": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！",
+      "step_type": "answer",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-e50720f3684d-CL012"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-e50720f3684d-CL012-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "discourse_role": "教授进行希腊文词形与语法判断",
+      "evidence_step_id": "DK-3d012c24a542-E001",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“彼得”是Petrus，“磐石”是Petra，两者在文法性别上不同。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授提出磐石解释",
+      "evidence_step_id": "DK-3d012c24a542-E002",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "建造教会的磐石不是彼得本人，而是彼得的信仰及其对耶稣的准确认识。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授进行希腊文时态语态解释",
+      "evidence_step_id": "DK-3d012c24a542-E003",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL002",
+        "DK-3d012c24a542-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "原文表示地上所捆绑的在天上将是已经被捆绑的，因此彼得必须按照天上已有的标准行动。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释赦罪宣告的条件",
+      "evidence_step_id": "DK-3d012c24a542-E004",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL003",
+        "DK-3d012c24a542-CL004"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "赦免或留下罪依据天上已有的标准：真正悔改者得赦免，不肯悔改者其罪留下。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释耶路撒冷会议的目的",
+      "evidence_step_id": "DK-3d012c24a542-E007",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15章"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶路撒冷会议不是凭辩论或投票决定教义，而是察看圣灵如何带领外邦宣教。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "安提阿教会交付给保罗、巴拿巴处理的问题",
+      "evidence_step_id": "DK-3d012c24a542-E008",
+      "produced_claim_ids": [],
+      "scripture_refs": [
+        "使徒行传15章"
+      ],
+      "speaker": "quoted_source",
+      "stance": "questioned",
+      "statement": "耶路撒冷会议所面对的问题是外邦人是否必须受割礼并遵守摩西律法。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-Q005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授概括会议的察验过程",
+      "evidence_step_id": "DK-3d012c24a542-E014",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15章"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "使徒们根据彼得和保罗的外邦宣教经验，寻求并察验圣灵对割礼、摩西律法与得救条件的教导。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授朗读雅各在会议中的经文论证",
+      "evidence_step_id": "DK-3d012c24a542-E016",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15:14-15"
+      ],
+      "speaker": "quoted_source",
+      "stance": "quoted",
+      "statement": "雅各把西门所述神眷顾外邦人的作为，与众先知的话相互印证。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授引用耶路撒冷会议写给外邦信徒的信",
+      "evidence_step_id": "DK-3d012c24a542-E017",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL003",
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15:28"
+      ],
+      "speaker": "quoted_source",
+      "stance": "quoted",
+      "statement": "会议的书信以“圣灵和我们定意”表明其决定被理解为与圣灵的带领一致。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释会议书信的救恩含义",
+      "evidence_step_id": "DK-3d012c24a542-E018",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15:28"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "会议结论是不要求外邦信徒受割礼或遵守摩西律法，而要求他们持续相信。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授限定会议所列禁戒事项的适用背景",
+      "evidence_step_id": "DK-3d012c24a542-E019",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL003",
+        "DK-3d012c24a542-CL010"
+      ],
+      "scripture_refs": [
+        "使徒行传15:20",
+        "使徒行传15:28-29"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "会议所列少数禁戒事项具有当时文化背景，目的在避免使犹太人跌倒，而不是另加得救条件。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授模拟耶稣说明弥赛亚使命",
+      "evidence_step_id": "DK-3d012c24a542-E020",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:21"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣的弥赛亚使命不是按门徒期待作政治君王，而是到耶路撒冷受苦、被杀、赎罪并复活。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授以紧邻叙事反问反驳彼得本人是根基",
+      "evidence_step_id": "DK-3d012c24a542-E021",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣在同一上下文中责备彼得为撒但，说明祂不会把教会建立在彼得这个仍不可靠的人身上。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授限定权柄的领受者范围",
+      "evidence_step_id": "DK-3d012c24a542-E022",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL003"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣所赐的权柄不只给彼得，也给其他门徒。",
+      "step_type": "qualification",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授提出待解释的释经问题",
+      "evidence_step_id": "DK-3d012c24a542-E023",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL013"
+      ],
+      "scripture_refs": [
+        "马太福音16:20"
+      ],
+      "speaker": "professor",
+      "stance": "questioned",
+      "statement": "耶稣为何在彼得认出祂是基督后，立即吩咐门徒不要告诉别人？",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授提出解释保密命令的方法原则",
+      "evidence_step_id": "DK-3d012c24a542-E024",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL013"
+      ],
+      "scripture_refs": [
+        "马太福音16:20-21"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "解释耶稣的保密命令必须观看整套经文与上下文，不可抽取一节断章取义。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授复述不信派的弥赛亚秘密理论以备反驳",
+      "evidence_step_id": "DK-3d012c24a542-E025",
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL013"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "opposed",
+      "statement": "被反驳的理论认为耶稣本来不是弥赛亚，门徒在祂死后为维持生活而虚构祂是弥赛亚，并编造保密命令解释生前无人听闻此身份。",
+      "step_type": "reasoning",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_3-3d012c24a542-DK-3d012c24a542-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-3d012c24a542-CL002-01",
+      "statement": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」",
+      "step_type": "reasoning",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL002"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-3d012c24a542-CL002-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-3d012c24a542-CL013-01",
+      "statement": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」",
+      "step_type": "literary_context",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-3d012c24a542-CL013"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-3d012c24a542-CL013-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "discourse_role": "教授对传统译法的判断",
+      "evidence_step_id": "DK-6f059dbca908-E001",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "传统中文译法没有准确表达马太福音16章19节的文法，因此引发权柄理解上的问题。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授给出的准确译法",
+      "evidence_step_id": "DK-6f059dbca908-E002",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL001",
+        "DK-6f059dbca908-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授将该句译为地上所捆绑的在天上“也将是已经被捆绑的”，并认定其为未来完成式。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "招生委员会类比",
+      "evidence_step_id": "DK-6f059dbca908-E003",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授以招生委员会只评估申请人是否符合教授会议既定条件作类比，说明执行权不等于制定条件的绝对权柄。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "时态构成的解释",
+      "evidence_step_id": "DK-6f059dbca908-E004",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL002",
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "完成式表示捆绑与释放的条件早已在天上决定，未来式表示彼得日后会遇见并判断符合这些条件的人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对彼得职能的结论",
+      "evidence_step_id": "DK-6f059dbca908-E005",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得没有制定标准的完全权柄，只负责执行天上所规定的标准并判断具体情形是否相符。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "相关经文与数的观察",
+      "evidence_step_id": "DK-6f059dbca908-E006",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL004"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "马太福音18章18节使用复数“你们”，教授据此认定同样的权柄属于教会，而不是彼得个人独占。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "进入天国条件的说明",
+      "evidence_step_id": "DK-6f059dbca908-E007",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL003",
+        "DK-6f059dbca908-CL005"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "悔改并持续相信耶稣是进入天国的既定条件，教会传福音时只可按此告诉人是否可以进入天国。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "约翰福音赦罪经文的解释",
+      "evidence_step_id": "DK-6f059dbca908-E008",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL006"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "罪是否得赦免取决于真正悔改；教会只能向悔改者宣告罪已赦免，向不悔改者警告罪仍留下。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-Q006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对禁止宣告基督身份的回答",
+      "evidence_step_id": "DK-6f059dbca908-E010",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL007"
+      ],
+      "scripture_refs": [
+        "马太福音16:20"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣禁止门徒立即宣告他是基督，是因为当时犹太人对基督的观念错误，必须先予纠正。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "彼得反应的解释",
+      "evidence_step_id": "DK-6f059dbca908-E011",
+      "produced_claim_ids": [
+        "DK-6f059dbca908-CL007"
+      ],
+      "scripture_refs": [
+        "马太福音16:21-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼得承认耶稣是弥赛亚，却不了解弥赛亚必须受苦、被杀并复活的性质与使命。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-6f059dbca908-DK-6f059dbca908-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释权柄范围",
+      "evidence_step_id": "DK-566e8ca150dd-E004",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL003"
+      ],
+      "scripture_refs": [
+        "约翰福音20:21-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "赦罪与留罪必须在基督差遣门徒传福音的前提下理解；门徒可作诊断和宣告，但最终权柄在神。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授原文时态解释",
+      "evidence_step_id": "DK-566e8ca150dd-E005",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL003",
+        "DK-566e8ca150dd-CL004"
+      ],
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "完成式指向已完成的十字架工作，赦免所针对的是悔改这一类人，而非门徒任意挑选的个人。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授原文语法论证",
+      "evidence_step_id": "DK-566e8ca150dd-E007",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL006",
+        "DK-566e8ca150dd-CL007"
+      ],
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“彼得”和“磐石”的语法性别不同，因此教会不是建立在彼得个人身上。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授援引平行经文",
+      "evidence_step_id": "DK-566e8ca150dd-E008",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL006",
+        "DK-566e8ca150dd-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "平行经文显示捆绑与释放的话是对众门徒说的，而不是只对彼得说的。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释历史词义",
+      "evidence_step_id": "DK-566e8ca150dd-E009",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "捆绑表示禁止，释放表示准许。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授以课堂情境作类比",
+      "evidence_step_id": "DK-566e8ca150dd-E010",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL009"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授用准许学生课堂吃东西的例子说明“不捆绑而释放”就是不禁止并准许。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授原文时态判断",
+      "evidence_step_id": "DK-566e8ca150dd-E011",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "相关动词是未来完成式，应理解为地上所捆绑的在天上将已经被捆绑，而不是天上随后服从地上的决定。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授说明时态的神学应用",
+      "evidence_step_id": "DK-566e8ca150dd-E012",
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL010",
+        "DK-566e8ca150dd-CL011"
+      ],
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "完成式表示天上已经决定，未来意义表示历代教会须把该决定应用到自己时代。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-S_220206-566e8ca150dd-DK-566e8ca150dd-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-566e8ca150dd-CL006-01",
+      "statement": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！",
+      "step_type": "answer",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL006"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-566e8ca150dd-CL006-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-566e8ca150dd-CL007-01",
+      "statement": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』",
+      "step_type": "scripture_evidence",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL007"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-566e8ca150dd-CL007-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-566e8ca150dd-CL010-01",
+      "statement": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。",
+      "step_type": "reasoning",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL010"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-566e8ca150dd-CL010-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-566e8ca150dd-CL011-01",
+      "statement": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。",
+      "step_type": "application",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-566e8ca150dd-CL011"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-566e8ca150dd-CL011-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "discourse_role": "拉比语言背景解释",
+      "evidence_step_id": "DK-0d5b2062b148-E022",
+      "produced_claim_ids": [
+        "DK-0d5b2062b148-CL015"
+      ],
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“捆绑”和“释放”是当时犹太拉比使用的俗语，分别表示禁止和准许。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-220_426_110_1139-0d5b2062b148-DK-0d5b2062b148-E022-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL008",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E019",
+        "DK-a26f0a7e9ba4-E020"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:13-16"
+      ],
+      "topic_terms": [
+        "该撒利亚腓立比",
+        "该撒",
+        "基督",
+        "顺服",
+        "历史背景"
+      ],
+      "title": "耶稣在强调罗马皇帝权柄的外邦城市该撒利亚腓立比询问门徒自己是谁，使问题同时具有在该撒与基督之间选择顺服对象的背景意义。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0017",
+              "media_time": 2099,
+              "evidence_id": "DK-a26f0a7e9ba4-E019",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "连接酵的段落与彼得认信段落",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌告訴門徒說：「你要避免撒都該人跟法利賽人錯誤，他們不接受耶穌是彌賽亞。」可是接著下面那一段很重要。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0017",
+              "media_time": 2099,
+              "evidence_id": "DK-a26f0a7e9ba4-E020",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "该撒利亚腓立比地点的象征解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "在這裡，腓力比要來強調羅馬皇帝的權柄。耶穌就在這個地方問門徒：「你們說我是誰？」耶穌選的那個背景很有意思。你到底是要順從該撒呢？還是要服從耶穌？",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL009",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E021",
+        "DK-a26f0a7e9ba4-E022"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:16"
+      ],
+      "topic_terms": [
+        "彼得认信",
+        "基督",
+        "受膏者",
+        "君王",
+        "祭司",
+        "先知"
+      ],
+      "title": "彼得认信耶稣是基督、永生神的儿子，并由“受膏者”这一身份指出耶稣一身兼具君王、祭司与先知三种职分。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0017",
+              "media_time": 2099,
+              "evidence_id": "DK-a26f0a7e9ba4-E021",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "彼得对耶稣问题的经文回答",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "西門‧彼得就回答說：「你是基督，是永生神的兒子。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0017",
+              "media_time": 2099,
+              "evidence_id": "DK-a26f0a7e9ba4-E022",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对基督即受膏者的职分解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "君王、祭司、先知的職位，通通集中在耶穌基督的身上。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL010",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E023",
+        "DK-a26f0a7e9ba4-E024",
+        "DK-a26f0a7e9ba4-E025"
+      ],
+      "opposed_position_ids": [
+        "DK-a26f0a7e9ba4-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:18",
+        "以弗所书2:20"
+      ],
+      "topic_terms": [
+        "彼得",
+        "磐石",
+        "教会根基",
+        "使徒和先知",
+        "房角石"
+      ],
+      "title": "马太福音十六章十八节的磐石与彼得有关，却不是彼得这个人；教会的根基是使徒和先知，并以基督耶稣为房角石。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0019",
+              "media_time": 2507,
+              "evidence_id": "DK-a26f0a7e9ba4-E023",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以Petros与petra的语法性反驳彼得个人根基说",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "如果耶穌要把祂的教會建立在彼得身上，祂才不會說：「你是彼得（Petrus）」，陽性，「我要把我的教會建造在這磐石（petra）上」，是陰性。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0021",
+              "media_time": 2785,
+              "evidence_id": "DK-a26f0a7e9ba4-E024",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "引用以弗所书说明教会根基",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "以弗所書二章二十節：「教會被建造在使徒和先知的根基上，有基督耶穌自己為房角石。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0026",
+              "media_time": 3795,
+              "evidence_id": "DK-a26f0a7e9ba4-E025",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "综合马太福音与以弗所书所得结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以不要忘掉，不只是建立在彼得的身上，乃是建立在使徒和先知們的身上。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL001",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E001",
+        "DK-e50720f3684d-E002"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "topic_terms": [
+        "彼得",
+        "磐石",
+        "Petrus",
+        "Petra",
+        "教会根基"
+      ],
+      "title": "马太福音十六章的教会不是建立在彼得这个人本身之上。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E001",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对现存正典文本及写作语言的判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "可是我們今天所有的聖經，就是希臘文的聖經，我們沒有馬太寫的亞蘭文的福音書，沒有。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E001",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对现存正典文本及写作语言的判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "當馬太來寫希臘文的馬太福音的時候，乃是在聖靈的啟示底下，在聖靈的監管底下、帶領底下，所以雖然亞蘭文沒有 Petrus、Petra 的那一個陽性、陰性的分別，可是當他來翻成希臘文的時候，也有聖靈的帶領，聖靈要他這麼寫。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E002",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出磐石所指的释经结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是建立在彼得這個「人」身上，乃是在彼得這個人身上所有的一個特徵，彼得的特徵。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL002",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E002"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "topic_terms": [
+        "彼得的特征",
+        "磐石",
+        "阴阳性"
+      ],
+      "title": "磐石所指的是彼得身上所具有的一个特征。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0003",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E002",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出磐石所指的释经结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是建立在彼得這個「人」身上，乃是在彼得這個人身上所有的一個特徵，彼得的特徵。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL012",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E013",
+        "DK-e50720f3684d-E014",
+        "AI-ADJ-DK-e50720f3684d-CL012-01"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "天国钥匙",
+        "綑綁",
+        "釋放",
+        "未来完成式",
+        "彼得权柄"
+      ],
+      "title": "马太福音十六章十九节应按未来完成式理解为：彼得在地上所綑綁或釋放的，在天上将是已经被綑綁或釋放了；这不是天上服从彼得的决定。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E013",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对希腊文时态作判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那個 ἔσται δεδεμένον 是什麼？未來完成式。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E014",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授依据时态给出准确译文",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "準確的翻譯：「凡你在地上所綑綁的，在天上將是已經被綑綁了。」「凡你在地上所釋放的，在天上將是已經被釋放了。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-e50720f3684d-CL012-01",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以彼得的權柄能夠管天上。對不對？99.99% 錯了！",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL013",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E015",
+        "DK-e50720f3684d-E016"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "天上标准",
+        "执行权柄",
+        "彼得",
+        "审判标准"
+      ],
+      "title": "能否进入天国的条件和标准由天上预先决定；彼得的职权只是继续按该标准审核、宣告并执行。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0017",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E015",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授以招生委员会主任作执行既定标准的类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是按照我的標準來評判，是按照教授會議決定的標準去評判。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E016",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释未来完成式各部分的神学意义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "為什麼完成式？因為這個條件，這個標準，天上已經決定好了。可是為什麼要用未來式？為什麼？因為彼得還要繼續地執行這個工作，不但是今天執行，將來還要執行，所以才是未來式。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL014",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E017"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:15-18",
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "教会权柄",
+        "彼得",
+        "门徒",
+        "綑綁釋放"
+      ],
+      "title": "綑綁与釋放的权柄不只给彼得，也给门徒和整个教会。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0020",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E017",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授用平行经文确定权柄对象",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "第十八節：「我實在告訴你們，凡你們在地上所綑綁的，在天上將是已經被綑綁；凡你們在地上所釋放的，在天上也將是已經被釋放。」所以同樣的權柄，耶穌不只是給彼得，也給教會。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL015",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E018",
+        "DK-e50720f3684d-E019"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:15-18"
+      ],
+      "topic_terms": [
+        "綑綁",
+        "釋放",
+        "拉比用语",
+        "教会纪律",
+        "人和事"
+      ],
+      "title": "“綑綁”与“釋放”既可涉及禁止或准许某件事，也可涉及接纳或排除某个人，两方面都包含在其用法中。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E018",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授依据拉比习语说明词义范围",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以「綑綁」是什麼意思？可以禁止做一些事，或者是不准人進天國，兩個都有。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E019",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授综合拉比用法与马太十八章语境",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以這個權柄是跟「事」有關，也跟「人」有關。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL016",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E020"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "查验",
+        "discern",
+        "天上标准",
+        "教会领导"
+      ],
+      "title": "使徒和教会不能随意决定，而有责任查验天上的标准，再把该标准应用于现实处境。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E020",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授由释经结论推出教会实践责任",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "使徒、教會，必須要查驗天上的標準是什麼。不是使徒、教會的決定，是天上所決定的標準。使徒、教會要查驗天上的標準，然後按照天上的標準來做事。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL018",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E021"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS008"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "留下罪",
+        "哪一种人",
+        "代词解释"
+      ],
+      "title": "约翰福音二十章二十三节中的“谁”应理解为“哪一种人”，而不是由使徒任意选择的某一个人。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0024",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E021",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对代词所指作语义判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "中文翻成「誰」那個字，「誰」不是 which person，不是哪一個人，是什麼？是「哪一種人」。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL019",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E022"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23",
+        "约翰一书1:9"
+      ],
+      "topic_terms": [
+        "悔改",
+        "赦罪",
+        "不悔改",
+        "罪被留下"
+      ],
+      "title": "真悔改这一类人的罪得赦免；不肯悔改这一类人的罪被留下。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0024",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E022",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授以认罪悔改经文具体界定两类人",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "就是那些真悔改的人，他們的罪就得赦免；那些不肯悔改的人，他們的罪就留下來了。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-e50720f3684d-CL023",
+      "evidence_step_ids": [
+        "DK-e50720f3684d-E023",
+        "DK-e50720f3684d-E024"
+      ],
+      "opposed_position_ids": [
+        "DK-e50720f3684d-POS007"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "使徒行传"
+      ],
+      "topic_terms": [
+        "彼得",
+        "教皇",
+        "使徒行传",
+        "耶路撒冷教会",
+        "哥尼流"
+      ],
+      "title": "彼得不是第一任教皇，因为使徒行传呈现他受其他使徒差派，并须向耶路撒冷教会交代其对外邦人的事工。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）2",
+          "anchors": [
+            {
+              "paragraph_key": "S0025",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E023",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授以使徒行传叙事反驳彼得是最高教皇",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得受其他的使徒差派他出去做工。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0025",
+              "media_time": null,
+              "evidence_id": "DK-e50720f3684d-E024",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授引用哥尼流事件说明彼得受教会问责",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "還有彼得到哥尼流到那邊去傳福音的時候，他回來要向耶路撒冷報告，要向耶路撒冷交代。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL001",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E001",
+        "DK-3d012c24a542-E002",
+        "DK-3d012c24a542-E020",
+        "DK-3d012c24a542-E021"
+      ],
+      "opposed_position_ids": [
+        "DK-3d012c24a542-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:16-18",
+        "马太福音16:21-23"
+      ],
+      "topic_terms": [
+        "教会根基",
+        "磐石",
+        "彼得",
+        "信仰告白",
+        "基督身份"
+      ],
+      "title": "耶稣所说建造教会的“磐石”不是彼得这个人，而是彼得对耶稣为基督、为神儿子的信仰告白，或彼得从耶稣领受并传下来的真理。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E001",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授进行希腊文词形与语法判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "希臘文講的是說：「你是彼得（Petrus），」希臘文，「我要把我的教會建在這個磐石上。」這個「磐石」是Petra，不同的文法上的這個性別。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E002",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授提出磐石解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這個磐石不是建立在彼得這個人身上，等一下我再給你看證據，不是彼得這個人身上，乃是彼得所有的一個特徵，其實乃是建立在彼得的信仰、對耶穌有準確的認識的這件事情上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E020",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授模拟耶稣说明弥赛亚使命",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我來做彌賽亞不是要來做王，我現在的彌賽亞是什麼？要到耶路撒冷去被殺、受苦，為你們贖罪，三天之後要復活。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E021",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授以紧邻叙事反问反驳彼得本人是根基",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「撒但，退我後邊去吧！」你看，耶穌罵彼得是撒但！你說啊，教會建立在撒但身上嗎？",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "20a1c52c616d1b2beb79149c1a80708a5dc884ef1c861e2ea3d0a3f1e46d8e2b",
+        "structural_notes": [
+          "仅删除 CL001 对 CL015 的 supports 关系；两个主张本身及其现有锚点保持不变。"
+        ]
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL002",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E003",
+        "AI-ADJ-DK-3d012c24a542-CL002-01"
+      ],
+      "opposed_position_ids": [
+        "DK-3d012c24a542-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "天国钥匙",
+        "捆绑释放",
+        "天上标准",
+        "教会权柄"
+      ],
+      "title": "马太福音十六章的捆绑与释放不是让彼得任意决定后由天上服从，而是要求彼得按照天上已经决定的标准行事和宣告。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E003",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授进行希腊文时态语态解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實希臘文不是這樣，它的意思是：「你在地上所捆綁的，在天上將是『已經被捆綁了的』。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-3d012c24a542-CL002-01",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是給彼得說，「彼得你不管你做什麼事，你決定，我們天上就聽你的話。」不是。乃是彼得要說：「你要按照天上已經決定的標準，來做你該做的事。」",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "20a1c52c616d1b2beb79149c1a80708a5dc884ef1c861e2ea3d0a3f1e46d8e2b",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL003",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E003",
+        "DK-3d012c24a542-E004",
+        "DK-3d012c24a542-E017",
+        "DK-3d012c24a542-E019",
+        "DK-3d012c24a542-E022"
+      ],
+      "opposed_position_ids": [
+        "DK-3d012c24a542-POS002",
+        "DK-3d012c24a542-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "约翰福音20:23",
+        "使徒行传15章"
+      ],
+      "topic_terms": [
+        "教会权柄",
+        "彼得",
+        "门徒",
+        "圣灵带领",
+        "天上标准"
+      ],
+      "title": "神赐给彼得和教会的权柄，是依据天上与圣灵已经显明的原则，宣告人在何种条件下得释放、受捆绑以及应当如何行事；这权柄也赐给其他门徒，并非彼得个人独有。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E003",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授进行希腊文时态语态解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實希臘文不是這樣，它的意思是：「你在地上所捆綁的，在天上將是『已經被捆綁了的』。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E004",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释赦罪宣告的条件",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "是天上已經有標準：不管你犯什麼罪，只要你真的悔改，誰就要赦免他的罪。聽懂了嗎？如果有人犯罪不肯悔改的話，誰的罪就留下了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E017",
+              "evidence_type": "scripture_evidence",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "教授引用耶路撒冷会议写给外邦信徒的信",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "因為聖靈和我們定意，不將別的重擔放在你們身上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E019",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授限定会议所列禁戒事项的适用背景",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那個是有當時的文化背景，現在我沒有時間講那樣東西，當時的文化背景，為了要使猶太人不至跌倒，他才要求他們這麼做而已。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E022",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授限定权柄的领受者范围",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "而且這個權柄不只是給彼得，也給其他的門徒，不要忘掉。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL004",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E004"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "留下罪",
+        "悔改",
+        "谁",
+        "教会宣告"
+      ],
+      "title": "约翰福音二十章二十三节的“谁”是指“什么样的人”而不是任意指定的某个人；真正悔改的人其罪得赦免，不肯悔改的人其罪留下。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0002",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E004",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释赦罪宣告的条件",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "是天上已經有標準：不管你犯什麼罪，只要你真的悔改，誰就要赦免他的罪。聽懂了嗎？如果有人犯罪不肯悔改的話，誰的罪就留下了。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL010",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E007",
+        "DK-3d012c24a542-E008",
+        "DK-3d012c24a542-E014",
+        "DK-3d012c24a542-E016",
+        "DK-3d012c24a542-E017",
+        "DK-3d012c24a542-E018",
+        "DK-3d012c24a542-E019"
+      ],
+      "opposed_position_ids": [
+        "DK-3d012c24a542-POS004",
+        "DK-3d012c24a542-POS005"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "使徒行传15:13-28"
+      ],
+      "topic_terms": [
+        "耶路撒冷会议",
+        "圣灵带领",
+        "教会决议",
+        "外邦宣教",
+        "使徒行传15章"
+      ],
+      "title": "使徒行传十五章的耶路撒冷会议不是使徒凭意见、辩论或投票创造救恩标准，而是共同察验圣灵在外邦宣教中已经显明的带领，并依此作出宣告。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E007",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释耶路撒冷会议的目的",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他們不是在那裡辯論，不是在那裡決定，也不是他們投票決定，不是。他們在那裡做什麼呢？他們說：「我們要來看聖靈如何帶領我們去參與外邦人…向外邦人傳福音、外邦宣教，聖靈要我們怎麼做。」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E008",
+              "evidence_type": "question",
+              "speaker": "quoted_source",
+              "stance": "questioned",
+              "discourse_role": "安提阿教会交付给保罗、巴拿巴处理的问题",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "外邦人要不要受割禮？外邦人需不需要來遵守摩西的律法？",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E014",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授概括会议的察验过程",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以這些使徒們說：「好，我們現在在這個地方，是要來尋求、要來察驗、來領會聖靈教導我們，外邦人要不要受割禮？外邦人要不要遵守摩西律法就可以得救？」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E016",
+              "evidence_type": "scripture_evidence",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "教授朗读雅各在会议中的经文论证",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "方才西門述說，神當初怎樣眷顧外邦人，從他們中間選取百姓歸於自己的名下。眾先知的話也與這意思相合。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E017",
+              "evidence_type": "scripture_evidence",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "教授引用耶路撒冷会议写给外邦信徒的信",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "因為聖靈和我們定意，不將別的重擔放在你們身上。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E018",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释会议书信的救恩含义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "意思就是說你不要再受割禮，你不要再…你不要受割禮，你不要遵守摩西的律法，你只要繼續相信，就可以得救。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E019",
+              "evidence_type": "qualification",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授限定会议所列禁戒事项的适用背景",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那個是有當時的文化背景，現在我沒有時間講那樣東西，當時的文化背景，為了要使猶太人不至跌倒，他才要求他們這麼做而已。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-3d012c24a542-CL013",
+      "evidence_step_ids": [
+        "DK-3d012c24a542-E023",
+        "DK-3d012c24a542-E024",
+        "DK-3d012c24a542-E025",
+        "AI-ADJ-DK-3d012c24a542-CL013-01"
+      ],
+      "opposed_position_ids": [
+        "DK-3d012c24a542-POS006"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:20-21"
+      ],
+      "topic_terms": [
+        "弥赛亚秘密",
+        "保密命令",
+        "上下文",
+        "断章取义",
+        "基督身份"
+      ],
+      "title": "耶稣命令门徒不要告诉别人祂是基督；教授反对据此主张耶稣不是弥赛亚、门徒在祂死后才编造其弥赛亚身份的“弥赛亚秘密”理论，并称这种读法是断章取义，主张把整套圣经合起来看。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）3",
+          "anchors": [
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E023",
+              "evidence_type": "question",
+              "speaker": "professor",
+              "stance": "questioned",
+              "discourse_role": "教授提出待解释的释经问题",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "很多人問我，奇怪，耶穌怕人家知道祂是彌賽亞？",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E024",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授提出解释保密命令的方法原则",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以說你們要特別小心，不要把聖經拿來斷章取義，你要把整個的聖經整套來看。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-3d012c24a542-E025",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "opposed",
+              "discourse_role": "教授复述不信派的弥赛亚秘密理论以备反驳",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "耶穌其實不是彌賽亞，是耶穌死了以後，他的門徒說完了，我們沒有辦法生活下去，所以門徒造謠說耶穌是彌賽亞。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-3d012c24a542-CL013-01",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌馬上說：「嘿，你不要告訴別人我是基督。」",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "20a1c52c616d1b2beb79149c1a80708a5dc884ef1c861e2ea3d0a3f1e46d8e2b",
+        "structural_notes": [
+          "移除把“避免人按照错误的弥赛亚观念理解祂”直接设为保密命令原因的编辑性因果推断；保留教授对“弥赛亚秘密”理论及断章取义读法的反对。"
+        ]
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL001",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E001",
+        "DK-6f059dbca908-E002"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001",
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "天国的钥匙",
+        "未来完成式",
+        "彼得",
+        "翻译"
+      ],
+      "title": "马太福音16章19节的传统中文译法没有译出希腊文未来完成式，因而容易造成彼得拥有绝对权柄、天上必须服从其决定的误解。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E001",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授对传统译法的判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那其實這句話，是中文翻錯了，所以很多人就不知道，就出了很多的問題。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出的准确译法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL002",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E002",
+        "DK-6f059dbca908-E004"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "捆绑",
+        "释放",
+        "未来完成式",
+        "天上标准"
+      ],
+      "title": "马太福音16章19节应理解为：彼得在地上所捆绑或释放的，在天上将是已经被捆绑或释放的；完成式表示标准早已由天上决定，未来式表示彼得以后会执行该工作。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授给出的准确译法",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "凡你在地上所捆綁的，在天上，怎麼樣？也將是已經被捆綁的。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E004",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "时态构成的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL003",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E003",
+        "DK-6f059dbca908-E004",
+        "DK-6f059dbca908-E005"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS001",
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "教会权柄",
+        "执行",
+        "宣告",
+        "天国条件"
+      ],
+      "title": "彼得和教会并不自行决定谁被捆绑、释放或进入天国，而是辨认、执行并宣告天上预先决定的条件。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0006",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E003",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "招生委员会类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "我乃是執行教授會議所決定的條件。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E004",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "时态构成的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為這個條件早就在天上決定好了。可是為什麼「未來」？因為彼得還繼續地在地上他工作的時候，他還會看到有一些人，他的情況怎麼樣？他合乎天上捆綁的條件，或者他合乎天上什麼？釋放的條件。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E005",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对彼得职能的结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "不是彼得有完全的權柄，不是。彼得乃是來執行天上所規定的捆綁的條件，來看你的情況是不是合乎那個條件。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL004",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E006"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "彼得",
+        "教会",
+        "复数",
+        "权柄"
+      ],
+      "title": "捆绑与释放的权柄不只给彼得；马太福音18章18节用复数“你们”，表明同样的权柄也给教会。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E006",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "相关经文与数的观察",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "馬太十八章十八節，耶穌說：「我實在告訴你們，凡『你們』……」單數還是複數？複數！不是彼得，是「你們」，教會！",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL005",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E007"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "悔改",
+        "信心",
+        "进入天国",
+        "福音宣告"
+      ],
+      "title": "人进入天国的条件不是由教会制定；真正悔改并持续相信耶稣基督的人可以进入天国，教会可据此作出宣告。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E007",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "进入天国条件的说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "只要你悔改，你繼續地相信耶穌基督，你就可以進天國。這個不是教會決定的，這是神在天上早就決定的。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL006",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E008"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "留罪",
+        "悔改",
+        "教会权柄"
+      ],
+      "title": "约翰福音20章23节不是赋予教会按个人好恶赦免或留下罪的权柄；罪是否得赦免取决于犯罪者是否真正悔改。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E008",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "约翰福音赦罪经文的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實一個人的罪能不能得赦免，在乎他有沒有真正的悔改。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-6f059dbca908-CL007",
+      "evidence_step_ids": [
+        "DK-6f059dbca908-E010",
+        "DK-6f059dbca908-E011"
+      ],
+      "opposed_position_ids": [
+        "DK-6f059dbca908-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:20-23"
+      ],
+      "topic_terms": [
+        "弥赛亚秘密",
+        "政治弥赛亚",
+        "罗马",
+        "十字架",
+        "赎罪"
+      ],
+      "title": "耶稣暂时禁止门徒宣告他是基督，因为当时犹太人把弥赛亚理解为发动反罗马革命、建立独立国家的政治领袖，这会妨碍耶稣完成十字架赎罪使命。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（五）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0013",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E010",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对禁止宣告基督身份的回答",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為當時猶太人對「基督」、對「受膏者」有錯誤的觀念。所以耶穌要先把這些人的觀念改正過來之後，才會准許門徒們去告訴別人，耶穌就是那個基督。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-6f059dbca908-E011",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "彼得反应的解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得認耶穌為基督、是彌賽亞，但是彼得不認識彌賽亞的性質，不知道、不認識彌賽亞的使命。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL003",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E004",
+        "DK-566e8ca150dd-E005"
+      ],
+      "opposed_position_ids": [
+        "DK-566e8ca150dd-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:21-23"
+      ],
+      "topic_terms": [
+        "赦罪",
+        "留罪",
+        "教会权柄",
+        "奉差遣"
+      ],
+      "title": "约翰福音二十章的赦罪与留罪之言，不是把任意决定个人是否蒙赦免的绝对权柄交给门徒，而是在奉差遣传福音的范围内宣告神的赦免。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E004",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释权柄范围",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "關鍵在於『奉差遣』的前提——門徒乃是蒙召傳揚福音，非擅自定罪。正如醫生診斷病症，但醫治權柄在神。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E005",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授原文时态解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那是什麼意思？你要赦免不是哪一個人，而是哪一種人——只有那些悔改的人，罪才會得到赦免。所以這裡是用完成式，完成十字架工作。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL004",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E005"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "约翰福音20:23"
+      ],
+      "topic_terms": [
+        "完成式",
+        "十字架",
+        "悔改",
+        "赦罪"
+      ],
+      "title": "约翰福音二十章赦罪动词的完成式指向十字架已经完成的工作；门徒所宣告的不是任意赦免某个人，而是悔改之人的罪得赦免。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E005",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授原文时态解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那是什麼意思？你要赦免不是哪一個人，而是哪一種人——只有那些悔改的人，罪才會得到赦免。所以這裡是用完成式，完成十字架工作。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL006",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E007",
+        "DK-566e8ca150dd-E008",
+        "AI-ADJ-DK-566e8ca150dd-CL006-01"
+      ],
+      "opposed_position_ids": [
+        "DK-566e8ca150dd-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:13-23",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "彼得",
+        "磐石",
+        "教会根基",
+        "天国钥匙"
+      ],
+      "title": "耶稣没有把教会建立在彼得个人身上，也没有把决定他人天堂或地狱命运的绝对权柄单独交给彼得。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E007",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授原文语法论证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0012",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E008",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授援引平行经文",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "馬太福音十八章十八節，耶穌告訴門徒：『我實在告訴你們』——門徒不是彼得一個人，是門徒——『你們門徒，凡你們在地上所捆綁的，在天上也要捆綁。』",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-566e8ca150dd-CL006-01",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "很多人說彼得有這種權柄——『我把你捆綁下地獄，你就下地獄；我釋放你到天堂去，你就到天堂去。』是不是這個鑰匙、天國的鑰匙，給彼得這麼做？錯！大錯！",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL007",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E007",
+        "AI-ADJ-DK-566e8ca150dd-CL007-01"
+      ],
+      "opposed_position_ids": [
+        "DK-566e8ca150dd-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:18"
+      ],
+      "topic_terms": [
+        "希腊文性别",
+        "彼得",
+        "磐石",
+        "基督身份"
+      ],
+      "title": "马太福音十六章中彼得与“磐石”的语法性别不同，教会所建造的磐石是彼得对耶稣为神儿子的承认，而不是彼得本人。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E007",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授原文语法论证",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "彼得不是盤石，那個「盤石」是陰性，不是陽性，所以不是在彼得身上。彼得是陽性，聖經講得很清楚",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-566e8ca150dd-CL007-01",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "各位注意看，後來彼得承認耶穌就是神的兒子，所以耶穌說：『我要把我的教會建在這一個「盤石」上。』",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL008",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E008"
+      ],
+      "opposed_position_ids": [
+        "DK-566e8ca150dd-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "捆绑释放",
+        "门徒",
+        "彼得",
+        "平行经文"
+      ],
+      "title": "捆绑与释放的托付属于所有受差遣的门徒，不只属于彼得一人。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0012",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E008",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授援引平行经文",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "馬太福音十八章十八節，耶穌告訴門徒：『我實在告訴你們』——門徒不是彼得一個人，是門徒——『你們門徒，凡你們在地上所捆綁的，在天上也要捆綁。』",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL009",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E009",
+        "DK-566e8ca150dd-E010"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "捆绑",
+        "释放",
+        "历史用法",
+        "禁止与准许"
+      ],
+      "title": "“捆绑”和“释放”在当时文士与法利赛人的用法中，分别表示禁止某事和准许某事。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0013",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E009",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释历史词义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "『捆綁』就是禁止，禁止你不可做這件事，就是捆綁；『我讓你做』就是釋放，就讓你做。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E010",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授以课堂情境作类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以我不捆綁你，不禁止你吃飯、吃東西，你可以，我釋放你可以吃。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL010",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E011",
+        "DK-566e8ca150dd-E012",
+        "AI-ADJ-DK-566e8ca150dd-CL010-01"
+      ],
+      "opposed_position_ids": [
+        "DK-566e8ca150dd-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19",
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "未来完成式",
+        "教会权柄",
+        "圣经规范",
+        "捆绑释放"
+      ],
+      "title": "捆绑与释放句子的未来完成式表示：地上的门徒和历代教会领袖应把天上已经决定并由圣经说明的禁止与准许应用于各时代，而不是让天上服从地上的个人决定。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E011",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授原文时态判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為這裡的時態是未來完成式，將已經被捆綁了。那什麼意思？你們在地上所捆綁的，在天上也將已經被捆綁了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0019",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E012",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授说明时态的神学应用",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以完成式在天上已經完成，然後呢？你要把天上所決定的事，現在要應用在今天的世界裡面。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0017",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-566e8ca150dd-CL010-01",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "天上已經決定什麼事可以做、什麼事不可以做。所以聖經裡面一大堆跟你們講什麼事可以做、什麼事不可以做，聖經已經講好了，天上已經決定了。",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-566e8ca150dd-CL011",
+      "evidence_step_ids": [
+        "DK-566e8ca150dd-E012",
+        "AI-ADJ-DK-566e8ca150dd-CL011-01"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音18:18"
+      ],
+      "topic_terms": [
+        "教会领导",
+        "圣经权威",
+        "应用",
+        "个人喜好"
+      ],
+      "title": "教会领袖判断可以做或不可做的事，不应根据个人喜好，而应遵照圣经中天上已经确定的原则。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9"
+      ],
+      "occurrences": [
+        {
+          "source_id": "S 220206",
+          "transcript_id": "S 220206",
+          "lecture": "S 220206",
+          "anchors": [
+            {
+              "paragraph_key": "S0019",
+              "media_time": null,
+              "evidence_id": "DK-566e8ca150dd-E012",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授说明时态的神学应用",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以完成式在天上已經完成，然後呢？你要把天上所決定的事，現在要應用在今天的世界裡面。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0018",
+              "media_time": null,
+              "evidence_id": "AI-ADJ-DK-566e8ca150dd-CL011-01",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "整個二十世紀、二十一世紀的教會領袖們，什麼事不是看你喜歡做什麼來決定，NO！沒有這件事！天上早就講好，天上都講好，天上所禁止的，你在二十一世紀就要來禁止。",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-0d5b2062b148-CL015",
+      "evidence_step_ids": [
+        "DK-0d5b2062b148-E022"
+      ],
+      "opposed_position_ids": [
+        "DK-0d5b2062b148-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:19"
+      ],
+      "topic_terms": [
+        "捆绑与释放",
+        "拉比俗语",
+        "禁止",
+        "准许"
+      ],
+      "title": "马太福音十六章的“捆绑”和“释放”是当时拉比用来表示禁止与准许的俗语，不是指决定某人能否进入天国。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949"
+      ],
+      "occurrences": [
+        {
+          "source_id": "220-426-110-1139",
+          "transcript_id": "220-426-110-1139",
+          "lecture": "220-426-110-1139",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": null,
+              "evidence_id": "DK-0d5b2062b148-E022",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "拉比语言背景解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "「捆綁」跟「釋放」就是當時猶太人的拉比學校，他們的Rabbi，或者拉比學派，拉比學院等等，這些人啊，拉比，他們所用的，實際上他們的slang。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "knowledge_relations": [],
+  "claim_relations": [],
+  "knowledge_routes": [],
+  "topic_candidates": [],
+  "candidate_generation": {
+    "status": "pending_cross_sermon_comparison",
+    "policy": {
+      "derive_after_independent_extraction": true,
+      "allow_unassigned_material": true,
+      "allow_multiple_topic_candidates": true,
+      "preserve_scripture_context": true,
+      "separate_questions_from_topic_exposition": true
+    }
+  },
+  "lineage": [
+    {
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+      "package_path": "/Users/junyang/app/smart-answer/output/claim-layer/detailed-extractions/2016_NYSC_1-a26f0a7e9ba4.reviewed-candidate.json",
+      "package_sha256": "a4c5329266cd8c59f3723976f68569272dcc9cb57b1a008ffefcd0e2634f0126",
+      "extraction_fingerprint": "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb",
+      "adjudication_fingerprint": "7c42675e0b6c11b222180c0f9079e014ae6ff55a44b4be34e87b35c05b395584"
+    },
+    {
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）2",
+      "package_path": "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_2-e50720f3684d.reviewed-candidate.json",
+      "package_sha256": "d44036e5200e5bf27e064fae497d06cd76916cced792fde4d2783b7a43c29927",
+      "extraction_fingerprint": "fb5a1ec02ac4342dfdcd8b0346dc2e818459a4b2d6890cf46c77903a8f0a7cc1",
+      "adjudication_fingerprint": "4a6a3c7c0ddb89b8cab87386c7e84bf88428b17e6343429c645e0e3fdac7b799"
+    },
+    {
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+      "package_path": "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_3-3d012c24a542.reviewed-candidate.json",
+      "package_sha256": "dbd462f2a18ed4b86a59083a06d9a5fcd030daac691d1e77957af252db01a867",
+      "extraction_fingerprint": "03b8ac78bf54a14fe161164e48af45111934882d6b75743c0d23438ae64cb14a",
+      "adjudication_fingerprint": "20a1c52c616d1b2beb79149c1a80708a5dc884ef1c861e2ea3d0a3f1e46d8e2b"
+    },
+    {
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）1",
+      "package_path": "output/claim-layer/matthew-16-13-20-sources/reviewed/2016_NYSC_1-6f059dbca908.reviewed-candidate.json",
+      "package_sha256": "01a6baa8244fdf4bdbbc5eb8c02aef8d072fa8d0453bdb58ec84dfae2a6ebb51",
+      "extraction_fingerprint": "4935d9fd75c46c74d5234362ddde8d5370a99e9a8d46ce3a5e4a283fb3a61643",
+      "adjudication_fingerprint": "13c89cce5ae3d9890a50cf17598333e38040f4cd264d447de745fd01d83aa26a"
+    },
+    {
+      "transcript_id": "S 220206",
+      "package_path": "/Users/junyang/app/smart-answer/output/claim-layer/matthew-16-13-20-sources/reviewed/S_220206-566e8ca150dd.reviewed-candidate.json",
+      "package_sha256": "6593979802f6d478b5113241705acf7bd2b4ed9604a0745ae55acafbed1692d1",
+      "extraction_fingerprint": "90a65fe3a68b8680f52707c82e28b8f1cfed0e121fa379d605986342926e6ca9",
+      "adjudication_fingerprint": "08ccfcea6e35f13e6c300e5eac79e12738f12ac06213dea946251b856e5a1df3"
+    },
+    {
+      "transcript_id": "220-426-110-1139",
+      "package_path": "output/claim-layer/matthew-16-13-20-sources/reviewed/220_426_110_1139-0d5b2062b148.reviewed-candidate.json",
+      "package_sha256": "d8b3322d84978a15b03e7e9c6c8615112745a31f999d7afce25694b8974550cf",
+      "extraction_fingerprint": "dae6df33050e136f680bc9a1bc641d3ca8c474f8d2fff69c41d93665a251c949",
+      "adjudication_fingerprint": "6e176dc9af4f35cef6fcf63db98180a190de1b07c92a930f38e13c6d7d45361a"
+    }
+  ],
+  "source_fidelity_corrections": [],
+  "approval_status": "not_human_approved",
+  "summary": {
+    "source_documents_count": 6,
+    "source_fragments_count": 83,
+    "evidence_steps_count": 64,
+    "claims_count": 35,
+    "claim_relations_count": 0,
+    "position_nodes_count": 18
+  },
+  "package_id": "knowledge-claim-slice",
+  "source_packages": [
+    null
+  ],
+  "slice_scope": {
+    "selection_policy": "explicit_reviewed_claim_ids",
+    "claim_ids": [
+      "DK-0d5b2062b148-CL015",
+      "DK-3d012c24a542-CL001",
+      "DK-3d012c24a542-CL002",
+      "DK-3d012c24a542-CL003",
+      "DK-3d012c24a542-CL004",
+      "DK-3d012c24a542-CL010",
+      "DK-3d012c24a542-CL013",
+      "DK-566e8ca150dd-CL003",
+      "DK-566e8ca150dd-CL004",
+      "DK-566e8ca150dd-CL006",
+      "DK-566e8ca150dd-CL007",
+      "DK-566e8ca150dd-CL008",
+      "DK-566e8ca150dd-CL009",
+      "DK-566e8ca150dd-CL010",
+      "DK-566e8ca150dd-CL011",
+      "DK-6f059dbca908-CL001",
+      "DK-6f059dbca908-CL002",
+      "DK-6f059dbca908-CL003",
+      "DK-6f059dbca908-CL004",
+      "DK-6f059dbca908-CL005",
+      "DK-6f059dbca908-CL006",
+      "DK-6f059dbca908-CL007",
+      "DK-a26f0a7e9ba4-CL008",
+      "DK-a26f0a7e9ba4-CL009",
+      "DK-a26f0a7e9ba4-CL010",
+      "DK-e50720f3684d-CL001",
+      "DK-e50720f3684d-CL002",
+      "DK-e50720f3684d-CL012",
+      "DK-e50720f3684d-CL013",
+      "DK-e50720f3684d-CL014",
+      "DK-e50720f3684d-CL015",
+      "DK-e50720f3684d-CL016",
+      "DK-e50720f3684d-CL018",
+      "DK-e50720f3684d-CL019",
+      "DK-e50720f3684d-CL023"
+    ]
+  }
+}
