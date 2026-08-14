@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,7 @@ from backend.pipeline.corpus_ai_adjudication import (
     validate_claude_reconsideration,
     validate_openai_adjudication,
 )
-from backend.pipeline.corpus_ai_adjudication_runner import _has_matching_generation
+from backend.pipeline.corpus_ai_adjudication_runner import _has_matching_generation, _load_context
 from backend.pipeline.shared_knowledge_pilot import _apply_claim_overrides
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
@@ -70,6 +71,31 @@ def test_openai_must_cover_every_actionable_claude_review() -> None:
             claims_by_id=_claims(),
             transcript_segments={"L3": {"10": "教授原话"}},
         )
+
+
+def test_adjudication_context_uses_transcript_id_not_source_node_id(tmp_path, monkeypatch) -> None:
+    package_path = tmp_path / "package.json"
+    package_path.write_text(
+        json.dumps({
+            "source_documents": [{
+                "source_id": "SRC-content-addressed",
+                "transcript_id": "sermon-human-id",
+            }],
+            "claims": [],
+            "claim_relations": [],
+        }),
+        encoding="utf-8",
+    )
+    payload = {"script": [{"index": "7", "text": "教授原话"}]}
+    monkeypatch.setattr(
+        "backend.pipeline.corpus_ai_adjudication_runner.load_knowledge_source_document",
+        lambda source, transcript_dirs: (payload, None, None),
+    )
+
+    _, _, transcripts, segments = _load_context(package_path, [tmp_path])
+
+    assert transcripts == [("sermon-human-id", payload)]
+    assert segments == {"sermon-human-id": {"7": "教授原话"}}
 
 
 def test_accept_requires_executable_patch_and_verbatim_new_anchor() -> None:
@@ -345,11 +371,44 @@ def test_sonnet_5_omits_legacy_sampling_and_thinking_fields() -> None:
     client.model = "claude-sonnet-5"
     client.max_output_tokens = 100
     client.timeout_seconds = 90
+    client.system_cache_ttl = "1h"
+    client.prefix_cache_ttl = "5m"
     client.client = SimpleNamespace(messages=Messages())
     result = client._post_chat_completion("system", "user", 0.0)
     assert result == "ok"
     assert "temperature" not in calls[0]
     assert "thinking" not in calls[0]
+
+
+def test_prompt_caching_marks_system_and_stable_prefix() -> None:
+    """The system prompt and the caller's stable payload are cached separately."""
+    calls: list[dict] = []
+
+    class Messages:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")], usage=None
+            )
+
+    client = Stage1AnthropicClient.__new__(Stage1AnthropicClient)
+    client.model = "claude-sonnet-4-6"
+    client.max_output_tokens = 100
+    client.timeout_seconds = 90
+    client.system_cache_ttl = "1h"
+    client.prefix_cache_ttl = "5m"
+    client.client = SimpleNamespace(messages=Messages())
+
+    client._post_chat_completion("system", "feedback", 0.0, cache_prefix="stable source")
+
+    request = calls[0]
+    assert request["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    blocks = request["messages"][0]["content"]
+    assert blocks[0]["text"] == "stable source"
+    assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "5m"}
+    # The volatile tail must stay outside the cached block, or every retry
+    # would invalidate the entry it is supposed to read.
+    assert blocks[1] == {"type": "text", "text": "feedback"}
 
 
 def test_matching_adjudication_generation_requires_output_and_overrides(tmp_path) -> None:

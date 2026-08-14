@@ -7,6 +7,7 @@ requested, and human-review queues with deterministic spot-check sampling.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import shutil
@@ -26,6 +27,7 @@ from backend.pipeline.corpus_ai_review import (
 )
 from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug, _transcript_for_prompt
+from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -150,12 +152,12 @@ def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
 
 def _claim_layer_input(
     survey: dict[str, Any],
-    transcripts: list[tuple[str, dict[str, Any]]],
+    source_documents: list[tuple[str, dict[str, Any]]],
 ) -> str:
     sections = []
-    for transcript_id, transcript in transcripts:
+    for source_id, source_document in source_documents:
         sections.append(
-            f"===== 完整逐字稿：{transcript_id} =====\n{_transcript_for_prompt(transcript)}"
+            f"===== 完整来源：{source_id} =====\n{_transcript_for_prompt(source_document)}"
         )
     return (
         "以下是已经精编的跨讲 claim layer。现有人工标签和状态只是待复核资料，"
@@ -176,12 +178,13 @@ def _generate_valid_review(
 ) -> dict[str, Any]:
     """Retry a structurally invalid review without hiding the failed attempt."""
     last_error: AIReviewValidationError | None = None
-    current_input = user_input
+    feedback = ""
     for attempt in range(1, validation_attempts + 1):
         response = client.generate_json(
             prompt,
-            current_input,
+            feedback,
             AI_REVIEW_RESPONSE_SCHEMA,
+            cache_prefix=user_input,
         )
         try:
             validate_review_response(response, survey)
@@ -190,9 +193,8 @@ def _generate_valid_review(
             last_error = exc
             if attempt == validation_attempts:
                 break
-            current_input = (
-                user_input
-                + "\n\n上一次审阅结果未通过程序验证。错误："
+            feedback = (
+                "\n\n上一次审阅结果未通过程序验证。错误："
                 + str(exc)
                 + "\n请重新输出一份完整 JSON；不得只输出修正片段，也不得遗漏任何 claim。"
             )
@@ -305,14 +307,15 @@ def run_claim_layer(
     transcript_hashes: dict[str, str] = {}
     transcript_paths: dict[str, str] = {}
     for source in package.get("source_documents", []):
-        transcript_id = str(source.get("transcript_id") or "")
-        transcript_path = _find_transcript(transcript_id, transcript_dirs)
-        transcript, raw = _load(transcript_path)
-        transcripts.append((transcript_id, transcript))
-        transcript_hashes[transcript_id] = _sha256_bytes(raw)
-        transcript_paths[transcript_id] = str(transcript_path)
+        source_id = str(source.get("source_id") or source.get("transcript_id") or "")
+        source_payload, raw, source_path = load_knowledge_source_document(
+            source, transcript_dirs
+        )
+        transcripts.append((source_id, source_payload))
+        transcript_hashes[source_id] = _sha256_bytes(raw)
+        transcript_paths[source_id] = str(source_path)
     if not transcripts:
-        raise AIReviewValidationError("claim-layer package has no source transcripts")
+        raise AIReviewValidationError("claim-layer package has no source documents")
 
     source_identity = {
         "input_mode": "curated_claim_layer",
@@ -320,6 +323,8 @@ def run_claim_layer(
         "package_sha256": _sha256_bytes(package_bytes),
         "transcript_sha256": transcript_hashes,
     }
+    if package.get("review_batch"):
+        source_identity["review_batch"] = copy.deepcopy(package["review_batch"])
     source_fingerprint = _sha256_bytes(
         json.dumps(
             source_identity,
@@ -414,22 +419,27 @@ def main() -> int:
     if args.claim_layer_package:
         package = json.loads(args.claim_layer_package.read_text(encoding="utf-8"))
         normalized = _normalize_claim_layer(package)
+        source_records = list(package.get("source_documents", []))
         source_ids = [
-            str(item.get("transcript_id") or "")
-            for item in package.get("source_documents", [])
+            str(item.get("source_id") or item.get("transcript_id") or "")
+            for item in source_records
         ]
         if args.dry_run:
+            resolved = []
+            for source in source_records:
+                try:
+                    load_knowledge_source_document(source, transcript_dirs)
+                    resolved.append(True)
+                except (FileNotFoundError, ValueError, json.JSONDecodeError):
+                    resolved.append(False)
             print(
                 json.dumps(
                     {
                         "input_mode": "curated_claim_layer",
                         "package": str(args.claim_layer_package),
                         "claims": len(normalized["candidate_claims"]),
-                        "source_transcripts": source_ids,
-                        "all_transcripts_found": all(
-                            any((directory / f"{item}.json").is_file() for directory in transcript_dirs)
-                            for item in source_ids
-                        ),
+                        "source_documents": source_ids,
+                        "all_sources_resolved": all(resolved),
                         "model": args.model,
                         "would_call_anthropic": False,
                     },

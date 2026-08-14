@@ -30,11 +30,11 @@ from backend.pipeline.corpus_ai_adjudication import (
 from backend.pipeline.corpus_ai_review_runner import (
     DEFAULT_TRANSCRIPT_DIRS,
     _claim_layer_input,
-    _find_transcript,
     _normalize_claim_layer,
     _sha256_bytes,
 )
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load
+from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
@@ -64,8 +64,13 @@ def _load_context(
     transcripts: list[tuple[str, dict[str, Any]]] = []
     segments: dict[str, dict[str, str]] = {}
     for source in package.get("source_documents", []):
-        transcript_id = str(source.get("transcript_id") or "")
-        payload, _ = _load(_find_transcript(transcript_id, transcript_dirs))
+        # Anchor patches are applied against ``transcript_id``.  ``source_id``
+        # names the knowledge node and may intentionally use a different,
+        # content-addressed identifier (for example ``SRC-...``).  Giving the
+        # model that source-node ID here produced valid-looking additions that
+        # the consensus applier could never resolve back to a transcript.
+        transcript_id = str(source.get("transcript_id") or source.get("source_id") or "")
+        payload, _, _ = load_knowledge_source_document(source, transcript_dirs)
         transcripts.append((transcript_id, payload))
         segments[transcript_id] = _transcript_segments(payload)
     return survey, claims_by_id, transcripts, segments
@@ -257,9 +262,9 @@ def run(
     previous_response: dict[str, Any] | None = None
     last_validation_error: AIAdjudicationValidationError | None = None
     for attempt in range(1, ADJUDICATION_VALIDATION_ATTEMPTS + 1):
-        current_input = openai_input
+        current_feedback = ""
         if previous_response is not None and last_validation_error is not None:
-            current_input += (
+            current_feedback = (
                 "\n\n===== 上一版仲裁 JSON（必须以此为基础定点修复）=====\n"
                 + json.dumps(previous_response, ensure_ascii=False)
                 + "\n\n===== 机械验证反馈 =====\n"
@@ -269,8 +274,9 @@ def run(
             )
         candidate = openai_client.generate_json(
             openai_prompt,
-            current_input,
+            current_feedback,
             OPENAI_ADJUDICATION_SCHEMA,
+            cache_prefix=openai_input,
         )
         try:
             validate_openai_adjudication(

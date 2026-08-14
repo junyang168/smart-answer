@@ -25,12 +25,14 @@ from backend.pipeline.detailed_knowledge_extraction import (
     extraction_identity,
     validate_response,
 )
+from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
 DEFAULT_OUTPUT_DIR = Path("output/claim-layer/detailed-extractions")
 PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
+NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4
 
 
@@ -120,11 +122,13 @@ def _anchored_fragment(
 def compile_package(
     *, transcript_id: str, transcript_path: Path, transcript: dict[str, Any], raw: bytes,
     response: dict[str, Any], extraction: dict[str, Any],
+    source_descriptor: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
     # sermon.  A 200-sermon corpus cannot safely contain 200 different CL001s.
-    namespace = f"DK-{hashlib.sha256(transcript_id.encode('utf-8')).hexdigest()[:12]}"
+    source_key = str((source_descriptor or {}).get("source_id") or transcript_id)
+    namespace = f"DK-{hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:12]}"
     response = json.loads(json.dumps(response, ensure_ascii=False))
     id_maps = {
         "question": {row["question_id"]: f"{namespace}-{row['question_id']}" for row in response["questions"]},
@@ -158,7 +162,7 @@ def compile_package(
         row["from_id"] = id_maps["claim"][row["from_id"]]
         row["to_id"] = id_maps["claim"][row["to_id"]]
 
-    source_id = f"SRC-{_slug(transcript_id)}"
+    source_id = str((source_descriptor or {}).get("source_id") or f"SRC-{_slug(transcript_id)}")
     source_sha256 = hashlib.sha256(raw).hexdigest()
     fragments: list[dict[str, Any]] = []
     fragment_by_anchor: dict[tuple[str, str], str] = {}
@@ -168,7 +172,7 @@ def compile_package(
         existing = fragment_by_anchor.get(key)
         if existing:
             return existing
-        fragment_id = f"FR-{_slug(transcript_id)}-{owner_id}-{position + 1:02d}"
+        fragment_id = f"FR-{_slug(source_key)}-{owner_id}-{position + 1:02d}"
         fragment_by_anchor[key] = fragment_id
         fragments.append(_anchored_fragment(
             fragment_id=fragment_id, source_id=source_id, anchor=anchor,
@@ -225,25 +229,35 @@ def compile_package(
                     "proposed_highlight": {"text": anchor["verbatim_excerpt"], "status": "proposed"},
                 })
         item["occurrences"] = [{
-            "transcript_id": transcript_id,
+            "source_id": source_key,
+            "transcript_id": source_key,
             "lecture": transcript.get("metadata", {}).get("title", transcript_id),
             "anchors": anchors,
         }]
         item["maturity"] = "candidate"
         claims.append(item)
 
-    package = {
-        "schema_version": "wang_shared_knowledge_v1.2",
-        "package_id": f"DETAILED-{_slug(transcript_id)}",
-        "source_documents": [{
+    source_document = {
+        "source_id": source_id,
+        "source_type": "sermon_transcript",
+        "transcript_id": transcript_id,
+        "title": transcript.get("metadata", {}).get("title", transcript_id),
+        "source_sha256": source_sha256,
+        "source_path": str(transcript_path),
+        "review_status": "candidate",
+    }
+    if source_descriptor:
+        source_document.update(json.loads(json.dumps(source_descriptor, ensure_ascii=False)))
+        source_document.update({
             "source_id": source_id,
-            "source_type": "sermon_transcript",
-            "transcript_id": transcript_id,
-            "title": transcript.get("metadata", {}).get("title", transcript_id),
             "source_sha256": source_sha256,
             "source_path": str(transcript_path),
             "review_status": "candidate",
-        }],
+        })
+    package = {
+        "schema_version": "wang_shared_knowledge_v1.2",
+        "package_id": f"DETAILED-{_slug(source_key)}",
+        "source_documents": [source_document],
         "source_fragments": fragments,
         "questions": questions,
         "position_nodes": positions,
@@ -265,6 +279,69 @@ def compile_package(
         },
     }
     return package
+
+
+def run_source(
+    source_descriptor: dict[str, Any], *, output_dir: Path, client: Stage1OpenAIClient,
+    prompt: str, reasoning_effort: str, force: bool,
+) -> tuple[str, Path]:
+    source, raw, source_path = markdown_source_document(source_descriptor)
+    source_id = str(source_descriptor["source_id"])
+    identity = extraction_identity(
+        source_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
+        model_id=client.model, reasoning_effort=reasoning_effort,
+        max_output_tokens=client.max_output_tokens,
+    )
+    output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
+    if output_path.is_file() and not force:
+        existing = json.loads(output_path.read_text(encoding="utf-8"))
+        if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
+            return "skipped", output_path
+    user_input = (
+        f"来源 ID：{source_id}\n标题：{source.get('metadata', {}).get('title', source_id)}\n"
+        f"来源类型：{source_descriptor.get('source_type', 'notes_manuscript')}\n\n"
+        "以下是完整 Markdown 讲稿。S 编号是唯一定位码。请输出完整 JSON。\n\n"
+        + _transcript_for_prompt(source)
+    )
+    last_error: DetailedExtractionValidationError | None = None
+    last_candidate: dict[str, Any] | None = None
+    response = None
+    for attempt in range(1, VALIDATION_ATTEMPTS + 1):
+        feedback = ""
+        if last_error and last_candidate:
+            feedback = (
+                "\n\n===== 上一版 JSON（必须以此为基础修复）=====\n"
+                + json.dumps(last_candidate, ensure_ascii=False)
+                + "\n\n===== 机械验证反馈 =====\n"
+                + _validation_feedback(last_error, source)
+            )
+        # The source text is identical on every attempt — send it as its own cached
+        # block so retries read it instead of paying for it again.
+        candidate = client.generate_json(
+            prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
+        )
+        try:
+            validate_response(candidate, source)
+            response = candidate
+            break
+        except DetailedExtractionValidationError as exc:
+            last_error = exc
+            last_candidate = candidate
+            _archive_rejected_candidate(
+                output_dir=output_dir, transcript_id=source_id, attempt=attempt,
+                candidate=candidate, error=exc,
+            )
+    if response is None:
+        raise last_error or DetailedExtractionValidationError("detailed extraction validation failed")
+    package = compile_package(
+        transcript_id=source_id, transcript_path=source_path, transcript=source,
+        raw=raw, response=response, extraction=identity,
+        source_descriptor=source_descriptor,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _archive(output_path)
+    output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return "created", output_path
 
 
 def run_one(
@@ -292,15 +369,17 @@ def run_one(
     last_candidate: dict[str, Any] | None = None
     response = None
     for attempt in range(1, VALIDATION_ATTEMPTS + 1):
-        current = user_input
+        feedback = ""
         if last_error and last_candidate:
-            current += (
+            feedback = (
                 "\n\n===== 上一版 JSON（必须以此为基础修复）=====\n"
                 + json.dumps(last_candidate, ensure_ascii=False)
                 + "\n\n===== 机械验证反馈 =====\n"
                 + _validation_feedback(last_error, transcript)
             )
-        candidate = client.generate_json(prompt, current, DETAILED_RESPONSE_SCHEMA)
+        candidate = client.generate_json(
+            prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
+        )
         try:
             validate_response(candidate, transcript)
             response = candidate
@@ -331,27 +410,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transcript-dir", type=Path, default=DEFAULT_TRANSCRIPT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--ids", nargs="+", required=True)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--ids", nargs="+")
+    group.add_argument("--source-manifest", type=Path)
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     parser.add_argument("--max-output-tokens", type=int, default=32000)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in args.ids]
+    source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
+    paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
         print(json.dumps({
-            "transcripts": args.ids, "model": args.model,
+            "transcripts": args.ids or [],
+            "sources": [row["source_id"] for row in source_rows], "model": args.model,
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
             "would_call_openai": False,
         }, ensure_ascii=False))
         return 0
     load_dotenv(PROJECT_ROOT / ".env")
-    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+    prompt_path = NOTES_PROMPT_PATH if source_rows else PROMPT_PATH
+    prompt = prompt_path.read_text(encoding="utf-8")
     client = Stage1OpenAIClient(
         model=args.model, reasoning_effort=args.reasoning_effort,
         timeout_seconds=600, max_retries=3, max_output_tokens=args.max_output_tokens,
@@ -368,6 +452,17 @@ def main() -> int:
         except (DetailedExtractionValidationError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
             counts["failed"] += 1
             print(f"FAILED: {path.name}: {exc}")
+    for source_row in source_rows:
+        try:
+            status, output = run_source(
+                source_row, output_dir=args.output_dir, client=client, prompt=prompt,
+                reasoning_effort=args.reasoning_effort, force=args.force,
+            )
+            counts[status] += 1
+            print(f"{status}: {source_row['source_id']} -> {output}")
+        except (DetailedExtractionValidationError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            counts["failed"] += 1
+            print(f"FAILED: {source_row['source_id']}: {exc}")
     print(json.dumps(counts, ensure_ascii=False))
     return 1 if counts["failed"] else 0
 
