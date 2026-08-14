@@ -16,12 +16,23 @@ from pathlib import Path
 from typing import Any
 
 
-AUDIT_SCHEMA_VERSION = "editorial-draft-audit.v1"
+AUDIT_SCHEMA_VERSION = "editorial-draft-audit.v2"
+PUBLICATION_PROFILE_SCHEMA_VERSION = "publication-profile.v1"
+PUBLICATION_PROFILE_ROOT = Path(__file__).resolve().parents[1] / "config" / "publication_profiles"
+PROVENANCE_COMMENT_RE = re.compile(r"^<!--\s*provenance:\s*(\{.*\})\s*-->$")
 VALID_ANCHOR_STATES = {
     "canonical_citation_bound",
     "source_version_bound",
     "valid",
     "current",
+}
+VALID_MATERIAL_DISPOSITIONS = {
+    "body",
+    "sidebar",
+    "appendix",
+    "topic_route",
+    "source_only",
+    "explicit_exclusion",
 }
 
 
@@ -94,6 +105,233 @@ def _resolve_inside(base: Path, relative_path: str) -> Path:
     return candidate
 
 
+def _resolve_material_record(base: Path, relative_path: str) -> Path:
+    """Resolve a staged knowledge record within the manuscript work area.
+
+    A draft manifest normally lives one directory below the detailed extraction
+    records it audits.  Source-only material may therefore point to a sibling
+    staging record, but never outside that manuscript work area.
+    """
+    candidate = (base / relative_path).resolve()
+    allowed_root = base.parent.resolve()
+    try:
+        candidate.relative_to(allowed_root)
+    except ValueError as exc:
+        raise EditorialDraftAuditError(
+            f"材料记录路径越出稿件工作目录：{relative_path}"
+        ) from exc
+    return candidate
+
+
+def _load_publication_profile(profile_id: str) -> tuple[dict[str, Any], Path]:
+    """Load the centrally owned publication contract for a draft."""
+    if not profile_id or not re.fullmatch(r"[A-Za-z0-9._-]+", profile_id):
+        raise EditorialDraftAuditError("初稿没有有效的 publication_profile_id。")
+    profile_path = (PUBLICATION_PROFILE_ROOT / f"{profile_id}.json").resolve()
+    try:
+        profile_path.relative_to(PUBLICATION_PROFILE_ROOT.resolve())
+    except ValueError as exc:
+        raise EditorialDraftAuditError(f"出版体例编号无效：{profile_id}") from exc
+    profile = _read_json(profile_path)
+    if str(profile.get("profile_id") or "") != profile_id:
+        raise EditorialDraftAuditError(f"出版体例内部编号不一致：{profile_id}")
+    if str(profile.get("schema_version") or "") != PUBLICATION_PROFILE_SCHEMA_VERSION:
+        raise EditorialDraftAuditError(
+            f"出版体例版本不受支持：{profile.get('schema_version') or '未填写'}"
+        )
+    return profile, profile_path
+
+
+def _markdown_blocks(content: str) -> list[dict[str, Any]]:
+    """Return substantive blocks and the provenance declaration before each one."""
+    rows: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    block_lines: list[str] = []
+    block_line = 0
+
+    def flush() -> None:
+        nonlocal block_lines, block_line, pending
+        if not block_lines:
+            return
+        text = "\n".join(block_lines).strip()
+        if text:
+            rows.append(
+                {
+                    "text": text,
+                    "line": block_line,
+                    "provenance": pending,
+                }
+            )
+        block_lines = []
+        block_line = 0
+        pending = None
+
+    for line_number, raw_line in enumerate(content.splitlines(), start=1):
+        stripped = raw_line.strip()
+        if re.match(r"^#{1,6}\s+", stripped):
+            flush()
+            continue
+        match = PROVENANCE_COMMENT_RE.fullmatch(stripped)
+        if match:
+            flush()
+            try:
+                value = json.loads(match.group(1))
+                pending = value if isinstance(value, dict) else {"_invalid": "not_an_object"}
+            except json.JSONDecodeError as exc:
+                pending = {"_invalid": str(exc)}
+            continue
+        # A blank quote line belongs to the surrounding blockquote. Ordinary
+        # blank lines separate prose paragraphs.
+        if not stripped or stripped == ">":
+            if stripped == ">" and block_lines:
+                block_lines.append(raw_line)
+            else:
+                flush()
+            continue
+        if not block_lines:
+            block_line = line_number
+        block_lines.append(raw_line)
+    flush()
+    if pending is not None:
+        rows.append({"text": "", "line": len(content.splitlines()) + 1, "provenance": pending})
+    return rows
+
+
+def _audit_paragraph_provenance(
+    headings: list[dict[str, Any]],
+    profile: dict[str, Any],
+    claims: dict[str, dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    policy = profile.get("paragraph_provenance") or {}
+    if not policy.get("required"):
+        return []
+    audited_sections = {str(value).strip() for value in policy.get("audited_sections", [])}
+    valid_attributions = {
+        str(value).strip() for value in policy.get("valid_attributions", [])
+    } or {"professor", "scripture", "editor"}
+    editor_labels = [str(value).strip() for value in policy.get("visible_editor_labels", [])]
+    results: list[dict[str, Any]] = []
+
+    for heading in headings:
+        if heading["text"] not in audited_sections:
+            continue
+        for block_index, block in enumerate(_markdown_blocks(str(heading.get("content") or "")), start=1):
+            provenance = block.get("provenance")
+            text = str(block.get("text") or "")
+            result = {
+                "section": heading["text"],
+                "block_index": block_index,
+                "line": block.get("line"),
+                "excerpt": text[:160],
+                "attribution": None,
+                "claim_ids": [],
+                "scripture_refs": [],
+                "valid": True,
+            }
+            if not text:
+                findings.append(
+                    _finding(
+                        "dangling_paragraph_provenance",
+                        "error",
+                        "段落来源标记后没有正文",
+                        f"「{heading['text']}」中有一项来源标记未对应任何文字。",
+                    )
+                )
+                result["valid"] = False
+                results.append(result)
+                continue
+            if provenance is None:
+                findings.append(
+                    _finding(
+                        "unmapped_manuscript_paragraph",
+                        "error",
+                        "正文段落没有来源归属",
+                        f"「{heading['text']}」中的段落必须映射到教授主张、圣经原文或明示的编辑说明：{text[:80]}",
+                    )
+                )
+                result["valid"] = False
+                results.append(result)
+                continue
+            if provenance.get("_invalid"):
+                findings.append(
+                    _finding(
+                        "invalid_paragraph_provenance",
+                        "error",
+                        "段落来源标记格式错误",
+                        f"「{heading['text']}」中的 provenance 不是有效 JSON：{provenance['_invalid']}",
+                    )
+                )
+                result["valid"] = False
+                results.append(result)
+                continue
+
+            attribution = str(provenance.get("attribution") or "").strip()
+            result["attribution"] = attribution
+            if attribution not in valid_attributions:
+                findings.append(
+                    _finding(
+                        "invalid_paragraph_provenance",
+                        "error",
+                        "段落来源归属无效",
+                        f"「{heading['text']}」使用了未知归属：{attribution or '未填写'}。",
+                    )
+                )
+                result["valid"] = False
+            elif attribution == "professor":
+                claim_ids = [str(value) for value in provenance.get("claim_ids", []) if value]
+                result["claim_ids"] = claim_ids
+                if not claim_ids:
+                    findings.append(
+                        _finding(
+                            "professor_paragraph_without_claim",
+                            "error",
+                            "教授观点段落没有映射主张",
+                            f"「{heading['text']}」中的教授观点必须列出 claim_ids。",
+                        )
+                    )
+                    result["valid"] = False
+                for claim_id in claim_ids:
+                    if claim_id not in claims:
+                        findings.append(
+                            _finding(
+                                "paragraph_provenance_unknown_claim",
+                                "error",
+                                "段落映射的共享主张不存在",
+                                f"当前知识快照中找不到 {claim_id}。",
+                                claim_id=claim_id,
+                            )
+                        )
+                        result["valid"] = False
+            elif attribution == "scripture":
+                scripture_refs = [
+                    str(value) for value in provenance.get("scripture_refs", []) if value
+                ]
+                result["scripture_refs"] = scripture_refs
+                if not scripture_refs:
+                    findings.append(
+                        _finding(
+                            "scripture_paragraph_without_reference",
+                            "error",
+                            "圣经原文段落没有经文编号",
+                            f"「{heading['text']}」中的圣经引文必须列出 scripture_refs。",
+                        )
+                    )
+                    result["valid"] = False
+            elif attribution == "editor" and not any(label in text for label in editor_labels):
+                findings.append(
+                    _finding(
+                        "editor_paragraph_without_visible_label",
+                        "error",
+                        "编辑文字没有向读者明示归属",
+                        f"「{heading['text']}」中的编辑文字必须显示以下标签之一：{'、'.join(editor_labels)}。",
+                    )
+                )
+                result["valid"] = False
+            results.append(result)
+    return results
+
+
 def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
     """Audit one draft declared in an editorial draft manifest."""
     manifest_path = manifest_path.resolve()
@@ -104,6 +342,9 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
     )
     if not draft:
         raise EditorialDraftAuditError(f"manifest 中找不到初稿：{draft_id}")
+
+    profile_id = str(draft.get("publication_profile_id") or "").strip()
+    profile, profile_path = _load_publication_profile(profile_id)
 
     config = draft.get("audit_config") or {}
     plan_id = str(config.get("plan_id") or draft.get("candidate_id") or "").strip()
@@ -138,9 +379,212 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
     }
     mappings = config.get("decision_sections") or []
     mapping_by_id = {str(item.get("decision_id")): item for item in mappings}
+    material_dispositions = config.get("material_dispositions") or []
     findings: list[dict[str, Any]] = []
 
-    required_sections = [str(value).strip() for value in config.get("required_top_level_sections", [])]
+    # The publication contract is owned centrally.  A manuscript may select a
+    # profile, but may not write its own exam by redefining required sections.
+    for forbidden_key in ("required_top_level_sections", "optional_top_level_sections"):
+        if forbidden_key in config:
+            findings.append(
+                _finding(
+                    "manifest_publication_structure_override",
+                    "error",
+                    "初稿不得自行定义出版结构",
+                    f"请从 audit_config 删除 {forbidden_key}；栏目要求由出版体例 {profile_id} 统一管理。",
+                )
+            )
+
+    disposition_results: list[dict[str, Any]] = []
+    material_record_fingerprints: dict[str, str] = {}
+    seen_disposition_ids: set[str] = set()
+    for disposition in material_dispositions:
+        disposition_id = str(disposition.get("disposition_id") or "").strip()
+        action = str(disposition.get("action") or "").strip()
+        review_status = str(disposition.get("review_status") or "").strip()
+        claim_ids = [str(value) for value in disposition.get("claim_ids", []) if value]
+        disposition_findings_before = len(findings)
+        disposition_claims = claims
+        disposition_evidence = evidence
+        disposition_fragments = fragments
+        knowledge_record_path = str(disposition.get("knowledge_record_path") or "").strip()
+        resolved_record_path: Path | None = None
+
+        if knowledge_record_path:
+            resolved_record_path = _resolve_material_record(base, knowledge_record_path)
+            material_record = _read_json(resolved_record_path)
+            material_record_fingerprints[knowledge_record_path] = _sha256_bytes(
+                resolved_record_path.read_bytes()
+            )
+            disposition_claims = {
+                str(item.get("claim_id")): item
+                for item in material_record.get("claims", [])
+            }
+            disposition_evidence = {
+                str(item.get("evidence_step_id")): item
+                for item in material_record.get("evidence_steps", [])
+            }
+            disposition_fragments = {
+                str(item.get("fragment_id")): item
+                for item in material_record.get("source_fragments", [])
+            }
+
+        if not disposition_id or disposition_id in seen_disposition_ids:
+            findings.append(
+                _finding(
+                    "invalid_material_disposition_id",
+                    "error",
+                    "材料处置记录缺少唯一编号",
+                    "每项不进入正文的实质材料也必须有可审核的稳定编号。",
+                )
+            )
+        else:
+            seen_disposition_ids.add(disposition_id)
+        if action not in VALID_MATERIAL_DISPOSITIONS:
+            findings.append(
+                _finding(
+                    "invalid_material_disposition_action",
+                    "error",
+                    "材料处置方式无效",
+                    f"{disposition_id or '未编号记录'} 使用了未知处置方式：{action or '未填写'}。",
+                )
+            )
+        if not claim_ids:
+            findings.append(
+                _finding(
+                    "material_disposition_without_claims",
+                    "error",
+                    "材料处置没有绑定共享主张",
+                    "仅写编辑备注不能证明原材料已被记录。",
+                )
+            )
+        missing_claim_ids = [
+            claim_id for claim_id in claim_ids if claim_id not in disposition_claims
+        ]
+        for claim_id in missing_claim_ids:
+            findings.append(
+                _finding(
+                    "material_disposition_missing_claim",
+                    "error",
+                    "材料处置引用的共享主张不存在",
+                    f"当前知识快照或指定的待认证知识记录中找不到 {claim_id}。",
+                    claim_id=claim_id,
+                )
+            )
+
+        disposition_evidence_count = 0
+        disposition_fragment_count = 0
+        for claim_id in claim_ids:
+            claim = disposition_claims.get(claim_id)
+            if not claim:
+                continue
+            evidence_ids = [
+                str(value) for value in claim.get("evidence_step_ids", []) if value
+            ]
+            if not evidence_ids:
+                findings.append(
+                    _finding(
+                        "material_disposition_claim_without_evidence",
+                        "error",
+                        "保留材料的主张没有证据步骤",
+                        f"{claim_id} 不能证明材料已完整保留。",
+                        claim_id=claim_id,
+                    )
+                )
+            for evidence_id in evidence_ids:
+                step = disposition_evidence.get(evidence_id)
+                if not step:
+                    findings.append(
+                        _finding(
+                            "material_disposition_missing_evidence",
+                            "error",
+                            "保留材料缺少证据步骤",
+                            f"找不到 {evidence_id}。",
+                            claim_id=claim_id,
+                        )
+                    )
+                    continue
+                disposition_evidence_count += 1
+                fragment_ids = [
+                    str(value) for value in step.get("source_fragment_ids", []) if value
+                ]
+                if not fragment_ids and step.get("source_fragment_id"):
+                    fragment_ids = [str(step["source_fragment_id"])]
+                if not fragment_ids:
+                    findings.append(
+                        _finding(
+                            "material_disposition_evidence_without_source",
+                            "error",
+                            "保留材料无法回到原始来源",
+                            f"证据步骤 {evidence_id} 没有来源片段。",
+                            claim_id=claim_id,
+                        )
+                    )
+                for fragment_id in fragment_ids:
+                    fragment = disposition_fragments.get(fragment_id)
+                    if not fragment:
+                        findings.append(
+                            _finding(
+                                "material_disposition_missing_source_fragment",
+                                "error",
+                                "保留材料的来源片段不存在",
+                                f"找不到 {fragment_id}。",
+                                claim_id=claim_id,
+                            )
+                        )
+                        continue
+                    disposition_fragment_count += 1
+                    anchor_state = str(fragment.get("anchor_state") or "").strip()
+                    if anchor_state not in VALID_ANCHOR_STATES:
+                        findings.append(
+                            _finding(
+                                "material_disposition_invalid_source_anchor",
+                                "error",
+                                "保留材料的来源定位无效",
+                                f"{fragment_id} 的定位状态为 {anchor_state or '未标记'}。",
+                                claim_id=claim_id,
+                            )
+                        )
+        if action in {"source_only", "explicit_exclusion"} and disposition.get("article_inclusion") is not False:
+            findings.append(
+                _finding(
+                    "excluded_material_marked_for_article",
+                    "error",
+                    "不入文材料的出版标记互相矛盾",
+                    "source_only 或 explicit_exclusion 必须明确设置 article_inclusion=false。",
+                )
+            )
+        if action == "source_only" and review_status != "requires_human_verification":
+            findings.append(
+                _finding(
+                    "source_only_without_human_verification",
+                    "error",
+                    "仅保留来源的材料未转人工认证",
+                    "source_only 材料必须明确进入人工认证队列，避免永久搁置。",
+                )
+            )
+
+        disposition_results.append(
+            {
+                "disposition_id": disposition_id,
+                "title": disposition.get("title") or "",
+                "action": action,
+                "article_inclusion": disposition.get("article_inclusion"),
+                "review_status": review_status,
+                "claim_ids": claim_ids,
+                "record_state": (
+                    "active_snapshot"
+                    if not knowledge_record_path
+                    else "staged_for_human_verification"
+                ),
+                "knowledge_record_path": knowledge_record_path or None,
+                "evidence_step_count": disposition_evidence_count,
+                "source_fragment_count": disposition_fragment_count,
+                "finding_count": len(findings) - disposition_findings_before,
+            }
+        )
+
+    required_sections = [str(value).strip() for value in profile.get("required_sections", [])]
     present_headings = {row["text"] for row in headings}
     for section in required_sections:
         if section not in present_headings:
@@ -152,6 +596,101 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
                     "初稿必须保持既定的出版结构。",
                 )
             )
+
+    paragraph_provenance = _audit_paragraph_provenance(
+        headings,
+        profile,
+        claims,
+        findings,
+    )
+
+    # A reader should not need to leave the manuscript to discover what a
+    # cited or interpreted passage actually says.  The manifest declares the
+    # minimum verbatim markers required under each relevant heading; the
+    # deterministic audit then prevents prose-only paraphrase from silently
+    # replacing the biblical text.
+    for quotation in config.get("required_scripture_quotations", []):
+        markdown_heading = str(quotation.get("markdown_heading") or "").strip()
+        heading = heading_by_text.get(markdown_heading)
+        if not heading:
+            findings.append(
+                _finding(
+                    "missing_scripture_quote_scope",
+                    "error",
+                    "經文引用要求找不到對應段落",
+                    f"未找到小標題：{markdown_heading or '（尚未配置）'}。",
+                )
+            )
+            continue
+        body = str(heading.get("content") or "")
+        missing_markers = [
+            str(marker)
+            for marker in quotation.get("required_markers", [])
+            if str(marker) and str(marker) not in body
+        ]
+        if missing_markers:
+            findings.append(
+                _finding(
+                    "missing_scripture_quotation",
+                    "error",
+                    "解釋所依據的經文沒有直接引入正文",
+                    "此段缺少經文文字：" + "、".join(missing_markers),
+                )
+            )
+
+    # Life application is optional.  If editors choose to include it, every
+    # application must be registered as a complete source-backed chain rather
+    # than inferred from fluent prose alone.
+    application_policy = config.get("application_policy") or {}
+    application_section = str(application_policy.get("section") or "生活應用").strip()
+    application_heading = heading_by_text.get(application_section)
+    application_chains = config.get("application_chains") or []
+    if (
+        application_heading
+        and application_policy.get("requires_registered_chains")
+        and not application_chains
+    ):
+        findings.append(
+            _finding(
+                "unregistered_application_section",
+                "error",
+                "生活應用未登記來源鏈",
+                "生活應用不是必備欄目；若保留，必須逐項登記「經文處境、教授解釋、不變原則、今日處境、應用與限制」。",
+            )
+        )
+    required_chain_fields = {
+        "scripture_context": "經文處境",
+        "professor_interpretation_claim_ids": "教授解釋",
+        "enduring_principle": "不變原則",
+        "present_context": "今日處境",
+        "application_and_limits": "應用與限制",
+    }
+    for index, chain in enumerate(application_chains, start=1):
+        missing_fields = [
+            label
+            for field, label in required_chain_fields.items()
+            if not chain.get(field)
+        ]
+        if missing_fields:
+            findings.append(
+                _finding(
+                    "incomplete_application_chain",
+                    "error",
+                    "生活應用來源鏈不完整",
+                    f"第 {index} 項缺少：{'、'.join(missing_fields)}。",
+                )
+            )
+        for claim_id in chain.get("professor_interpretation_claim_ids", []):
+            if str(claim_id) not in claims:
+                findings.append(
+                    _finding(
+                        "application_chain_missing_claim",
+                        "error",
+                        "生活應用引用的教授主張不存在",
+                        f"找不到 {claim_id}。",
+                        claim_id=str(claim_id),
+                    )
+                )
 
     plan_ids = set(decisions)
     mapped_ids = set(mapping_by_id)
@@ -197,6 +736,28 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
                     decision_id=decision_id,
                 )
             )
+
+        # Section-level claim coverage does not prove that every sentence is
+        # the professor's own interpretation. Registered editorial connective
+        # prose must therefore be visibly attributed in the manuscript.
+        editorial_boundary = (
+            mapping.get("editorial_boundary")
+            or decision.get("editorial_boundary")
+            or {}
+        )
+        if editorial_boundary.get("required") and heading:
+            body = str(heading.get("content") or "")
+            label = str(editorial_boundary.get("label") or "編輯說明").strip()
+            if label not in body:
+                findings.append(
+                    _finding(
+                        "missing_editorial_attribution",
+                        "error",
+                        "編輯推論未明示歸屬",
+                        str(editorial_boundary.get("reason") or "本段含有編輯補充，正文必須清楚標示編輯聲音。"),
+                        decision_id=decision_id,
+                    )
+                )
 
         claim_ids = [str(value) for value in decision.get("claim_ids", []) if value]
         if not claim_ids:
@@ -376,6 +937,15 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
             "draft_sha256": _sha256_bytes(markdown.encode("utf-8")),
             "knowledge_snapshot_sha256": _sha256_bytes(snapshot_path.read_bytes()),
             "audit_config_sha256": _sha256_json(config),
+            "publication_profile_sha256": _sha256_bytes(profile_path.read_bytes()),
+            "material_record_sha256s": material_record_fingerprints,
+        },
+        "publication_profile": {
+            "profile_id": profile_id,
+            "revision": profile.get("revision"),
+            "title": profile.get("title") or "",
+            "required_sections": required_sections,
+            "optional_sections": profile.get("optional_sections") or [],
         },
         "summary": {
             "decision_total": len(decisions),
@@ -386,8 +956,27 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
             "valid_source_fragment_total": len(valid_fragments),
             "error_total": errors,
             "warning_total": warnings,
+            "material_disposition_total": len(disposition_results),
+            "source_only_pending_human_total": sum(
+                item["action"] == "source_only"
+                and item["review_status"] == "requires_human_verification"
+                for item in disposition_results
+            ),
+            "paragraph_total": len(paragraph_provenance),
+            "paragraph_valid_total": sum(item["valid"] for item in paragraph_provenance),
+            "professor_paragraph_total": sum(
+                item["attribution"] == "professor" for item in paragraph_provenance
+            ),
+            "scripture_paragraph_total": sum(
+                item["attribution"] == "scripture" for item in paragraph_provenance
+            ),
+            "editor_paragraph_total": sum(
+                item["attribution"] == "editor" for item in paragraph_provenance
+            ),
         },
         "decisions": decision_results,
+        "paragraph_provenance": paragraph_provenance,
+        "material_dispositions": disposition_results,
         "findings": findings,
     }
     return output

@@ -1,0 +1,36 @@
+{
+  "schema_version": "publication-profile.v1",
+  "profile_id": "PP-matthew-expository-teaching-v1",
+  "revision": 1,
+  "title": "馬太福音釋經教學講稿",
+  "required_sections": [
+    "經文與問題",
+    "釋經",
+    "神學意義"
+  ],
+  "optional_sections": [
+    "生活應用",
+    "附錄"
+  ],
+  "paragraph_provenance": {
+    "required": true,
+    "audited_sections": [
+      "經文與問題",
+      "釋經",
+      "神學意義",
+      "生活應用",
+      "附錄"
+    ],
+    "visible_editor_labels": [
+      "編輯說明",
+      "編輯導讀",
+      "編者按",
+      "資料說明"
+    ],
+    "valid_attributions": [
+      "professor",
+      "scripture",
+      "editor"
+    ]
+  }
+}

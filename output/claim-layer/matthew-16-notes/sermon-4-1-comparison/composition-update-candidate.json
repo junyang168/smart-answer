@@ -45,7 +45,7 @@
       {
         "order": 2,
         "passage": "太16:2–4",
-        "title": "分辨天色，却不能分辨时代",
+        "title": "所求的神蹟與約拿的神蹟",
         "role": "sign_and_response",
         "baseline_claim_ids": [
           "DK-91b546f25db1-CL025"
@@ -53,7 +53,12 @@
         "sermon_claim_ids": [
           "DK-a26f0a7e9ba4-CL002"
         ],
-        "integration": "保留拒绝试探性神迹的基线，补入求神迹动机及约拿神迹指向受死与第三日复活。"
+        "integration": "教授只誦讀太16:2–3，未展開天色與時代的對比；此處只保留經文銜接，不形成獨立解釋主張。正文集中處理拒絕試探性神蹟，以及約拿神蹟指向受死與第三日復活。",
+        "editorial_boundary": {
+          "required": true,
+          "label": "編輯說明",
+          "reason": "教授只誦讀太16:2–3，未在現有材料中展開天色與時代的對比；正文只能明示此材料邊界，不得代替教授補作解釋。"
+        }
       },
       {
         "order": 3,

@@ -56,6 +56,14 @@ function nodeText(node: ReactNode): string {
   return "";
 }
 
+// Provenance comments are machine-readable audit metadata stored alongside the
+// manuscript. Keep them in the source Markdown, but never expose them as prose
+// in the editorial reading view. ReactMarkdown intentionally escapes raw HTML,
+// so these comments must be removed from the display copy before rendering.
+function markdownForDisplay(markdown: string): string {
+  return markdown.replace(/<!--\s*provenance:\s*[\s\S]*?-->\s*/g, "");
+}
+
 function IntegratedSourceMedia({ section }: { section: DecisionMediaSection }) {
   const playable = section.source_presentations.filter((item) => item.source?.public_url);
   if (playable.length === 0) return null;
@@ -113,6 +121,18 @@ type EditorialDraftAudit = {
     valid_source_fragment_total: number;
     error_total: number;
     warning_total: number;
+    paragraph_total: number;
+    paragraph_valid_total: number;
+    professor_paragraph_total: number;
+    scripture_paragraph_total: number;
+    editor_paragraph_total: number;
+  };
+  publication_profile: {
+    profile_id: string;
+    revision: number;
+    title: string;
+    required_sections: string[];
+    optional_sections: string[];
   };
   findings: AuditFinding[];
 };
@@ -125,6 +145,8 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
     () => new Map((draft?.decision_media_sections ?? []).map((section) => [section.markdown_heading.trim(), section])),
     [draft],
   );
+
+  const displayMarkdown = useMemo(() => markdownForDisplay(draft?.markdown ?? ""), [draft?.markdown]);
 
   useEffect(() => {
     async function loadDraft() {
@@ -182,6 +204,48 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
               <div className="rounded-2xl bg-white/75 p-4"><div className="text-2xl font-bold text-slate-950">{draft.audit.summary.evidence_step_total}</div><div className="mt-1 text-sm text-slate-600">個證據步驟</div></div>
               <div className="rounded-2xl bg-white/75 p-4"><div className="text-2xl font-bold text-slate-950">{draft.audit.summary.valid_source_fragment_total}/{draft.audit.summary.source_fragment_total}</div><div className="mt-1 text-sm text-slate-600">個有效來源定位</div></div>
             </div>
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-white/80 bg-white/80 p-5">
+                <div className="text-sm font-bold text-indigo-700">中央出版體例檢查</div>
+                <h3 className="mt-2 text-lg font-bold text-slate-950">{draft.audit.publication_profile.title}</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  文章結構由中央出版體例決定，不由本篇初稿自行設定。
+                </p>
+                <div className="mt-4">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">必須具備</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {draft.audit.publication_profile.required_sections.map((section) => (
+                      <span key={section} className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-bold text-indigo-800">{section}</span>
+                    ))}
+                  </div>
+                </div>
+                {!!draft.audit.publication_profile.optional_sections.length && (
+                  <div className="mt-4">
+                    <div className="text-xs font-bold uppercase tracking-wide text-slate-500">視材料需要</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {draft.audit.publication_profile.optional_sections.map((section) => (
+                        <span key={section} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">{section}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/80 p-5">
+                <div className="text-sm font-bold text-indigo-700">逐段來源檢查</div>
+                <div className="mt-2 flex items-end gap-2">
+                  <div className="text-3xl font-bold text-slate-950">{draft.audit.summary.paragraph_valid_total}/{draft.audit.summary.paragraph_total}</div>
+                  <div className="pb-1 text-sm text-slate-600">段已有明確歸屬</div>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  每個正文段落都必須對應教授主張、經文引用，或清楚標示為編輯說明；未交代來源即不能通過。
+                </p>
+                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl bg-emerald-50 p-3"><div className="text-xl font-bold text-emerald-900">{draft.audit.summary.professor_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-emerald-800">教授原意</div></div>
+                  <div className="rounded-xl bg-sky-50 p-3"><div className="text-xl font-bold text-sky-900">{draft.audit.summary.scripture_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-sky-800">經文引用</div></div>
+                  <div className="rounded-xl bg-violet-50 p-3"><div className="text-xl font-bold text-violet-900">{draft.audit.summary.editor_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-violet-800">編輯說明</div></div>
+                </div>
+              </div>
+            </div>
             {draft.audit.findings.length > 0 && (
               <div className="mt-5 space-y-3">
                 {draft.audit.findings.map((finding, index) => (
@@ -212,7 +276,7 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
               },
             }}
           >
-            {draft.markdown}
+            {displayMarkdown}
           </ReactMarkdown>
         </article>
       </div>

@@ -1,14 +1,32 @@
 {
-  "schema_version": "editorial-draft-audit.v1",
+  "schema_version": "editorial-draft-audit.v2",
   "draft_id": "DRAFT-M16-001-V1",
   "plan_id": "CP-matthew-16-1-12",
   "status": "pass_with_warnings",
-  "generated_at": "2026-08-14T05:23:37.282605+00:00",
+  "generated_at": "2026-08-14T16:34:27.154943+00:00",
   "scope": "结构、论证可追溯性与来源锚点；不代替神学判断或逐句语义忠实度审核。",
   "fingerprint": {
-    "draft_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f",
-    "knowledge_snapshot_sha256": "ee1821d1e18970e1c7941747bccb57a6415e5507cb690041f1ed80d27ada94cf",
-    "audit_config_sha256": "368014d98e5e7af9ad5ce3c7c7422d6822b3b12b4ae1e588f70eca7b2e1a0861"
+    "draft_sha256": "8ddf636f99d07630648cc8ba12c1298a9bb6d7d3ebc4552e4cdd5e126730caaa",
+    "knowledge_snapshot_sha256": "4193646c2cdc9b7fe74a2613327f48cf0fd70155834ed8467912973c2c1bff14",
+    "audit_config_sha256": "3d3ffdb6b6045b8ca99da0da1dc5ace8b5aa2549a1211b7808318e38a7250c51",
+    "publication_profile_sha256": "b3e77604bcfb1874abd712ab06fb217676cb838f2866b9072a47e52d3e1b2b31",
+    "material_record_sha256s": {
+      "../notes_manuscript_16-91b546f25db1.detailed-knowledge.json": "855cb17d24acd98a48c86f344fc6215fec29a607f172463a6cb2d810be9cea7f"
+    }
+  },
+  "publication_profile": {
+    "profile_id": "PP-matthew-expository-teaching-v1",
+    "revision": 1,
+    "title": "馬太福音釋經教學講稿",
+    "required_sections": [
+      "經文與問題",
+      "釋經",
+      "神學意義"
+    ],
+    "optional_sections": [
+      "生活應用",
+      "附錄"
+    ]
   },
   "summary": {
     "decision_total": 6,
@@ -18,7 +36,14 @@
     "source_fragment_total": 27,
     "valid_source_fragment_total": 27,
     "error_total": 0,
-    "warning_total": 2
+    "warning_total": 2,
+    "material_disposition_total": 1,
+    "source_only_pending_human_total": 1,
+    "paragraph_total": 32,
+    "paragraph_valid_total": 32,
+    "professor_paragraph_total": 17,
+    "scripture_paragraph_total": 7,
+    "editor_paragraph_total": 8
   },
   "decisions": [
     {
@@ -35,8 +60,8 @@
     {
       "decision_id": "CD-M16-001-02",
       "passage": "太16:2–4",
-      "section_title": "分辨天色，却不能分辨时代",
-      "markdown_heading": "能分辨天色，卻不能分辨時代（太 16:2–4）",
+      "section_title": "所求的神蹟與約拿的神蹟",
+      "markdown_heading": "所求的神蹟與約拿的神蹟（太 16:2–4）",
       "heading_found": true,
       "claim_count": 2,
       "evidence_step_count": 4,
@@ -86,6 +111,406 @@
       "evidence_step_count": 2,
       "valid_source_fragment_count": 2,
       "finding_count": 1
+    }
+  ],
+  "paragraph_provenance": [
+    {
+      "section": "經文與問題",
+      "block_index": 1,
+      "line": 3,
+      "excerpt": "> **編輯導讀：** 本篇處理馬太福音 16:1–12，按經文次序集中回答四個問題：法利賽人與撒都該人為何聯合試探耶穌？耶穌為何拒絕他們所求的神蹟，卻留下約拿的神蹟？門徒為何把「酵」誤解成餅，耶穌又為何稱他們為「小信的人」？兩派立場不同，耶穌為何以同一個「教訓」概括他們的酵？以下回答以王教授在現有筆記講稿與講道中明確",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "經文與問題",
+      "block_index": 2,
+      "line": 6,
+      "excerpt": "> 「法利賽人和撒都該人來試探耶穌，請祂從天上顯個神蹟給他們看。耶穌回答說：『晚上天發紅，你們就說：天必要晴；早晨天發紅，又發黑，你們就說：今日必有風雨。你們知道分辨天上的氣色，倒不能分辨這時候的神蹟。一個邪惡淫亂的世代求神蹟，除了約拿的神蹟以外，再沒有神蹟給它看。』耶穌就離開他們去了。」（太 16:1–4）\n>\n> ",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.1-Matt.16.12"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 1,
+      "line": 5,
+      "excerpt": "> 「法利賽人和撒都該人來試探耶穌，請祂從天上顯個神蹟給他們看。」（太 16:1）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.1"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 2,
+      "line": 8,
+      "excerpt": "> **編輯導讀：** 這節經文首先提出一個值得追問的問題：法利賽人與撒都該人平時立場不同，為甚麼此刻卻一同來到耶穌面前？",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 3,
+      "line": 11,
+      "excerpt": "法利賽人相信復活，也承認神在歷史中施行超自然的作為；撒都該人則不接受復活，對神蹟也持不同立場。兩派同屬猶太公會，卻在許多重要問題上彼此對立。因此，他們一同出現，並不是因為原有的分歧已經消失，而是因為他們在反對耶穌的事上形成了共同立場。詳細的歷史背景與信仰差異，參見[附錄一：法利賽人與撒都該人](#附錄一法利賽人與撒都該",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL001",
+        "DK-91b546f25db1-CL024"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 4,
+      "line": 14,
+      "excerpt": "王教授特別注意到，原文把「法利賽人」與「撒都該人」置於同一個定冠詞之下，將他們表達為一個共同採取行動的群體。經文的重點不是逐一介紹兩派，而是讓讀者看見：原本互相對立的人，如今聯合起來試探耶穌。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-a26f0a7e9ba4-CL001"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 5,
+      "line": 17,
+      "excerpt": "他們要求耶穌「從天上顯個神蹟」，表面上像是在尋求證據，實際目的卻不是認識真理。馬太明確指出，他們是來「試探」耶穌。這就帶出下一個問題：既然他們要求神蹟，耶穌為甚麼拒絕，又為甚麼只把「約拿的神蹟」留給他們？",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 6,
+      "line": 22,
+      "excerpt": "> 「你們知道分辨天上的氣色，倒不能分辨這時候的神蹟。一個邪惡淫亂的世代求神蹟，除了約拿的神蹟以外，再沒有神蹟給它看。」（太 16:3–4）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.3-Matt.16.4"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 7,
+      "line": 25,
+      "excerpt": "> **編輯說明：** 王教授在現有材料中誦讀了太 16:2–3，卻沒有進一步解釋「天色」與「時候」的對比。因此，本篇不代替教授補作這項解釋，只保留經文本身，並轉入他明確展開的兩個重點：人不能要求耶穌表演神蹟，以及約拿的神蹟指向耶穌的死與復活。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 8,
+      "line": 28,
+      "excerpt": "就他們求神蹟的動機，王教授指出，耶穌拒絕按照他們指定的方式表演神蹟。耶穌行神蹟不是作秀，也不以能力滿足人的好奇或接受人的試驗。神蹟出於神自己的旨意，用來顯明祂的作為；人不能把神蹟變成測試耶穌的工具。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL025",
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 9,
+      "line": 31,
+      "excerpt": "然而，耶穌並非沒有給出記號。祂說，這世代除了「約拿的神蹟」以外，再沒有神蹟給它看。按照王教授的解釋，約拿的神蹟指向耶穌的受死與第三日復活。兩派所要求的是一場可以立即觀看的表演，耶穌給出的卻是整個福音的中心：祂將受死，也將復活。真正判明耶穌身分的記號，不是人所安排的一次奇觀，而是神在基督受死與復活中的決定性作為。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 10,
+      "line": 36,
+      "excerpt": "> 「門徒渡到那邊去，忘了帶餅。耶穌對他們說：『你們要謹慎，防備法利賽人和撒都該人的酵。』門徒彼此議論說：『這是因為我們沒有帶餅吧。』」（太 16:5–7）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.5-Matt.16.7"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 11,
+      "line": 39,
+      "excerpt": "耶穌離開法利賽人和撒都該人之後，警告門徒要防備他們的酵。門徒卻彼此議論，以為耶穌這樣說，是因為他們沒有帶餅。這個誤解顯出門徒仍然停留在物質層面：耶穌正在談一種會滲透並影響人的教導，他們想到的卻只是眼前缺少食物。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL003"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 12,
+      "line": 42,
+      "excerpt": "> **編輯說明：** 這段敘事把兩種問題連在一起。法利賽人與撒都該人看見耶穌的作為，仍然拒絕祂；門徒雖然跟隨耶穌，也親歷祂的作為，卻尚未完全明白這些經歷的含義。前者是帶著敵意的試探，後者是尚未成熟的理解；兩者並不相同，但都涉及人如何面對神已經給出的啟示。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 13,
+      "line": 47,
+      "excerpt": "> 「你們這小信的人（ὀλιγόπιστοι），為甚麼因為沒有餅彼此議論呢？你們還不明白嗎？不記得那五個餅分給五千人，又收拾了多少籃子（κοφίνους）的零碎嗎？也不記得那七個餅分給四千人，又收拾了多少筐子（σπυρίδας）的零碎嗎？」（太 16:8–10）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.8-Matt.16.10"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 14,
+      "line": 50,
+      "excerpt": "耶穌知道門徒的議論，便稱他們為「小信的人」。這句話很容易被理解成門徒擁有的信心分量太少、力量不夠。王教授卻指出，此處的「小信」不是在衡量信心的強弱，而是說門徒沒有充分理解自己所信之事包含的意義，也沒有由已知的事實作出應有的推論。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL002",
+        "DK-a26f0a7e9ba4-CL003"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 15,
+      "line": 53,
+      "excerpt": "耶穌因此提醒他們兩次餵飽眾人的神蹟：五個餅使五千人吃飽，七個餅使四千人吃飽。門徒不只是聽過這些事，而是親身在場，也收拾過剩下的食物。既然他們已經知道耶穌能用少量的食物供應眾人，就應當推知，即使現在沒有帶餅，耶穌仍有能力供應他們。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 16,
+      "line": 56,
+      "excerpt": "所以，門徒的問題不是完全沒有信心，也不是缺少新的神蹟，而是沒有運用已經領受的證據。他們承認耶穌、跟隨耶穌，卻沒有讓先前的經歷形成對當下處境的判斷。信心不只是記得神曾經做過甚麼，也包括明白這些作為顯明了祂是誰，並由此判斷眼前的需要。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL002",
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 17,
+      "line": 59,
+      "excerpt": "王教授也把兩次餵飽眾人的神蹟理解為彌賽亞對猶太人與外邦人的豐盛供應。兩次事件所用「籃子」與「筐子」的原文字詞並不相同；不過，這項字詞與歷史背景不在本段展開，完整說明應放在五餅二魚的敘事中，並與七餅神蹟互相參照。參見[太 14:13–21：五餅二魚與彌賽亞的供應](#待建立太-141321五餅二魚與彌賽亞的供應)。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL004",
+        "DK-a26f0a7e9ba4-CL005"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 18,
+      "line": 64,
+      "excerpt": "> 「我對你們說，要防備法利賽人和撒都該人的酵，這話不是指著餅說的，你們怎麼不明白呢？門徒這才曉得祂說的不是叫他們防備餅的酵，乃是防備法利賽人和撒都該人的教訓。」（太 16:11–12）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "Matt.16.11-Matt.16.12"
+      ],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 19,
+      "line": 67,
+      "excerpt": "耶穌再次說明，祂所談的不是餅。門徒這才明白，耶穌要他們防備的，是法利賽人和撒都該人的教訓。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL003"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 20,
+      "line": 70,
+      "excerpt": "兩派在復活、神蹟和許多宗教問題上的看法並不相同，因此，「兩派的教訓」不能簡單理解為他們全部主張都完全一致。王教授注意到太 16:12 使用單數的「教訓」（διδαχή），並據此追問：這兩個彼此對立的群體，究竟共享甚麼錯誤？他的答案是，他們雖從不同方向出發，卻共同拒絕耶穌是神所差來的基督和彌賽亞。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL003",
+        "DK-a26f0a7e9ba4-CL006"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 21,
+      "line": 73,
+      "excerpt": "> **編輯說明：** 這也解釋了為甚麼耶穌用「酵」作比喻。酵的作用並不限於表面，而會逐漸滲透整團麵。錯誤的教導同樣會影響人閱讀證據、理解神蹟和認識基督的方式。門徒需要防備的，不只是某一條孤立的錯誤觀念，而是一種使人看見神的作為、卻仍拒絕基督的解釋框架。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "神學意義",
+      "block_index": 1,
+      "line": 5,
+      "excerpt": "> 「我們並有先知更確的預言……你們在這預言上留意，才是好的。」（彼後 1:19）",
+      "attribution": "scripture",
+      "claim_ids": [],
+      "scripture_refs": [
+        "2Pet.1.19"
+      ],
+      "valid": true
+    },
+    {
+      "section": "神學意義",
+      "block_index": 2,
+      "line": 8,
+      "excerpt": "> **編輯說明：** 本段把法利賽人和撒都該人的求神蹟，與門徒回想已經經歷的神蹟放在一起。前者要求耶穌按人的條件證明自己；後者則應當由神已經施行的作為，進一步認識耶穌並信靠祂。兩者的差別，不在於有沒有神蹟，而在於人如何理解神蹟。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "神學意義",
+      "block_index": 3,
+      "line": 11,
+      "excerpt": "王教授強調，神蹟可以印證神的作為，卻不能取代神的話成為信仰的根基。人即使看見超自然的事件，仍可能拒絕神；因此，單憑追求神蹟，並不能產生穩固的信仰。彼得後書稱先知的話為「更確的預言」，正說明信仰不能建立在不斷追求新的奇觀上，而要建立在神已經啟示的話語上（彼後 1:19）。這一主題將在[專題：神蹟、啟示與聖經權威](#待建",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL005",
+        "DK-2bd0c0df7ecd-CL024"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "神學意義",
+      "block_index": 4,
+      "line": 16,
+      "excerpt": "門徒的「小信」說明，信心不只是口頭承認某項教義，也不只是曾經有過屬靈經歷。真正的信心會理解神已經顯明的事，並把其中的意義帶入新的處境。門徒若相信耶穌曾供應數千人的需要，就應當由此推知，沒有帶餅並不是耶穌無法解決的問題。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL002",
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "神學意義",
+      "block_index": 5,
+      "line": 19,
+      "excerpt": "因此，理性思考並不是信心的敵人。人需要從經文、神已經顯明的作為以及對基督身分的認識出發，作出合乎信仰的判斷。缺少這一步，信心就容易停留在零散的記憶或口號中，不能真正引導生活。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL002",
+        "DK-a26f0a7e9ba4-CL003"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "附錄",
+      "block_index": 1,
+      "line": 5,
+      "excerpt": "法利賽人與撒都該人都是第一世紀猶太社會中的重要群體，也參與猶太公會。兩派在復活、神蹟及律法解釋等問題上存在明顯分歧。王教授曾以自然神論作類比，幫助說明撒都該人的立場：他們承認神存在，卻不接受神持續介入世界以及死人復活等超自然作為。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL001",
+        "DK-91b546f25db1-CL024"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "附錄",
+      "block_index": 2,
+      "line": 8,
+      "excerpt": "> **資料說明：** 「自然神論」是王教授在教學中使用的類比，不表示撒都該人與近代自然神論在歷史與思想上完全相同。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "附錄",
+      "block_index": 3,
+      "line": 11,
+      "excerpt": "太 16:1 的重點並不是完整介紹兩派，而是說明這兩個通常彼此對立的群體，在試探耶穌的事情上聯合行動。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL001",
+        "DK-a26f0a7e9ba4-CL001"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "附錄",
+      "block_index": 4,
+      "line": 14,
+      "excerpt": "> **資料說明：** 詳細歷史資料在本篇只作背景，不取代經文本身的敘事重點。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    }
+  ],
+  "material_dispositions": [
+    {
+      "disposition_id": "MD-M16-001-01",
+      "title": "歷史學家的工作方式",
+      "action": "source_only",
+      "article_inclusion": false,
+      "review_status": "requires_human_verification",
+      "claim_ids": [
+        "DK-91b546f25db1-CL006"
+      ],
+      "record_state": "staged_for_human_verification",
+      "knowledge_record_path": "../notes_manuscript_16-91b546f25db1.detailed-knowledge.json",
+      "evidence_step_count": 1,
+      "source_fragment_count": 1,
+      "finding_count": 0
     }
   ],
   "findings": [
