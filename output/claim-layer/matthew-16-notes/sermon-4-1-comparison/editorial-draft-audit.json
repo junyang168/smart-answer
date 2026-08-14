@@ -1,0 +1,109 @@
+{
+  "schema_version": "editorial-draft-audit.v1",
+  "draft_id": "DRAFT-M16-001-V1",
+  "plan_id": "CP-matthew-16-1-12",
+  "status": "pass_with_warnings",
+  "generated_at": "2026-08-14T05:23:37.282605+00:00",
+  "scope": "结构、论证可追溯性与来源锚点；不代替神学判断或逐句语义忠实度审核。",
+  "fingerprint": {
+    "draft_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f",
+    "knowledge_snapshot_sha256": "ee1821d1e18970e1c7941747bccb57a6415e5507cb690041f1ed80d27ada94cf",
+    "audit_config_sha256": "368014d98e5e7af9ad5ce3c7c7422d6822b3b12b4ae1e588f70eca7b2e1a0861"
+  },
+  "summary": {
+    "decision_total": 6,
+    "decision_headings_found": 6,
+    "claim_total": 14,
+    "evidence_step_total": 25,
+    "source_fragment_total": 27,
+    "valid_source_fragment_total": 27,
+    "error_total": 0,
+    "warning_total": 2
+  },
+  "decisions": [
+    {
+      "decision_id": "CD-M16-001-01",
+      "passage": "太16:1",
+      "section_title": "法利赛人与撒都该人联合试探耶稣",
+      "markdown_heading": "法利賽人與撒都該人聯合試探耶穌（太 16:1）",
+      "heading_found": true,
+      "claim_count": 3,
+      "evidence_step_count": 5,
+      "valid_source_fragment_count": 6,
+      "finding_count": 0
+    },
+    {
+      "decision_id": "CD-M16-001-02",
+      "passage": "太16:2–4",
+      "section_title": "分辨天色，却不能分辨时代",
+      "markdown_heading": "能分辨天色，卻不能分辨時代（太 16:2–4）",
+      "heading_found": true,
+      "claim_count": 2,
+      "evidence_step_count": 4,
+      "valid_source_fragment_count": 4,
+      "finding_count": 0
+    },
+    {
+      "decision_id": "CD-M16-001-03",
+      "passage": "太16:5–7",
+      "section_title": "门徒把酵误解成饼",
+      "markdown_heading": "門徒把「酵」誤解為沒有帶餅（太 16:5–7）",
+      "heading_found": true,
+      "claim_count": 1,
+      "evidence_step_count": 2,
+      "valid_source_fragment_count": 2,
+      "finding_count": 0
+    },
+    {
+      "decision_id": "CD-M16-001-04",
+      "passage": "太16:8–10",
+      "section_title": "小信：没有从已有启示作出正确推论",
+      "markdown_heading": "「小信」是沒有理解已有證據的含義（太 16:8–10）",
+      "heading_found": true,
+      "claim_count": 5,
+      "evidence_step_count": 11,
+      "valid_source_fragment_count": 12,
+      "finding_count": 1
+    },
+    {
+      "decision_id": "CD-M16-001-05",
+      "passage": "太16:11–12",
+      "section_title": "酵是拒绝基督的教导",
+      "markdown_heading": "「酵」是共同拒絕基督的教導（太 16:11–12）",
+      "heading_found": true,
+      "claim_count": 2,
+      "evidence_step_count": 6,
+      "valid_source_fragment_count": 7,
+      "finding_count": 0
+    },
+    {
+      "decision_id": "CD-M16-001-06",
+      "passage": "太16:1–12",
+      "section_title": "神迹、圣经与信仰判断",
+      "markdown_heading": "神蹟是印證，不是信仰的根基",
+      "heading_found": true,
+      "claim_count": 2,
+      "evidence_step_count": 2,
+      "valid_source_fragment_count": 2,
+      "finding_count": 1
+    }
+  ],
+  "findings": [
+    {
+      "code": "placeholder_topic_link",
+      "severity": "warning",
+      "title": "专题链接仍是占位符",
+      "detail": "正文结构已完成，但正式发布前需要替换为实际专题页面。",
+      "decision_id": "CD-M16-001-04",
+      "claim_id": null
+    },
+    {
+      "code": "placeholder_topic_link",
+      "severity": "warning",
+      "title": "专题链接仍是占位符",
+      "detail": "正文结构已完成，但正式发布前需要替换为实际专题页面。",
+      "decision_id": "CD-M16-001-06",
+      "claim_id": null
+    }
+  ]
+}

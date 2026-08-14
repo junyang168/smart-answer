@@ -1,0 +1,2790 @@
+{
+  "schema_version": "wang_shared_knowledge_increment_v1",
+  "package_id": "SKI-M16-1-12-EXPOSITION-TOPICS-V1",
+  "source_documents": [
+    {
+      "source_id": "notes_manuscript:16章釋經",
+      "source_type": "notes_manuscript",
+      "transcript_id": "notes_manuscript:16章釋經",
+      "title": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+      "review_status": "candidate",
+      "project_id": "16章釋經",
+      "source_url": "/resources/notes_to_manuscript_series/d5c55bdf-6375-49e9-a08d-22eda1eaf21d/16章釋經",
+      "lineage": {
+        "upstream_kind": "professor_notes",
+        "transformation": "notes_to_manuscript",
+        "fidelity_status": "current_passed",
+        "meta_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/meta.json",
+        "source_pages": [
+          "notes_main/chapter16/15.jpeg",
+          "notes_main/chapter16/16.jpeg",
+          "notes_main/chapter16/17.jpeg",
+          "notes_main/chapter16/18.jpeg"
+        ]
+      }
+    },
+    {
+      "source_id": "notes_manuscript:16_章_-_生命",
+      "source_type": "notes_manuscript",
+      "transcript_id": "notes_manuscript:16_章_-_生命",
+      "title": "16 章 - 靈、魂、體的整體性",
+      "source_sha256": "a117576a9adcaf61ddc099e417c4d8d0dbe6ce3c4a9c2150729f24f7715386af",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_生命/final.md",
+      "review_status": "candidate",
+      "project_id": "16_章_-_生命",
+      "source_url": "/resources/notes_to_manuscript_series/d5c55bdf-6375-49e9-a08d-22eda1eaf21d/16_章_-_生命",
+      "lineage": {
+        "upstream_kind": "professor_notes",
+        "transformation": "notes_to_manuscript",
+        "fidelity_status": "previous_pass_stale_after_integration_patch",
+        "meta_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_生命/meta.json",
+        "original_notes_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_生命/original_notes.md",
+        "source_pages": [
+          "notes_main/chapter16/22.jpg",
+          "notes_main/chapter16/23.jpg",
+          "notes_main/chapter16/24.jpeg",
+          "notes_main/chapter16/25.jpeg",
+          "notes_main/chapter16/26.jpeg",
+          "notes_main/chapter16/27.jpeg",
+          "notes_main/chapter16/28.jpeg",
+          "notes_main/chapter16/29.jpeg"
+        ]
+      }
+    },
+    {
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "source_type": "sermon_transcript",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+      "title": "2016 NYSC 專題：馬太福音釋經（四）1",
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_published/2016 NYSC 專題：馬太福音釋經（四）1.json",
+      "review_status": "candidate"
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-Q002-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "我對你們說、要防備法利賽人和撒都該人的酵、這話不是指著餅說的．你們怎麼不明白呢？",
+      "paragraph_key": "S0016",
+      "source_segment_index": 16,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "0ef0f721c4e69732b7d0720cfdcc36bee1fe6b4d80d5a42904aa7e9174c8d824",
+      "verbatim_excerpt_sha256": "fca78e16aad249b6bdeeb4390b4aa7683727a163239801e41dc490be8dfef70a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS005-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "以顯神蹟作為信仰根基",
+      "paragraph_key": "S0026",
+      "source_segment_index": 26,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "f170ca5851b1f00cd5cc78b11031711468f055e239db9e3ee2087c2c073117a3",
+      "verbatim_excerpt_sha256": "fbe946a7a1ac6266923a8876a2b5e630814b83cf4956236eaf96f48a9f3fe4ef",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E001-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "然而在此段經文中，原文使用單一定冠詞，將兩者並列為同一行動主體，表示他們在這件事上聯合起來共同行動，一起向耶穌提出要求。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 4,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "52338e9154f74cef35512b62a5f6e7221f8fc816109b47056d973587863adb3b",
+      "verbatim_excerpt_sha256": "15ad441bd45a182206cbf49813eb352918dba6a9c18050650f6fd788c43d3e43",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E002-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "耶穌在此使用的「小信」（ὀλιγόπιστοι），並非指門徒信心的強度不足，而是指他們信心的內涵（implication）不足——他們尚未認識到自己所信之信仰的全部含義。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 11,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "083316e791c7e535893f572c9999dc3a1d9efa3ec9a1f3f71b29d5026e9562bf",
+      "verbatim_excerpt_sha256": "869afca0508092ffc9480086edd04d5d1728b17065cb270852bde1b5fdc9f024",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E003-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "耶穌既然已經能用少量的餅和魚使五千人吃飽、使四千人吃飽，當然也能供應門徒的需要。門徒卻因為忘了帶餅而憂慮，正說明他們沒有從已有的親身經歷中推導出耶穌能力的完整意涵。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 11,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "083316e791c7e535893f572c9999dc3a1d9efa3ec9a1f3f71b29d5026e9562bf",
+      "verbatim_excerpt_sha256": "848855af1f68df57180ca8550665829d0fe48bc74edbf8f8e48c6b20572ed6c1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E005-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "太 16:12 揭示，法利賽人和撒都該人雖然在哈拉卡與復活等問題上彼此對立，卻共同持有一個教訓（the teaching，原文單數）：不接受耶穌是神所差來的彌賽亞。",
+      "paragraph_key": "S0021",
+      "source_segment_index": 21,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "0210446c332b2a9b7ce1f65bd38157007c5b4b3826cca3b787f65b067cc09e4a",
+      "verbatim_excerpt_sha256": "f1669a0ddc784e1c0a3e5f58c4350e9e4fb2cf115bd66e15433d9341b39d23ee",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E006-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "耶穌帶來豐盛的靈糧，不僅給猶太人（五千人吃飽後剩下十二個 κοφίνους，參太 14:20；16:9），也給外邦人（四千人吃飽後剩下七個 σπυρίδας，參太 15:37；16:10）。彌賽亞的供應涵蓋猶太人與外邦人兩個群體。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 22,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "3685f7c08efd51c3116522b496a4a4689b5ee07efdf087bfb889c2f474de0af0",
+      "verbatim_excerpt_sha256": "84b7e569e6ef4d4fbcf941feb123ff0fec780ca668f520dd4856fdb8c09ce256",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E007-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "以顯神蹟作為信仰根基，是一種「淺信」。以色列人在曠野天天看見神蹟，仍然不信，這一歷史事實說明神蹟本身並不構成信心的根基。今日若以顯神蹟作為佈道大會叫人決志，容易形成『淺信』。",
+      "paragraph_key": "S0026",
+      "source_segment_index": 26,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "f170ca5851b1f00cd5cc78b11031711468f055e239db9e3ee2087c2c073117a3",
+      "verbatim_excerpt_sha256": "40e872b9e8a406df361ebbe4f2f2e882b8983d49797306d7286774155b18f03d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E032-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "Deism（自然神論）認為神創造宇宙之後便不再介入，不再管理世界的事務。Theism 則認為神創造之後仍然持續管理宇宙，人的歷史中存在超自然的作為。",
+      "paragraph_key": "S0028",
+      "source_segment_index": 28,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "3fd376bc2ab84967effe0bc5dd48429f7c43862bf5a47f2a35c0d3dd0633be18",
+      "verbatim_excerpt_sha256": "69f95e21044c7a73704033d1dbdc49380e487f6f76fc52236ee818e51b6a512f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E032-02",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "撒都該人的神學立場，可類比為 Deism 的框架。",
+      "paragraph_key": "S0028",
+      "source_segment_index": 28,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "3fd376bc2ab84967effe0bc5dd48429f7c43862bf5a47f2a35c0d3dd0633be18",
+      "verbatim_excerpt_sha256": "2167e9650bf6e64aef2b668f707200c4df58494a2d40f6d0d5d12447a8f678be",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E033-01",
+      "source_id": "notes_manuscript:16章釋經",
+      "verbatim_excerpt": "耶穌顯神蹟不是在作秀。法利賽人和撒都該人要求耶穌從天上顯神蹟，是試探性的要求，耶穌不回應這種要求。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 20,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+      "paragraph_text_sha256": "678c40ff88454aa6aa25b8276060ae4f52faa2f24d681f5d237e008669442958",
+      "verbatim_excerpt_sha256": "1f5aa29c5c06d90ad4e121b19849465b425fd80d7ebbd9ffd9815083b3ce452a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-2bd0c0df7ecd-DK-2bd0c0df7ecd-POS004-01",
+      "source_id": "notes_manuscript:16_章_-_生命",
+      "verbatim_excerpt": "靈恩派傾向以神蹟、異象、異夢作為信仰的核心依據，而忽略聖經預言的更確實性",
+      "paragraph_key": "S0300",
+      "source_segment_index": 300,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "a117576a9adcaf61ddc099e417c4d8d0dbe6ce3c4a9c2150729f24f7715386af",
+      "paragraph_text_sha256": "428a32265356f8ece109ec8eca3206ec24bcc5d8fcf6d4d7e768d858b386659a",
+      "verbatim_excerpt_sha256": "cbaa4567b7ef7e59bd05e06da48f9f0dd5f777fb3e26ade0d21172c5be4c8691",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-notes_manuscript_16-2bd0c0df7ecd-DK-2bd0c0df7ecd-E043-01",
+      "source_id": "notes_manuscript:16_章_-_生命",
+      "verbatim_excerpt": "此節將聖經的預言定位為比神蹟更確實可靠的根基，是信仰的更穩固依據。",
+      "paragraph_key": "S0290",
+      "source_segment_index": 290,
+      "media_time": null,
+      "media_end_time": null,
+      "source_sha256": "a117576a9adcaf61ddc099e417c4d8d0dbe6ce3c4a9c2150729f24f7715386af",
+      "paragraph_text_sha256": "9e86714f87e0dbc5ae20515bf7e79f7935044ab6fe9b9a66fe75092a7c846e3b",
+      "verbatim_excerpt_sha256": "9e86714f87e0dbc5ae20515bf7e79f7935044ab6fe9b9a66fe75092a7c846e3b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS001-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "你顯一個神蹟給我們看。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 233,
+      "media_time": 516,
+      "media_end_time": 802,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "cd04ceec9234e3ec75818fd0c0e097b468eea596cca17a12a6c8ac19942cd520",
+      "verbatim_excerpt_sha256": "2a342b1c7e45af6988b6500de5648a5a25e4684c8074e0cee06f96f0afd72d32",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS002-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "小信的人信心不夠強、不夠大。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 372,
+      "media_time": 802,
+      "media_end_time": 902,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "a792ada8f82f5ab38a49c3c4e02de66d445e8d9a843ee153011614152d161f9e",
+      "verbatim_excerpt_sha256": "2034907c16c59ee7e1e42477aae446ecaac3ff95ae96b9e387d5f43fdf5bb0d6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS003-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "法利賽人接受口傳的古人遺傳，來解釋如何遵守聖經。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 691,
+      "media_time": 1503,
+      "media_end_time": 1755,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "8a1f75e2d56061c6772f62dbb24056a7a90df1e662e8478816a76e7227605c94",
+      "verbatim_excerpt_sha256": "505ab20824c1cd3cbc15b56e18240d00fdbc39a9ac91c1bb54049b41ed0bdaac",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS004-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "撒都該人認為人死了就完了，不會再復活。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 691,
+      "media_time": 1503,
+      "media_end_time": 1755,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "8a1f75e2d56061c6772f62dbb24056a7a90df1e662e8478816a76e7227605c94",
+      "verbatim_excerpt_sha256": "ced5a052ab5e28160ce9610060ff1510f8a83b87b5184807948318b62f483b39",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS005-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "撒都該人跟法利賽人不承認耶穌是神所差來的基督，是神差來的彌賽亞。",
+      "paragraph_key": "S0015",
+      "source_segment_index": 781,
+      "media_time": 1755,
+      "media_end_time": 2099,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "90f45ac1c2f262ac99f7db54d35eb566a4c660122019a9b099406c0433af5764",
+      "verbatim_excerpt_sha256": "1ad6cb4040fa3c5808c240d67c28cb358b56bd1e9881107a00d3e5528e58999e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E001-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "法利賽人跟撒都該人，只有一個定冠詞，表示在這件事上，他們一起行動。他們是猶太公會的成員。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 105,
+      "media_time": 220,
+      "media_end_time": 516,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "8be916f55df90e5b96f24b4569ec93d6a39c2faa4357677c14451f7dd4b3010e",
+      "verbatim_excerpt_sha256": "67075e0d4dd96c703cc24f32f41fdd41a9cbd7332470500ab6f34da1c8ea1ed2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E002-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "法利賽人等於是今天的這些怎麼說呢，相信超自然能力的這些人。他們相信神存在，他們相信神行神蹟，他們也相信人死了以後將來要復活。法利賽人在這個方面。可是撒都該人呢，不相信。撒都該人只相信說有神，可是神不管這個世界上發生什麼事，人死了就沒有了，什麼都沒有了。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 233,
+      "media_time": 516,
+      "media_end_time": 802,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "cd04ceec9234e3ec75818fd0c0e097b468eea596cca17a12a6c8ac19942cd520",
+      "verbatim_excerpt_sha256": "91dd30555079a2f3b565e629a89d476378246eb62b3040e6736f4f5e4adc5930",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E003-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "羅馬政府就使各地的，這個他們所佔領的國家，使他們組織一個公會，來處理他們有關他們的宗教問題、有關他們的習慣上的問題，羅馬不管他們，給他們自由。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 105,
+      "media_time": 220,
+      "media_end_time": 516,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "8be916f55df90e5b96f24b4569ec93d6a39c2faa4357677c14451f7dd4b3010e",
+      "verbatim_excerpt_sha256": "2cfd6b3ed8ee5a9f4d22f1f5ddd31812248d867f9522b69b390fcb97cbd63fca",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E004-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "法利賽人來試探耶穌，他明講是來試探耶穌的，他不是真正要求知道真理，他要試探耶穌，所以請祂從天上顯個神蹟給他們看，就要耶穌做秀給他們看。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 233,
+      "media_time": 516,
+      "media_end_time": 802,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "cd04ceec9234e3ec75818fd0c0e097b468eea596cca17a12a6c8ac19942cd520",
+      "verbatim_excerpt_sha256": "2d654c39420608251e1aee9bfc4cd249f67905a5f0d71b5b5f48f69e88971176",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E005-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "你們這一個不信的世代，我要一個神蹟給你們看，將來我要死，被你們抓去釘十字架，三天之後我要復活。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 233,
+      "media_time": 516,
+      "media_end_time": 802,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "cd04ceec9234e3ec75818fd0c0e097b468eea596cca17a12a6c8ac19942cd520",
+      "verbatim_excerpt_sha256": "6f411d49861e1ae6832cf41c16f0799439f803483b4e0c33901f666ffabc935a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E006-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "所以今天有很多人求神蹟，目的就是為了自己的好處、為了要做秀給人家看，說「我會行神蹟」。所以那一種事，在耶穌觀點看，耶穌根本不理。",
+      "paragraph_key": "S0005",
+      "source_segment_index": 233,
+      "media_time": 516,
+      "media_end_time": 802,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "cd04ceec9234e3ec75818fd0c0e097b468eea596cca17a12a6c8ac19942cd520",
+      "verbatim_excerpt_sha256": "87c6b7dab8f263eb060496d83aae15bc8bf43a9c1fac862c459fcfd9dd1e48ca",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E007-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "小信的人信心不夠強、不夠大。所以「神求你，增加我們的信心。」常常有人這麼想。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 372,
+      "media_time": 802,
+      "media_end_time": 902,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "a792ada8f82f5ab38a49c3c4e02de66d445e8d9a843ee153011614152d161f9e",
+      "verbatim_excerpt_sha256": "353d1030a121d9cf8ddf5af7b87d0052de1275293181b92a9c4dc75ac2fc2311",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E008-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "小信的人是什麼？就是不完全了解他們的信心所有的 implication。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 418,
+      "media_time": 902,
+      "media_end_time": 994,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "b2ff520aa827c4bc0b9dad2ccb81585e2a0e4ccd66333ef7cdb141ac826a149c",
+      "verbatim_excerpt_sha256": "e764b79462eaadb174d0f4bdca4703ec90330abe52086a86d05df7518665171d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E009-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "十六章第九節，耶穌說：「你们还不明白吗？不记得那五个饼分给五千人、收拾了多少篮子吗？也不记得那七个饼分给四千人、收拾了多少筐子吗？」",
+      "paragraph_key": "S0010",
+      "source_segment_index": 461,
+      "media_time": 994,
+      "media_end_time": 1208,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "139722a42471bee6edb7390ae37dc654befe0b1ab05d590fe76eb428737458fe",
+      "verbatim_excerpt_sha256": "606f7e4db921f3f4a4bc1e061a1dbb889232cc75ccdac717c85eedd5d0e7d931",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E010-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "那裡所講的那個字，是指著、暗示著，耶穌用五個餅餵養五千人，是給猶太人吃飽的。猶太人，那個字很特別。那下面，耶穌又說什麼？「那七個餅分給四千人，又收拾了多少的『筐子』的零碎嗎？」那個「筐子」那個字，是外邦人所用的字。",
+      "paragraph_key": "S0010",
+      "source_segment_index": 461,
+      "media_time": 994,
+      "media_end_time": 1208,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "139722a42471bee6edb7390ae37dc654befe0b1ab05d590fe76eb428737458fe",
+      "verbatim_excerpt_sha256": "c007e26489b88ce2706c2cabb06589ecb95760f70b7f877dd0f4e0929a9b9a13",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E011-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "耶穌有能力叫我們吃飽，你何必擔心？所以「小信」，不是信心的程度不夠，乃是你對信心的內涵的了解不夠",
+      "paragraph_key": "S0012",
+      "source_segment_index": 648,
+      "media_time": 1396,
+      "media_end_time": 1503,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "9085e16cc48444e2a26930c1eac09d33a91c691b9580304858fc4431c060b7e4",
+      "verbatim_excerpt_sha256": "a87f91c1514170247999ef324df312e848ec42ed84546e751d6bb61bbdb37f37",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E012-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "門徒這才知道耶穌說的不是叫他們防備餅的酵，乃是防備法利賽人和撒都該人的教訓。",
+      "paragraph_key": "S0012",
+      "source_segment_index": 648,
+      "media_time": 1396,
+      "media_end_time": 1503,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "9085e16cc48444e2a26930c1eac09d33a91c691b9580304858fc4431c060b7e4",
+      "verbatim_excerpt_sha256": "da4933b8c420a28775b2d327b2bc7a2658046842b25af4d6c1d5a72944472493",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E013-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "The teaching，你知道，不是他們說的教訓，他們的教訓當中一個很特點，他們這兩個黨所共用的錯誤的焦點、錯誤的教導",
+      "paragraph_key": "S0014",
+      "source_segment_index": 691,
+      "media_time": 1503,
+      "media_end_time": 1755,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "8a1f75e2d56061c6772f62dbb24056a7a90df1e662e8478816a76e7227605c94",
+      "verbatim_excerpt_sha256": "e6503b51d2c9be6fb7a4e487ef483529635dccaf60fe1a27d29b9f9f42692799",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "剩下了十二個κοφίνος（kophinos）。kophinos是什麼？是猶太人用的那個籃子。",
+      "paragraph_key": "S0015",
+      "source_segment_index": 781,
+      "media_time": 1755,
+      "media_end_time": 2099,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "90f45ac1c2f262ac99f7db54d35eb566a4c660122019a9b099406c0433af5764",
+      "verbatim_excerpt_sha256": "5b9569c7e428a4833e602247d172b7035b583fcc019cc73165f5c4a35e8def08",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-02",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "剩下七個Spyris。那個字是什麼？就是外邦人所用的筐子。",
+      "paragraph_key": "S0015",
+      "source_segment_index": 781,
+      "media_time": 1755,
+      "media_end_time": 2099,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "90f45ac1c2f262ac99f7db54d35eb566a4c660122019a9b099406c0433af5764",
+      "verbatim_excerpt_sha256": "8f085b49bd3e1507f859069939bec8cc41cb0ff2d6f19f8701532c031b96ebfe",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E018-01",
+      "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+      "verbatim_excerpt": "他們不接受耶穌是神所差來的彌賽亞。這個彌賽亞其實是帶來豐盛的靈糧給猶太人。",
+      "paragraph_key": "S0015",
+      "source_segment_index": 781,
+      "media_time": 1755,
+      "media_end_time": 2099,
+      "source_sha256": "579e257121149b5f9f8316781c5713995008f6e9ee40d5d30aa482dfd413f287",
+      "paragraph_text_sha256": "90f45ac1c2f262ac99f7db54d35eb566a4c660122019a9b099406c0433af5764",
+      "verbatim_excerpt_sha256": "c211f47dd46d842ea04a1400dfcfbefa0f40ffee0acd95e284d0e54f9d7d3b99",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    }
+  ],
+  "questions": [],
+  "observations": [],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL001",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E001"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:1"
+      ],
+      "topic_terms": [
+        "法利赛人",
+        "撒都该人",
+        "哈拉卡",
+        "复活",
+        "联合试探"
+      ],
+      "title": "法利赛人与撒都该人平时在哈拉卡和复活等问题上对立，却在试探耶稣、要求神迹一事上联合行动。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E001",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以历史分歧和原文冠词说明两派联合行动",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "然而在此段經文中，原文使用單一定冠詞，將兩者並列為同一行動主體，表示他們在這件事上聯合起來共同行動，一起向耶穌提出要求。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL002",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E002",
+        "DK-91b546f25db1-E003"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:8-10",
+        "太14:20",
+        "太15:37"
+      ],
+      "topic_terms": [
+        "小信",
+        "信心内涵",
+        "门徒",
+        "神迹记忆",
+        "耶稣的供应"
+      ],
+      "title": "耶稣称门徒为“小信的人”，不是说他们信心强度不足，而是说他们没有从已有神迹经历推导出所信之事的完整含义。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "解释“小信”的语义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌在此使用的「小信」（ὀλιγόπιστοι），並非指門徒信心的強度不足，而是指他們信心的內涵（implication）不足——他們尚未認識到自己所信之信仰的全部含義。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0011",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E003",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由既有神迹推导耶稣供应能力",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌既然已經能用少量的餅和魚使五千人吃飽、使四千人吃飽，當然也能供應門徒的需要。門徒卻因為忘了帶餅而憂慮，正說明他們沒有從已有的親身經歷中推導出耶穌能力的完整意涵。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL003",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E004",
+        "DK-91b546f25db1-E005"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:6-12"
+      ],
+      "topic_terms": [
+        "酵",
+        "教训",
+        "弥赛亚",
+        "法利赛人",
+        "撒都该人"
+      ],
+      "title": "法利赛人与撒都该人的“酵”不是字面的饼，而是他们共同拒绝耶稣为神所差弥赛亚的教训。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E004",
+              "evidence_type": "scripture_evidence",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "经文排除字面解释",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "我對你們說、要防備法利賽人和撒都該人的酵、這話不是指著餅說的．你們怎麼不明白呢？",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0021",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E005",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "确定“酵”的共同教训内容",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "太 16:12 揭示，法利賽人和撒都該人雖然在哈拉卡與復活等問題上彼此對立，卻共同持有一個教訓（the teaching，原文單數）：不接受耶穌是神所差來的彌賽亞。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL004",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E006"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太14:20",
+        "太15:37",
+        "太16:9-10"
+      ],
+      "topic_terms": [
+        "五千人",
+        "四千人",
+        "犹太人",
+        "外邦人",
+        "弥赛亚供应"
+      ],
+      "title": "两次喂饱群众的神迹表明弥赛亚的丰盛供应同时涵盖犹太人与外邦人。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0022",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E006",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "赋予两次喂饱神迹跨群体意义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌帶來豐盛的靈糧，不僅給猶太人（五千人吃飽後剩下十二個 κοφίνους，參太 14:20；16:9），也給外邦人（四千人吃飽後剩下七個 σπυρίδας，參太 15:37；16:10）。彌賽亞的供應涵蓋猶太人與外邦人兩個群體。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL005",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E007"
+      ],
+      "opposed_position_ids": [
+        "DK-91b546f25db1-POS005"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "神迹",
+        "信心根基",
+        "浅信",
+        "布道",
+        "生活应用"
+      ],
+      "title": "神迹本身不构成信心的根基；以显神迹作为信仰或布道决志的根基容易形成“浅信”。",
+      "claim_type": "application",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0026",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E007",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由历史例证转入信仰与布道应用",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "以顯神蹟作為信仰根基，是一種「淺信」。以色列人在曠野天天看見神蹟，仍然不信，這一歷史事實說明神蹟本身並不構成信心的根基。今日若以顯神蹟作為佈道大會叫人決志，容易形成『淺信』。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL024",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E032"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:1"
+      ],
+      "topic_terms": [
+        "撒都该人",
+        "自然神论",
+        "Deism",
+        "神迹",
+        "神的介入"
+      ],
+      "title": "撒都该人的神学立场可类比自然神论框架，即承认神存在，却否认神在创造后继续介入世界及神迹的可能性。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0028",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E032",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "提供自然神论定义并类比撒都该人",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "Deism（自然神論）認為神創造宇宙之後便不再介入，不再管理世界的事務。Theism 則認為神創造之後仍然持續管理宇宙，人的歷史中存在超自然的作為。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0028",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E032",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "提供自然神论定义并类比撒都该人",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "撒都該人的神學立場，可類比為 Deism 的框架。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-91b546f25db1-CL025",
+      "evidence_step_ids": [
+        "DK-91b546f25db1-E033"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "太16:1-4"
+      ],
+      "topic_terms": [
+        "神迹",
+        "试探",
+        "耶稣事工",
+        "作秀"
+      ],
+      "title": "耶稣行神迹不是作秀，因此不回应法利赛人与撒都该人带有试探性质的神迹要求。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "17c3a72ace070b019e2555f0f30078a4ae59a5dfcfbf65eb81268f2f9363caa4"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16章釋經",
+          "transcript_id": "notes_manuscript:16章釋經",
+          "lecture": "16章 - 彼得的認信、天國鑰匙與教會的判斷權柄",
+          "anchors": [
+            {
+              "paragraph_key": "S0020",
+              "media_time": null,
+              "evidence_id": "DK-91b546f25db1-E033",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "解释耶稣不回应神迹要求",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌顯神蹟不是在作秀。法利賽人和撒都該人要求耶穌從天上顯神蹟，是試探性的要求，耶穌不回應這種要求。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-2bd0c0df7ecd-CL024",
+      "evidence_step_ids": [
+        "DK-2bd0c0df7ecd-E043"
+      ],
+      "opposed_position_ids": [
+        "DK-2bd0c0df7ecd-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "彼得後書1:19"
+      ],
+      "topic_terms": [
+        "聖經預言",
+        "神蹟",
+        "信仰根基",
+        "優先性"
+      ],
+      "title": "聖經的預言比神蹟更確實可靠，是更穩固的信仰根基；神蹟只能作為印證。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "b7099ce87718a485395b65b8f91bffb0d06929b5dc9f02a4ac567acc543cc22a"
+      ],
+      "occurrences": [
+        {
+          "source_id": "notes_manuscript:16_章_-_生命",
+          "transcript_id": "notes_manuscript:16_章_-_生命",
+          "lecture": "16 章 - 靈、魂、體的整體性",
+          "anchors": [
+            {
+              "paragraph_key": "S0290",
+              "media_time": null,
+              "evidence_id": "DK-2bd0c0df7ecd-E043",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "建立預言相對神蹟的優先性",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "此節將聖經的預言定位為比神蹟更確實可靠的根基，是信仰的更穩固依據。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL001",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E001",
+        "DK-a26f0a7e9ba4-E002",
+        "DK-a26f0a7e9ba4-E003"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:1"
+      ],
+      "topic_terms": [
+        "法利赛人",
+        "撒都该人",
+        "定冠词",
+        "犹太公会",
+        "共同行动"
+      ],
+      "title": "马太福音十六章一节中法利赛人与撒都该人共享一个定冠词，表示这两个通常敌对的公会党派在试探耶稣一事上共同采取行动。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0004",
+              "media_time": 220,
+              "evidence_id": "DK-a26f0a7e9ba4-E001",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "原文语法与群体行动解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "法利賽人跟撒都該人，只有一個定冠詞，表示在這件事上，他們一起行動。他們是猶太公會的成員。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": 516,
+              "evidence_id": "DK-a26f0a7e9ba4-E002",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "两党信念差异的历史宗教背景",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "法利賽人等於是今天的這些怎麼說呢，相信超自然能力的這些人。他們相信神存在，他們相信神行神蹟，他們也相信人死了以後將來要復活。法利賽人在這個方面。可是撒都該人呢，不相信。撒都該人只相信說有神，可是神不管這個世界上發生什麼事，人死了就沒有了，什麼都沒有了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": 220,
+              "evidence_id": "DK-a26f0a7e9ba4-E003",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "罗马地方治理背景说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "羅馬政府就使各地的，這個他們所佔領的國家，使他們組織一個公會，來處理他們有關他們的宗教問題、有關他們的習慣上的問題，羅馬不管他們，給他們自由。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL002",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E004",
+        "DK-a26f0a7e9ba4-E005",
+        "DK-a26f0a7e9ba4-E006"
+      ],
+      "opposed_position_ids": [
+        "DK-a26f0a7e9ba4-POS001"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:1-4"
+      ],
+      "topic_terms": [
+        "神迹",
+        "试探",
+        "约拿的神迹",
+        "受死复活",
+        "动机"
+      ],
+      "title": "法利赛人与撒都该人求神迹不是诚心寻求真理，而是试探并要求耶稣表演；耶稣拒绝这种要求，只以自己的受死与第三日复活作为约拿的神迹。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0005",
+              "media_time": 516,
+              "evidence_id": "DK-a26f0a7e9ba4-E004",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对求神迹者动机的经文判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "法利賽人來試探耶穌，他明講是來試探耶穌的，他不是真正要求知道真理，他要試探耶穌，所以請祂從天上顯個神蹟給他們看，就要耶穌做秀給他們看。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": 516,
+              "evidence_id": "DK-a26f0a7e9ba4-E005",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授模拟耶稣话语以解释约拿神迹，并非逐字经文引语",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "你們這一個不信的世代，我要一個神蹟給你們看，將來我要死，被你們抓去釘十字架，三天之後我要復活。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0005",
+              "media_time": 516,
+              "evidence_id": "DK-a26f0a7e9ba4-E006",
+              "evidence_type": "application",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对现代求神迹现象的应用",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以今天有很多人求神蹟，目的就是為了自己的好處、為了要做秀給人家看，說「我會行神蹟」。所以那一種事，在耶穌觀點看，耶穌根本不理。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL003",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E007",
+        "DK-a26f0a7e9ba4-E008",
+        "DK-a26f0a7e9ba4-E009"
+      ],
+      "opposed_position_ids": [
+        "DK-a26f0a7e9ba4-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:5-12"
+      ],
+      "topic_terms": [
+        "小信",
+        "信心",
+        "内涵",
+        "implication",
+        "门徒"
+      ],
+      "title": "圣经所说的“小信”不是信心强度或程度不足，而是没有完全理解信心所包含的全部内涵与推论。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0007",
+              "media_time": 802,
+              "evidence_id": "DK-a26f0a7e9ba4-E007",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "opposed",
+              "discourse_role": "复述将被反驳的常见解释",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "小信的人信心不夠強、不夠大。所以「神求你，增加我們的信心。」常常有人這麼想。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0009",
+              "media_time": 902,
+              "evidence_id": "DK-a26f0a7e9ba4-E008",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "核心术语定义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "小信的人是什麼？就是不完全了解他們的信心所有的 implication。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0010",
+              "media_time": 994,
+              "evidence_id": "DK-a26f0a7e9ba4-E009",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "引用耶稣对门徒的提醒作为经文证据",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "十六章第九節，耶穌說：「你们还不明白吗？不记得那五个饼分给五千人、收拾了多少篮子吗？也不记得那七个饼分给四千人、收拾了多少筐子吗？」",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL004",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E009",
+        "DK-a26f0a7e9ba4-E010",
+        "DK-a26f0a7e9ba4-E011"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:8-10"
+      ],
+      "topic_terms": [
+        "五饼二鱼",
+        "七饼",
+        "门徒忧虑",
+        "信心内涵",
+        "供应"
+      ],
+      "title": "既然耶稣曾用少量饼食使五千与四千人吃饱，门徒就应推知耶稣也能解决他们没有带饼的问题，不必忧虑。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": 994,
+              "evidence_id": "DK-a26f0a7e9ba4-E009",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "引用耶稣对门徒的提醒作为经文证据",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "十六章第九節，耶穌說：「你们还不明白吗？不记得那五个饼分给五千人、收拾了多少篮子吗？也不记得那七个饼分给四千人、收拾了多少筐子吗？」",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0010",
+              "media_time": 994,
+              "evidence_id": "DK-a26f0a7e9ba4-E010",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "两种容器用词的原文判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那裡所講的那個字，是指著、暗示著，耶穌用五個餅餵養五千人，是給猶太人吃飽的。猶太人，那個字很特別。那下面，耶穌又說什麼？「那七個餅分給四千人，又收拾了多少的『筐子』的零碎嗎？」那個「筐子」那個字，是外邦人所用的字。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0012",
+              "media_time": 1396,
+              "evidence_id": "DK-a26f0a7e9ba4-E011",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "由神迹事实推到门徒当下处境",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌有能力叫我們吃飽，你何必擔心？所以「小信」，不是信心的程度不夠，乃是你對信心的內涵的了解不夠",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL005",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E010",
+        "DK-a26f0a7e9ba4-E017"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音15:37",
+        "马太福音16:9-10"
+      ],
+      "topic_terms": [
+        "篮子",
+        "筐子",
+        "kophinos",
+        "spyris",
+        "犹太人",
+        "外邦人"
+      ],
+      "title": "五饼喂饱五千人的篮子用犹太人的词，七饼喂饱四千人的筐子用外邦人的词，因此两次事件分别指向耶稣对犹太人与外邦人的供应。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0010",
+              "media_time": 994,
+              "evidence_id": "DK-a26f0a7e9ba4-E010",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "两种容器用词的原文判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那裡所講的那個字，是指著、暗示著，耶穌用五個餅餵養五千人，是給猶太人吃飽的。猶太人，那個字很特別。那下面，耶穌又說什麼？「那七個餅分給四千人，又收拾了多少的『筐子』的零碎嗎？」那個「筐子」那個字，是外邦人所用的字。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1755,
+              "evidence_id": "DK-a26f0a7e9ba4-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "明确给出两种希腊词及其文化使用者",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "剩下了十二個κοφίνος（kophinos）。kophinos是什麼？是猶太人用的那個籃子。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1755,
+              "evidence_id": "DK-a26f0a7e9ba4-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "明确给出两种希腊词及其文化使用者",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "剩下七個Spyris。那個字是什麼？就是外邦人所用的筐子。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "7c42675e0b6c11b222180c0f9079e014ae6ff55a44b4be34e87b35c05b395584",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-a26f0a7e9ba4-CL006",
+      "evidence_step_ids": [
+        "DK-a26f0a7e9ba4-E012",
+        "DK-a26f0a7e9ba4-E013",
+        "DK-a26f0a7e9ba4-E017",
+        "DK-a26f0a7e9ba4-E018"
+      ],
+      "opposed_position_ids": [
+        "DK-a26f0a7e9ba4-POS003",
+        "DK-a26f0a7e9ba4-POS004",
+        "DK-a26f0a7e9ba4-POS005"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音16:6-12"
+      ],
+      "topic_terms": [
+        "酵",
+        "错误教导",
+        "弥赛亚",
+        "法利赛人",
+        "撒都该人"
+      ],
+      "title": "法利赛人与撒都该人共同的“酵”是他们不接受耶稣为神所差来的基督和弥赛亚；门徒必须防备这一共同的错误教导。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "76b540006d0cbcb762ea4c265ef69ddf55853835fb0aae4bc2eaedf6d2a7a1eb"
+      ],
+      "occurrences": [
+        {
+          "source_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "lecture": "2016 NYSC 專題：馬太福音釋經（四）1",
+          "anchors": [
+            {
+              "paragraph_key": "S0012",
+              "media_time": 1396,
+              "evidence_id": "DK-a26f0a7e9ba4-E012",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "经文中比喻含义的说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "門徒這才知道耶穌說的不是叫他們防備餅的酵，乃是防備法利賽人和撒都該人的教訓。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": 1503,
+              "evidence_id": "DK-a26f0a7e9ba4-E013",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "定冠词和单数名词的语法解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "The teaching，你知道，不是他們說的教訓，他們的教訓當中一個很特點，他們這兩個黨所共用的錯誤的焦點、錯誤的教導",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1755,
+              "evidence_id": "DK-a26f0a7e9ba4-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "明确给出两种希腊词及其文化使用者",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "剩下了十二個κοφίνος（kophinos）。kophinos是什麼？是猶太人用的那個籃子。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1755,
+              "evidence_id": "DK-a26f0a7e9ba4-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "明确给出两种希腊词及其文化使用者",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "剩下七個Spyris。那個字是什麼？就是外邦人所用的筐子。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1755,
+              "evidence_id": "DK-a26f0a7e9ba4-E018",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "回答两派共同错误教训的内容",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他們不接受耶穌是神所差來的彌賽亞。這個彌賽亞其實是帶來豐盛的靈糧給猶太人。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "evidence_steps": [
+    {
+      "discourse_role": "以历史分歧和原文冠词说明两派联合行动",
+      "evidence_step_id": "DK-91b546f25db1-E001",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL001"
+      ],
+      "scripture_refs": [
+        "太16:1"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "法利赛人与撒都该人虽在哈拉卡和复活上分歧，原文单一定冠词却把他们作为共同试探耶稣的行动主体。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E001-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E001-01"
+    },
+    {
+      "discourse_role": "解释“小信”的语义",
+      "evidence_step_id": "DK-91b546f25db1-E002",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL002"
+      ],
+      "scripture_refs": [
+        "太16:8"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“小信”指信心内涵没有展开，而非信心强度不足。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E002-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E002-01"
+    },
+    {
+      "discourse_role": "由既有神迹推导耶稣供应能力",
+      "evidence_step_id": "DK-91b546f25db1-E003",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL002"
+      ],
+      "scripture_refs": [
+        "太14:13-21",
+        "太15:32-39",
+        "太16:8-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "两次喂饱神迹本应使门徒推知耶稣能够供应他们，但门徒没有作出这一推论。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E003-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E003-01"
+    },
+    {
+      "discourse_role": "经文排除字面解释",
+      "evidence_step_id": "DK-91b546f25db1-E004",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL003"
+      ],
+      "scripture_refs": [
+        "太16:11"
+      ],
+      "speaker": "quoted_source",
+      "stance": "quoted",
+      "statement": "耶稣明确说明“酵”不是指着饼说的。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-Q002-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-Q002-01"
+    },
+    {
+      "discourse_role": "确定“酵”的共同教训内容",
+      "evidence_step_id": "DK-91b546f25db1-E005",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL003"
+      ],
+      "scripture_refs": [
+        "太16:12"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "原文单数“教训”被解释为两派共同拒绝耶稣为弥赛亚。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E005-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E005-01"
+    },
+    {
+      "discourse_role": "赋予两次喂饱神迹跨群体意义",
+      "evidence_step_id": "DK-91b546f25db1-E006",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL004"
+      ],
+      "scripture_refs": [
+        "太14:20",
+        "太15:37",
+        "太16:9-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "五千人与四千人的神迹被分别联系于犹太人和外邦人，表明弥赛亚供应两者。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E006-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E006-01"
+    },
+    {
+      "discourse_role": "由历史例证转入信仰与布道应用",
+      "evidence_step_id": "DK-91b546f25db1-E007",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL005"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "旷野中的以色列人看见神迹仍不信，因此神迹不应成为信仰或布道决志的根基。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E007-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E007-01"
+    },
+    {
+      "discourse_role": "提供自然神论定义并类比撒都该人",
+      "evidence_step_id": "DK-91b546f25db1-E032",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL024"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "自然神论否认创造后神的持续介入，撒都该人的立场被类比于这一框架。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E032-01",
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E032-02"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E032-01"
+    },
+    {
+      "discourse_role": "解释耶稣不回应神迹要求",
+      "evidence_step_id": "DK-91b546f25db1-E033",
+      "produced_claim_ids": [
+        "DK-91b546f25db1-CL025"
+      ],
+      "scripture_refs": [
+        "太16:1-4"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣不以神迹作秀，也不回应试探性的神迹要求。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E033-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-E033-01"
+    },
+    {
+      "discourse_role": "建立預言相對神蹟的優先性",
+      "evidence_step_id": "DK-2bd0c0df7ecd-E043",
+      "produced_claim_ids": [
+        "DK-2bd0c0df7ecd-CL024"
+      ],
+      "scripture_refs": [
+        "彼得後書1:19"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "彼後1:19把聖經預言定位為比神蹟更可靠的信仰根基。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-2bd0c0df7ecd-DK-2bd0c0df7ecd-E043-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-notes_manuscript_16-2bd0c0df7ecd-DK-2bd0c0df7ecd-E043-01"
+    },
+    {
+      "discourse_role": "原文语法与群体行动解释",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E001",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL001"
+      ],
+      "scripture_refs": [
+        "马太福音16:1"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "法利赛人与撒都该人共享一个定冠词，表示两党在试探耶稣一事上共同行动，并且都是犹太公会成员。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E001-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E001-01"
+    },
+    {
+      "discourse_role": "两党信念差异的历史宗教背景",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E002",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL001"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "法利赛人相信神迹和复活，撒都该人虽相信有神，却认为神不介入世界且人死后即终结。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E002-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E002-01"
+    },
+    {
+      "discourse_role": "罗马地方治理背景说明",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E003",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL001"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "罗马政府容许被占领民族组织公会，自行处理宗教和习惯问题；犹太公会主要由法利赛人与撒都该人组成。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E003-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E003-01"
+    },
+    {
+      "discourse_role": "对求神迹者动机的经文判断",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E004",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:1"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "经文明说两派是在试探耶稣，因此他们求神迹不是寻求真理，而是要求耶稣表演。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E004-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E004-01"
+    },
+    {
+      "discourse_role": "教授模拟耶稣话语以解释约拿神迹，并非逐字经文引语",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E005",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:4"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "约拿的神迹被解释为耶稣将被钉十字架并在第三日复活。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E005-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E005-01"
+    },
+    {
+      "discourse_role": "对现代求神迹现象的应用",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E006",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL002"
+      ],
+      "scripture_refs": [
+        "马太福音16:1-4"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "以个人利益或表演能力为目的求神迹，与试探耶稣者的态度相同，不会得到耶稣认可。",
+      "step_type": "application",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E006-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E006-01"
+    },
+    {
+      "discourse_role": "复述将被反驳的常见解释",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E007",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:8"
+      ],
+      "speaker": "professor",
+      "stance": "opposed",
+      "statement": "常见解释认为“小信”就是信心不够强、不够大。",
+      "step_type": "reasoning",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E007-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E007-01"
+    },
+    {
+      "discourse_role": "核心术语定义",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E008",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL003"
+      ],
+      "scripture_refs": [
+        "马太福音16:8"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "小信指不完全了解信心所有的implication，即信心所包括的内涵与推论。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E008-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E008-01"
+    },
+    {
+      "discourse_role": "引用耶稣对门徒的提醒作为经文证据",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E009",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "scripture_refs": [
+        "马太福音16:9-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣以五饼喂饱五千人与七饼喂饱四千人的往事，指出门徒应由既有信仰事实推知他的供应能力。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E009-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E009-01"
+    },
+    {
+      "discourse_role": "两种容器用词的原文判断",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E010",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL004",
+        "DK-a26f0a7e9ba4-CL005"
+      ],
+      "scripture_refs": [
+        "马太福音16:9-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "五千人事件中的“篮子”是犹太人使用的词，四千人事件中的“筐子”是外邦人使用的词。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E010-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E010-01"
+    },
+    {
+      "discourse_role": "由神迹事实推到门徒当下处境",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E011",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "scripture_refs": [
+        "马太福音16:8-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "门徒既知道耶稣能以少量食物供应众人，就应知道他也能使没有带饼的门徒吃饱；其问题是未理解信心内涵。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E011-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E011-01"
+    },
+    {
+      "discourse_role": "经文中比喻含义的说明",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E012",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL006"
+      ],
+      "scripture_refs": [
+        "马太福音16:11-12"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "门徒最终明白，酵并非食物中的酵，而是法利赛人与撒都该人的教训。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E012-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E012-01"
+    },
+    {
+      "discourse_role": "定冠词和单数名词的语法解释",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E013",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL006"
+      ],
+      "scripture_refs": [
+        "马太福音16:12"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "“the teaching”被解释为两派所共同具有的一个错误焦点，而不是泛指两派全部教训。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E013-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E013-01"
+    },
+    {
+      "discourse_role": "明确给出两种希腊词及其文化使用者",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E017",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL005",
+        "DK-a26f0a7e9ba4-CL006"
+      ],
+      "scripture_refs": [
+        "马太福音15:37",
+        "马太福音16:9-10"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "kophinos是犹太人使用的篮子，spyris是外邦人使用的筐子；两次喂饱事件显示弥赛亚为犹太人与外邦人带来丰盛灵粮。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-01",
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-02"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-01"
+    },
+    {
+      "discourse_role": "回答两派共同错误教训的内容",
+      "evidence_step_id": "DK-a26f0a7e9ba4-E018",
+      "produced_claim_ids": [
+        "DK-a26f0a7e9ba4-CL006"
+      ],
+      "scripture_refs": [
+        "马太福音16:6-12"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "法利赛人与撒都该人共同的错误，是不接受耶稣为神所差来的弥赛亚，而弥赛亚为人带来丰盛灵粮。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E018-01"
+      ],
+      "review_status": "candidate",
+      "source_fragment_id": "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E018-01"
+    }
+  ],
+  "knowledge_relations": [],
+  "claim_relations": [],
+  "position_nodes": [
+    {
+      "attribution": "以神迹布道或建立信仰者",
+      "position_id": "DK-91b546f25db1-POS005",
+      "title": "以显神迹作为信仰根基",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-91b546f25db1-DK-91b546f25db1-POS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "材料所描述的靈恩派傾向",
+      "position_id": "DK-2bd0c0df7ecd-POS004",
+      "title": "以神蹟、異象、異夢作為信仰核心依據",
+      "source_fragment_ids": [
+        "FR-notes_manuscript_16-2bd0c0df7ecd-DK-2bd0c0df7ecd-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "法利赛人与撒都该人，由教授戏剧化复述",
+      "position_id": "DK-a26f0a7e9ba4-POS001",
+      "title": "要求耶稣以神迹表演证明自己",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "许多人的常见解释",
+      "position_id": "DK-a26f0a7e9ba4-POS002",
+      "title": "小信等于信心强度不足",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "法利赛人的立场",
+      "position_id": "DK-a26f0a7e9ba4-POS003",
+      "title": "以口传传统规定如何遵守圣经",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "撒都该人的立场",
+      "position_id": "DK-a26f0a7e9ba4-POS004",
+      "title": "否认死人将来复活",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "法利赛人与撒都该人的共同立场",
+      "position_id": "DK-a26f0a7e9ba4-POS005",
+      "title": "不承认耶稣是神所差来的弥赛亚",
+      "source_fragment_ids": [
+        "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-POS005-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "topic_nodes": [
+    {
+      "topic_id": "disciple-small-faith",
+      "label": "『小信』：信心、理解與倚靠",
+      "parent_topic_id": "disciple-faith-trust",
+      "aliases": [
+        "小信",
+        "信心小",
+        "芥菜種的信心"
+      ],
+      "definition": "整理教授如何以『小信』說明人未能理解、推論並倚靠已領受的啟示；不得簡化為抽象的信心份量大小。",
+      "review_status": "candidate"
+    },
+    {
+      "topic_id": "signs-revelation-scripture-authority",
+      "label": "神蹟、啟示與聖經權威",
+      "parent_topic_id": "bible-hermeneutics",
+      "aliases": [
+        "神蹟與聖經",
+        "神蹟與信仰根基"
+      ],
+      "definition": "整理教授關於神蹟如何印證神的作為、卻不能取代神的話成為信仰根基的論述。",
+      "review_status": "candidate"
+    }
+  ],
+  "knowledge_routes": [
+    {
+      "route_id": "ROUTE-bcedc19c746a",
+      "claim_id": "DK-91b546f25db1-CL001",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-01"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-d34cbb1c3a8f",
+      "claim_id": "DK-91b546f25db1-CL024",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-01"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-8d9448e624ec",
+      "claim_id": "DK-a26f0a7e9ba4-CL001",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-01"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-5ddc7fb1fac8",
+      "claim_id": "DK-91b546f25db1-CL025",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-02"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-49008b656098",
+      "claim_id": "DK-a26f0a7e9ba4-CL002",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-02"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-8a50f85c9d33",
+      "claim_id": "DK-91b546f25db1-CL003",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-03",
+        "CD-M16-001-05"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-425cd483cd42",
+      "claim_id": "DK-91b546f25db1-CL002",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-04"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-5f981efafe7f",
+      "claim_id": "DK-91b546f25db1-CL004",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-04"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-206d4c98012e",
+      "claim_id": "DK-a26f0a7e9ba4-CL003",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-04"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-482750a43959",
+      "claim_id": "DK-a26f0a7e9ba4-CL004",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-04"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-a85c70d0ab90",
+      "claim_id": "DK-a26f0a7e9ba4-CL005",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-04"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-99766f3e1391",
+      "claim_id": "DK-a26f0a7e9ba4-CL006",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-05"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-2c9a23c67eaf",
+      "claim_id": "DK-91b546f25db1-CL005",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-06"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-92bc0ec3d027",
+      "claim_id": "DK-2bd0c0df7ecd-CL024",
+      "route_type": "scripture_exposition",
+      "target_id": "CP-matthew-16-1-12",
+      "decision_ids": [
+        "CD-M16-001-06"
+      ],
+      "canonical_topic_ids": [],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-1c205c06cfbe",
+      "claim_id": "DK-91b546f25db1-CL002",
+      "route_type": "topic_research",
+      "target_id": "CP-topic-small-faith",
+      "decision_ids": [
+        "CD-SMALL-FAITH-001"
+      ],
+      "canonical_topic_ids": [
+        "disciple-small-faith"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-38e93615a15e",
+      "claim_id": "DK-a26f0a7e9ba4-CL003",
+      "route_type": "topic_research",
+      "target_id": "CP-topic-small-faith",
+      "decision_ids": [
+        "CD-SMALL-FAITH-001"
+      ],
+      "canonical_topic_ids": [
+        "disciple-small-faith"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-6872d6229579",
+      "claim_id": "DK-a26f0a7e9ba4-CL004",
+      "route_type": "topic_research",
+      "target_id": "CP-topic-small-faith",
+      "decision_ids": [
+        "CD-SMALL-FAITH-001"
+      ],
+      "canonical_topic_ids": [
+        "disciple-small-faith"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-3353bae177ac",
+      "claim_id": "DK-91b546f25db1-CL005",
+      "route_type": "topic_research",
+      "target_id": "CP-topic-signs-revelation-scripture-authority",
+      "decision_ids": [
+        "CD-SIGNS-SCRIPTURE-001"
+      ],
+      "canonical_topic_ids": [
+        "signs-revelation-scripture-authority"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "route_id": "ROUTE-d851d332b9d3",
+      "claim_id": "DK-2bd0c0df7ecd-CL024",
+      "route_type": "topic_research",
+      "target_id": "CP-topic-signs-revelation-scripture-authority",
+      "decision_ids": [
+        "CD-SIGNS-SCRIPTURE-001"
+      ],
+      "canonical_topic_ids": [
+        "signs-revelation-scripture-authority"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "cross_source_syntheses": [
+    {
+      "synthesis_id": "SYN-M16-1-12-EXPOSITION",
+      "synthesis_type": "passage_exposition",
+      "title": "太16:1–12：神蹟、酵與小信",
+      "description": "以通過忠實度校對的筆記講稿為基線，補入相關講道論證，按經文次序形成釋經產品。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL001",
+        "DK-91b546f25db1-CL024",
+        "DK-a26f0a7e9ba4-CL001",
+        "DK-91b546f25db1-CL025",
+        "DK-a26f0a7e9ba4-CL002",
+        "DK-91b546f25db1-CL003",
+        "DK-91b546f25db1-CL002",
+        "DK-91b546f25db1-CL004",
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004",
+        "DK-a26f0a7e9ba4-CL005",
+        "DK-a26f0a7e9ba4-CL006",
+        "DK-91b546f25db1-CL005",
+        "DK-2bd0c0df7ecd-CL024"
+      ],
+      "corpus_scope": "matthew_16_1_12",
+      "review_status": "candidate",
+      "manuscript_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f"
+    },
+    {
+      "synthesis_id": "SYN-TOPIC-SMALL-FAITH-M16",
+      "synthesis_type": "topic_seed",
+      "title": "『小信』專題的太16材料",
+      "description": "只記錄太16目前提供的主張；完整專題必須再合併其他經文和講道。",
+      "claim_ids": [
+        "DK-91b546f25db1-CL002",
+        "DK-a26f0a7e9ba4-CL003",
+        "DK-a26f0a7e9ba4-CL004"
+      ],
+      "corpus_scope": "matthew_16_1_12_seed",
+      "review_status": "candidate"
+    }
+  ],
+  "product_plans": [
+    {
+      "schema_version": "wang_composition_plan_v1",
+      "plan_id": "CP-matthew-16-1-12",
+      "title": "馬太福音16:1–12釋經編排",
+      "description": "編輯部按經文次序，把已校對的筆記講稿與講道補充組織為一篇可溯源釋經；專題內容以連結延伸。",
+      "product_type": "scripture_exposition",
+      "decisions": [
+        {
+          "decision_id": "CD-M16-001-01",
+          "passage": "太16:1",
+          "section_title": "法利赛人与撒都该人联合试探耶稣",
+          "action": "main_section",
+          "decision": "合并重复结论；补入共享定冠词。正文只用一句说明两派通常对立却联合试探耶稣；公会制度、信仰差异及自然神论类比链接至注脚或附录。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL001",
+            "DK-91b546f25db1-CL024",
+            "DK-a26f0a7e9ba4-CL001"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "narrative_problem",
+          "source_presentations": [
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 220,
+              "end_seconds": 802,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E001-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E003-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E002-01"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E001",
+                "DK-a26f0a7e9ba4-E003",
+                "DK-a26f0a7e9ba4-E002"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL001"
+              ],
+              "duration_seconds": 582,
+              "presentation_id": "SP-fd9f3e61df98",
+              "label": "原聲教學片段"
+            }
+          ],
+          "source_presentation_summary": {
+            "mode": "continuous",
+            "status": "partial",
+            "mapped_claim_ids": [
+              "DK-a26f0a7e9ba4-CL001"
+            ],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL001",
+              "DK-91b546f25db1-CL024"
+            ],
+            "note": "原聲材料連續，可直接按本段編排聆聽。"
+          }
+        },
+        {
+          "decision_id": "CD-M16-001-02",
+          "passage": "太16:2–4",
+          "section_title": "分辨天色，却不能分辨时代",
+          "action": "main_section",
+          "decision": "保留拒绝试探性神迹的基线，补入求神迹动机及约拿神迹指向受死与第三日复活。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL025",
+            "DK-a26f0a7e9ba4-CL002"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "sign_and_response",
+          "source_presentations": [
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 516,
+              "end_seconds": 802,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E004-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E005-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E006-01"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E004",
+                "DK-a26f0a7e9ba4-E005",
+                "DK-a26f0a7e9ba4-E006"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL002"
+              ],
+              "duration_seconds": 286,
+              "presentation_id": "SP-6e67e181a14b",
+              "label": "原聲教學片段"
+            }
+          ],
+          "source_presentation_summary": {
+            "mode": "continuous",
+            "status": "partial",
+            "mapped_claim_ids": [
+              "DK-a26f0a7e9ba4-CL002"
+            ],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL025"
+            ],
+            "note": "原聲材料連續，可直接按本段編排聆聽。"
+          }
+        },
+        {
+          "decision_id": "CD-M16-001-03",
+          "passage": "太16:5–7",
+          "section_title": "门徒把酵误解成饼",
+          "action": "brief_note",
+          "decision": "按叙事顺序交代误解，为后面的责备和解释作铺垫。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL003"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "disciple_misunderstanding",
+          "source_presentations": [],
+          "source_presentation_summary": {
+            "mode": "unavailable",
+            "status": "unavailable",
+            "mapped_claim_ids": [],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL003"
+            ],
+            "note": "本段目前只有筆記講稿來源，沒有可播放的講道時間定位。"
+          }
+        },
+        {
+          "decision_id": "CD-M16-001-04",
+          "passage": "太16:8–10",
+          "section_title": "小信：没有从已有启示作出正确推论",
+          "action": "main_with_topic_link",
+          "decision": "合并小信的重复定义；用两次喂饱作为具体支持论据。篮筐原文字词不在太16展开，只交叉引用至太14章五饼二鱼的完整解释，并在太15章七饼神迹处补足对应比较。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL002",
+            "DK-91b546f25db1-CL004",
+            "DK-a26f0a7e9ba4-CL003",
+            "DK-a26f0a7e9ba4-CL004",
+            "DK-a26f0a7e9ba4-CL005"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "jesus_correction",
+          "source_presentations": [
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 802,
+              "end_seconds": 1208,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E007-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E008-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E009-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E010-01"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E007",
+                "DK-a26f0a7e9ba4-E008",
+                "DK-a26f0a7e9ba4-E009",
+                "DK-a26f0a7e9ba4-E010"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL003",
+                "DK-a26f0a7e9ba4-CL004",
+                "DK-a26f0a7e9ba4-CL005"
+              ],
+              "duration_seconds": 406,
+              "presentation_id": "SP-4ba387ebbb73",
+              "label": "原聲教學片段"
+            },
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 1396,
+              "end_seconds": 1503,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E011-01"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E011"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL003",
+                "DK-a26f0a7e9ba4-CL004"
+              ],
+              "duration_seconds": 107,
+              "presentation_id": "SP-61d8fe486084",
+              "label": "原聲教學片段"
+            },
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 1755,
+              "end_seconds": 2099,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-02"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E017"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL005"
+              ],
+              "duration_seconds": 344,
+              "presentation_id": "SP-2f9fd12d33f7",
+              "label": "原聲教學片段"
+            }
+          ],
+          "source_presentation_summary": {
+            "mode": "segment_group",
+            "status": "partial",
+            "mapped_claim_ids": [
+              "DK-a26f0a7e9ba4-CL003",
+              "DK-a26f0a7e9ba4-CL004",
+              "DK-a26f0a7e9ba4-CL005"
+            ],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL002",
+              "DK-91b546f25db1-CL004"
+            ],
+            "note": "同一編排段落由數段不連續原聲支持；依原講道時間排序呈現，不拼接成虛假的連續發言。"
+          },
+          "topic_route_ids": [
+            "disciple-small-faith"
+          ]
+        },
+        {
+          "decision_id": "CD-M16-001-05",
+          "passage": "太16:11–12",
+          "section_title": "酵是拒绝基督的教导",
+          "action": "main_section",
+          "decision": "保留酵的核心解释，补入门徒必须防备错误教导的有限应用。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL003",
+            "DK-a26f0a7e9ba4-CL006"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "interpretive_conclusion",
+          "source_presentations": [
+            {
+              "source_id": "SRC-2016_NYSC_1-a26f0a7e9ba4",
+              "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "source_title": "2016 NYSC 專題：馬太福音釋經（四）1",
+              "start_seconds": 1396,
+              "end_seconds": 2099,
+              "source_fragment_ids": [
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E012-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E013-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-01",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E017-02",
+                "FR-2016_NYSC_1-a26f0a7e9ba4-DK-a26f0a7e9ba4-E018-01"
+              ],
+              "evidence_step_ids": [
+                "DK-a26f0a7e9ba4-E012",
+                "DK-a26f0a7e9ba4-E013",
+                "DK-a26f0a7e9ba4-E017",
+                "DK-a26f0a7e9ba4-E018"
+              ],
+              "claim_ids": [
+                "DK-a26f0a7e9ba4-CL006"
+              ],
+              "duration_seconds": 703,
+              "presentation_id": "SP-0b898188888c",
+              "label": "原聲教學片段"
+            }
+          ],
+          "source_presentation_summary": {
+            "mode": "continuous",
+            "status": "partial",
+            "mapped_claim_ids": [
+              "DK-a26f0a7e9ba4-CL006"
+            ],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL003"
+            ],
+            "note": "原聲材料連續，可直接按本段編排聆聽。"
+          }
+        },
+        {
+          "decision_id": "CD-M16-001-06",
+          "passage": "太16:1–12",
+          "section_title": "神迹、圣经与信仰判断",
+          "action": "main_with_topic_link",
+          "decision": "作为重要神学意义保留一至两段：神迹可以印证神的作为，却不能取代神的话成为信仰根基。彼后1:19作为教授论证的旁证，不在此展开；完整论证链接至专题。这是笔记内部已有关系，不算作本讲新增内容。",
+          "rationale": "依經文次序整理已通過忠實度校對的筆記講稿，並用講道材料補足論證；不把跨經文專題全部塞入本段正文。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL005",
+            "DK-2bd0c0df7ecd-CL024"
+          ],
+          "coverage": "available",
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "section_role": "bounded_theological_significance",
+          "source_presentations": [],
+          "source_presentation_summary": {
+            "mode": "unavailable",
+            "status": "unavailable",
+            "mapped_claim_ids": [],
+            "unmapped_claim_ids": [
+              "DK-91b546f25db1-CL005",
+              "DK-2bd0c0df7ecd-CL024"
+            ],
+            "note": "本段目前只有筆記講稿來源，沒有可播放的講道時間定位。"
+          },
+          "topic_route_ids": [
+            "signs-revelation-scripture-authority"
+          ]
+        }
+      ],
+      "review_status": "candidate",
+      "editorial_attribution": "editor",
+      "manuscript_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f",
+      "source_presentation_policy": {
+        "alignment": "composition_decision",
+        "public_unit_target_seconds": [
+          180,
+          480
+        ],
+        "preserve_original_continuity": true,
+        "non_contiguous_mode": "segment_group",
+        "topic_usage": "embed_as_source_inside_topic_not_separate_audio_product"
+      }
+    },
+    {
+      "schema_version": "wang_composition_plan_v1",
+      "plan_id": "CP-topic-small-faith",
+      "title": "『小信』：信心、理解與倚靠",
+      "description": "跨經文、跨講道的專題編排；太16只是第一組已整理材料。",
+      "product_type": "topic_research",
+      "decisions": [
+        {
+          "decision_id": "CD-SMALL-FAITH-001",
+          "action": "topic_core_section",
+          "section_title": "『小信』不是信心份量不足，而是沒有理解並倚靠已領受的啟示",
+          "decision": "把太16:8–10作為『小信』專題的一組核心材料；日後與太8:26、太17:20等經文及相關講道綜合，不在太16正文重複展開完整專論。",
+          "rationale": "教授在不同經文反覆使用『小信』說明理解、推論與倚靠的問題，已超出單一段落的局部釋義。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL002",
+            "DK-a26f0a7e9ba4-CL003",
+            "DK-a26f0a7e9ba4-CL004"
+          ],
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "corpus_scope": "matthew_16_1_12_seed"
+        }
+      ],
+      "review_status": "candidate",
+      "editorial_attribution": "editor"
+    },
+    {
+      "schema_version": "wang_composition_plan_v1",
+      "plan_id": "CP-topic-signs-revelation-scripture-authority",
+      "title": "神蹟、啟示與聖經權威",
+      "description": "跨經文專題種子；待其他講道材料合併後再成篇。",
+      "product_type": "topic_research",
+      "decisions": [
+        {
+          "decision_id": "CD-SIGNS-SCRIPTURE-001",
+          "action": "topic_seed_section",
+          "section_title": "神蹟是印證，不是信仰的根基",
+          "decision": "以太16:1–12材料建立專題種子；待合併其他講道後再形成完整專論。",
+          "rationale": "這是教授重要而且跨經文的神學判斷，太16正文只保留與本段直接相關的篇幅。",
+          "claim_ids": [
+            "DK-91b546f25db1-CL005",
+            "DK-2bd0c0df7ecd-CL024"
+          ],
+          "review_status": "candidate",
+          "editorial_attribution": "editor",
+          "corpus_scope": "matthew_16_1_12_seed"
+        }
+      ],
+      "review_status": "candidate",
+      "editorial_attribution": "editor"
+    }
+  ],
+  "editorial_checks": [
+    {
+      "check_id": "EC-M16-001-BASKET-WORDS",
+      "question": "篮筐原文字词的完整解释应放在哪里？",
+      "status": "resolved",
+      "resolution": "太16章只作交叉引用；完整解释归入太14章五饼二鱼，并在太15章七饼神迹处建立对应链接。",
+      "target_product": {
+        "axis": "scripture",
+        "primary_passage": "太14:13–21",
+        "related_passage": "太15:32–39"
+      }
+    },
+    {
+      "check_id": "EC-M16-001-SADDUCEE-DEISM",
+      "question": "撒都该人与自然神论的背景在太16正文保留多少？",
+      "status": "resolved",
+      "resolution": "正文只保留一句背景提示，说明两派通常对立却联合试探耶稣；详细的公会制度、信仰差异和自然神论类比移入注脚或附录，并从正文建立链接。",
+      "target_product": {
+        "axis": "background",
+        "candidate_title": "法利赛人与撒都该人：信仰分歧与共同试探",
+        "placement": "footnote_or_appendix"
+      }
+    },
+    {
+      "check_id": "EC-M16-001-SIGNS-SCRIPTURE",
+      "question": "神迹、预言与圣经根基的说明在太16正文保留多少？",
+      "status": "resolved",
+      "resolution": "这是教授的重要神学观点。太16正文保留一至两段，说明神迹是印证而不是信仰根基；彼后1:19只作旁证。完整论证进入“神迹、启示与圣经权威”专题，并从正文建立链接。",
+      "target_product": {
+        "axis": "topic",
+        "candidate_title": "神迹、启示与圣经权威",
+        "placement": "topic_article"
+      }
+    }
+  ],
+  "summary": {
+    "source_claim_count": 14,
+    "exposition_claim_count": 14,
+    "small_faith_claim_count": 3,
+    "route_count": 19,
+    "product_plan_count": 3,
+    "manuscript_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f"
+  }
+}

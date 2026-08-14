@@ -1,0 +1,25 @@
+{
+  "schema_version": "matthew_16_argument_integration_report_v1",
+  "status": "ready_for_ingest",
+  "package_id": "SKI-M16-1-12-EXPOSITION-TOPICS-V1",
+  "exposition_plan_id": "CP-matthew-16-1-12",
+  "topic_plan_ids": [
+    "CP-topic-small-faith",
+    "CP-topic-signs-revelation-scripture-authority"
+  ],
+  "shared_claims_between_exposition_and_small_faith": [
+    "DK-91b546f25db1-CL002",
+    "DK-a26f0a7e9ba4-CL003",
+    "DK-a26f0a7e9ba4-CL004"
+  ],
+  "separation_rule": "太16釋經回答本段經文；『小信』專題跨經文綜合。兩者共享主張與來源，不複製主張。",
+  "findings": [],
+  "summary": {
+    "source_claim_count": 14,
+    "exposition_claim_count": 14,
+    "small_faith_claim_count": 3,
+    "route_count": 19,
+    "product_plan_count": 3,
+    "manuscript_sha256": "d74fa77bf372abd6f67a59b9c5dae76f51a76de9b9960e609d1f1dd43e354b6f"
+  }
+}

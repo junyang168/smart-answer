@@ -309,6 +309,111 @@ def test_candidates_project_scripture_and_topic_plans_with_readable_routes(
     )
 
 
+def test_editorial_draft_is_attached_to_its_composition_candidate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _fixture_paths(tmp_path, monkeypatch)
+    draft_root = tmp_path / "drafts"
+    draft_root.mkdir()
+    (draft_root / "draft.md").write_text("# 一份初稿\n\n正文。", encoding="utf-8")
+    _write(
+        draft_root / "presentation-package.json",
+        {
+            "source_documents": [
+                {
+                    "source_id": "SRC-1",
+                    "source_type": "sermon_transcript",
+                    "transcript_id": "講道 3",
+                }
+            ],
+            "product_plans": [
+                {
+                    "plan_id": "CP-1",
+                    "decisions": [
+                        {
+                            "decision_id": "CD-1",
+                            "passage": "太17:1",
+                            "section_title": "第一段",
+                            "source_presentations": [
+                                {
+                                    "presentation_id": "PRES-1",
+                                    "source_id": "SRC-1",
+                                    "start_seconds": 30,
+                                    "end_seconds": 90,
+                                }
+                            ],
+                            "source_presentation_summary": {"mode": "continuous"},
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    _write(
+        draft_root / "editorial-draft-manifest.json",
+        {
+            "drafts": [
+                {
+                    "draft_id": "DRAFT-1",
+                    "decision_id": "CD-1",
+                    "title": "一份初稿",
+                    "status_label": "編輯初稿可審閱",
+                    "relative_path": "draft.md",
+                    "presentation_package_path": "presentation-package.json",
+                    "audit_config": {
+                        "decision_sections": [
+                            {"decision_id": "CD-1", "markdown_heading": "第一段"}
+                        ]
+                    },
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(thought_review, "EDITORIAL_DRAFT_ROOT", draft_root)
+    monkeypatch.setattr(
+        thought_review,
+        "_resolved_presentation_source",
+        lambda source: {
+            **source,
+            "public_url": "/resources/sermons/%E8%AC%9B%E9%81%93%203",
+            "media": {"kind": "audio", "url": "/web/video/sermon.mp3"},
+        },
+    )
+
+    payload = thought_review.candidates_data()
+    candidate = payload["scripture_candidates"][0]
+    assert candidate["draft_count"] == 1
+    assert candidate["editorial_drafts"][0]["draft_id"] == "DRAFT-1"
+
+    detail = thought_review.editorial_draft_data("DRAFT-1")
+    assert detail["candidate_id"] == "CP-1"
+    assert detail["markdown"].startswith("# 一份初稿")
+    assert detail["decision_media_sections"] == [
+        {
+            "decision_id": "CD-1",
+            "markdown_heading": "第一段",
+            "passage": "太17:1",
+            "section_title": "第一段",
+            "source_presentations": [
+                {
+                    "presentation_id": "PRES-1",
+                    "source_id": "SRC-1",
+                    "start_seconds": 30,
+                    "end_seconds": 90,
+                    "source": {
+                        "source_id": "SRC-1",
+                        "source_type": "sermon_transcript",
+                        "transcript_id": "講道 3",
+                        "public_url": "/resources/sermons/%E8%AC%9B%E9%81%93%203",
+                        "media": {"kind": "audio", "url": "/web/video/sermon.mp3"},
+                    },
+                }
+            ],
+            "source_presentation_summary": {"mode": "continuous"},
+        }
+    ]
+
+
 def test_candidates_use_postgres_decision_text_instead_of_internal_id(
     tmp_path: Path, monkeypatch
 ) -> None:

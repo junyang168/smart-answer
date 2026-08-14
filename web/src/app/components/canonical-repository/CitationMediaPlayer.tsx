@@ -11,6 +11,7 @@ type CitationMediaPlayerProps = {
     media?: { kind?: "audio" | "video" | "unknown"; url?: string | null };
   };
   startTime?: number | null;
+  endTime?: number | null;
 };
 
 function formatTime(seconds: number) {
@@ -19,7 +20,7 @@ function formatTime(seconds: number) {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
-export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerProps) {
+export function CitationMediaPlayer({ source, startTime, endTime }: CitationMediaPlayerProps) {
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const { status } = useSession();
   const authenticated = process.env.NODE_ENV !== "production" || status === "authenticated";
@@ -28,6 +29,17 @@ export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerPr
       mediaRef.current.currentTime = startTime;
     }
   }, [startTime]);
+  const stopAtCitationEnd = useCallback(() => {
+    const media = mediaRef.current;
+    if (
+      media
+      && typeof endTime === "number"
+      && endTime > 0
+      && media.currentTime >= endTime
+    ) {
+      media.pause();
+    }
+  }, [endTime]);
 
   useEffect(() => {
     seekToCitation();
@@ -55,7 +67,9 @@ export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerPr
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 text-sm">
         <span className="font-semibold text-slate-700">
           {source.media.kind === "audio" ? "讲道录音" : "讲道录像"}
-          {typeof startTime === "number" ? ` · 已定位至 ${formatTime(startTime)}` : ""}
+          {typeof startTime === "number"
+            ? ` · 已定位至 ${formatTime(startTime)}${typeof endTime === "number" ? `–${formatTime(endTime)}` : ""}`
+            : ""}
         </span>
         <Link href={source.public_url} target="_blank" rel="noopener noreferrer" className="font-semibold text-indigo-700 hover:underline">
           打开完整讲道与逐字稿
@@ -67,6 +81,7 @@ export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerPr
           controls
           preload="metadata"
           onLoadedMetadata={seekToCitation}
+          onTimeUpdate={stopAtCitationEnd}
           className="aspect-video w-full bg-black"
         >
           <source src={source.media.url} type="video/mp4" />
@@ -79,6 +94,7 @@ export function CitationMediaPlayer({ source, startTime }: CitationMediaPlayerPr
             controls
             preload="metadata"
             onLoadedMetadata={seekToCitation}
+            onTimeUpdate={stopAtCitationEnd}
             className="w-full"
           >
             <source src={source.media.url} type="audio/mpeg" />

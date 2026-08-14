@@ -18,6 +18,10 @@ from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     PostgresKnowledgeStoreError,
 )
+from backend.pipeline.editorial_draft_audit import (
+    EditorialDraftAuditError,
+    audit_editorial_draft,
+)
 
 
 router = APIRouter(prefix="/admin/thought-review", tags=["thought-review-admin"])
@@ -36,6 +40,7 @@ QA_VALIDATION_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_validation_ca
 QA_DIAGNOSTICS_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_answer_diagnostics_v1.json"
 ACTIVE_SNAPSHOT_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "compiled"
 TOPIC_STRUCTURE_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "research-batches"
+EDITORIAL_DRAFT_ROOT = PROJECT_ROOT / "output" / "claim-layer"
 
 ReviewStatus = Literal["candidate", "approved", "changes_requested", "rejected"]
 
@@ -60,6 +65,192 @@ def _read_optional_json(path: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
+
+
+def _resolved_presentation_source(source_document: dict) -> dict:
+    """Resolve sermon media at read time; knowledge records keep stable source IDs."""
+    if source_document.get("source_type") != "sermon_transcript":
+        return source_document
+    from backend.api.canonical_repository.service import CanonicalRepositoryService
+
+    transcript_id = str(source_document.get("transcript_id") or "").strip()
+    metadata: dict = {}
+    source_path = Path(str(source_document.get("source_path") or ""))
+    if source_path.is_file():
+        try:
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
+            metadata = payload.get("metadata") or {}
+        except (json.JSONDecodeError, OSError):
+            pass
+    catalog = CanonicalRepositoryService._sermon_catalog_record(transcript_id)
+    media = CanonicalRepositoryService._sermon_media(transcript_id, metadata, catalog)
+    return {
+        **source_document,
+        "public_url": f"/resources/sermons/{quote(transcript_id, safe='')}",
+        "media": media.model_dump(mode="json"),
+    }
+
+
+def _editorial_drafts() -> list[dict]:
+    """Load editor-authored manuscript drafts without treating them as claims.
+
+    Draft manifests live beside generated manuscript artifacts.  A manifest
+    binds a draft to a composition decision; the candidate workspace can then
+    expose the draft without inventing a second, private product-plan ID.
+    """
+    drafts: list[dict] = []
+    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
+        manifest = _read_optional_json(manifest_path)
+        for item in manifest.get("drafts", []):
+            draft_id = str(item.get("draft_id") or "").strip()
+            candidate_id = str(item.get("candidate_id") or "").strip()
+            decision_id = str(item.get("decision_id") or "").strip()
+            relative_path = str(item.get("relative_path") or "").strip()
+            if not draft_id or (not candidate_id and not decision_id) or not relative_path:
+                continue
+            draft_path = (manifest_path.parent / relative_path).resolve()
+            try:
+                draft_path.relative_to(EDITORIAL_DRAFT_ROOT.resolve())
+            except ValueError:
+                continue
+            if not draft_path.is_file():
+                continue
+            drafts.append(
+                {
+                    "draft_id": draft_id,
+                    "candidate_id": candidate_id,
+                    "decision_id": decision_id,
+                    "title": item.get("title") or draft_path.stem,
+                    "status": item.get("status") or "editorial_draft",
+                    "status_label": item.get("status_label") or "編輯初稿可審閱",
+                    "draft_path": draft_path,
+                    "manifest_path": manifest_path.resolve(),
+                    "presentation_package_path": item.get("presentation_package_path"),
+                    "audit_config": item.get("audit_config") or {},
+                }
+            )
+    return drafts
+
+
+def _resolved_source_presentations(decision: dict, source_documents: dict[str, dict]) -> list[dict]:
+    """Attach current media URLs to stable, composition-owned clip ranges."""
+    presentations = []
+    for presentation in decision.get("source_presentations", []) or []:
+        source_document = source_documents.get(presentation.get("source_id")) or {}
+        presentations.append(
+            {
+                **presentation,
+                "source": _resolved_presentation_source(source_document) if source_document else None,
+            }
+        )
+    return presentations
+
+
+def _draft_presentation_payload(draft: dict, shared: dict) -> dict:
+    """Load the exact knowledge package used to compose a draft when declared.
+
+    Active snapshots intentionally omit some presentation metadata.  A draft
+    may therefore bind to its authoring package explicitly instead of silently
+    deriving a second listening structure from the current database state.
+    """
+    relative_path = str(draft.get("presentation_package_path") or "").strip()
+    if not relative_path:
+        return shared
+    package_path = (draft["manifest_path"].parent / relative_path).resolve()
+    try:
+        package_path.relative_to(EDITORIAL_DRAFT_ROOT.resolve())
+    except ValueError:
+        return shared
+    return _read_optional_json(package_path) or shared
+
+
+def editorial_draft_data(draft_id: str) -> dict:
+    """Return one Markdown editorial draft and its composition destination."""
+    draft = next((item for item in _editorial_drafts() if item["draft_id"] == draft_id), None)
+    if not draft:
+        raise HTTPException(status_code=404, detail="找不到這份編輯初稿。")
+
+    shared = _shared_payload()
+    candidate_id = draft.get("candidate_id") or None
+    passage = ""
+    decision_title = ""
+    for plan in shared.get("product_plans", []):
+        if candidate_id and str(plan.get("plan_id") or "") == candidate_id:
+            break
+        for decision in plan.get("decisions", []) or []:
+            if str(decision.get("decision_id") or "") != draft["decision_id"]:
+                continue
+            candidate_id = plan.get("plan_id")
+            passage = str(decision.get("passage") or "").strip()
+            decision_title = str(
+                decision.get("section_title")
+                or decision.get("decision")
+                or decision.get("passage")
+                or ""
+            ).strip()
+            break
+        if candidate_id:
+            break
+
+    presentation_payload = _draft_presentation_payload(draft, shared)
+    presentation_plan = next(
+        (
+            plan
+            for plan in presentation_payload.get("product_plans", []) or []
+            if str(plan.get("plan_id") or "") == str(candidate_id or "")
+        ),
+        None,
+    )
+    presentation_decisions = {
+        str(item.get("decision_id") or ""): item
+        for item in (presentation_plan or {}).get("decisions", []) or []
+    }
+    presentation_sources = {
+        str(item.get("source_id") or ""): item
+        for item in presentation_payload.get("source_documents", []) or []
+    }
+    decision_media_sections = []
+    for section in draft.get("audit_config", {}).get("decision_sections", []) or []:
+        section_decision = presentation_decisions.get(str(section.get("decision_id") or "")) or {}
+        presentations = _resolved_source_presentations(section_decision, presentation_sources)
+        if not presentations:
+            continue
+        decision_media_sections.append(
+            {
+                "decision_id": section.get("decision_id"),
+                "markdown_heading": section.get("markdown_heading"),
+                "passage": section_decision.get("passage"),
+                "section_title": section_decision.get("section_title"),
+                "source_presentations": presentations,
+                "source_presentation_summary": section_decision.get("source_presentation_summary"),
+            }
+        )
+
+    audit = None
+    audit_error = ""
+    if draft.get("audit_config"):
+        try:
+            # This audit is deterministic and inexpensive.  Running it at
+            # read time prevents the UI from displaying a stale result after
+            # an editor changes either the Markdown or the knowledge snapshot.
+            audit = audit_editorial_draft(draft["manifest_path"], draft_id)
+        except EditorialDraftAuditError as exc:
+            audit_error = str(exc)
+
+    return {
+        "draft_id": draft["draft_id"],
+        "decision_id": draft["decision_id"],
+        "candidate_id": candidate_id,
+        "title": draft["title"],
+        "status": draft["status"],
+        "status_label": draft["status_label"],
+        "passage": passage,
+        "decision_title": decision_title,
+        "markdown": draft["draft_path"].read_text(encoding="utf-8"),
+        "decision_media_sections": decision_media_sections,
+        "audit": audit,
+        "audit_error": audit_error,
+    }
 
 
 def _postgres_store() -> PostgresKnowledgeStore | None:
@@ -730,6 +921,13 @@ def candidates_data() -> dict:
     claims_by_id = {item["claim_id"]: item for item in shared.get("claims", [])}
     plans_by_id = {item.get("plan_id"): item for item in shared.get("product_plans", [])}
     topics_by_id = {item.get("topic_id"): item for item in shared.get("topic_nodes", [])}
+    drafts_by_decision_id: dict[str, list[dict]] = {}
+    drafts_by_candidate_id: dict[str, list[dict]] = {}
+    for draft in _editorial_drafts():
+        if draft.get("candidate_id"):
+            drafts_by_candidate_id.setdefault(draft["candidate_id"], []).append(draft)
+        if draft.get("decision_id"):
+            drafts_by_decision_id.setdefault(draft["decision_id"], []).append(draft)
 
     grouped: dict[tuple[str, str], list[dict]] = {}
     for route in shared.get("knowledge_routes", []):
@@ -795,6 +993,30 @@ def candidates_data() -> dict:
             }
             for decision in decisions
         ]
+        editorial_drafts = list(drafts_by_candidate_id.get(target_id, [])) + [
+            {
+                "draft_id": draft["draft_id"],
+                "decision_id": draft["decision_id"],
+                "title": draft["title"],
+                "status": draft["status"],
+                "status_label": draft["status_label"],
+            }
+            for decision in decisions
+            for draft in drafts_by_decision_id.get(str(decision.get("decision_id") or ""), [])
+        ]
+        editorial_drafts = [
+            {
+                "draft_id": draft["draft_id"],
+                "candidate_id": draft.get("candidate_id") or target_id,
+                "decision_id": draft.get("decision_id") or "",
+                "title": draft["title"],
+                "status": draft["status"],
+                "status_label": draft["status_label"],
+            }
+            for draft in {
+                draft["draft_id"]: draft for draft in editorial_drafts
+            }.values()
+        ]
         navigation_claim_ids = list(claim_ids)
         for decision in decisions:
             for claim_ref in decision.get("claim_ids", []) or []:
@@ -828,6 +1050,8 @@ def candidates_data() -> dict:
                 "decisions": reviewed_decisions,
                 "decision_count": len(reviewed_decisions),
                 "decision_counts": _status_counts(reviewed_decisions) if reviewed_decisions else {},
+                "editorial_drafts": editorial_drafts,
+                "draft_count": len(editorial_drafts),
                 "scripture_navigation": (
                     _scripture_navigation(plan or {}, navigation_claim_ids, claims_by_id)
                     if axis == "scripture"
@@ -1485,6 +1709,8 @@ def composition_detail_data(decision_id: str) -> dict:
         for claim in shared.get("claims", [])
         if claim["claim_id"] in linked_ids
     ]
+    source_documents = {item.get("source_id"): item for item in shared.get("source_documents", [])}
+    source_presentations = _resolved_source_presentations(decision, source_documents)
     return {
         "plan": {
             "plan_id": composition.get("plan_id"),
@@ -1503,6 +1729,8 @@ def composition_detail_data(decision_id: str) -> dict:
             for item in composition.get("source_leads", [])
             if item.get("source_lead_id") in set(decision.get("source_lead_ids", []))
         ],
+        "source_presentations": source_presentations,
+        "source_presentation_summary": decision.get("source_presentation_summary"),
     }
 
 
@@ -1572,6 +1800,11 @@ def compile_active_snapshot():
 @router.get("/candidates")
 def get_candidates():
     return candidates_data()
+
+
+@router.get("/drafts/{draft_id}")
+def get_editorial_draft(draft_id: str):
+    return editorial_draft_data(draft_id)
 
 
 @router.get("/qa/{case_id}")

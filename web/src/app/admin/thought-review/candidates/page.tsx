@@ -16,6 +16,14 @@ type Candidate = {
   claim_count: number;
   decisions: { decision_id: string; passage?: string; title: string; review: { status: string } }[];
   decision_count: number;
+  editorial_drafts: {
+    draft_id: string;
+    decision_id: string;
+    title: string;
+    status: string;
+    status_label: string;
+  }[];
+  draft_count: number;
   scripture_navigation?: {
     located: boolean;
     source: string;
@@ -316,7 +324,10 @@ function CandidateCard({ item, highlighted }: { item: Candidate; highlighted: bo
     <article id={`candidate-${item.candidate_id}`} className={`scroll-mt-24 rounded-2xl border bg-white p-6 shadow-sm transition ${highlighted ? "border-indigo-400 ring-4 ring-indigo-100" : "border-slate-200"}`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-3xl">
-          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${item.candidate_state === "composition_plan_ready" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{item.candidate_state_label}</span>
+          <div className="flex flex-wrap gap-2">
+            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${item.candidate_state === "composition_plan_ready" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{item.candidate_state_label}</span>
+            {!!item.editorial_drafts?.length && <span className="inline-flex rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-800">{item.editorial_drafts[0].status_label}</span>}
+          </div>
           <h2 className="mt-3 text-2xl font-bold text-slate-950">{item.title}</h2>
           <p className="mt-2 leading-7 text-slate-600">{item.description}</p>
         </div>
@@ -338,7 +349,14 @@ function CandidateCard({ item, highlighted }: { item: Candidate; highlighted: bo
         </section>
       )}
       {!!item.claims.length && <details className="mt-6 rounded-xl bg-slate-50 p-4"><summary className="cursor-pointer font-bold text-slate-800">查看依據的共享主張（{item.claims.length}）</summary><ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">{item.claims.map((claim) => <li key={claim.claim_id} className="flex gap-2"><FileText className="mt-1 h-4 w-4 shrink-0 text-indigo-500" /><span>{claim.title}</span></li>)}</ul></details>}
-      {item.candidate_state === "composition_plan_ready" && <Link href={`/admin/thought-review?tab=validation&plan=${encodeURIComponent(item.candidate_id)}`} className="mt-5 inline-flex items-center gap-1 font-semibold text-indigo-700">前往審核編排計劃<ChevronRight className="h-4 w-4" /></Link>}
+      <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3">
+        {item.editorial_drafts?.map((draft) => (
+          <Link key={draft.draft_id} href={`/admin/thought-review/candidates/drafts/${encodeURIComponent(draft.draft_id)}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700">
+            查看編輯初稿<ChevronRight className="h-4 w-4" />
+          </Link>
+        ))}
+        {item.candidate_state === "composition_plan_ready" && <Link href={`/admin/thought-review?tab=validation&plan=${encodeURIComponent(item.candidate_id)}`} className="inline-flex items-center gap-1 font-semibold text-indigo-700">前往審核編排計劃<ChevronRight className="h-4 w-4" /></Link>}
+      </div>
     </article>
   );
 }

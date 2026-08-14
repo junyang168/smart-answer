@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   XCircle,
 } from "lucide-react";
+import { CitationMediaPlayer } from "@/app/components/canonical-repository/CitationMediaPlayer";
 
 type ReviewStatus = "candidate" | "approved" | "changes_requested" | "rejected";
 type Attention =
@@ -432,6 +433,32 @@ type CompositionDetail = {
     evidence_maturity: string;
     priority: string;
   }[];
+  source_presentations: {
+    presentation_id: string;
+    source_id: string;
+    transcript_id?: string;
+    source_title?: string;
+    start_seconds: number;
+    end_seconds: number;
+    duration_seconds: number;
+    label: string;
+    claim_ids: string[];
+    source?: {
+      source_type: string;
+      public_url: string;
+      media?: {
+        kind?: "audio" | "video" | "unknown";
+        url?: string | null;
+      };
+    } | null;
+  }[];
+  source_presentation_summary?: {
+    mode: "continuous" | "segment_group" | "unavailable";
+    status: string;
+    mapped_claim_ids: string[];
+    unmapped_claim_ids: string[];
+    note: string;
+  } | null;
 };
 
 type EvidenceStepScope = {
@@ -2524,6 +2551,60 @@ export default function ThoughtReviewPage() {
                               冒充教授補寫。
                             </p>
                           </div>
+                        )}
+                      </section>
+                      <section className="rounded-2xl border border-sky-200 bg-sky-50/40 p-6">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-xl font-bold">與本段編排一致的原聲</h3>
+                            <p className="mt-2 text-sm leading-6 text-slate-600">
+                              原聲依照同一項編排決定呈現，不另立一套分類；連續材料保留為完整片段，非連續材料則明確分段。
+                            </p>
+                          </div>
+                          {compositionDetail.source_presentation_summary?.mode === "segment_group" && (
+                            <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-sky-800 ring-1 ring-sky-200">
+                              多個原聲片段
+                            </span>
+                          )}
+                        </div>
+                        {compositionDetail.source_presentations.length ? (
+                          <div className="mt-5 space-y-4">
+                            {compositionDetail.source_presentations.map((presentation, index) => (
+                              <article key={presentation.presentation_id} className="rounded-xl border border-sky-200 bg-white p-4">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs font-bold text-sky-800">
+                                      原聲教學片段 {index + 1}
+                                    </p>
+                                    <p className="mt-1 font-semibold text-slate-900">
+                                      {presentation.source_title || presentation.transcript_id || "原始講道"}
+                                    </p>
+                                  </div>
+                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                    {Math.max(1, Math.round(presentation.duration_seconds / 60))} 分鐘
+                                  </span>
+                                </div>
+                                {presentation.source ? (
+                                  <CitationMediaPlayer
+                                    source={presentation.source}
+                                    startTime={presentation.start_seconds}
+                                    endTime={presentation.end_seconds}
+                                  />
+                                ) : (
+                                  <p className="mt-3 text-sm text-amber-700">已找到時間範圍，但尚未解析出可播放的媒體。</p>
+                                )}
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-5 rounded-xl bg-white p-4 text-sm leading-6 text-slate-600">
+                            本段目前只有筆記講稿來源，或尚未完成講道時間定位，因此沒有可播放的原聲片段。
+                          </p>
+                        )}
+                        {compositionDetail.source_presentation_summary?.note && (
+                          <p className="mt-4 text-xs leading-5 text-slate-500">
+                            {compositionDetail.source_presentation_summary.note}
+                          </p>
                         )}
                       </section>
                       {compositionDetail.argument_layer_assessment && (

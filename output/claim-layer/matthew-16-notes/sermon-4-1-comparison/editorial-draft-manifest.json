@@ -1,0 +1,52 @@
+{
+  "schema_version": "editorial-draft-manifest.v2",
+  "drafts": [
+    {
+      "draft_id": "DRAFT-M16-001-V1",
+      "candidate_id": "CP-matthew-16-1-12",
+      "decision_id": "",
+      "title": "馬太福音 16:1–12：從求神蹟到防備錯誤的教訓",
+      "status": "editorial_draft",
+      "status_label": "編輯初稿可審閱",
+      "relative_path": "trial-manuscript-matt16-1-12.md",
+      "presentation_package_path": "shared-knowledge-integration/incremental-package.json",
+      "audit_config": {
+        "plan_id": "CP-matthew-16-1-12",
+        "knowledge_snapshot_path": "shared-knowledge-integration/authoring-snapshot-after.json",
+        "audit_output_path": "editorial-draft-audit.json",
+        "required_top_level_sections": [
+          "釋經",
+          "神學意義",
+          "生活應用",
+          "附錄"
+        ],
+        "decision_sections": [
+          {
+            "decision_id": "CD-M16-001-01",
+            "markdown_heading": "法利賽人與撒都該人聯合試探耶穌（太 16:1）"
+          },
+          {
+            "decision_id": "CD-M16-001-02",
+            "markdown_heading": "能分辨天色，卻不能分辨時代（太 16:2–4）"
+          },
+          {
+            "decision_id": "CD-M16-001-03",
+            "markdown_heading": "門徒把「酵」誤解為沒有帶餅（太 16:5–7）"
+          },
+          {
+            "decision_id": "CD-M16-001-04",
+            "markdown_heading": "「小信」是沒有理解已有證據的含義（太 16:8–10）"
+          },
+          {
+            "decision_id": "CD-M16-001-05",
+            "markdown_heading": "「酵」是共同拒絕基督的教導（太 16:11–12）"
+          },
+          {
+            "decision_id": "CD-M16-001-06",
+            "markdown_heading": "神蹟是印證，不是信仰的根基"
+          }
+        ]
+      }
+    }
+  ]
+}

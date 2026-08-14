@@ -1,0 +1,183 @@
+{
+  "schema_version": "wang_composition_decision_patch_v1",
+  "patch_id": "CDP-M16-001-SERMON-4-1-V1",
+  "title": "太16:1–12笔记基线与《马太福音释经（四）》第一讲整合候选",
+  "status": "candidate",
+  "editorial_authorship": "church_editorial_team",
+  "semantic_assumption": "笔记基线与讲道材料只有经审核关系明确的部分才合并；材料被纳入同一比较包不表示它们自动属于同一主张。",
+  "base_plan": {
+    "path": "output/claim-layer/matthew-16-notes/composition_plan_matthew_16_notes.json",
+    "sha256": "af9ec6bf06a6cd528bbdbcf514c6afafadb2d2133661efcaf41d7e2c6c0e8e5b",
+    "decision_id": "CD-M16-001"
+  },
+  "reviewed_relations": {
+    "path": "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/cross-source-relations/reviewed-relations.json",
+    "sha256": "5d30ae81446f4748c5064c86bfb89b8ebe4602dbe94346ebcd4fd2e3a179bed9",
+    "ai_consensus_count": 8,
+    "human_review_required": 0
+  },
+  "comparison_knowledge": {
+    "path": "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/comparison-knowledge.json",
+    "sha256": "3993ecb2c2c2526ad14d50305680e7416578e50d2cfcce3b790a2ae569a997e7"
+  },
+  "decision_update": {
+    "decision_id": "CD-M16-001",
+    "passage": "太16:1–12",
+    "section_title": "从求神迹到酵的警告",
+    "readiness": "article_ready",
+    "readiness_label": "可正式成篇",
+    "baseline_policy": "保留笔记整理稿作为正文骨架；讲道只按已审核的duplicate、supports和extends关系定点补入，不另起一篇重复讲稿。",
+    "ordered_sections": [
+      {
+        "order": 1,
+        "passage": "太16:1",
+        "title": "法利赛人与撒都该人联合试探耶稣",
+        "role": "narrative_problem",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL001",
+          "DK-91b546f25db1-CL024"
+        ],
+        "sermon_claim_ids": [
+          "DK-a26f0a7e9ba4-CL001"
+        ],
+        "integration": "合并重复结论；补入共享定冠词。正文只用一句说明两派通常对立却联合试探耶稣；公会制度、信仰差异及自然神论类比链接至注脚或附录。"
+      },
+      {
+        "order": 2,
+        "passage": "太16:2–4",
+        "title": "分辨天色，却不能分辨时代",
+        "role": "sign_and_response",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL025"
+        ],
+        "sermon_claim_ids": [
+          "DK-a26f0a7e9ba4-CL002"
+        ],
+        "integration": "保留拒绝试探性神迹的基线，补入求神迹动机及约拿神迹指向受死与第三日复活。"
+      },
+      {
+        "order": 3,
+        "passage": "太16:5–7",
+        "title": "门徒把酵误解成饼",
+        "role": "disciple_misunderstanding",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL003"
+        ],
+        "sermon_claim_ids": [],
+        "integration": "按叙事顺序交代误解，为后面的责备和解释作铺垫。"
+      },
+      {
+        "order": 4,
+        "passage": "太16:8–10",
+        "title": "小信：没有从已有启示作出正确推论",
+        "role": "jesus_correction",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL002",
+          "DK-91b546f25db1-CL004"
+        ],
+        "sermon_claim_ids": [
+          "DK-a26f0a7e9ba4-CL003",
+          "DK-a26f0a7e9ba4-CL004",
+          "DK-a26f0a7e9ba4-CL005"
+        ],
+        "integration": "合并小信的重复定义；用两次喂饱作为具体支持论据。篮筐原文字词不在太16展开，只交叉引用至太14章五饼二鱼的完整解释，并在太15章七饼神迹处补足对应比较。"
+      },
+      {
+        "order": 5,
+        "passage": "太16:11–12",
+        "title": "酵是拒绝基督的教导",
+        "role": "interpretive_conclusion",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL003"
+        ],
+        "sermon_claim_ids": [
+          "DK-a26f0a7e9ba4-CL006"
+        ],
+        "integration": "保留酵的核心解释，补入门徒必须防备错误教导的有限应用。"
+      },
+      {
+        "order": 6,
+        "passage": "太16:1–12",
+        "title": "神迹、圣经与信仰判断",
+        "role": "bounded_theological_significance",
+        "baseline_claim_ids": [
+          "DK-91b546f25db1-CL005",
+          "DK-2bd0c0df7ecd-CL024"
+        ],
+        "sermon_claim_ids": [],
+        "integration": "作为重要神学意义保留一至两段：神迹可以印证神的作为，却不能取代神的话成为信仰根基。彼后1:19作为教授论证的旁证，不在此展开；完整论证链接至专题。这是笔记内部已有关系，不算作本讲新增内容。",
+        "topic_route": {
+          "candidate_title": "神迹、启示与圣经权威",
+          "link_required": true
+        }
+      }
+    ],
+    "relation_usage": [
+      {
+        "relation_id": "XSR-7c48dead5091d1e8",
+        "editorial_action": "merge_without_repetition"
+      },
+      {
+        "relation_id": "XSR-a8ac9874072ecaac",
+        "editorial_action": "merge_without_repetition"
+      },
+      {
+        "relation_id": "XSR-e54e7038ace8c458",
+        "editorial_action": "add_supporting_reason"
+      },
+      {
+        "relation_id": "XSR-18db080f1863bef8",
+        "editorial_action": "add_bounded_application"
+      },
+      {
+        "relation_id": "XSR-0c8af094771dd82a",
+        "editorial_action": "route_lexical_detail_to_matthew_14_and_cross_reference_only"
+      },
+      {
+        "relation_id": "XSR-30135e4b7de9e94b",
+        "editorial_action": "add_motive_and_jonah_sign_explanation"
+      },
+      {
+        "relation_id": "XSR-cf2f4cd5e9581f6f",
+        "editorial_action": "retain_as_existing_notes_relation_not_sermon_contribution"
+      }
+    ],
+    "editorial_checks": [
+      {
+        "check_id": "EC-M16-001-BASKET-WORDS",
+        "question": "篮筐原文字词的完整解释应放在哪里？",
+        "status": "resolved",
+        "resolution": "太16章只作交叉引用；完整解释归入太14章五饼二鱼，并在太15章七饼神迹处建立对应链接。",
+        "target_product": {
+          "axis": "scripture",
+          "primary_passage": "太14:13–21",
+          "related_passage": "太15:32–39"
+        }
+      },
+      {
+        "check_id": "EC-M16-001-SADDUCEE-DEISM",
+        "question": "撒都该人与自然神论的背景在太16正文保留多少？",
+        "status": "resolved",
+        "resolution": "正文只保留一句背景提示，说明两派通常对立却联合试探耶稣；详细的公会制度、信仰差异和自然神论类比移入注脚或附录，并从正文建立链接。",
+        "target_product": {
+          "axis": "background",
+          "candidate_title": "法利赛人与撒都该人：信仰分歧与共同试探",
+          "placement": "footnote_or_appendix"
+        }
+      },
+      {
+        "check_id": "EC-M16-001-SIGNS-SCRIPTURE",
+        "question": "神迹、预言与圣经根基的说明在太16正文保留多少？",
+        "status": "resolved",
+        "resolution": "这是教授的重要神学观点。太16正文保留一至两段，说明神迹是印证而不是信仰根基；彼后1:19只作旁证。完整论证进入“神迹、启示与圣经权威”专题，并从正文建立链接。",
+        "target_product": {
+          "axis": "topic",
+          "candidate_title": "神迹、启示与圣经权威",
+          "placement": "topic_article"
+        }
+      }
+    ]
+  },
+  "main_shared_knowledge_writeback": false,
+  "next_action": "按已确认的六段结构生成太16:1–12试写正文；正文保留神迹、启示与圣经权威的核心论证，并把完整展开链接至专题候选。"
+}
