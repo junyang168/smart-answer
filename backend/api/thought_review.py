@@ -449,15 +449,28 @@ def _eligible_evidence_count(
     shared_payload: dict,
 ) -> int | None:
     """How many anchors may still support this claim, or None when unknowable here."""
-    if package_claim and "eligible_evidence_step_ids" in package_claim:
-        return len(package_claim["eligible_evidence_step_ids"])
-    group_id = claim.get("group_id")
     steps = shared_payload.get("evidence_steps")
-    if not group_id or steps is None:
-        return None
     excluded = set(
         (package_claim or {}).get("ai_adjudication", {}).get("excluded_evidence_step_ids", [])
     )
+    # Recompute from the claim's own evidence, the way the publication gate in
+    # build_active_snapshot does.  The cached eligible list is only a snapshot of
+    # an earlier build and does not follow later eligibility changes; claims
+    # imported after the pilot never carried it at all.
+    step_ids = (package_claim or claim).get("evidence_step_ids")
+    if step_ids is not None and steps is not None:
+        by_id = {item["evidence_step_id"]: item for item in steps}
+        return sum(
+            1
+            for step_id in step_ids
+            if step_id not in excluded
+            and by_id.get(step_id, {}).get("support_eligibility", "eligible") in ELIGIBLE_SUPPORT
+        )
+    if package_claim and "eligible_evidence_step_ids" in package_claim:
+        return len(package_claim["eligible_evidence_step_ids"])
+    group_id = claim.get("group_id")
+    if not group_id or steps is None:
+        return None
     return sum(
         1
         for step in steps
@@ -759,6 +772,11 @@ def candidates_data() -> dict:
         reviewed_decisions = [
             {
                 "decision_id": decision.get("decision_id"),
+                # Keep the structured Scripture range separate from the
+                # editorial heading.  The candidate workspace uses this field
+                # to show readers where each decision belongs in the passage;
+                # it must not guess the range from the title.
+                "passage": str(decision.get("passage") or "").strip(),
                 # Legacy composition plans stored the reader-facing heading in
                 # ``section_title``/``passage``.  PostgreSQL-native plans use
                 # ``decision`` for the same purpose.  Never expose an internal
@@ -777,6 +795,12 @@ def candidates_data() -> dict:
             }
             for decision in decisions
         ]
+        navigation_claim_ids = list(claim_ids)
+        for decision in decisions:
+            for claim_ref in decision.get("claim_ids", []) or []:
+                claim_id = claim_ref.get("claim_id") if isinstance(claim_ref, dict) else claim_ref
+                if claim_id and claim_id not in navigation_claim_ids:
+                    navigation_claim_ids.append(claim_id)
         title = (plan or {}).get("title") or "、".join(topic_labels) or target_id
         items.append(
             {
@@ -804,6 +828,11 @@ def candidates_data() -> dict:
                 "decisions": reviewed_decisions,
                 "decision_count": len(reviewed_decisions),
                 "decision_counts": _status_counts(reviewed_decisions) if reviewed_decisions else {},
+                "scripture_navigation": (
+                    _scripture_navigation(plan or {}, navigation_claim_ids, claims_by_id)
+                    if axis == "scripture"
+                    else None
+                ),
             }
         )
 
@@ -816,6 +845,88 @@ def candidates_data() -> dict:
         # Topic discovery is deliberately displayed as a separate stage.  A
         # discovered family is not yet an approved topic or product plan.
         "topic_structures": _topic_structure_candidates(claims_by_id),
+    }
+
+
+_NEW_TESTAMENT_BOOKS = {
+    "Matt", "Mark", "Luke", "John", "Acts", "Rom", "1Cor", "2Cor", "Gal",
+    "Eph", "Phil", "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus",
+    "Phlm", "Heb", "Jas", "1Pet", "2Pet", "1John", "2John", "3John", "Jude", "Rev",
+}
+
+
+def _scripture_navigation(plan: dict, claim_ids: list[str], claims_by_id: dict[str, dict]) -> dict:
+    """Derive a candidate's primary book/chapter from structured scripture data.
+
+    Composition passages are the strongest editorial signal. Older plans did
+    not store them, so their claims' ``scripture_refs`` are the explicit
+    fallback. Titles are deliberately excluded: they are display copy, not a
+    stable scripture locator.
+    """
+    from backend.api.sermon_search.bible_refs import BOOKS, extract_refs
+
+    decision_texts = [
+        str(decision.get("passage") or "").strip()
+        for decision in plan.get("decisions", []) or []
+        if str(decision.get("passage") or "").strip()
+    ]
+    source = "composition_passage" if decision_texts else "claim_scripture_refs"
+    source_texts = decision_texts
+    if not source_texts:
+        source_texts = [
+            str(raw_ref).strip()
+            for claim_id in claim_ids
+            for raw_ref in (claims_by_id.get(claim_id, {}).get("scripture_refs", []) or [])
+            if str(raw_ref).strip()
+        ]
+
+    refs = [ref for text in source_texts for ref in extract_refs(text)]
+    if not refs:
+        return {
+            "located": False,
+            "source": "unresolved",
+            "book": None,
+            "book_code": None,
+            "chapter": None,
+            "testament": None,
+            "references": [],
+        }
+
+    # A passage such as Matt 16:27-17:1 contributes to both chapters. This
+    # prevents a cross-chapter introduction from incorrectly owning an entire
+    # chapter plan when the rest of the plan clearly concerns chapter 17.
+    chapter_counts: dict[tuple[str, int], int] = {}
+    book_counts: dict[str, int] = {}
+    for ref in refs:
+        end_chapter = ref.chapter_end or ref.chapter_start
+        chapters = range(ref.chapter_start, min(end_chapter, ref.chapter_start + 20) + 1)
+        book_counts[ref.book] = book_counts.get(ref.book, 0) + 1
+        for chapter in chapters:
+            key = (ref.book, chapter)
+            chapter_counts[key] = chapter_counts.get(key, 0) + 1
+
+    nt_first_order = [book for book, _label, _aliases in BOOKS if book in _NEW_TESTAMENT_BOOKS]
+    nt_first_order.extend(book for book, _label, _aliases in BOOKS if book not in _NEW_TESTAMENT_BOOKS)
+    order = {book: index for index, book in enumerate(nt_first_order)}
+    primary_book = min(
+        book_counts,
+        key=lambda book: (-book_counts[book], order.get(book, 999), book),
+    )
+    primary_chapter = min(
+        (chapter for book, chapter in chapter_counts if book == primary_book),
+        key=lambda chapter: (-chapter_counts[(primary_book, chapter)], chapter),
+    )
+    labels = {book: label for book, label, _aliases in BOOKS}
+    references = list(dict.fromkeys(ref.osis for ref in refs))
+    return {
+        "located": True,
+        "source": source,
+        "book": labels.get(primary_book, primary_book),
+        "book_code": primary_book,
+        "book_order": order.get(primary_book, 999),
+        "chapter": primary_chapter,
+        "testament": "new" if primary_book in _NEW_TESTAMENT_BOOKS else "old",
+        "references": references,
     }
 
 

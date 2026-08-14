@@ -14,8 +14,18 @@ type Candidate = {
   canonical_topics: { topic_id: string; label: string }[];
   claims: { claim_id: string; title: string }[];
   claim_count: number;
-  decisions: { decision_id: string; title: string; review: { status: string } }[];
+  decisions: { decision_id: string; passage?: string; title: string; review: { status: string } }[];
   decision_count: number;
+  scripture_navigation?: {
+    located: boolean;
+    source: string;
+    book: string | null;
+    book_code: string | null;
+    book_order?: number;
+    chapter: number | null;
+    testament: "new" | "old" | null;
+    references: string[];
+  } | null;
 };
 
 type Payload = {
@@ -74,6 +84,7 @@ export default function ThoughtReviewCandidatesPage() {
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
+  const [selectedScriptureBook, setSelectedScriptureBook] = useState<string | null>(null);
 
   async function loadCandidates({ background = false }: { background?: boolean } = {}) {
     if (!background) setRefreshing(true);
@@ -113,8 +124,18 @@ export default function ThoughtReviewCandidatesPage() {
 
   useEffect(() => {
     if (!payload || !target) return;
+    const targetCandidate = payload.scripture_candidates.find((item) => item.candidate_id === target);
+    if (axis === "scripture" && targetCandidate?.scripture_navigation?.book) {
+      setSelectedScriptureBook(targetCandidate.scripture_navigation.book);
+      return;
+    }
     document.getElementById(`candidate-${target}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [payload, target, axis]);
+
+  useEffect(() => {
+    if (!payload || !target || axis !== "scripture" || !selectedScriptureBook) return;
+    requestAnimationFrame(() => document.getElementById(`candidate-${target}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }, [payload, target, axis, selectedScriptureBook]);
 
   const items = useMemo(
     () => axis === "scripture" ? payload?.scripture_candidates ?? [] : axis === "topic" ? payload?.topic_candidates ?? [] : [],
@@ -124,6 +145,7 @@ export default function ThoughtReviewCandidatesPage() {
   function selectAxis(nextAxis: "scripture" | "topic" | "structure") {
     setAxis(nextAxis);
     setTarget("");
+    setSelectedScriptureBook(null);
     window.history.replaceState(null, "", `/admin/thought-review/candidates?axis=${nextAxis}`);
   }
 
@@ -172,64 +194,152 @@ export default function ThoughtReviewCandidatesPage() {
 
         {axis === "structure" ? (
           <TopicStructureView batches={payload?.topic_structures ?? []} />
-        ) : <div className="mt-6 space-y-5">
-          {items.map((item) => {
-            const highlighted = item.candidate_id === target;
-            return (
-              <article id={`candidate-${item.candidate_id}`} key={item.candidate_id} className={`scroll-mt-24 rounded-2xl border bg-white p-6 shadow-sm transition ${highlighted ? "border-indigo-400 ring-4 ring-indigo-100" : "border-slate-200"}`}>
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="max-w-3xl">
-                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${item.candidate_state === "composition_plan_ready" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>
-                      {item.candidate_state_label}
-                    </span>
-                    <h2 className="mt-3 text-2xl font-bold text-slate-950">{item.title}</h2>
-                    <p className="mt-2 leading-7 text-slate-600">{item.description}</p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <strong className="block text-xl text-slate-950">{item.claim_count}</strong>條共享主張
-                  </div>
-                </div>
-
-                {!!item.canonical_topics.length && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {item.canonical_topics.map((topic) => <span key={topic.topic_id} className="rounded-full bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-800">{topic.label}</span>)}
-                  </div>
-                )}
-
-                {!!item.decisions.length && (
-                  <section className="mt-6">
-                    <h3 className="font-bold text-slate-900">編排決定</h3>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {item.decisions.map((decision) => (
-                        <div key={decision.decision_id} className="rounded-xl border border-slate-200 p-4">
-                          <span className="text-xs font-bold text-indigo-700">{statusLabels[decision.review.status] ?? "待確認"}</span>
-                          <p className="mt-1 font-semibold leading-6">{decision.title}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-                {!!item.claims.length && (
-                  <details className="mt-6 rounded-xl bg-slate-50 p-4">
-                    <summary className="cursor-pointer font-bold text-slate-800">查看依據的共享主張（{item.claims.length}）</summary>
-                    <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
-                      {item.claims.map((claim) => <li key={claim.claim_id} className="flex gap-2"><FileText className="mt-1 h-4 w-4 shrink-0 text-indigo-500" /><span>{claim.title}</span></li>)}
-                    </ul>
-                  </details>
-                )}
-
-                {item.candidate_state === "composition_plan_ready" && (
-                  <Link href={`/admin/thought-review?tab=validation&plan=${encodeURIComponent(item.candidate_id)}`} className="mt-5 inline-flex items-center gap-1 font-semibold text-indigo-700">
-                    前往審核編排計劃<ChevronRight className="h-4 w-4" />
-                  </Link>
-                )}
-              </article>
-            );
-          })}
-        </div>}
+        ) : axis === "scripture" ? (
+          <ScriptureCandidateView
+            items={items}
+            target={target}
+            selectedBook={selectedScriptureBook}
+            onSelectBook={setSelectedScriptureBook}
+          />
+        ) : (
+          <div className="mt-6 space-y-5">
+            {items.map((item) => <CandidateCard key={item.candidate_id} item={item} highlighted={item.candidate_id === target} />)}
+          </div>
+        )}
       </div>
     </main>
+  );
+}
+
+function ScriptureCandidateView({
+  items,
+  target,
+  selectedBook,
+  onSelectBook,
+}: {
+  items: Candidate[];
+  target: string;
+  selectedBook: string | null;
+  onSelectBook: (book: string | null) => void;
+}) {
+  const located = items.filter((item) => item.scripture_navigation?.located && item.scripture_navigation.book);
+  const unresolved = items.filter((item) => !item.scripture_navigation?.located || !item.scripture_navigation.book);
+  const books = Array.from(new Set(located.map((item) => item.scripture_navigation!.book!)))
+    .map((book) => {
+      const candidates = located.filter((item) => item.scripture_navigation?.book === book);
+      const navigation = candidates[0].scripture_navigation!;
+      return {
+        book,
+        testament: navigation.testament,
+        order: navigation.book_order ?? 999,
+        candidates,
+        chapters: Array.from(new Set(candidates.map((item) => item.scripture_navigation?.chapter).filter((chapter): chapter is number => typeof chapter === "number"))),
+      };
+    })
+    .sort((a, b) => a.order - b.order || a.book.localeCompare(b.book, "zh-Hant"));
+
+  if (!selectedBook) {
+    return (
+      <div className="mt-6 space-y-8">
+        {(["new", "old"] as const).map((testament) => {
+          const testamentBooks = books.filter((book) => book.testament === testament);
+          if (!testamentBooks.length) return null;
+          return (
+            <section key={testament}>
+              <h2 className="text-xl font-bold text-slate-950">{testament === "new" ? "新約聖經" : "舊約聖經"}</h2>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {testamentBooks.map((entry) => (
+                  <button
+                    key={entry.book}
+                    type="button"
+                    onClick={() => onSelectBook(entry.book)}
+                    className="group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-indigo-300 hover:shadow-md"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-xl font-bold text-slate-950 group-hover:text-indigo-700">{entry.book}</h3>
+                        <p className="mt-2 text-sm text-slate-500">{entry.chapters.length} 章 · {entry.candidates.length} 個釋經候選</p>
+                      </div>
+                      <ChevronRight className="h-5 w-5 text-slate-400 group-hover:text-indigo-600" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+        {!!unresolved.length && (
+          <section>
+            <h2 className="text-xl font-bold text-slate-950">尚待定位</h2>
+            <p className="mt-1 text-sm text-slate-500">這些候選尚無足夠的結構化經文資料，沒有依標題猜測書卷。</p>
+            <div className="mt-3 space-y-5">
+              {unresolved.map((item) => <CandidateCard key={item.candidate_id} item={item} highlighted={item.candidate_id === target} />)}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  }
+
+  const selectedItems = located
+    .filter((item) => item.scripture_navigation?.book === selectedBook)
+    .sort((a, b) => (a.scripture_navigation?.chapter ?? 999) - (b.scripture_navigation?.chapter ?? 999) || a.title.localeCompare(b.title, "zh-Hant"));
+  const chapters = Array.from(new Set(selectedItems.map((item) => item.scripture_navigation?.chapter).filter((chapter): chapter is number => typeof chapter === "number"))).sort((a, b) => a - b);
+
+  return (
+    <div className="mt-6">
+      <button type="button" onClick={() => onSelectBook(null)} className="inline-flex items-center gap-1 text-sm font-bold text-indigo-700">
+        <ChevronLeft className="h-4 w-4" />返回書卷目錄
+      </button>
+      <div className="mt-4 border-b-2 border-sky-500 pb-3">
+        <h2 className="text-3xl font-bold text-slate-950">{selectedBook}</h2>
+        <p className="mt-1 text-sm text-slate-500">按章號排列，共 {selectedItems.length} 個釋經候選</p>
+      </div>
+      <div className="mt-7 space-y-9">
+        {chapters.map((chapter) => (
+          <section key={chapter}>
+            <h3 className="mb-4 text-2xl font-bold text-slate-800">第 {chapter} 章</h3>
+            <div className="space-y-5">
+              {selectedItems.filter((item) => item.scripture_navigation?.chapter === chapter).map((item) => (
+                <CandidateCard key={item.candidate_id} item={item} highlighted={item.candidate_id === target} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CandidateCard({ item, highlighted }: { item: Candidate; highlighted: boolean }) {
+  return (
+    <article id={`candidate-${item.candidate_id}`} className={`scroll-mt-24 rounded-2xl border bg-white p-6 shadow-sm transition ${highlighted ? "border-indigo-400 ring-4 ring-indigo-100" : "border-slate-200"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${item.candidate_state === "composition_plan_ready" ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{item.candidate_state_label}</span>
+          <h2 className="mt-3 text-2xl font-bold text-slate-950">{item.title}</h2>
+          <p className="mt-2 leading-7 text-slate-600">{item.description}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600"><strong className="block text-xl text-slate-950">{item.claim_count}</strong>條共享主張</div>
+      </div>
+      {!!item.canonical_topics.length && <div className="mt-4 flex flex-wrap gap-2">{item.canonical_topics.map((topic) => <span key={topic.topic_id} className="rounded-full bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-800">{topic.label}</span>)}</div>}
+      {!!item.decisions.length && (
+        <section className="mt-6">
+          <h3 className="font-bold text-slate-900">編排決定</h3>
+          <div className="mt-2 divide-y divide-slate-200 border-y border-slate-200">
+            {item.decisions.map((decision) => (
+              <div key={decision.decision_id} className="grid gap-1 py-3 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+                <span className="font-bold text-sky-800">{decision.passage || "經文待定位"}</span>
+                <span className="font-semibold leading-6 text-slate-900">{decision.title}</span>
+                <span className="text-xs font-bold text-indigo-700">{statusLabels[decision.review.status] ?? "待確認"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {!!item.claims.length && <details className="mt-6 rounded-xl bg-slate-50 p-4"><summary className="cursor-pointer font-bold text-slate-800">查看依據的共享主張（{item.claims.length}）</summary><ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">{item.claims.map((claim) => <li key={claim.claim_id} className="flex gap-2"><FileText className="mt-1 h-4 w-4 shrink-0 text-indigo-500" /><span>{claim.title}</span></li>)}</ul></details>}
+      {item.candidate_state === "composition_plan_ready" && <Link href={`/admin/thought-review?tab=validation&plan=${encodeURIComponent(item.candidate_id)}`} className="mt-5 inline-flex items-center gap-1 font-semibold text-indigo-700">前往審核編排計劃<ChevronRight className="h-4 w-4" /></Link>}
+    </article>
   );
 }
 

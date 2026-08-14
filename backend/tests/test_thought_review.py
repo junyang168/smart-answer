@@ -298,6 +298,7 @@ def test_candidates_project_scripture_and_topic_plans_with_readable_routes(
     assert [item["candidate_id"] for item in payload["scripture_candidates"]] == ["CP-1"]
     assert [item["candidate_id"] for item in payload["topic_candidates"]] == ["CP-TOPIC-1"]
     assert payload["scripture_candidates"][0]["decision_count"] == 1
+    assert "passage" in payload["scripture_candidates"][0]["decisions"][0]
 
     detail = thought_review.claim_detail_data("CL-1")
     route = detail["knowledge_routes"][0]
@@ -327,6 +328,63 @@ def test_candidates_use_postgres_decision_text_instead_of_internal_id(
     decision = payload["topic_candidates"][0]["decisions"][0]
     assert decision["title"] == "先說明『人子』稱號的原文限定"
     assert decision["title"] != decision["decision_id"]
+    assert decision["passage"] == ""
+
+
+def test_scripture_navigation_uses_composition_passages_and_dominant_chapter() -> None:
+    navigation = thought_review._scripture_navigation(
+        {
+            "decisions": [
+                {"passage": "太16:27–17:1"},
+                {"passage": "太17:1-5"},
+                {"passage": "太17:6-8"},
+            ]
+        },
+        [],
+        {},
+    )
+
+    assert navigation["located"] is True
+    assert navigation["source"] == "composition_passage"
+    assert navigation["book"] == "馬太福音"
+    assert navigation["book_order"] == 0
+    assert navigation["chapter"] == 17
+    assert navigation["testament"] == "new"
+
+
+def test_scripture_navigation_falls_back_to_claim_refs_in_nt_first_order() -> None:
+    navigation = thought_review._scripture_navigation(
+        {"decisions": []},
+        ["CL-A", "CL-B"],
+        {
+            "CL-A": {"scripture_refs": ["使徒行傳15:1-29"]},
+            "CL-B": {"scripture_refs": ["加拉太書3:1"]},
+        },
+    )
+
+    assert navigation["source"] == "claim_scripture_refs"
+    assert navigation["book"] == "使徒行傳"
+    assert navigation["chapter"] == 15
+    assert navigation["book_order"] == 4
+    assert navigation["testament"] == "new"
+
+
+def test_scripture_navigation_does_not_guess_from_candidate_title() -> None:
+    navigation = thought_review._scripture_navigation(
+        {"title": "馬太福音第十六章"},
+        [],
+        {},
+    )
+
+    assert navigation == {
+        "located": False,
+        "source": "unresolved",
+        "book": None,
+        "book_code": None,
+        "chapter": None,
+        "testament": None,
+        "references": [],
+    }
 
 
 def test_candidates_show_discovered_topic_hierarchy_as_separate_stage(
@@ -521,6 +579,44 @@ def test_claim_without_eligible_evidence_cannot_be_approved(tmp_path: Path, monk
     with pytest.raises(HTTPException) as error:
         thought_review.review_claim("CL-1", thought_review.ReviewUpdate(status="approved"))
     assert error.value.status_code == 409
+
+
+def test_evidence_gate_applies_to_claims_imported_without_a_cached_list(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Claims added after the pilot carry evidence_step_ids but no cached list."""
+    _fixture_paths(tmp_path, monkeypatch)
+    shared = json.loads(thought_review.SHARED_KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+    claim = shared["claims"][0]
+    claim.pop("eligible_evidence_step_ids", None)
+    claim.pop("group_id", None)
+    claim["evidence_step_ids"] = ["E1", "E2"]
+    _write(thought_review.SHARED_KNOWLEDGE_PATH, shared)
+    _write_ai_review([_claim_review("CL-1")])
+
+    # E2 is eligible, E1 is contextual only.
+    assert thought_review._eligible_evidence_count(claim, claim, shared) == 1
+
+    for evidence in shared["evidence_steps"]:
+        evidence["support_eligibility"] = "withheld_missing_anchor"
+    _write(thought_review.SHARED_KNOWLEDGE_PATH, shared)
+    assert thought_review._eligible_evidence_count(claim, claim, shared) == 0
+    assert thought_review.claim_detail_data("CL-1")["attention"] == "pending_evidence_review"
+
+
+def test_stale_cached_eligible_list_does_not_override_current_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _fixture_paths(tmp_path, monkeypatch)
+    shared = json.loads(thought_review.SHARED_KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+    claim = shared["claims"][0]
+    claim["evidence_step_ids"] = ["E1", "E2"]
+    # A snapshot from an earlier build, before E2 lost its anchor.
+    claim["eligible_evidence_step_ids"] = ["E2"]
+    for evidence in shared["evidence_steps"]:
+        evidence["support_eligibility"] = "withheld_missing_anchor"
+
+    assert thought_review._eligible_evidence_count(claim, claim, shared) == 0
 
 
 def test_claim_without_ai_review_enters_ai_queue_not_human_queue(tmp_path: Path, monkeypatch) -> None:
