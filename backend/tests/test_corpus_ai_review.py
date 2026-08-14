@@ -166,8 +166,10 @@ def test_invalid_model_review_is_retried_with_validation_feedback() -> None:
         def __init__(self) -> None:
             self.calls: list[str] = []
 
-        def generate_json(self, _prompt, user_input, _schema):
-            self.calls.append(user_input)
+        def generate_json(self, _prompt, user_input, _schema, cache_prefix=None):
+            # The stable source now rides in its own cached block; record the
+            # rendered prompt so the assertions still see the full text.
+            self.calls.append((cache_prefix or "") + user_input)
             review = _review()
             if len(self.calls) == 1:
                 review["claim_reviews"].pop()

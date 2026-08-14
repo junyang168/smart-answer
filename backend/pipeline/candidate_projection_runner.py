@@ -67,17 +67,19 @@ def _generate_valid(
     validator: Any,
     attempts: int = 3,
 ) -> dict[str, Any]:
-    current = user_input
+    # `user_input` is identical on every attempt; only the feedback tail varies,
+    # so it goes in its own cached block instead of being re-sent at full price.
+    feedback = ""
     last_error: Exception | None = None
     for _ in range(attempts):
-        response = client.generate_json(prompt, current, schema)
+        response = client.generate_json(prompt, feedback, schema, cache_prefix=user_input)
         try:
             validator(response)
             return response
         except ValueError as exc:
             last_error = exc
-            current = (
-                user_input + "\n\n上一版未通过机械验证：" + str(exc)
+            feedback = (
+                "\n\n上一版未通过机械验证：" + str(exc)
                 + "。请重新输出完整 JSON，不得只给修正片段。"
             )
     raise ValueError(f"candidate model output remained invalid: {last_error}")

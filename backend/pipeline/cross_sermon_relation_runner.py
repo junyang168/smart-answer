@@ -151,20 +151,21 @@ def _generate_valid(
     validate: Callable[[dict[str, Any]], None],
     attempts: int = 3,
 ) -> dict[str, Any]:
-    current_input = user_input
+    feedback = ""
     previous: dict[str, Any] | None = None
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
-        response = normalize(client.generate_json(prompt, current_input, schema))
+        response = normalize(
+            client.generate_json(prompt, feedback, schema, cache_prefix=user_input)
+        )
         try:
             validate(response)
             return response
         except CrossSermonRelationValidationError as exc:
             last_error = exc
             previous = response
-            current_input = (
-                user_input
-                + "\n\n上一版未通过机械验证："
+            feedback = (
+                "\n\n上一版未通过机械验证："
                 + str(exc)
                 + "。请修正后重新输出完整 JSON，不得只给修正片段。"
                 + "\n上一版完整 JSON：\n"

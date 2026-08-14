@@ -158,18 +158,17 @@ def _generate_valid(
     validator: Any,
     attempts: int = 2,
 ) -> dict[str, Any]:
-    current = user_input
+    feedback = ""
     last_error: Exception | None = None
     for attempt in range(attempts):
-        response = client.generate_json(prompt, current, schema)
+        response = client.generate_json(prompt, feedback, schema, cache_prefix=user_input)
         try:
             validator(response)
             return response
         except CompositionReviewValidationError as exc:
             last_error = exc
-            current = (
-                user_input
-                + "\n\n上一次JSON未通过程序验证："
+            feedback = (
+                "\n\n上一次JSON未通过程序验证："
                 + str(exc)
                 + "。请重新输出完整结果，不得只给修正片段。"
             )

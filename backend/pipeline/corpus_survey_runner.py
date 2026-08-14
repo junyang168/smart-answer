@@ -467,14 +467,16 @@ def run_one(
     validation_error: SurveyValidationError | None = None
     survey: dict[str, Any] | None = None
     for attempt in range(2):
-        attempt_prompt = user_prompt
+        attempt_feedback = ""
         if validation_error is not None:
-            attempt_prompt += (
+            attempt_feedback = (
                 "\n\n上一版输出未通过机械验证，原因是："
                 f"{validation_error}。请重新输出完整 JSON。特别注意：每个 verbatim_excerpt 必须从指定 segment 的原文逐字复制，"
                 "不可改写、不可补标点、不可省略字。"
             )
-        response = client.generate_json(system_prompt, attempt_prompt, SURVEY_RESPONSE_SCHEMA)
+        response = client.generate_json(
+            system_prompt, attempt_feedback, SURVEY_RESPONSE_SCHEMA, cache_prefix=user_prompt
+        )
         candidate = _make_survey(
             transcript_id, path, payload, raw, response, extraction
         )

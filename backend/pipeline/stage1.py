@@ -201,6 +201,14 @@ class Stage1AnthropicClient:
             max_retries=0,
             timeout=timeout_seconds,
         )
+        self.last_usage: Any = None
+        # Only "5m" and "1h" are accepted by the API.  The system prompt is
+        # re-used by every call in a batch run, and a single call can take far
+        # longer than five minutes, so it is cached for an hour (2x write, 0.1x
+        # read).  The per-call payload is only re-read by an immediate
+        # validation retry, where the cheaper 5m write pays off more often.
+        self.system_cache_ttl = os.environ.get("ANTHROPIC_SYSTEM_CACHE_TTL", "1h")
+        self.prefix_cache_ttl = os.environ.get("ANTHROPIC_PREFIX_CACHE_TTL", "5m")
 
     def generate_json(
         self,
@@ -209,6 +217,7 @@ class Stage1AnthropicClient:
         json_schema: Dict[str, Any],
         temperature: float = 0.0,
         timeout_seconds: Optional[float] = None,
+        cache_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         return self._with_retries(
             lambda: self._generate_json_once(
@@ -217,6 +226,7 @@ class Stage1AnthropicClient:
                 json_schema=json_schema,
                 temperature=temperature,
                 timeout_seconds=timeout_seconds,
+                cache_prefix=cache_prefix,
             )
         )
 
@@ -226,6 +236,7 @@ class Stage1AnthropicClient:
         user_prompt: str,
         temperature: float = 0.2,
         timeout_seconds: Optional[float] = None,
+        cache_prefix: Optional[str] = None,
     ) -> str:
         return self._with_retries(
             lambda: self._generate_text_once(
@@ -233,6 +244,7 @@ class Stage1AnthropicClient:
                 user_prompt=user_prompt,
                 temperature=temperature,
                 timeout_seconds=timeout_seconds,
+                cache_prefix=cache_prefix,
             )
         )
 
@@ -267,6 +279,7 @@ class Stage1AnthropicClient:
         json_schema: Dict[str, Any],
         temperature: float,
         timeout_seconds: Optional[float],
+        cache_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
         schema_description = json.dumps(json_schema.get("schema", {}), ensure_ascii=False, indent=2)
         content = self._post_chat_completion(
@@ -279,6 +292,7 @@ class Stage1AnthropicClient:
             ),
             temperature=temperature,
             timeout_seconds=timeout_seconds,
+            cache_prefix=cache_prefix,
         )
         return self._parse_json_response(content)
 
@@ -288,12 +302,14 @@ class Stage1AnthropicClient:
         user_prompt: str,
         temperature: float,
         timeout_seconds: Optional[float],
+        cache_prefix: Optional[str] = None,
     ) -> str:
         return self._post_chat_completion(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             timeout_seconds=timeout_seconds,
+            cache_prefix=cache_prefix,
         )
 
     def _post_chat_completion(
@@ -302,6 +318,7 @@ class Stage1AnthropicClient:
         user_prompt: str,
         temperature: float,
         timeout_seconds: Optional[float] = None,
+        cache_prefix: Optional[str] = None,
     ) -> str:
         client = self.client
         effective_timeout = timeout_seconds or self.timeout_seconds
@@ -311,16 +328,39 @@ class Stage1AnthropicClient:
                 max_retries=0,
                 timeout=effective_timeout,
             )
+        # Prompt caching is a prefix match: the system prompt is identical across
+        # every call a runner makes, and `cache_prefix` carries the caller's stable
+        # payload (e.g. the transcript a validation-retry loop re-sends unchanged).
+        # Splitting them into their own blocks keeps the rendered text byte-identical
+        # while giving the cache a boundary it can reuse.
+        user_content: list[Dict[str, Any]] = []
+        if cache_prefix:
+            user_content.append(
+                {
+                    "type": "text",
+                    "text": cache_prefix,
+                    "cache_control": {
+                        "type": "ephemeral",
+                        "ttl": self.prefix_cache_ttl,
+                    },
+                }
+            )
+        if user_prompt or not user_content:
+            user_content.append({"type": "text", "text": user_prompt})
         request: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_output_tokens,
-            "system": system_prompt,
-            "messages": [
+            "system": [
                 {
-                    "role": "user",
-                    "content": [{"type": "text", "text": user_prompt}],
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {
+                        "type": "ephemeral",
+                        "ttl": self.system_cache_ttl,
+                    },
                 }
             ],
+            "messages": [{"role": "user", "content": user_content}],
         }
         # Claude Sonnet 5 uses adaptive thinking by default and rejects the
         # legacy sampling/thinking combination used by Claude 4.x.  Omitting
@@ -333,6 +373,8 @@ class Stage1AnthropicClient:
             message = client.messages.create(**request)
         except Exception as exc:
             raise RuntimeError(self._format_exception(exc)) from exc
+
+        self.last_usage = getattr(message, "usage", None)
 
         text_blocks = [
             block.text.strip()
@@ -411,7 +453,14 @@ class Stage1OpenAIClient:
         json_schema: Dict[str, Any],
         temperature: float = 0.0,
         timeout_seconds: Optional[float] = None,
+        cache_prefix: Optional[str] = None,
     ) -> Dict[str, Any]:
+        # Same signature as the Anthropic client so dual-model runners can call
+        # either one.  OpenAI caches long prompt prefixes automatically, so the
+        # stable part simply leads the user message — the rendered text is
+        # identical to concatenating it at the call site.
+        if cache_prefix:
+            user_prompt = cache_prefix + user_prompt
         last_error: Optional[Exception] = None
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -917,7 +966,7 @@ class Stage1Pipeline:
         except Exception as exc:
             self._log("segmenter", f"初次切割結果驗證失敗，嘗試修正：{exc}")
             repair_user_prompt = (
-                f"{user_prompt}\n\n"
+                "\n\n"
                 "【上一輪切割結果（有錯誤，請修正）】\n"
                 f"{json.dumps({'units': raw_units}, ensure_ascii=False, indent=2)}\n\n"
                 "【驗證錯誤】\n"
@@ -934,6 +983,7 @@ class Stage1Pipeline:
                 user_prompt=repair_user_prompt,
                 json_schema=self.SPLIT_SCHEMA,
                 temperature=0.0,
+                cache_prefix=user_prompt,
             )
             repaired_units = repaired_response.get("units", [])
             normalized = self._normalize_units(repaired_units, line_count=split_cutoff_line)
@@ -1107,8 +1157,7 @@ class Stage1Pipeline:
                 unit_id=unit.unit_id,
             )
             retry_user_prompt = (
-                user_prompt
-                + "\n\n【重要修正要求】\n"
+                "\n\n【重要修正要求】\n"
                 + "上一版逐字稿仍偏向課堂提綱／筆記式表達。\n"
                 + "請保留必要的小標題，但正文必須改寫為連續的分析性段落。\n"
                 + "除非來源本身明確要求，禁止使用 `1. 2. 3.`、`第一/第二/第三`、`一、二、三、` 或 bullet points 作為正文主體展開方式。\n"
@@ -1121,6 +1170,7 @@ class Stage1Pipeline:
                     json_schema=self.MANUSCRIPT_GENERATION_SCHEMA,
                     temperature=0.2,
                     timeout_seconds=manuscript_timeout_seconds,
+                    cache_prefix=user_prompt,
                 )
                 retry_sections = self._normalize_manuscript_sections(retry_payload.get("manuscript_sections", {}))
                 retry_coverage_checks = self._normalize_coverage_checks(
