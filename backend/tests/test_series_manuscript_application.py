@@ -216,3 +216,141 @@ def test_apply_marks_edited_target_unit_as_conflict(monkeypatch, tmp_path):
     assert result.applied_patch_count == 0
     assert result.conflict_patch_count == 1
     assert (project_root / "prior" / "draft_v1.md").read_text(encoding="utf-8") == edited
+
+
+def test_apply_safe_patch_keeps_fidelity_history_for_notes_target(monkeypatch, tmp_path):
+    project_root, _, prior_text = _configure(monkeypatch, tmp_path)
+    (project_root / "prior" / "meta.json").write_text(
+        json.dumps({"project_type": "sermon_note", "audit_passed": True}), encoding="utf-8"
+    )
+    (project_root / "prior" / "draft_v1.md").write_text(prior_text, encoding="utf-8")
+    (project_root / "prior" / "fidelity_audit.json").write_text(
+        json.dumps(
+            {
+                "chunk_001": {"pass": True, "scores": {"faithfulness": 92}, "must_fix": []},
+                "chunk_002": {"pass": False, "scores": {"faithfulness": 61}, "must_fix": ["修正"]},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    status = application.materialize_integrated_manuscript("series-1", "current", "proposal-1")
+
+    application.apply_safe_integration_patches("series-1", "current", status.application_id)
+
+    audit_path = project_root / "prior" / "fidelity_audit.json"
+    assert audit_path.exists()
+    audits = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audits["chunk_001"]["stale"] is True
+    assert audits["chunk_001"]["previous_pass"] is True
+    assert "pass" not in audits["chunk_001"]
+    assert audits["chunk_001"]["stale_reason"] == application.FIDELITY_STALE_REASON
+    assert audits["chunk_001"]["invalidated_by_application_id"] == status.application_id
+    assert audits["chunk_001"]["scores"]["faithfulness"] == 92
+    assert audits["chunk_002"]["previous_pass"] is False
+    meta = json.loads((project_root / "prior" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["audit_passed"] is False
+
+
+def test_repeated_invalidation_preserves_first_invalidation_record(monkeypatch, tmp_path):
+    project_root, _, _ = _configure(monkeypatch, tmp_path)
+    audit_path = project_root / "prior" / "fidelity_audit.json"
+    audit_path.write_text(
+        json.dumps({"chunk_001": {"pass": True, "scores": {"faithfulness": 92}}}), encoding="utf-8"
+    )
+    (project_root / "prior" / "meta.json").write_text(
+        json.dumps({"project_type": "sermon_note"}), encoding="utf-8"
+    )
+
+    application._invalidate_target_review("prior", {"application_id": "app-1"})
+    application._invalidate_target_review("prior", {"application_id": "app-2"})
+
+    audits = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audits["chunk_001"]["previous_pass"] is True
+    assert audits["chunk_001"]["invalidated_by_application_id"] == "app-1"
+
+
+def test_fidelity_summary_reports_stale_chunks_without_passing(monkeypatch, tmp_path):
+    project_id = "notes-project"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir(parents=True)
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+    (project_dir / "meta.json").write_text(
+        json.dumps({"project_type": "sermon_note", "audit_passed": True}), encoding="utf-8"
+    )
+    (project_dir / "draft_chunks_meta.json").write_text(
+        json.dumps([{"id": "chunk_001", "title": "第一段"}, {"id": "chunk_002", "title": "第二段"}]),
+        encoding="utf-8",
+    )
+    (project_dir / "fidelity_audit.json").write_text(
+        json.dumps(
+            {
+                "chunk_001": {
+                    "previous_pass": True,
+                    "stale": True,
+                    "stale_reason": "series_integration_patch",
+                    "invalidated_at": "2026-07-27T20:03:21Z",
+                    "scores": {"faithfulness": 92},
+                },
+                "chunk_002": {"pass": True, "scores": {"faithfulness": 88}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = service.get_fidelity_audit_summary(project_id)
+
+    assert summary["stale_chunks"] == 1
+    assert summary["passed_chunks"] == 1
+    assert summary["missing_chunks"] == 0
+    assert summary["all_passed"] is False
+    stale_chunk = next(c for c in summary["chunks"] if c["id"] == "chunk_001")
+    assert stale_chunk["status"] == "stale"
+    assert stale_chunk["previous_pass"] is True
+    assert stale_chunk["faithfulness"] == 92
+
+    assert service.check_and_update_project_audit_status(project_id) is False
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["audit_passed"] is False
+
+
+def test_notes_target_marks_theology_review_stale(monkeypatch, tmp_path):
+    project_root, _, prior_text = _configure(monkeypatch, tmp_path)
+    (project_root / "prior" / "meta.json").write_text(
+        json.dumps({"project_type": "sermon_note", "audit_passed": True}), encoding="utf-8"
+    )
+    (project_root / "prior" / "draft_v1.md").write_text(prior_text, encoding="utf-8")
+    status = application.materialize_integrated_manuscript("series-1", "current", "proposal-1")
+
+    application.apply_safe_integration_patches("series-1", "current", status.application_id)
+
+    meta = json.loads((project_root / "prior" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["theological_review_stale"] is True
+
+
+def test_reset_theological_audit_state_archives_previous_verdicts(monkeypatch, tmp_path):
+    project_id = "notes-project"
+    project_dir = tmp_path / project_id
+    project_dir.mkdir(parents=True)
+    monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
+    (project_dir / "meta.json").write_text(
+        json.dumps({"project_type": "sermon_note", "theological_audit_completed": True}),
+        encoding="utf-8",
+    )
+    (project_dir / "theological_audit.json").write_text(
+        json.dumps({"chunk_001": {"issues": [], "summary": "沒有神學問題"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    assert service.reset_theological_audit_state(
+        project_id, reason="series_integration_patch", application_id="app-1"
+    ) is True
+
+    assert not (project_dir / "theological_audit.json").exists()
+    history = json.loads((project_dir / "theological_audit_history.json").read_text(encoding="utf-8"))
+    assert len(history) == 1
+    assert history[0]["reason"] == "series_integration_patch"
+    assert history[0]["application_id"] == "app-1"
+    assert history[0]["audits"]["chunk_001"]["summary"] == "沒有神學問題"
+    meta = json.loads((project_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["theological_audit_completed"] is False

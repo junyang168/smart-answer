@@ -205,20 +205,66 @@ def get_integrated_manuscript_status(series_id: str, project_id: str) -> Integra
     )
 
 
-def _invalidate_target_review(project_id: str) -> None:
+FIDELITY_STALE_REASON = "series_integration_patch"
+
+
+def _mark_fidelity_audit_stale(
+    project_root: Path,
+    application: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Invalidate a sermon_note fidelity audit without destroying its history.
+
+    The Draft changed, so the previous per-chunk verdicts no longer certify the
+    current text.  They still record that the manuscript passed once, when, and
+    what invalidated it, so the audit lineage the knowledge layer depends on
+    survives re-auditing.
+    """
+    fidelity_path = project_root / "fidelity_audit.json"
+    audits = _load_json(fidelity_path)
+    if not isinstance(audits, dict) or not audits:
+        return
+
+    invalidated_at = _utcnow()
+    application_id = (application or {}).get("application_id")
+    changed = False
+    for record in audits.values():
+        if not isinstance(record, dict) or record.get("stale") is True:
+            continue
+        if "pass" in record:
+            record["previous_pass"] = record.pop("pass")
+        record["stale"] = True
+        record["stale_reason"] = FIDELITY_STALE_REASON
+        record["invalidated_at"] = invalidated_at
+        record["invalidated_by_application_id"] = application_id
+        changed = True
+
+    if changed:
+        _save_json(fidelity_path, audits)
+
+
+def _invalidate_target_review(
+    project_id: str,
+    application: Optional[Dict[str, Any]] = None,
+) -> None:
     project_root = get_sermon_draft_path(project_id).parent
     meta_path = project_root / "meta.json"
     meta = _load_json(meta_path)
     project_type = meta.get("project_type") or "sermon_note"
+    application_id = (application or {}).get("application_id")
     if project_type == "transcript":
         update_transcript_coverage_audit_state(project_id, stale=True)
-        reset_theological_audit_state(project_id)
     else:
-        fidelity_path = project_root / "fidelity_audit.json"
-        if fidelity_path.exists():
-            fidelity_path.unlink()
+        _mark_fidelity_audit_stale(project_root, application)
+    # Either way the Draft moved ahead of the reviewed final text, so the
+    # theology review has to restart from the new Draft.
+    reset_theological_audit_state(
+        project_id,
+        reason=FIDELITY_STALE_REASON,
+        application_id=application_id,
+    )
     meta = _load_json(meta_path)
     meta["audit_passed"] = False
+    meta["theological_review_stale"] = True
     _save_json(meta_path, meta)
 
 
@@ -312,7 +358,7 @@ def _prepare_target_review(
 ) -> None:
     if _save_target_patch_coverage_check(project_id, patches, application):
         return
-    _invalidate_target_review(project_id)
+    _invalidate_target_review(project_id, application)
 
 
 def apply_safe_integration_patches(

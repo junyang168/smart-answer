@@ -2312,6 +2312,7 @@ def get_fidelity_audit_summary(project_id: str) -> dict:
             "passed_chunks": 0,
             "failed_chunks": 0,
             "missing_chunks": 0,
+            "stale_chunks": 0,
             "all_passed": False,
             "chunks": [],
         }
@@ -2328,16 +2329,23 @@ def get_fidelity_audit_summary(project_id: str) -> dict:
     passed_chunks = 0
     failed_chunks = 0
     missing_chunks = 0
+    stale_chunks = 0
 
     for chunk in chunks:
         chunk_id = chunk.get("id")
         audit = audits.get(chunk_id) if chunk_id else None
-        passed = bool(isinstance(audit, dict) and audit.get("pass") is True)
+        stale = bool(isinstance(audit, dict) and audit.get("stale") is True)
+        passed = bool(isinstance(audit, dict) and audit.get("pass") is True and not stale)
         has_result = isinstance(audit, dict)
 
         if passed:
             status = "passed"
             passed_chunks += 1
+        elif stale:
+            # The Draft changed after this verdict; it neither passes nor fails
+            # the current text, but its history is kept for audit lineage.
+            status = "stale"
+            stale_chunks += 1
         elif has_result:
             status = "failed"
             failed_chunks += 1
@@ -2351,6 +2359,10 @@ def get_fidelity_audit_summary(project_id: str) -> dict:
                 "title": chunk.get("title") or chunk_id,
                 "status": status,
                 "pass": passed,
+                "stale": stale,
+                "previous_pass": audit.get("previous_pass") if isinstance(audit, dict) else None,
+                "stale_reason": audit.get("stale_reason") if isinstance(audit, dict) else None,
+                "invalidated_at": audit.get("invalidated_at") if isinstance(audit, dict) else None,
                 "faithfulness": audit.get("scores", {}).get("faithfulness") if isinstance(audit, dict) else None,
                 "must_fix_count": len(audit.get("must_fix", [])) if isinstance(audit, dict) and isinstance(audit.get("must_fix"), list) else 0,
             }
@@ -2362,6 +2374,7 @@ def get_fidelity_audit_summary(project_id: str) -> dict:
         "passed_chunks": passed_chunks,
         "failed_chunks": failed_chunks,
         "missing_chunks": missing_chunks,
+        "stale_chunks": stale_chunks,
         "all_passed": total_chunks > 0 and passed_chunks == total_chunks,
         "chunks": summary_chunks,
     }
@@ -3519,6 +3532,9 @@ def force_audit_pass(project_id: str, chunk_id: str) -> bool:
         if chunk_id in existing_audits:
             audit_data = existing_audits[chunk_id]
             audit_data["pass"] = True
+            if audit_data.pop("stale", None):
+                audit_data["stale_cleared_by"] = "force_pass"
+            audit_data.pop("previous_pass", None)
             
             # Optionally overwrite must_fix to show why it passed
             if audit_data.get("must_fix") and len(audit_data["must_fix"]) > 0:
@@ -3586,7 +3602,7 @@ def check_and_update_project_audit_status(project_id: str) -> bool:
             if not chunk_id:
                 continue
             audit = audits.get(chunk_id)
-            if not audit or not audit.get("pass"):
+            if not audit or audit.get("stale") is True or not audit.get("pass"):
                 all_passed = False
                 break
                 
@@ -3627,7 +3643,49 @@ def update_transcript_coverage_audit_state(
     return True
 
 
-def reset_theological_audit_state(project_id: str) -> bool:
+def _archive_theological_audit(
+    project_id: str,
+    *,
+    reason: str,
+    application_id: Optional[str] = None,
+) -> bool:
+    """Keep superseded theology verdicts as history before the live file is cleared.
+
+    The audit no longer certifies the current text, but the record that the
+    manuscript was reviewed, when, and what superseded it must survive.
+    """
+    sermon_dir = NOTES_TO_SERMON_DIR / project_id
+    audit_file = sermon_dir / "theological_audit.json"
+    if not audit_file.exists():
+        return False
+
+    audits = _load_json_file(audit_file, {})
+    if not audits:
+        return False
+
+    history_file = sermon_dir / "theological_audit_history.json"
+    history = _load_json_file(history_file, [])
+    if not isinstance(history, list):
+        history = []
+    history.append(
+        {
+            "archived_at": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
+            "application_id": application_id,
+            "audits": audits,
+        }
+    )
+    with open(history_file, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
+    return True
+
+
+def reset_theological_audit_state(
+    project_id: str,
+    *,
+    reason: str = "review_restart",
+    application_id: Optional[str] = None,
+) -> bool:
     """Start a fresh final-text review and invalidate any earlier theology audit."""
     sermon_dir = NOTES_TO_SERMON_DIR / project_id
     meta_file = sermon_dir / "meta.json"
@@ -3636,6 +3694,7 @@ def reset_theological_audit_state(project_id: str) -> bool:
 
     audit_file = sermon_dir / "theological_audit.json"
     if audit_file.exists():
+        _archive_theological_audit(project_id, reason=reason, application_id=application_id)
         audit_file.unlink()
 
     meta_data = _load_json_file(meta_file, {})

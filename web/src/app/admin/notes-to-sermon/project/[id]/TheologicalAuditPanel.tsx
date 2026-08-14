@@ -335,9 +335,17 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                                     <p className="mb-1"><strong>已通過:</strong> {fidelitySummary.passed_chunks}</p>
                                     <p className="mb-1"><strong>未通過:</strong> {fidelitySummary.failed_chunks}</p>
                                     <p className="mb-1"><strong>尚未審核:</strong> {fidelitySummary.missing_chunks}</p>
+                                    {fidelitySummary.stale_chunks > 0 && (
+                                        <p className="mb-1"><strong>已失效需重審:</strong> {fidelitySummary.stale_chunks}</p>
+                                    )}
                                     <p className="mt-2">
                                         <strong>整體狀態:</strong> {fidelitySummary.all_passed ? '✅ 全部通過，可 Check In' : '⚠️ 尚未全部通過'}
                                     </p>
+                                    {fidelitySummary.stale_chunks > 0 && (
+                                        <p className="mt-2 text-amber-700">
+                                            講稿在上次審核後被修改，舊的忠實度結論已失效並保留為歷史記錄，需針對目前 Draft 重新審核。
+                                        </p>
+                                    )}
                                 </div>
 
                                 <div className="bg-gray-50 border rounded p-4">
@@ -351,8 +359,19 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                                                 </div>
                                                 <div className="text-right text-sm">
                                                     <div>
-                                                        {chunk.status === 'passed' ? '✅ 通過' : chunk.status === 'failed' ? '❌ 未通過' : '⏳ 尚未審核'}
+                                                        {chunk.status === 'passed'
+                                                            ? '✅ 通過'
+                                                            : chunk.status === 'failed'
+                                                                ? '❌ 未通過'
+                                                                : chunk.status === 'stale'
+                                                                    ? '♻️ 已失效，需重審'
+                                                                    : '⏳ 尚未審核'}
                                                     </div>
+                                                    {chunk.status === 'stale' && chunk.previous_pass === true && (
+                                                        <div className="text-xs text-amber-700">
+                                                            原已通過{chunk.invalidated_at ? `（${chunk.invalidated_at.slice(0, 10)} 失效）` : ''}
+                                                        </div>
+                                                    )}
                                                     {chunk.faithfulness != null && (
                                                         <div className="text-xs text-gray-500">忠實度 {chunk.faithfulness}</div>
                                                     )}
@@ -383,7 +402,17 @@ export default function TheologicalAuditPanel({ projectId, selectedChunkId, sele
                                             </button>
                                         )}
                                     </div>
-                                    <p className="mb-1"><strong>審核結果:</strong> {fidelityResult.pass ? '✅ 通過 (Pass)' : '❌ 未通過 (Fail)'}</p>
+                                    <p className="mb-1">
+                                        <strong>審核結果:</strong>{' '}
+                                        {fidelityResult.stale
+                                            ? `♻️ 已失效，需重審${fidelityResult.previous_pass === true ? '（原已通過）' : ''}`
+                                            : fidelityResult.pass ? '✅ 通過 (Pass)' : '❌ 未通過 (Fail)'}
+                                    </p>
+                                    {fidelityResult.stale && (
+                                        <p className="mb-1 text-xs text-amber-700">
+                                            以下結果對應失效前的講稿{fidelityResult.invalidated_at ? `（${fidelityResult.invalidated_at.slice(0, 10)} 失效）` : ''}，僅供對照。
+                                        </p>
+                                    )}
                                     <p className="mb-1"><strong>忠實度:</strong> {fidelityResult.scores?.faithfulness} / 100</p>
                                 </div>
 
