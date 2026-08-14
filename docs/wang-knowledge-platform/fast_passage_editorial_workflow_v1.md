@@ -20,12 +20,14 @@
 
 ## 模型闸门
 
-`requires_model_extraction` 只有在以下任一条件成立时才为真：
+文字與媒體分別設閘門。`requires_model_extraction` 只有在以下任一條件成立時才為真：
 
 - 目标范围存在未覆盖经节；
 - 没有任何 `eligible`、`eligible_candidate` 或 `eligible_with_label` 证据。
 
 双模型复核与仲裁不再是每篇必跑步骤，只处理冲突、低置信度、来源归属不明或程序审核无法裁定的项目。
+
+若来源地图已列出相关讲道，而切片中没有该讲道的有效时间码证据，系统必须另行返回 `requires_media_projection: true`。文字完整不能代替媒体完整。媒体投影先以已发布逐字稿的唯一 segment index 与逐字摘录进行确定性核验；只有无法唯一定位时才调用模型或转人工。
 
 ## 命令
 

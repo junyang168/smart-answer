@@ -28,6 +28,7 @@ def test_fast_path_prefers_complete_postgresql_slice() -> None:
     assert result["resolution"] == "postgresql_reuse"
     assert not result["requires_database_ingest"]
     assert not result["requires_model_extraction"]
+    assert not result["requires_media_projection"]
 
 
 def test_fast_path_reuses_reviewed_package_before_model() -> None:
@@ -35,9 +36,52 @@ def test_fast_path_reuses_reviewed_package_before_model() -> None:
     assert result["resolution"] == "reviewed_package_reuse"
     assert result["requires_database_ingest"]
     assert not result["requires_model_extraction"]
+    assert not result["requires_media_projection"]
 
 
 def test_fast_path_requests_model_only_when_both_sources_have_gaps() -> None:
     result = resolve_fast_path(_package(None), PASSAGE, _package(None))
     assert result["resolution"] == "model_extraction_required"
     assert result["requires_model_extraction"]
+
+
+def test_text_complete_still_requires_expected_sermon_media() -> None:
+    result = resolve_fast_path(
+        _package("太16:21-23"),
+        PASSAGE,
+        expected_sermon_ids={"講道四"},
+    )
+    assert result["resolution"] == "postgresql_reuse_media_projection_required"
+    assert not result["requires_model_extraction"]
+    assert result["requires_media_projection"]
+
+
+def test_timed_sermon_evidence_satisfies_media_gate() -> None:
+    package = _package("太16:21-23")
+    package["source_documents"] = [
+        {"source_id": "SRC-S", "source_type": "sermon_transcript", "transcript_id": "講道四"}
+    ]
+    package["source_fragments"] = [
+        {"fragment_id": "FR-S", "source_id": "SRC-S", "media_time": 10, "media_end_time": 20}
+    ]
+    package["evidence_steps"][0]["source_fragment_ids"] = ["FR-S"]
+    result = resolve_fast_path(package, PASSAGE, expected_sermon_ids={"講道四"})
+    assert result["resolution"] == "postgresql_reuse"
+    assert not result["requires_media_projection"]
+
+
+def test_media_gate_requires_every_expected_sermon() -> None:
+    package = _package("太16:21-23")
+    package["source_documents"] = [
+        {"source_id": "SRC-S", "source_type": "sermon_transcript", "transcript_id": "講道四"}
+    ]
+    package["source_fragments"] = [
+        {"fragment_id": "FR-S", "source_id": "SRC-S", "media_time": 10, "media_end_time": 20}
+    ]
+    package["evidence_steps"][0]["source_fragment_ids"] = ["FR-S"]
+    result = resolve_fast_path(
+        package,
+        PASSAGE,
+        expected_sermon_ids={"講道四", "講道五"},
+    )
+    assert result["requires_media_projection"]
