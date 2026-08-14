@@ -37,6 +37,7 @@ WEBCAST_DIR: Final[Path] = DATA_BASE_PATH / "webcast"
 DEPTH_OF_FAITH_FILE: Final[Path] = WEBCAST_DIR / "depth_of_faith.json"
 SERMON_TO_VIDEO_DIR: Final[Path] = DATA_BASE_PATH / "sermon_to_video"
 MICRO_SERMONS_FILE: Final[Path] = SERMON_TO_VIDEO_DIR / "micro_sermons.json"
+WANG_REPOSITORY_DIR: Final[Path] = DATA_BASE_PATH / "wang_repository"
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
 OCR_MODEL: Final[str] = os.getenv("OCR_MODEL", "gemini-3.1-pro-preview")

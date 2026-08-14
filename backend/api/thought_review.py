@@ -12,6 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.api.config import WANG_REPOSITORY_DIR
 from backend.api.canonical_repository.postgres_store import (
     ActiveSnapshotBlocked,
     ChangeSetConflict,
@@ -40,7 +41,10 @@ QA_VALIDATION_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_validation_ca
 QA_DIAGNOSTICS_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_answer_diagnostics_v1.json"
 ACTIVE_SNAPSHOT_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "compiled"
 TOPIC_STRUCTURE_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "research-batches"
-EDITORIAL_DRAFT_ROOT = PROJECT_ROOT / "output" / "claim-layer"
+# Generated editorial products are runtime data, not deployed source files.
+# PostgreSQL remains authoritative for semantic knowledge; manuscript artifacts
+# live under DATA_BASE_DIR so a new article does not require a code checkout.
+EDITORIAL_DRAFT_ROOT = WANG_REPOSITORY_DIR
 
 ReviewStatus = Literal["candidate", "approved", "changes_requested", "rejected"]
 
