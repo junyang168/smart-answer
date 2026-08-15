@@ -11,6 +11,10 @@ from typing import Any, Iterable
 
 
 MATTHEW_BOOK_PATTERN = r"(?:太|马太(?:福音)?|馬太(?:福音)?|Matt(?:hew)?\.?|Mt\.?)"
+MATTHEW_REFERENCE_HINT_RE = re.compile(
+    r"(?:马太|馬太|Matthew|Matt|Mt\.?|太\s*\d)",
+    re.IGNORECASE,
+)
 REFERENCE_RE = re.compile(
     rf"(?P<book>{MATTHEW_BOOK_PATTERN})\s*(?P<chapter>\d+)\s*[:：.]\s*"
     rf"(?P<start>\d+)(?:\s*[-–—]\s*"
@@ -102,13 +106,36 @@ def _fragment_ids(records: Iterable[dict[str, Any]]) -> set[str]:
     }
 
 
+def _claim_reference_diagnostics(package: dict[str, Any]) -> dict[str, int]:
+    references = [
+        str(reference)
+        for claim in package.get("claims", [])
+        for reference in claim.get("scripture_refs") or []
+    ]
+    parsed = [reference for reference in references if REFERENCE_RE.search(reference)]
+    unparsed = [reference for reference in references if not REFERENCE_RE.search(reference)]
+    return {
+        "claim_reference_total": len(references),
+        "parsed_claim_reference_total": len(parsed),
+        "unparsed_claim_reference_total": len(unparsed),
+        "unparsed_matthew_reference_total": sum(
+            bool(MATTHEW_REFERENCE_HINT_RE.search(reference)) for reference in unparsed
+        ),
+    }
+
+
 def build_passage_slice(package: dict[str, Any], passage: Passage) -> dict[str, Any]:
+    reference_diagnostics = _claim_reference_diagnostics(package)
     overlapping_claims = [
         row for row in package.get("claims", []) if _record_overlaps(row, passage)
     ]
     claims = [row for row in overlapping_claims if _directly_scoped(row, passage)]
-    contextual_claims = [row for row in overlapping_claims if row not in claims]
     claim_ids = {str(row.get("claim_id")) for row in claims}
+    contextual_claims = [
+        row
+        for row in overlapping_claims
+        if str(row.get("claim_id")) not in claim_ids
+    ]
     observations = [
         row for row in package.get("observations", []) if _record_overlaps(row, passage)
     ]
@@ -147,8 +174,20 @@ def build_passage_slice(package: dict[str, Any], passage: Passage) -> dict[str, 
     ]
     relations = [
         row for row in package.get("claim_relations", [])
-        if str(row.get("source_claim_id") or row.get("from_id")) in claim_ids
-        and str(row.get("target_claim_id") or row.get("to_id")) in claim_ids
+        if str(
+            row.get("source_claim_id")
+            or row.get("from_id")
+            or row.get("source_id")
+            or ""
+        )
+        in claim_ids
+        and str(
+            row.get("target_claim_id")
+            or row.get("to_id")
+            or row.get("target_id")
+            or ""
+        )
+        in claim_ids
     ]
 
     covered_verses = {
@@ -204,6 +243,7 @@ def build_passage_slice(package: dict[str, Any], passage: Passage) -> dict[str, 
             "evidence_steps": len(evidence),
             "eligible_evidence_steps": len(eligible_evidence),
             "claim_relations": len(relations),
+            **reference_diagnostics,
         },
     }
 

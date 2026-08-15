@@ -71,6 +71,104 @@ def test_passage_slice_keeps_full_chinese_book_name_claims() -> None:
     ]
 
 
+def test_passage_slice_keeps_relations_with_real_and_legacy_endpoint_fields() -> None:
+    package = {
+        "claims": [
+            {"claim_id": "CL-1", "scripture_refs": ["马太福音16:18"]},
+            {"claim_id": "CL-2", "scripture_refs": ["马太福音16:18"]},
+        ],
+        "claim_relations": [
+            {
+                "claim_relation_id": "CR-REAL",
+                "source_id": "CL-1",
+                "target_id": "CL-2",
+                "relation_type": "contrasts",
+            },
+            {
+                "claim_relation_id": "CR-EXPLICIT",
+                "source_claim_id": "CL-1",
+                "target_claim_id": "CL-2",
+                "relation_type": "extends",
+            },
+            {
+                "claim_relation_id": "CR-LEGACY",
+                "from_id": "CL-2",
+                "to_id": "CL-1",
+                "relation_type": "duplicate",
+            },
+            {
+                "claim_relation_id": "CR-OUTSIDE",
+                "source_id": "CL-1",
+                "target_id": "CL-OUTSIDE",
+                "relation_type": "contrasts",
+            },
+        ],
+    }
+
+    result = build_passage_slice(package, Passage("Matt", 16, 13, 20))
+
+    assert [row["claim_relation_id"] for row in result["claim_relations"]] == [
+        "CR-REAL",
+        "CR-EXPLICIT",
+        "CR-LEGACY",
+    ]
+
+
+def test_direct_scope_width_boundary_for_matthew_16_13_20() -> None:
+    package = {
+        "claims": [
+            {
+                "claim_id": "CL-WIDTH-24",
+                "title": "二十四節範圍",
+                "scripture_refs": ["馬太福音16:1-24"],
+            },
+            {
+                "claim_id": "CL-WIDTH-25",
+                "title": "二十五節範圍",
+                "scripture_refs": ["馬太福音16:1-25"],
+            },
+        ]
+    }
+
+    result = build_passage_slice(package, Passage("Matt", 16, 13, 20))
+
+    assert [row["claim_id"] for row in result["claims"]] == ["CL-WIDTH-24"]
+    assert [row["claim_id"] for row in result["contextual_claim_leads"]] == [
+        "CL-WIDTH-25"
+    ]
+
+
+def test_slice_reports_unparsed_matthew_references_without_blocking() -> None:
+    package = {
+        "claims": [
+            {"claim_id": "CL-PARSED", "scripture_refs": ["馬太福音16:19"]},
+            {
+                "claim_id": "CL-MATTHEW-UNKNOWN",
+                "scripture_refs": ["马太福音第十六章十九节"],
+            },
+            {"claim_id": "CL-OTHER-BOOK", "scripture_refs": ["彼后2:1"]},
+        ]
+    }
+
+    result = build_passage_slice(package, Passage("Matt", 16, 13, 20))
+
+    assert {
+        key: result["summary"][key]
+        for key in (
+            "claim_reference_total",
+            "parsed_claim_reference_total",
+            "unparsed_claim_reference_total",
+            "unparsed_matthew_reference_total",
+        )
+    } == {
+        "claim_reference_total": 3,
+        "parsed_claim_reference_total": 1,
+        "unparsed_claim_reference_total": 2,
+        "unparsed_matthew_reference_total": 1,
+    }
+    assert [row["claim_id"] for row in result["claims"]] == ["CL-PARSED"]
+
+
 def test_passage_slice_keeps_only_transitive_provenance() -> None:
     package = {
         "package_id": "PKG",
