@@ -9,5 +9,6 @@
 5. 不把一個 composition decision 機械地變成一個標題；可用較少的讀者小節連續覆蓋多個 decision。
 6. 先完整呈現母本論證，再自然交代補充來源的不同著重。不得靜默調和真張力。
 7. 每個實質段落之前保留符合 publication profile 的 provenance 註解，格式必須是單行有效 JSON：`<!-- provenance: {"attribution":"professor","claim_ids":["DK-..."]} -->`。不可使用 `key=value` 格式，也不可把註解放在段落之後。跨來源編輯綜合使用 `editorial_synthesis`，並提供 `claim_ids` 與隱藏的 `synthesis_note`；它不需要在讀者正文反覆顯示「編輯說明」。
+8. ledger 中列出全部 step ID，不等於論證已保留。每個承重步驟都要讓讀者看見：觀察了甚麼、為甚麼重要、如何推到下一步、結論受到甚麼限制。若只用一兩句列出 Petros/petra、弗 2:20 和結論，即使溯源正確也屬壓縮失敗。
 
 若完成文章需要改變 CompositionPlan 的 action、claim 集合、coverage、主要順序或張力處置，返回 `plan_change_required` 與具體請求，不要先寫一篇越權的稿。否則返回 `drafted`、完整 Markdown 和逐節 authoring ledger。

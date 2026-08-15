@@ -34,6 +34,17 @@
     "program_audit_passed",
     "human_publication_decision_approved"
   ],
+  "review_calibration": {
+    "coverage_is_not_depth": true,
+    "required_reader_chain": [
+      "observation",
+      "why_it_matters",
+      "inference_bridge",
+      "qualified_conclusion"
+    ],
+    "maximum_score_when_load_bearing_steps_are_only_summarized": 89,
+    "failure_example": "Merely listing Petros/petra, Ephesians 2:20, and the conclusion without explaining how each step advances or limits the interpretation."
+  },
   "deterministic_warnings": {
     "production_language_terms": [
       "DK-",
