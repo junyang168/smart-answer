@@ -24,6 +24,13 @@ import { useRouter } from 'next/navigation';
 
 const resourceCardsData = [
   {
+    icon: BookOpen,
+    title: '王守仁教授釋經文庫',
+    description: `按聖經經卷或講論主題閱讀正式釋經文章，也可進入信仰問答；文章支援在完整閱讀與原聲講解之間隨時切換。`,
+    link: '/resources/wang-repository',
+    linkLabel: '進入釋經文庫',
+  },
+  {
     icon: FileSignature,
     title: '講義轉逐字稿',
     description: `按系列與講次瀏覽「講義轉逐字稿」的整理稿件，並閱讀完整手稿內容。此模組需先以 Google 帳號登入。`,
