@@ -50,6 +50,8 @@ flowchart LR
   H --> U["Publish"]
 ```
 
+圖中的 rubric `pass` 必須是總分至少 90，並且所有維度硬門檻與 hard failure 檢查同時通過；89 分及以下不得進入人工發布閘門。
+
 Author Agent 可以把多個 composition decision 組織在同一個讀者小節中；這只是呈現層決定，現有 audit 也允許多對一的 heading 映射。若現有 manifest 要求多處「編輯說明」，作者可先把資料邊界集中成較少、較自然的說明，再由 audit 檢查各 decision 是否仍被覆蓋。只有當作者需要改變 action、claim 集合、coverage、主要順序或張力處置時，才返回 `plan_change_required`，提出具體 change request 後停止；它不能靜默改動 CompositionPlan 的實質意圖。
 
 ## 5. 阶段产物

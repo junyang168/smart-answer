@@ -6,4 +6,6 @@
 
 校準規則：不要把 ledger、claim 或 step ID 的完整覆蓋誤判為寫作充分。逐節追問普通讀者是否能看見「觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論」。若關鍵原文、交叉經文與結論只被並列成來源摘要，`base_manuscript_preservation`、`exegetical_reasoning` 和 `concision_without_compression` 必須扣分；這種稿件不得因技術覆蓋完整而得到 90 分以上。
 
+出版最低線是 90 分，不是 80 分。89 分及以下必須判為未通過；即使總分達到 90，任何維度硬門檻或 hard failure 仍可使文章不通過。
+
 不要重做資料抽取，不作沒有來源的外部神學裁判，不直接代寫。每項 finding 必須先給一個本輪暫用的 `finding_id`，並引用稿件中的短 anchor、說明失敗維度、嚴重度、可執行修改與是否 blocking；runner 會在驗證後改成 canonical ID。技術 audit 與文筆判斷分開。

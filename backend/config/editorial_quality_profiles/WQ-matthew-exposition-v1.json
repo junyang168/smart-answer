@@ -1,9 +1,9 @@
 {
   "schema_version": "editorial-writing-quality-profile.v1",
   "profile_id": "WQ-matthew-exposition-v1",
-  "revision": 1,
+  "revision": 2,
   "title": "馬太福音釋經文章寫作質量",
-  "passing_score": 80,
+  "passing_score": 90,
   "reference_score": 90,
   "hard_gate_dimensions": [
     "source_and_exegesis",

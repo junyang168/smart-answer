@@ -161,6 +161,31 @@ def test_hard_gate_cannot_be_offset_by_high_total_score():
     assert outcome["hard_gate_failures"] == ["base_manuscript_preservation"]
 
 
+def test_publication_score_requires_ninety_points():
+    profile = load_json(PROFILE_PATH)
+    assert profile["passing_score"] == 90
+    scores = [
+        {
+            "dimension_id": dimension["id"],
+            "score": dimension["weight"],
+            "evidence": "fixture",
+        }
+        for dimension in profile["dimensions"]
+    ]
+    by_id = {item["dimension_id"]: item for item in scores}
+    by_id["general_reader_readability"]["score"] = 0
+    assert evaluate_editorial_review(
+        {"dimension_scores": scores, "hard_failures": []}, profile
+    )["passed"] is True
+
+    by_id["editorial_voice_restraint"]["score"] = 9
+    outcome = evaluate_editorial_review(
+        {"dimension_scores": scores, "hard_failures": []}, profile
+    )
+    assert outcome["total_score"] == 89
+    assert outcome["passed"] is False
+
+
 def test_generation_fingerprint_changes_with_prompt_model_or_input():
     kwargs = {
         "inputs": {"plan_sha256": "a"},
