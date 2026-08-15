@@ -20,6 +20,11 @@ AUDIT_SCHEMA_VERSION = "editorial-draft-audit.v2"
 PUBLICATION_PROFILE_SCHEMA_VERSION = "publication-profile.v1"
 PUBLICATION_PROFILE_ROOT = Path(__file__).resolve().parents[1] / "config" / "publication_profiles"
 PROVENANCE_COMMENT_RE = re.compile(r"^<!--\s*provenance:\s*(\{.*\})\s*-->$")
+INTERNAL_SOURCE_REFERENCE_RE = re.compile(
+    r"(?<![\w/])(?:S\s+\d{6}|\d{2,}(?:-\d+){3,}|(?:SRC|DK|CL|FR|EV|CD|DRAFT)-[A-Z0-9][A-Z0-9_-]*)(?![\w/])"
+    r"|\btranscript\s+`?(?:S\s+\d{6}|\d{2,}(?:-\d+){2,}|[A-Z0-9][A-Z0-9._-]*\d[A-Z0-9._-]*)`?",
+    flags=re.IGNORECASE,
+)
 VALID_ANCHOR_STATES = {
     "canonical_citation_bound",
     "source_version_bound",
@@ -195,6 +200,31 @@ def _markdown_blocks(content: str) -> list[dict[str, Any]]:
     if pending is not None:
         rows.append({"text": "", "line": len(content.splitlines()) + 1, "provenance": pending})
     return rows
+
+
+def _reader_visible_markdown(markdown: str) -> str:
+    """Remove hidden metadata and link targets while retaining reader-facing labels."""
+    without_comments = re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
+    return re.sub(r"\[([^\]]+)\]\([^\n)]*\)", r"\1", without_comments)
+
+
+def _audit_reader_facing_source_references(
+    markdown: str,
+    findings: list[dict[str, Any]],
+) -> None:
+    visible_markdown = _reader_visible_markdown(markdown)
+    matches = list(dict.fromkeys(INTERNAL_SOURCE_REFERENCE_RE.findall(visible_markdown)))
+    if not matches:
+        return
+    findings.append(
+        _finding(
+            "reader_facing_internal_source_id",
+            "error",
+            "正文出现内部来源编号",
+            "请改用日期、讲道标题与机构等读者可理解的名称；如正文需要点名来源，名称必须链接到讲道网页。发现："
+            + "、".join(matches[:5]),
+        )
+    )
 
 
 def _audit_paragraph_provenance(
@@ -381,6 +411,7 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
     mapping_by_id = {str(item.get("decision_id")): item for item in mappings}
     material_dispositions = config.get("material_dispositions") or []
     findings: list[dict[str, Any]] = []
+    _audit_reader_facing_source_references(markdown, findings)
 
     # The publication contract is owned centrally.  A manuscript may select a
     # profile, but may not write its own exam by redefining required sections.

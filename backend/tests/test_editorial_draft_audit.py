@@ -454,3 +454,41 @@ def test_audit_rejects_manifest_owned_publication_structure(tmp_path: Path) -> N
         item["code"] == "manifest_publication_structure_override"
         for item in result["findings"]
     )
+
+
+def test_audit_rejects_reader_facing_internal_source_id(tmp_path: Path) -> None:
+    manifest = _fixture(tmp_path)
+    draft_path = tmp_path / "draft.md"
+    draft_path.write_text(
+        draft_path.read_text(encoding="utf-8").replace(
+            "正文。",
+            "王教授在 `S 220206` 與 transcript `220-426-110-1139` 中指出這一點。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "fail"
+    assert any(
+        item["code"] == "reader_facing_internal_source_id"
+        for item in result["findings"]
+    )
+
+
+def test_audit_allows_internal_id_only_in_sermon_link_target(tmp_path: Path) -> None:
+    manifest = _fixture(tmp_path)
+    draft_path = tmp_path / "draft.md"
+    draft_path.write_text(
+        draft_path.read_text(encoding="utf-8").replace(
+            "正文。",
+            "王教授在 [2022 年 2 月 6 日達拉斯聖道教會講道](/resources/sermons/S%20220206) 中指出這一點。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "pass"
