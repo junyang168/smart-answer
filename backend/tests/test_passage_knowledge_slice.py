@@ -138,6 +138,24 @@ def test_direct_scope_width_boundary_for_matthew_16_13_20() -> None:
     ]
 
 
+def test_direct_scope_checks_all_references_after_a_broad_overlap() -> None:
+    package = {
+        "claims": [
+            {
+                "claim_id": "CL-BROAD-THEN-EXACT",
+                "scripture_refs": ["Matthew 1:1-28:20", "Matthew 16:19"],
+            }
+        ]
+    }
+
+    result = build_passage_slice(package, Passage("Matt", 16, 13, 20))
+
+    assert [row["claim_id"] for row in result["claims"]] == [
+        "CL-BROAD-THEN-EXACT"
+    ]
+    assert result["contextual_claim_leads"] == []
+
+
 def test_slice_reports_unparsed_matthew_references_without_blocking() -> None:
     package = {
         "claims": [

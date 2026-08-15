@@ -89,8 +89,9 @@ def _directly_scoped(record: dict[str, Any], passage: Passage) -> bool:
             passage_end = (passage.chapter, passage.end_verse)
             if start <= passage_end and end >= passage_start:
                 if start[0] != end[0]:
-                    return False
-                return end[1] - start[1] + 1 <= maximum_width
+                    continue
+                if end[1] - start[1] + 1 <= maximum_width:
+                    return True
     return False
 
 
