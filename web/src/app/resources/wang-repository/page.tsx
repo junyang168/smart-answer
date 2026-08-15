@@ -5,282 +5,213 @@ import { useEffect, useMemo, useState } from "react";
 
 type RepositoryView = "bible" | "topic";
 
+type ScriptureReference = {
+  book: string;
+  book_label: string;
+  chapter: number;
+  verse_start: number;
+  end_chapter: number;
+  verse_end: number;
+  display: string;
+};
+
 type PublicArticleSummary = {
   slug: string;
   title: string;
   passage: string;
+  scripture: ScriptureReference | null;
+  topics: string[];
   href: string;
-};
-
-type BibleReference = {
-  osis: string;
-  display: string;
-};
-
-type RepositoryUnit = {
-  unit_id: string;
-  title: string;
-  primary_bible_refs?: BibleReference[];
-};
-
-type BibleUnitCard = {
-  unit: RepositoryUnit;
-  indexReferences: BibleReference[];
-  anchor: ParsedBibleReference;
-};
-
-type ParsedBibleReference = {
-  book: string;
-  bookOrder: number;
-  bookLabel: string;
-  chapter: number;
-  verse: number;
-  endChapter: number;
-  endVerse: number;
 };
 
 type BibleChapterGroup = {
   chapter: number;
-  units: BibleUnitCard[];
+  articles: PublicArticleSummary[];
 };
 
 type BibleBookGroup = {
   book: string;
-  bookOrder: number;
   bookLabel: string;
   chapters: BibleChapterGroup[];
 };
 
-const BIBLE_BOOKS: Array<[string, string]> = [
-  ["Gen", "創世記"], ["Exod", "出埃及記"], ["Lev", "利未記"], ["Num", "民數記"], ["Deut", "申命記"],
-  ["Josh", "約書亞記"], ["Judg", "士師記"], ["Ruth", "路得記"], ["1Sam", "撒母耳記上"], ["2Sam", "撒母耳記下"],
-  ["1Kgs", "列王紀上"], ["2Kgs", "列王紀下"], ["1Chr", "歷代志上"], ["2Chr", "歷代志下"], ["Ezra", "以斯拉記"],
-  ["Neh", "尼希米記"], ["Esth", "以斯帖記"], ["Job", "約伯記"], ["Ps", "詩篇"], ["Prov", "箴言"],
-  ["Eccl", "傳道書"], ["Song", "雅歌"], ["Isa", "以賽亞書"], ["Jer", "耶利米書"], ["Lam", "耶利米哀歌"],
-  ["Ezek", "以西結書"], ["Dan", "但以理書"], ["Hos", "何西阿書"], ["Joel", "約珥書"], ["Amos", "阿摩司書"],
-  ["Obad", "俄巴底亞書"], ["Jonah", "約拿書"], ["Mic", "彌迦書"], ["Nah", "那鴻書"], ["Hab", "哈巴谷書"],
-  ["Zeph", "西番雅書"], ["Hag", "哈該書"], ["Zech", "撒迦利亞書"], ["Mal", "瑪拉基書"],
-  ["Matt", "馬太福音"], ["Mark", "馬可福音"], ["Luke", "路加福音"], ["John", "約翰福音"], ["Acts", "使徒行傳"],
-  ["Rom", "羅馬書"], ["1Cor", "哥林多前書"], ["2Cor", "哥林多後書"], ["Gal", "加拉太書"], ["Eph", "以弗所書"],
-  ["Phil", "腓立比書"], ["Col", "歌羅西書"], ["1Thess", "帖撒羅尼迦前書"], ["2Thess", "帖撒羅尼迦後書"],
-  ["1Tim", "提摩太前書"], ["2Tim", "提摩太後書"], ["Titus", "提多書"], ["Phlm", "腓利門書"], ["Heb", "希伯來書"],
-  ["Jas", "雅各書"], ["1Pet", "彼得前書"], ["2Pet", "彼得後書"], ["1John", "約翰一書"], ["2John", "約翰二書"],
-  ["3John", "約翰三書"], ["Jude", "猶大書"], ["Rev", "啟示錄"],
+const BIBLE_BOOK_ORDER = [
+  "Gen", "Exod", "Lev", "Num", "Deut", "Josh", "Judg", "Ruth", "1Sam", "2Sam",
+  "1Kgs", "2Kgs", "1Chr", "2Chr", "Ezra", "Neh", "Esth", "Job", "Ps", "Prov",
+  "Eccl", "Song", "Isa", "Jer", "Lam", "Ezek", "Dan", "Hos", "Joel", "Amos",
+  "Obad", "Jonah", "Mic", "Nah", "Hab", "Zeph", "Hag", "Zech", "Mal", "Matt",
+  "Mark", "Luke", "John", "Acts", "Rom", "1Cor", "2Cor", "Gal", "Eph", "Phil",
+  "Col", "1Thess", "2Thess", "1Tim", "2Tim", "Titus", "Phlm", "Heb", "Jas", "1Pet",
+  "2Pet", "1John", "2John", "3John", "Jude", "Rev",
 ];
 
-const BIBLE_BOOK_META = new Map(
-  BIBLE_BOOKS.map(([osis, label], index) => [osis, { order: index, label }]),
-);
+const BIBLE_BOOK_RANK = new Map(BIBLE_BOOK_ORDER.map((book, index) => [book, index]));
 
-function parseBibleReference(reference: BibleReference): ParsedBibleReference {
-  const match = reference.osis.match(/^([1-3]?[A-Za-z]+)\.(\d+)(?:\.(\d+))?(?:-([1-3]?[A-Za-z]+)\.(\d+)(?:\.(\d+))?)?$/);
-  const book = match?.[1] ?? reference.osis;
-  const chapter = Number(match?.[2] ?? 0);
-  const verse = Number(match?.[3] ?? 0);
-  const endChapter = Number(match?.[5] ?? chapter);
-  const endVerse = Number(match?.[6] ?? verse);
-  const metadata = BIBLE_BOOK_META.get(book);
-  return {
-    book,
-    bookOrder: metadata?.order ?? Number.MAX_SAFE_INTEGER,
-    bookLabel: metadata?.label ?? book,
-    chapter,
-    verse,
-    endChapter,
-    endVerse,
-  };
-}
-
-function uniqueBibleUnits(references: Record<string, RepositoryUnit[]>): BibleUnitCard[] {
-  const cards = new Map<string, BibleUnitCard>();
-  for (const [osis, units] of Object.entries(references)) {
-    for (const unit of units) {
-      const existing = cards.get(unit.unit_id);
-      if (existing) {
-        if (!existing.indexReferences.some((reference) => reference.osis === osis)) {
-          existing.indexReferences.push({ osis, display: osis });
-        }
-        continue;
-      }
-      const primaryReferences = unit.primary_bible_refs?.length
-        ? unit.primary_bible_refs
-        : [{ osis, display: osis }];
-      cards.set(unit.unit_id, {
-        unit,
-        indexReferences: [...primaryReferences],
-        anchor: parseBibleReference(primaryReferences[0]),
-      });
-    }
-  }
-  return [...cards.values()];
-}
-
-function groupBibleUnits(cards: BibleUnitCard[]): BibleBookGroup[] {
-  const sorted = [...cards].sort((left, right) =>
-    left.anchor.bookOrder - right.anchor.bookOrder
-    || left.anchor.chapter - right.anchor.chapter
-    || left.anchor.verse - right.anchor.verse
-    || left.anchor.endChapter - right.anchor.endChapter
-    || left.anchor.endVerse - right.anchor.endVerse
-    || left.unit.title.localeCompare(right.unit.title, "zh-Hant"),
-  );
+function groupArticlesByBible(articles: PublicArticleSummary[]): BibleBookGroup[] {
   const books = new Map<string, BibleBookGroup>();
-  for (const card of sorted) {
-    let book = books.get(card.anchor.book);
+  const sorted = articles
+    .filter((article) => article.scripture)
+    .sort((left, right) => {
+      const leftRef = left.scripture!;
+      const rightRef = right.scripture!;
+      return (BIBLE_BOOK_RANK.get(leftRef.book) ?? Number.MAX_SAFE_INTEGER)
+        - (BIBLE_BOOK_RANK.get(rightRef.book) ?? Number.MAX_SAFE_INTEGER)
+        || leftRef.chapter - rightRef.chapter
+        || leftRef.verse_start - rightRef.verse_start
+        || leftRef.end_chapter - rightRef.end_chapter
+        || leftRef.verse_end - rightRef.verse_end;
+    });
+
+  for (const article of sorted) {
+    const reference = article.scripture!;
+    let book = books.get(reference.book);
     if (!book) {
-      book = {
-        book: card.anchor.book,
-        bookOrder: card.anchor.bookOrder,
-        bookLabel: card.anchor.bookLabel,
-        chapters: [],
-      };
-      books.set(card.anchor.book, book);
+      book = { book: reference.book, bookLabel: reference.book_label, chapters: [] };
+      books.set(reference.book, book);
     }
-    let chapter = book.chapters.find((item) => item.chapter === card.anchor.chapter);
+    let chapter = book.chapters.find((item) => item.chapter === reference.chapter);
     if (!chapter) {
-      chapter = { chapter: card.anchor.chapter, units: [] };
+      chapter = { chapter: reference.chapter, articles: [] };
       book.chapters.push(chapter);
     }
-    chapter.units.push(card);
+    chapter.articles.push(article);
   }
   return [...books.values()];
 }
 
+function groupArticlesByTopic(articles: PublicArticleSummary[]) {
+  const topics = new Map<string, PublicArticleSummary[]>();
+  for (const article of articles) {
+    for (const topic of article.topics ?? []) {
+      const group = topics.get(topic) ?? [];
+      group.push(article);
+      topics.set(topic, group);
+    }
+  }
+  return [...topics.entries()].sort(([left], [right]) => left.localeCompare(right, "zh-Hant"));
+}
+
+function ArticleLink({ article }: { article: PublicArticleSummary }) {
+  return (
+    <Link
+      href={article.href}
+      className="group block rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-700"
+    >
+      <span className="text-sm font-bold text-amber-800">{article.passage}</span>
+      <h4 className="mt-2 text-lg font-bold leading-7 text-stone-950 group-hover:text-amber-900">
+        {article.title}
+      </h4>
+      <span className="mt-3 inline-block text-sm font-semibold text-stone-500 group-hover:text-amber-800">
+        閱讀文章 <span aria-hidden="true">→</span>
+      </span>
+    </Link>
+  );
+}
+
 export default function WangRepositoryPage() {
   const [view, setView] = useState<RepositoryView>("bible");
-  const [data, setData] = useState<any>(null);
-  const [publicArticles, setPublicArticles] = useState<PublicArticleSummary[]>([]);
+  const [articles, setArticles] = useState<PublicArticleSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/public/wang-articles", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : { articles: [] })
-      .then((payload) => setPublicArticles(payload.articles ?? []));
+    const controller = new AbortController();
+    fetch("/api/public/wang-articles", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("暫時無法讀取文章目錄。");
+        return response.json();
+      })
+      .then((payload) => setArticles(payload.articles ?? []))
+      .catch((reason) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setError(reason instanceof Error ? reason.message : "暫時無法讀取文章目錄。");
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
   }, []);
 
-  useEffect(() => {
-    setData(null);
-    fetch(`/api/canonical-repository/${view === "bible" ? "bible-index" : "topic-index"}`, {
-      cache: "no-store",
-    })
-      .then((response) => response.json())
-      .then(setData);
-  }, [view]);
-
-  const bibleUnits = useMemo(
-    () => uniqueBibleUnits(data?.references ?? {}),
-    [data?.references],
-  );
-  const bibleBooks = useMemo(() => groupBibleUnits(bibleUnits), [bibleUnits]);
-  const unavailable = data?.available === false;
+  const bibleBooks = useMemo(() => groupArticlesByBible(articles), [articles]);
+  const topicGroups = useMemo(() => groupArticlesByTopic(articles), [articles]);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12">
-      <p className="text-sm font-semibold text-sky-700">達拉斯聖道教會文獻整理計畫</p>
-      <h1 className="mt-1 text-4xl font-bold">王守仁教授釋經與專題講論文庫</h1>
-      <p className="mt-3 max-w-3xl text-slate-600">
-        按聖經經卷與講論專題，整理王守仁教授在不同時期、不同場合的釋經內容。
-      </p>
-      <div className="mt-6 flex flex-wrap gap-3" aria-label="文庫探索方式">
-        <button
-          onClick={() => setView("bible")}
-          className={`rounded-lg px-4 py-2 font-semibold ${view === "bible" ? "bg-sky-600 text-white" : "bg-slate-100"}`}
-        >
-          聖經目錄
-        </button>
-        <button
-          onClick={() => setView("topic")}
-          className={`rounded-lg px-4 py-2 font-semibold ${view === "topic" ? "bg-sky-600 text-white" : "bg-slate-100"}`}
-        >
-          主題目錄
-        </button>
-        <Link
-          href="/resources/qa"
-          className="rounded-lg bg-slate-100 px-4 py-2 font-semibold text-slate-800 hover:bg-slate-200"
-        >
-          信仰問答
-        </Link>
-      </div>
+    <main className="min-h-screen bg-stone-50">
+      <div className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
+        <p className="text-sm font-semibold tracking-wide text-amber-800">達拉斯聖道教會文獻整理計畫</p>
+        <h1 className="mt-2 font-serif text-4xl font-bold leading-tight text-stone-950 sm:text-5xl">
+          王守仁教授釋經文庫
+        </h1>
+        <p className="mt-4 max-w-3xl text-lg leading-8 text-stone-600">
+          按聖經經卷、章節或講論主題尋找正式發布的釋經文章。每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解。
+        </p>
 
-      {publicArticles.length > 0 && (
-        <section className="mt-10 rounded-3xl border border-amber-200 bg-amber-50/70 p-6 sm:p-8">
-          <p className="text-sm font-bold tracking-wide text-amber-800">正式釋經文章</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {publicArticles.map((article) => (
-              <Link key={article.slug} href={article.href} className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                <span className="text-sm font-semibold text-amber-800">{article.passage}</span>
-                <h2 className="mt-2 text-xl font-bold leading-8 text-slate-950">{article.title}</h2>
-                <p className="mt-3 text-sm text-slate-600">閱讀全文，或按相同小節聆聽王教授原聲講解。</p>
-              </Link>
+        <nav className="mt-8 flex flex-wrap gap-3" aria-label="文庫探索方式">
+          <button
+            type="button"
+            aria-pressed={view === "bible"}
+            onClick={() => setView("bible")}
+            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "bible" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
+          >
+            聖經目錄
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "topic"}
+            onClick={() => setView("topic")}
+            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "topic" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
+          >
+            主題目錄
+          </button>
+          <Link href="/resources/qa" className="rounded-full bg-white px-5 py-2.5 font-semibold text-stone-700 shadow-sm hover:bg-stone-100">
+            信仰問答
+          </Link>
+        </nav>
+
+        {loading ? (
+          <p className="py-16 text-stone-600" role="status">正在讀取文章目錄…</p>
+        ) : error ? (
+          <div className="mt-12 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-900" role="alert">{error}</div>
+        ) : articles.length === 0 ? (
+          <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
+            目前尚無正式發布的文章。
+          </div>
+        ) : view === "bible" ? (
+          <div className="mt-12 space-y-14">
+            {bibleBooks.map((book) => (
+              <section key={book.book} aria-labelledby={`book-${book.book}`}>
+                <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-800">{book.book}</p>
+                <h2 id={`book-${book.book}`} className="mt-1 border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950">
+                  {book.bookLabel}
+                </h2>
+                <div className="mt-7 space-y-9">
+                  {book.chapters.map((chapter) => (
+                    <section key={`${book.book}-${chapter.chapter}`} aria-labelledby={`${book.book}-${chapter.chapter}`}>
+                      <h3 id={`${book.book}-${chapter.chapter}`} className="text-xl font-bold text-stone-700">第 {chapter.chapter} 章</h3>
+                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                        {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
-        </section>
-      )}
-
-      {!data ? (
-        <p className="py-12">讀取中…</p>
-      ) : unavailable ? (
-        <div className="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-6">
-          <h2 className="font-bold text-amber-900">文庫尚未正式發布</h2>
-          <p className="mt-2 text-amber-800">候選單元仍在人工審閱；公開頁不會顯示未批准內容。</p>
-        </div>
-      ) : view === "bible" ? (
-        <div className="mt-8 space-y-10">
-          {bibleBooks.map((book) => (
-            <section key={book.book}>
-              <div className="border-b-2 border-sky-600 pb-3">
-                <p className="text-sm font-semibold uppercase tracking-wide text-sky-700">{book.book}</p>
-                <h2 className="text-3xl font-bold text-slate-900">{book.bookLabel}</h2>
-              </div>
-              <div className="mt-5 space-y-7">
-                {book.chapters.map((chapter) => (
-                  <section key={`${book.book}-${chapter.chapter}`}>
-                    <h3 className="text-xl font-bold text-slate-700">第 {chapter.chapter} 章</h3>
-                    <div className="mt-3 space-y-3">
-                      {chapter.units.map(({ unit, indexReferences }) => (
-                        <article key={unit.unit_id} className="rounded-xl border bg-white p-5">
-                          <div className="flex flex-wrap gap-2">
-                            {indexReferences.map((reference, index) => (
-                              <span
-                                key={reference.osis}
-                                className={`rounded px-2 py-1 text-sm font-semibold ${index === 0 ? "bg-sky-100 text-sky-900" : "bg-slate-100 text-slate-600"}`}
-                              >
-                                {reference.display}
-                              </span>
-                            ))}
-                          </div>
-                          <Link
-                            href={`/resources/wang-repository/${unit.unit_id}`}
-                            className="mt-3 block font-semibold hover:underline"
-                          >
-                            {unit.title}
-                          </Link>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-8 space-y-5">
-          {(data.topics ?? []).map((topic: any) => (
-            <section key={topic.topic_id} className="rounded-xl border bg-white p-5">
-              <h2 className="font-bold">{topic.path.join(" › ")}</h2>
-              {topic.units.map((unit: RepositoryUnit) => (
-                <Link
-                  key={unit.unit_id}
-                  href={`/resources/wang-repository/${unit.unit_id}`}
-                  className="mt-3 block text-indigo-700 hover:underline"
-                >
-                  {unit.title}
-                </Link>
-              ))}
-            </section>
-          ))}
-        </div>
-      )}
+        ) : topicGroups.length > 0 ? (
+          <div className="mt-12 space-y-10">
+            {topicGroups.map(([topic, topicArticles]) => (
+              <section key={topic} aria-labelledby={`topic-${topic}`}>
+                <h2 id={`topic-${topic}`} className="border-b border-stone-300 pb-3 font-serif text-2xl font-bold text-stone-950">{topic}</h2>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  {topicArticles.map((article) => <ArticleLink key={article.slug} article={article} />)}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
+            已發布文章尚未設定公開主題。
+          </div>
+        )}
+      </div>
     </main>
   );
 }

@@ -136,6 +136,33 @@ def test_unapproved_article_is_not_publicly_discoverable(tmp_path: Path, monkeyp
     assert exc.value.status_code == 404
 
 
+def test_public_article_index_contains_article_navigation_metadata(tmp_path: Path, monkeypatch) -> None:
+    _publication_fixture(tmp_path, monkeypatch)
+
+    result = public_wang_articles.list_public_articles()
+
+    assert result == {
+        "articles": [
+            {
+                "slug": "matthew-16-13-20",
+                "title": "馬太福音 16:13–20：認信與教會",
+                "passage": "太16:13–20",
+                "scripture": {
+                    "book": "Matt",
+                    "book_label": "馬太福音",
+                    "chapter": 16,
+                    "verse_start": 13,
+                    "end_chapter": 16,
+                    "verse_end": 20,
+                    "display": "太16:13–20",
+                },
+                "topics": ["認信", "教會"],
+                "href": "/resources/wang-repository/articles/matthew-16-13-20",
+            }
+        ]
+    }
+
+
 def test_changed_manuscript_invalidates_existing_approval(tmp_path: Path, monkeypatch) -> None:
     manuscript = _publication_fixture(tmp_path, monkeypatch)
     manuscript.write_text(manuscript.read_text(encoding="utf-8") + "\n未批准的新段落。", encoding="utf-8")

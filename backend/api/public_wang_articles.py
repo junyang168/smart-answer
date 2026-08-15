@@ -27,6 +27,32 @@ BOOK_SLUGS = {
     "Rom": "romans",
 }
 
+BOOK_METADATA = {
+    "創": ("Gen", "創世記"), "出": ("Exod", "出埃及記"), "利": ("Lev", "利未記"),
+    "民": ("Num", "民數記"), "申": ("Deut", "申命記"), "書": ("Josh", "約書亞記"),
+    "士": ("Judg", "士師記"), "得": ("Ruth", "路得記"), "撒上": ("1Sam", "撒母耳記上"),
+    "撒下": ("2Sam", "撒母耳記下"), "王上": ("1Kgs", "列王紀上"), "王下": ("2Kgs", "列王紀下"),
+    "代上": ("1Chr", "歷代志上"), "代下": ("2Chr", "歷代志下"), "拉": ("Ezra", "以斯拉記"),
+    "尼": ("Neh", "尼希米記"), "斯": ("Esth", "以斯帖記"), "伯": ("Job", "約伯記"),
+    "詩": ("Ps", "詩篇"), "箴": ("Prov", "箴言"), "傳": ("Eccl", "傳道書"),
+    "歌": ("Song", "雅歌"), "賽": ("Isa", "以賽亞書"), "耶": ("Jer", "耶利米書"),
+    "哀": ("Lam", "耶利米哀歌"), "結": ("Ezek", "以西結書"), "但": ("Dan", "但以理書"),
+    "何": ("Hos", "何西阿書"), "珥": ("Joel", "約珥書"), "摩": ("Amos", "阿摩司書"),
+    "俄": ("Obad", "俄巴底亞書"), "拿": ("Jonah", "約拿書"), "彌": ("Mic", "彌迦書"),
+    "鴻": ("Nah", "那鴻書"), "哈": ("Hab", "哈巴谷書"), "番": ("Zeph", "西番雅書"),
+    "該": ("Hag", "哈該書"), "亞": ("Zech", "撒迦利亞書"), "瑪": ("Mal", "瑪拉基書"),
+    "太": ("Matt", "馬太福音"), "可": ("Mark", "馬可福音"), "路": ("Luke", "路加福音"),
+    "約": ("John", "約翰福音"), "徒": ("Acts", "使徒行傳"), "羅": ("Rom", "羅馬書"),
+    "林前": ("1Cor", "哥林多前書"), "林後": ("2Cor", "哥林多後書"), "加": ("Gal", "加拉太書"),
+    "弗": ("Eph", "以弗所書"), "腓": ("Phil", "腓立比書"), "西": ("Col", "歌羅西書"),
+    "帖前": ("1Thess", "帖撒羅尼迦前書"), "帖後": ("2Thess", "帖撒羅尼迦後書"),
+    "提前": ("1Tim", "提摩太前書"), "提後": ("2Tim", "提摩太後書"), "多": ("Titus", "提多書"),
+    "門": ("Phlm", "腓利門書"), "來": ("Heb", "希伯來書"), "雅": ("Jas", "雅各書"),
+    "彼前": ("1Pet", "彼得前書"), "彼後": ("2Pet", "彼得後書"), "約壹": ("1John", "約翰一書"),
+    "約貳": ("2John", "約翰二書"), "約參": ("3John", "約翰三書"), "猶": ("Jude", "猶大書"),
+    "啟": ("Rev", "啟示錄"),
+}
+
 
 def _read_json(path: Path) -> dict:
     try:
@@ -87,6 +113,41 @@ def _manifest_passage_slug(item: dict) -> str:
     if match:
         return f"matthew-{match.group(1)}-{match.group(2)}-{match.group(3)}"
     return ""
+
+
+def _public_scripture_reference(item: dict) -> dict | None:
+    passage = str(item.get("passage") or "").strip()
+    match = re.fullmatch(r"([^\d\s]+)\s*(\d+):(\d+)(?:[–—-](?:(\d+):)?(\d+))?", passage)
+    if not match:
+        return None
+    book_display, chapter, verse_start, end_chapter, verse_end = match.groups()
+    metadata = BOOK_METADATA.get(book_display)
+    if not metadata:
+        return None
+    book, book_label = metadata
+    return {
+        "book": book,
+        "book_label": book_label,
+        "chapter": int(chapter),
+        "verse_start": int(verse_start),
+        "end_chapter": int(end_chapter or chapter),
+        "verse_end": int(verse_end or verse_start),
+        "display": passage,
+    }
+
+
+def _public_topics(item: dict) -> list[str]:
+    configured = item.get("public_topics")
+    if isinstance(configured, list):
+        topics = [str(topic).strip() for topic in configured if str(topic).strip()]
+        if topics:
+            return list(dict.fromkeys(topics))
+    title = str(item.get("title") or "")
+    subtitle = title.split("：", maxsplit=1) if "：" in title else re.split(r":\s+", title, maxsplit=1)
+    if len(subtitle) < 2:
+        return []
+    topics = [topic.strip() for topic in re.split(r"[、，,]|(?:與|和|及)", subtitle[1]) if topic.strip()]
+    return list(dict.fromkeys(topics))
 
 
 def _approved_publication(manifest_path: Path, item: dict) -> tuple[Path, dict] | None:
@@ -228,6 +289,8 @@ def list_public_articles():
                     "slug": slug,
                     "title": str(item.get("title") or "").strip(),
                     "passage": str(item.get("passage") or "").strip(),
+                    "scripture": _public_scripture_reference(item),
+                    "topics": _public_topics(item),
                     "href": f"/resources/wang-repository/articles/{slug}",
                 }
             )
