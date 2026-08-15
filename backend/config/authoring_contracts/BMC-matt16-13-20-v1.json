@@ -1,0 +1,301 @@
+{
+  "schema_version": "matthew-exposition-base-contract.v1",
+  "contract_id": "BMC-matt16-13-20-v1",
+  "passage": "Matt.16.13-Matt.16.20",
+  "authoring_mode": "verified_manuscript_integration",
+  "composition_plan": {
+    "plan_id": "CP-matthew-16-13-20",
+    "sha256": "d75e6ae61bbff5156282d3c08b5093f66e0b406006e1877e057f5c368abd5ba4"
+  },
+  "base_source": {
+    "source_id": "notes_manuscript:16章釋經",
+    "path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+    "sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+    "fidelity_status": "current_passed",
+    "section_anchor": "## 二、彼得的认信：耶稣是基督，是永生神的儿子"
+  },
+  "additional_base_sources": [
+    {
+      "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+      "path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_彌賽亞，捨己/final.md",
+      "sha256": "ab0eb2e591f028d8071ec870e4dbd56b261a00d1cf79d86a412eb1b662b27d18",
+      "fidelity_status": "current_passed",
+      "section_anchor": "#### 太 16:20 的文本與保密命令的脈絡"
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "reader-sec-01",
+      "reader_heading": "在該撒利亞腓立比：你們說我是誰？",
+      "decision_ids": ["CD-M16-002-01"],
+      "thesis": "耶穌在以該撒命名的外邦城市追問身分，把眾人的意見收緊為門徒自己的王權與效忠回答。",
+      "required_argument_steps": [
+        {
+          "step_id": "M16-S01-A",
+          "role": "historical_context_to_question",
+          "statement": "以該撒利亞腓立比的命名、外邦環境和皇帝權柄建立王權對照，但不擴寫城市專題。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:79",
+          "source_excerpt": "耶穌選擇在這個地方提出這個問題，帶有明確的目的指向——在一個以羅馬皇帝命名的城市境內，「到底要誰做王」的問題具有特殊的對照意義，這一邏輯延續至第15、16節的進一步追問。"
+        },
+        {
+          "step_id": "M16-S01-B",
+          "role": "narrative_narrowing",
+          "statement": "耶穌先問眾人的看法，再要求門徒自己回答；彼得代表門徒作出認信。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:83-89",
+          "source_excerpt": "耶穌先問眾人對人子的看法（第13節），隨後在第15節直接轉向門徒"
+        }
+      ],
+      "allowed_operations": ["preserve", "clarify", "merge_reader_heading"],
+      "ineligible_operations": [
+        "expand_city_history_topic",
+        "imitate_classroom_questions"
+      ]
+    },
+    {
+      "section_id": "reader-sec-02",
+      "reader_heading": "彼得的認信與天父的啟示",
+      "decision_ids": ["CD-M16-002-02", "CD-M16-002-03"],
+      "thesis": "彼得所認的基督是兼具先知、祭司、君王職分的受膏者；第17節保留經文與資料邊界，不由 AI 補作啟示論。",
+      "required_argument_steps": [
+        {
+          "step_id": "M16-S02-A",
+          "role": "term_and_office_explanation",
+          "statement": "解釋基督／彌賽亞與先知、祭司、君王三重受膏職分，以及耶穌兼具三職的獨特性。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:91",
+          "source_excerpt": "「基督」一詞來自希臘文 Χριστὸς，意為「受膏者」；對應的希伯來文詞彙即「彌賽亞」。在猶太人的社會傳統中，受膏者涵蓋三種職分：先知、祭司、君王。"
+        }
+      ],
+      "coverage_boundaries": [
+        {
+          "decision_id": "CD-M16-002-03",
+          "passage": "Matt.16.17",
+          "visible_label_required_by_current_audit": true,
+          "rule": "經文必須出現；現有材料沒有教授的獨立解釋，不得用一般啟示論補寫。資料說明應最短並與本節連續閱讀。"
+        }
+      ],
+      "allowed_operations": ["preserve", "clarify", "merge_reader_heading"],
+      "ineligible_operations": [
+        "expand_systematic_christology",
+        "invent_revelation_exegesis"
+      ]
+    },
+    {
+      "section_id": "reader-sec-03",
+      "reader_heading": "彼得、磐石與教會",
+      "decision_ids": ["CD-M16-002-04", "CD-M16-002-05"],
+      "thesis": "先完整呈現母本由 Petros/petra 和弗2:20 指向基督為終極根基的論證，再自然保留相關講道對認信／所領受真理的不同著重。",
+      "required_argument_steps": [
+        {
+          "step_id": "M16-S03-A",
+          "role": "original_language_observation_and_limit",
+          "statement": "Petros 與 petra 字根相關但詞形和陰陽性不同；這使磐石不能不經論證就等同彼得本人。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:99",
+          "source_excerpt": "這節經文在原文層面存在一個關鍵的語法區分：Πέτρος 是陽性名詞，πέτρα 是陰性名詞。兩個詞雖然字根相近，卻是不同的詞。"
+        },
+        {
+          "step_id": "M16-S03-B",
+          "role": "cross_reference_observation",
+          "statement": "弗2:20把使徒和先知置於同一定冠詞下，形成共同的根基性見證。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:107",
+          "source_excerpt": "在弗 2:20 的原文中，「使徒和先知」只有一個定冠詞，語法上指向同一個根基。"
+        },
+        {
+          "step_id": "M16-S03-C",
+          "role": "base_conclusion",
+          "statement": "使徒群體共同指向作房角石的基督，因此基督是教會終極根基，不是彼得個人的權位。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:107",
+          "source_excerpt": "使徒群體共同指向的根基是基督耶穌。"
+        }
+      ],
+      "coverage_boundaries": [
+        {
+          "decision_id": "CD-M16-002-05",
+          "passage": "Matt.16.18b",
+          "visible_label_required_by_current_audit": true,
+          "rule": "保留陰間的權柄／門不能勝過教會的經文；不補陰間之門語義、教會論或末世論。"
+        }
+      ],
+      "allowed_operations": [
+        "preserve",
+        "clarify",
+        "merge_reader_heading",
+        "add_tension_after_base"
+      ],
+      "ineligible_operations": [
+        "compress_to_source_summary",
+        "replace_with_supplement",
+        "silently_harmonize_tension"
+      ]
+    },
+    {
+      "section_id": "reader-sec-04",
+      "reader_heading": "天國鑰匙與受約束的教會權柄",
+      "decision_ids": ["CD-M16-002-06", "CD-M16-002-07", "CD-M16-002-08"],
+      "thesis": "綑綁與釋放的範圍存在來源張力，但未來完成式、太18:18、約20:23和徒15共同限制權柄方向：天上先定，教會辨認、宣告並執行。",
+      "required_argument_steps": [
+        {
+          "step_id": "M16-S04-A",
+          "role": "base_semantic_scope",
+          "statement": "母本把綑綁與釋放理解為可涉及人與事：禁止／准許事情，也可接納／排除人。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:141",
+          "source_excerpt": "值得注意的是，「綑綁」在原文語法上是中性，因此其指涉對象可以是人，也可以是事。指事時，意為禁止某件事；指人時，意為不准某人進入天國。"
+        },
+        {
+          "step_id": "M16-S04-B",
+          "role": "tense_observation_and_authority_direction",
+          "statement": "未來完成式表明不是地上先決定、天上再跟從，而是天上已有標準，彼得在地上執行。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:145",
+          "source_excerpt": "它所表達的不是「彼得在地上決定，天上隨後跟從」，而是「天上早已決定，彼得在地上執行天上已定的標準」。"
+        },
+        {
+          "step_id": "M16-S04-C",
+          "role": "pronoun_and_scope_extension",
+          "statement": "太16的單數對彼得說話，太18的複數把同一權柄擴展給門徒與教會。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:149-153",
+          "source_excerpt": "此處代名詞由單數 σύ 轉為複數 ὑμῖν，指向的是教會整體，而非單指彼得。"
+        },
+        {
+          "step_id": "M16-S04-D",
+          "role": "john_parallel_and_limited_example",
+          "statement": "約20:23作平行例，說明教會按福音已定條件宣告赦罪，而不是自行創造標準。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:157-161",
+          "source_excerpt": "三段經文在語法結構上相互印證，共同指向同一個原則：執行者是使徒與教會，但標準的制定者是神。"
+        },
+        {
+          "step_id": "M16-S04-E",
+          "role": "acts_historical_example",
+          "statement": "徒15只作有限歷史實例：教會經過真實商議，查驗聖靈已顯明的旨意，而不是自主立法。",
+          "source_id": "notes_manuscript:16章釋經",
+          "source_span": "final.md:235",
+          "source_excerpt": "徒15章的核心神學立場在於：耶路撒冷會議的決定，並非由使徒自行裁定外邦人要不要守摩西律法，而是查驗聖靈（天上的標準）所得出的結論。"
+        }
+      ],
+      "allowed_operations": [
+        "preserve",
+        "clarify",
+        "merge_reader_heading",
+        "compress_example",
+        "add_tension_after_base"
+      ],
+      "ineligible_operations": [
+        "silently_harmonize_semantic_scope",
+        "deny_acts15_deliberation",
+        "expand_acts15_topic"
+      ]
+    },
+    {
+      "section_id": "reader-sec-05",
+      "reader_heading": "為何暫時不可宣告祂是基督",
+      "decision_ids": ["CD-M16-002-09"],
+      "thesis": "保密命令有具體處境與救贖使命原因；門徒認對了彌賽亞身分，尚未明白受苦、十字架與復活的使命。",
+      "required_argument_steps": [
+        {
+          "step_id": "M16-S05-A",
+          "role": "narrative_context",
+          "statement": "第20節緊接彼得認信，保密命令不是孤立謎題，必須從當時歷史與宣教處境理解。",
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "source_span": "final.md:7-9",
+          "source_excerpt": "這節經文記載耶穌在彼得宣認祂是基督之後，立即命令門徒對外保密。這一命令並非孤立事件"
+        },
+        {
+          "step_id": "M16-S05-B",
+          "role": "identity_mission_distinction",
+          "statement": "彼得認對了彌賽亞身分，卻尚未明白彌賽亞受苦、十字架與救贖的性質和使命。",
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "source_span": "final.md:17-19",
+          "source_excerpt": "彼得在該撒利亞腓立比宣認耶穌為基督，這一認信本身是正確的；然而彼得與門徒尚未明白，這位彌賽亞來到世上真正的工作，是受苦並死在十字架上，為罪付上代價。"
+        },
+        {
+          "step_id": "M16-S05-C",
+          "role": "historical_reason_and_transition",
+          "statement": "政治彌賽亞期待可能妨礙十字架使命；第20節因此收束身分問題並引向21節以後的受苦教導。",
+          "source_id": "notes_manuscript:16_章_-_彌賽亞，捨己",
+          "source_span": "final.md:38",
+          "source_excerpt": "原因並非否認彌賽亞身份，而是當時眾人（包括門徒）尚未明白祂來是要為罪死在十字架上。他們期待的是征服羅馬壓迫的猶太彌賽亞概念。"
+        }
+      ],
+      "allowed_operations": [
+        "preserve",
+        "clarify",
+        "merge_reader_heading",
+        "route_out"
+      ],
+      "ineligible_operations": [
+        "expand_wrede_topic",
+        "state_political_outcome_as_certain",
+        "imitate_classroom_repetition"
+      ]
+    }
+  ],
+  "supplemental_material": [
+    {
+      "claim_ids": ["DK-a26f0a7e9ba4-CL008", "DK-a26f0a7e9ba4-CL009"],
+      "operation": "corroborate",
+      "placement": "reader-sec-01-and-02",
+      "description": "印證該撒／基督對照與三重職分，不重複母本或模仿課堂語氣。"
+    },
+    {
+      "claim_ids": [
+        "DK-e50720f3684d-CL001",
+        "DK-e50720f3684d-CL002",
+        "DK-3d012c24a542-CL001",
+        "DK-566e8ca150dd-CL006",
+        "DK-566e8ca150dd-CL007"
+      ],
+      "operation": "tension",
+      "placement": "reader-sec-03-after-base-argument",
+      "description": "相關講道著重彼得的認信或所領受真理；與母本的基督本身說共同排除彼得個人，但不可靜默合成單一公式。"
+    },
+    {
+      "claim_ids": [
+        "DK-e50720f3684d-CL015",
+        "DK-566e8ca150dd-CL009",
+        "DK-0d5b2062b148-CL015"
+      ],
+      "operation": "tension",
+      "placement": "reader-sec-04-after-base-semantic-scope",
+      "description": "母本的人與事廣義和較後講授的禁止／准許窄義須分別歸屬；逐字證據不足的排除性主張不可冒充原聲。"
+    },
+    {
+      "claim_ids": [
+        "DK-e50720f3684d-CL018",
+        "DK-3d012c24a542-CL004",
+        "DK-91b546f25db1-CL016",
+        "DK-e50720f3684d-CL019",
+        "DK-3d012c24a542-CL010",
+        "DK-6f059dbca908-CL006"
+      ],
+      "operation": "qualify",
+      "placement": "reader-sec-04-examples",
+      "description": "約20:23的『哪一種人』解釋須清楚歸屬；徒15只保留聖靈工作、經文相合、群體查驗三點。"
+    },
+    {
+      "claim_ids": [
+        "DK-72483dc200ad-CL007",
+        "DK-72483dc200ad-CL009",
+        "DK-3d012c24a542-CL013"
+      ],
+      "operation": "route_out",
+      "placement": "reader-sec-05-note-only",
+      "description": "Wrede 生平、理論興衰和完整彌賽亞秘密論轉介專題，不在本文展開。"
+    }
+  ],
+  "global_rules": [
+    "兩份 notes final.md 是主要框架；講道只作印證、延伸、限定、張力或專題轉介。",
+    "正文平實而充實，不模仿課堂口頭禪，不反覆點名王教授。",
+    "太16:17與16:18b保留經文和最短資料邊界，不製造教授解釋。",
+    "徒15可以說教會查驗聖靈已顯明的旨意，不可說沒有辯論或群體判斷。",
+    "每個實質段落保留隱藏 provenance；讀者正文不得出現資料庫或審核語言。"
+  ],
+  "status": "editor_confirmed"
+}

@@ -126,6 +126,7 @@ type EditorialDraftAudit = {
     professor_paragraph_total: number;
     scripture_paragraph_total: number;
     editor_paragraph_total: number;
+    editorial_synthesis_paragraph_total: number;
   };
   publication_profile: {
     profile_id: string;
@@ -141,10 +142,14 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
   const [draft, setDraft] = useState<EditorialDraft | null>(null);
   const [error, setError] = useState("");
 
-  const mediaByHeading = useMemo(
-    () => new Map((draft?.decision_media_sections ?? []).map((section) => [section.markdown_heading.trim(), section])),
-    [draft],
-  );
+  const mediaSectionsByHeading = useMemo(() => {
+    const grouped = new Map<string, DecisionMediaSection[]>();
+    for (const section of draft?.decision_media_sections ?? []) {
+      const heading = section.markdown_heading.trim();
+      grouped.set(heading, [...(grouped.get(heading) ?? []), section]);
+    }
+    return grouped;
+  }, [draft]);
 
   const displayMarkdown = useMemo(() => markdownForDisplay(draft?.markdown ?? ""), [draft?.markdown]);
 
@@ -239,10 +244,11 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   每個正文段落都必須對應教授主張、經文引用，或清楚標示為編輯說明；未交代來源即不能通過。
                 </p>
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                   <div className="rounded-xl bg-emerald-50 p-3"><div className="text-xl font-bold text-emerald-900">{draft.audit.summary.professor_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-emerald-800">教授原意</div></div>
                   <div className="rounded-xl bg-sky-50 p-3"><div className="text-xl font-bold text-sky-900">{draft.audit.summary.scripture_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-sky-800">經文引用</div></div>
                   <div className="rounded-xl bg-violet-50 p-3"><div className="text-xl font-bold text-violet-900">{draft.audit.summary.editor_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-violet-800">編輯說明</div></div>
+                  <div className="rounded-xl bg-amber-50 p-3"><div className="text-xl font-bold text-amber-900">{draft.audit.summary.editorial_synthesis_paragraph_total}</div><div className="mt-1 text-xs font-semibold text-amber-800">跨來源綜合</div></div>
                 </div>
               </div>
             </div>
@@ -265,12 +271,21 @@ export default function EditorialDraftPage({ params }: { params: { draftId: stri
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              h3: ({ children }) => {
+                const sections = mediaSectionsByHeading.get(nodeText(children).trim()) ?? [];
+                return (
+                  <>
+                    <h3>{children}</h3>
+                    {sections.map((section) => <IntegratedSourceMedia key={section.decision_id} section={section} />)}
+                  </>
+                );
+              },
               h4: ({ children }) => {
-                const section = mediaByHeading.get(nodeText(children).trim());
+                const sections = mediaSectionsByHeading.get(nodeText(children).trim()) ?? [];
                 return (
                   <>
                     <h4>{children}</h4>
-                    {section && <IntegratedSourceMedia section={section} />}
+                    {sections.map((section) => <IntegratedSourceMedia key={section.decision_id} section={section} />)}
                   </>
                 );
               },

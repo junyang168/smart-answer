@@ -1,15 +1,23 @@
 # Technical Specification: Notes to Sermon Transformation System
 
 ## 1. System Architecture
-The system follows a monolithic architecture with a clear separation between the frontend (Next.js) and backend (FastAPI/Python). The core logic resides in the backend, specifically in the `multi_agent` package.
+
+The notes-to-sermon system uses explicit, artifact-backed pipelines behind a
+FastAPI API and a Next.js editing interface. The old
+`backend/api/multi_agent/` state-machine orchestrator has been retired and
+removed. It is not the foundation for future agent orchestration.
+
+The current operational source of truth is
+[Notes to Sermon Workflow](../../.agents/workflows/notes_to_sermon.md). This
+document records lower-level API, storage, transcript, and repository details.
 
 ### 1.1. High-Level Components
 *   **Web Client**: Next.js 13+ App Router. Handles UI state polling and rendering.
 *   **API Layer**: FastAPI routers (`sermon_converter_router.py`). Exposes endpoints for triggering generation and retrieving status.
-*   **Orchestrator**: `backend/api/multi_agent/orchestrator.py`. The "brain" that manages the state machine and invokes agents appropriately.
-*   **Agents Module**: `backend/api/multi_agent/agents.py`. Contains the specific prompt logic and LLM calls for each persona.
-*   **LLM Gateway**: `GeminiClient` wrapping `google-genai` SDK (V1). Connects to Vertex AI (Gemini 3 Pro).
-*   **Persistence**: Local filesystem storage (JSON artifacts).
+*   **Stage 1 API**: `backend/api/sermon_converter_router.py`. Exposes explicit split, analyze, generate, audit, status, and prompt-review endpoints.
+*   **Stage 1 Pipeline**: `backend/pipeline/stage1.py` for lecture-note projects and `backend/pipeline/transcript_pipeline.py` for transcript projects.
+*   **Detached Worker**: `backend/pipeline/stage1_worker.py`. Runs one requested pipeline mode and persists job state, logs, and artifacts.
+*   **Persistence**: Local filesystem storage with phase-specific JSON and Markdown artifacts rather than a shared mutable `AgentState`.
 *   **Transcript Pipeline**: `backend/pipeline/transcript_pipeline.py`. Implements full-transcript evidence extraction, planning, generation, and coverage auditing.
 *   **OpenAI Gateway**: Transcript generation, Coverage Audit, and Theological Boundary Review use structured OpenAI responses. The current shared model is `gpt-5.6-sol`, configured by `OPENAI_GENERATION_MODEL`.
 *   **Series Index Refresh**: `backend/api/series_index_refresh.py`. Runs cache-aware topic extraction for one Series and then rebuilds the global manuscript search index.
@@ -18,43 +26,17 @@ The system follows a monolithic architecture with a clear separation between the
 
 ## 2. Data Models & Schemas
 
-### 2.1. Agent State
-Persisted in `notes_to_surmon/{project_id}/agent_state.json`.
+### 2.1. Stage 1 Runtime Artifacts
 
-```python
-class AgentState(BaseModel):
-    project_id: str
+Stage 1 persists explicit artifacts under
+`notes_to_surmon/{project_id}/`, including `stage1_job.json`,
+`stage1_manifest.json`, `stage1_units.json`, `stage1_logs.jsonl`, and generated
+unit files. Transcript projects use their corresponding evidence inventory,
+manuscript plan, generated-unit, manifest, and coverage-audit artifacts. Status
+polling derives its response from these artifacts; there is no aggregate
+`agent_state.json`.
 
-    # Context (Immutable after init)
-    sermon_series_title: str
-    sermon_series_description: str
-    lecture_title: str
-    lecture_description: str
-    source_notes: str # The unified markdown of raw notes
-
-    # Artifacts (Mutable)
-    exegetical_notes: Optional[str] = None
-    theological_analysis: Optional[str] = None
-    illustration_ideas: Optional[str] = None
-    beats: Optional[List[str]] = None      # The structure/plan
-    draft_chunks: List[str] = Field(default_factory=list) # Progress so far
-    full_manuscript: Optional[str] = None  # Final result
-```
-
-### 2.2. Agent Logs
-Persisted in `notes_to_surmon/{project_id}/agent_logs.json`.
-Structure: `List[Dict[str, str]]`
-```json
-[
-  {
-    "timestamp": "ISO-8601 String",
-    "role": "exegete | theologian | illustrator ...",
-    "message": "Human-readable log message"
-  }
-]
-```
-
-### 2.3. Project Metadata (`meta.json`)
+### 2.2. Project Metadata (`meta.json`)
 Tracks the overall status of the project, including non-agent metadata.
 *   `processing`: boolean (Is the system running?)
 *   `processing_status`: string (e.g., "Drafting Part 2/5")
@@ -77,7 +59,7 @@ Transcript projects additionally use:
 *   `theological_audit_passed`: whether every final chunk completed with zero findings; informational and not the Check In gate
 *   `theological_review_stale`: an integration patch changed the Draft after an older final review copy was created; the UI must offer **Restart Theological Review** and Check In remains disabled
 
-### 2.4. Transcript Project Storage
+### 2.3. Transcript Project Storage
 
 Canonical transcript project files live at:
 
@@ -94,7 +76,7 @@ data/notes_to_surmon/{project_id}
 
 This preserves existing notes-to-sermon routes while keeping transcript manuscripts in their dedicated root. The project ID must also appear in the assigned Lecture's `project_ids` array in `notes_to_surmon/series_db.json`; project metadata and Series metadata form a bidirectional association.
 
-### 2.5. Transcript Artifacts
+### 2.4. Transcript Artifacts
 
 * `unified_source.md`: reviewed sermon transcript
 * `evidence_inventory.json`: complete evidence inventory with source ranges
@@ -118,7 +100,7 @@ Each evidence item includes `scripture_refs` and a structured `scripture_present
 
 Evidence validation rejects a direct quotation not found verbatim in its declared transcript source range. Unit generation requires the reference and requires every direct quotation to appear inside a Markdown `>` blockquote. The deterministic whole-document check contributes `tone_or_format` findings to `coverage_audit.json`; the Stage 1 UI displays those findings as targeted, read-only correction proposals.
 
-### 2.6. Canonical Repository and Source Lineage
+### 2.5. Canonical Repository and Source Lineage
 
 Project files remain authoritative for manuscript production. The repository adds stable canonical-unit, source-document, source-map, citation, and unit-relationship records under `DATA_BASE_DIR/canonical_repository/`.
 
@@ -132,18 +114,15 @@ The complete schemas, storage layout, invalidation rules, and compiler design ar
 
 ### 3.1. Trigger Generation
 **POST** `/api/admin/notes-to-sermon/sermon-project/{id}/generate-draft`
-*   **Payload**: `{ "use_mas": true, "restart": boolean }`
-*   **Behavior**:
-    *   If `restart=true`: Calls `reset_agent_state` (deletes JSONs).
-    *   Starts `process_project_with_mas` as a Background Task.
-    *   Returns 202 Accepted immediately.
+*   **Status**: Deprecated compatibility route.
+*   **Payload**: Legacy `prompt_id` and `use_mas` fields remain accepted but are ignored; `restart` maps to the current Stage 1 `force` option.
+*   **Behavior**: Starts `start_stage1_pipeline_job` in `generate_all` mode and returns the detached worker job record.
+*   **New clients**: Use the explicit `/stage1/split`, `/stage1/analyze`, `/stage1/generate-all`, `/stage1/unit/{unit_id}/generate`, and `/stage1/audit` endpoints.
 
 ### 3.2. Status Polling
-**GET** `/api/admin/notes-to-sermon/sermon-project/{id}/agent-logs`
-*   **Returns**: Consolidated list of logs from both legacy and new paths.
-
-**GET** `/api/admin/notes-to-sermon/sermon-project/{id}/agent-state`
-*   **Returns**: The full `AgentState` JSON object. Used by frontend to render output artifacts.
+**GET** `/api/admin/notes-to-sermon/sermon-project/{id}/stage1/status`
+*   **Returns**: Detached job state, project progress, manifest summary, unit states, and Stage 1 logs.
+*   The retired `/agent-state` and `/agent-logs` routes no longer exist.
 
 ### 3.3. Transcript Pipeline Endpoints
 
@@ -231,26 +210,21 @@ The complete route definitions and payloads are specified in [Technical Specific
 
 ## 4. Implementation Details
 
-### 4.1. Orchestration Logic (`process_project_with_mas`)
-The orchestrator uses a **State Machine** pattern with **Checkpointing**:
-1.  **Load State**: Tries to read `agent_state.json`. If missing, initializes new state from project source.
-2.  **Phase 1 (Research)**: Checks if `exegetical_notes` is null. If so, runs Exegete and saves state.
-3.  **Phase 2 (Enrichment)**: Sequentially runs Theologian and Illustrator if their fields are null.
-4.  **Phase 3 (Structure)**: Runs Structuring Specialist to populate `state.beats`.
-5.  **Phase 4 (Drafting Loop)**:
-    *   Iterates through `state.beats`.
-    *   Skips beats already present in `state.draft_chunks` (Resume logic).
-    *   For each new beat:
-        *    Calls `Drafter` with context (previous text + current beat).
-        *   Calls `Critic` to valid.
-        *   If Critic fails, retry loop (up to 3 times).
-        *   **Save State** after each successful chunk.
+### 4.1. Stage 1 Execution
 
-### 4.2. Beat Visualization
-*   **Backend**: `identify_beats` uses a specialized LLM prompt (JSON mode) to find split points in the source markdown. It employs a "Dual-Anchor" strategy (finding text before/after the split) to be robust against minor OCR errors.
-*   **Frontend**: `ScriptureMarkdown` component parses the markdown string. It detects `> [!NOTE]` syntax to render collapsible cards for each beat.
+The API calls `start_stage1_pipeline_job`, which validates the project and
+requested mode, rejects concurrent execution, and starts
+`backend.pipeline.stage1_worker` as a detached process. The worker invokes the
+notes or transcript pipeline, persists phase-specific artifacts and logs, and
+updates `stage1_job.json` plus project processing metadata. Each model call is
+stateless; resumability comes from validated artifacts rather than a shared
+agent state machine.
 
-### 4.3. Transcript State Transitions
+The Stage 1 console polls `/stage1/status`, lets editors inspect unit boundaries
+before generation, and supports split-only, per-unit, generate-all, transcript
+analysis, and coverage-audit modes.
+
+### 4.2. Transcript State Transitions
 
 ```text
 Transcript saved
@@ -276,7 +250,7 @@ State invalidation rules:
   * `theological_audit_passed`: all valid results contain zero issues.
 * Check In uses `theological_audit_completed`, not `theological_audit_passed`, because findings are advisory and require human judgment.
 
-### 4.4. Audit Responsibilities
+### 4.3. Audit Responsibilities
 
 | Audit | Input scope | Purpose | Workflow effect |
 |---|---|---|---|
@@ -299,7 +273,7 @@ verify the change adds no argument or Evidence disposition
 
 This transition is valid only for formatting- and navigation-preserving migrations. Ordinary Draft editing continues to invalidate Coverage because the system cannot assume that a general edit is non-substantive.
 
-### 4.5. Model Configuration
+### 4.4. Model Configuration
 
 Transcript generation and both transcript review paths currently resolve to:
 
@@ -309,7 +283,7 @@ OPENAI_GENERATION_MODEL=gpt-5.6-sol
 
 Theological review does not currently have a separate model setting. It calls `generate_structured_json()` without a model override and therefore uses the shared `OPENAI_GENERATION_MODEL` value.
 
-### 4.6. Topic and Search Index Refresh
+### 4.5. Topic and Search Index Refresh
 
 The refresh pipeline has two stages:
 
@@ -342,7 +316,7 @@ data/sermon_search/sermon_search.sqlite3
 
 The Series admin page polls the status endpoint every two seconds while the job is queued or running.
 
-### 4.7. Series Continuity Analysis
+### 4.6. Series Continuity Analysis
 
 Implementation lives in `backend/api/series_manuscript_service.py` and uses `gpt-5.6-sol` through the existing structured-output client.
 
@@ -377,7 +351,7 @@ data/series_manuscripts/{series_id}/merge_runs/{proposal_id}/proposal.json
 
 Prior section IDs are stable hashes of Project ID, heading path, and section ordinal. Proposal source snapshots record the current evidence hash and prior manuscript hashes so later apply/merge work can reject stale proposals.
 
-### 4.8. Approved Proposal to Series Draft
+### 4.7. Approved Proposal to Series Draft
 
 Implementation lives in `backend/api/series_manuscript_builder.py`. The builder parses earlier checked-in manuscripts into canonical units at `##` headings, resolves every approved decision to an operation, and regenerates only affected units.
 
@@ -405,7 +379,7 @@ data/series_manuscripts/{series_id}/merge_runs/{proposal_id}/build.json
 
 New main-text decisions that share Scripture references are grouped into one logical operation before generation. A reference-free related question is attached to the nearest Scripture-grounded new unit. This prevents separate proposal decisions about narrative, theology, and application from becoming repetitive reader-facing units. Operation results are content-addressed by the approved decision, evidence, existing-unit hash, prompt, and model, so an interrupted or editorially regrouped rebuild can reuse unaffected operations safely.
 
-### 4.9. Integration Application and Project Draft
+### 4.8. Integration Application and Project Draft
 
 Implementation lives in `backend/api/series_manuscript_application.py`.
 
@@ -450,7 +424,7 @@ Patch application records per-unit results in `integration_application.json`. Ap
 
 For transcript patch targets, `series_manuscript_application.py` reverses the applied units in memory and requires the reconstructed full Draft to equal the reviewed `final.md`. On success it writes `coverage_audit.json` with `audit_kind: integration_patch_coverage_check`, marks Coverage passed, and sets `theological_review_stale: true`. The editor UI then offers **Restart Theological Review**. `start_theological_review()` replaces `final.md` and its chunk bundle from the updated Draft only under this explicit stale-review state, clears the flag, and resets the theological audit. Check In remains disabled until every new review chunk has been completed.
 
-### 4.10. Canonical Repository Build and Source Readers
+### 4.9. Canonical Repository Build and Source Readers
 
 The repository compiler consumes reviewed canonical-unit and citation authoring records and writes a new immutable build containing SQLite lookup tables plus Bible and topic JSON projections. It validates manuscript anchors, taxonomy assignments, source hashes, exact highlights, access policy, and publication gates before atomically changing the active-build pointer.
 
@@ -458,7 +432,7 @@ The sermon reader must stop flattening all transcript paragraphs into an unaddre
 
 Implementation phases and rollback behavior are defined in [Technical Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_tech_spec.md#16-implementation-phases).
 
-### 4.11. Knowledge Build and Product Projections
+### 4.10. Knowledge Build and Product Projections
 
 The target knowledge compiler validates and publishes reviewed questions, claims, relations, Scripture evidence, original-language judgments, applications, and thought-map revisions alongside canonical units and citations. Stable repository IDs remain independent of editable prose and project-local evidence IDs.
 

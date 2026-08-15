@@ -1,0 +1,20 @@
+{
+  "schema_version": "human-publication-decision.v1",
+  "draft_id": "DRAFT-M16-002-V1",
+  "decision": "approved",
+  "decided_at": "2026-08-15T18:58:10Z",
+  "approved_by": "user_task_authorization",
+  "authorization_basis": "The user approved the writing standard and explicitly instructed this task to continue through rewrite, audit, repository publication, and production UI verification.",
+  "manuscript_sha256": "e0bc814ef8ae68c12a2e1d6d6d5041ece7c1ca6a23c939e9e8e7e8285686151d",
+  "technical_audit_path": "editorial-draft-audit.json",
+  "technical_audit_sha256": "f396904fa1f6e48478a4fe17643a282d695145947c815c91a787259dded4355d",
+  "editorial_review_path": "authoring-v1/final-independent-editorial-review.json",
+  "editorial_review_sha256": "1c1a469ac55a9a6aaaaaa9ff19249f45895165380b3961951e9db500f5f5a107",
+  "editorial_review_score": 91,
+  "editorial_review_passed": true,
+  "technical_audit_status": "pass_with_warnings",
+  "publication_notes": [
+    "Two non-blocking warnings remain for intentionally unlinked topic routes; no placeholder URL was invented.",
+    "The final independent editorial review contains one low-severity hidden-provenance suggestion and no blocking finding."
+  ]
+}

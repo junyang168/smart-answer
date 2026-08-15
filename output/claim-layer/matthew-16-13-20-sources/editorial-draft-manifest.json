@@ -14,54 +14,56 @@
       "presentation_package_path": "shared-knowledge-projection.json",
       "audit_config": {
         "plan_id": "CP-matthew-16-13-20",
-        "knowledge_snapshot_path": "shared-knowledge-projection.json",
-        "audit_output_path": "editorial-draft-audit.json",
+    "knowledge_snapshot_path": "shared-knowledge-projection.json",
+    "audit_output_path": "editorial-draft-audit.json",
+    "editorial_review_path": "authoring-v1/final-independent-editorial-review.json",
+    "publication_decision_path": "human-publication-decision.json",
         "decision_sections": [
           {
             "decision_id": "CD-M16-002-01",
-            "markdown_heading": "在該撒利亞腓立比追問耶穌是誰（太 16:13–15）"
+          "markdown_heading": "在該撒利亞腓立比：你們說我是誰？"
           },
           {
             "decision_id": "CD-M16-002-02",
-            "markdown_heading": "基督、永生神的兒子（太 16:16）"
+          "markdown_heading": "彼得的認信與天父的啟示"
           },
           {
             "decision_id": "CD-M16-002-03",
-            "markdown_heading": "不是血肉指示，乃是天父啟示（太 16:17）",
+          "markdown_heading": "彼得的認信與天父的啟示",
             "editorial_boundary": {
               "required": true,
-              "label": "編輯說明",
+            "label": "資料說明",
               "reason": "現有材料未形成王教授對太16:17的獨立展開；正文只保留經文及材料缺口。"
             }
           },
           {
             "decision_id": "CD-M16-002-04",
-            "markdown_heading": "彼得、磐石與教會根基（太 16:18a）"
+          "markdown_heading": "彼得、磐石與教會"
           },
           {
             "decision_id": "CD-M16-002-05",
-            "markdown_heading": "陰間的權柄不能勝過教會（太 16:18b）",
+          "markdown_heading": "彼得、磐石與教會",
             "editorial_boundary": {
               "required": true,
-              "label": "編輯說明",
+            "label": "資料說明",
               "reason": "目前候選知識沒有足以支撐王教授對『陰間的門』之獨立解釋。"
             }
           },
           {
             "decision_id": "CD-M16-002-06",
-            "markdown_heading": "天國鑰匙與捆綁、釋放的語義（太 16:19a）"
+          "markdown_heading": "天國鑰匙與受約束的教會權柄"
           },
           {
             "decision_id": "CD-M16-002-07",
-            "markdown_heading": "權柄不屬彼得個人，方向是天上先定、地上執行（太 16:19；18:18）"
+          "markdown_heading": "天國鑰匙與受約束的教會權柄"
           },
           {
             "decision_id": "CD-M16-002-08",
-            "markdown_heading": "赦罪宣告與耶路撒冷會議的兩個實例"
+          "markdown_heading": "天國鑰匙與受約束的教會權柄"
           },
           {
             "decision_id": "CD-M16-002-09",
-            "markdown_heading": "為何暫時不可宣告耶穌是基督（太 16:20）"
+          "markdown_heading": "為何暫時不可宣告祂是基督"
           }
         ],
         "material_dispositions": [
@@ -79,41 +81,41 @@
         ],
         "required_scripture_quotations": [
           {
-            "markdown_heading": "在該撒利亞腓立比追問耶穌是誰（太 16:13–15）",
+          "markdown_heading": "在該撒利亞腓立比：你們說我是誰？",
             "required_markers": [
               "人說人子是誰",
               "你們說我是誰"
             ]
           },
           {
-            "markdown_heading": "基督、永生神的兒子（太 16:16）",
+          "markdown_heading": "彼得的認信與天父的啟示",
             "required_markers": [
               "祢是基督",
               "永生神的兒子"
             ]
           },
           {
-            "markdown_heading": "不是血肉指示，乃是天父啟示（太 16:17）",
+          "markdown_heading": "彼得的認信與天父的啟示",
             "required_markers": [
               "不是屬血肉的指示你的",
               "我在天上的父指示的"
             ]
           },
           {
-            "markdown_heading": "彼得、磐石與教會根基（太 16:18a）",
+          "markdown_heading": "彼得、磐石與教會",
             "required_markers": [
               "你是彼得",
               "建造在這磐石上"
             ]
           },
           {
-            "markdown_heading": "陰間的權柄不能勝過教會（太 16:18b）",
+          "markdown_heading": "彼得、磐石與教會",
             "required_markers": [
               "陰間的權柄不能勝過它"
             ]
           },
           {
-            "markdown_heading": "天國鑰匙與捆綁、釋放的語義（太 16:19a）",
+          "markdown_heading": "天國鑰匙與受約束的教會權柄",
             "required_markers": [
               "天國的鑰匙",
               "所捆綁的",
@@ -121,7 +123,7 @@
             ]
           },
           {
-            "markdown_heading": "權柄不屬彼得個人，方向是天上先定、地上執行（太 16:19；18:18）",
+          "markdown_heading": "天國鑰匙與受約束的教會權柄",
             "required_markers": [
               "將是已經捆綁的",
               "將是已經釋放的",
@@ -129,14 +131,14 @@
             ]
           },
           {
-            "markdown_heading": "赦罪宣告與耶路撒冷會議的兩個實例",
+          "markdown_heading": "天國鑰匙與受約束的教會權柄",
             "required_markers": [
               "你們赦免誰的罪",
               "聖靈和我們定意"
             ]
           },
           {
-            "markdown_heading": "為何暫時不可宣告耶穌是基督（太 16:20）",
+          "markdown_heading": "為何暫時不可宣告祂是基督",
             "required_markers": [
               "不可對人說祂是基督"
             ]

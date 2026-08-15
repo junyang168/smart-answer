@@ -3,18 +3,18 @@
   "draft_id": "DRAFT-M16-002-V1",
   "plan_id": "CP-matthew-16-13-20",
   "status": "pass_with_warnings",
-  "generated_at": "2026-08-14T19:17:32.662226+00:00",
+  "generated_at": "2026-08-15T19:00:47.376980+00:00",
   "scope": "结构、论证可追溯性与来源锚点；不代替神学判断或逐句语义忠实度审核。",
   "fingerprint": {
-    "draft_sha256": "e6bc01dfa1e6e4ffb62444d1717d861c1404ab12f0c8a8b5492ee0f7ba678ee9",
+    "draft_sha256": "e0bc814ef8ae68c12a2e1d6d6d5041ece7c1ca6a23c939e9e8e7e8285686151d",
     "knowledge_snapshot_sha256": "0cb1e5eb40b4c31cda1ebec63cad40ac06b494f5bdc2cfb260bf2845021f514a",
-    "audit_config_sha256": "70b0739483177793f1dc03fe1e611672ef6b24fc4da3fcdc6f712f07144962eb",
-    "publication_profile_sha256": "b3e77604bcfb1874abd712ab06fb217676cb838f2866b9072a47e52d3e1b2b31",
+    "audit_config_sha256": "7c061450d62044ba2759fd56d8c1ff00de63528a5d1bcbaac4fa421166e294bd",
+    "publication_profile_sha256": "0a0f5e74c5e594a6c45cf85392f13bceb399535970edaa3cab10cc4dce645970",
     "material_record_sha256s": {}
   },
   "publication_profile": {
     "profile_id": "PP-matthew-expository-teaching-v1",
-    "revision": 1,
+    "revision": 2,
     "title": "馬太福音釋經教學講稿",
     "required_sections": [
       "經文與問題",
@@ -23,7 +23,8 @@
     ],
     "optional_sections": [
       "生活應用",
-      "附錄"
+      "附錄",
+      "註釋"
     ]
   },
   "summary": {
@@ -37,18 +38,19 @@
     "warning_total": 2,
     "material_disposition_total": 1,
     "source_only_pending_human_total": 1,
-    "paragraph_total": 35,
-    "paragraph_valid_total": 35,
-    "professor_paragraph_total": 15,
-    "scripture_paragraph_total": 10,
-    "editor_paragraph_total": 10
+    "paragraph_total": 36,
+    "paragraph_valid_total": 36,
+    "professor_paragraph_total": 20,
+    "scripture_paragraph_total": 7,
+    "editor_paragraph_total": 2,
+    "editorial_synthesis_paragraph_total": 7
   },
   "decisions": [
     {
       "decision_id": "CD-M16-002-01",
       "passage": "太16:13–15",
       "section_title": "在該撒利亞腓立比追問耶穌是誰",
-      "markdown_heading": "在該撒利亞腓立比追問耶穌是誰（太 16:13–15）",
+      "markdown_heading": "在該撒利亞腓立比：你們說我是誰？",
       "heading_found": true,
       "claim_count": 2,
       "evidence_step_count": 4,
@@ -59,7 +61,7 @@
       "decision_id": "CD-M16-002-02",
       "passage": "太16:16",
       "section_title": "基督、永生神的兒子",
-      "markdown_heading": "基督、永生神的兒子（太 16:16）",
+      "markdown_heading": "彼得的認信與天父的啟示",
       "heading_found": true,
       "claim_count": 2,
       "evidence_step_count": 3,
@@ -70,7 +72,7 @@
       "decision_id": "CD-M16-002-03",
       "passage": "太16:17",
       "section_title": "不是血肉指示，乃是天父啟示",
-      "markdown_heading": "不是血肉指示，乃是天父啟示（太 16:17）",
+      "markdown_heading": "彼得的認信與天父的啟示",
       "heading_found": true,
       "claim_count": 0,
       "evidence_step_count": 0,
@@ -81,7 +83,7 @@
       "decision_id": "CD-M16-002-04",
       "passage": "太16:18a",
       "section_title": "彼得、磐石與教會根基",
-      "markdown_heading": "彼得、磐石與教會根基（太 16:18a）",
+      "markdown_heading": "彼得、磐石與教會",
       "heading_found": true,
       "claim_count": 7,
       "evidence_step_count": 17,
@@ -92,7 +94,7 @@
       "decision_id": "CD-M16-002-05",
       "passage": "太16:18b",
       "section_title": "陰間的權柄不能勝過教會",
-      "markdown_heading": "陰間的權柄不能勝過教會（太 16:18b）",
+      "markdown_heading": "彼得、磐石與教會",
       "heading_found": true,
       "claim_count": 0,
       "evidence_step_count": 0,
@@ -103,7 +105,7 @@
       "decision_id": "CD-M16-002-06",
       "passage": "太16:19a",
       "section_title": "天國鑰匙與捆綁、釋放的語義",
-      "markdown_heading": "天國鑰匙與捆綁、釋放的語義（太 16:19a）",
+      "markdown_heading": "天國鑰匙與受約束的教會權柄",
       "heading_found": true,
       "claim_count": 4,
       "evidence_step_count": 6,
@@ -114,7 +116,7 @@
       "decision_id": "CD-M16-002-07",
       "passage": "太16:19；太18:18",
       "section_title": "權柄不屬彼得個人，方向是天上先定、地上執行",
-      "markdown_heading": "權柄不屬彼得個人，方向是天上先定、地上執行（太 16:19；18:18）",
+      "markdown_heading": "天國鑰匙與受約束的教會權柄",
       "heading_found": true,
       "claim_count": 19,
       "evidence_step_count": 38,
@@ -125,7 +127,7 @@
       "decision_id": "CD-M16-002-08",
       "passage": "約20:23；徒15",
       "section_title": "赦罪宣告與耶路撒冷會議的兩個實例",
-      "markdown_heading": "赦罪宣告與耶路撒冷會議的兩個實例",
+      "markdown_heading": "天國鑰匙與受約束的教會權柄",
       "heading_found": true,
       "claim_count": 9,
       "evidence_step_count": 17,
@@ -136,7 +138,7 @@
       "decision_id": "CD-M16-002-09",
       "passage": "太16:20",
       "section_title": "為何暫時不可宣告耶穌是基督",
-      "markdown_heading": "為何暫時不可宣告耶穌是基督（太 16:20）",
+      "markdown_heading": "為何暫時不可宣告祂是基督",
       "heading_found": true,
       "claim_count": 6,
       "evidence_step_count": 18,
@@ -149,41 +151,44 @@
       "section": "經文與問題",
       "block_index": 1,
       "line": 3,
-      "excerpt": "> **編輯導讀：** 本篇處理馬太福音 16:13–20，按敘事次序回答四個問題：彼得認耶穌為「基督、永生神的兒子」包含甚麼意義？耶穌所說的「磐石」指甚麼？天國的鑰匙以及捆綁、釋放賦予彼得和教會何種權柄？耶穌為何隨即禁止門徒宣告祂是基督？現有材料對「磐石」的正面所指及「捆綁、釋放」的涵蓋範圍保留了兩項實質張力；本篇如",
-      "attribution": "editor",
+      "excerpt": "馬太福音 16:13–20 從耶穌在該撒利亞腓立比提出身分問題開始，經過彼得的認信、磐石與教會的宣告，以及天國鑰匙的託付，最後以暫時不可公開宣告祂是基督的命令收束。整段經文的中心不只是人如何稱呼耶穌，也包括人所認識的基督究竟是怎樣的基督，以及教會應當如何在祂的權柄之下行事。",
+      "attribution": "scripture",
       "claim_ids": [],
-      "scripture_refs": [],
+      "scripture_refs": [
+        "Matt.16.13-20"
+      ],
       "valid": true
     },
     {
       "section": "經文與問題",
       "block_index": 2,
       "line": 6,
-      "excerpt": "> 「耶穌到了該撒利亞腓立比的境內，就問門徒說：『人說人子是誰？』他們說：『有人說是施洗的約翰，有人說是以利亞，又有人說是耶利米或是先知裡的一位。』耶穌說：『你們說我是誰？』西門彼得回答說：『祢是基督，是永生神的兒子。』耶穌對他說：『西門巴約拿，你是有福的！因為這不是屬血肉的指示你的，乃是我在天上的父指示的。我還告訴你",
+      "excerpt": "> 「人說人子是誰？」……「你們說我是誰？」（太 16:13、15）",
       "attribution": "scripture",
       "claim_ids": [],
       "scripture_refs": [
-        "Matt.16.13-Matt.16.20"
+        "Matt.16.13",
+        "Matt.16.15"
       ],
+      "valid": true
+    },
+    {
+      "section": "經文與問題",
+      "block_index": 3,
+      "line": 9,
+      "excerpt": "耶穌先問眾人的看法，隨後把問題收緊，要求門徒親自回答。這個轉折使身分問題成為效忠問題：門徒不能只轉述別人的意見，必須自己說明耶穌對他們究竟是誰。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL007"
+      ],
+      "scripture_refs": [],
       "valid": true
     },
     {
       "section": "釋經",
       "block_index": 1,
       "line": 5,
-      "excerpt": "> 「耶穌到了該撒利亞腓立比的境內，就問門徒說：『人說人子是誰？』……耶穌說：『你們說我是誰？』」（太 16:13、15）",
-      "attribution": "scripture",
-      "claim_ids": [],
-      "scripture_refs": [
-        "Matt.16.13-Matt.16.15"
-      ],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 2,
-      "line": 8,
-      "excerpt": "王教授把提問的地點視為理解本段的重要背景。該撒利亞腓立比是一座以羅馬皇帝權柄為鮮明標誌、外邦人口居多的城市。耶穌在這裡問門徒祂是誰，使這個問題不只要求一個稱號，也帶出「誰真正作王、門徒向誰效忠」的對照。",
+      "excerpt": "該撒利亞腓立比位於加利利以北、黑門山地山腳下，居民大多是外邦人。這城由分封王腓立建造，並以羅馬皇帝該撒命名；為了與地中海沿岸的另一座該撒利亞區別，又加上腓立的名字。在這個彰顯皇帝權柄的地方，耶穌提出自己的身分問題，使「誰作王」的對照格外鮮明。這項背景不取代經文的問題，卻使門徒的回答帶有王權與效忠的分量。",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL007",
@@ -194,19 +199,21 @@
     },
     {
       "section": "釋經",
-      "block_index": 3,
-      "line": 11,
-      "excerpt": "> **編輯說明：** 地點背景在本篇只服務於耶穌的身分問題，不另行擴寫為該城的歷史或宗教專題。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "block_index": 2,
+      "line": 8,
+      "excerpt": "耶穌先問：「人說人子是誰？」眾人曾把祂看作施洗約翰、以利亞、耶利米或先知中的一位。這些回答都承認祂是一位重要人物，卻沒有準確說明祂的身分。於是耶穌轉向門徒說：「你們說我是誰？」彼得代表門徒作答，敘事也由眾說紛紜進入明確的認信。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL007"
+      ],
       "scripture_refs": [],
       "valid": true
     },
     {
       "section": "釋經",
-      "block_index": 4,
-      "line": 16,
-      "excerpt": "> 「西門彼得回答說：『祢是基督，是永生神的兒子。』」（太 16:16）",
+      "block_index": 3,
+      "line": 13,
+      "excerpt": "> 西門彼得回答說：「祢是基督，是永生神的兒子。」（太 16:16）",
       "attribution": "scripture",
       "claim_ids": [],
       "scripture_refs": [
@@ -216,9 +223,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 5,
-      "line": 19,
-      "excerpt": "彼得所說的「基督」就是受膏者、彌賽亞。王教授指出，舊約中的先知、祭司和君王都可因受膏而承擔神所託付的職分；耶穌卻在一身之中兼具先知、祭司、君王三重職分。彼得又稱祂為「永生神的兒子」，因此這不是把耶穌列為眾多先知之一，而是對祂獨特身分的認信。",
+      "block_index": 4,
+      "line": 16,
+      "excerpt": "「基督」的意思是「受膏者」，相應的希伯來稱呼是「彌賽亞」。[^1] 在猶太傳統中，先知、祭司和君王都與受膏職分有關；君王與祭司的職分通常彼此分開，耶穌卻兼具先知、祭司、君王三重職分。彼得的回答因此不是只給耶穌一個尊稱，而是承認祂是那位獨特而至高的受膏者。",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL008",
@@ -229,9 +236,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 6,
-      "line": 24,
-      "excerpt": "> 「耶穌對他說：『西門巴約拿，你是有福的！因為這不是屬血肉的指示你的，乃是我在天上的父指示的。』」（太 16:17）",
+      "block_index": 5,
+      "line": 19,
+      "excerpt": "> 耶穌對他說：「西門巴約拿，你是有福的！因為這不是屬血肉的指示你的，乃是我在天上的父指示的。」（太 16:17）",
       "attribution": "scripture",
       "claim_ids": [],
       "scripture_refs": [
@@ -241,9 +248,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 7,
-      "line": 27,
-      "excerpt": "> **編輯說明：** 現有候選知識沒有形成王教授對本節的獨立解釋主張。本篇保留耶穌對彼得認信來源的說明，不用一般啟示論或其他註釋內容代替教授補寫。",
+      "block_index": 6,
+      "line": 22,
+      "excerpt": "**資料說明：** 現有材料沒有對第 17 節作獨立展開，因此這裡只保留經文，不另補一般啟示論的解釋。",
       "attribution": "editor",
       "claim_ids": [],
       "scripture_refs": [],
@@ -251,9 +258,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 8,
-      "line": 32,
-      "excerpt": "> 「我還告訴你：你是彼得，我要把我的教會建造在這磐石上。」（太 16:18）",
+      "block_index": 7,
+      "line": 27,
+      "excerpt": "> 「我還告訴你，你是彼得，我要把我的教會建造在這磐石上；陰間的權柄〔原文作『門』〕不能勝過它。」（太 16:18）",
       "attribution": "scripture",
       "claim_ids": [],
       "scripture_refs": [
@@ -263,13 +270,24 @@
     },
     {
       "section": "釋經",
+      "block_index": 8,
+      "line": 30,
+      "excerpt": "**資料說明：** 本文保留「陰間的權柄不能勝過它」這項經文宣告；經文原文作「陰間的門」，現有材料沒有充分展開其語義，因此不另補教會論或末世論的說明。",
+      "attribution": "editor",
+      "claim_ids": [],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
       "block_index": 9,
-      "line": 35,
-      "excerpt": "王教授在不同材料中共同排除一種讀法：耶穌不是把教會建立在彼得這個人本身之上。彼得與「磐石」彼此相關，但關係不能被簡化為彼得個人就是教會的終極根基。",
+      "line": 33,
+      "excerpt": "這節經文首先有一項重要的原文觀察：「彼得」與「磐石」字根相關，詞形與陰陽性卻不同。[^2] 這項差異顯示磐石與彼得確有關聯，但仍需額外論證才能把磐石直接等同於彼得本人，更不能由此推導出教會建立在彼得個人權位之上。",
       "attribution": "professor",
       "claim_ids": [
+        "DK-91b546f25db1-CL009",
+        "DK-a26f0a7e9ba4-CL010",
         "DK-e50720f3684d-CL001",
-        "DK-e50720f3684d-CL002",
         "DK-566e8ca150dd-CL006"
       ],
       "scripture_refs": [],
@@ -278,8 +296,8 @@
     {
       "section": "釋經",
       "block_index": 10,
-      "line": 38,
-      "excerpt": "筆記整理稿和《馬太福音釋經（四）》第一講較強調基督本身：以弗所書 2:20 說教會建造在使徒和先知的根基上，並以基督耶穌為房角石。按這組材料，彼得和使徒所指向的終極根基是基督，而不是彼得個人。",
+      "line": 36,
+      "excerpt": "太 16:18 可以與弗 2:20 對照，以進一步辨明教會的根基。以弗所書說，教會「被建造在使徒和先知的根基上，有基督耶穌自己為房角石」。原文把「使徒和先知」放在同一個定冠詞之下，形成共同的根基性見證。[^3] 使徒與先知不是彼此競爭的多個根基，而是共同見證並指向基督。",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL009",
@@ -291,10 +309,24 @@
     {
       "section": "釋經",
       "block_index": 11,
-      "line": 41,
-      "excerpt": "另一些講授則把「磐石」更直接表述為彼得對耶穌是基督、是神兒子的信仰告白，或彼得從耶穌領受並傳下來的真理。按這組材料，教會不是建立在彼得的個人地位上，而是建立在他所承認、所領受的真理上。",
+      "line": 39,
+      "excerpt": "由此可見，基督耶穌是房角石，也是教會終極的根基；彼得並非教會唯一的根基，使徒群體的根基性作用在於共同指向基督。教會不能建立在某一個人的地位、性格或權勢之上，而要建立在基督自己身上。",
       "attribution": "professor",
       "claim_ids": [
+        "DK-91b546f25db1-CL009",
+        "DK-a26f0a7e9ba4-CL010"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 12,
+      "line": 42,
+      "excerpt": "相關講道在正面界定「磐石」時另有一種著重：磐石被說成彼得對耶穌身分的認信，或彼得所領受並傳下來的真理。兩種講授都反對把教會建立在彼得的個人權位上，但回答「磐石直接指甚麼」時，著重點並不完全相同：一個把論證落在基督自己，另一個著重彼得對基督的正確認信。現有材料沒有進一步把兩者完全等同，因此這個共同點與差別都需要保留。",
+      "attribution": "editorial_synthesis",
+      "claim_ids": [
+        "DK-e50720f3684d-CL002",
         "DK-3d012c24a542-CL001",
         "DK-566e8ca150dd-CL007"
       ],
@@ -303,41 +335,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 12,
-      "line": 44,
-      "excerpt": "> **編輯說明：** 兩組材料在排除「彼得個人是根基」上相同，在正面回答「磐石直接指甚麼」時卻分別強調基督本身與彼得的認信／所領受的真理。跨來源審核把它們判為實質對照；本篇保留這項張力，不把兩種說法改寫成王教授從未明說的單一公式。",
-      "attribution": "editor",
-      "claim_ids": [],
-      "scripture_refs": [],
-      "valid": true
-    },
-    {
-      "section": "釋經",
       "block_index": 13,
-      "line": 49,
-      "excerpt": "> 「陰間的權柄不能勝過它。」（太 16:18）",
-      "attribution": "scripture",
-      "claim_ids": [],
-      "scripture_refs": [
-        "Matt.16.18"
-      ],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 14,
-      "line": 52,
-      "excerpt": "> **編輯說明：** 現有候選知識沒有足以支撐王教授對「陰間的門／權柄」之獨立解釋。本篇保留耶穌的應許，但不補作該詞的語義、教會論或末世論專論。",
-      "attribution": "editor",
-      "claim_ids": [],
-      "scripture_refs": [],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 15,
-      "line": 57,
-      "excerpt": "> 「我要把天國的鑰匙給你；凡你在地上所捆綁的……凡你在地上所釋放的……」（太 16:19）",
+      "line": 47,
+      "excerpt": "> 「我要把天國的鑰匙給你；凡你在地上所捆綁的，在天上也要捆綁；凡你在地上所釋放的，在天上也要釋放。」（太 16:19）",
       "attribution": "scripture",
       "claim_ids": [],
       "scripture_refs": [
@@ -347,22 +347,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 16,
-      "line": 60,
-      "excerpt": "王教授在 `S 220206` 與 transcript `220-426-110-1139` 中都指出，「捆綁」與「釋放」是當時拉比語境中的用語，分別表示禁止與准許。`S 220206` 的這項主張說明共同的語義基礎；transcript `220-426-110-1139` 更進一步明確限定，認為這組俗語不是指決定",
-      "attribution": "professor",
-      "claim_ids": [
-        "DK-566e8ca150dd-CL009",
-        "DK-0d5b2062b148-CL015"
-      ],
-      "scripture_refs": [],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 17,
-      "line": 63,
-      "excerpt": "然而，筆記整理稿與《馬太福音釋經（四）》第二講保存了較廣的表述：捆綁與釋放既可以涉及事，表示禁止或准許，也可以涉及人，表示接納或排除；筆記甚至把它連到是否准許進入天國。",
+      "block_index": 14,
+      "line": 50,
+      "excerpt": "這一講解把「捆綁」與「釋放」理解為可以涉及事，也可以涉及人。涉及事情時，捆綁是禁止，釋放是准許；涉及人時，則可指不准或准許人進入天國。這個較廣的理解把天國鑰匙、教會判斷與人的接納或排除聯繫起來。",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL010",
@@ -373,32 +360,41 @@
     },
     {
       "section": "釋經",
-      "block_index": 18,
-      "line": 66,
-      "excerpt": "> **編輯說明：** 「可涉及人與事」和「只指禁止與准許、不指決定誰進天國」是第二項跨來源張力。現階段的關係審核確認二者不能靜默合併；本篇分別歸屬來源，不替教授裁定哪一項應覆蓋另一項。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "block_index": 15,
+      "line": 53,
+      "excerpt": "較後的講授中，有的仍保留「涉及人與事」的廣義，有的只強調拉比語境中「禁止」與「准許」的用法。另有一份講授更明確限定，認為這組俗語不是指決定某人能否進天國。這些說法在語義範圍上確有差別，不能讓其中一種悄悄取代另一種。無論如何界定範圍，材料在另一點上仍然一致：天國的鑰匙不是彼得憑個人意志決定他人永恆命運的權力。",
+      "attribution": "editorial_synthesis",
+      "claim_ids": [
+        "DK-e50720f3684d-CL015",
+        "DK-566e8ca150dd-CL009",
+        "DK-0d5b2062b148-CL015",
+        "DK-566e8ca150dd-CL006"
+      ],
       "scripture_refs": [],
       "valid": true
     },
     {
       "section": "釋經",
-      "block_index": 19,
-      "line": 71,
-      "excerpt": "> 「凡你在地上所捆綁的，在天上將是已經捆綁的；凡你在地上所釋放的，在天上將是已經釋放的。」（太 16:19，依王教授所強調的時態意義呈現）\n>\n> 「凡你們在地上所捆綁的，在天上將是已經捆綁的；凡你們在地上所釋放的，在天上將是已經釋放的。」（太 18:18，同一結構中的「你們」為複數）",
-      "attribution": "scripture",
-      "claim_ids": [],
-      "scripture_refs": [
-        "Matt.16.19",
-        "Matt.18.18"
+      "block_index": 16,
+      "line": 56,
+      "excerpt": "無論「捆綁」與「釋放」的對象範圍如何界定，這節的權柄方向都受到原文時態的明確限制。相關動詞採用未來完成式，可以直譯為：「凡你在地上所捆綁的，在天上將是已經捆綁的；凡你在地上所釋放的，在天上將是已經釋放的。」[^4] 地上的行動應當與天上已經確立的判斷相符。決定標準的是神；彼得的責任是辨認、宣告並執行那已經確立的標準。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL012",
+        "DK-e50720f3684d-CL012",
+        "DK-3d012c24a542-CL002",
+        "DK-6f059dbca908-CL001",
+        "DK-6f059dbca908-CL002",
+        "DK-566e8ca150dd-CL010"
       ],
+      "scripture_refs": [],
       "valid": true
     },
     {
       "section": "釋經",
-      "block_index": 20,
-      "line": 76,
-      "excerpt": "太 16:19 首先對彼得說話，太 18:18 卻以複數「你們」把同樣的捆綁、釋放交給門徒與教會。因此，這不是彼得個人獨佔、可以任意支配他人屬靈命運的權柄；孤立太 16:19 而不讀太 18:18，會把經文本身後來給出的範圍遺漏掉。",
+      "block_index": 17,
+      "line": 59,
+      "excerpt": "太 16:19 的話最初以單數「你」對彼得說；到了太 18:18，同樣的捆綁與釋放則以複數「你們」對門徒說：「凡你們在地上所捆綁的……凡你們在地上所釋放的……」[^5] 這項轉換表明，權柄並非彼得個人所獨有，而是擴展到門徒與教會。把太 16:19 與太 18:18 分開，進而主張教會已被單獨交給彼得，不能完整交代馬太福",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL011",
@@ -412,59 +408,12 @@
     },
     {
       "section": "釋經",
-      "block_index": 21,
-      "line": 79,
-      "excerpt": "王教授特別強調原文的未來完成式。傳統中文譯法容易讓人以為，彼得先在地上作決定，天上隨後照辦；原文所表達的方向卻是：彼得將來在地上捆綁或釋放之事，在天上已經被捆綁或釋放。完成式指向天上已有的決定，未來式指向彼得和教會以後所要執行的工作。",
+      "block_index": 18,
+      "line": 62,
+      "excerpt": "約 20:23 提供了一個平行例子：「你們赦免誰的罪，誰的罪就赦免了；你們留下誰的罪，誰的罪就留下了。」相關講道把這裡的「誰」解作「哪一種人」，而不是任由使徒挑選的某一個人：真正悔改的人得著赦免，不肯悔改的人，其罪仍被留下。這項解釋把赦罪的宣告放在基督差遣門徒傳福音的範圍內；教會宣告神已定的福音條件，卻不能自行創造赦罪",
       "attribution": "professor",
       "claim_ids": [
         "DK-91b546f25db1-CL012",
-        "DK-e50720f3684d-CL012",
-        "DK-6f059dbca908-CL001",
-        "DK-6f059dbca908-CL002",
-        "DK-566e8ca150dd-CL010"
-      ],
-      "scripture_refs": [],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 22,
-      "line": 82,
-      "excerpt": "所以，教會的職責不是創造進入天國、赦罪或行事為人的條件，而是從神已經啟示的標準中辨認這些條件，再在具體處境中宣告並執行。教會領袖不能按個人喜好決定可做或不可做的事；權柄的真實性恰恰在於它受天上標準和聖經真理約束。",
-      "attribution": "professor",
-      "claim_ids": [
-        "DK-91b546f25db1-CL015",
-        "DK-e50720f3684d-CL016",
-        "DK-3d012c24a542-CL002",
-        "DK-3d012c24a542-CL003",
-        "DK-6f059dbca908-CL003",
-        "DK-6f059dbca908-CL005",
-        "DK-566e8ca150dd-CL011"
-      ],
-      "scripture_refs": [],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 23,
-      "line": 87,
-      "excerpt": "> 「你們赦免誰的罪，誰的罪就赦免了；你們留下誰的罪，誰的罪就留下了。」（約 20:23）\n>\n> 「因為聖靈和我們定意不將別的重擔放在你們身上。」（徒 15:28）",
-      "attribution": "scripture",
-      "claim_ids": [],
-      "scripture_refs": [
-        "John.20.23",
-        "Acts.15.28"
-      ],
-      "valid": true
-    },
-    {
-      "section": "釋經",
-      "block_index": 24,
-      "line": 92,
-      "excerpt": "約翰福音 20:23 提供一個平行實例。按王教授的解釋，經文中的「誰」應理解為「甚麼樣的人」，不是任由使徒按個人好惡挑選某個人。教會所宣告的是福音已經給出的條件：真正悔改的人，其罪得赦免；不肯悔改的人，其罪被留下。宣告指向基督已經完成的工作，不是教會另造赦罪標準。",
-      "attribution": "professor",
-      "claim_ids": [
-        "DK-91b546f25db1-CL014",
         "DK-e50720f3684d-CL018",
         "DK-e50720f3684d-CL019",
         "DK-3d012c24a542-CL004",
@@ -477,10 +426,10 @@
     },
     {
       "section": "釋經",
-      "block_index": 25,
-      "line": 95,
-      "excerpt": "使徒行傳 15 章的耶路撒冷會議則提供一個歷史實例。王教授強調，使徒並不是憑意見、辯論或投票創造外邦人得救的新標準，而是一起察驗聖靈在外邦宣教中已經顯明的帶領，再按所辨認的旨意作出宣告。這正體現「天上先定、地上辨認並執行」的權柄方向。",
-      "attribution": "professor",
+      "block_index": 19,
+      "line": 65,
+      "excerpt": "使徒行傳 15 章則是教會如何運用這種受約束權柄的有限歷史實例。耶路撒冷會議確實經過辯論、見證、經文查考與群體判斷；不能把它描述成沒有商議的過程。彼得述說聖靈如何臨到外邦人，保羅和巴拿巴報告神在外邦人中的工作，雅各又指出眾先知的話與此相合。最後「聖靈和我們定意」的表述顯示，教會經過真實商議，所要查驗和確認的是聖靈已經顯",
+      "attribution": "editorial_synthesis",
       "claim_ids": [
         "DK-91b546f25db1-CL016",
         "DK-3d012c24a542-CL010"
@@ -490,18 +439,23 @@
     },
     {
       "section": "釋經",
-      "block_index": 26,
-      "line": 98,
-      "excerpt": "> **編輯說明：** 本篇只保留這兩個實例與太 16:19 直接相關的論證。耶路撒冷會議的完整歷史、四項禁戒以及一般教會權柄問題，將轉入[專題：天國鑰匙、教會權柄與天上已定的標準](#待建立專題天國鑰匙教會權柄與天上已定的標準)。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "block_index": 20,
+      "line": 68,
+      "excerpt": "因此，天國鑰匙不是教會可以隨意使用的權力，而是受神話語約束的責任。教會在接納、勸戒、赦罪宣告或禁止某事時，都必須查驗聖經所顯明的標準；若按領袖個人喜好作決定，不但顛倒了權柄的方向，也可能對當事人造成實質傷害。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL014",
+        "DK-91b546f25db1-CL015",
+        "DK-e50720f3684d-CL016",
+        "DK-566e8ca150dd-CL011"
+      ],
       "scripture_refs": [],
       "valid": true
     },
     {
       "section": "釋經",
-      "block_index": 27,
-      "line": 103,
+      "block_index": 21,
+      "line": 73,
       "excerpt": "> 「當下，耶穌囑咐門徒，不可對人說祂是基督。」（太 16:20）",
       "attribution": "scripture",
       "claim_ids": [],
@@ -512,14 +466,12 @@
     },
     {
       "section": "釋經",
-      "block_index": 28,
-      "line": 106,
-      "excerpt": "王教授反對把這項保密命令孤立起來，進而推論耶穌從未具有或暗示自己的彌賽亞身分。福音書中確有在特定時候不許人宣揚祂身分或作為的命令，但每一處都有具體的歷史與宣教處境。彼得在這裡公開認信耶穌為基督，福音書其他事件也持續呈現祂的彌賽亞身分；因此，第20節不能成為否定這一身分的證據。",
+      "block_index": 22,
+      "line": 76,
+      "excerpt": "第 20 節緊接彼得的認信，因此這項保密命令不是一個與上下文無關的謎題。理解它必須考慮耶穌當時所處的歷史與宣教環境，也要注意經文隨即在第 21 節轉向受苦、被殺與復活的預告。",
       "attribution": "professor",
       "claim_ids": [
         "DK-72483dc200ad-CL001",
-        "DK-72483dc200ad-CL007",
-        "DK-72483dc200ad-CL009",
         "DK-3d012c24a542-CL013"
       ],
       "scripture_refs": [],
@@ -527,9 +479,9 @@
     },
     {
       "section": "釋經",
-      "block_index": 29,
-      "line": 109,
-      "excerpt": "在這一次的處境中，當時常見的政治彌賽亞期待尤其重要。若群眾把彌賽亞只理解為發動反羅馬革命、建立獨立國家的政治領袖，公開宣揚這個稱號便會遮蔽耶穌必須受苦、被殺、復活並完成救贖的使命。門徒已經認出祂是誰，卻仍需要在下一段學習祂要怎樣作彌賽亞。",
+      "block_index": 23,
+      "line": 79,
+      "excerpt": "彼得認對了耶穌的彌賽亞身分，卻尚未明白彌賽亞的性質與使命。他所期待的彌賽亞偏向作王和得勝，不能接受彌賽亞必須受苦、被殺並在第三日復活。這正是第 21 至 23 節中彼得反對耶穌受苦預告的原因：他的問題不是完全不認識耶穌是基督，而是不明白這位基督如何藉十字架成就救贖。",
       "attribution": "professor",
       "claim_ids": [
         "DK-72483dc200ad-CL002",
@@ -540,11 +492,28 @@
     },
     {
       "section": "釋經",
-      "block_index": 30,
-      "line": 112,
-      "excerpt": "> **編輯說明：** 太 16:20 在本篇收束「耶穌是誰」的問題，同時引向太 16:21–23 對彌賽亞受苦使命的解釋。Wrede 與「彌賽亞秘密」的歷史討論不在這裡展開，參見[專題：彌賽亞秘密、歷史處境與耶穌身分](#待建立專題彌賽亞秘密歷史處境與耶穌身分)。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "block_index": 24,
+      "line": 82,
+      "excerpt": "當時帶有政治色彩的彌賽亞期待，可能使人把耶穌理解為帶領群眾反抗羅馬、建立地上政權的領袖。若門徒在尚未明白十字架使命之前公開宣告祂是基督，這種既有期待便可能妨礙祂傳揚天國與完成救贖工作。因此，保密命令並非否認彌賽亞身分，而是使彌賽亞的稱號不至脫離祂受苦、受死與復活的使命。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-72483dc200ad-CL001",
+        "DK-6f059dbca908-CL007"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "釋經",
+      "block_index": 25,
+      "line": 85,
+      "excerpt": "僅憑第 20 節，不能推論耶穌否認自己是彌賽亞，也不能把保密命令孤立為門徒日後虛構基督身分的證據。評估這類理論還需綜合彼得的認信、耶穌進入耶路撒冷、大祭司對祂身分的詢問，以及十字架上的「猶太人的王」等整體見證。關於 Wrede 與「彌賽亞秘密」理論的歷史及完整爭論，屬於另一專題，本文不在此展開。",
+      "attribution": "editorial_synthesis",
+      "claim_ids": [
+        "DK-72483dc200ad-CL007",
+        "DK-72483dc200ad-CL009",
+        "DK-3d012c24a542-CL013"
+      ],
       "scripture_refs": [],
       "valid": true
     },
@@ -552,21 +521,24 @@
       "section": "神學意義",
       "block_index": 1,
       "line": 5,
-      "excerpt": "> **編輯導讀：** 本段的神學意義不是為教會建立一項不受約束的特權，而是把教會的存在與判斷置於基督身分、使徒認信和天上已經啟示的標準之下。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "excerpt": "彼得說「你是基督」，不是只選出一個正確答案。在以該撒命名的城市裡，這句認信同時表明誰才是真正的王。基督徒的認信也不能停留在稱號上；承認耶穌是基督，就意味著接受祂作先知所啟示的真理、作祭司所成就的救贖，以及作君王所施行的統治。",
+      "attribution": "editorial_synthesis",
+      "claim_ids": [
+        "DK-a26f0a7e9ba4-CL008",
+        "DK-a26f0a7e9ba4-CL009"
+      ],
       "scripture_refs": [],
       "valid": true
     },
     {
       "section": "神學意義",
       "block_index": 2,
-      "line": 8,
-      "excerpt": "無論「磐石」在不同材料中更強調基督本身，還是彼得對基督的認信與所領受的真理，兩組講授都排除把教會建立在彼得個人權位之上。同樣，天國鑰匙也不是把天上的決定權交給地上的個人。教會之所以能宣告、判斷和執行，是因為它先領受基督所啟示的真理，並受神已經設立的標準約束。",
-      "attribution": "professor",
+      "line": 10,
+      "excerpt": "教會的根基是基督，不是某一位領袖的個人權位；教會所領受的權柄也不是自行立法的主權。使徒、先知和教會的服事都必須指向基督，並在神已顯明的標準之下運作。這使教會既不應輕看所領受的責任，也不可把責任膨脹為不受約束的權力。",
+      "attribution": "editorial_synthesis",
       "claim_ids": [
         "DK-91b546f25db1-CL009",
-        "DK-3d012c24a542-CL001",
+        "DK-91b546f25db1-CL011",
         "DK-91b546f25db1-CL012",
         "DK-91b546f25db1-CL015"
       ],
@@ -576,10 +548,76 @@
     {
       "section": "神學意義",
       "block_index": 3,
-      "line": 11,
-      "excerpt": "> **編輯說明：** 現有材料沒有為本篇形成一條完整而獨立的生活應用鏈，因此本稿不另設「生活應用」欄目。有關教會領袖如何在當代處境中辨認和執行聖經原則的應用，應在補齊「經文處境 → 解釋 → 不變原則 → 今日處境 → 應用與限制」後再收入。",
-      "attribution": "editor",
-      "claim_ids": [],
+      "line": 15,
+      "excerpt": "彼得的認信正確，理解卻仍不完整。耶穌沒有容許門徒用政治得勝的期待定義彌賽亞，而是在下一段以受苦、十字架與復活說明自己的使命。因此，真正完整的基督信仰不只是承認耶穌尊貴的身分，也要接受祂以捨己和救贖顯明的道路。第 20 節不是認信的否定，而是把認信帶向十字架的必要轉折。",
+      "attribution": "editorial_synthesis",
+      "claim_ids": [
+        "DK-72483dc200ad-CL002",
+        "DK-6f059dbca908-CL007"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "註釋",
+      "block_index": 1,
+      "line": 3,
+      "excerpt": "[^1]: 「基督」的希臘文為 Χριστός。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL008"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "註釋",
+      "block_index": 2,
+      "line": 6,
+      "excerpt": "[^2]: 「彼得」是陽性名詞 Πέτρος，「磐石」是陰性名詞 πέτρα。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL009",
+        "DK-a26f0a7e9ba4-CL010"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "註釋",
+      "block_index": 3,
+      "line": 9,
+      "excerpt": "[^3]: 弗 2:20 的 τῶν ἀποστόλων καὶ προφητῶν 在兩個並列名詞之前只使用一個定冠詞。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL009"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "註釋",
+      "block_index": 4,
+      "line": 12,
+      "excerpt": "[^4]: 太 16:19 使用 ἔσται δεδεμένον 與 ἔσται λελυμένον，兩者都是未來完成式的表達。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL012",
+        "DK-e50720f3684d-CL012"
+      ],
+      "scripture_refs": [],
+      "valid": true
+    },
+    {
+      "section": "註釋",
+      "block_index": 5,
+      "line": 15,
+      "excerpt": "[^5]: 太 16:19 以單數 σύ 對彼得說話，太 18:18 則以複數 ὑμῖν 對門徒說話。",
+      "attribution": "professor",
+      "claim_ids": [
+        "DK-91b546f25db1-CL011",
+        "DK-91b546f25db1-CL013"
+      ],
       "scripture_refs": [],
       "valid": true
     }
@@ -603,18 +641,18 @@
   ],
   "findings": [
     {
-      "code": "placeholder_topic_link",
+      "code": "missing_topic_link",
       "severity": "warning",
-      "title": "专题链接仍是占位符",
-      "detail": "正文结构已完成，但正式发布前需要替换为实际专题页面。",
+      "title": "专题延伸尚未加入链接",
+      "detail": "编排决定要求把完整讨论导向专题。",
       "decision_id": "CD-M16-002-08",
       "claim_id": null
     },
     {
-      "code": "placeholder_topic_link",
+      "code": "missing_topic_link",
       "severity": "warning",
-      "title": "专题链接仍是占位符",
-      "detail": "正文结构已完成，但正式发布前需要替换为实际专题页面。",
+      "title": "专题延伸尚未加入链接",
+      "detail": "编排决定要求把完整讨论导向专题。",
       "decision_id": "CD-M16-002-09",
       "claim_id": null
     }

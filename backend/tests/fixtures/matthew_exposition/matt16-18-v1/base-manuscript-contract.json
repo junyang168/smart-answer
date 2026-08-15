@@ -1,0 +1,41 @@
+{
+  "schema_version": "matthew-exposition-base-contract.v1",
+  "contract_id": "BMC-matt16-18-v1",
+  "passage": "Matt.16.18",
+  "authoring_mode": "verified_manuscript_integration",
+  "composition_plan": {
+    "plan_id": "CP-matthew-16-13-20",
+    "sha256": "d75e6ae61bbff5156282d3c08b5093f66e0b406006e1877e057f5c368abd5ba4"
+  },
+  "base_source": {
+    "source_id": "notes_manuscript:16章釋經",
+    "path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+    "sha256": "f4b6fdec98239d8759f0cafd6e451a3a8c502d7bae00b547ed5a18d654b1a23e",
+    "fidelity_status": "current_passed",
+    "section_anchor": "#### 磐石的身份：太 16:18 的原文分析"
+  },
+  "sections": [
+    {
+      "section_id": "matt16-18-rock",
+      "decision_ids": ["CD-M16-002-04", "CD-M16-002-05"],
+      "thesis": "教會的終極根基不是彼得個人的權位，而是使徒見證所指向的基督；其他講授對認信或真理的著重須保留為張力。",
+      "required_argument_steps": [
+        {"step_id": "M16-18-S01", "role": "observation", "statement": "Petros 與 petra 字根相關，但詞形與陰陽性不同。", "source_span": "final.md:99", "source_excerpt": "Πέτρος 是陽性名詞，πέτρα 是陰性名詞。兩個詞雖然字根相近，卻是不同的詞。"},
+        {"step_id": "M16-18-S02", "role": "inference", "statement": "差別表明二者相關，但磐石不能不經論證就等同彼得本人。", "source_span": "final.md:99", "source_excerpt": "「這磐石」與彼得之間有某種關聯，但「這磐石」所指的並不是彼得這個人本身。"},
+        {"step_id": "M16-18-S03", "role": "corroboration", "statement": "弗 2:20 的使徒和先知共用一個定冠詞，形成共同的根基性見證。", "source_span": "final.md:107", "source_excerpt": "「使徒和先知」只有一個定冠詞，語法上指向同一個根基。"},
+        {"step_id": "M16-18-S04", "role": "conclusion", "statement": "使徒和先知共同指向房角石基督，基督是教會終極根基。", "source_span": "final.md:107", "source_excerpt": "使徒群體共同指向的根基是基督耶穌。"}
+      ],
+      "allowed_operations": ["preserve", "clarify", "reorder_within_step", "merge_reader_heading"],
+      "ineligible_operations": ["compress_to_source_summary", "replace_with_supplement", "silently_harmonize_tension"]
+    }
+  ],
+  "supplemental_material": [
+    {
+      "claim_ids": ["DK-3d012c24a542-CL001", "DK-566e8ca150dd-CL007"],
+      "operation": "tension",
+      "placement": "after_base_argument",
+      "description": "另一些講授把磐石更直接表述為彼得的認信或所領受的真理。"
+    }
+  ],
+  "status": "editor_confirmed"
+}

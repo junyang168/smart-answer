@@ -308,7 +308,7 @@ def _audit_paragraph_provenance(
                     )
                 )
                 result["valid"] = False
-            elif attribution == "professor":
+            elif attribution in {"professor", "editorial_synthesis"}:
                 claim_ids = [str(value) for value in provenance.get("claim_ids", []) if value]
                 result["claim_ids"] = claim_ids
                 if not claim_ids:
@@ -318,6 +318,18 @@ def _audit_paragraph_provenance(
                             "error",
                             "教授观点段落没有映射主张",
                             f"「{heading['text']}」中的教授观点必须列出 claim_ids。",
+                        )
+                    )
+                    result["valid"] = False
+                if attribution == "editorial_synthesis" and not str(
+                    provenance.get("synthesis_note") or ""
+                ).strip():
+                    findings.append(
+                        _finding(
+                            "editorial_synthesis_without_note",
+                            "error",
+                            "跨來源編輯綜合沒有說明",
+                            f"「{heading['text']}」中的 editorial_synthesis 必須在隱藏 provenance 提供 synthesis_note。",
                         )
                     )
                     result["valid"] = False
@@ -1008,6 +1020,10 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
             ),
             "editor_paragraph_total": sum(
                 item["attribution"] == "editor" for item in paragraph_provenance
+            ),
+            "editorial_synthesis_paragraph_total": sum(
+                item["attribution"] == "editorial_synthesis"
+                for item in paragraph_provenance
             ),
         },
         "decisions": decision_results,
