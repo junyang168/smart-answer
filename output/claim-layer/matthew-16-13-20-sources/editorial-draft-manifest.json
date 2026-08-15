@@ -16,7 +16,7 @@
         "plan_id": "CP-matthew-16-13-20",
     "knowledge_snapshot_path": "shared-knowledge-projection.json",
     "audit_output_path": "editorial-draft-audit.json",
-    "editorial_review_path": "authoring-v1/final-independent-editorial-review.json",
+    "editorial_review_path": "authoring-v1/final-independent-editorial-review-v2.json",
     "publication_decision_path": "human-publication-decision.json",
         "decision_sections": [
           {

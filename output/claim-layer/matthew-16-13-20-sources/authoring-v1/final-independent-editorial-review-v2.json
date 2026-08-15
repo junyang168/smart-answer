@@ -1,0 +1,112 @@
+{
+  "schema_version": "matthew-exposition-final-independent-editorial-delta-review.v1",
+  "review_type": "delta_re_review",
+  "reviewed_draft_sha256": "45c70052372a9977118151f80d38fe53da6e5d7457b1c238c9b5a7d8d0a8901f",
+  "supersedes": {
+    "path": "output/claim-layer/matthew-16-13-20-sources/authoring-v1/final-independent-editorial-review.json",
+    "artifact_sha256": "1c1a469ac55a9a6aaaaaa9ff19249f45895165380b3961951e9db500f5f5a107",
+    "reviewed_draft_sha256": "e0bc814ef8ae68c12a2e1d6d6d5041ece7c1ca6a23c939e9e8e7e8285686151d",
+    "total_score": 91
+  },
+  "review_scope": "對既有全稿 independent editorial review 的 delta re-review；只重新判斷太16:18六段的推理密度、M16-S03-A/B/C 綁定、彼得角色段歸屬及其對全稿 hard gate 的影響。未重新打開其他已通過內容。",
+  "delta_summary": "太16:18六段已恢復母本認可的推理密度，完整呈現 Petros/petra 的文法觀察、不能直接等同彼得的限制、弗2:20的共同根基性見證、基督為終極根基的結論，以及相關講道對彼得認信／所領受真理的不同著重。line 50 已正確綁定 M16-S03-A；line 53 已綁定 M16-S03-B 與 M16-S03-C；彼得角色段已改為 editorial_synthesis，並帶有 Matt.16.16/18/19、明確 synthesis_note、母本與三項補充來源及相應 evidence。此前的 editorial_or_ai_inference_attributed_to_professor hard failure 因而消除，正文沒有因 provenance 修正而降質。",
+  "total_score": 93,
+  "previous_score": 91,
+  "score_delta": 2,
+  "passed": true,
+  "hard_failures": [],
+  "resolved_hard_failures": [
+    {
+      "failure_id": "editorial_or_ai_inference_attributed_to_professor",
+      "section_id": "reader-sec-03",
+      "resolution": "彼得角色段现标为 editorial_synthesis；其经文观察、母本结论与跨讲道综合分别由 scripture_refs、claim_ids、evidence_step_ids、source_ids 和 synthesis_note 明确承担，不再冒充教授单一来源主张。"
+    }
+  ],
+  "dimension_scores": [
+    {
+      "dimension_id": "source_and_exegesis",
+      "score": 15,
+      "delta": 1,
+      "evidence": "太16:18不再只是列出 Petros/petra 与弗2:20，而是解释文法分类、词形变化为何形成解释问题，以及交叉经文如何把论证引向基督。"
+    },
+    {
+      "dimension_id": "base_manuscript_preservation",
+      "score": 15,
+      "delta": 0,
+      "evidence": "M16-S03-A、M16-S03-B、M16-S03-C 均按母本次序完整出现，补充讲道仍放在母本结论之后。"
+    },
+    {
+      "dimension_id": "exegetical_reasoning",
+      "score": 15,
+      "delta": 1,
+      "evidence": "观察、限制、交叉经文、正面结论及彼得角色的解释桥梁连续完整，普通读者无需依赖审核说明即可跟随。"
+    },
+    {
+      "dimension_id": "argument_organization",
+      "score": 9,
+      "delta": 0,
+      "evidence": "六段各推进一步，先完成母本论证，再呈现不同讲授的正面指认与共同否定面。"
+    },
+    {
+      "dimension_id": "general_reader_readability",
+      "score": 9,
+      "delta": 0,
+      "evidence": "新增解释使用平实书面语说明文法与推论，没有模仿课堂口吻；篇幅增加但没有造成概念跳跃。"
+    },
+    {
+      "dimension_id": "editorial_voice_restraint",
+      "score": 9,
+      "delta": 0,
+      "evidence": "编辑判断只存在于隐藏 provenance 和必要的来源张力段落，读者正文没有出现生产流程语言。"
+    },
+    {
+      "dimension_id": "approved_written_style",
+      "score": 9,
+      "delta": 0,
+      "evidence": "段落恢复平实但不简略的讲稿密度，既有解释耐心，也没有过度模仿教授课堂语气。"
+    },
+    {
+      "dimension_id": "theological_tension_and_attribution",
+      "score": 4,
+      "delta": 0,
+      "evidence": "太16:18的基督本身与彼得认信／所领受真理之张力得到准确归属且没有合并；全稿仍保留旧 review 所列徒15 source_ids 的低严重度直接溯源 finding，因此本维度维持4分。"
+    },
+    {
+      "dimension_id": "concision_without_compression",
+      "score": 4,
+      "delta": 0,
+      "evidence": "六段不是来源摘要，且差异与共同点分别处理；末两段有少量有意重申，但各自承担未决张力与共同否定面的不同功能。"
+    },
+    {
+      "dimension_id": "pastoral_theological_landing",
+      "score": 4,
+      "delta": 0,
+      "evidence": "彼得的重要性被放在其所认信的基督之下，与全稿教会根基和受约束权柄的神学落点一致。"
+    }
+  ],
+  "section_reviews": [
+    {
+      "section_id": "reader-sec-03",
+      "base_step_ids_preserved": [
+        "M16-S03-A",
+        "M16-S03-B",
+        "M16-S03-C"
+      ],
+      "assessment": "通过。六段恢复了承重论证的完整展开；step IDs 与实际段落功能已对齐；彼得角色段的编辑综合归属已经透明；16:18b 仍遵守 coverage boundary；来源张力和共同否定面均清楚保留。"
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "FIER-e0bc814ef8-001",
+      "status": "carried_forward",
+      "dimension_id": "theological_tension_and_attribution",
+      "section_id": "reader-sec-04",
+      "severity": "low",
+      "blocking": false,
+      "manuscript_anchor": "採用母本筆記所載的辯論與群體商議描述，不採另一講道的「無辯論」說法",
+      "explanation": "本次 delta 不涉及徒15。现有 editorial_synthesis 仍保留 synthesis_note、DK-3d012c24a542 claim 与 evidence IDs，但 source_ids 尚未直接列出被舍弃之讲道 SRC-2016_NYSC_3-3d012c24a542。该问题不影响读者正文或当前 hard gate，继续作为低严重度、非阻断 finding。",
+      "recommended_action": "未来整理隐藏 provenance 时，将 SRC-2016_NYSC_3-3d012c24a542 加入该段 source_ids；无需改动正文。"
+    }
+  ],
+  "delta_findings": []
+}
