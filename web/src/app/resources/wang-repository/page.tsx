@@ -5,6 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 
 type RepositoryView = "bible" | "topic";
 
+type PublicArticleSummary = {
+  slug: string;
+  title: string;
+  passage: string;
+  href: string;
+};
+
 type BibleReference = {
   osis: string;
   display: string;
@@ -142,6 +149,13 @@ function groupBibleUnits(cards: BibleUnitCard[]): BibleBookGroup[] {
 export default function WangRepositoryPage() {
   const [view, setView] = useState<RepositoryView>("bible");
   const [data, setData] = useState<any>(null);
+  const [publicArticles, setPublicArticles] = useState<PublicArticleSummary[]>([]);
+
+  useEffect(() => {
+    fetch("/api/public/wang-articles", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : { articles: [] })
+      .then((payload) => setPublicArticles(payload.articles ?? []));
+  }, []);
 
   useEffect(() => {
     setData(null);
@@ -166,7 +180,7 @@ export default function WangRepositoryPage() {
       <p className="mt-3 max-w-3xl text-slate-600">
         按聖經經卷與講論專題，整理王守仁教授在不同時期、不同場合的釋經內容。
       </p>
-      <div className="mt-6 flex gap-3">
+      <div className="mt-6 flex flex-wrap gap-3" aria-label="文庫探索方式">
         <button
           onClick={() => setView("bible")}
           className={`rounded-lg px-4 py-2 font-semibold ${view === "bible" ? "bg-sky-600 text-white" : "bg-slate-100"}`}
@@ -179,7 +193,28 @@ export default function WangRepositoryPage() {
         >
           主題目錄
         </button>
+        <Link
+          href="/resources/qa"
+          className="rounded-lg bg-slate-100 px-4 py-2 font-semibold text-slate-800 hover:bg-slate-200"
+        >
+          信仰問答
+        </Link>
       </div>
+
+      {publicArticles.length > 0 && (
+        <section className="mt-10 rounded-3xl border border-amber-200 bg-amber-50/70 p-6 sm:p-8">
+          <p className="text-sm font-bold tracking-wide text-amber-800">正式釋經文章</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {publicArticles.map((article) => (
+              <Link key={article.slug} href={article.href} className="rounded-2xl border border-amber-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                <span className="text-sm font-semibold text-amber-800">{article.passage}</span>
+                <h2 className="mt-2 text-xl font-bold leading-8 text-slate-950">{article.title}</h2>
+                <p className="mt-3 text-sm text-slate-600">閱讀全文，或按相同小節聆聽王教授原聲講解。</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {!data ? (
         <p className="py-12">讀取中…</p>

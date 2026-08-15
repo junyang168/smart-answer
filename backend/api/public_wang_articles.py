@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+from urllib.parse import quote
+
+from fastapi import APIRouter, HTTPException
+
+from backend.api.config import WANG_REPOSITORY_DIR
+from backend.api.canonical_repository.service import CanonicalRepositoryService
+
+
+router = APIRouter(prefix="/public/wang-articles", tags=["wang-articles-public"])
+
+EDITORIAL_DRAFT_ROOT = WANG_REPOSITORY_DIR
+APPROVAL_SCHEMA_VERSION = "human-publication-decision.v1"
+
+BOOK_SLUGS = {
+    "Matt": "matthew",
+    "Mark": "mark",
+    "Luke": "luke",
+    "John": "john",
+    "Acts": "acts",
+    "Rom": "romans",
+}
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _safe_child(root: Path, relative_path: str) -> Path | None:
+    if not relative_path:
+        return None
+    candidate = (root / relative_path).resolve()
+    try:
+        candidate.relative_to(EDITORIAL_DRAFT_ROOT.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _slug_from_passage(passage: str) -> str:
+    match = re.fullmatch(
+        r"([1-3]?[A-Za-z]+)\.(\d+)(?:\.(\d+))?(?:-([1-3]?[A-Za-z]+)\.(\d+)(?:\.(\d+))?)?",
+        passage.strip(),
+    )
+    if not match:
+        return ""
+    book, chapter, verse, end_book, end_chapter, end_verse = match.groups()
+    book_slug = BOOK_SLUGS.get(book, book.lower())
+    parts = [book_slug, chapter]
+    if verse:
+        parts.append(verse)
+    if end_book and end_book != book:
+        parts.extend([BOOK_SLUGS.get(end_book, end_book.lower()), end_chapter or ""])
+    elif end_chapter and end_chapter != chapter:
+        parts.append(end_chapter)
+    if end_verse:
+        parts.append(end_verse)
+    return "-".join(part for part in parts if part)
+
+
+def _manifest_passage_slug(item: dict) -> str:
+    public_slug = str(item.get("public_slug") or "").strip()
+    if public_slug:
+        return public_slug
+    audit_config = item.get("audit_config") or {}
+    for quotation in audit_config.get("required_scripture_quotations", []) or []:
+        for marker in quotation.get("scripture_refs", []) or []:
+            slug = _slug_from_passage(str(marker))
+            if slug:
+                return slug
+    passage = str(item.get("passage") or "").strip()
+    match = re.fullmatch(r"太\s*(\d+):(\d+)[–—-](\d+)", passage)
+    if match:
+        return f"matthew-{match.group(1)}-{match.group(2)}-{match.group(3)}"
+    return ""
+
+
+def _approved_publication(manifest_path: Path, item: dict) -> tuple[Path, dict] | None:
+    draft_id = str(item.get("draft_id") or "").strip()
+    manuscript_path = _safe_child(manifest_path.parent, str(item.get("relative_path") or "").strip())
+    decision_relative = str((item.get("audit_config") or {}).get("publication_decision_path") or "").strip()
+    decision_path = _safe_child(manifest_path.parent, decision_relative)
+    if not draft_id or not manuscript_path or not manuscript_path.is_file() or not decision_path:
+        return None
+    decision = _read_json(decision_path)
+    if (
+        decision.get("schema_version") != APPROVAL_SCHEMA_VERSION
+        or decision.get("draft_id") != draft_id
+        or decision.get("decision") != "approved"
+        or decision.get("editorial_review_passed") is not True
+        or decision.get("technical_audit_status") not in {"pass", "pass_with_warnings"}
+        or decision.get("manuscript_sha256") != _sha256(manuscript_path)
+    ):
+        return None
+    return manuscript_path, decision
+
+
+def _public_source(source_document: dict) -> dict | None:
+    if source_document.get("source_type") != "sermon_transcript":
+        return None
+    transcript_id = str(source_document.get("transcript_id") or "").strip()
+    if not transcript_id:
+        return None
+    catalog = CanonicalRepositoryService._sermon_catalog_record(transcript_id)
+    metadata: dict = {}
+    source_path = Path(str(source_document.get("source_path") or ""))
+    if source_path.is_file():
+        raw = _read_json(source_path)
+        metadata = raw.get("metadata") or {}
+    media = CanonicalRepositoryService._sermon_media(transcript_id, metadata, catalog)
+    media_payload = media.model_dump(mode="json")
+    media_origin = os.getenv("PUBLIC_MEDIA_ORIGIN", "").rstrip("/")
+    if media_origin and str(media_payload.get("url") or "").startswith("/"):
+        media_payload["url"] = f"{media_origin}{media_payload['url']}"
+    return {
+        "title": str(catalog.get("title") or source_document.get("title") or transcript_id),
+        "sermon_label": str(source_document.get("title") or transcript_id),
+        "delivered_on": catalog.get("deliver_date") or None,
+        "public_url": f"/resources/sermons/{quote(transcript_id, safe='')}",
+        "media": media_payload,
+    }
+
+
+def _public_markdown(markdown: str) -> str:
+    markdown = re.sub(r"<!--\s*provenance:\s*[\s\S]*?-->\s*", "", markdown)
+    markdown = markdown.replace("**資料說明：**", "**閱讀提示：**")
+    markdown = markdown.replace("現有材料沒有對第 17 節作獨立展開", "本文不在此對第 17 節作獨立展開")
+    markdown = markdown.replace("現有材料沒有充分展開其語義", "本文不在此進一步展開其語義")
+    return markdown.strip()
+
+
+def public_article_data(slug: str) -> dict:
+    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
+        manifest = _read_json(manifest_path)
+        for item in manifest.get("drafts", []) or []:
+            if _manifest_passage_slug(item) != slug:
+                continue
+            approved = _approved_publication(manifest_path, item)
+            if not approved:
+                continue
+            manuscript_path, _decision = approved
+            package_path = _safe_child(
+                manifest_path.parent,
+                str(item.get("presentation_package_path") or "").strip(),
+            )
+            package = _read_json(package_path) if package_path and package_path.is_file() else {}
+            plan_id = str((item.get("audit_config") or {}).get("plan_id") or item.get("candidate_id") or "")
+            plan = next(
+                (candidate for candidate in package.get("product_plans", []) or [] if candidate.get("plan_id") == plan_id),
+                {},
+            )
+            decisions = {
+                str(decision.get("decision_id") or ""): decision
+                for decision in plan.get("decisions", []) or []
+            }
+            sources = {
+                str(source.get("source_id") or ""): source
+                for source in package.get("source_documents", []) or []
+            }
+            audio_sections = []
+            for section in (item.get("audit_config") or {}).get("decision_sections", []) or []:
+                decision = decisions.get(str(section.get("decision_id") or "")) or {}
+                clips = []
+                for presentation in decision.get("source_presentations", []) or []:
+                    source = _public_source(sources.get(str(presentation.get("source_id") or "")) or {})
+                    if not source or not source.get("media", {}).get("url"):
+                        continue
+                    clips.append(
+                        {
+                            "title": source["title"],
+                            "sermon_label": source["sermon_label"],
+                            "delivered_on": source["delivered_on"],
+                            "public_url": source["public_url"],
+                            "media": source["media"],
+                            "start_seconds": presentation.get("start_seconds"),
+                            "end_seconds": presentation.get("end_seconds"),
+                        }
+                    )
+                if clips:
+                    audio_sections.append(
+                        {
+                            "heading": str(section.get("markdown_heading") or "").strip(),
+                            "title": str(decision.get("section_title") or section.get("markdown_heading") or "").strip(),
+                            "passage": str(decision.get("passage") or "").strip(),
+                            "clips": clips,
+                        }
+                    )
+            markdown = _public_markdown(manuscript_path.read_text(encoding="utf-8"))
+            return {
+                "slug": slug,
+                "title": str(item.get("title") or "").strip(),
+                "passage": str(item.get("passage") or "").strip(),
+                "markdown": markdown,
+                "audio_sections": audio_sections,
+                "audio_section_count": len(audio_sections),
+                "player_count": sum(len(section["clips"]) for section in audio_sections),
+            }
+    raise HTTPException(status_code=404, detail="找不到這篇文章。")
+
+
+@router.get("")
+def list_public_articles():
+    articles = []
+    seen: set[str] = set()
+    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
+        manifest = _read_json(manifest_path)
+        for item in manifest.get("drafts", []) or []:
+            slug = _manifest_passage_slug(item)
+            if not slug or slug in seen or not _approved_publication(manifest_path, item):
+                continue
+            seen.add(slug)
+            articles.append(
+                {
+                    "slug": slug,
+                    "title": str(item.get("title") or "").strip(),
+                    "passage": str(item.get("passage") or "").strip(),
+                    "href": f"/resources/wang-repository/articles/{slug}",
+                }
+            )
+    return {"articles": articles}
+
+
+@router.get("/{slug}")
+def get_public_article(slug: str):
+    return public_article_data(slug)

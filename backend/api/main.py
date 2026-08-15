@@ -28,6 +28,7 @@ from .canonical_repository.router import (
     admin_router as canonical_repository_admin_router,
 )
 from .thought_review import router as thought_review_router
+from .public_wang_articles import router as public_wang_articles_router
 
 app = FastAPI()
 
@@ -63,6 +64,7 @@ app.include_router(sermon_search_compat_router)
 app.include_router(canonical_repository_router)
 app.include_router(canonical_repository_admin_router)
 app.include_router(thought_review_router)
+app.include_router(public_wang_articles_router)
 
 
 @app.get("/healthz")
