@@ -10,9 +10,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+MATTHEW_BOOK_PATTERN = r"(?:太|马太(?:福音)?|馬太(?:福音)?|Matt(?:hew)?\.?|Mt\.?)"
 REFERENCE_RE = re.compile(
-    r"(?P<book>太|Matt\.?)\s*(?P<chapter>\d+)\s*[:：.]\s*"
-    r"(?P<start>\d+)(?:\s*[-–—]\s*(?P<end>\d+))?",
+    rf"(?P<book>{MATTHEW_BOOK_PATTERN})\s*(?P<chapter>\d+)\s*[:：.]\s*"
+    rf"(?P<start>\d+)(?:\s*[-–—]\s*"
+    rf"(?:(?:(?P<end_book>{MATTHEW_BOOK_PATTERN})\s*)?"
+    rf"(?P<end_chapter>\d+)\s*[:：.]\s*)?"
+    rf"(?P<end>\d+))?",
     re.IGNORECASE,
 )
 
@@ -31,18 +35,36 @@ class Passage:
 
 
 def _canonical_book(value: str) -> str:
-    return "Matt" if value.lower().startswith("matt") or value == "太" else value
+    compact = re.sub(r"\s+", "", value)
+    return (
+        "Matt"
+        if compact.lower().startswith("matt")
+        or compact.lower().rstrip(".") == "mt"
+        or compact in {"太", "马太", "馬太", "马太福音", "馬太福音"}
+        else compact
+    )
+
+
+def _match_span(match: re.Match[str]) -> tuple[tuple[int, int], tuple[int, int]]:
+    start = (int(match.group("chapter")), int(match.group("start")))
+    end_book = match.group("end_book")
+    if end_book and _canonical_book(end_book) != _canonical_book(match.group("book")):
+        return start, start
+    end = (
+        int(match.group("end_chapter") or start[0]),
+        int(match.group("end") or start[1]),
+    )
+    return start, end
 
 
 def reference_overlaps(reference: str, passage: Passage) -> bool:
+    passage_start = (passage.chapter, passage.start_verse)
+    passage_end = (passage.chapter, passage.end_verse)
     for match in REFERENCE_RE.finditer(reference):
         if _canonical_book(match.group("book")) != _canonical_book(passage.book):
             continue
-        if int(match.group("chapter")) != passage.chapter:
-            continue
-        start = int(match.group("start"))
-        end = int(match.group("end") or start)
-        if start <= passage.end_verse and end >= passage.start_verse:
+        start, end = _match_span(match)
+        if start <= passage_end and end >= passage_start:
             return True
     return False
 
@@ -58,12 +80,13 @@ def _directly_scoped(record: dict[str, Any], passage: Passage) -> bool:
         for match in REFERENCE_RE.finditer(str(reference)):
             if _canonical_book(match.group("book")) != _canonical_book(passage.book):
                 continue
-            if int(match.group("chapter")) != passage.chapter:
-                continue
-            start = int(match.group("start"))
-            end = int(match.group("end") or start)
-            if start <= passage.end_verse and end >= passage.start_verse:
-                return end - start + 1 <= maximum_width
+            start, end = _match_span(match)
+            passage_start = (passage.chapter, passage.start_verse)
+            passage_end = (passage.chapter, passage.end_verse)
+            if start <= passage_end and end >= passage_start:
+                if start[0] != end[0]:
+                    return False
+                return end[1] - start[1] + 1 <= maximum_width
     return False
 
 

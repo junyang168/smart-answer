@@ -9,8 +9,66 @@ def test_reference_overlap_handles_chinese_and_english_ranges() -> None:
     passage = Passage("Matt", 16, 21, 23)
     assert reference_overlaps("太16:16-23", passage)
     assert reference_overlaps("Matt.16:22", passage)
+    assert reference_overlaps("马太福音16:21", passage)
+    assert reference_overlaps("馬太福音 16:21–23", passage)
+    assert reference_overlaps("Matthew 16:13-23", passage)
+    assert reference_overlaps("Mt. 16:21", passage)
     assert not reference_overlaps("太16:24-27", passage)
     assert not reference_overlaps("太17:21-23", passage)
+
+
+def test_reference_overlap_treats_full_osis_range_as_one_span() -> None:
+    reference = "Matt.16.13-Matt.16.20"
+
+    assert reference_overlaps(reference, Passage("Matt", 16, 17, 17))
+    assert not reference_overlaps(reference, Passage("Matt", 16, 21, 21))
+    assert reference_overlaps(
+        "Matt.16.28-Matt.17.2",
+        Passage("Matt", 17, 1, 1),
+    )
+    assert reference_overlaps(
+        "Matthew 16:28-17:2",
+        Passage("Matt", 17, 1, 1),
+    )
+
+
+def test_passage_slice_keeps_full_chinese_book_name_claims() -> None:
+    claims = [
+        {
+            "claim_id": f"CL-{index}",
+            "scripture_refs": [reference],
+            "evidence_step_ids": [f"E-{index}"],
+        }
+        for index, reference in enumerate(
+            [
+                "马太福音16:19",
+                "馬太福音 16:18",
+                "Matthew 16:13-20",
+                "Matt.16.13-Matt.16.20",
+            ],
+            start=1,
+        )
+    ]
+    package = {
+        "claims": claims,
+        "evidence_steps": [
+            {
+                "evidence_step_id": f"E-{index}",
+                "produced_claim_ids": [f"CL-{index}"],
+                "support_eligibility": "eligible",
+            }
+            for index in range(1, 5)
+        ],
+    }
+
+    result = build_passage_slice(package, Passage("Matt", 16, 13, 20))
+
+    assert [row["claim_id"] for row in result["claims"]] == [
+        "CL-1",
+        "CL-2",
+        "CL-3",
+        "CL-4",
+    ]
 
 
 def test_passage_slice_keeps_only_transitive_provenance() -> None:
