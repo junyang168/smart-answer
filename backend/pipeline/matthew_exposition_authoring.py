@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -29,6 +30,34 @@ HARD_FAILURE_IDS = [
     "production_language_dominates_reader_prose",
     "exegetical_observation_inference_conclusion_chain_missing",
 ]
+EDITORIAL_REVIEW_PACKET_MAX_BYTES = 40 * 1024
+FINAL_REVIEW_TIMEOUT_MIN_SECONDS = 180.0
+FINAL_REVIEW_TIMEOUT_MAX_SECONDS = 300.0
+FINAL_REVIEW_MAX_ATTEMPTS = 2
+
+# A revision aimed at one dimension can predictably disturb a small number of
+# adjacent dimensions.  Keeping this map explicit makes delta scoring
+# conservative without allowing a reviewer to rescore the whole manuscript.
+DELTA_DIMENSION_IMPACTS: dict[str, set[str]] = {
+    "source_and_exegesis": {"exegetical_reasoning"},
+    "base_manuscript_preservation": {"exegetical_reasoning", "concision_without_compression"},
+    "exegetical_reasoning": {"general_reader_readability", "concision_without_compression"},
+    "argument_organization": {"general_reader_readability", "concision_without_compression"},
+    "general_reader_readability": {"approved_written_style"},
+    "editorial_voice_restraint": {"approved_written_style", "general_reader_readability"},
+    "approved_written_style": {"general_reader_readability"},
+    "theological_tension_and_attribution": {"source_and_exegesis", "exegetical_reasoning"},
+    "concision_without_compression": {"general_reader_readability"},
+    "pastoral_theological_landing": {"approved_written_style"},
+}
+
+HARD_FAILURE_DIMENSIONS = {
+    "load_bearing_base_argument_removed_or_reordered": "base_manuscript_preservation",
+    "editorial_or_ai_inference_attributed_to_professor": "theological_tension_and_attribution",
+    "material_source_tension_silently_harmonized": "theological_tension_and_attribution",
+    "production_language_dominates_reader_prose": "editorial_voice_restraint",
+    "exegetical_observation_inference_conclusion_chain_missing": "exegetical_reasoning",
+}
 
 
 AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
@@ -155,6 +184,44 @@ EDITORIAL_REVIEW_SCHEMA: dict[str, Any] = {
             },
         },
         "required": ["scope_confirmation", "summary", "dimension_scores", "hard_failures", "section_reviews", "findings"],
+    },
+}
+
+
+FINAL_DELTA_REVIEW_SCHEMA: dict[str, Any] = {
+    "name": "matthew_exposition_final_delta_review_v1",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "scope_confirmation": {"type": "string", "enum": ["final_delta_writing_quality"]},
+            "reviewed_manuscript_sha256": {"type": "string"},
+            "summary": {"type": "string"},
+            "dimension_scores": EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["dimension_scores"],
+            "hard_failure_assessments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "failure_id": {"type": "string", "enum": HARD_FAILURE_IDS},
+                        "failed": {"type": "boolean"},
+                        "evidence": {"type": "string"},
+                    },
+                    "required": ["failure_id", "failed", "evidence"],
+                },
+            },
+            "findings": EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["findings"],
+        },
+        "required": [
+            "scope_confirmation",
+            "reviewed_manuscript_sha256",
+            "summary",
+            "dimension_scores",
+            "hard_failure_assessments",
+            "findings",
+        ],
     },
 }
 
@@ -552,6 +619,52 @@ def reader_text(markdown: str) -> str:
     return re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
 
 
+def rebind_review_after_hidden_metadata_normalization(
+    *,
+    review: dict[str, Any],
+    outcome: dict[str, Any],
+    before_manuscript: str,
+    after_manuscript: str,
+    contract: dict[str, Any],
+    quality_profile: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Rebind a verified review when only hidden HTML comments changed."""
+
+    verified = validate_editorial_review(
+        review,
+        contract=contract,
+        manuscript=before_manuscript,
+        quality_profile=quality_profile,
+    )
+    comparable_outcome = {
+        key: value for key, value in outcome.items() if key != "manuscript_sha256"
+    }
+    if comparable_outcome != verified:
+        raise AuthoringContractError("normalization baseline outcome is not verified")
+    before_sha = sha256_text(before_manuscript)
+    if outcome.get("manuscript_sha256") != before_sha:
+        raise AuthoringContractError("normalization baseline SHA does not match manuscript")
+    # A serializer may add or remove the final newline without changing any
+    # reader-visible prose. Internal whitespace remains byte-for-byte strict.
+    before_reader_text = reader_text(before_manuscript).rstrip("\n")
+    after_reader_text = reader_text(after_manuscript).rstrip("\n")
+    if before_reader_text != after_reader_text:
+        raise AuthoringContractError(
+            "hidden metadata normalization changed reader-visible manuscript text"
+        )
+    rebound_outcome = {
+        **outcome,
+        "manuscript_sha256": sha256_text(after_manuscript),
+    }
+    return rebound_outcome, {
+        "schema_version": "matthew-exposition-hidden-metadata-normalization.v1",
+        "before_manuscript_sha256": before_sha,
+        "after_manuscript_sha256": rebound_outcome["manuscript_sha256"],
+        "reader_text_sha256": sha256_text(before_reader_text),
+        "reader_visible_text_unchanged": True,
+    }
+
+
 def deterministic_writing_warnings(
     markdown: str, quality_profile: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -677,6 +790,283 @@ def validate_editorial_review(
             "a failing rubric assessment requires at least one blocking finding"
         )
     return outcome
+
+
+def _with_packet_size(packet: dict[str, Any], *, max_bytes: int) -> dict[str, Any]:
+    packet["size_budget"] = {"max_bytes": max_bytes, "actual_bytes": 0}
+    # The number of digits in actual_bytes can change the serialized size.  A
+    # short fixed-point loop records the exact canonical payload size.
+    for _ in range(4):
+        actual_bytes = len(canonical_json(packet).encode("utf-8"))
+        if packet["size_budget"]["actual_bytes"] == actual_bytes:
+            break
+        packet["size_budget"]["actual_bytes"] = actual_bytes
+    actual_bytes = len(canonical_json(packet).encode("utf-8"))
+    if actual_bytes > max_bytes:
+        raise AuthoringContractError(
+            f"editorial review packet exceeds {max_bytes} byte budget: {actual_bytes}"
+        )
+    return packet
+
+
+def build_editorial_review_packet(
+    *,
+    authoring_packet: dict[str, Any],
+    author_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the bounded writing-review projection of an authoring packet.
+
+    Knowledge records, topic nodes, source fragments, evidence steps, the
+    composition plan, and base manuscript text intentionally remain local.
+    """
+
+    manuscript = _require_nonempty_string(
+        author_result.get("manuscript_markdown"), "manuscript_markdown"
+    )
+    contract = _require_mapping(authoring_packet.get("base_contract"), "base_contract")
+    quality_profile = _require_mapping(
+        authoring_packet.get("quality_profile"), "quality_profile"
+    )
+    compact_sections = []
+    for section in contract.get("sections", []):
+        compact_sections.append(
+            {
+                "section_id": section["section_id"],
+                "required_argument_steps": [
+                    {
+                        "step_id": step["step_id"],
+                        "statement": step["statement"],
+                        "required": step.get("required", True),
+                    }
+                    for step in section.get("required_argument_steps", [])
+                ],
+            }
+        )
+    packet = {
+        "schema_version": "matthew-exposition-editorial-review-packet.v1",
+        "manuscript_sha256": sha256_text(manuscript),
+        "manuscript_markdown": manuscript,
+        "base_preservation_contract": {"sections": compact_sections},
+        "author_section_ledger": [
+            {
+                "section_id": section["section_id"],
+                "base_step_ids_preserved": section.get("base_step_ids_preserved", []),
+                "output_anchor": section.get("output_anchor", ""),
+            }
+            for section in author_result.get("sections", [])
+        ],
+        "quality_profile": {
+            "profile_id": quality_profile.get("profile_id"),
+            "revision": quality_profile.get("revision"),
+            "passing_score": quality_profile.get("passing_score"),
+            "dimensions": quality_profile.get("dimensions", []),
+            "hard_failures": quality_profile.get("hard_failures", []),
+            "review_calibration": quality_profile.get("review_calibration", {}),
+        },
+        "scope": {
+            "include": ["writing_quality", "base_manuscript_preservation"],
+            "exclude": [
+                "program_audit",
+                "claim_extraction",
+                "knowledge_records",
+                "topic_nodes",
+                "source_fragments",
+                "evidence_steps",
+                "composition_plan",
+                "base_manuscript",
+            ],
+        },
+    }
+    return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
+
+
+def select_delta_dimensions(accepted_findings: list[dict[str, Any]]) -> list[str]:
+    direct = {
+        finding.get("dimension_id")
+        for finding in accepted_findings
+        if finding.get("dimension_id") in QUALITY_DIMENSION_IDS
+    }
+    affected = set(direct)
+    for dimension_id in direct:
+        affected.update(DELTA_DIMENSION_IMPACTS.get(dimension_id, set()))
+    return [dimension_id for dimension_id in QUALITY_DIMENSION_IDS if dimension_id in affected]
+
+
+def _markdown_blocks(markdown: str) -> list[str]:
+    return [block.strip() for block in re.split(r"\n\s*\n", markdown) if block.strip()]
+
+
+def changed_markdown_paragraphs(before: str, after: str) -> list[dict[str, Any]]:
+    before_blocks = _markdown_blocks(before)
+    after_blocks = _markdown_blocks(after)
+    matcher = SequenceMatcher(a=before_blocks, b=after_blocks, autojunk=False)
+    changes: list[dict[str, Any]] = []
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changes.append(
+            {
+                "change": tag,
+                "before_paragraphs": before_blocks[old_start:old_end],
+                "after_paragraphs": after_blocks[new_start:new_end],
+            }
+        )
+    return changes
+
+
+def build_final_delta_review_packet(
+    *,
+    baseline_review: dict[str, Any],
+    baseline_outcome: dict[str, Any],
+    baseline_manuscript: str,
+    revised_manuscript: str,
+    accepted_findings: list[dict[str, Any]],
+    dispositions: list[dict[str, Any]],
+    quality_profile: dict[str, Any],
+    contract: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a SHA-bound final review packet containing revision deltas only."""
+
+    # A baseline is inheritable only after the full local validator has attached
+    # its deterministic outcome and exact manuscript binding.
+    baseline_sha = sha256_text(baseline_manuscript)
+    recomputed_baseline_outcome = validate_editorial_review(
+        baseline_review,
+        contract=contract,
+        manuscript=baseline_manuscript,
+        quality_profile=quality_profile,
+    )
+    comparable_outcome = {
+        key: value for key, value in baseline_outcome.items() if key != "manuscript_sha256"
+    }
+    if comparable_outcome != recomputed_baseline_outcome:
+        raise AuthoringContractError("baseline review outcome is not the locally verified result")
+    if baseline_outcome.get("manuscript_sha256") != baseline_sha:
+        raise AuthoringContractError("baseline review is not verified against the baseline manuscript SHA")
+    affected = select_delta_dimensions(accepted_findings)
+    if not affected:
+        raise AuthoringContractError("final delta review requires at least one affected dimension")
+    expected_ids = {item.get("finding_id") for item in accepted_findings}
+    disposition_ids = [item.get("finding_id") for item in dispositions]
+    if len(disposition_ids) != len(set(disposition_ids)) or set(disposition_ids) != expected_ids:
+        raise AuthoringContractError("delta dispositions do not match accepted findings")
+    dimensions_by_id = {item["id"]: item for item in quality_profile["dimensions"]}
+    affected_hard_failures = [
+        failure_id
+        for failure_id in HARD_FAILURE_IDS
+        if HARD_FAILURE_DIMENSIONS[failure_id] in affected
+    ]
+    packet = {
+        "schema_version": "matthew-exposition-final-delta-review-packet.v1",
+        "baseline_manuscript_sha256": baseline_sha,
+        "baseline_review_sha256": sha256_text(canonical_json(baseline_review)),
+        "manuscript_sha256": sha256_text(revised_manuscript),
+        "changed_paragraphs": changed_markdown_paragraphs(
+            baseline_manuscript, revised_manuscript
+        ),
+        "baseline_review": {
+            "review": baseline_review,
+            "verified_outcome": baseline_outcome,
+        },
+        "accepted_findings": accepted_findings,
+        "finding_dispositions": dispositions,
+        "affected_dimensions": [dimensions_by_id[item] for item in affected],
+        "affected_hard_failures": affected_hard_failures,
+    }
+    if not packet["changed_paragraphs"]:
+        raise AuthoringContractError("revision did not change any manuscript paragraphs")
+    return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
+
+
+def validate_final_delta_review(
+    review: dict[str, Any],
+    *,
+    packet: dict[str, Any],
+    revised_manuscript: str,
+    quality_profile: dict[str, Any],
+) -> None:
+    validate_strict_schema(review, FINAL_DELTA_REVIEW_SCHEMA)
+    current_sha = sha256_text(revised_manuscript)
+    if packet.get("manuscript_sha256") != current_sha:
+        raise AuthoringContractError("final delta packet does not match revised manuscript SHA")
+    if review.get("reviewed_manuscript_sha256") != current_sha:
+        raise AuthoringContractError("final delta review does not match revised manuscript SHA")
+    affected = {item["id"] for item in packet["affected_dimensions"]}
+    score_ids = [item.get("dimension_id") for item in review.get("dimension_scores", [])]
+    if len(score_ids) != len(set(score_ids)) or set(score_ids) != affected:
+        raise AuthoringContractError(
+            "delta review must score each affected dimension exactly once"
+        )
+    configured = {item["id"]: item for item in quality_profile["dimensions"]}
+    for item in review["dimension_scores"]:
+        score = item["score"]
+        if not 0 <= score <= configured[item["dimension_id"]]["weight"]:
+            raise AuthoringContractError(f"invalid delta score for {item['dimension_id']}: {score}")
+    allowed_failures = set(packet.get("affected_hard_failures", []))
+    assessment_ids = [item.get("failure_id") for item in review["hard_failure_assessments"]]
+    if len(assessment_ids) != len(set(assessment_ids)) or set(assessment_ids) != allowed_failures:
+        raise AuthoringContractError(
+            "delta review must assess each hard failure associated with affected dimensions"
+        )
+    changed_text = "\n\n".join(
+        paragraph
+        for change in packet["changed_paragraphs"]
+        for paragraph in change["after_paragraphs"]
+    )
+    for finding in review.get("findings", []):
+        if finding["dimension_id"] not in affected:
+            raise AuthoringContractError("delta finding uses an unaffected dimension")
+        anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
+        if anchor not in revised_manuscript or anchor not in changed_text:
+            raise AuthoringContractError(f"delta finding anchor not found in changed manuscript text: {anchor}")
+
+
+def merge_final_delta_review(
+    *,
+    baseline_review: dict[str, Any],
+    baseline_outcome: dict[str, Any],
+    delta_review: dict[str, Any],
+    packet: dict[str, Any],
+    quality_profile: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if baseline_outcome.get("manuscript_sha256") != packet.get("baseline_manuscript_sha256"):
+        raise AuthoringContractError("cannot inherit scores from an unverified baseline review")
+    if sha256_text(canonical_json(baseline_review)) != packet.get("baseline_review_sha256"):
+        raise AuthoringContractError("baseline review does not match the verified delta packet")
+    affected = {item["id"] for item in packet["affected_dimensions"]}
+    baseline_scores = {
+        item["dimension_id"]: dict(item) for item in baseline_review["dimension_scores"]
+    }
+    for item in delta_review["dimension_scores"]:
+        baseline_scores[item["dimension_id"]] = dict(item)
+    inherited = set(baseline_scores) - affected
+    declared_failures = {
+        failure_id
+        for failure_id in baseline_review.get("hard_failures", [])
+        if HARD_FAILURE_DIMENSIONS[failure_id] not in affected
+    }
+    declared_failures.update(
+        item["failure_id"]
+        for item in delta_review["hard_failure_assessments"]
+        if item["failed"]
+    )
+    merged = {
+        "scope_confirmation": "writing_quality_and_base_preservation",
+        "summary": delta_review["summary"],
+        "dimension_scores": [baseline_scores[item] for item in QUALITY_DIMENSION_IDS],
+        "hard_failures": sorted(declared_failures),
+        "section_reviews": baseline_review["section_reviews"],
+        "findings": delta_review["findings"],
+        "score_provenance": {
+            "rescored_dimensions": sorted(affected),
+            "inherited_dimensions": sorted(inherited),
+            "baseline_manuscript_sha256": packet["baseline_manuscript_sha256"],
+            "manuscript_sha256": packet["manuscript_sha256"],
+        },
+    }
+    outcome = evaluate_editorial_review(merged, quality_profile)
+    outcome["manuscript_sha256"] = packet["manuscript_sha256"]
+    return merged, outcome
 
 
 def validate_revision_result(

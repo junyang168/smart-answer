@@ -15,7 +15,13 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _publication_fixture(tmp_path: Path, monkeypatch, *, approved: bool = True) -> Path:
+def _publication_fixture(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    approved: bool = True,
+    decision_schema: str = "human-publication-decision.v1",
+) -> Path:
     root = tmp_path / "editorial_drafts"
     draft = root / "DRAFT-M16-002-V1"
     draft.mkdir(parents=True)
@@ -85,7 +91,7 @@ def _publication_fixture(tmp_path: Path, monkeypatch, *, approved: bool = True) 
     _write_json(
         draft / "human-publication-decision.json",
         {
-            "schema_version": "human-publication-decision.v1",
+            "schema_version": decision_schema,
             "draft_id": "DRAFT-M16-002-V1",
             "decision": "approved" if approved else "rejected",
             "editorial_review_passed": True,
@@ -161,6 +167,17 @@ def test_public_article_index_contains_article_navigation_metadata(tmp_path: Pat
             }
         ]
     }
+
+
+def test_automated_approval_is_publicly_discoverable(tmp_path: Path, monkeypatch) -> None:
+    _publication_fixture(
+        tmp_path,
+        monkeypatch,
+        decision_schema="automated-publication-decision.v1",
+    )
+
+    result = public_wang_articles.list_public_articles()
+    assert [item["slug"] for item in result["articles"]] == ["matthew-16-13-20"]
 
 
 def test_changed_manuscript_invalidates_existing_approval(tmp_path: Path, monkeypatch) -> None:

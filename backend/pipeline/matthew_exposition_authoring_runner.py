@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -18,20 +19,31 @@ from backend.pipeline.matthew_exposition_authoring import (
     ADJUDICATION_SCHEMA,
     AUTHOR_RESULT_SCHEMA,
     EDITORIAL_REVIEW_SCHEMA,
+    EDITORIAL_REVIEW_PACKET_MAX_BYTES,
+    FINAL_DELTA_REVIEW_SCHEMA,
+    FINAL_REVIEW_MAX_ATTEMPTS,
+    FINAL_REVIEW_TIMEOUT_MAX_SECONDS,
+    FINAL_REVIEW_TIMEOUT_MIN_SECONDS,
     RECONSIDERATION_SCHEMA,
     REVISION_SCHEMA,
     AuthoringContractError,
     build_authoring_packet,
+    build_editorial_review_packet,
+    build_final_delta_review_packet,
     canonical_json,
     deterministic_writing_warnings,
     generation_fingerprint,
+    merge_final_delta_review,
     sha256_text,
     validate_author_result,
     validate_editorial_review,
+    validate_final_delta_review,
     validate_revision_result,
     validate_strict_schema,
 )
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
+from backend.pipeline.editorial_draft_audit import write_editorial_draft_audit
+from backend.pipeline.editorial_draft_repository import publish_automated_editorial_draft
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +54,7 @@ PROMPTS = {
     "adjudication": PROMPT_DIR / "matthew_exposition_editorial_adjudication.md",
     "reconsideration": PROMPT_DIR / "matthew_exposition_editorial_reconsideration.md",
     "revision": PROMPT_DIR / "matthew_exposition_author_revision.md",
+    "delta_review": PROMPT_DIR / "matthew_exposition_final_delta_review.md",
 }
 
 
@@ -59,6 +72,35 @@ def _client_generation_parameters(client: Any) -> dict[str, Any]:
         "timeout_seconds": getattr(client, "timeout_seconds", None),
         "temperature": 0.0,
     }
+
+
+def _final_review_timeout(client: Any) -> float:
+    configured = float(getattr(client, "timeout_seconds", 240.0) or 240.0)
+    return max(
+        FINAL_REVIEW_TIMEOUT_MIN_SECONDS,
+        min(configured, FINAL_REVIEW_TIMEOUT_MAX_SECONDS),
+    )
+
+
+def _call_final_reviewer(
+    client: Any,
+    prompt: str,
+    payload: str,
+    schema: dict[str, Any],
+) -> dict[str, Any]:
+    # Stage1 clients perform their own transport/JSON retry loop.  Capping it
+    # here guarantees one retry at most; schema validation happens after this
+    # call and is deliberately never retried.
+    if hasattr(client, "max_retries"):
+        client.max_retries = min(
+            max(1, int(client.max_retries)), FINAL_REVIEW_MAX_ATTEMPTS
+        )
+    return client.generate_json(
+        prompt,
+        payload,
+        schema,
+        timeout_seconds=_final_review_timeout(client),
+    )
 
 
 def _archive(path: Path) -> None:
@@ -118,6 +160,104 @@ def _validate_exact_ids(items: list[dict[str, Any]], expected: set[str], field: 
         )
 
 
+def _heading_text(anchor: str) -> str:
+    return anchor.strip().lstrip("#").strip()
+
+
+def _build_program_audit_manifest(
+    *,
+    template: dict[str, Any],
+    draft_id: str,
+    sections: list[dict[str, Any]],
+    scripture_heading: str = "經文與問題",
+) -> dict[str, Any]:
+    staged = json.loads(json.dumps(template, ensure_ascii=False))
+    drafts = [item for item in staged.get("drafts", []) if item.get("draft_id") == draft_id]
+    if len(drafts) != 1:
+        raise AuthoringContractError(
+            f"program audit template must contain draft_id exactly once: {draft_id}"
+        )
+    draft = drafts[0]
+    config = draft.get("audit_config") or {}
+    heading_by_decision: dict[str, str] = {}
+    for section in sections:
+        heading = _heading_text(str(section.get("output_anchor") or ""))
+        if not heading:
+            raise AuthoringContractError("program audit section has no output anchor")
+        for decision_id in section.get("decision_ids", []):
+            if decision_id in heading_by_decision:
+                raise AuthoringContractError(
+                    f"program audit decision is mapped twice: {decision_id}"
+                )
+            heading_by_decision[decision_id] = heading
+
+    old_heading_decisions: dict[str, list[str]] = {}
+    for mapping in config.get("decision_sections", []):
+        decision_id = str(mapping.get("decision_id") or "")
+        old_heading = str(mapping.get("markdown_heading") or "")
+        old_heading_decisions.setdefault(old_heading, []).append(decision_id)
+        if decision_id not in heading_by_decision:
+            raise AuthoringContractError(
+                f"program audit template decision missing from author ledger: {decision_id}"
+            )
+        mapping["markdown_heading"] = heading_by_decision[decision_id]
+
+    for quotation in config.get("required_scripture_quotations", []):
+        old_heading = str(quotation.get("markdown_heading") or "")
+        decision_ids = old_heading_decisions.get(old_heading, [])
+        mapped_headings = {
+            heading_by_decision[decision_id]
+            for decision_id in decision_ids
+            if decision_id in heading_by_decision
+        }
+        if len(mapped_headings) != 1:
+            raise AuthoringContractError(
+                f"cannot remap scripture quotation heading: {old_heading}"
+            )
+        # Author Agent articles quote the complete passage once under the
+        # central Scripture section. Keep every literal marker, but verify it
+        # there instead of forcing repeated quotations under reader sections.
+        quotation["markdown_heading"] = scripture_heading
+
+    draft["relative_path"] = "manuscript.md"
+    draft["presentation_package_path"] = "knowledge-snapshot.json"
+    config["knowledge_snapshot_path"] = "knowledge-snapshot.json"
+    config["audit_output_path"] = "program-audit.json"
+    return {"schema_version": staged["schema_version"], "drafts": [draft]}
+
+
+def _run_program_audit_stage(
+    *,
+    template_path: Path,
+    draft_id: str,
+    knowledge_path: Path,
+    output_dir: Path,
+    manuscript: str,
+    manuscript_sections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    template = json.loads(template_path.read_text(encoding="utf-8"))
+    manifest = _build_program_audit_manifest(
+        template=template,
+        draft_id=draft_id,
+        sections=manuscript_sections,
+    )
+    audit_dir = output_dir / "program-audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "manuscript.md").write_text(manuscript, encoding="utf-8")
+    shutil.copyfile(knowledge_path, audit_dir / "knowledge-snapshot.json")
+    manifest_path = audit_dir / "editorial-draft-manifest.json"
+    _write_json(manifest_path, manifest)
+    audit_path = write_editorial_draft_audit(manifest_path, draft_id)
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    return {
+        "status": audit["status"],
+        "path": str(audit_path),
+        "manifest_path": str(manifest_path),
+        "summary": audit["summary"],
+        "manuscript_sha256": sha256_text(manuscript),
+    }
+
+
 def run_authoring(
     *,
     plan_path: Path,
@@ -129,6 +269,15 @@ def run_authoring(
     openai_client: Any,
     claude_client: Any,
     force: bool = False,
+    auto_accept_maintained_findings: bool = False,
+    seed_author_result: dict[str, Any] | None = None,
+    revision_round: int = 1,
+    max_revision_rounds: int = 1,
+    continuation_review: dict[str, Any] | None = None,
+    continuation_outcome: dict[str, Any] | None = None,
+    program_audit_manifest_path: Path | None = None,
+    program_audit_draft_id: str | None = None,
+    repository_root: Path | None = None,
 ) -> dict[str, Any]:
     packet = build_authoring_packet(
         plan_path=plan_path,
@@ -163,25 +312,135 @@ def run_authoring(
     packet_text = canonical_json(packet)
     packet_sha = packet["packet_sha256"]
 
-    author_prompt = _read_prompt("author")
-    author_fingerprint = generation_fingerprint(
-        inputs={
-            "packet_sha256": packet_sha,
-            "generation_parameters": _client_generation_parameters(openai_client),
-        },
-        prompt_text=author_prompt,
-        schema=AUTHOR_RESULT_SCHEMA,
-        model=openai_client.model,
-        reasoning=getattr(openai_client, "reasoning_effort", "unknown"),
-    )
-    author_result, author_cached = _run_cached_stage(
-        path=output_dir / "authoring.json",
-        schema_version="matthew-exposition-authoring.v1",
-        fingerprint=author_fingerprint,
-        producer={"role": "author", "provider": "openai", "model": openai_client.model},
-        generate=lambda: openai_client.generate_json(author_prompt, packet_text, AUTHOR_RESULT_SCHEMA),
-        force=force,
-    )
+    def finish_editorial_pass(
+        *,
+        editorial_status: str,
+        manuscript: str,
+        manuscript_sections: list[dict[str, Any]],
+        editorial_review: dict[str, Any],
+        editorial_outcome: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        if (program_audit_manifest_path is None) != (program_audit_draft_id is None):
+            raise AuthoringContractError(
+                "program audit requires both manifest path and draft_id"
+            )
+        if program_audit_manifest_path is None or program_audit_draft_id is None:
+            return result
+        audit = _run_program_audit_stage(
+            template_path=program_audit_manifest_path,
+            draft_id=program_audit_draft_id,
+            knowledge_path=knowledge_path,
+            output_dir=output_dir,
+            manuscript=manuscript,
+            manuscript_sections=manuscript_sections,
+        )
+        if audit["status"] not in {"pass", "pass_with_warnings"}:
+            return {
+                **result,
+                "status": "program_audit_failed",
+                "editorial_status": editorial_status,
+                "program_audit": audit,
+            }
+        if (
+            editorial_outcome.get("manuscript_sha256") != sha256_text(manuscript)
+            or editorial_outcome.get("passed") is not True
+            or int(editorial_outcome.get("total_score", -1))
+            < int(packet["quality_profile"]["passing_score"])
+            or editorial_outcome.get("hard_gate_failures")
+            or editorial_outcome.get("declared_hard_failures")
+        ):
+            raise AuthoringContractError(
+                "automatic publication requires a bound passing editorial outcome"
+            )
+        audit_dir = Path(audit["manifest_path"]).parent
+        publication_review_path = audit_dir / "publication-editorial-review.json"
+        _write_json(
+            publication_review_path,
+            {
+                "schema_version": "automated-editorial-review.v1",
+                "reviewed_draft_sha256": editorial_outcome["manuscript_sha256"],
+                "manuscript_sha256": editorial_outcome["manuscript_sha256"],
+                "passed": True,
+                "total_score": editorial_outcome["total_score"],
+                "hard_gate_failures": editorial_outcome["hard_gate_failures"],
+                "declared_hard_failures": editorial_outcome[
+                    "declared_hard_failures"
+                ],
+                "review": editorial_review,
+            },
+        )
+        publication = publish_automated_editorial_draft(
+            Path(audit["manifest_path"]),
+            program_audit_draft_id,
+            publication_review_path,
+            destination_root=repository_root,
+        )
+        return {
+            **result,
+            "status": "workflow_published",
+            "editorial_status": editorial_status,
+            "program_audit": audit,
+            "publication_decision_path": publication[
+                "publication_decision_path"
+            ],
+            "publication": publication,
+        }
+
+    if seed_author_result is None:
+        author_prompt = _read_prompt("author")
+        author_fingerprint = generation_fingerprint(
+            inputs={
+                "packet_sha256": packet_sha,
+                "generation_parameters": _client_generation_parameters(openai_client),
+            },
+            prompt_text=author_prompt,
+            schema=AUTHOR_RESULT_SCHEMA,
+            model=openai_client.model,
+            reasoning=getattr(openai_client, "reasoning_effort", "unknown"),
+        )
+        author_result, author_cached = _run_cached_stage(
+            path=output_dir / "authoring.json",
+            schema_version="matthew-exposition-authoring.v1",
+            fingerprint=author_fingerprint,
+            producer={"role": "author", "provider": "openai", "model": openai_client.model},
+            generate=lambda: openai_client.generate_json(
+                author_prompt, packet_text, AUTHOR_RESULT_SCHEMA
+            ),
+            force=force,
+        )
+    else:
+        seeded_author_result = {
+            "status": "drafted",
+            "manuscript_markdown": seed_author_result["manuscript_markdown"],
+            "sections": seed_author_result["sections"],
+            "plan_change_requests": seed_author_result.get("plan_change_requests", []),
+        }
+        author_fingerprint = generation_fingerprint(
+            inputs={
+                "packet_sha256": packet_sha,
+                "seed_manuscript_sha256": sha256_text(
+                    seeded_author_result["manuscript_markdown"]
+                ),
+                "revision_round": revision_round,
+            },
+            prompt_text="deterministic revision-round seed",
+            schema=AUTHOR_RESULT_SCHEMA,
+            model="deterministic",
+            reasoning="verified_prior_revision",
+        )
+        author_result, author_cached = _run_cached_stage(
+            path=output_dir / "authoring.json",
+            schema_version="matthew-exposition-authoring.v1",
+            fingerprint=author_fingerprint,
+            producer={
+                "role": "revision_round_seed",
+                "provider": "deterministic",
+                "revision_round": revision_round,
+            },
+            generate=lambda: seeded_author_result,
+            force=force,
+        )
     validate_strict_schema(author_result, AUTHOR_RESULT_SCHEMA)
     valid_claim_ids = {
         item["claim_id"]
@@ -204,35 +463,120 @@ def run_authoring(
     draft = author_result["manuscript_markdown"]
     (output_dir / "draft.md").write_text(draft, encoding="utf-8")
     draft_sha = sha256_text(draft)
-    review_prompt = _read_prompt("review")
-    review_input = canonical_json({"packet": packet, "author_result": author_result})
-    review_fingerprint = generation_fingerprint(
-        inputs={
-            "packet_sha256": packet_sha,
-            "draft_sha256": draft_sha,
-            "generation_parameters": _client_generation_parameters(claude_client),
-        },
-        prompt_text=review_prompt,
-        schema=EDITORIAL_REVIEW_SCHEMA,
-        model=claude_client.model,
-        reasoning="independent_review",
-    )
-    review, review_cached = _run_cached_stage(
-        path=output_dir / "independent-editorial-review.json",
-        schema_version="matthew-exposition-editorial-review.v1",
-        fingerprint=review_fingerprint,
-        producer={"role": "independent_editor", "provider": "anthropic", "model": claude_client.model},
-        generate=lambda: claude_client.generate_json(review_prompt, review_input, EDITORIAL_REVIEW_SCHEMA),
-        force=force,
-    )
-    validate_strict_schema(review, EDITORIAL_REVIEW_SCHEMA)
-    _canonicalize_findings(review, draft_sha)
-    review_outcome = validate_editorial_review(
-        review,
-        contract=packet["base_contract"],
-        manuscript=draft,
-        quality_profile=packet["quality_profile"],
-    )
+    if (continuation_review is None) != (continuation_outcome is None):
+        raise AuthoringContractError(
+            "revision continuation requires both baseline review and outcome"
+        )
+
+    if continuation_review is not None and continuation_outcome is not None:
+        # A later revision round continues directly from the preceding Delta
+        # Review. It must not call a second reviewer before revising again.
+        validate_strict_schema(continuation_review, EDITORIAL_REVIEW_SCHEMA)
+        verified_override = validate_editorial_review(
+            continuation_review,
+            contract=packet["base_contract"],
+            manuscript=draft,
+            quality_profile=packet["quality_profile"],
+        )
+        comparable_override = {
+            key: value
+            for key, value in continuation_outcome.items()
+            if key != "manuscript_sha256"
+        }
+        if comparable_override != verified_override:
+            raise AuthoringContractError("revision continuation outcome is not verified")
+        if continuation_outcome.get("manuscript_sha256") != draft_sha:
+            raise AuthoringContractError(
+                "revision continuation SHA does not match manuscript"
+            )
+        review = json.loads(json.dumps(continuation_review))
+        review_outcome = dict(continuation_outcome)
+        review_cached = True
+        _write_json(
+            output_dir / "independent-editorial-review.json",
+            {
+                "schema_version": "matthew-exposition-inherited-delta-review.v1",
+                "generation": {
+                    "fingerprint": sha256_text(canonical_json(review)),
+                    "generated_at": _utcnow(),
+                    "role": "verified_delta_review_inheritance",
+                    "provider": "deterministic",
+                },
+                "result": review,
+                "checks": {"rubric_outcome": review_outcome},
+            },
+        )
+    else:
+        review_prompt = _read_prompt("review")
+        editorial_review_packet = build_editorial_review_packet(
+            authoring_packet=packet,
+            author_result=author_result,
+        )
+        _write_json(
+            output_dir / "editorial-review-packet.json",
+            {
+                "schema_version": "matthew-exposition-editorial-review-packet-envelope.v1",
+                "generation": {
+                    "fingerprint": sha256_text(canonical_json(editorial_review_packet)),
+                    "generated_at": _utcnow(),
+                    "role": "editorial_packet_builder",
+                    "provider": "deterministic",
+                },
+                "result": editorial_review_packet,
+            },
+        )
+        review_input = canonical_json(editorial_review_packet)
+        review_fingerprint = generation_fingerprint(
+            inputs={
+                "editorial_review_packet_sha256": sha256_text(review_input),
+                "draft_sha256": draft_sha,
+                "generation_parameters": {
+                    **_client_generation_parameters(claude_client),
+                    "timeout_seconds": _final_review_timeout(claude_client),
+                    "max_attempts": FINAL_REVIEW_MAX_ATTEMPTS,
+                },
+            },
+            prompt_text=review_prompt,
+            schema=EDITORIAL_REVIEW_SCHEMA,
+            model=claude_client.model,
+            reasoning="independent_review",
+        )
+
+        def generate_initial_review() -> dict[str, Any]:
+            generated = _call_final_reviewer(
+                claude_client, review_prompt, review_input, EDITORIAL_REVIEW_SCHEMA
+            )
+            # Literal anchors and all other contracts are verified before the
+            # response can be persisted or used by another stage.
+            validate_editorial_review(
+                generated,
+                contract=packet["base_contract"],
+                manuscript=draft,
+                quality_profile=packet["quality_profile"],
+            )
+            return generated
+
+        review, review_cached = _run_cached_stage(
+            path=output_dir / "independent-editorial-review.json",
+            schema_version="matthew-exposition-editorial-review.v1",
+            fingerprint=review_fingerprint,
+            producer={
+                "role": "independent_editor",
+                "provider": "anthropic",
+                "model": claude_client.model,
+            },
+            generate=generate_initial_review,
+            force=force,
+        )
+        validate_strict_schema(review, EDITORIAL_REVIEW_SCHEMA)
+        _canonicalize_findings(review, draft_sha)
+        review_outcome = validate_editorial_review(
+            review,
+            contract=packet["base_contract"],
+            manuscript=draft,
+            quality_profile=packet["quality_profile"],
+        )
+        review_outcome["manuscript_sha256"] = draft_sha
     writing_warnings = deterministic_writing_warnings(
         draft, packet["quality_profile"]
     )
@@ -251,13 +595,21 @@ def run_authoring(
             "a failing editorial review must include at least one actionable finding"
         )
     if not findings and review_outcome["passed"]:
-        return {
+        result = {
             "status": "editorial_pass_no_revision",
             "draft_path": str(output_dir / "draft.md"),
             "review_path": str(output_dir / "independent-editorial-review.json"),
             "author_cached": author_cached,
             "review_cached": review_cached,
         }
+        return finish_editorial_pass(
+            editorial_status=result["status"],
+            manuscript=draft,
+            manuscript_sections=author_result["sections"],
+            editorial_review=review,
+            editorial_outcome=review_outcome,
+            result=result,
+        )
 
     finding_ids = {item["finding_id"] for item in findings}
     adjudication_prompt = _read_prompt("adjudication")
@@ -332,10 +684,19 @@ def run_authoring(
     accepted_ids = {
         item["finding_id"] for item in adjudication["adjudications"] if item["decision"] == "accept"
     }
+    auto_accepted_ids: set[str] = set()
+    if auto_accept_maintained_findings and maintained_ids:
+        # Fully automated staging takes the conservative direction: a
+        # reviewer-maintained blocking concern is revised, never silently
+        # waived. This does not grant publication approval.
+        auto_accepted_ids = set(maintained_ids)
+        accepted_ids.update(auto_accepted_ids)
+        maintained_ids.clear()
     accepted_findings = [item for item in findings if item["finding_id"] in accepted_ids]
     consensus = {
         "schema_version": "matthew-exposition-reviewed-findings.v1",
         "accepted_finding_ids": sorted(accepted_ids),
+        "auto_accepted_maintained_finding_ids": sorted(auto_accepted_ids),
         "withdrawn_finding_ids": sorted(withdrawn_ids),
         "human_required_finding_ids": sorted(maintained_ids),
     }
@@ -353,7 +714,18 @@ def run_authoring(
             "consensus_path": str(output_dir / "reviewed-editorial-findings.json"),
         }
     if not accepted_findings:
-        return {"status": "editorial_pass_after_adjudication", "draft_path": str(output_dir / "draft.md")}
+        result = {
+            "status": "editorial_pass_after_adjudication",
+            "draft_path": str(output_dir / "draft.md"),
+        }
+        return finish_editorial_pass(
+            editorial_status=result["status"],
+            manuscript=draft,
+            manuscript_sections=author_result["sections"],
+            editorial_review=review,
+            editorial_outcome=review_outcome,
+            result=result,
+        )
 
     revision_prompt = _read_prompt("revision")
     revision_input = canonical_json(
@@ -400,13 +772,154 @@ def run_authoring(
     if not revised_draft.strip():
         raise AuthoringContractError("revision must return the complete manuscript")
     (output_dir / "revised-draft.md").write_text(revised_draft, encoding="utf-8")
-    return {
-        "status": "revised_requires_reaudit",
-        "revised_draft_path": str(output_dir / "revised-draft.md"),
+    delta_packet = build_final_delta_review_packet(
+        baseline_review=review,
+        baseline_outcome=review_outcome,
+        baseline_manuscript=draft,
+        revised_manuscript=revised_draft,
+        accepted_findings=accepted_findings,
+        dispositions=dispositions,
+        quality_profile=packet["quality_profile"],
+        contract=packet["base_contract"],
+    )
+    _write_json(
+        output_dir / "final-delta-review-packet.json",
+        {
+            "schema_version": "matthew-exposition-final-delta-review-packet-envelope.v1",
+            "generation": {
+                "fingerprint": sha256_text(canonical_json(delta_packet)),
+                "generated_at": _utcnow(),
+                "role": "final_delta_packet_builder",
+                "provider": "deterministic",
+            },
+            "result": delta_packet,
+        },
+    )
+    delta_prompt = _read_prompt("delta_review")
+    delta_input = canonical_json(delta_packet)
+    delta_fingerprint = generation_fingerprint(
+        inputs={
+            "delta_packet_sha256": sha256_text(delta_input),
+            "manuscript_sha256": delta_packet["manuscript_sha256"],
+            "generation_parameters": {
+                **_client_generation_parameters(claude_client),
+                "timeout_seconds": _final_review_timeout(claude_client),
+                "max_attempts": FINAL_REVIEW_MAX_ATTEMPTS,
+            },
+        },
+        prompt_text=delta_prompt,
+        schema=FINAL_DELTA_REVIEW_SCHEMA,
+        model=claude_client.model,
+        reasoning="final_delta_review",
+    )
+
+    def generate_delta_review() -> dict[str, Any]:
+        generated = _call_final_reviewer(
+            claude_client, delta_prompt, delta_input, FINAL_DELTA_REVIEW_SCHEMA
+        )
+        validate_final_delta_review(
+            generated,
+            packet=delta_packet,
+            revised_manuscript=revised_draft,
+            quality_profile=packet["quality_profile"],
+        )
+        return generated
+
+    delta_review, delta_cached = _run_cached_stage(
+        path=output_dir / "final-delta-editorial-review.json",
+        schema_version="matthew-exposition-final-delta-review.v1",
+        fingerprint=delta_fingerprint,
+        producer={
+            "role": "final_delta_editor",
+            "provider": "anthropic",
+            "model": claude_client.model,
+        },
+        generate=generate_delta_review,
+        force=force,
+    )
+    validate_final_delta_review(
+        delta_review,
+        packet=delta_packet,
+        revised_manuscript=revised_draft,
+        quality_profile=packet["quality_profile"],
+    )
+    _canonicalize_findings(delta_review, delta_packet["manuscript_sha256"])
+    merged_review, final_outcome = merge_final_delta_review(
+        baseline_review=review,
+        baseline_outcome=review_outcome,
+        delta_review=delta_review,
+        packet=delta_packet,
+        quality_profile=packet["quality_profile"],
+    )
+    delta_artifact = json.loads(
+        (output_dir / "final-delta-editorial-review.json").read_text(encoding="utf-8")
+    )
+    delta_artifact["result"] = delta_review
+    delta_artifact["checks"] = {
+        "merged_review": merged_review,
+        "rubric_outcome": final_outcome,
         "deterministic_warnings": deterministic_writing_warnings(
             revised_draft, packet["quality_profile"]
         ),
     }
+    _write_json(output_dir / "final-delta-editorial-review.json", delta_artifact)
+    if final_outcome["passed"] and not delta_review["findings"]:
+        status = "editorial_pass_after_delta_review"
+    elif not delta_review["findings"]:
+        status = "editorial_threshold_unmet_no_actionable_delta"
+    else:
+        status = "revision_required_after_delta_review"
+    if (
+        delta_review["findings"]
+        and revision_round < max_revision_rounds
+    ):
+        next_output_dir = output_dir / f"round-{revision_round + 1:02d}"
+        next_result = run_authoring(
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+            output_dir=next_output_dir,
+            openai_client=openai_client,
+            claude_client=claude_client,
+            force=force,
+            auto_accept_maintained_findings=auto_accept_maintained_findings,
+            seed_author_result=revision,
+            revision_round=revision_round + 1,
+            max_revision_rounds=max_revision_rounds,
+            continuation_review={
+                key: value
+                for key, value in merged_review.items()
+                if key != "score_provenance"
+            },
+            continuation_outcome=final_outcome,
+            program_audit_manifest_path=program_audit_manifest_path,
+            program_audit_draft_id=program_audit_draft_id,
+            repository_root=repository_root,
+        )
+        return {
+            **next_result,
+            "continued_from_revision_round": revision_round,
+            "prior_round_outcome": final_outcome,
+        }
+    result = {
+        "status": status,
+        "revised_draft_path": str(output_dir / "revised-draft.md"),
+        "delta_review_path": str(output_dir / "final-delta-editorial-review.json"),
+        "delta_review_cached": delta_cached,
+        "rubric_outcome": final_outcome,
+    }
+    if status == "editorial_pass_after_delta_review":
+        return finish_editorial_pass(
+            editorial_status=status,
+            manuscript=revised_draft,
+            manuscript_sections=revision["sections"],
+            editorial_review=merged_review,
+            editorial_outcome=final_outcome,
+            result=result,
+        )
+    return result
 
 
 def main() -> int:
@@ -420,8 +933,30 @@ def main() -> int:
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-reasoning-effort", default="medium")
-    parser.add_argument("--timeout-seconds", type=float, default=600.0)
+    parser.add_argument("--timeout-seconds", type=float, default=240.0)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--auto-accept-maintained-findings",
+        action="store_true",
+        help=(
+            "Continue staging by conservatively sending reviewer-maintained "
+            "findings to revision; never grants publication approval."
+        ),
+    )
+    parser.add_argument(
+        "--max-revision-rounds",
+        type=int,
+        choices=(1, 2),
+        default=2,
+        help="Maximum automatic author/review revision rounds (default: 2).",
+    )
+    parser.add_argument("--program-audit-manifest", type=Path)
+    parser.add_argument("--program-audit-draft-id")
+    parser.add_argument(
+        "--repository-root",
+        type=Path,
+        help="Override Wang repository destination; defaults to DATA_BASE_DIR/wang_repository.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -462,11 +997,22 @@ def main() -> int:
         claude_client=Stage1AnthropicClient(
             model=args.claude_model,
             timeout_seconds=args.timeout_seconds,
+            max_retries=FINAL_REVIEW_MAX_ATTEMPTS,
         ),
         force=args.force,
+        auto_accept_maintained_findings=args.auto_accept_maintained_findings,
+        max_revision_rounds=args.max_revision_rounds,
+        program_audit_manifest_path=args.program_audit_manifest,
+        program_audit_draft_id=args.program_audit_draft_id,
+        repository_root=args.repository_root,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    terminal_success = {"editorial_pass_no_revision", "editorial_pass_after_adjudication"}
+    terminal_success = {
+        "editorial_pass_no_revision",
+        "editorial_pass_after_adjudication",
+        "editorial_pass_after_delta_review",
+        "workflow_published",
+    }
     return 0 if result["status"] in terminal_success else 2
 
 
