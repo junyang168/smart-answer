@@ -16,7 +16,10 @@ from backend.api.canonical_repository.service import CanonicalRepositoryService
 router = APIRouter(prefix="/public/wang-articles", tags=["wang-articles-public"])
 
 EDITORIAL_DRAFT_ROOT = WANG_REPOSITORY_DIR
-APPROVAL_SCHEMA_VERSION = "human-publication-decision.v1"
+APPROVAL_SCHEMA_VERSIONS = {
+    "human-publication-decision.v1",
+    "automated-publication-decision.v1",
+}
 
 BOOK_SLUGS = {
     "Matt": "matthew",
@@ -159,7 +162,7 @@ def _approved_publication(manifest_path: Path, item: dict) -> tuple[Path, dict] 
         return None
     decision = _read_json(decision_path)
     if (
-        decision.get("schema_version") != APPROVAL_SCHEMA_VERSION
+        decision.get("schema_version") not in APPROVAL_SCHEMA_VERSIONS
         or decision.get("draft_id") != draft_id
         or decision.get("decision") != "approved"
         or decision.get("editorial_review_passed") is not True

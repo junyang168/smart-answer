@@ -8,4 +8,8 @@
 
 出版最低線是 90 分，不是 80 分。89 分及以下必須判為未通過；即使總分達到 90，任何維度硬門檻或 hard failure 仍可使文章不通過。
 
+結果必須與 finding 一致：只要總分低於 90、任何維度低於其硬門檻，或存在 hard failure，`findings` 中就必須至少有一項 `blocking: true` 的可執行 finding，並列出造成未通過的維度。不得返回「rubric 未通過但沒有 blocking finding」的結果。只有總分、全部維度門檻與 hard failures 同時通過時，才可以沒有 blocking finding。
+
 不要重做資料抽取，不作沒有來源的外部神學裁判，不直接代寫。每項 finding 必須先給一個本輪暫用的 `finding_id`，並引用稿件中的短 anchor、說明失敗維度、嚴重度、可執行修改與是否 blocking；runner 會在驗證後改成 canonical ID。技術 audit 與文筆判斷分開。
+
+`anchor` 必須直接從輸入稿件複製一段連續、可逐字搜尋的原文。不得改寫、刪字、補字、正規化標點，或替換中文／英文標點與全形／半形字元。回傳前必須自行確認每個 anchor 都是稿件的 exact substring；找不到可逐字引用的 anchor，就不得建立該 finding。

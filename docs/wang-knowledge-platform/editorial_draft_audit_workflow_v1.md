@@ -76,6 +76,8 @@ Manifest 中必須明確列出每項編排決定在初稿中對應的 Markdown �
 
 凡正文實際解釋、比較或用作論據的經文，必須在相應小節就近引出經文內容，不能只留下章節號讓讀者另行查找。Manifest 以 `required_scripture_quotations` 登記每個小節必須出現的經文標記；小節不存在或引文標記缺失時，分別產生 `missing_scripture_quote_scope` 或 `missing_scripture_quotation` 錯誤。
 
+Author Agent 若把完整經文集中放在 `經文與問題`，runner 可以把各個 CompositionDecision 的 `required_scripture_quotations` 檢查範圍映射到該標題；Manifest 中原有的逐項經文標記不得刪減或改寫。各 decision 的實際成文標題仍須分別通過 claim、evidence 與 provenance 覆蓋檢查。這項映射只避免同一段經文反覆刊出，不降低經文引文要求。
+
 王教授有來源支持的希臘文詞義、文法、定冠詞與翻譯判斷，是其釋經方法的重要部分，應優先保留希臘文形式、教授的解釋及其論證功能。編輯不得為了文字流暢刪去，也不得自行補造教授未講過的字義或文法結論。
 
 ### 4.3 主張完整性
@@ -143,7 +145,21 @@ Manifest 中必須明確列出每項編排決定在初稿中對應的 Markdown �
 
 因此，閱讀介面在交給 Markdown renderer 之前，必須只從顯示副本中移除 provenance 註解，不得修改或覆寫原始 Markdown。回歸測試至少要確認：頁面看不到 `<!-- provenance:`，而其後的編輯導讀、經文與正文仍正常顯示。
 
-### 4.6.2 生活應用推論鏈
+### 4.6.2 原文證據與註釋層
+
+教授解經的分量很大一部分在原文、文法與經文互證上，而多數讀者不讀希臘文。審計因此不再只問「這段有沒有掛主張」，也問「主張底下的論證有沒有進入文章」。
+
+判定用一個問題:**刪掉這項原文或文法觀察，該段結論是否仍然成立?**
+
+- **不成立（承重觀察）**:必須出現在正文，並以中文說明它證明了甚麼。詞形、拼寫與時態術語另置註釋。正文缺少承重觀察而只寫出結論者，記 `conclusion_only` 錯誤。
+- **仍然成立（補強觀察）**:進註釋，不佔正文。
+- **同一觀察在正文只呈現一次。** 來源中對同一語法事實的多次表述屬於同一觀察，其餘留在註釋或來源層，**不計為遺漏**。
+
+註釋使用標準 Markdown 腳註（`[^key]`）。註釋段落與正文一樣需要來源標記，並須列出對應的 `evidence_step_ids`；只有主張 ID 而沒有證據 ID 的註釋不成立。
+
+審計輸出應報告每篇的原文證據使用情況:可用的承重觀察數、已進入正文數、留在註釋數。這三個數字比段落總數更能說明文章是不是合格的釋經，而不是結論摘要。
+
+### 4.6.3 生活應用推論鏈
 
 `生活應用` 不是必備欄目。若文章保留此欄目，Manifest 必須在 `application_chains` 中逐項登記：
 
@@ -175,13 +191,16 @@ Manifest 中必須明確列出每項編排決定在初稿中對應的 Markdown �
 
 程序化審計的通過，不等於文章取得出版批准。
 
-## 六、《馬太福音》16:1–12 驗證結果
+## 六、《馬太福音》16:1–12 發布審計結果
 
-首個驗證稿為：
+2026-08-15，首篇文章在完成独立写作质量审核后，以完整本地知识快照重新执行 Program Audit：
 
 - Draft：`DRAFT-M16-001-V1`
 - 經文：太16:1–12
+- 標題：〈看見神蹟，卻仍未明白基督——馬太福音 16:1–12〉
+- 發布稿 SHA：`c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`
 - 結果：`pass_with_warnings`
+- 公開路徑：`/resources/wang-repository/articles/matthew-16-1-12`
 
 | 檢查項 | 結果 |
 | --- | ---: |
@@ -190,11 +209,10 @@ Manifest 中必須明確列出每項編排決定在初稿中對應的 Markdown �
 | 證據步驟 | 25 條 |
 | 來源片段 | 27 條 |
 | 有效來源片段 | 27 條 |
-| 實質正文段落 | 32 段 |
-| 已通過反向歸屬檢查 | 32 段 |
-| 教授觀點段落 | 17 段 |
-| 經文引文段落 | 7 段 |
-| 編輯聲音段落 | 8 段 |
+| 實質正文段落 | 18 段 |
+| 已通過反向歸屬檢查 | 18 段 |
+| 教授觀點段落 | 15 段 |
+| 編輯綜合段落 | 3 段 |
 | 錯誤 | 0 |
 | 警告 | 2 |
 
@@ -203,7 +221,9 @@ Manifest 中必須明確列出每項編排決定在初稿中對應的 Markdown �
 1. 「小信」專題；
 2. 「神蹟、聖經與信仰判斷」專題。
 
-這表示初稿的每個實質段落都已通過反向歸屬檢查，段落、主張、支持證據和來源版本已形成完整可追溯鏈；同時，文章所遵循的必備與可選結構已由中央 Publication Profile 驗證。專題產品尚未完成，正文目前只能保留明確的待辦轉介。
+這表示發布稿的每個實質段落都已通過反向歸屬檢查，段落、主張、支持證據和來源版本已形成完整可追溯鏈；同時，文章所遵循的必備與可選結構已由中央 Publication Profile 驗證。兩項 warning 不被伪装成已完成链接，也不阻断当前文章发布。
+
+Program Audit 仍在本地读取 2.69 MB 的完整 knowledge snapshot；该数据没有进入写作品质 reviewer 的 packet。Final Delta Review 的 12,772-byte packet 与 Program Audit 输入保持分离，前者负责受影响写作维度，后者负责完整知识、provenance、CompositionPlan 与来源不变量。
 
 ## 七、文章與原聲講解的同序投影
 
@@ -238,7 +258,7 @@ flowchart LR
 
 ### 7.3 太16:1–12 的實作結果
 
-首個示範已把 `2016 NYSC 專題：馬太福音釋經（四）1` 的原聲投影到 `DRAFT-M16-001-V1`：
+首篇发布已把 `2016 NYSC 專題：馬太福音釋經（四）1` 的原聲投影到 `DRAFT-M16-001-V1`：
 
 | 項目 | 結果 |
 | --- | ---: |
@@ -265,14 +285,14 @@ flowchart LR
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.editorial_draft_audit_runner \
-  --manifest output/claim-layer/matthew-16-notes/sermon-4-1-comparison/editorial-draft-manifest.json \
+  --manifest output/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-manifest.json \
   --draft-id DRAFT-M16-001-V1
 ```
 
 產物：
 
 ```text
-output/claim-layer/matthew-16-notes/sermon-4-1-comparison/editorial-draft-audit.json
+output/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-audit.json
 ```
 
 管理員 UI 在打開初稿時會即時計算一次，避免展示與當前 Markdown、編排計劃或知識快照不一致的舊報告。
