@@ -38,8 +38,11 @@ PROFILE_PATH = (
     / "config/editorial_quality_profiles/WQ-matthew-exposition-v1.json"
 )
 ROOT = Path(__file__).parents[2]
-PLAN_PATH = ROOT / "output/claim-layer/matthew-16-13-20-sources/composition-reviews-with-relations/CP-matthew-16-13-20.reviewed-candidate.json"
-KNOWLEDGE_PATH = ROOT / "output/claim-layer/matthew-16-13-20-sources/shared-knowledge-projection.json"
+WANG_FIXTURE_DIR = Path(__file__).parent / "fixtures/wang_knowledge_platform"
+PLAN_PATH = WANG_FIXTURE_DIR / "matthew_exposition/article2-reviewed-plan.json"
+KNOWLEDGE_PATH = (
+    WANG_FIXTURE_DIR / "matthew_exposition/article2-knowledge-projection.json"
+)
 PUBLICATION_PROFILE_PATH = ROOT / "backend/config/publication_profiles/PP-matthew-expository-teaching-v1.json"
 
 

@@ -1,0 +1,244 @@
+{
+  "schema_version": "wang_composition_plan_v1",
+  "plan_id": "CP-topic-son-of-man",
+  "title": "「那人子」与耶稣身份专题编排",
+  "description": "以205篇讲道普查所得的全库线索为范围，以第三、第四讲及011WSR01的详细论证资料为当前证据基础，逐步形成一篇可溯源的专题论述。普查线索不是已批准主张；进入正文前仍须完成逐句整理与来源忠实度审核。",
+  "axis": "topic",
+  "product_type": "topic_research",
+  "canonical_topic_ids": [
+    "messiah-king-son-of-man",
+    "deity-of-christ"
+  ],
+  "corpus_scope": {
+    "surveyed_source_count": 205,
+    "detailed_claim_scope": "2016 NYSC第三、第四讲及011WSR01",
+    "priority_expansion_source": "2012 NYSC关于赦罪权柄与安息日主权的两讲",
+    "completeness": "full_corpus_survey_with_partial_detailed_extraction"
+  },
+  "source_leads": [
+    {
+      "source_lead_id": "SL-SON-001",
+      "transcript_id": "011WSR01",
+      "cluster_id": "T001",
+      "title": "『那人子』称号与耶稣的神性身份",
+      "summary": "由定冠词、但以理书七章的启示文学背景及司提反异象，论证耶稣自称『那人子』不是仅强调人性，而是宣告自己为但以理所预言、具有神性权柄的那一位。",
+      "scripture_refs": ["太 26:2", "但 7:3–14", "徒 7:55–56"],
+      "evidence_maturity": "ai_consensus_detailed_claims",
+      "priority": "highest",
+      "survey_path": "output/corpus-survey/011WSR01-f0eac41a4244.first-pass.json",
+      "detailed_package_path": "output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json",
+      "review_path": "output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json",
+      "adjudication_path": "output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.adjudication.json"
+    },
+    {
+      "source_lead_id": "SL-SON-002",
+      "transcript_id": "2012 NYSC 專題：馬太福音釋經（三）1",
+      "cluster_id": "cl05",
+      "title": "『人子』与赦罪权柄",
+      "summary": "从『那个人子』与但以理书七章的关联，论证耶稣自称为神并有赦罪权柄。",
+      "scripture_refs": ["太 9:1–8", "但 7:13"],
+      "evidence_maturity": "survey_lead",
+      "priority": "high",
+      "survey_path": "output/corpus-survey/2012_NYSC_1-fa35f8b5f08e.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-003",
+      "transcript_id": "2012 NYSC 專題：馬太福音釋經（三）3",
+      "cluster_id": "cl4",
+      "title": "安息日争议与人子之主权",
+      "summary": "通过安息日争议、大卫与祭司的例子，解释人子是安息日的主。",
+      "scripture_refs": ["太 12:1–8"],
+      "evidence_maturity": "survey_lead",
+      "priority": "high",
+      "survey_path": "output/corpus-survey/2012_NYSC_3-7c953a71ebeb.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-004",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+      "cluster_id": "cl1,cl4",
+      "title": "句首 Amen、但以理七章与『那人子』的神性权柄",
+      "summary": "从句首 Amen、定冠词、但以理七章和启示文体说明耶稣的身份与权柄。",
+      "scripture_refs": ["太 16:28", "但 7:3–14"],
+      "evidence_maturity": "detailed_shared_claims",
+      "priority": "high",
+      "survey_path": "output/corpus-survey/2016_NYSC_3-f35be4755f9b.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-008",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+      "cluster_id": "cl1,cl4",
+      "title": "登山變像、人子國度與耶穌雙重身分",
+      "summary": "保存第四講中與人子、但以理七章及耶穌身分相關的來源線索；本專題目前只把可直接支持『那人子』論證的材料列為候選，登山變像的『愛子』線另行路由。",
+      "scripture_refs": ["太 16:28–17:8", "但 7:13–14"],
+      "evidence_maturity": "detailed_shared_claims",
+      "priority": "high",
+      "survey_path": "output/corpus-survey/2016_NYSC_4-5317618c7962.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-005",
+      "transcript_id": "2017 NYSC 專題：馬太福音釋經（六）4",
+      "cluster_id": "CL06",
+      "title": "『那人子』、但以理七章与以西结",
+      "summary": "解释耶稣自称『那人子』与但以理七章、启示文学象征及以西结称号之间的区别。",
+      "scripture_refs": ["太 19", "但 7", "结"],
+      "evidence_maturity": "survey_lead",
+      "priority": "medium",
+      "survey_path": "output/corpus-survey/2017_NYSC_4-78f4b0b8eb95.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-006",
+      "transcript_id": "2018 NYSC 專題：馬太福音釋經（七）1",
+      "cluster_id": "cl5",
+      "title": "人子、受苦仆人与作多人的赎价",
+      "summary": "围绕受难预言、服事与赎价，连接人子身份和受苦仆人的工作。",
+      "scripture_refs": ["太 20:17–28", "赛 53:12"],
+      "evidence_maturity": "survey_lead",
+      "priority": "high",
+      "survey_path": "output/corpus-survey/2018_NYSC_1-8c366a6206fe.first-pass.json"
+    },
+    {
+      "source_lead_id": "SL-SON-007",
+      "transcript_id": "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之3",
+      "cluster_id": "CL06",
+      "title": "人子公开荣耀再临",
+      "summary": "解释马太二十四章中人子的公开荣耀再临、选民召聚与被提。",
+      "scripture_refs": ["太 24:29–31", "可 13:26–27"],
+      "evidence_maturity": "survey_lead",
+      "priority": "medium",
+      "survey_path": "output/corpus-survey/2021_NYSC_4_3-32c296829d56.first-pass.json"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "CD-SON-001",
+      "passage": "称号与原文",
+      "section_title": "『人子』为何是『那一位人子』",
+      "action": "topic_main_section",
+      "decision": "先处理定冠词与称号限定，再进入神学结论；不得把语言学判断和神性结论压缩成同一句未经论证的话。",
+      "rationale": "这是教授反复采用的论证入口，也直接回应『人子只强调人性』的反方读法。",
+      "claim_ids": ["CL-0028", "DK-f0eac41a4244-CL001"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "DK-f0eac41a4244-CL001",
+        "corroborating_claims": ["CL-0028"],
+        "evidence_step_scopes": [
+          {
+            "claim_id": "DK-f0eac41a4244-CL001",
+            "evidence_step_ids": ["DK-f0eac41a4244-E002", "DK-f0eac41a4244-E003"]
+          },
+          {
+            "claim_id": "CL-0028",
+            "evidence_step_ids": ["L3-E006", "L3-E035"]
+          }
+        ],
+        "note": "011WSR01提供完整的定冠词—但以理七章—神性身份论断；第三、第四讲的既有主张用于跨讲印证，不重复写成两个平行结论。"
+      },
+      "source_lead_ids": ["SL-SON-001", "SL-SON-004"],
+      "followup_source_lead_ids": ["SL-SON-008", "SL-SON-005"],
+      "coverage": "two_source_detailed_extraction",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-SON-002",
+      "passage": "但7:3–14；徒7:55–56",
+      "section_title": "但以理异象与属神的人子",
+      "action": "topic_main_section",
+      "decision": "以但以理七章的启示文体、兽与人子的对比、永远国权及司提反异象建立核心论证链。",
+      "rationale": "教授不是只凭称号下结论，而是以文体、图像对比和跨经文互证推进论证。",
+      "claim_ids": ["DK-f0eac41a4244-CL001", "DK-f0eac41a4244-CL002", "CL-0028"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "DK-f0eac41a4244-CL001",
+        "supporting_claims": ["DK-f0eac41a4244-CL002"],
+        "corroborating_claims": ["CL-0028"],
+        "evidence_step_scopes": [
+          {
+            "claim_id": "DK-f0eac41a4244-CL001",
+            "evidence_step_ids": ["DK-f0eac41a4244-E004", "DK-f0eac41a4244-E005"]
+          },
+          {
+            "claim_id": "DK-f0eac41a4244-CL002",
+            "evidence_step_ids": ["DK-f0eac41a4244-E006"]
+          },
+          {
+            "claim_id": "CL-0028",
+            "evidence_step_ids": ["L3-E029", "L3-E030", "L3-E031", "L3-E032"]
+          }
+        ],
+        "note": "本节只保留但以理书七章称号、异象与司提反用例的论证链。登山变像中的『爱子』、诗篇二篇与以赛亚书四十二章属于另一条经文线，不在本节承担人子称号的论证功能。"
+      },
+      "source_lead_ids": ["SL-SON-001", "SL-SON-004"],
+      "followup_source_lead_ids": ["SL-SON-008", "SL-SON-005"],
+      "coverage": "two_source_detailed_extraction",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-SON-003",
+      "passage": "太16:28",
+      "section_title": "句首 Amen 所显示的宣告权柄",
+      "action": "topic_section_pending_scope",
+      "decision": "当前仅记录句首Amen所显示的宣告权柄；赦罪权柄与安息日主权须待2012 NYSC相关讲次完成详细抽取后再决定是否进入正文。",
+      "rationale": "三组材料的经文问题与论证路径不同；目前只有句首Amen具备已整理主张，不能用普查摘要补足其余两条线。",
+      "claim_ids": ["CL-0003"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "CL-0003",
+        "note": "赦罪权柄与安息日主权仍是待详细整理的普查线索。"
+      },
+      "editorial_transition": {
+        "from_decision_ids": ["CD-SON-001", "CD-SON-002"],
+        "transition_type": "product_level_sequence",
+        "editorial_attribution": "editor",
+        "text": "专题编排在确立『那人子』的身份论证后，转而考察教授如何谈论耶稣的权柄；这只是产品层的阅读顺序，不表示教授已经明确建立身份主张与句首Amen之间的ClaimRelation。"
+      },
+      "source_lead_ids": ["SL-SON-004"],
+      "pending_passages": ["太9:1–8", "太12:1–8"],
+      "future_section_title": "人子的神性权柄如何在行动中显明",
+      "followup_source_lead_ids": ["SL-SON-002", "SL-SON-003"],
+      "coverage": "one_of_three_threads_detailed_remaining_pending_extraction",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-SON-004",
+      "passage": "太20:17–28",
+      "section_title": "荣耀的人子也是受苦服事的人子",
+      "action": "topic_section_pending_scope",
+      "decision": "先收集并详细整理受难、服事与赎价材料；在确认它们与『人子』称号之间的明确论证关系后，再决定是否升级为主体段落。",
+      "rationale": "专题应保留受苦服事的研究方向，但目前没有可配置的已审核主张，不能预先赋予主体段落地位。",
+      "claim_ids": [],
+      "source_lead_ids": ["SL-SON-006"],
+      "coverage": "survey_lead_only",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-SON-005",
+      "passage": "太24:29–31；可13:26–27",
+      "section_title": "人子的荣耀再临",
+      "action": "topic_section_pending_scope",
+      "decision": "先收集再临材料并辨别它与国权、受苦及教会论议题的边界；篇幅由全库详细整理结果决定。",
+      "rationale": "再临材料跨入末世论，若未经范围控制，容易让『人子』专题失去中心。",
+      "claim_ids": [],
+      "source_lead_ids": ["SL-SON-007"],
+      "coverage": "survey_lead_only",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-SON-006",
+      "passage": "跨时期语料",
+      "section_title": "稳定主张、重复表达与可能的发展",
+      "action": "thought_development_check",
+      "decision": "当前只比较三个已完成详细整理的来源，其中先以DK-f0eac41a4244-CL001（011WSR01）与CL-0028（第三讲）关于『那个人子』定冠词及但以理七章背景的表述为明确比较对象，并以已审核的CR-CONSENSUS-SON-001关系为起点；第四讲须先确定与本专题直接相关的已审核Claim锚点，才纳入措辞或范围变化比较。比较时区分重复、延伸、措辞变化和真正的立场变化；其余普查线索须待详细抽取后再纳入，不得仅以摘要或年代差异推断思想演变。",
+      "rationale": "专题综合需要跨讲归并，但项目也必须保留教授思想发展研究的可能。",
+      "claim_ids": ["DK-f0eac41a4244-CL001", "CL-0028"],
+      "source_lead_ids": ["SL-SON-001", "SL-SON-004", "SL-SON-008"],
+      "followup_source_lead_ids": ["SL-SON-002", "SL-SON-003", "SL-SON-005", "SL-SON-006", "SL-SON-007"],
+      "coverage": "survey_complete_two_sources_detailed_with_third_pending_anchor",
+      "review_status": "candidate"
+    }
+  ],
+  "acceptance_criteria": [
+    "每个正文结论均连接到已审核主张及原始录音或逐字稿定位",
+    "普查来源线索在完成逐句整理与来源核实前不作为教授最终主张发布",
+    "清楚区分教授的主张、教授转述的反方立场与编辑综合",
+    "同一主张可同时服务释经与专题，但产品编排决定分别审核",
+    "问答材料进入问答集，不为专题连贯性而伪装成教授主动论述"
+  ],
+  "review_status": "candidate"
+}

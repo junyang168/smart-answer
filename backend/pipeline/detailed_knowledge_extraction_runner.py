@@ -13,6 +13,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey_runner import (
     PROJECT_ROOT,
     _load,
@@ -30,7 +31,7 @@ from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
-DEFAULT_OUTPUT_DIR = Path("output/claim-layer/detailed-extractions")
+DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extractions"
 PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
 NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4

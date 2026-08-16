@@ -12,6 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 from backend.pipeline.topic_structure_discovery import (
@@ -31,7 +32,10 @@ from backend.pipeline.topic_structure_discovery import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_BATCH_ROOT = Path("output/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01")
+DEFAULT_BATCH_ROOT = (
+    wang_platform_paths().claim_layer_staging
+    / "research-batches/RB-COVENANT-LAW-CORE-NINE-01"
+)
 PROMPT_DIR = Path("backend/pipeline/prompts")
 RUNNER_SCHEMA_VERSION = "wang_topic_structure_runner_v2"
 

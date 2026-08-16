@@ -841,6 +841,8 @@ The bundle is generated deterministically from retrieval and graph traversal bef
 
 The profile stores explicit editorial rules, not imitation instructions for another author's distinctive prose. A published work snapshots the profile revision it used. Updating a profile never silently changes earlier works.
 
+Micro-sermons use the same record type with a separate approved profile such as `PP-micro-sermon-3-5min` and `product_types: ["micro_sermon"]`. That profile requires one central question, a target duration, a minimum complete claim chain, explicit source mode (`source_excerpt` or `editorial_synthesis`), deeper-reading links, and a prohibition on removing material qualifications merely to meet duration.
+
 ### 5.20. CompositionPlan
 
 ```json
@@ -1030,7 +1032,9 @@ The per-transcript `fingerprint_sha256` is SHA256 over the same deterministic id
 }
 ```
 
-The survey stores both fingerprints and `generated_at`; every candidate claim stores the per-transcript fingerprint. Resume/skip requires exact per-transcript fingerprint equality. Prompt, model, schema, reasoning setting, token budget, or source changes therefore force re-extraction. Before replacement, the previous canonical survey is copied to `output/corpus-survey/generations/` under its old fingerprint.
+The survey stores both fingerprints and `generated_at`; every candidate claim stores the per-transcript fingerprint. Resume/skip requires exact per-transcript fingerprint equality. Prompt, model, schema, reasoning setting, token budget, or source changes therefore force re-extraction. Before replacement, the previous canonical survey is copied to `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/generations/` under its old fingerprint.
+
+This describes the behavior of the reusable extraction runner for a new, explicitly scoped survey output. It does not authorize mutation of `CORPUS-SURVEY-205-V1`, which is a one-time closed historical survey. Later sermons and later transcript revisions must enter the normal PostgreSQL knowledge-authoring or ResearchBatch workflow; they must not be appended to, or used to regenerate, the 205-card V1 corpus.
 
 Corpus synthesis requires one and only one `generation_fingerprint_sha256` across all selected surveys. It fails closed on legacy or mixed-generation input. Its own batch/final cache identities include source cards, source extraction generation, synthesis prompt, model, reasoning setting, token budget, and response schema.
 
@@ -1901,7 +1905,8 @@ The first Matthew 17 passage deliverable and the first cross-sermon “Son of Ma
 
 ### Phase 11: Additional authored works
 
-* Generate passage-centered academic lectures and cross-sermon topic essays from selected reviewed knowledge under approved profiles and plans.
+* Generate passage-centered academic lectures, cross-sermon topic essays, and three-to-five-minute micro-sermons from selected reviewed knowledge under approved profiles and plans.
+* Link the existing micro-sermon delivery record to CompositionPlan, active knowledge build, ClaimRelation/Citation dependencies, source mode, duration, and review state without making the delivery JSON a parallel knowledge store.
 * Add research comparison, teaching outlines, study guides, and other projections without creating parallel knowledge stores.
 
 ## 17. Deployment and Rollback

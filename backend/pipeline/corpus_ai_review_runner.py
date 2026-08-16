@@ -17,6 +17,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_ai_review import (
     AI_REVIEW_RESPONSE_SCHEMA,
     AI_REVIEW_VERSION,
@@ -31,14 +32,17 @@ from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
-DEFAULT_SURVEY_DIR = Path("output/corpus-survey")
-DEFAULT_OUTPUT_DIR = Path("output/corpus-survey/independent-review")
+CORPUS_SURVEY_ROOT = wang_platform_paths().corpus_survey_staging
+DEFAULT_SURVEY_DIR = CORPUS_SURVEY_ROOT
+DEFAULT_OUTPUT_DIR = CORPUS_SURVEY_ROOT / "independent-review"
 DEFAULT_TRANSCRIPT_DIRS = [
     Path("/opt/homebrew/var/www/church/web/data/script_published"),
     Path("/opt/homebrew/var/www/church/web/data/script_review"),
 ]
 PROMPT_PATH = Path("backend/pipeline/prompts/corpus_independent_ai_review.md")
-DEFAULT_CLAIM_LAYER_OUTPUT = Path("output/claim-layer/independent_ai_review_v1.json")
+DEFAULT_CLAIM_LAYER_OUTPUT = (
+    wang_platform_paths().claim_layer_staging / "independent_ai_review_v1.json"
+)
 CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v2"
 
 

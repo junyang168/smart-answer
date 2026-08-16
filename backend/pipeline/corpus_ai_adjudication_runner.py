@@ -16,6 +16,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_ai_adjudication import (
     ADJUDICATION_VERSION,
     CLAUDE_RECONSIDERATION_SCHEMA,
@@ -38,10 +39,11 @@ from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
-DEFAULT_PACKAGE = Path("output/claim-layer/shared_knowledge_pilot_v1.json")
-DEFAULT_REVIEW = Path("output/claim-layer/independent_ai_review_v1.json")
-DEFAULT_OUTPUT = Path("output/claim-layer/ai_adjudication_v1.json")
-DEFAULT_OVERRIDES = Path("output/claim-layer/claim_statement_overrides_v1.json")
+CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
+DEFAULT_PACKAGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
+DEFAULT_REVIEW = CLAIM_LAYER_ROOT / "independent_ai_review_v1.json"
+DEFAULT_OUTPUT = CLAIM_LAYER_ROOT / "ai_adjudication_v1.json"
+DEFAULT_OVERRIDES = CLAIM_LAYER_ROOT / "claim_statement_overrides_v1.json"
 OPENAI_PROMPT = Path("backend/pipeline/prompts/corpus_openai_adjudication.md")
 CLAUDE_PROMPT = Path("backend/pipeline/prompts/corpus_claude_reconsideration.md")
 ADJUDICATION_VALIDATION_ATTEMPTS = 3

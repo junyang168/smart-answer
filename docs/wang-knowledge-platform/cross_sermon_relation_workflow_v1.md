@@ -102,8 +102,8 @@ flowchart LR
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_sermon_relation_runner \
-  --knowledge output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/merged/research-batch-knowledge.json \
-  --output-dir output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/cross-sermon-relations
+  --knowledge "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/merged/research-batch-knowledge.json" \
+  --output-dir "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/cross-sermon-relations"
 ```
 
 更换批次时只替换输入和输出路径；不得用批次名称当作专题归属。`--force` 只在明确要求重做同一世代时使用。
@@ -150,6 +150,28 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_sermon_relation_runner \
 - `reconsideration.json`：Claude 对被拒意见的再审；
 - `reviewed-relations.json`：最终 AI 共识关系与仅含真实分歧的人工队列。
 
+`reviewed-relations.json` 不是流程终点。通过复核的关系必须经由统一整合程序回写 PostgreSQL authoring store；否则后续释经、专题、问答、搜索和微讲道仍看不到这批跨讲知识。整合程序负责：
+
+1. 验证每条关系的起点、终点和证据是否存在；
+2. 把双模型共识与持续分歧分流；
+3. 生成关系增量包与候选合并快照，供写入前审计；
+4. 以 ChangeSet 写入同一个主库，并保留既有人工审核状态；
+5. 以内容指纹保证同一批资料可安全重跑。
+
+```bash
+PYTHONPATH=. .venv/bin/python \
+  -m backend.pipeline.knowledge_store_runner \
+  ingest-reviewed-relations \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/cross-sermon-relations/reviewed-relations.json" \
+  --base-package \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/merged/research-batch-knowledge.json" \
+  --output-dir \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/integration" \
+  --apply
+```
+
+`candidate-shared-knowledge.json` 是审计 artifact，不是另一个主库；`incremental-package.json` 是关系写入载体；真正的编辑权威仍是 PostgreSQL。AI 共识关系写入后保持候选状态，只有通过批准与完整性门槛的对象才会进入 Active Snapshot。
+
 关系图本身仍然**不是专题目录**。关系审核完成后，`candidate_projection_runner.py` 以共识关系图和共享主张为输入，提出彼此独立的释经候选与专题候选。OpenAI 先建立候选编排，Claude 按候选逐项独立复核；有修改意见时由 OpenAI 仲裁，若 OpenAI 不接受，再交 Claude 复审。只有两个模型持续不同意的单项候选进入人工队列。
 
 复核采用逐项、可恢复运行，而不是把全部主张和全部主题一次交给模型。这样可以避免长请求把输出额度全部耗在推理中，也使一项失败不会丢掉整批结果。每项结果按计划指纹保存在 `candidate-projection/plan-reviews/`，同一输入可以安全续跑。
@@ -188,3 +210,9 @@ PYTHONPATH=. backend/.venv/bin/python \
 - 候选投影双模型 runner：`backend/pipeline/candidate_projection_runner.py`
 - 候选投影 prompts：`backend/pipeline/prompts/candidate_projection_*.md`
 - 候选投影测试：`backend/tests/test_candidate_projection.py`
+
+## 八、关系图之后：自动发现专题层级
+
+跨讲关系只是“哪些主张彼此重复、支持、扩展、限定或相反”，不能直接当作专题目录。为避免再次要求同工手工发现“母题—子专题—篇章段落”，关系整合后增加独立的结构发现阶段：OpenAI 根据共享主张图提出候选层级，Claude 按母题复核，OpenAI 仲裁，Claude 对分歧再审；只有持续分歧才转人工。
+
+该阶段强制每条主张恰好有一个主要专题归宿或明确保持未归组，且所有标题与段落安排都标为编辑候选。核心九篇实测及完整流程见 [母题—子专题—篇章段落自动发现与双模型复核 v1](./topic_structure_discovery_workflow_v1.md)。

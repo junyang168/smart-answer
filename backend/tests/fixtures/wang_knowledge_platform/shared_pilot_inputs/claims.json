@@ -1,0 +1,3639 @@
+{
+  "schema_version": 1,
+  "note": "逐字稿為 system of record；media_time 僅供收聽原聲。全部條目為 candidate，未經人工批准。",
+  "source_projects": [
+    {
+      "project_id": "16_章_-_榮耀、信心",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+      "evidence_count": 59
+    },
+    {
+      "project_id": "17_章_登山變像_醫治鬼附之子",
+      "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+      "evidence_count": 81
+    }
+  ],
+  "claim_count": 30,
+  "claims": [
+    {
+      "claim_id": "CL-0001",
+      "group_id": "CG-1628-TRANSFIG",
+      "title": "太16:28「有人未死以前必看見人子降臨在祂的國裡」應驗於登山變像，非指第二次再臨",
+      "claim_type": "解經判斷",
+      "opposes": "耶穌的預言落空、聖經不可靠",
+      "scripture_refs": [
+        "馬太福音16:28",
+        "馬太福音17:1-2",
+        "馬可福音9:1-2",
+        "馬太福音16:28-17:2",
+        "馬可福音9:2-3",
+        "馬太福音16:27",
+        "馬可福音8:38（聽眾口述為「馬可福音九章最後一節」）",
+        "彼得後書1:16-18"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 7,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E033",
+            "E036",
+            "E037",
+            "E038",
+            "E039",
+            "E040",
+            "E041"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "919",
+              "line": 39,
+              "paragraph_length": 751,
+              "media_time": 2573.0,
+              "evidence_id": "E037",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 80,
+                "char_end": 137,
+                "text": "把耶穌說「有人在還沒有死以前，看見人子降臨在祂的國裡」，跟耶穌在山上的變像，這兩個…時間他跟你講說「過了六天」。",
+                "match_score": 2.899,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E039",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 120,
+                "char_end": 151,
+                "text": "這個就保證耶穌所說的，祂將來要帶著天上的榮耀降臨到世上來作王。",
+                "match_score": 2.47,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "840",
+              "line": 35,
+              "paragraph_length": 576,
+              "media_time": 2391.0,
+              "evidence_id": "E037",
+              "evidence_type": "reasoning",
+              "assertive": false,
+              "speaker": "professor",
+              "stance": "opposed",
+              "discourse_role": "quoted_opponent",
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 49,
+                "text": "所以這裡所說的，「有人在沒有死以前，必看見那一個人子降臨在祂的國裡」，就是耶穌要降臨，耶穌要再來。",
+                "match_score": 2.205,
+                "status": "rejected",
+                "rejection_reason": "教授下一句以「我說你念錯」駁斥此讀法；這不是教授自己的立場。"
+              }
+            },
+            {
+              "paragraph_key": "1006",
+              "line": 41,
+              "paragraph_length": 419,
+              "media_time": 2805.0,
+              "evidence_id": "E039",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 84,
+                "char_end": 155,
+                "text": "「過了六天」，耶穌帶了彼得、雅各、約翰到高山上，在那裡變了形象，把祂隱藏在祂裡面的神的榮耀彰顯出來。祂就是神。這個神將來要帶著榮耀降臨在地上。",
+                "match_score": 2.149,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E038",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 182,
+                "char_end": 251,
+                "text": "所以你看，耶穌在山上變像，彰顯祂的榮耀，這是祂將來一定會再臨的保證，知道嗎？所以這些聖經，很多解經書告訴你說聖經錯了，耶穌的預言沒有實現。",
+                "match_score": 1.778,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E041",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 331,
+                "char_end": 406,
+                "text": "《彼得後書》一章16節到18節，彼得寫：「我們從前將我們主耶穌基督的大能和祂降臨的事告訴你們，並不是隨從什麼？乖巧捏造的虛言，乃是親眼見過祂的威榮。」",
+                "match_score": 3.057,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "840",
+              "line": 35,
+              "paragraph_length": 576,
+              "media_time": 2391.0,
+              "evidence_id": "E036",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 463,
+                "char_end": 576,
+                "text": "耶穌講了這句話之後，他特別講「過了六天」，耶穌帶了彼得、雅各、約翰上了高山。什麼意思？告訴你說，耶穌帶了彼得、雅各、約翰上了高山，在他們面前變了形象，就是耶穌在前面所說的：「有人還沒有嘗死味以前，必要看見神的國大有能力臨到。」",
+                "match_score": 2.805,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E036",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 5,
+                "char_end": 72,
+                "text": "所以我給你看，「過了六天」指出「人子降臨在祂的國裡」，馬太十六章二十八節，或者說「大有能力臨到」，馬可九章一節，是指耶穌在山上的變像。",
+                "match_score": 2.797,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "671",
+              "line": 31,
+              "paragraph_length": 596,
+              "media_time": 1971.0,
+              "evidence_id": "E033",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 451,
+                "char_end": 506,
+                "text": "這些人說：「你看，耶穌預言祂的門徒還沒有死以前，耶穌就要再來作王。」可是事實上沒有，所以表示耶穌的預言不可靠。",
+                "match_score": 1.5,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1006",
+              "line": 41,
+              "paragraph_length": 419,
+              "media_time": 2805.0,
+              "evidence_id": "E040",
+              "evidence_type": "dialogue_context",
+              "speaker": "audience",
+              "stance": "questioned",
+              "discourse_role": "audience_prompt",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 317,
+                "char_end": 338,
+                "text": "（聽眾：人子要在父的榮耀裡面，同眾聖天使…",
+                "match_score": 1.462,
+                "status": "contextual_only",
+                "review_note": "聽眾發言且截斷在半句，不能作為教授的經文證據。"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0002",
+      "group_id": "CG-ABRAHAM-CONDITION",
+      "title": "亞伯拉罕後裔對應許之福的享受與順服不可分割，並非不論行為都無條件有效",
+      "claim_type": "解經判斷",
+      "opposes": "神給亞伯拉罕的應許是無條件的，後裔不論如何犯罪都必蒙福",
+      "scripture_refs": [
+        "創世記18:18-19"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 4,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E025",
+            "E026",
+            "E027",
+            "E028"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "499",
+              "line": 25,
+              "paragraph_length": 714,
+              "media_time": 1495.0,
+              "evidence_id": "E026",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 236,
+                "char_end": 290,
+                "text": "北邊的以色列被亞述國滅掉了。然後猶大國，南邊的猶大國，又被巴比倫滅掉了。你說神祝福亞伯拉罕的應許是無條件的？",
+                "match_score": 2.184,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "499",
+              "line": 25,
+              "paragraph_length": 714,
+              "media_time": 1495.0,
+              "evidence_id": "E028",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 525,
+                "char_end": 567,
+                "text": "所以如果亞伯拉罕後裔他們不遵守神的道，不秉公行義，神給亞伯拉罕的應許就他們就沒有了。",
+                "match_score": 1.835,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "499",
+              "line": 25,
+              "paragraph_length": 714,
+              "media_time": 1495.0,
+              "evidence_id": "E025",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 10,
+                "char_end": 31,
+                "text": "他們說神給亞伯拉罕的應許是什麼？無條件的。",
+                "match_score": 1.462,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0003",
+      "group_id": "CG-AMEN",
+      "title": "句首「Amen」取代先知傳話公式，顯示宣告者的神性權柄",
+      "claim_type": "原文文法",
+      "opposes": "把「我實在告訴你們」僅當作語氣強調",
+      "scripture_refs": [
+        "馬太福音16:28"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 4,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E001",
+            "E002",
+            "E003",
+            "E004"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E003",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 180,
+                "char_end": 253,
+                "text": "在耶穌口裡面所說的「Amen」，或者是「Amen, Amen」，是代替了舊約聖經裡面，這些舊約的先知們所說：「神的話臨到我，我把這個話傳給你們。」",
+                "match_score": 1.728,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E004",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 284,
+                "char_end": 343,
+                "text": "「Amen, Amen」在耶穌的口中是什麼意思呢？就是說：「我就是神，我站在神的立場上，把這個很重要的消息告訴你們。」",
+                "match_score": 1.328,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E002",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 358,
+                "char_end": 420,
+                "text": "「Amen，我就是神，我以神的身分告訴你們一個很重要的消息：站在這裡的，有人在還沒有嘗死味以前，必看見人子降臨在祂的國裡。」",
+                "match_score": 3.201,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E001",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 343,
+                "char_end": 358,
+                "text": "所以「我實在告訴你們」是什麼？",
+                "match_score": 2.109,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0004",
+      "group_id": "CG-ARMAGEDDON",
+      "title": "哈米吉多頓取自舊約古戰場意象，不是預告現代戰爭必按字面發生於該地",
+      "claim_type": "解經判斷",
+      "opposes": "把啟示錄的戰爭意象讀成當代地緣政治預測",
+      "scripture_refs": [
+        "啟示錄（哈米吉多頓段落，未指明章節）"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 1,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E013"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "288",
+              "line": 19,
+              "paragraph_length": 323,
+              "media_time": 714.0,
+              "evidence_id": "E013",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 172,
+                "char_end": 178,
+                "text": "哈米吉多頓。",
+                "match_score": 1.236,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0005",
+      "group_id": "CG-CLOUD",
+      "title": "聖經中雲彩的出現標示神的臨在",
+      "claim_type": "互文",
+      "opposes": null,
+      "scripture_refs": [
+        "馬太福音17:5"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 1,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E050"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E050",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 56,
+                "char_end": 78,
+                "text": "聖經常常講，有雲顯示，雲出現就顯示神的臨在。",
+                "match_score": 1.279,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E050",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 508,
+                "char_end": 564,
+                "text": "他們說話當中，忽然有一朵光明的雲彩遮蓋他們，且有聲音從雲彩裡出來，說：「這是我的愛子，我所喜悅的，你們要聽祂！」",
+                "match_score": 1.208,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0006",
+      "group_id": "CG-DISPENSATIONALISM",
+      "title": "時代論的致命問題是把各時代描述成神改換彼此割裂的救恩方法；加3:17 表明後來的律法不能廢掉先前的應許",
+      "claim_type": "解經判斷",
+      "opposes": "割裂式救恩史；律法時代須完全守律法才能得救",
+      "scripture_refs": [
+        "加拉太書3:17",
+        "啟示錄（未指明章節）"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 8,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E018",
+            "E019",
+            "E021",
+            "E022",
+            "E023",
+            "E024"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "417",
+              "line": 23,
+              "paragraph_length": 760,
+              "media_time": 1281.0,
+              "evidence_id": "E022",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 450,
+                "char_end": 518,
+                "text": "其實聖經也沒有說完…聖經你找不到，明講，聖經明講你找不到，說因為在律法時代，沒有一個人能夠全守摩西的律法，所以律法時代沒有一個人得救。",
+                "match_score": 1.611,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "352",
+              "line": 21,
+              "paragraph_length": 636,
+              "media_time": 1115.0,
+              "evidence_id": "E019",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 209,
+                "char_end": 245,
+                "text": "（王守仁：）我告訴你，我這一天下午，我不是來攻擊時代派，時代論大有問題。",
+                "match_score": 1.334,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "417",
+              "line": 23,
+              "paragraph_length": 760,
+              "media_time": 1281.0,
+              "evidence_id": "E024",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 574,
+                "char_end": 624,
+                "text": "請你看《加拉太書》三章17節：「神預先所立的約，不能被那四百三十年以後的律法廢掉，叫應許歸於虛空。」",
+                "match_score": 1.25,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "352",
+              "line": 21,
+              "paragraph_length": 636,
+              "media_time": 1115.0,
+              "evidence_id": "E018",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 70,
+                "text": "（聽眾：王教授，）（聽眾：我這裡有一個很大的問題，想要請您談論時代派的講法。）你講時代派的講法，講到這個新的聖城，這個以色列民族在神的眼中…",
+                "match_score": 1.143,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "417",
+              "line": 23,
+              "paragraph_length": 760,
+              "media_time": 1281.0,
+              "evidence_id": "E021",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 256,
+                "char_end": 261,
+                "text": "應許時代。",
+                "match_score": 1.0,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "352",
+              "line": 21,
+              "paragraph_length": 636,
+              "media_time": 1115.0,
+              "evidence_id": "E021",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 519,
+                "char_end": 547,
+                "text": "我跟你講一個時代派的致命傷，不要講太多，我講一個就夠了。",
+                "match_score": 0.5,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E003",
+            "E022"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "508",
+              "line": 29,
+              "paragraph_length": 94,
+              "media_time": 1329.0,
+              "evidence_id": "E022",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 41,
+                "text": "在華人教會裡面，知道 apocalyptic 的人非常少，他們都是受時代派的影響。",
+                "match_score": 0.558,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0007",
+      "group_id": "CG-DUAL-MISSION",
+      "title": "父神的宣告揭示雙重身分：詩2的受膏君王，與賽42神所喜悅的受苦僕人",
+      "claim_type": "神學",
+      "opposes": "只接受彌賽亞作王，不接受祂受苦贖罪（猶太人與門徒共有的偏差）",
+      "scripture_refs": [
+        "詩篇2:7-9",
+        "以賽亞書42:1",
+        "馬太福音17:5",
+        "馬太福音17:1-5",
+        "馬可福音9:2-7",
+        "路加福音9:28-35",
+        "彼得後書1:16-18",
+        "馬太福音 17:5",
+        "以賽亞書 42:1",
+        "馬太福音 3:16-17",
+        "詩篇 2:7",
+        "使徒行傳 13:33",
+        "馬太福音 16:21-23"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 10,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E052",
+            "E055",
+            "E056",
+            "E057"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E056",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 457,
+                "char_end": 526,
+                "text": "所以神就明告訴彼得、雅各、約翰，耶穌有雙重身分，祂的使命有雙重的使命：祂要來做全世界的王，同時一方面祂要做耶穌…神的僕人，要為我們贖罪。",
+                "match_score": 1.93,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 435,
+                "char_end": 559,
+                "text": "「祂從父神得尊貴榮耀的時候，從極大榮光之中有聲音出來，向祂說：『這是我的愛子，我所喜悅的。』我們同祂在聖山的時候，我們同祂在聖山的時候，親自聽見這聲音從天上出來。」所以彼得說：「我看過祂的榮耀，我看過祂彰顯神的榮耀，我就可以保證祂將來一定會再來。」",
+                "match_score": 1.303,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "919",
+              "line": 39,
+              "paragraph_length": 751,
+              "media_time": 2573.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 670,
+                "char_end": 706,
+                "text": "耶穌把自己所有的神的榮耀彰顯出來，是保證祂將來帶著榮耀要降臨在地上作王。",
+                "match_score": 1.025,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 125,
+                "char_end": 156,
+                "text": "摩西（律法）、以利亞（先知），律法和先知都預言耶穌為世罪而死。",
+                "match_score": 0.795,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1006",
+              "line": 41,
+              "paragraph_length": 419,
+              "media_time": 2805.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 84,
+                "char_end": 134,
+                "text": "「過了六天」，耶穌帶了彼得、雅各、約翰到高山上，在那裡變了形象，把祂隱藏在祂裡面的神的榮耀彰顯出來。",
+                "match_score": 0.5,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E055",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 359,
+                "char_end": 418,
+                "text": "《以賽亞書》四十二章1節：「看哪，我的僕人，我所扶持、所揀選、心裡所喜悅的！我已將我的靈賜給祂，祂必將公理傳給外邦。」",
+                "match_score": 3.301,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E052",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 9,
+                "char_end": 30,
+                "text": "「這是我的愛子，我所喜悅的。你們要聽祂。」",
+                "match_score": 2.924,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E023",
+            "E029",
+            "E030",
+            "E031",
+            "E032",
+            "E034"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "678",
+              "line": 41,
+              "paragraph_length": 732,
+              "media_time": 1927.0,
+              "evidence_id": "E031",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 305,
+                "char_end": 464,
+                "text": "神來向世界上的人宣告，耶穌有兩個使命：一個是神的愛子，就是祂要做全宇宙掌權的那一位；還有，祂是神所喜悅的，就是神所喜悅的僕人，為所要來替我們贖罪，要做我們的救主，要來把福音傳給我們。所以你看，耶穌受洗的時候，和祂在山上變貌的時候，神都宣告耶穌的雙重使命。第一，祂要做君王，掌握著權柄；第二，祂要做耶和華的僕人為人贖罪。",
+                "match_score": 1.705,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "678",
+              "line": 41,
+              "paragraph_length": 732,
+              "media_time": 1927.0,
+              "evidence_id": "E032",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 644,
+                "char_end": 692,
+                "text": "所以你看，彼得代表門徒，接受耶穌做君王的使命，卻難接受耶穌做耶和華的僕人的使命，要來為我們贖罪。",
+                "match_score": 1.229,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "570",
+              "line": 35,
+              "paragraph_length": 580,
+              "media_time": 1526.0,
+              "evidence_id": "E031",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 66,
+                "text": "好，就是說耶穌在山上改變祂、彰顯祂榮耀出來的時候，就是神說：「這是我的愛子，我所喜悅的，你們要聽他。」神來宣告耶穌來地上有兩個使命。",
+                "match_score": 0.676,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E032",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 736,
+                "char_end": 748,
+                "text": "猶太人就接受約翰為先知。",
+                "match_score": 0.463,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "678",
+              "line": 41,
+              "paragraph_length": 732,
+              "media_time": 1927.0,
+              "evidence_id": "E029",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 107,
+                "char_end": 214,
+                "text": "《以賽亞書》四十二章第一節：「看哪，我的僕人，我所扶持、所揀選、心裡所喜悅的！我已將我的靈賜給他，他必將公理傳給外邦。」所以耶穌基督是神的僕人，祂要來為我們贖罪，把神的救恩、為我們預備救恩，把這個救恩傳到全世界去。",
+                "match_score": 2.047,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "678",
+              "line": 41,
+              "paragraph_length": 732,
+              "media_time": 1927.0,
+              "evidence_id": "E030",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 249,
+                "char_end": 305,
+                "text": "天忽然為他開了，他就看見神的靈彷彿鴿子降下，落在他身上。從天上有聲音說，又是一樣：「這是我的愛子，我所喜悅的。」",
+                "match_score": 1.782,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0008",
+      "group_id": "CG-ELIJAH-JOHN",
+      "title": "太17:11-13 的「以利亞」指施洗約翰；先行者事工成功並不排除彌賽亞受苦",
+      "claim_type": "解經判斷",
+      "opposes": "若以利亞已復興萬事，彌賽亞就不應受苦被殺",
+      "scripture_refs": [
+        "馬太福音 17:10",
+        "馬太福音 17:10-12",
+        "瑪拉基書 4:5-6",
+        "馬太福音 17:11-13",
+        "馬太福音 17:11-12",
+        "馬太福音 3:5-6"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 9,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E035",
+            "E036",
+            "E037",
+            "E038",
+            "E039",
+            "E040",
+            "E041",
+            "E042",
+            "E043"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E040",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 857,
+                "char_end": 919,
+                "text": "所以你看，耶穌說：「施洗約翰的工作成功了，很多人接受他的工作信息，但人隨意對待他，並最後殺死他。照樣，人子也要受害、被殺。」",
+                "match_score": 1.382,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E043",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 519,
+                "char_end": 547,
+                "text": "其實耶穌所說以利亞來，那以利亞是指是指施洗約翰已經來了。",
+                "match_score": 1.187,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E042",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 690,
+                "char_end": 736,
+                "text": "所以施洗約翰那裡工作很成功。可是什麼意思？希律就想要殺他，只是怕百姓，因為他們以約翰為先知。",
+                "match_score": 1.048,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E041",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 611,
+                "char_end": 704,
+                "text": "其實以利亞來的工作很成功。《馬太福音》三章五節、六節：「那時，耶路撒冷和猶太全地，並約旦河一帶地方的人，都出去到約翰那裡，承認他們的罪，在約旦河裡受他的洗。」所以施洗約翰那裡工作很成功。",
+                "match_score": 2.586,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E039",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 390,
+                "char_end": 483,
+                "text": "所以你看，《馬太福音》十七章十一節、十二節，耶穌回答說：「一方面，以利亞固然先來，並要復興萬事；只是我告訴你們，以利亞已經來了，可是人卻不認識他，竟任意待他。人子也將要這樣受他們的害。」",
+                "match_score": 2.013,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E037",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 45,
+                "char_end": 174,
+                "text": "你看，《瑪拉基書》四章五節到六節，就預言了：「看哪，耶和華大而可畏之日未到以前，我必差遣先知以利亞到你們那裡去。他必使父親的心轉向兒女，兒女的心轉向父親，免得我來咒詛遍地。」所以就預言施洗約翰要會來，耶穌還沒來以前、耶穌還沒出現以前，施洗約翰要來，叫人悔改。",
+                "match_score": 2.01,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "749",
+              "line": 45,
+              "paragraph_length": 936,
+              "media_time": 2164.0,
+              "evidence_id": "E036",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 270,
+                "char_end": 330,
+                "text": "以利亞先來來叫猶太人悔改，叫猶太人來歸向神，在這個完美的環境裡面，彌賽亞為什麼要受長老、祭司長、文士許多的苦，然後被殺？",
+                "match_score": 1.415,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0009",
+      "group_id": "CG-FAITH-RELATION",
+      "title": "信心的主要意義是使人與神建立並維持合宜關係",
+      "claim_type": "神學",
+      "opposes": "把信心理解為可量化的心理強度",
+      "scripture_refs": [],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E053",
+            "E054"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "896",
+              "line": 53,
+              "paragraph_length": 557,
+              "media_time": 2596.0,
+              "evidence_id": "E054",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 329,
+                "char_end": 350,
+                "text": "其實信心最主要是什麼呢？我們跟神有好關係。",
+                "match_score": 1.096,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E054",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 674,
+                "char_end": 695,
+                "text": "其實「義」主要的觀念是什麼？跟神有好關係。",
+                "match_score": 0.731,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0010",
+      "group_id": "CG-LAW-PROPHETS-WITNESS",
+      "title": "摩西代表律法、以利亞代表先知，二者在變像中見證耶穌將受死",
+      "claim_type": "互文",
+      "opposes": null,
+      "scripture_refs": [
+        "路加福音9:28-31",
+        "路加福音9:30-31"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E043",
+            "E047"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E047",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 125,
+                "char_end": 156,
+                "text": "摩西（律法）、以利亞（先知），律法和先知都預言耶穌為世罪而死。",
+                "match_score": 2.702,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E043",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 205,
+                "char_end": 265,
+                "text": "「耶穌帶著彼得、約翰、雅各上山去禱告。正禱告的時候，祂的面貌就改變了，衣服潔白放光。忽然有摩西、以利亞兩個人同耶穌說話。",
+                "match_score": 2.924,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0011",
+      "group_id": "CG-LISTEN-TO-HIM",
+      "title": "「你們要聽祂」表明耶穌權柄高過摩西與以利亞，三者不可平列",
+      "claim_type": "解經判斷",
+      "opposes": "把耶穌與摩西、以利亞置於同等地位（彼得搭三座棚）",
+      "scripture_refs": [
+        "馬太福音17:4-5",
+        "馬太福音17:5",
+        "馬太福音 17:4-5"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 6,
+      "cross_lecture": "duplicate",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E048",
+            "E049",
+            "E050",
+            "E051",
+            "E059"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E049",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 401,
+                "char_end": 441,
+                "text": "你們三個平等。耶穌說：「你錯了。摩西、以利亞是我的先知，是我的僕人，我就是神。」",
+                "match_score": 1.835,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E050",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 508,
+                "char_end": 564,
+                "text": "他們說話當中，忽然有一朵光明的雲彩遮蓋他們，且有聲音從雲彩裡出來，說：「這是我的愛子，我所喜悅的，你們要聽祂！」",
+                "match_score": 1.691,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E059",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 595,
+                "char_end": 617,
+                "text": "你們要聽祂！」祂的權柄比摩西、比以利亞更高。",
+                "match_score": 1.612,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E050",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 56,
+                "char_end": 99,
+                "text": "聖經常常講，有雲顯示，雲出現就顯示神的臨在。「這是我的愛子，我所喜悅的。你們要聽祂。」",
+                "match_score": 1.486,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E059",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 23,
+                "char_end": 30,
+                "text": "你們要聽祂。」",
+                "match_score": 1.449,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E048",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 276,
+                "char_end": 326,
+                "text": "你若願意，我就在這裡搭三座棚，一座為祢，一座為摩西，一座為以利亞。」那耶穌有沒有接受這個彼得的建議？",
+                "match_score": 1.588,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E033"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "678",
+              "line": 41,
+              "paragraph_length": 732,
+              "media_time": 1927.0,
+              "evidence_id": "E033",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 578,
+                "char_end": 607,
+                "text": "所以神說：「你們要聽祂。」耶穌的地位高過摩西、高過以利亞。",
+                "match_score": 2.259,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0012",
+      "group_id": "CG-LITTLE-FAITH",
+      "title": "門徒的「信心小」不是數量少，而是信心觀念不完整——誤以為權柄可脫離與神的關係自動生效",
+      "claim_type": "解經判斷",
+      "opposes": "把「信心小」理解為信心的份量不足",
+      "scripture_refs": [
+        "馬太福音 17:19",
+        "馬太福音 17:20-21"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 4,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E046",
+            "E047",
+            "E048",
+            "E049"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "896",
+              "line": 53,
+              "paragraph_length": 557,
+              "media_time": 2596.0,
+              "evidence_id": "E047",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 240,
+                "char_end": 309,
+                "text": "耶穌說，罪惡的鬼若不禱告、禁食，就不能趕出鬼來。所以什麼意思？耶穌講清楚，趕鬼的權柄沒有魔術的能力，而必須和神有好關係，靠神的能力來趕鬼。",
+                "match_score": 1.556,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "896",
+              "line": 53,
+              "paragraph_length": 557,
+              "media_time": 2596.0,
+              "evidence_id": "E049",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 70,
+                "char_end": 89,
+                "text": "門徒們對信心的觀念不準確，或者不完整。",
+                "match_score": 1.526,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "844",
+              "line": 49,
+              "paragraph_length": 470,
+              "media_time": 2448.0,
+              "evidence_id": "E047",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 356,
+                "char_end": 470,
+                "text": "耶穌說：「是因你們的信心小。我實在告訴你們，你們若有信心，像一粒芥菜種，就是對這座山說：『你從這邊挪到那邊』，他也必挪去；並且你們沒有一件不能做的事了。至於這一類的鬼，若不禱告、禁食，他就不出來，或者說你就沒有辦法把他趕出來。」",
+                "match_score": 1.067,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "844",
+              "line": 49,
+              "paragraph_length": 470,
+              "media_time": 2448.0,
+              "evidence_id": "E046",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 320,
+                "char_end": 370,
+                "text": "門徒暗暗地到耶穌的跟前說：「我們為什麼不能趕出那鬼呢？」看耶穌怎麼回答。耶穌說：「是因你們的信心小。",
+                "match_score": 1.038,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0013",
+      "group_id": "CG-METHOD-CLEAR-OVER-OBSCURE",
+      "title": "以清楚的書信證據裁定象徵性文體，不由象徵單獨立論",
+      "claim_type": "方法論",
+      "opposes": "僅憑高度象徵的經文建立教義",
+      "scripture_refs": [
+        "哥林多前書 15:20-26",
+        "啟示錄 20:4-5"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E008",
+            "E019"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E008",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 69,
+                "char_end": 106,
+                "text": "如果只有《啟示錄》，沒有《哥林多前書》十五章，我就不敢講千禧年是不是存在。",
+                "match_score": 1.88,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E008",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 59,
+                "char_end": 124,
+                "text": "我說：「如果只有《啟示錄》，沒有《哥林多前書》第十五章，我就不敢說有沒有千禧年，我就不敢說了。」可是什麼？有《哥林多前書》十五章。",
+                "match_score": 1.64,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0014",
+      "group_id": "CG-METHOD-CONTEXT-LINK",
+      "title": "上下文的時間連接詞是刻意的釋經線索，必須追究",
+      "claim_type": "方法論",
+      "opposes": "把敘事的時間標記當作無關細節",
+      "scripture_refs": [
+        "馬太福音16:28-17:2",
+        "馬可福音9:1-2"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 1,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E037"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "919",
+              "line": 39,
+              "paragraph_length": 751,
+              "media_time": 2573.0,
+              "evidence_id": "E037",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 123,
+                "char_end": 137,
+                "text": "時間他跟你講說「過了六天」。",
+                "match_score": 1.52,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "840",
+              "line": 35,
+              "paragraph_length": 576,
+              "media_time": 2391.0,
+              "evidence_id": "E037",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 463,
+                "char_end": 576,
+                "text": "耶穌講了這句話之後，他特別講「過了六天」，耶穌帶了彼得、雅各、約翰上了高山。什麼意思？告訴你說，耶穌帶了彼得、雅各、約翰上了高山，在他們面前變了形象，就是耶穌在前面所說的：「有人還沒有嘗死味以前，必要看見神的國大有能力臨到。」",
+                "match_score": 1.309,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0015",
+      "group_id": "CG-METHOD-COST",
+      "title": "明白聖經需付出學習代價，包括學習原文",
+      "claim_type": "應用",
+      "opposes": "期待不經訓練即獲得成熟解經能力",
+      "scripture_refs": [],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 3,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E073",
+            "E074",
+            "E075"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1101",
+              "line": 61,
+              "paragraph_length": 441,
+              "media_time": 3232.0,
+              "evidence_id": "E074",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 354,
+                "char_end": 422,
+                "text": "（講員：）當然，學原文。沒有錯。你不肯付出代價，我不願意學習彈鋼琴，我希望我坐下來就可以彈那個Beethoven的那一種交響曲，不可能！",
+                "match_score": 0.658,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0016",
+      "group_id": "CG-METHOD-CULTURE",
+      "title": "古代文化慣例（計日法等）必須先還原，才能判斷是否矛盾",
+      "claim_type": "方法論",
+      "opposes": "用現代習慣衡量古代表達並判定聖經矛盾",
+      "scripture_refs": [
+        "馬太福音17:1",
+        "馬可福音9:2",
+        "路加福音9:28"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E045",
+            "E046"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E045",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 616,
+                "char_end": 652,
+                "text": "三天三夜，三天，第三天，在第一世紀猶太人的觀點裡面，完全一樣，沒有分別。",
+                "match_score": 1.352,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E045",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 7,
+                "char_end": 52,
+                "text": "所以馬太說「過了六天」，馬可說「過了六天」，路加說「大約八天」，在猶太的觀念裡面完全一樣。",
+                "match_score": 0.586,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1353",
+              "line": 49,
+              "paragraph_length": 872,
+              "media_time": 3577.0,
+              "evidence_id": "E046",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 606,
+                "char_end": 751,
+                "text": "第一個問我說「你孩子幾歲」那個人，剛從台灣來，所以他的頭腦都是台灣的觀點，所以我就根據他所了解的觀點，「五歲」，沒有錯。第二個問我說「你孩子幾歲」那個人，已經在美國住了二十多年了，他新的…他的頭腦已經被美國文化「毒化」了，思想完全是美國方式，所以按照美國（方式）就算了，他是四歲，沒有錯。",
+                "match_score": 0.711,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0017",
+      "group_id": "CG-METHOD-EXEGESIS-FIRST",
+      "title": "解經學是神學教育最基本的學科；系統神學須建立在逐段解經之上",
+      "claim_type": "方法論",
+      "opposes": "以羅列神學家意見為中心的系統神學；proof-texting（先有主張再找經文佐證）",
+      "scripture_refs": [],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 8,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E069",
+            "E070",
+            "E071",
+            "E072",
+            "E077",
+            "E078",
+            "E079",
+            "E080"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1168",
+              "line": 65,
+              "paragraph_length": 788,
+              "media_time": 3400.0,
+              "evidence_id": "E079",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 430,
+                "char_end": 446,
+                "text": "叫 proof-texting。",
+                "match_score": 2.531,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1101",
+              "line": 61,
+              "paragraph_length": 441,
+              "media_time": 3232.0,
+              "evidence_id": "E072",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 293,
+                "char_end": 325,
+                "text": "你把念系統神學的時間盡力去研究聖經，那你的信仰就非常合乎聖經了。",
+                "match_score": 1.081,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1101",
+              "line": 61,
+              "paragraph_length": 441,
+              "media_time": 3232.0,
+              "evidence_id": "E070",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 206,
+                "char_end": 223,
+                "text": "（聽眾提問：）系統神學，要不要念？",
+                "match_score": 0.6,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1168",
+              "line": 65,
+              "paragraph_length": 788,
+              "media_time": 3400.0,
+              "evidence_id": "E080",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 587,
+                "char_end": 606,
+                "text": "所以我才說神學教育最基本的就是解經學。",
+                "match_score": 1.907,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0018",
+      "group_id": "CG-METHOD-GENRE",
+      "title": "解經必先辨認文體，記號性文體不可逐字處理",
+      "claim_type": "方法論",
+      "opposes": "把啟示文學、詩歌當作一般敘述或書信逐字解釋",
+      "scripture_refs": [
+        "但以理書7:3-14",
+        "啟示錄21:1-5",
+        "啟示錄22:1-2",
+        "詩篇3:3（講員以「耶和華是我的盾牌」概述，未明指篇節）",
+        "啟示錄（未指明章節）",
+        "哥林多前書 15章",
+        "詩篇（「神是我的盾牌」，未指明篇節）",
+        "詩篇（未指明篇節）"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 7,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E007",
+            "E014"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "574",
+              "line": 27,
+              "paragraph_length": 865,
+              "media_time": 1721.0,
+              "evidence_id": "E007",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 694,
+                "char_end": 740,
+                "text": "就是神藉著這個《但以理書》的後面，也是啟示錄的文體，也是用記號來表達，來傳達祂要傳達的信息。",
+                "match_score": 1.337,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "117",
+              "line": 11,
+              "paragraph_length": 637,
+              "media_time": 483.0,
+              "evidence_id": "E007",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 467,
+                "char_end": 478,
+                "text": "這是啟示錄文體的特徵。",
+                "match_score": 0.961,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "68",
+              "line": 9,
+              "paragraph_length": 613,
+              "media_time": 278.0,
+              "evidence_id": "E007",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 80,
+                "text": "《但以理書》第七章是 Apocalyptic Literature。Apocalyptic Literature…那個是一種聖經當中的、一個很特殊的這種文體。",
+                "match_score": 0.832,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "180",
+              "line": 13,
+              "paragraph_length": 605,
+              "media_time": 670.0,
+              "evidence_id": "E007",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 495,
+                "char_end": 520,
+                "text": "所以你去看《啟示錄》的解經書，很多這些問題在那裡。",
+                "match_score": 0.509,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "243",
+              "line": 15,
+              "paragraph_length": 526,
+              "media_time": 829.0,
+              "evidence_id": "E014",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 313,
+                "char_end": 364,
+                "text": "所以耶和華是我的保護者。可是用詩歌表達的時候，他不是說「耶和華是我的保護者」，說「耶和華是我的盾牌」。",
+                "match_score": 2.458,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "180",
+              "line": 13,
+              "paragraph_length": 605,
+              "media_time": 670.0,
+              "evidence_id": "E014",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 520,
+                "char_end": 605,
+                "text": "其實我講清楚一點，在學術界裡面，差不多最近一百年，就九十年左右這段期間裡面，學術界才發現到，原來《啟示錄》，你不能夠把《啟示錄》當作保羅書信一樣來看待，它有它特別的特徵。",
+                "match_score": 1.646,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E002",
+            "E010",
+            "E014",
+            "E015",
+            "E016"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E010",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 447,
+                "char_end": 496,
+                "text": "可是《哥林多前書》十五章不是啟示文學的問題，那是書信的問題。書信的問題就是可以按字去看，照字去看。",
+                "match_score": 1.092,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "288",
+              "line": 19,
+              "paragraph_length": 323,
+              "media_time": 714.0,
+              "evidence_id": "E002",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 302,
+                "char_end": 323,
+                "text": "所以你按照把《啟示錄》照字去看就出問題了。",
+                "match_score": 0.914,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "349",
+              "line": 23,
+              "paragraph_length": 353,
+              "media_time": 895.0,
+              "evidence_id": "E002",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 273,
+                "char_end": 353,
+                "text": "所以如果你不會把聖經的各種不同的文體分清楚，一大堆異端都從那裡出來。《啟示錄》一樣，很多異端就是很喜歡用《啟示錄》，他用《啟示錄》可以亂解釋，無所謂，這麼搞的。",
+                "match_score": 0.752,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E002",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 477,
+                "char_end": 524,
+                "text": "書信的問題就是可以按字去看，照字去看。啟示文學的問題不能按字去解釋，如果你按字去解釋就出問題。",
+                "match_score": 0.578,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "349",
+              "line": 23,
+              "paragraph_length": 353,
+              "media_time": 895.0,
+              "evidence_id": "E015",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 249,
+                "char_end": 273,
+                "text": "所以你把詩篇拿來當作普通的文章經驗，又是大錯誤。",
+                "match_score": 0.518,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "349",
+              "line": 23,
+              "paragraph_length": 353,
+              "media_time": 895.0,
+              "evidence_id": "E014",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 98,
+                "char_end": 112,
+                "text": "所以他說：「神是我的盾牌。」",
+                "match_score": 0.869,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "349",
+              "line": 23,
+              "paragraph_length": 353,
+              "media_time": 895.0,
+              "evidence_id": "E016",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 12,
+                "char_end": 98,
+                "text": "啟示錄文體是被聖經學者差不多九十年前左右才發現到，原來這個文體跟其他的文體不一樣。如果你不會把聖經的文體分清楚，一定出很多問題。剛才我所講的，詩歌大部分用記號來表達一些事。",
+                "match_score": 0.302,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0019",
+      "group_id": "CG-METHOD-ORIGINAL-LANGUAGE",
+      "title": "原文的限定成分（冠詞、詞義）常決定意義，中譯本未必呈現",
+      "claim_type": "原文文法",
+      "opposes": "僅憑中文譯本下解經判斷",
+      "scripture_refs": [
+        "但以理書7:13-14",
+        "以西結書（講員未明指章節）",
+        "馬太福音（施洗約翰與「義／δικαιοσύνη」段落，未指明節數）"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 3,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E006",
+            "E035"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "740",
+              "line": 33,
+              "paragraph_length": 1134,
+              "media_time": 2153.0,
+              "evidence_id": "E035",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 69,
+                "char_end": 125,
+                "text": "以西結的「人子」沒有那一個「the」定冠詞，你聽懂嗎？耶穌的「人子」有「the」，就是「那個人子」，完全不一樣。",
+                "match_score": 2.227,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "574",
+              "line": 27,
+              "paragraph_length": 865,
+              "media_time": 1721.0,
+              "evidence_id": "E006",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 59,
+                "char_end": 116,
+                "text": "在新約聖經裡面講「人子」，都是有那個定冠詞的，就是「那個人子」。哪一個人子？就是《但以理書》第七章所講的那個人子。",
+                "match_score": 1.782,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E006",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 552,
+                "char_end": 642,
+                "text": "可是在每一次耶穌講「人子」的時候，耶穌講「The」，定冠詞「The」，英文的「The」定冠詞。「那個人子」，「那個人子」是指哪一個呢？就是指著《但以理書》第七章所講的「那個人子」。",
+                "match_score": 1.601,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E057"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "947",
+              "line": 57,
+              "paragraph_length": 718,
+              "media_time": 2791.0,
+              "evidence_id": "E057",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 44,
+                "char_end": 55,
+                "text": "δικαιοσύνη。",
+                "match_score": 2.162,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0020",
+      "group_id": "CG-METHOD-SELF-DOUBT",
+      "title": "遇表面矛盾先懷疑自己的解經，不先懷疑經文",
+      "claim_type": "方法論",
+      "opposes": "把自己的誤讀當作聖經錯誤",
+      "scripture_refs": [
+        "馬太福音16:28-17:2",
+        "馬可福音9:1-2",
+        "路加福音9:28",
+        "啟示錄（未指明章節）"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 3,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E058"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E058",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 24,
+                "char_end": 92,
+                "text": "所以我常常說，當我們來做仔細的、深度解經的時候，可以把很多皮毛上看起來好像有矛盾、好像有問題的聖經可以解決，可以幫助我們靈性、靈命長進。",
+                "match_score": 0.908,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "243",
+              "line": 15,
+              "paragraph_length": 526,
+              "media_time": 829.0,
+              "evidence_id": "E058",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 424,
+                "char_end": 456,
+                "text": "所以你解經的時候，必須要分辨你是處理哪一種的聖經的文體，不一樣。",
+                "match_score": 0.772,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E058",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 220,
+                "char_end": 251,
+                "text": "所以這些聖經，很多解經書告訴你說聖經錯了，耶穌的預言沒有實現。",
+                "match_score": 0.626,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "671",
+              "line": 31,
+              "paragraph_length": 596,
+              "media_time": 1971.0,
+              "evidence_id": "E058",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 409,
+                "char_end": 451,
+                "text": "我說他們就不懂得念聖經。我給你看。所以為什麼我常常說，你深度、準確地解經非常的重要。",
+                "match_score": 0.54,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1353",
+              "line": 49,
+              "paragraph_length": 872,
+              "media_time": 3577.0,
+              "evidence_id": "E058",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 701,
+                "char_end": 775,
+                "text": "他的頭腦已經被美國文化「毒化」了，思想完全是美國方式，所以按照美國（方式）就算了，他是四歲，沒有錯。所以今天有人說：「你看，哎呀，新約聖經怎麼可靠？",
+                "match_score": 0.216,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E011",
+            "E012"
+          ],
+          "anchors": []
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0021",
+      "group_id": "CG-MILLENNIUM",
+      "title": "千禧年存在：林前15的復活次序與啟20的兩次復活互相解釋；「一千年」指相當長的時期而非精確年數",
+      "claim_type": "解經判斷",
+      "opposes": "僅憑啟示錄象徵斷定千禧年；或把一千年擴大成數萬年",
+      "scripture_refs": [
+        "啟示錄 20章",
+        "哥林多前書 15章",
+        "哥林多前書 15:20-26",
+        "啟示錄 20:4-5",
+        "啟示錄 20:4-6"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 10,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E005",
+            "E006",
+            "E007",
+            "E008",
+            "E009",
+            "E017",
+            "E018",
+            "E019",
+            "E020",
+            "E021"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E017",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 530,
+                "char_end": 578,
+                "text": "所以沒有信主的人，這個時候會復活。所以按照《哥林多前書》十五章，這一段有一段時期，相隔一段時期。",
+                "match_score": 1.891,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E008",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 69,
+                "char_end": 106,
+                "text": "如果只有《啟示錄》，沒有《哥林多前書》十五章，我就不敢講千禧年是不是存在。",
+                "match_score": 1.88,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E020",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 936,
+                "char_end": 1012,
+                "text": "這個一千年，千禧年就在這個時候。可是既然《啟示錄》是 apocalyptic，那一千年不一定是999加1的一千年，是一段相當長的時間，可是也不是幾萬年。",
+                "match_score": 1.754,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E008",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 59,
+                "char_end": 124,
+                "text": "我說：「如果只有《啟示錄》，沒有《哥林多前書》第十五章，我就不敢說有沒有千禧年，我就不敢說了。」可是什麼？有《哥林多前書》十五章。",
+                "match_score": 1.64,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E021",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 1012,
+                "char_end": 1065,
+                "text": "他說一千年。那個時候基督要在地上作王，那我們屬於基督的人，要跟耶穌一起在地上作王，就是這樣，從這裡才知道。",
+                "match_score": 1.542,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E006",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 30,
+                "text": "關於千禧年，我的學生就問我：「王教授，你相信不相信千禧年？」",
+                "match_score": 0.82,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "104",
+              "line": 9,
+              "paragraph_length": 524,
+              "media_time": 236.0,
+              "evidence_id": "E009",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 195,
+                "char_end": 233,
+                "text": "《哥林多前書》十五章二十節：「但基督已經從死裡復活，成了睡了之人初熟的果子。",
+                "match_score": 2.965,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E009",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 203,
+                "char_end": 253,
+                "text": "剛才我給你念那一段，《哥林多前書》第十五章講到什麼？在基督裡所有人都要復活，基督是復活的初熟的果子。",
+                "match_score": 2.037,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "383",
+              "line": 27,
+              "paragraph_length": 1129,
+              "media_time": 980.0,
+              "evidence_id": "E018",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 684,
+                "char_end": 796,
+                "text": "我又看見那些為給耶穌作見證、並為神之道被斬者的靈魂，和那沒有拜過獸與獸像、也沒有在額上和手上受過他印記之人的靈魂，他們都復活了，與基督一同作王一千年。」第五節：「這是頭一次的復活。其餘的死人還沒有復活，直等到那一千年完了。」",
+                "match_score": 1.719,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0022",
+      "group_id": "CG-NO-MAGIC",
+      "title": "屬靈權柄不具魔術性質；禱告禁食表明必須與神有合宜關係並倚靠神的能力",
+      "claim_type": "神學",
+      "opposes": "把屬靈話語、動作或權柄當作自動生效的公式",
+      "scripture_refs": [
+        "馬太福音 17:20-21"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 4,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E050",
+            "E051",
+            "E052",
+            "E076"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "896",
+              "line": 53,
+              "paragraph_length": 557,
+              "media_time": 2596.0,
+              "evidence_id": "E050",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 271,
+                "char_end": 309,
+                "text": "耶穌講清楚，趕鬼的權柄沒有魔術的能力，而必須和神有好關係，靠神的能力來趕鬼。",
+                "match_score": 1.61,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1168",
+              "line": 65,
+              "paragraph_length": 788,
+              "media_time": 3400.0,
+              "evidence_id": "E051",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 54,
+                "char_end": 89,
+                "text": "你必須跟神有好關係，你才能夠靠神的能力來趕鬼，不是靠你的魔術、那句話。",
+                "match_score": 1.61,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E052",
+              "evidence_type": "application",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 688,
+                "char_end": 695,
+                "text": "跟神有好關係。",
+                "match_score": 0.58,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0023",
+      "group_id": "CG-PS2-RESURRECTION",
+      "title": "詩2:7「我今日生你」不是父神本體生出聖子，而是指復活後被高舉登基",
+      "claim_type": "解經判斷",
+      "opposes": "詩2:7 描述聖父在某時間點生出聖子",
+      "scripture_refs": [
+        "詩篇2:7-9",
+        "詩篇 2:7",
+        "使徒行傳 13:33",
+        "詩篇 2篇"
+      ],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 7,
+      "cross_lecture": "extension",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E053",
+            "E054"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E054",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 171,
+                "char_end": 248,
+                "text": "「祢是我的兒子，我今日生祢」，不是說神生耶穌了，不是聖父生聖子了，這乃是說耶穌基督復活，神提高祂的地位，做全宇宙的王，把全宇宙的這個君王的權柄交給耶穌了。",
+                "match_score": 2.74,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E053",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 104,
+                "char_end": 164,
+                "text": "「這是我的愛子」是引用《詩篇》第二篇7節到9節。受膏者說：「我要傳聖旨。耶和華曾對我說：『祢是我的兒子，我今日生祢。』」",
+                "match_score": 2.122,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E024",
+            "E025",
+            "E026",
+            "E027",
+            "E028"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "570",
+              "line": 35,
+              "paragraph_length": 580,
+              "media_time": 1526.0,
+              "evidence_id": "E026",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 347,
+                "char_end": 390,
+                "text": "所以「你是我的兒子，我今日生你」是什麼？不是父神生聖子了，在太初父神生聖子的事，不是。",
+                "match_score": 2.4,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "630",
+              "line": 37,
+              "paragraph_length": 373,
+              "media_time": 1743.0,
+              "evidence_id": "E028",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 170,
+                "char_end": 229,
+                "text": "父子。所以我們說聖父、聖子的關係，跟我跟我的兒子的關係不一樣。你找不到一段時期，父神存在、子神不存在，沒有那個時候了。",
+                "match_score": 0.725,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0024",
+      "group_id": "CG-REV-SYMBOLIC",
+      "title": "新耶路撒冷的形象是記號性的：「生命樹葉醫治萬民」表達不再有疾病，「從天而降」表達神與人同住",
+      "claim_type": "解經判斷",
+      "opposes": "按字面拼合啟示錄形象，並據此推論地上仍有萬國君王或一座城將降落地球",
+      "scripture_refs": [
+        "啟示錄21:4-5",
+        "啟示錄22:1-2",
+        "啟示錄21:24",
+        "啟示錄21:1-3",
+        "啟示錄21:22"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 9,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E008",
+            "E009",
+            "E010",
+            "E011",
+            "E012",
+            "E013",
+            "E015",
+            "E016",
+            "E017"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "117",
+              "line": 11,
+              "paragraph_length": 637,
+              "media_time": 483.0,
+              "evidence_id": "E011",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 428,
+                "char_end": 467,
+                "text": "祂是用這句話，說生命樹的葉子可以醫治萬民，來表達在新耶路撒冷裡，不會再有疾病。",
+                "match_score": 1.954,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "180",
+              "line": 13,
+              "paragraph_length": 605,
+              "media_time": 670.0,
+              "evidence_id": "E013",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 379,
+                "char_end": 495,
+                "text": "似乎說除了這個新耶路撒冷、新天新地以外，好像還有地上的萬國的君王？沒有，那你所說的君王，就是以前的君王，這個今世的君王，在那個地方要敬拜神，就是那個東西。所以你《啟示錄》，你現在已經開始看出來了，你《啟示錄》按照字去看，一大堆矛盾。",
+                "match_score": 1.844,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "295",
+              "line": 17,
+              "paragraph_length": 575,
+              "media_time": 965.0,
+              "evidence_id": "E017",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 325,
+                "char_end": 353,
+                "text": "其實新耶路撒冷在那個地方，神要與人、與得救的人住在一起。",
+                "match_score": 1.775,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "180",
+              "line": 13,
+              "paragraph_length": 605,
+              "media_time": 670.0,
+              "evidence_id": "E011",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 38,
+                "char_end": 51,
+                "text": "對，在新耶路撒冷裡沒有病。",
+                "match_score": 1.344,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "295",
+              "line": 17,
+              "paragraph_length": 575,
+              "media_time": 965.0,
+              "evidence_id": "E016",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 15,
+                "char_end": 88,
+                "text": "「我又看見一個新天新地，因為先前的天地已經過去了，海也不再有了。我又看見聖城新耶路撒冷，由神那裡從天而降，預備好了，就如新婦妝飾整齊，等候丈夫。」",
+                "match_score": 2.704,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "68",
+              "line": 9,
+              "paragraph_length": 613,
+              "media_time": 278.0,
+              "evidence_id": "E009",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 406,
+                "char_end": 477,
+                "text": "請各位看《啟示錄》第21章，《啟示錄》第21章第四節：「神要擦去他們一切的眼淚，不再有死亡，也不再有悲哀、哭號、疼痛，因為以前的事都過去了。」",
+                "match_score": 2.401,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "117",
+              "line": 11,
+              "paragraph_length": 637,
+              "media_time": 483.0,
+              "evidence_id": "E010",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 12,
+                "char_end": 103,
+                "text": "好啦，我就從第一節唸：「天使又指示我在城內街道當中一道生命水的河，明亮如水晶，從神和羔羊的寶座流出來。在河這邊與那邊有生命樹，結十二樣果子，每月都結果子；樹上的葉子，乃為醫治萬民。」",
+                "match_score": 2.13,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "180",
+              "line": 13,
+              "paragraph_length": 605,
+              "media_time": 670.0,
+              "evidence_id": "E008",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 75,
+                "char_end": 201,
+                "text": "那裡神要擦去他們一切的眼淚，不再有死亡，也不再有悲哀、哭號、疼痛，pain，病。不再有病，對不對？那既然沒有病，二十一章說既然沒有病，為什麼第二十二章說在這一個新耶路撒冷裡面，有一條生命河，這個生命河旁邊都有生命樹，那每一年十二個月都結出不同的果子來。",
+                "match_score": 1.756,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "295",
+              "line": 17,
+              "paragraph_length": 575,
+              "media_time": 965.0,
+              "evidence_id": "E015",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 232,
+                "char_end": 275,
+                "text": "新耶路撒冷就是從天上降在地上的時候，將來什麼？將來這個地球就要成為成為全宇宙的中心點。",
+                "match_score": 1.638,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0025",
+      "group_id": "CG-RIGHTEOUSNESS-RELATION",
+      "title": "「義」的首要意義是人與神的合宜關係；「沒有罪」是由此產生的次要層面",
+      "claim_type": "神學",
+      "opposes": "把義主要解釋為神把實際有罪者視作無罪的法律虛構",
+      "scripture_refs": [
+        "羅馬書 4章",
+        "創世記 15章",
+        "馬太福音（施洗約翰與「義／δικαιοσύνη」段落，未指明節數）",
+        "創世記 15:6",
+        "羅馬書 4:3",
+        "羅馬書 4:6-8"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 14,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E055",
+            "E056",
+            "E057",
+            "E058",
+            "E059",
+            "E060",
+            "E061",
+            "E062",
+            "E063",
+            "E064",
+            "E065",
+            "E066",
+            "E067",
+            "E068"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "947",
+              "line": 57,
+              "paragraph_length": 718,
+              "media_time": 2791.0,
+              "evidence_id": "E057",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 44,
+                "char_end": 55,
+                "text": "δικαιοσύνη。",
+                "match_score": 2.162,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E066",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 438,
+                "char_end": 467,
+                "text": "亞伯拉罕，亞伯拉罕因信神，這就是他的義了。他就跟神有關係。",
+                "match_score": 1.833,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1101",
+              "line": 61,
+              "paragraph_length": 441,
+              "media_time": 3232.0,
+              "evidence_id": "E061",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 122,
+                "char_end": 206,
+                "text": "所以那個不是神「算」了他的義，這個「就是」亞伯拉罕的義，consist in。你要講清楚的話，用英文翻的話可以翻成，這個（義）consist in他的信，跟神有好關係。",
+                "match_score": 1.742,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "947",
+              "line": 57,
+              "paragraph_length": 718,
+              "media_time": 2791.0,
+              "evidence_id": "E058",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 584,
+                "char_end": 657,
+                "text": "所以我們因著信跟神建立好關係之後，因為神很在乎罪，所以你就不可能繼續犯罪。所以「義」主要不是「沒有罪」，主要是「跟神好關係」，次要才是「沒有罪」。",
+                "match_score": 1.728,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "896",
+              "line": 53,
+              "paragraph_length": 557,
+              "media_time": 2596.0,
+              "evidence_id": "E056",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 467,
+                "char_end": 483,
+                "text": "其實「義」的觀念主要不是沒有罪。",
+                "match_score": 1.436,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1101",
+              "line": 61,
+              "paragraph_length": 441,
+              "media_time": 3232.0,
+              "evidence_id": "E066",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 51,
+                "text": "所以那裡，並不是亞伯拉罕信了神，神就算了他沒有罪，不是。因為他相信神，所以這個是亞伯拉罕跟神有好關係。",
+                "match_score": 1.191,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E058",
+              "evidence_type": "reasoning",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 688,
+                "char_end": 729,
+                "text": "跟神有好關係。主要是好關係。那因為神很在乎罪，所以你不可能繼續犯罪跟神維持好關係。",
+                "match_score": 1.038,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E064",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 350,
+                "char_end": 391,
+                "text": "如果我們因信，神算了我們沒有罪，（有罪）算作沒有罪，那是神騙祂自己，神也騙了我們。",
+                "match_score": 0.901,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E056",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 78,
+                "char_end": 134,
+                "text": "「義」就是那個東西。所以神不是把亞伯拉罕算為義。亞伯拉罕信了神，這個就是亞伯拉罕的義，就是亞伯拉罕跟神的好關係。",
+                "match_score": 0.794,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E067",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 41,
+                "char_end": 88,
+                "text": "那個翻錯了，那個不是這樣。亞伯拉罕信了神，「這」就是亞伯拉罕跟神的好關係。「義」就是那個東西。",
+                "match_score": 0.69,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E062",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 236,
+                "char_end": 321,
+                "text": "（聽眾提問：）「在《羅馬書》第四章第六節，他是『大衛稱那在行為以外蒙神算為義的人是有福的。』他說『得赦免其過、遮蓋其罪的，這人是有福的。主不算為有罪的，這人是有福的。』」",
+                "match_score": 1.406,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1025",
+              "line": 59,
+              "paragraph_length": 784,
+              "media_time": 3024.0,
+              "evidence_id": "E065",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 674,
+                "char_end": 695,
+                "text": "其實「義」主要的觀念是什麼？跟神有好關係。",
+                "match_score": 0.731,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0026",
+      "group_id": "CG-SELF-SCOFIELD",
+      "title": "自述：早年深入接受時代論與司可福體系，赴美學習釋經學後轉向專攻解經",
+      "claim_type": "自述",
+      "opposes": null,
+      "scripture_refs": [],
+      "lectures": [
+        "第3講",
+        "第4講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": "duplicate",
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E020"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "352",
+              "line": 21,
+              "paragraph_length": 636,
+              "media_time": 1115.0,
+              "evidence_id": "E020",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 362,
+                "char_end": 439,
+                "text": "那我在高中的時候，我專門念那種書，很多教會請我去講時代派的時代論，那種解經方法。我那個時候都不知道，等到我來美國，我開始念釋經學之後，我才發現那個大問題。",
+                "match_score": 1.075,
+                "status": "proposed"
+              }
+            }
+          ]
+        },
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E004"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "31",
+              "line": 5,
+              "paragraph_length": 471,
+              "media_time": 99.0,
+              "evidence_id": "E004",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 0,
+                "char_end": 125,
+                "text": "所以我小時候，我在高中、初中的時候，我專門是念那個 Scofield Bible 那一套東西，念到大家說：「王守仁，你這個人對這個聖經很懂！」所以很多教會請我去講，我先去講。那個時候我講了一大堆，講完、講完之後，後來我來念神學之後，開始念這個釋經學。",
+                "match_score": 0.79,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0027",
+      "group_id": "CG-SIX-EIGHT-DAYS",
+      "title": "太17:1「過了六天」與路9:28「約有八天」不矛盾：第一世紀猶太計日法含首尾",
+      "claim_type": "解經判斷",
+      "opposes": "福音書之間互相矛盾",
+      "scripture_refs": [
+        "馬太福音17:1",
+        "馬可福音9:2",
+        "路加福音9:28"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 3,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E044",
+            "E045",
+            "E046"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E045",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 616,
+                "char_end": 652,
+                "text": "三天三夜，三天，第三天，在第一世紀猶太人的觀點裡面，完全一樣，沒有分別。",
+                "match_score": 1.352,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E045",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 7,
+                "char_end": 52,
+                "text": "所以馬太說「過了六天」，馬可說「過了六天」，路加說「大約八天」，在猶太的觀念裡面完全一樣。",
+                "match_score": 1.171,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E044",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 329,
+                "char_end": 374,
+                "text": "馬太說六天以後，馬可說六天以後，路加說什麼？「耶穌說了這話以後，大約有八天。」不是矛盾嗎？",
+                "match_score": 1.553,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1353",
+              "line": 49,
+              "paragraph_length": 872,
+              "media_time": 3577.0,
+              "evidence_id": "E046",
+              "evidence_type": "appendix",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 606,
+                "char_end": 751,
+                "text": "第一個問我說「你孩子幾歲」那個人，剛從台灣來，所以他的頭腦都是台灣的觀點，所以我就根據他所了解的觀點，「五歲」，沒有錯。第二個問我說「你孩子幾歲」那個人，已經在美國住了二十多年了，他新的…他的頭腦已經被美國文化「毒化」了，思想完全是美國方式，所以按照美國（方式）就算了，他是四歲，沒有錯。",
+                "match_score": 0.8,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0028",
+      "group_id": "CG-SONOFMAN",
+      "title": "「那個人子」帶定冠詞，特指但以理書七章領受永遠國權的那一位，故表明神性而非泛指人性",
+      "claim_type": "解經判斷",
+      "opposes": "耶穌自稱人子是在強調祂的人性／謙卑",
+      "scripture_refs": [
+        "但以理書7:13-14",
+        "但以理書7:3-14",
+        "以西結書（講員未明指章節）",
+        "但以理書8:17"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 8,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E005",
+            "E006",
+            "E029",
+            "E030",
+            "E031",
+            "E032",
+            "E034",
+            "E035"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "574",
+              "line": 27,
+              "paragraph_length": 865,
+              "media_time": 1721.0,
+              "evidence_id": "E030",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 397,
+                "char_end": 431,
+                "text": "第一個獸是巴比倫，第二獸是波斯，第三個獸是希臘，第四個獸是羅馬帝國。",
+                "match_score": 3.279,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "740",
+              "line": 33,
+              "paragraph_length": 1134,
+              "media_time": 2153.0,
+              "evidence_id": "E035",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 69,
+                "char_end": 125,
+                "text": "以西結的「人子」沒有那一個「the」定冠詞，你聽懂嗎？耶穌的「人子」有「the」，就是「那個人子」，完全不一樣。",
+                "match_score": 2.358,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "671",
+              "line": 31,
+              "paragraph_length": 596,
+              "media_time": 1971.0,
+              "evidence_id": "E031",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 161,
+                "char_end": 191,
+                "text": "所以耶穌說「人子」，不是強調耶穌的人性，而是強調耶穌的神性。",
+                "match_score": 2.243,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "574",
+              "line": 27,
+              "paragraph_length": 865,
+              "media_time": 1721.0,
+              "evidence_id": "E006",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 59,
+                "char_end": 116,
+                "text": "在新約聖經裡面講「人子」，都是有那個定冠詞的，就是「那個人子」。哪一個人子？就是《但以理書》第七章所講的那個人子。",
+                "match_score": 2.037,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "26",
+              "line": 5,
+              "paragraph_length": 642,
+              "media_time": 133.0,
+              "evidence_id": "E006",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 552,
+                "char_end": 642,
+                "text": "可是在每一次耶穌講「人子」的時候，耶穌講「The」，定冠詞「The」，英文的「The」定冠詞。「那個人子」，「那個人子」是指哪一個呢？就是指著《但以理書》第七章所講的「那個人子」。",
+                "match_score": 1.601,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "671",
+              "line": 31,
+              "paragraph_length": 596,
+              "media_time": 1971.0,
+              "evidence_id": "E032",
+              "evidence_type": "theology",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 96,
+                "char_end": 156,
+                "text": "耶穌說「我是人子」，是什麼意思？「我就是《但以理書》七章所說的那個人子。」人比獸更高，獸代表人，比獸更高的人子代表什麼？",
+                "match_score": 1.597,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "574",
+              "line": 27,
+              "paragraph_length": 865,
+              "media_time": 1721.0,
+              "evidence_id": "E029",
+              "evidence_type": "scripture_evidence",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 757,
+                "char_end": 865,
+                "text": "可是第十三節說：「我在夜間的異象中看見，有一位像人子的，駕著天雲而來，被領到亙古常在者，就是神嘛，在神面前，得了權柄、榮耀、國度，使各國、各方…各國、各族的人都事奉祂。祂的權柄是永遠的，不能廢去，祂的國必不敗壞。」",
+                "match_score": 3.636,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0029",
+      "group_id": "CG-TRANSFIG-MEANING",
+      "title": "登山變像綜合顯明：神性榮耀的預先彰顯、受死的預告、父神對雙重身分的宣告",
+      "claim_type": "神學",
+      "opposes": null,
+      "scripture_refs": [
+        "馬太福音17:1-5",
+        "馬可福音9:2-7",
+        "路加福音9:28-35",
+        "彼得後書1:16-18",
+        "詩篇2:7-9",
+        "以賽亞書42:1"
+      ],
+      "lectures": [
+        "第3講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "16_章_-_榮耀、信心",
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E042",
+            "E057"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "1174",
+              "line": 43,
+              "paragraph_length": 605,
+              "media_time": 3160.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 182,
+                "char_end": 220,
+                "text": "所以你看，耶穌在山上變像，彰顯祂的榮耀，這是祂將來一定會再臨的保證，知道嗎？",
+                "match_score": 1.13,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1493",
+              "line": 55,
+              "paragraph_length": 537,
+              "media_time": 4008.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 514,
+                "char_end": 526,
+                "text": "神的僕人，要為我們贖罪。",
+                "match_score": 0.927,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "919",
+              "line": 39,
+              "paragraph_length": 751,
+              "media_time": 2573.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 670,
+                "char_end": 706,
+                "text": "耶穌把自己所有的神的榮耀彰顯出來，是保證祂將來帶著榮耀要降臨在地上作王。",
+                "match_score": 0.878,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1433",
+              "line": 51,
+              "paragraph_length": 634,
+              "media_time": 3799.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 125,
+                "char_end": 156,
+                "text": "摩西（律法）、以利亞（先知），律法和先知都預言耶穌為世罪而死。",
+                "match_score": 0.795,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1006",
+              "line": 41,
+              "paragraph_length": 419,
+              "media_time": 2805.0,
+              "evidence_id": "E057",
+              "evidence_type": "answer",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 84,
+                "char_end": 134,
+                "text": "「過了六天」，耶穌帶了彼得、雅各、約翰到高山上，在那裡變了形象，把祂隱藏在祂裡面的神的榮耀彰顯出來。",
+                "match_score": 0.375,
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "1253",
+              "line": 45,
+              "paragraph_length": 671,
+              "media_time": 3332.0,
+              "evidence_id": "E042",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 116,
+                "char_end": 130,
+                "text": "在山上變像，到底有什麼意思？",
+                "match_score": 0.869,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "claim_id": "CL-0030",
+      "group_id": "CG-UNBELIEF-MORAL",
+      "title": "「不信又悖謬的世代」的不信是道德背叛，不是證據不足",
+      "claim_type": "解經判斷",
+      "opposes": "不信是因為證據不夠",
+      "scripture_refs": [
+        "馬太福音 17:14-18",
+        "馬太福音 17:17"
+      ],
+      "lectures": [
+        "第4講"
+      ],
+      "recurrence": 2,
+      "cross_lecture": null,
+      "occurrences": [
+        {
+          "project_id": "17_章_登山變像_醫治鬼附之子",
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E044",
+            "E045"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "844",
+              "line": 49,
+              "paragraph_length": 470,
+              "media_time": 2448.0,
+              "evidence_id": "E045",
+              "evidence_type": "exegesis",
+              "assertive": true,
+              "proposed_highlight": {
+                "char_start": 178,
+                "char_end": 256,
+                "text": "那耶穌明講：「你們這個不信又悖謬的世代」，什麼意思？耶穌說，這些猶太人不信，不是因為沒有證據，而是因道德的問題。因為你背叛神，所以你不信，不是因為沒有證據。",
+                "match_score": 1.902,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "open_questions": [
+    {
+      "open_question_id": "OQ-DANIEL-SON-OF-MAN",
+      "question": "但以理被稱為「人子」（但8:17）與耶穌的「那個人子」有何分別？",
+      "note": "聽眾同時問及以西結與但以理；教授只處理了以西結，未進一步回答但以理的部分。manuscript 已如實記錄「這裡不替教授補充答案」，但 evidence 層把 E034 標為 answered。",
+      "status": "partially_answered",
+      "occurrences": [
+        {
+          "lecture": "第3講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）3",
+          "local_source_evidence_ids": [
+            "E034"
+          ],
+          "anchors": [
+            {
+              "paragraph_key": "740",
+              "line": 33,
+              "paragraph_length": 1134,
+              "media_time": 2153.0,
+              "evidence_id": "E034",
+              "evidence_type": "question",
+              "assertive": false,
+              "proposed_highlight": {
+                "char_start": 96,
+                "char_end": 125,
+                "text": "耶穌的「人子」有「the」，就是「那個人子」，完全不一樣。",
+                "match_score": 1.833,
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "open_question_id": "OQ-REV-LITERAL-BOUNDARY",
+      "question": "《啟示錄》中哪些部分是記號性的、哪些應照字面理解？",
+      "note": "教授明確指出這是解讀《啟示錄》的重大問題，但本講沒有逐段給出判準。",
+      "status": "unanswered",
+      "occurrences": [
+        {
+          "lecture": "第4講",
+          "transcript_id": "2016 NYSC 專題：馬太福音釋經（五）4",
+          "local_source_evidence_ids": [
+            "E001"
+          ],
+          "anchors": []
+        }
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "non_substantive": {
+    "16_章_-_榮耀、信心": {},
+    "17_章_登山變像_醫治鬼附之子": {
+      "E081": "結束禱告"
+    }
+  },
+  "unassigned_evidence": {
+    "16_章_-_榮耀、信心": [],
+    "17_章_登山變像_醫治鬼附之子": []
+  }
+}

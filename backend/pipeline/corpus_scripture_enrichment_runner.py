@@ -10,6 +10,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_scripture_enrichment import (
     ScriptureEnrichmentValidationError,
     build_reference_inventory,
@@ -22,8 +23,9 @@ from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _slug
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
-DEFAULT_SURVEY_DIR = Path("output/corpus-survey")
-DEFAULT_OUTPUT_DIR = Path("output/corpus-survey/scripture-v2")
+CORPUS_SURVEY_ROOT = wang_platform_paths().corpus_survey_staging
+DEFAULT_SURVEY_DIR = CORPUS_SURVEY_ROOT
+DEFAULT_OUTPUT_DIR = CORPUS_SURVEY_ROOT / "scripture-v2"
 PROMPT_PATH = Path("backend/pipeline/prompts/corpus_scripture_role_enrichment.md")
 
 ROLE_SCHEMA: dict[str, Any] = {

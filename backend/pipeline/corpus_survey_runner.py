@@ -21,12 +21,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import SurveyValidationError, validate_survey
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
-DEFAULT_OUTPUT_DIR = Path("output/corpus-survey")
+DEFAULT_OUTPUT_DIR = wang_platform_paths().corpus_survey_staging
 PROMPT_PATH = Path("backend/pipeline/prompts/corpus_first_pass_survey.md")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SURVEY_VERSION = "wang_corpus_first_pass_v1"

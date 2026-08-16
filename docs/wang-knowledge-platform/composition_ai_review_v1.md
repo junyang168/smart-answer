@@ -74,7 +74,7 @@ flowchart LR
 1. 证据确实支持一条正边：写入版本化 `ClaimRelation`（例如跨讲 `corroborates` 或有限的 `contextualizes`）。
 2. 两项材料只是共同服务同一段落：写入 `ClaimRelationConstraint`，明确禁止目前不能成立的 `supports`，并在 composition hierarchy 中标为 `parallel_context`。
 
-`output/claim-layer/claim_relation_consensus_v1.json` 是这类跨篇章、跨来源结构判断的候选交换文件。共享知识构建器负责验证 endpoint、关系类型、重复 ID 和负约束；违反约束时直接停止构建。后续 Composition AI review 输入同时包含正边与负约束，避免第二次复审再次建议同一个错误关系。
+`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/claim_relation_consensus_v1.json` 是这类跨篇章、跨来源结构判断的候选交换文件。共享知识构建器负责验证 endpoint、关系类型、重复 ID 和负约束；违反约束时直接停止构建。后续 Composition AI review 输入同时包含正边与负约束，避免第二次复审再次建议同一个错误关系。
 
 ## 六、同工如何查看
 

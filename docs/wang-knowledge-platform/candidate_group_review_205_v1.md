@@ -131,7 +131,7 @@ flowchart TD
 
 17 个候选归组的完整摘要、批次主题、全部展开 claim refs、代表性 claim refs、待审问题和覆盖数字位于：
 
-- `output/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.json`
-- `output/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.md`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.json`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.md`
 
 本审核只改变结构建议，不改写上述机器结果。

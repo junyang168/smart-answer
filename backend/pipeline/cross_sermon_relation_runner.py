@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.cross_sermon_relation import (
     ADJUDICATION_SCHEMA,
     DISCOVERY_SCHEMA,
@@ -32,13 +33,13 @@ from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT = Path(
-    "output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/"
-    "merged/research-batch-knowledge.json"
+CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
+DEFAULT_INPUT = CLAIM_LAYER_ROOT / (
+    "research-batches/RB-COVENANT-LAW-VALIDATION-01/merged/"
+    "research-batch-knowledge.json"
 )
-DEFAULT_OUTPUT_DIR = Path(
-    "output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/"
-    "cross-sermon-relations"
+DEFAULT_OUTPUT_DIR = CLAIM_LAYER_ROOT / (
+    "research-batches/RB-COVENANT-LAW-VALIDATION-01/cross-sermon-relations"
 )
 PROMPT_DIR = Path("backend/pipeline/prompts")
 DISCOVERY_PROMPT = PROMPT_DIR / "cross_sermon_relation_discovery.md"

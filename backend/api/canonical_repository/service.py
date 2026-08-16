@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from opencc import OpenCC
 
-from backend.api.config import CONFIG_DIR, DATA_BASE_PATH
+from backend.api.config import CONFIG_DIR, DATA_BASE_PATH, WANG_SEED_CATALOG_DIR
 from backend.api import sermon_converter_service as sermon_service
 
 from .compiler import RepositoryCompiler
@@ -88,13 +88,7 @@ class CanonicalRepositoryService:
 
     @staticmethod
     def _topic_taxonomy_path() -> Path:
-        return (
-            Path(__file__).resolve().parents[3]
-            / "output"
-            / "seed-catalog"
-            / "matthew-review-v1"
-            / "topic_taxonomy.json"
-        )
+        return WANG_SEED_CATALOG_DIR / "matthew-review-v1/topic_taxonomy.json"
 
     @staticmethod
     def _topic_identity_overrides() -> Dict[str, Dict[str, str]]:

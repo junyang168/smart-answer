@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from backend.config.wang_platform_paths import wang_platform_paths
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT_DIR = PROJECT_ROOT / "output" / "claim-layer"
+DEFAULT_INPUT_DIR = wang_platform_paths().claim_layer_staging
 DEFAULT_OUTPUT = DEFAULT_INPUT_DIR / "shared_knowledge_pilot_v1.json"
 DEFAULT_ATTRIBUTION_OVERRIDES = DEFAULT_INPUT_DIR / "evidence_attribution_overrides_v1.json"
 DEFAULT_CLAIM_OVERRIDES = DEFAULT_INPUT_DIR / "claim_statement_overrides_v1.json"
@@ -22,7 +23,7 @@ DEFAULT_DETAILED_PACKAGES = [
     / "011WSR01-f0eac41a4244.reviewed-candidate.json"
 ]
 DEFAULT_TOPIC_TAXONOMY = (
-    PROJECT_ROOT / "output" / "seed-catalog" / "matthew-review-v1" / "topic_taxonomy.json"
+    wang_platform_paths().seed_catalog / "matthew-review-v1/topic_taxonomy.json"
 )
 
 OBSERVATION_TYPES = {"經文", "背景"}

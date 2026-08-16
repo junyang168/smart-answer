@@ -6,6 +6,8 @@ import os
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
+
 load_dotenv()
 
 DATA_BASE_DIR = os.getenv("DATA_BASE_DIR")
@@ -37,7 +39,19 @@ WEBCAST_DIR: Final[Path] = DATA_BASE_PATH / "webcast"
 DEPTH_OF_FAITH_FILE: Final[Path] = WEBCAST_DIR / "depth_of_faith.json"
 SERMON_TO_VIDEO_DIR: Final[Path] = DATA_BASE_PATH / "sermon_to_video"
 MICRO_SERMONS_FILE: Final[Path] = SERMON_TO_VIDEO_DIR / "micro_sermons.json"
-WANG_REPOSITORY_DIR: Final[Path] = DATA_BASE_PATH / "wang_repository"
+WANG_PLATFORM_PATHS: Final = wang_platform_paths(DATA_BASE_PATH)
+WANG_PLATFORM_DIR: Final[Path] = WANG_PLATFORM_PATHS.root
+WANG_REPOSITORY_DIR: Final[Path] = WANG_PLATFORM_PATHS.repository
+WANG_ACTIVE_SNAPSHOT_DIR: Final[Path] = WANG_PLATFORM_PATHS.active_snapshots
+WANG_STAGING_DIR: Final[Path] = WANG_PLATFORM_PATHS.staging
+WANG_CLAIM_LAYER_STAGING_DIR: Final[Path] = WANG_PLATFORM_PATHS.claim_layer_staging
+WANG_SEED_CATALOG_DIR: Final[Path] = WANG_PLATFORM_PATHS.seed_catalog
+WANG_MATTHEW_SOURCE_COVERAGE_FILE: Final[Path] = (
+    WANG_PLATFORM_PATHS.matthew_source_coverage
+)
+WANG_MATTHEW_SOURCE_COVERAGE_REPORT: Final[Path] = (
+    WANG_PLATFORM_PATHS.matthew_source_coverage_report
+)
 
 GENERATION_MODEL: Final[str] = os.getenv("FULL_ARTICLE_MODEL", "gemini-2.5-pro")
 OCR_MODEL: Final[str] = os.getenv("OCR_MODEL", "gemini-3.1-pro-preview")

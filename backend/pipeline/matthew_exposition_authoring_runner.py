@@ -955,7 +955,10 @@ def main() -> int:
     parser.add_argument(
         "--repository-root",
         type=Path,
-        help="Override Wang repository destination; defaults to DATA_BASE_DIR/wang_repository.",
+        help=(
+            "Override Wang repository destination; defaults to "
+            "DATA_BASE_DIR/wang-knowledge-platform/repository."
+        ),
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

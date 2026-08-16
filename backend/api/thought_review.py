@@ -12,7 +12,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.api.config import WANG_REPOSITORY_DIR
+from backend.api.config import (
+    WANG_ACTIVE_SNAPSHOT_DIR,
+    WANG_CLAIM_LAYER_STAGING_DIR,
+    WANG_REPOSITORY_DIR,
+)
 from backend.api.canonical_repository.postgres_store import (
     ActiveSnapshotBlocked,
     ChangeSetConflict,
@@ -27,20 +31,19 @@ from backend.pipeline.editorial_draft_audit import (
 
 router = APIRouter(prefix="/admin/thought-review", tags=["thought-review-admin"])
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CLAIMS_PATH = PROJECT_ROOT / "output" / "claim-layer" / "claims.json"
-GRAPH_PATH = PROJECT_ROOT / "output" / "claim-layer" / "argument_graph.json"
-COMPOSITION_PATH = PROJECT_ROOT / "output" / "claim-layer" / "composition_plan_matthew_17.json"
-SHARED_KNOWLEDGE_PATH = PROJECT_ROOT / "output" / "claim-layer" / "shared_knowledge_pilot_v1.json"
-REVIEW_STATE_PATH = PROJECT_ROOT / "output" / "claim-layer" / "review_state.json"
-AI_REVIEW_PATH = PROJECT_ROOT / "output" / "claim-layer" / "independent_ai_review_v1.json"
-AI_ADJUDICATION_PATH = PROJECT_ROOT / "output" / "claim-layer" / "ai_adjudication_v1.json"
-DETAILED_EXTRACTION_DIR = PROJECT_ROOT / "output" / "claim-layer" / "detailed-extractions"
-COMPOSITION_REVIEW_DIR = PROJECT_ROOT / "output" / "claim-layer" / "composition-reviews"
-QA_VALIDATION_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_validation_cases_v1.json"
-QA_DIAGNOSTICS_PATH = PROJECT_ROOT / "output" / "claim-layer" / "qa_answer_diagnostics_v1.json"
-ACTIVE_SNAPSHOT_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "compiled"
-TOPIC_STRUCTURE_ROOT = PROJECT_ROOT / "output" / "claim-layer" / "research-batches"
+CLAIMS_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "claims.json"
+GRAPH_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "argument_graph.json"
+COMPOSITION_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "composition_plan_matthew_17.json"
+SHARED_KNOWLEDGE_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "shared_knowledge_pilot_v1.json"
+REVIEW_STATE_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "review_state.json"
+AI_REVIEW_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "independent_ai_review_v1.json"
+AI_ADJUDICATION_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "ai_adjudication_v1.json"
+DETAILED_EXTRACTION_DIR = WANG_CLAIM_LAYER_STAGING_DIR / "detailed-extractions"
+COMPOSITION_REVIEW_DIR = WANG_CLAIM_LAYER_STAGING_DIR / "composition-reviews"
+QA_VALIDATION_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "qa_validation_cases_v1.json"
+QA_DIAGNOSTICS_PATH = WANG_CLAIM_LAYER_STAGING_DIR / "qa_answer_diagnostics_v1.json"
+ACTIVE_SNAPSHOT_ROOT = WANG_ACTIVE_SNAPSHOT_DIR
+TOPIC_STRUCTURE_ROOT = WANG_CLAIM_LAYER_STAGING_DIR / "research-batches"
 # Generated editorial products are runtime data, not deployed source files.
 # PostgreSQL remains authoritative for semantic knowledge; manuscript artifacts
 # live under DATA_BASE_DIR so a new article does not require a code checkout.

@@ -74,42 +74,55 @@ export KNOWLEDGE_DATABASE_URL='postgresql:///smart_answer_knowledge'
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  ingest-package output/claim-layer/shared_knowledge_pilot_v1.json
+  ingest-package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json"
 ```
 
 审核预览后显式应用：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  ingest-package output/claim-layer/shared_knowledge_pilot_v1.json --apply
+  ingest-package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json" --apply
 ```
 
-研究批次先作为未分类的增量对象进入同一主库，再写入经过双模型审核的跨讲关系：
+研究批次先作为未分类的增量对象进入同一主库，再写入经过双模型审核的跨讲关系。跨讲关系不能只停留在批次目录，也不能直接修改一个大型 JSON；正式程序会先验证关系两端、证据 ID、关系 ID 冲突和自指关系，再生成可审计的增量包、候选快照、人工队列及整合报告：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  ingest-package \
-  output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/merged/research-batch-knowledge.json \
-  --source-kind research_batch --apply
-
-.venv/bin/python -m backend.pipeline.knowledge_store_runner \
   ingest-reviewed-relations \
-  output/claim-layer/research-batches/RB-COVENANT-LAW-VALIDATION-01/cross-sermon-relations/reviewed-relations.json \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/cross-sermon-relations/reviewed-relations.json" \
+  --base-package \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/merged/research-batch-knowledge.json" \
+  --output-dir \
+  "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/integration" \
   --apply
 ```
+
+`--apply` 以两个独立 ChangeSet 完成工作：先把研究批次中的来源、问题、观察、证据、主张及讲内关系写入 PostgreSQL，再写入通过双模型共识的跨讲关系。持续分歧的项目只进入 `human-review-queue.json`，不会写入主库。两次写入都以内容指纹保证幂等；相同输入重跑应返回 `already_applied`。
+
+整合目录包含：
+
+```text
+integration/
+├── incremental-package.json          # 可写入主库的共识关系增量
+├── candidate-shared-knowledge.json   # 供审查和比较的候选合并结果
+├── human-review-queue.json           # 仅含双模型持续分歧
+└── integration-report.json           # 验证、计数与数据库变更预览
+```
+
+2026-08-12 核心九篇实测：67 条共识关系全部写入（59 新增、8 更新），1 条持续分歧留在人工队列；相同基础包与关系包再次执行均返回 `already_applied`。这些关系进入 authoring store 后仍是 AI 共识候选，不会自动进入 approved-only Active Snapshot。
 
 为内部工具编译完整的兼容包（包含候选资料，不可直接公开）：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  compile output/claim-layer/compiled/shared_knowledge_active.json
+  compile "$DATA_BASE_DIR/wang-knowledge-platform/compiled/shared_knowledge_active.json"
 ```
 
 把现有人工审核状态迁入 PostgreSQL（可重复执行）：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  sync-review-state output/claim-layer/review_state.json
+  sync-review-state "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/review_state.json"
 ```
 
 把来源片段绑定到当前人工校订逐字稿版本。此程序只接受逐字相符的引文；不相符的片段保留为 unresolved，不用模糊匹配猜测：
@@ -141,13 +154,13 @@ Active Snapshot 的发布门槛：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
-  compile-active output/claim-layer/compiled
+  compile-active "$DATA_BASE_DIR/wang-knowledge-platform/compiled/active-snapshots"
 ```
 
 输出结构：
 
 ```text
-output/claim-layer/compiled/
+$DATA_BASE_DIR/wang-knowledge-platform/compiled/active-snapshots/
 ├── active.json                         # 原子更新的当前版本指针
 └── builds/<build_id>/
     ├── manifest.json                   # build ID、hash 与计数

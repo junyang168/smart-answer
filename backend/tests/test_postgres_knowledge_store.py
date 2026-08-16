@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from backend.api.canonical_repository.postgres_store import (
+    SOURCE_KEYS,
     build_active_snapshot,
     build_change_set_plan,
     normalize_package,
@@ -121,10 +122,49 @@ def test_reviewed_relation_artifact_becomes_edges_and_negative_constraints() -> 
     assert "duplicate" in package["claim_relation_constraints"][0]["forbidden_relation_types"]
 
 
+def test_reviewed_relation_package_preserves_human_approval() -> None:
+    artifact = {
+        "result": {
+            "reviewed_relations": [
+                {
+                    "candidate_id": "XSR-APPROVED",
+                    "source_claim_id": "CL-1",
+                    "target_claim_id": "CL-2",
+                    "relation_type": "supports",
+                    "review_status": "approved",
+                }
+            ]
+        }
+    }
+    package = reviewed_relations_package(artifact)
+    assert package["claim_relations"][0]["review_status"] == "approved"
+
+
+def test_topic_identity_reconciliation_is_a_persisted_knowledge_record() -> None:
+    package = {
+        "schema_version": "topic_identity_test_v1",
+        "package_id": "PKG-TOPIC-IDENTITY",
+        "topic_identity_reconciliations": [{
+            "reconciliation_id": "TIR-1",
+            "candidate_topic_id": "TCAND-1",
+            "label": "候选母题：约与关系",
+            "topic_level": "family",
+            "claim_ids": ["CL-1"],
+            "status": "pending_match",
+            "candidate_matches": [{"existing_topic_id": "covenant"}],
+            "origin_batch_id": "RB-ONE",
+        }],
+    }
+    normalized = normalize_package(package)
+    record = normalized["topic_identity_reconciliations"]["TIR-1"]
+    assert record["candidate_topic_id"] == "TCAND-1"
+    assert record["status"] == "pending_match"
+    assert record["candidate_matches"][0]["existing_topic_id"] == "covenant"
+    assert SOURCE_KEYS["topic_identity_reconciliations"] == "topic_identity_reconciliations"
+
+
 def test_current_shared_package_can_be_normalized() -> None:
-    path = Path("output/claim-layer/shared_knowledge_pilot_v1.json")
-    if not path.is_file():
-        return
+    path = Path(__file__).parent / "fixtures/wang_knowledge_platform/shared-knowledge-pilot.json"
     normalized = normalize_package(json.loads(path.read_text(encoding="utf-8")))
     assert normalized["claims"]
     assert normalized["source_documents"]

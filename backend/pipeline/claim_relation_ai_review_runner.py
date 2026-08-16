@@ -11,14 +11,16 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.composition_ai_review import CompositionReviewValidationError
 from backend.pipeline.composition_ai_review_runner import _generate_valid
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KNOWLEDGE = Path("output/claim-layer/shared_knowledge_pilot_v1.json")
-DEFAULT_OUTPUT = Path("output/claim-layer/claim_relation_review_v1.json")
+CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
+DEFAULT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
+DEFAULT_OUTPUT = CLAIM_LAYER_ROOT / "claim_relation_review_v1.json"
 TARGET_RELATION_IDS = {
     "DK-f0eac41a4244-CR001",
     "DK-f0eac41a4244-CR002",

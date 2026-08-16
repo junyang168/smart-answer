@@ -1,0 +1,130 @@
+{
+  "schema_version": "wang_composition_plan_v1",
+  "plan_id": "CP-matthew-17",
+  "title": "马太福音第17章释经讲座编排",
+  "description": "把教授跨讲次的材料组织成以经文推进的释经讲座；所有决定均待人工审核。",
+  "decisions": [
+    {
+      "decision_id": "CD-M17-001",
+      "passage": "太16:27–17:1",
+      "section_title": "进入登山变像的上下文",
+      "action": "brief_note",
+      "decision": "作为第17章的短引言，交代荣耀降临、句首 Amen 与“那个人子”的关系，不展开为独立长篇。",
+      "rationale": "这些背景帮助读者理解17:1的承接关系，但若全面展开会离开本章主线。",
+      "claim_ids": ["CL-0001", "CL-0014", "CL-0003", "CL-0028"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-002",
+      "passage": "太17:1；路9:28",
+      "section_title": "“六天”与“约八天”",
+      "action": "brief_note",
+      "decision": "保留为简短释经注，解释两种计日方式并不矛盾。",
+      "rationale": "问题值得回答，但不是登山变像叙事的中心。",
+      "claim_ids": ["CL-0027", "CL-0016"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-003",
+      "passage": "太17:1–5",
+      "section_title": "登山变像的启示",
+      "action": "main_section",
+      "decision": "作为第一核心段落，解释耶稣的荣耀、摩西与以利亚、彼得的误解、云彩和天上声音。",
+      "rationale": "这是本章叙事的神学中心，教授提供了较完整的经文与神学论证。",
+      "claim_ids": ["CL-0029", "CL-0010", "CL-0005", "CL-0007", "CL-0023", "CL-0011"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "CL-0029",
+        "supporting_claims": ["CL-0010", "CL-0005", "CL-0007", "CL-0023", "CL-0011"],
+        "note": "CL-0007作为CL-0029之下的身分论据，不另写成重复的平行大段；CL-0023提供诗2:7复活登基的经文根据。"
+      },
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-004",
+      "passage": "太17:6–8",
+      "section_title": "门徒俯伏与只见耶稣",
+      "action": "coverage_gap",
+      "decision": "标记为材料缺口，暂不代替教授补写。",
+      "rationale": "现有两讲没有足够主张支持完整释经。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-005",
+      "passage": "太17:9",
+      "section_title": "下山时的禁令",
+      "action": "coverage_gap",
+      "decision": "标记为材料缺口，等待其他讲道或笔记补充。",
+      "rationale": "本次语料没有形成足以归属于教授的解释。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-006",
+      "passage": "太17:10–13",
+      "section_title": "以利亚已经来了",
+      "action": "main_section",
+      "decision": "作为第二核心段落，解释以利亚预言与施洗约翰的应验。",
+      "rationale": "教授直接处理门徒的问题，并给出经文之间的解释关系。",
+      "claim_ids": ["CL-0008"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-007",
+      "passage": "太17:14–18",
+      "section_title": "被鬼附的孩子得医治",
+      "action": "brief_note",
+      "decision": "先作简短叙事过渡，说明医治事件和耶稣对世代的责备；补回更多可定位证据后再考虑升格为核心段落。",
+      "rationale": "目前唯一合格证据只支持「不信又悖谬」的道德含义，另一条整理缺少原话与时间码，不足以支撑完整核心段落。",
+      "claim_ids": ["CL-0030"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-008",
+      "passage": "太17:19–21",
+      "section_title": "小信、祷告与倚靠神",
+      "action": "main_with_topic_link",
+      "decision": "在章内回答门徒为何不能赶鬼；更完整的“小信”和倚靠神主题另作专题。",
+      "rationale": "这里必须回答经文问题，但跨经文的完整主题若全部展开会打断本章推进。",
+      "claim_ids": ["CL-0012", "CL-0022", "CL-0009"],
+      "claim_hierarchy": {
+        "conclusion": "CL-0012",
+        "immediate_explanation": "CL-0022",
+        "theological_ground": "CL-0009",
+        "note": "三者组成由神人关系、属灵能力到小信问题的论证链，不合并为一个笼统主张。"
+      },
+      "topic_route_ids": ["TOPIC-FAITH-RELATION"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-009",
+      "passage": "太17:22–23",
+      "section_title": "第二次预告受难与复活",
+      "action": "coverage_gap",
+      "decision": "标记为材料缺口，不以一般注释代替教授观点。",
+      "rationale": "现有语料不足以建立可归属的教授主张。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M17-010",
+      "passage": "太17:24–27",
+      "section_title": "圣殿税与君王之子的自由",
+      "action": "coverage_gap",
+      "decision": "标记为材料缺口，等待其他来源。",
+      "rationale": "现有两讲没有提供足够内容。",
+      "claim_ids": [],
+      "coverage": "missing",
+      "review_status": "candidate"
+    }
+  ]
+}

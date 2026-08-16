@@ -43,6 +43,7 @@ SOURCE_KEYS = {
     "observations": "observations",
     "claims": "claims",
     "topic_nodes": "topic_nodes",
+    "topic_identity_reconciliations": "topic_identity_reconciliations",
     "evidence_steps": "evidence_steps",
     "knowledge_relations": "knowledge_relations",
     "claim_relations": "claim_relations",
@@ -478,6 +479,7 @@ def reviewed_relations_package(artifact: Mapping[str, Any]) -> dict[str, Any]:
     for row in reviewed_rows:
         if row.get("review_status") not in {"ai_consensus", "approved"}:
             continue
+        review_status = str(row["review_status"])
         candidate_id = str(row["candidate_id"])
         relation_type = str(row["relation_type"])
         if relation_type == "unrelated":
@@ -491,7 +493,7 @@ def reviewed_relations_package(artifact: Mapping[str, Any]) -> dict[str, Any]:
                     ],
                     "bidirectional": True,
                     "reason": row.get("reason", ""),
-                    "review_status": "ai_consensus",
+                    "review_status": review_status,
                     "review_artifact_id": candidate_id,
                 }
             )
@@ -503,7 +505,7 @@ def reviewed_relations_package(artifact: Mapping[str, Any]) -> dict[str, Any]:
                     "target_id": row["target_claim_id"],
                     "relation_type": relation_type,
                     "reason": row.get("reason", ""),
-                    "review_status": "ai_consensus",
+                    "review_status": review_status,
                     "confidence": row.get("confidence"),
                     "source_evidence_step_ids": row.get("source_evidence_step_ids", []),
                     "target_evidence_step_ids": row.get("target_evidence_step_ids", []),

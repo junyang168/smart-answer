@@ -35,7 +35,7 @@
 23. [釋經初稿的程序化審計流程 v1](./editorial_draft_audit_workflow_v1.md)
 24. [篇章釋經快速路徑 v1](./fast_passage_editorial_workflow_v1.md)
 
-共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`output/claim-layer/shared_knowledge_pilot_v1.json` 仍是候选交换包，不等于 canonical repository，也不会直接进入公开文库。
+共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 仍是 legacy 候选交换包，不等于 PostgreSQL authoring authority，也不会直接进入公开文库。
 
 ## 当前实施进度（2026-08-15）
 
@@ -57,7 +57,7 @@
 - 教会同工提出的“教授讲了什么、好在哪里”和“有没有人总结因信成义”已转成正式产品需求与验收标准。首轮以五篇罗马书相关讲道建立 `RB-RIGHTEOUSNESS-FAITH-ROMANS-VALIDATION-01`：89 条主张形成 111 条整合关系、4 个释经候选和 5 个专题候选；验证同时抓出“成义”被 AI 静默改成“称义”的来源忠实性问题。该轮证明知识结构可用，但读者可读性仍须由第一篇“因信成义”候选专题及同工任务测试验收。
 - 《馬太福音》16:1–12 已完成第一個「篇章編排計劃 → 寫作與獨立重審 → 本地 Program Audit → 人工批准 → repository 發布 → 公開讀取」閉環，並發布為〈看見神蹟，卻仍未明白基督——馬太福音 16:1–12〉。Final review 不再重送 231,233-byte authoring envelope：独立 EditorialReviewPacket 为 14,421 bytes，FinalDeltaReviewPacket 为 12,772 bytes；有效 delta request 用时 60.174 秒，仅重评四个受影响维度，其余六项从 SHA 绑定 baseline 继承，程序重算为 90 分且 hard gates 全部通过。Program Audit 继续在本地读取完整知识快照，检查 6/6 编排决定、14 条共享主张、25 个证据步骤、27 个来源片段与 18/18 个正文 provenance 段落；结果为 `pass_with_warnings`、0 错误，仅保留「小信」及「神蹟、聖經與信仰判斷」两项专题链接待办。公开 slug 为 `matthew-16-1-12`，四个读者段落共呈现六个原声播放器。
 - 《馬太福音》16:13–20 已完成同一閉環並把跨來源張力正式帶入編排層。兩份筆記講稿與六篇講道形成49條限定主張、90個證據步驟和30條雙模型共識關係；關係增量投影後，篇章二審為 `argument_layer_status=solid`，9項決定中8項直接通過、1項自動澄清來源邊界，0人工分歧。初稿審計覆蓋9/9編排決定、48條所用主張、88個證據步驟、89個有效來源片段及35/35個正文段落，結果為 `pass_with_warnings`、0錯誤；兩項警告只涉及待建立的「天國鑰匙與教會權柄」及「彌賽亞秘密」專題。正文不靜默調和「磐石」與「捆綁／釋放」的兩項來源張力，也不替教授補寫太16:17及16:18b。原聲按同一 CompositionPlan 投影到7/9個段落，共19個時間範圍；無時間碼的審閱稿只在逐字引文能於發布稿取得唯一精確匹配時補回時間，`S 220206`因無發布稿不生成虛假播放器。
-- 《馬太福音》16:21–23 已以 Author Agent workflow 重新生成，并在两轮修订后由程序重算为90分，0 hard gates、0 hard failures。该次诊断曾使用独立 Score-Gap Reviewer；后续全局检视确认它造成不必要的第二次 review stage，正式 runner 已将其退役。当前规则是初审一次、每轮 revision 只调用一次 Delta Reviewer；Delta 在同一响应内完成验收、受影响维度评分及必要的下一轮 findings，下一轮直接继承已验证 review 与 SHA 进入 Revision。Program Audit 本地检查4/4编排决定、4条主张、9个证据步骤、9个有效来源片段与14/14 provenance 段落，结果为 `pass`、0错误、0警告。系统据此生成 `automated-publication-decision.v1` 并写入 Wang repository；slug 为 `matthew-16-21-23`，读取投影含 4 个原声播放器。发布稿 SHA 为 `342fa88d5af7c339174bd82a301f0e204f3fd650962029024c01d35c9e97c0d7`。当前生产后端仍运行另一份部署目录中的旧代码，须在获准部署新 API schema 后，实际 public UI 才会列出该稿；不得以伪造 human decision 绕过。
+- 《馬太福音》16:21–23 已以 Author Agent workflow 重新生成，并在两轮修订后由程序重算为90分，0 hard gates、0 hard failures。该次诊断曾使用独立 Score-Gap Reviewer；后续全局检视确认它造成不必要的第二次 review stage，正式 runner 已将其退役。当前规则是初审一次、每轮 revision 只调用一次 Delta Reviewer；Delta 在同一响应内完成验收、受影响维度评分及必要的下一轮 findings，下一轮直接继承已验证 review 与 SHA 进入 Revision。Program Audit 本地检查4/4编排决定、4条主张、9个证据步骤、9个有效来源片段与14/14 provenance 段落，结果为 `pass`、0错误、0警告。系统据此生成 `automated-publication-decision.v1` 并写入 Wang repository；slug 为 `matthew-16-21-23`，读取投影含 4 个原声播放器。发布稿 SHA 为 `342fa88d5af7c339174bd82a301f0e204f3fd650962029024c01d35c9e97c0d7`。实现已由 PR #2 合并到 GitHub `main`（merge commit `ba7850527de1432f94016f28195ff56e8449851b`）；当前生产后端仍运行另一份部署目录中的旧代码，须在获准部署新 API schema 后，实际 public UI 才会列出该稿，不得以伪造 human decision 绕过。
 
 马太福音文章的自动发布只适用于通过 90 分 editorial gate、hard gates 和 Program Audit 的特定稿件 SHA，不自动批准其上游候选知识、专题、篇章计划或其他产品。旧文章已有的人工 publication decision 继续有效；新文章使用明确标记为 automated 的 SHA 绑定决定，不能伪装成人工批准。
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": "question-answer-state-overrides.v1",
+  "questions": {
+    "Q-L3-E034": {
+      "answer_state": "partially_answered",
+      "answer_state_origin": "reviewed_compound_question_override",
+      "answered_subquestions": [
+        "以西結受稱為一般性的『人子』，與耶穌帶定冠詞的『那人子』不同。"
+      ],
+      "unanswered_subquestions": [
+        "現有片段沒有完整、直接回答但以理本人與耶穌『那人子』稱號的差別。"
+      ],
+      "note": "原始聽眾問題包含以西結與但以理兩個子問題；論證圖中的回答只直接處理了以西結一側，因此不可因存在 answers 邊就標成完整回答。"
+    }
+  }
+}

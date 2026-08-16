@@ -16,13 +16,13 @@
 本流程的機器可讀來源總表是：
 
 ```text
-$DATA_BASE_DIR/matthew_source_coverage.json
+$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.json
 ```
 
 同工可直接閱讀的全範圍來源清單為：
 
 ```text
-$DATA_BASE_DIR/matthew_source_coverage.md
+$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.md
 ```
 
 該檔以第一至二十八章為檢索骨架，同時列出兩條來源管線：講道逐字稿，以及「馬太福音釋經」
@@ -302,7 +302,7 @@ flowchart TD
 5. `fail` 返回篇章计划、共享知识或来源层修复；`pass_with_warnings` 和 `pass` 才进入编辑人工阅读；
 6. 程序通过不等于出版批准。逻辑、文体、详略、神学表述与应用推论仍由编辑审核。
 
-太16:1–12 已完成首轮验证：6/6 编排决定、14 条共享主张、25 个证据步骤和 27 个来源片段全部可定位，0 错误；两项警告为尚待建立的专题链接。完整规范见[《释经初稿的程序化审计流程 v1》](./editorial_draft_audit_workflow_v1.md)。
+太16:1–12 已完成验证并于 2026-08-15 发布第一篇文章：6/6 编排决定、14 条共享主张、25 个证据步骤和 27 个来源片段全部可定位，0 错误；两项警告为尚待建立的专题链接。Final Delta Review 经程序合并重算为 90 分并通过 hard gates，发布稿 SHA、editorial review、Program Audit 与 human publication decision 已由 repository publisher 逐项核对。完整规范见[《释经初稿的程序化审计流程 v1》](./editorial_draft_audit_workflow_v1.md)与[《馬太福音釋經文章多 Agent 寫作流程 v1》](./matthew_exposition_multi_agent_authoring_workflow_v1.md)。
 
 ### 8.6 生成与文章同序的原声来源投影
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import _load as _load_transcript
 from backend.pipeline.stage1 import Stage1OpenAIClient
@@ -24,10 +25,11 @@ from backend.pipeline.stage1 import Stage1OpenAIClient
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
-DEFAULT_SURVEY_DIR = Path("output/corpus-survey")
-DEFAULT_OUTPUT_DIR = Path("output/corpus-survey/synthesis/full-corpus")
+CORPUS_SURVEY_ROOT = wang_platform_paths().corpus_survey_staging
+DEFAULT_SURVEY_DIR = CORPUS_SURVEY_ROOT
+DEFAULT_OUTPUT_DIR = CORPUS_SURVEY_ROOT / "synthesis/full-corpus"
 PROMPT_PATH = Path("backend/pipeline/prompts/corpus_cross_sermon_synthesis.md")
-BASELINE_PATH = Path("output/corpus-survey/synthesis/15_sample_thought_map_v1.json")
+BASELINE_PATH = CORPUS_SURVEY_ROOT / "synthesis/15_sample_thought_map_v1.json"
 
 AXES = ["method", "theology", "passage_exegesis", "application", "development"]
 BASELINE_RELATIONS = ["repeats", "extends", "splits", "new_candidate", "tension", "unrelated"]

@@ -13,7 +13,7 @@ The Exegesis and Topic Repository reorganizes Dr. Wang's notes, lectures, sermon
 
 Every published unit contains a readable manuscript and one or more traceable links to the exact source fragments from which the manuscript was derived. A source link must open the original sermon transcript or notes source, position the reader at the relevant fragment, and highlight that fragment. Opening only the top of a complete source document does not satisfy this requirement.
 
-The repository is also the reviewed knowledge foundation for evidence-backed QA, original-language search, thought-development comparison, and future study tools. Canonical manuscripts are new editorial works built from reviewed claims and evidence under an approved publication profile and composition plan; they are not direct graph projections or the only machine-readable representation of Dr. Wang's teaching.
+The repository is also the reviewed knowledge foundation for evidence-backed QA, three-to-five-minute micro-sermons, original-language search, thought-development comparison, and future study tools. Canonical manuscripts are new editorial works built from reviewed claims and evidence under an approved publication profile and composition plan; they are not direct graph projections or the only machine-readable representation of Dr. Wang's teaching.
 
 ## 2. Problem Statement
 
@@ -461,6 +461,16 @@ Editors can group work by deliverable, reviewer role, risk, passage/topic, or so
 
 The pilot records estimated and actual review minutes by record type and role; proposed, accepted, changed, rejected, and deferred counts; rework caused by bad source anchors or wrong attribution; weekly available editor hours; and projected backlog under the current extraction rate. These measurements determine batch size and future automation. The system must not hide editorial debt behind a large candidate count.
 
+### 9.12. Plan and review a micro-sermon
+
+1. The editor chooses one reader question that can be answered in three to five minutes without removing a material premise or qualification.
+2. The system builds a minimum claim-and-source subgraph and proposes either `source_excerpt` or `editorial_synthesis` mode.
+3. For a source excerpt, the editor verifies exact media start/end time, transcript highlight, speaker, stance, and surrounding context.
+4. For editorial synthesis, the editor reviews the short script, claim order, attribution, limitations, and links to deeper passage/topic products.
+5. Independent AI review checks source fidelity, argument completeness, attribution, and harmful omissions; it does not perform theological criticism.
+6. Publication uses the existing micro-sermon administration and public routes and records ProductDependencies for every material claim and citation.
+7. A stale source or invalidated upstream dependency returns the micro-sermon to review and blocks it from a new public build.
+
 ## 10. UI Requirements
 
 ### 10.1. Repository home
@@ -707,6 +717,9 @@ Repository builds report unit, relationship, citation, stale-citation, and unres
 * A missing passage is recorded as a coverage gap and deferred decision; AI does not invent Dr. Wang's exposition.
 * A published article resolves to the exact Publication Profile and Composition Plan revisions used to create it.
 * Changing a profile does not retroactively change existing publications.
+* A micro-sermon plan contains one central question and a minimum complete argument rather than a mechanically shortened manuscript.
+* A source-excerpt micro-sermon resolves to exact media bounds and highlighted transcript context; an editorial-synthesis micro-sermon is visibly attributed to the editor and resolves to every material claim used.
+* Upstream claim, relation, or citation invalidation identifies and blocks every affected micro-sermon.
 
 ### Pilot examples
 

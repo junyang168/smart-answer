@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.api.config import WANG_CLAIM_LAYER_STAGING_DIR, WANG_SEED_CATALOG_DIR
 from .compiler import RepositoryValidationError
 from .knowledge_importer import KnowledgePackageValidationError
 from .knowledge_models import KNOWLEDGE_COLLECTIONS
@@ -33,7 +34,9 @@ class CreateCitationRequest(BaseModel):
 
 
 class ImportSeedRequest(BaseModel):
-    catalog_path: str = "output/seed-catalog/matthew-review-v1/canonical_units.json"
+    catalog_path: str = str(
+        WANG_SEED_CATALOG_DIR / "matthew-review-v1/canonical_units.json"
+    )
 
 
 class MergeUnitsRequest(BaseModel):
@@ -42,7 +45,9 @@ class MergeUnitsRequest(BaseModel):
 
 
 class ImportKnowledgePackageRequest(BaseModel):
-    package_path: str = "output/claim-layer/shared_knowledge_pilot_v1.json"
+    package_path: str = str(
+        WANG_CLAIM_LAYER_STAGING_DIR / "shared_knowledge_pilot_v1.json"
+    )
 
 
 class UpdateKnowledgeRecordRequest(BaseModel):
@@ -132,22 +137,26 @@ def import_candidates(payload: ImportSeedRequest):
 
 
 def _validated_catalog_path(catalog_path: str) -> Path:
-    project_root = Path(__file__).resolve().parents[3]
-    requested = (project_root / catalog_path).resolve()
-    allowed_root = (project_root / "output" / "seed-catalog").resolve()
+    requested = Path(catalog_path).expanduser().resolve()
+    allowed_root = WANG_SEED_CATALOG_DIR.resolve()
     if not requested.is_relative_to(allowed_root) or requested.name != "canonical_units.json":
-        raise HTTPException(status_code=400, detail="Catalog must be a canonical_units.json file under output/seed-catalog")
+        raise HTTPException(
+            status_code=400,
+            detail="Catalog must be a canonical_units.json file under the Wang catalog root",
+        )
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="Seed catalog not found")
     return requested
 
 
 def _validated_knowledge_package_path(package_path: str) -> Path:
-    project_root = Path(__file__).resolve().parents[3]
-    requested = (project_root / package_path).resolve()
-    allowed_root = (project_root / "output").resolve()
+    requested = Path(package_path).expanduser().resolve()
+    allowed_root = WANG_CLAIM_LAYER_STAGING_DIR.resolve()
     if not requested.is_relative_to(allowed_root) or requested.suffix != ".json":
-        raise HTTPException(status_code=400, detail="Knowledge package must be a JSON file under output")
+        raise HTTPException(
+            status_code=400,
+            detail="Knowledge package must be a JSON file under Wang claim-layer staging",
+        )
     if not requested.is_file():
         raise HTTPException(status_code=404, detail="Knowledge package not found")
     return requested

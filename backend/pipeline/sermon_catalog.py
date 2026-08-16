@@ -15,13 +15,14 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from backend.api.config import DATA_BASE_PATH
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.api.sermon_search.bible_refs import normalize_ref
 from backend.api.sermon_search.topics import extract_topics
 
 
 CATALOG_SCHEMA_VERSION = "wang_sermon_catalog_v2"
 CLASSIFIER_VERSION = "content_structure_classifier_v2"
-DEFAULT_SURVEY_DIR = Path("output/corpus-survey")
+DEFAULT_SURVEY_DIR = wang_platform_paths().corpus_survey_staging
 DEFAULT_OUTPUT_PATH = DATA_BASE_PATH / "sermon_catalog.json"
 DEFAULT_OVERRIDES_PATH = DATA_BASE_PATH / "config" / "sermon_catalog_overrides.json"
 
