@@ -1538,20 +1538,55 @@ def test_a_contract_that_forbids_an_application_chain_puts_the_pastoral_dimensio
     assert "invent_life_application_chain" in scoped_out["pastoral_theological_landing"]
 
 
-def test_out_of_scope_dimension_is_awarded_in_full_not_penalised():
-    """生活應用 is optional; omitting one the material cannot support is the
-    correct outcome and must not cost the article points, or the rubric pushes
-    the author to invent the closing paragraph this pipeline exists to prevent.
+def test_out_of_scope_dimension_is_excluded_from_the_total_not_awarded():
+    """生活應用 is optional; omitting one the material cannot support must not
+    cost the article points -- but awarding the weight instead would score it
+    the same as an article that wrote an excellent application. The dimension
+    was not measured, so it contributes to neither side.
     """
     review = _review_scoring(1)
-    penalised = evaluate_editorial_review(review, _profile())
-    awarded = evaluate_editorial_review(
+    scored = evaluate_editorial_review(review, _profile())
+    excluded = evaluate_editorial_review(
         review, _profile(), {"pastoral_theological_landing": "contract forbids it"}
     )
-    assert awarded["total_score"] - penalised["total_score"] == 4  # 1 -> full weight 5
-    assert awarded["not_applicable_dimensions"] == {
+    # The one point it did score is removed from the numerator...
+    assert excluded["total_score"] == scored["total_score"] - 1
+    # ...and its weight from the denominator, so the threshold scales with it.
+    assert excluded["applicable_weight"] == 95
+    assert excluded["scaled_passing_score"] == 85.5
+    assert excluded["not_applicable_dimensions"] == {
         "pastoral_theological_landing": "contract forbids it"
     }
+
+
+def test_excluding_a_dimension_neither_helps_nor_penalises_a_borderline_article():
+    """An article at exactly the threshold stays at the threshold."""
+    review = passing_review()
+    for item in review["dimension_scores"]:
+        item["score"] = 0
+    # 90 of the 95 applicable points, pastoral excluded.
+    for item in review["dimension_scores"]:
+        if item["dimension_id"] == "source_and_exegesis":
+            item["score"] = 15
+        elif item["dimension_id"] == "base_manuscript_preservation":
+            item["score"] = 15
+        elif item["dimension_id"] == "exegetical_reasoning":
+            item["score"] = 15
+        elif item["dimension_id"] == "argument_organization":
+            item["score"] = 10
+        elif item["dimension_id"] == "general_reader_readability":
+            item["score"] = 10
+        elif item["dimension_id"] == "editorial_voice_restraint":
+            item["score"] = 10
+        elif item["dimension_id"] == "approved_written_style":
+            item["score"] = 10
+        elif item["dimension_id"] == "theological_tension_and_attribution":
+            item["score"] = 5
+    outcome = evaluate_editorial_review(
+        review, _profile(), {"pastoral_theological_landing": "contract forbids it"}
+    )
+    assert outcome["total_score"] == 90
+    assert outcome["total_score"] >= outcome["scaled_passing_score"]
 
 
 def test_out_of_scope_dimension_cannot_fail_its_minimum():

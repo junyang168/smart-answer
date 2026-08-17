@@ -900,16 +900,19 @@ def evaluate_editorial_review(
         )
 
     total = 0
+    applicable_weight = 0
     hard_gate_failures: list[str] = []
     for dimension_id, config in configured.items():
         score = received[dimension_id].get("score")
         if not isinstance(score, int) or not 0 <= score <= config["weight"]:
             raise AuthoringContractError(f"invalid score for {dimension_id}: {score}")
         if dimension_id in not_applicable:
-            # Awarded, not skipped: omitting an unsupported section is the
-            # correct outcome, and must not cost the article points.
-            total += config["weight"]
+            # Excluded from both numerator and denominator. Awarding the full
+            # weight instead would score an article that wrote no application
+            # the same as one that wrote an excellent one; the dimension was
+            # not measured, so it should not contribute either way.
             continue
+        applicable_weight += config["weight"]
         total += score
         if score < config.get("minimum", 0):
             hard_gate_failures.append(dimension_id)
@@ -918,8 +921,16 @@ def evaluate_editorial_review(
     unknown_hard_failures = set(declared_hard_failures) - set(quality_profile["hard_failures"])
     if unknown_hard_failures:
         raise AuthoringContractError(f"unknown hard failures: {sorted(unknown_hard_failures)}")
+    # The threshold scales with what was actually measured, so excluding a
+    # dimension neither helps nor penalises: 90/100 becomes 85.5/95.
+    configured_weight = sum(item["weight"] for item in quality_profile["dimensions"])
+    scaled_passing_score = (
+        quality_profile["passing_score"] * applicable_weight / configured_weight
+        if configured_weight
+        else 0
+    )
     passed = (
-        total >= quality_profile["passing_score"]
+        total >= scaled_passing_score
         and not hard_gate_failures
         and not declared_hard_failures
     )
@@ -929,6 +940,8 @@ def evaluate_editorial_review(
         "hard_gate_failures": hard_gate_failures,
         "declared_hard_failures": declared_hard_failures,
         "not_applicable_dimensions": dict(not_applicable),
+        "applicable_weight": applicable_weight,
+        "scaled_passing_score": round(scaled_passing_score, 2),
     }
 
 
