@@ -24,6 +24,8 @@ def _contract(tmp_path, *, excerpt="太 16:21 以「從此」作為轉折", sour
     manuscript.write_text(MANUSCRIPT, encoding="utf-8")
     return {
         "contract_id": "BMC-test-v1",
+        "schema_version": "matthew-exposition-base-contract.v1",
+        "passage": "Matt.16.21-Matt.16.23",
         "authoring_mode": "verified_manuscript_integration",
         "composition_plan": {"plan_id": "CP-test", "sha256": "abc"},
         "base_source": {
@@ -100,6 +102,8 @@ def test_merge_carries_the_contract_and_records_who_confirmed_it(tmp_path):
         confirmed_at="2026-08-17T00:00:00Z",
     )
     assert merged["contract_id"] == "BMC-test-v1"
+    assert merged["contract_schema_version"] == "matthew-exposition-base-contract.v1"
+    assert merged["passage"] == "Matt.16.21-Matt.16.23"
     assert merged["contract_confirmed_by"] == "junyang168"
     assert merged["contract_confirmed_at"] == "2026-08-17T00:00:00Z"
     step = merged["authoring_sections"][0]["required_argument_steps"][0]

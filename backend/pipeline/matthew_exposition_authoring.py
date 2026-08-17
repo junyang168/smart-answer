@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
@@ -1434,6 +1435,94 @@ def _sermon_transcript_slices(
             "segment_indices": sorted(str(index) for index in indices),
         }
     return slices
+
+
+def contract_from_plan_payload(
+    plan_payload: dict[str, Any], *, plan_document_sha256: str
+) -> dict[str, Any]:
+    """Reconstruct a base-contract dict from an authoring-store plan record.
+
+    The contract used to be a standalone JSON file, referencing its plan only
+    by a `composition_plan.sha256` staleness check. It is now stored as fields
+    on the plan record itself (`authoring_contract_migration.py`), so this is
+    the inverse of that migration's merge: it rebuilds the exact shape
+    `validate_base_contract` and the rest of this module already expect,
+    letting the packet builder stay unaware of whether the contract came from
+    the store or a file.
+
+    `plan_document_sha256` must be the sha256 the caller will compute over the
+    exact plan document `build_authoring_packet` hashes, or the built-in
+    "stale composition plan" check will always fail: the plan and its
+    contract are now the same PostgreSQL record, not two files that can drift
+    apart, so this reconstructs the check as an identity rather than a real
+    staleness guard.
+    """
+
+    return {
+        "schema_version": plan_payload.get("contract_schema_version"),
+        "contract_id": plan_payload.get("contract_id"),
+        "passage": plan_payload.get("passage"),
+        "authoring_mode": plan_payload.get("authoring_mode"),
+        "composition_plan": {
+            "plan_id": plan_payload.get("plan_id"),
+            "sha256": plan_document_sha256,
+        },
+        "base_source": plan_payload.get("base_source"),
+        "additional_base_sources": plan_payload.get("additional_base_sources") or [],
+        "sections": plan_payload.get("authoring_sections") or [],
+        "supplemental_material": plan_payload.get("supplemental_material") or [],
+        "global_rules": plan_payload.get("global_rules") or [],
+        "status": "editor_confirmed" if plan_payload.get("contract_confirmed_by") else None,
+    }
+
+
+def build_authoring_packet_from_store(
+    *,
+    plan_id: str,
+    store: Any,
+    knowledge_path: str | Path,
+    publication_profile_path: str | Path,
+    quality_profile_path: str | Path,
+) -> dict[str, Any]:
+    """Build an authoring packet with the plan and contract read from PostgreSQL.
+
+    `store` is a `PostgresKnowledgeStore` (typed as `Any` to avoid a hard
+    import dependency for callers that already have one). The knowledge
+    snapshot, publication profile and quality profile remain files: source
+    manuscripts and shared config are not authored-plan state and do not
+    belong in this migration.
+    """
+
+    plan_payload = store.get_record("composition_plans", plan_id)
+    if plan_payload is None:
+        raise AuthoringContractError(f"plan not found in authoring store: {plan_id}")
+    decisions = []
+    for decision_id in plan_payload.get("decision_ids") or []:
+        decision = store.get_record("composition_decisions", decision_id)
+        if decision is None:
+            raise AuthoringContractError(
+                f"decision {decision_id} referenced by {plan_id} is not in the authoring store"
+            )
+        decisions.append(decision)
+    plan = {**plan_payload, "decisions": decisions}
+    plan_document = canonical_json(plan)
+    contract = contract_from_plan_payload(
+        plan_payload, plan_document_sha256=sha256_text(plan_document)
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        plan_path = tmp_dir / "plan.json"
+        contract_path = tmp_dir / "contract.json"
+        plan_path.write_text(plan_document, encoding="utf-8")
+        contract_path.write_text(canonical_json(contract), encoding="utf-8")
+        return build_authoring_packet(
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+        )
 
 
 def build_authoring_packet(

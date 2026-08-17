@@ -130,6 +130,8 @@ def merge_contract_into_plan(
 
     merged = dict(plan_payload)
     merged["contract_id"] = contract.get("contract_id")
+    merged["contract_schema_version"] = contract.get("schema_version")
+    merged["passage"] = contract.get("passage")
     merged["authoring_mode"] = contract.get("authoring_mode")
     merged["base_source"] = contract.get("base_source")
     merged["additional_base_sources"] = contract.get("additional_base_sources") or []

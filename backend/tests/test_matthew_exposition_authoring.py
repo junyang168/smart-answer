@@ -8,6 +8,8 @@ from backend.pipeline.matthew_exposition_authoring import (
     AuthoringContractError,
     EDITORIAL_REVIEW_PACKET_MAX_BYTES,
     build_authoring_packet,
+    build_authoring_packet_from_store,
+    contract_from_plan_payload,
     build_editorial_review_packet,
     build_final_delta_review_packet,
     changed_markdown_paragraphs,
@@ -337,6 +339,85 @@ def full_authoring_packet():
         publication_profile_path=PUBLICATION_PROFILE_PATH,
         quality_profile_path=PROFILE_PATH,
     )
+
+
+class _FakeAuthoringStore:
+    """A minimal stand-in for PostgresKnowledgeStore's read path."""
+
+    def __init__(self, records: dict[str, dict[str, dict]]):
+        self._records = records
+
+    def get_record(self, collection, object_id):
+        return self._records.get(collection, {}).get(object_id)
+
+
+def _store_from_migrated_contract():
+    """Build a fake store whose plan/decisions mirror the real JSON fixtures.
+
+    This exercises the same merge the real migration performs
+    (`authoring_contract_migration.merge_contract_into_plan`), so a store-backed
+    packet can be compared against the file-backed one built from the exact
+    same source contract and plan.
+    """
+
+    from backend.pipeline.authoring_contract_migration import (
+        load_contract,
+        merge_contract_into_plan,
+    )
+
+    plan = json.loads(PLAN_PATH.read_text(encoding="utf-8"))
+    contract = load_contract(FIXTURE_DIR / "base-manuscript-contract.json")
+    decisions = plan.pop("decisions")
+    plan["decision_ids"] = [d["decision_id"] for d in decisions]
+    merged_plan = merge_contract_into_plan(
+        plan, contract, confirmed_by="test-editor", confirmed_at="2026-08-17T00:00:00Z"
+    )
+    decisions_by_id = {d["decision_id"]: d for d in decisions}
+    return _FakeAuthoringStore(
+        {"composition_plans": {merged_plan["plan_id"]: merged_plan}, "composition_decisions": decisions_by_id}
+    )
+
+
+def test_contract_from_plan_payload_round_trips_every_field_the_contract_needs():
+    """Regression: an earlier version of this reconstruction silently dropped
+    `authoring_mode`, which only surfaces as a validation error deep inside
+    `build_authoring_packet`, not as a missing-field error at the call site.
+    """
+
+    store = _store_from_migrated_contract()
+    plan_payload = store.get_record("composition_plans", "CP-matthew-16-13-20")
+    contract = contract_from_plan_payload(plan_payload, plan_document_sha256="irrelevant-here")
+    original = json.loads(
+        (FIXTURE_DIR / "base-manuscript-contract.json").read_text(encoding="utf-8")
+    )
+    original = original.get("result", original)
+    for field in ("schema_version", "contract_id", "passage", "authoring_mode", "base_source", "sections"):
+        assert contract[field] == original[field], f"{field} did not round-trip"
+    # Optional in this older fixture; must still round-trip when absent, not
+    # silently become a different falsy value.
+    assert contract["supplemental_material"] == original.get("supplemental_material", [])
+    assert contract["global_rules"] == original.get("global_rules", [])
+    assert contract["status"] == "editor_confirmed"
+
+
+def test_build_authoring_packet_from_store_matches_the_file_based_packet():
+    store = _store_from_migrated_contract()
+    from_file = full_authoring_packet()
+    from_store = build_authoring_packet_from_store(
+        plan_id="CP-matthew-16-13-20",
+        store=store,
+        knowledge_path=KNOWLEDGE_PATH,
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+    )
+    assert from_store["knowledge"] == from_file["knowledge"]
+    assert from_store["base_manuscript_texts"] == from_file["base_manuscript_texts"]
+    assert from_store["sermon_transcript_texts"] == from_file["sermon_transcript_texts"]
+    assert from_store["base_contract"]["sections"] == from_file["base_contract"]["sections"]
+    assert from_store["base_contract"]["base_source"] == from_file["base_contract"]["base_source"]
+    assert {d["decision_id"] for d in from_store["plan"]["decisions"]} == {
+        d["decision_id"] for d in from_file["plan"]["decisions"]
+    }
 
 
 def verified_baseline():

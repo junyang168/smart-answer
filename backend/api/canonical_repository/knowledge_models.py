@@ -227,7 +227,10 @@ class RequiredArgumentStep(BaseModel):
 
     step_id: str
     statement: str
-    source_id: str
+    # Optional: an older contract shape lets a step omit source_id and fall
+    # back to its section's base_source, which `validate_base_contract`
+    # still honours (`step.get("source_id", base_source["source_id"])`).
+    source_id: Optional[str] = None
     source_excerpt: str
     role: str = ""
     source_span: str = ""
@@ -279,6 +282,8 @@ class CompositionPlanRecord(EvolvingKnowledgeRecord):
     # claim unverifiable. PostgreSQL is the authoring authority; this is where
     # the contract belongs.
     contract_id: Optional[str] = None
+    contract_schema_version: Optional[str] = None
+    passage: Optional[str] = None
     authoring_mode: Optional[str] = None
     base_source: Optional[BaseSourceBinding] = None
     additional_base_sources: list[BaseSourceBinding] = Field(default_factory=list)
