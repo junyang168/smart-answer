@@ -81,6 +81,7 @@ def valid_author_result():
                 ],
                 "claim_ids_used": [],
                 "integration_operations": ["tension"],
+                "applied_operations": ["preserve", "clarify"],
                 "omissions": [],
                 "output_anchor": "耶穌說：「你是彼得",
             }
@@ -132,6 +133,37 @@ def test_author_ledger_requires_output_anchor_in_full_manuscript():
     result = valid_author_result()
     result["sections"][0]["output_anchor"] = "not in the manuscript"
     with pytest.raises(AuthoringContractError, match="output anchor not found"):
+        validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_author_ledger_rejects_ineligible_operation():
+    value = contract()
+    value["sections"][0]["ineligible_operations"].append("invent_life_application_chain")
+    result = valid_author_result()
+    result["sections"][0]["applied_operations"].append("invent_life_application_chain")
+    with pytest.raises(AuthoringContractError, match="ineligible operations"):
+        validate_author_result(result, contract=value, plan=mini_plan())
+
+
+def test_author_ledger_rejects_ineligible_supplemental_operation():
+    value = contract()
+    value["sections"][0]["ineligible_operations"].append("tension")
+    result = valid_author_result()
+    with pytest.raises(AuthoringContractError, match="ineligible operations"):
+        validate_author_result(result, contract=value, plan=mini_plan())
+
+
+def test_author_ledger_rejects_operation_outside_allowed_list():
+    result = valid_author_result()
+    result["sections"][0]["applied_operations"].append("invent_life_application_chain")
+    with pytest.raises(AuthoringContractError, match="outside allowed_operations"):
+        validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_author_ledger_requires_declared_operations():
+    result = valid_author_result()
+    result["sections"][0]["applied_operations"] = []
+    with pytest.raises(AuthoringContractError, match="at least one applied operation"):
         validate_author_result(result, contract=contract(), plan=mini_plan())
 
 

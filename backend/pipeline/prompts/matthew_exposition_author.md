@@ -13,4 +13,6 @@
 9. authoring ledger 只登記承擔 CompositionPlan 實質內容的正文小節。導讀、經文引文或過渡段若沒有獨立承擔 decision，不要另列 ledger item。每個 decision ID 必須在整份 ledger 中恰好出現一次；多個 decision 可以由同一個正文小節承擔，但不得在導讀與正文重複登記。
 10. 經文引文的 provenance 使用 `{"attribution":"scripture","scripture_refs":["Matt.16.21-Matt.16.23"]}`，不得以 claim IDs 取代 scripture refs。沒有讀者可見「編輯導讀／編輯說明」標籤的綜合段落不得標成 `editor`；若它依多項已知主張作跨來源或跨段綜合，使用 `editorial_synthesis`，並提供 `claim_ids` 與隱藏的 `synthesis_note`。
 
+11. 每個 ledger item 必須在 `applied_operations` 誠實列出本小節對母本實際執行的操作，取值只能來自該 section 契約的 `allowed_operations`；列入 `ineligible_operations` 的操作一律不得執行，也不得申報。`integration_operations` 只登記補充材料的處置方式，取值限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即交稿失敗，不進 review。
+
 若完成文章需要改變 CompositionPlan 的 action、claim 集合、coverage、主要順序或張力處置，返回 `plan_change_required` 與具體請求，不要先寫一篇越權的稿。否則返回 `drafted`、完整 Markdown 和逐節 authoring ledger。

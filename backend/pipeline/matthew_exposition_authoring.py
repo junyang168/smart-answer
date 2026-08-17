@@ -80,6 +80,7 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
                         "claim_ids_used": {"type": "array", "items": {"type": "string"}},
                         "integration_operations": {"type": "array", "items": {"type": "string"}},
+                        "applied_operations": {"type": "array", "items": {"type": "string"}},
                         "omissions": {
                             "type": "array",
                             "items": {
@@ -100,6 +101,7 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "base_step_ids_preserved",
                         "claim_ids_used",
                         "integration_operations",
+                        "applied_operations",
                         "omissions",
                         "output_anchor",
                     ],
@@ -507,6 +509,78 @@ def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = Tr
             )
 
 
+def _governing_contract_sections(
+    section: dict[str, Any], contract: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return the contract sections whose operation policy binds a ledger item.
+
+    An author may merge several composition decisions into one reader section,
+    so a ledger item is bound by every contract section it draws decisions
+    from; an exact section_id match takes precedence when it exists.
+    """
+
+    section_id = section.get("section_id")
+    matched = [
+        item for item in contract["sections"] if item["section_id"] == section_id
+    ]
+    if matched:
+        return matched
+    decision_ids = set(section.get("decision_ids", []))
+    return [
+        item
+        for item in contract["sections"]
+        if decision_ids & set(item["decision_ids"])
+    ]
+
+
+def _validate_section_operations(
+    section: dict[str, Any], *, contract: dict[str, Any], field: str
+) -> None:
+    """Enforce the contract's allowed/ineligible operations for one ledger item."""
+
+    section_id = section.get("section_id") or field
+    governing = _governing_contract_sections(section, contract)
+    allowed: set[str] = set()
+    ineligible: set[str] = set()
+    for governing_section in governing:
+        allowed.update(governing_section.get("allowed_operations", []))
+        ineligible.update(governing_section.get("ineligible_operations", []))
+
+    applied = section.get("applied_operations")
+    if not isinstance(applied, list) or not applied:
+        raise AuthoringContractError(
+            f"section {section_id} must declare at least one applied operation"
+        )
+    for index, operation in enumerate(applied):
+        _require_nonempty_string(operation, f"{field}.applied_operations[{index}]")
+    if duplicates := _duplicates(applied):
+        raise AuthoringContractError(
+            f"section {section_id} declared an operation twice: {sorted(duplicates)}"
+        )
+
+    integration_operations = section.get("integration_operations", [])
+    if not isinstance(integration_operations, list):
+        raise AuthoringContractError("integration_operations must be an array")
+    unsupported = set(integration_operations) - SUPPLEMENT_OPERATIONS
+    if unsupported:
+        raise AuthoringContractError(
+            f"section {section_id} used unsupported supplemental operations: {sorted(unsupported)}"
+        )
+
+    executed = set(applied) | set(integration_operations)
+    blocked = executed & ineligible
+    if blocked:
+        raise AuthoringContractError(
+            f"section {section_id} used ineligible operations: {sorted(blocked)}"
+        )
+    if allowed:
+        outside = set(applied) - allowed
+        if outside:
+            raise AuthoringContractError(
+                f"section {section_id} used operations outside allowed_operations: {sorted(outside)}"
+            )
+
+
 def validate_author_result(
     result: dict[str, Any],
     *,
@@ -577,6 +651,9 @@ def validate_author_result(
         if unknown_decisions:
             raise AuthoringContractError(f"unknown decision_ids: {sorted(unknown_decisions)}")
         covered_decisions.extend(decision_ids)
+        _validate_section_operations(
+            section, contract=contract, field=f"sections[{section_index}]"
+        )
         preserved_steps.extend(section.get("base_step_ids_preserved", []))
         used_claim_ids.extend(section.get("claim_ids_used", []))
         omissions = section.get("omissions", [])
