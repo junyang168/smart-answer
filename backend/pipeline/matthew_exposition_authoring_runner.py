@@ -547,7 +547,14 @@ def run_authoring(
     ):
         repair_prompt = _read_prompt("grounding_revision")
         repair_input = canonical_json(
-            {"manuscript_markdown": draft, "findings": grounding_report["findings"]}
+            {
+                "manuscript_markdown": draft,
+                "findings": grounding_report["findings"],
+                # The ledger travels with the draft so the repair can return it
+                # unchanged; regenerating it from scratch loses decision_ids and
+                # anchors that the repair has no reason to touch.
+                "sections": author_result["sections"],
+            }
         )
         repair_fingerprint = generation_fingerprint(
             inputs={

@@ -274,29 +274,48 @@ def test_hard_gate_cannot_be_offset_by_high_total_score():
     assert outcome["hard_gate_failures"] == ["base_manuscript_preservation"]
 
 
-def test_publication_score_requires_ninety_points():
+def test_publication_requires_reaching_the_threshold_exactly():
+    """One point below the threshold must fail, whatever the threshold is.
+
+    Previously this asserted the number 90 directly, so lowering the bar broke
+    a test whose actual subject is the boundary, not the value.
+    """
     profile = load_json(PROFILE_PATH)
-    assert profile["passing_score"] == 90
+    threshold = profile["passing_score"]
+    total_weight = sum(d["weight"] for d in profile["dimensions"])
     scores = [
-        {
-            "dimension_id": dimension["id"],
-            "score": dimension["weight"],
-            "evidence": "fixture",
-        }
-        for dimension in profile["dimensions"]
+        {"dimension_id": d["id"], "score": d["weight"], "evidence": "fixture"}
+        for d in profile["dimensions"]
     ]
     by_id = {item["dimension_id"]: item for item in scores}
-    by_id["general_reader_readability"]["score"] = 0
-    assert evaluate_editorial_review(
-        {"dimension_scores": scores, "hard_failures": []}, profile
-    )["passed"] is True
 
-    by_id["editorial_voice_restraint"]["score"] = 9
-    outcome = evaluate_editorial_review(
+    # Take points off dimensions with no minimum, so only the total moves.
+    deduct = total_weight - threshold
+    for dimension in profile["dimensions"]:
+        if deduct <= 0:
+            break
+        if dimension.get("minimum", 0) > 0:
+            continue
+        take = min(deduct, dimension["weight"])
+        by_id[dimension["id"]]["score"] = dimension["weight"] - take
+        deduct -= take
+    assert deduct == 0, "profile has too little slack to build this fixture"
+    reducible = next(
+        d["id"] for d in profile["dimensions"]
+        if d.get("minimum", 0) == 0 and by_id[d["id"]]["score"] > 0
+    )
+    at_threshold = evaluate_editorial_review(
         {"dimension_scores": scores, "hard_failures": []}, profile
     )
-    assert outcome["total_score"] == 89
-    assert outcome["passed"] is False
+    assert at_threshold["total_score"] == threshold
+    assert at_threshold["passed"] is True
+
+    by_id[reducible]["score"] -= 1
+    below = evaluate_editorial_review(
+        {"dimension_scores": scores, "hard_failures": []}, profile
+    )
+    assert below["total_score"] == threshold - 1
+    assert below["passed"] is False
 
 
 def test_generation_fingerprint_changes_with_prompt_model_or_input():
@@ -1553,7 +1572,10 @@ def test_out_of_scope_dimension_is_excluded_from_the_total_not_awarded():
     assert excluded["total_score"] == scored["total_score"] - 1
     # ...and its weight from the denominator, so the threshold scales with it.
     assert excluded["applicable_weight"] == 95
-    assert excluded["scaled_passing_score"] == 85.5
+    # Derived from the profile so changing the threshold does not break this.
+    assert excluded["scaled_passing_score"] == round(
+        _profile()["passing_score"] * 95 / 100, 2
+    )
     assert excluded["not_applicable_dimensions"] == {
         "pastoral_theological_landing": "contract forbids it"
     }
@@ -1564,7 +1586,7 @@ def test_excluding_a_dimension_neither_helps_nor_penalises_a_borderline_article(
     review = passing_review()
     for item in review["dimension_scores"]:
         item["score"] = 0
-    # 90 of the 95 applicable points, pastoral excluded.
+    # A full 90 of the 95 applicable points, pastoral excluded.
     for item in review["dimension_scores"]:
         if item["dimension_id"] == "source_and_exegesis":
             item["score"] = 15
