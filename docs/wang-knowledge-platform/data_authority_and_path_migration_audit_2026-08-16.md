@@ -126,4 +126,6 @@ Corpus survey 已建立 SHA-bound 研究快照 `repository/research_corpus_snaps
 - `$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json`，SHA-256 `7690fe92d1cef03ab9c3e4203f69ef6caa4e187822d911cf72a2bf1171196c96`；
 - `$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog_overrides.json`，SHA-256 `87ce92cf2c1d98b5cf199743e52f3b48abaac9808da3286d41e053ed2afc1141`。
 
-两组 source/canonical SHA 均相同。Draft PR #27 已让统一 path configuration、catalog builder、Matthew coverage read model、API catalog loader 与 watcher 使用 canonical 路径；相关测试为 60 passed。该 PR 尚未 merge 或 deploy，因此旧两项原件继续保留，不能在 production 完成 cutover、health/API 验证与回滚确认前删除。它们是新增的精确 legacy 删除候选，不是 PostgreSQL authority，也不进入 Git。
+两组 source/canonical SHA 均相同。PR #27 已让统一 path configuration、catalog builder、Matthew coverage read model、API catalog loader 与 watcher 使用 canonical 路径；相关测试为 60 passed。该 PR 以 merge commit `92d899e1dd6d2179866f76b495fe365f9b02f9a1` 合并并部署为 immutable release，旧 release `678249ae40259534cddae2318c8d47b73e65d554` 保留供回滚。
+
+production LaunchAgent 已明确设置 `WANG_RUNTIME_ENV=production`；backend 与 frontend health 均通过。Matthew progress API 重新验证三篇 repository 文章全部 `production_visible=true`、SHA `consistent`、0 blockers。两项旧原件在建立 mode `0444` archive、完成 2/2 隔离恢复验证后永久删除；backend 在旧文件不存在的状态下重新启动并再次通过相同验证。完整执行与恢复记录为 `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/sermon-catalog-path-cutover-20260817.json`（SHA-256 `ed95d7b3efa2f319100b13c50c378ac79102330238d1e7ff93fb8166f25c3a6a`）；archive SHA-256 为 `e40f4b1681d2a72c4f9288cfcd39608f1da459250c250ef1ffd229be0b624ed3`。
