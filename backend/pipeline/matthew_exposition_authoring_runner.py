@@ -33,6 +33,9 @@ from backend.pipeline.matthew_exposition_authoring import (
     AuthoringContractError,
     build_authoring_packet,
     build_authoring_packet_from_store,
+    evaluate_editorial_review,
+    hard_failures_after_adjudication,
+    out_of_scope_dimensions,
     build_editorial_review_packet,
     build_final_delta_review_packet,
     canonical_json,
@@ -851,12 +854,30 @@ def run_authoring(
         accepted_ids.update(auto_accepted_ids)
         maintained_ids.clear()
     accepted_findings = [item for item in findings if item["finding_id"] in accepted_ids]
+
+    # A hard failure rests on the finding that evidenced it. If adjudication
+    # rejected that finding, the declaration went with it -- otherwise the run
+    # deadlocks: nothing left to revise, but a one-vote veto still standing.
+    kept_failures, withdrawn_failures = hard_failures_after_adjudication(
+        review, withdrawn_ids
+    )
+    if withdrawn_failures:
+        review["hard_failures"] = kept_failures
+        review_outcome = evaluate_editorial_review(
+            review,
+            packet["quality_profile"],
+            out_of_scope_dimensions(packet["base_contract"]),
+        )
+        review_outcome["manuscript_sha256"] = draft_sha
+
     consensus = {
         "schema_version": "matthew-exposition-reviewed-findings.v1",
         "accepted_finding_ids": sorted(accepted_ids),
         "auto_accepted_maintained_finding_ids": sorted(auto_accepted_ids),
         "withdrawn_finding_ids": sorted(withdrawn_ids),
         "human_required_finding_ids": sorted(maintained_ids),
+        "withdrawn_hard_failures": withdrawn_failures,
+        "rubric_outcome_after_adjudication": review_outcome,
     }
     _write_json(output_dir / "reviewed-editorial-findings.json", consensus)
     if maintained_ids:

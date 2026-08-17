@@ -853,6 +853,47 @@ def deterministic_writing_warnings(
     return findings
 
 
+def hard_failures_after_adjudication(
+    review: dict[str, Any], withdrawn_finding_ids: set[str]
+) -> tuple[list[str], dict[str, str]]:
+    """Drop hard failures whose every supporting finding was rejected.
+
+    A reviewer declares a hard failure and files the finding that evidences
+    it. When adjudication rejects that finding -- concluding, say, that the
+    inference chain is present and only its order could be improved -- the
+    declaration it rested on has been overturned too. Leaving it standing
+    deadlocks the run: nothing is left to revise, yet a one-vote veto still
+    blocks publication, so every draft ends at human review no matter how
+    good it is.
+
+    A hard failure with no finding behind it is left alone. Nothing was
+    adjudicated, so there is nothing to overturn, and a safety declaration
+    should not evaporate for lack of paperwork.
+    """
+
+    findings_by_dimension: dict[str, list[dict[str, Any]]] = {}
+    for finding in review.get("findings", []):
+        dimension = finding.get("dimension_id")
+        if dimension:
+            findings_by_dimension.setdefault(dimension, []).append(finding)
+
+    kept: list[str] = []
+    withdrawn: dict[str, str] = {}
+    for failure_id in review.get("hard_failures", []):
+        dimension = HARD_FAILURE_DIMENSIONS.get(failure_id)
+        supporting = findings_by_dimension.get(dimension or "", [])
+        if supporting and all(
+            item["finding_id"] in withdrawn_finding_ids for item in supporting
+        ):
+            withdrawn[failure_id] = (
+                f"every finding for {dimension} was rejected in adjudication: "
+                + ", ".join(sorted(item["finding_id"] for item in supporting))
+            )
+        else:
+            kept.append(failure_id)
+    return kept, withdrawn
+
+
 def out_of_scope_dimensions(contract: dict[str, Any]) -> dict[str, str]:
     """Return dimensions the contract puts out of this article's reach.
 

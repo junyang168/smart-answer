@@ -1722,3 +1722,59 @@ def test_grounding_repair_is_bounded(tmp_path):
     )
     assert result["status"] == "grounding_gate_failed"
     assert result["grounding_attempts"] == 2
+
+
+def _review_with_hard_failure():
+    review = passing_review()
+    review["hard_failures"] = ["exegetical_observation_inference_conclusion_chain_missing"]
+    review["findings"] = [
+        {
+            "finding_id": "F-1",
+            "dimension_id": "exegetical_reasoning",
+            "section_id": "matt16-18-rock",
+            "severity": "high",
+            "blocking": True,
+            "manuscript_anchor": "彼得是 *Petros*",
+            "explanation": "推論鏈跳步。",
+            "recommended_action": "補上橋樑。",
+        }
+    ]
+    return review
+
+
+def test_a_hard_failure_falls_with_the_finding_that_evidenced_it():
+    """Otherwise the run deadlocks: adjudication rejects the finding, so
+    nothing is left to revise, but the veto it rested on still blocks
+    publication -- every draft ends at human review however good it is.
+    """
+    from backend.pipeline.matthew_exposition_authoring import hard_failures_after_adjudication
+
+    kept, withdrawn = hard_failures_after_adjudication(
+        _review_with_hard_failure(), withdrawn_finding_ids={"F-1"}
+    )
+    assert kept == []
+    assert "exegetical_observation_inference_conclusion_chain_missing" in withdrawn
+    assert "F-1" in withdrawn["exegetical_observation_inference_conclusion_chain_missing"]
+
+
+def test_a_hard_failure_stands_while_any_of_its_findings_was_accepted():
+    from backend.pipeline.matthew_exposition_authoring import hard_failures_after_adjudication
+
+    review = _review_with_hard_failure()
+    review["findings"].append({**review["findings"][0], "finding_id": "F-2"})
+    kept, withdrawn = hard_failures_after_adjudication(review, withdrawn_finding_ids={"F-1"})
+    assert kept == ["exegetical_observation_inference_conclusion_chain_missing"]
+    assert withdrawn == {}
+
+
+def test_a_hard_failure_with_no_finding_behind_it_is_left_alone():
+    """Nothing was adjudicated, so there is nothing to overturn: a safety
+    declaration must not evaporate for lack of paperwork.
+    """
+    from backend.pipeline.matthew_exposition_authoring import hard_failures_after_adjudication
+
+    review = _review_with_hard_failure()
+    review["findings"] = []
+    kept, withdrawn = hard_failures_after_adjudication(review, withdrawn_finding_ids={"F-1"})
+    assert kept == ["exegetical_observation_inference_conclusion_chain_missing"]
+    assert withdrawn == {}
