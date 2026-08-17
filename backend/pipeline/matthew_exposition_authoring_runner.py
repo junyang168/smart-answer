@@ -267,6 +267,25 @@ def _run_program_audit_stage(
     }
 
 
+def _professor_source_texts(packet: dict[str, Any]) -> list[str]:
+    """Every text in the packet that carries the professor's own wording.
+
+    Rule 8e sends the author to the sermon transcript segments for his exact
+    phrasing; a quote in the draft is checked back against the same texts,
+    plus the base manuscripts, so a quote lifted from the approved notes is
+    not reported as invented.
+    """
+
+    return [
+        *(
+            text
+            for segments in (packet.get("sermon_transcript_texts") or {}).values()
+            for text in segments.values()
+        ),
+        *(packet.get("base_manuscript_texts") or {}).values(),
+    ]
+
+
 def _run_grounding_stage(
     *,
     draft: str,
@@ -740,7 +759,9 @@ def run_authoring(
         )
         review_outcome["manuscript_sha256"] = draft_sha
     writing_warnings = deterministic_writing_warnings(
-        draft, packet["quality_profile"]
+        draft,
+        packet["quality_profile"],
+        source_texts=_professor_source_texts(packet),
     )
     # Persist canonical finding IDs and deterministic checks even on a cache hit.
     review_artifact = json.loads((output_dir / "independent-editorial-review.json").read_text(encoding="utf-8"))
@@ -1052,7 +1073,9 @@ def run_authoring(
         "merged_review": merged_review,
         "rubric_outcome": final_outcome,
         "deterministic_warnings": deterministic_writing_warnings(
-            revised_draft, packet["quality_profile"]
+            revised_draft,
+            packet["quality_profile"],
+            source_texts=_professor_source_texts(packet),
         ),
     }
     _write_json(output_dir / "final-delta-editorial-review.json", delta_artifact)

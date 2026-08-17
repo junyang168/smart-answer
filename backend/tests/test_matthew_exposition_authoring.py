@@ -14,6 +14,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     build_final_delta_review_packet,
     changed_markdown_paragraphs,
     deterministic_writing_warnings,
+    quote_fidelity_warnings,
     evaluate_editorial_review,
     generation_fingerprint,
     merge_final_delta_review,
@@ -256,6 +257,84 @@ def test_bad_golden_triggers_production_language_but_good_does_not():
         for finding in deterministic_writing_warnings(bad, profile)
     )
     assert deterministic_writing_warnings(good, profile) == []
+
+
+# The professor's own words, verbatim from SRC-2016_NYSC_4 segment 732: rule 8e
+# sends the author here for his phrasing, so the check that a quote is really
+# his is written against the same text rather than a paraphrase of it.
+SEGMENT_732 = (
+    "因為你不關心、你不重視神的意思，你所關心的是人的意思。我們中文翻成「體貼」那個字，"
+    "phroneō 那個字，是關心、重視的意思，你不是從神的觀點來看這件事情。"
+    "第一功課是什麼？你要先知道耶穌就是基督。可是門徒通過第一課的考試，耶穌開始教他們第二課。"
+)
+NOTES_SENTENCE = "彼得並非不認識耶穌是彌賽亞，他的問題在於他不認識彌賽亞的性質。"
+PROFESSOR_PROVENANCE = '<!-- provenance: {"attribution":"professor","claim_ids":["DK-1"]} -->\n'
+
+
+def professor_paragraph(text: str) -> str:
+    return PROFESSOR_PROVENANCE + text
+
+
+def test_a_verbatim_quote_of_the_professor_raises_no_warning():
+    draft = professor_paragraph("他這樣重讀那個字：「我們中文翻成「體貼」那個字，phroneō 那個字，是關心、重視」。")
+    assert quote_fidelity_warnings(draft, [SEGMENT_732]) == []
+
+
+def test_prose_rewritten_inside_quotation_marks_is_reported():
+    draft = professor_paragraph("他說：「你不夠關心神的心意，反而更在乎人的看法」。")
+    assert quote_fidelity_warnings(draft, [SEGMENT_732]) == [
+        {"code": "quote_not_verbatim", "quoted_text": "你不夠關心神的心意，反而更在乎人的看法"}
+    ]
+
+
+def test_a_nested_term_quote_does_not_hide_a_rewritten_outer_quote():
+    # `「體貼」` is below the term-mention threshold on its own; matching only the
+    # inner span would skip the outer sentence, which is the quote 8e is about.
+    draft = professor_paragraph("他說：「我們中文翻成「體貼」那個字，其實帶著情感上的體恤」。")
+    assert [item["quoted_text"] for item in quote_fidelity_warnings(draft, [SEGMENT_732])] == [
+        "我們中文翻成「體貼」那個字，其實帶著情感上的體恤"
+    ]
+
+
+def test_an_elided_quote_matches_when_both_sides_are_verbatim_and_in_order():
+    kept = professor_paragraph("「因為你不關心、你不重視神的意思⋯⋯你不是從神的觀點」。")
+    assert quote_fidelity_warnings(kept, [SEGMENT_732]) == []
+    # An elision may skip material but may not reorder it.
+    reordered = professor_paragraph("「耶穌開始教他們第二課⋯⋯門徒通過第一課的考試」。")
+    assert quote_fidelity_warnings(reordered, [SEGMENT_732])
+
+
+def test_quote_matching_ignores_punctuation_the_transcriber_chose():
+    draft = professor_paragraph("「門徒通過第一課的考試；耶穌開始教他們第二課」。")
+    assert quote_fidelity_warnings(draft, [SEGMENT_732]) == []
+
+
+def test_naming_a_term_is_not_quoting_a_sentence():
+    draft = professor_paragraph("中文譯本把這個字翻成「體貼」，容易讀成情感上的體恤。")
+    assert quote_fidelity_warnings(draft, [SEGMENT_732]) == []
+
+
+def test_a_quote_from_the_base_manuscript_is_not_reported_as_invented():
+    draft = professor_paragraph("「他的問題在於他不認識彌賽亞的性質」。")
+    assert quote_fidelity_warnings(draft, [SEGMENT_732, NOTES_SENTENCE]) == []
+
+
+def test_only_paragraphs_claiming_the_professor_are_checked():
+    scripture = (
+        '<!-- provenance: {"attribution":"scripture","scripture_refs":["Matt.16.23"]} -->\n'
+        "「撒但，退我後邊去吧，你是絆我腳的」。"
+    )
+    assert quote_fidelity_warnings(scripture, [SEGMENT_732]) == []
+
+
+def test_warnings_skip_quote_fidelity_when_no_source_texts_are_given():
+    profile = load_json(PROFILE_PATH)
+    draft = professor_paragraph("他說：「你不夠關心神的心意，反而更在乎人的看法」。")
+    assert deterministic_writing_warnings(draft, profile) == []
+    assert any(
+        finding["code"] == "quote_not_verbatim"
+        for finding in deterministic_writing_warnings(draft, profile, source_texts=[SEGMENT_732])
+    )
 
 
 def test_hard_gate_cannot_be_offset_by_high_total_score():

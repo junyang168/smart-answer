@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import tempfile
+import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable
@@ -816,12 +817,149 @@ def rebind_review_after_hidden_metadata_normalization(
     }
 
 
-def deterministic_writing_warnings(
-    markdown: str, quality_profile: dict[str, Any]
+#: A provenance comment and the prose it governs; `manuscript_grounding_check`
+#: imports from this module, so its own copy of this pattern cannot be reused
+#: here without an import cycle.
+_PROVENANCE_COMMENT_RE = re.compile(r"<!--\s*provenance:\s*(\{.*?\})\s*-->", re.S)
+#: An elision written as a single, doubled, or longer run of dots: the house
+#: convention is 「⋯⋯」 but a draft that writes one 「…」 means the same thing.
+_QUOTE_ELISION_RE = re.compile(r"[⋯…]+|\.{3,}")
+
+#: A quoted span shorter than this is a term being named (「體貼」那個字), not a
+#: sentence being quoted, and naming a word is not a claim about what the
+#: professor said. Set from the shortest real quote worth checking rather than
+#: from a corpus measurement; it is a warning threshold, not a gate.
+QUOTE_FIDELITY_MIN_CHARS = 8
+
+#: Quoted prose is checked for invented words, not for copied punctuation: a
+#: spoken transcript is punctuated by whoever transcribed it, so requiring a
+#: quote to reproduce 、 where the body reads ，would fail faithful quotes.
+_QUOTE_MATCH_STRIP_RE = re.compile(
+    r"[\s，。、；：！？「」『』（）《》〈〉—–\-…⋯,.;:!?\'\"()\[\]]+"
+)
+
+
+def _outermost_quoted_spans(text: str) -> list[str]:
+    """Return the content of each outermost 「…」 span, nesting included.
+
+    Quotes of the professor nest by convention -- he names a word inside a
+    sentence he is quoting (「我們中文翻成「體貼」那個字」) -- and a pattern that
+    stops at the first closing bracket matches only the inner 「體貼」, which is
+    below the term-mention threshold. The whole outer sentence would then be
+    skipped, losing exactly the quote rule 8e is about. Nested brackets are
+    stripped from the comparison key, so the span is matched against the source
+    as one run of prose.
+    """
+
+    spans: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(text):
+        if char == "「":
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif char == "」" and depth:
+            depth -= 1
+            if depth == 0:
+                spans.append(text[start:index])
+    return spans
+
+
+def _quote_match_key(text: str) -> str:
+    return _QUOTE_MATCH_STRIP_RE.sub("", unicodedata.normalize("NFKC", text))
+
+
+def quote_fidelity_warnings(
+    markdown: str,
+    source_texts: Iterable[str],
+    *,
+    checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
+    min_chars: int = QUOTE_FIDELITY_MIN_CHARS,
 ) -> list[dict[str, Any]]:
+    """Report quoted spans that no source text contains verbatim.
+
+    Rule 8e tells the author to prefer the professor's own wording over a
+    paraphrase of it, which introduces a failure the pipeline did not have
+    before: prose of the author's own composition placed inside quotation
+    marks and attributed to him. That is worse than the abstract paraphrase
+    8e exists to remove -- an invented quote is a fabricated source, while an
+    abstract paraphrase is merely flat -- so the instruction ships with a
+    check behind it.
+
+    Only spans in paragraphs claiming `checked_attributions` are examined, and
+    only those at least `min_chars` long; a shorter span names a term rather
+    than quoting a sentence. `⋯⋯` marks an elision the author is allowed to
+    make, so each side of it is matched separately, in order, against the same
+    source text -- a quote may skip material but may not reorder it or join
+    two speakers.
+
+    Known false positive: a scripture sentence quoted inside a professor
+    paragraph is verbatim from the Bible, which is not among the source texts.
+    That is why this returns warnings for the adjudicator to read rather than
+    a gate result, and why it does not raise.
+    """
+
+    keys = [_quote_match_key(item) for item in source_texts if item]
+    warnings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    matches = list(_PROVENANCE_COMMENT_RE.finditer(markdown))
+    for index, match in enumerate(matches):
+        try:
+            provenance = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(provenance, dict):
+            continue
+        if provenance.get("attribution") not in checked_attributions:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        for quoted in _outermost_quoted_spans(markdown[match.end() : end]):
+            pieces = [
+                piece for part in _QUOTE_ELISION_RE.split(quoted)
+                if (piece := _quote_match_key(part))
+            ]
+            if sum(len(piece) for piece in pieces) < min_chars:
+                continue
+            if any(_pieces_in_order(pieces, key) for key in keys):
+                continue
+            if quoted in seen:
+                continue
+            seen.add(quoted)
+            warnings.append({"code": "quote_not_verbatim", "quoted_text": quoted})
+    return warnings
+
+
+def _pieces_in_order(pieces: list[str], key: str) -> bool:
+    cursor = 0
+    for piece in pieces:
+        found = key.find(piece, cursor)
+        if found < 0:
+            return False
+        cursor = found + len(piece)
+    return True
+
+
+def deterministic_writing_warnings(
+    markdown: str,
+    quality_profile: dict[str, Any],
+    *,
+    source_texts: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Run the checks that need no model over a draft.
+
+    `source_texts` are the professor's own words -- the sermon transcript
+    segments and base manuscripts the packet carries -- against which quoted
+    spans are matched. Callers without them (a test, a CLI reading only a
+    manuscript) get every other check and skip quote fidelity, rather than
+    having every quote reported as unmatched against an empty corpus.
+    """
+
     text = reader_text(markdown)
     warning_profile = quality_profile.get("deterministic_warnings", {})
     findings: list[dict[str, Any]] = []
+    if source_texts is not None:
+        findings.extend(quote_fidelity_warnings(markdown, source_texts))
     for term in warning_profile.get("production_language_terms", []):
         count = text.lower().count(str(term).lower())
         if count:
