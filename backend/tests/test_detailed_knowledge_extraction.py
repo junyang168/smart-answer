@@ -217,3 +217,22 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
     assert relation_id not in {row["claim_relation_id"] for row in result["claim_relations"]}
     assert any(value.startswith("AI-ADJ-") for value in updated["evidence_step_ids"])
     assert result["consensus_application"]["approval_status"] == "not_human_approved"
+
+
+def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript, raw=raw, response=_response(),
+        extraction=extraction_identity(
+            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt",
+            model_id="gpt-5.6-sol", reasoning_effort="medium", max_output_tokens=32000,
+        ),
+    )
+    result = apply_consensus_overrides(
+        package,
+        {"adjudication_fingerprint": "combined-fp", "claims": {}},
+        {"011WSR01": transcript},
+    )
+    assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
