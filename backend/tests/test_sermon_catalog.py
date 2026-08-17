@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 
 from backend.api.sc_api.sermon_meta import SermonMetaManager
-from backend.pipeline.sermon_catalog import build_catalog, classify_sermon, write_catalog
+from backend.pipeline.sermon_catalog import (
+    build_catalog,
+    classify_sermon,
+    normalize_sermon_source,
+    write_catalog,
+)
 
 
 def _survey(transcript_id: str, clusters: list[dict]) -> dict:
@@ -26,6 +31,57 @@ def _cluster(function: str, indexes: list[str], refs: list[str], title: str = ""
         "summary": title,
         "topic_terms": [],
     }
+
+
+def test_source_normalization_keeps_organization_provider_and_url_distinct():
+    assert normalize_sermon_source({"source": None}) == {
+        "source_category": "dallas_hlc",
+        "source_category_label": "達拉斯聖道教會",
+        "source_organization": "達拉斯聖道教會",
+        "source_provider": None,
+        "source_url": None,
+        "source_raw": None,
+    }
+    nysc = normalize_sermon_source(
+        {"source": "https://www.bctcnj.org/NYSC/2016/1WSR01.MP3"}
+    )
+    assert nysc["source_category"] == "nysc"
+    assert nysc["source_organization"] == "紐約靈命進深會"
+    assert nysc["source_url"].endswith("1WSR01.MP3")
+    external = normalize_sermon_source({"source": "Ruxin Zhang"})
+    assert external["source_category"] == "external_church"
+    assert external["source_provider"] == "Ruxin Zhang"
+    assert external["source_url"] is None
+
+
+def test_other_nonempty_sources_are_not_assumed_to_be_dallas():
+    other_url = normalize_sermon_source({"source": "https://www.youtube.com/watch?v=abc"})
+    assert other_url["source_category"] == "other"
+    assert other_url["source_url"] == "https://www.youtube.com/watch?v=abc"
+    named = normalize_sermon_source({"source": "Archive donor"})
+    assert named["source_category"] == "other"
+    assert named["source_provider"] == "Archive donor"
+
+
+def test_explicit_nysc_series_identifies_event_while_preserving_media_url():
+    source = normalize_sermon_source(
+        {"source": "https://www.youtube.com/watch?v=abc"},
+        {
+            "series_id": "2021 NYSC 專題：馬太福音釋經（八）",
+            "series_title": "基督再臨的真相",
+        },
+    )
+
+    assert source["source_category"] == "nysc"
+    assert source["source_organization"] == "紐約靈命進深會"
+    assert source["source_url"] == "https://www.youtube.com/watch?v=abc"
+    assert source["source_provider"] is None
+
+
+def test_missing_metadata_is_not_the_same_as_empty_source_in_sermon_json():
+    missing = normalize_sermon_source(None)
+    assert missing["source_category"] == "unknown"
+    assert missing["source_category_label"] == "來源待確認"
 
 
 def test_content_classifier_distinguishes_passage_flow_from_cross_scripture_topic():

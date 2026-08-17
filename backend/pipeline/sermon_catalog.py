@@ -20,7 +20,7 @@ from backend.api.sermon_search.bible_refs import normalize_ref
 from backend.api.sermon_search.topics import extract_topics
 
 
-CATALOG_SCHEMA_VERSION = "wang_sermon_catalog_v2"
+CATALOG_SCHEMA_VERSION = "wang_sermon_catalog_v4"
 CLASSIFIER_VERSION = "content_structure_classifier_v2"
 DEFAULT_SURVEY_DIR = wang_platform_paths().corpus_survey_staging
 DEFAULT_OUTPUT_PATH = DATA_BASE_PATH / "sermon_catalog.json"
@@ -31,6 +31,84 @@ MODE_LABELS = {
     "topic_led": "專題講論",
     "mixed": "釋經與專題並重",
 }
+
+SOURCE_CATEGORY_LABELS = {
+    "dallas_hlc": "達拉斯聖道教會",
+    "nysc": "紐約靈命進深會",
+    "external_church": "其他教會",
+    "other": "其他來源",
+    "unknown": "來源待確認",
+}
+
+
+def normalize_sermon_source(
+    metadata: dict[str, Any] | None,
+    series: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Separate source organization, provider and media URL.
+
+    ``config/sermon.json`` predates this distinction, so its ``source`` field
+    may contain a URL, a provider name, or nothing at all.  Preserve that raw
+    value while exposing stable fields for filtering and provenance display.
+    An explicit event marker in the series metadata (for example ``NYSC``)
+    identifies the organization even when ``source`` is only a YouTube media
+    URL.  Source identity never determines Scripture coverage.
+    """
+
+    if metadata is None:
+        return {
+            "source_category": "unknown",
+            "source_category_label": SOURCE_CATEGORY_LABELS["unknown"],
+            "source_organization": None,
+            "source_provider": None,
+            "source_url": None,
+            "source_raw": None,
+        }
+
+    series = series or {}
+    series_blob = " ".join(
+        str(value or "")
+        for value in (series.get("series_id"), series.get("series_title"))
+    )
+    explicit_nysc = bool(re.search(r"NYSC", series_blob, re.IGNORECASE))
+
+    raw_value = metadata.get("source")
+    raw = str(raw_value).strip() if raw_value is not None else ""
+    lowered = raw.lower()
+    is_url = bool(re.match(r"^https?://", raw, re.IGNORECASE))
+    if explicit_nysc:
+        category = "nysc"
+        organization = "紐約靈命進深會"
+        provider = None if is_url or not raw else raw
+        url = raw if is_url else None
+    elif not raw:
+        category = "dallas_hlc"
+        organization = "達拉斯聖道教會"
+        provider = None
+        url = None
+    elif "bctcnj.org" in lowered:
+        category = "nysc"
+        organization = "紐約靈命進深會"
+        provider = None
+        url = raw
+    elif raw.casefold() == "ruxin zhang".casefold():
+        category = "external_church"
+        organization = "其他教會（名稱未記錄）"
+        provider = "Ruxin Zhang"
+        url = None
+    else:
+        category = "other"
+        organization = None
+        provider = None if is_url else raw
+        url = raw if is_url else None
+    return {
+        "source_category": category,
+        "source_category_label": SOURCE_CATEGORY_LABELS[category],
+        "source_organization": organization,
+        "source_provider": provider,
+        "source_url": url,
+        "source_raw": raw_value,
+    }
 
 
 def _load_json(path: Path) -> Any:
@@ -415,6 +493,10 @@ def build_catalog(
         primary_refs = role_order[:5]
         deliver_date = metadata.get("deliver_date")
         year_match = re.match(r"(19|20)\d{2}", str(deliver_date or ""))
+        normalized_source = normalize_sermon_source(
+            metadata if transcript_id in metadata_by_id else None,
+            series,
+        )
         record = {
             "transcript_id": transcript_id,
             "title": metadata.get("title") or transcript_id,
@@ -439,6 +521,7 @@ def build_catalog(
             "series_order": series.get("series_order"),
             "deliver_date": deliver_date,
             "year": int(year_match.group(0)) if year_match else None,
+            **normalized_source,
             "source_stage": source.get("publication_status"),
             "source_sha256": source.get("sha256"),
             "survey_path": str(path.resolve()),

@@ -8,8 +8,9 @@ batch as a topic.
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections import Counter, defaultdict
-from typing import Any
+from typing import Any, Mapping
 
 
 SCHEMA_VERSION = "wang_topic_structure_discovery_v1"
@@ -302,26 +303,283 @@ def validate_discovery(payload: dict[str, Any], source: dict[str, Any]) -> None:
         raise ValueError(f"topic structure omitted claims: {sorted(omitted)}")
 
 
+EDITORIAL_TITLE_PREFIXES = ("候选母题：", "候选专题：", "候選母題：", "候選專題：")
+_TITLE_NOISE = str.maketrans({character: None for character in " \t　：:，,。.、；;（）()「」《》—-_"})
+
+
+def normalize_topic_title(title: str) -> str:
+    """Reduce an editorial label to the identity-bearing part of the name.
+
+    Dropping the ``候选`` prefix and punctuation means approving a candidate, or
+    tidying its punctuation, does not mint a different topic.
+    """
+    value = str(title or "").strip()
+    for prefix in EDITORIAL_TITLE_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    return value.translate(_TITLE_NOISE).casefold()
+
+
+def topic_slug(*parts: str) -> str:
+    """Create a deterministic *candidate* key, never a canonical topic id."""
+    return _digest(*(normalize_topic_title(part) for part in parts))
+
+
 def stable_family_key(family: dict[str, Any]) -> str:
-    return _digest(str(family.get("title")), *sorted(family_claim_ids(family)))
+    """Identify one discovered family inside a single run's report."""
+    return topic_slug(str(family.get("title")))
 
 
 def _slug(value: str) -> str:
     return _digest(value, size=10)
 
 
-def build_incremental_package(
-    *, batch_id: str, reviewed_payload: dict[str, Any]
+def _topic_level(row: Mapping[str, Any]) -> str:
+    """A node without a parent is a family; that is how the store records roots."""
+    level = row.get("topic_level")
+    if level:
+        return str(level)
+    return "subtopic" if row.get("parent_topic_id") else "family"
+
+
+def reconcile_topic_identity(
+    proposed: list[dict[str, Any]],
+    existing_topics: Mapping[str, Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Create persistent reconciliation work; never mint canonical identities."""
+    existing = {
+        topic_id: {
+            "label": row.get("label"),
+            "level": _topic_level(row),
+            "parent_topic_id": row.get("parent_topic_id"),
+            "claim_ids": {str(claim_id) for claim_id in (row.get("claim_ids") or [])},
+        }
+        for topic_id, row in (existing_topics or {}).items()
+    }
+    records: list[dict[str, Any]] = []
+    exact_parent_mapping: dict[str, str] = {}
+    for topic in proposed:
+        topic_id = str(topic["topic_id"])
+        level = _topic_level(topic)
+        parent_id = str(topic.get("parent_topic_id") or "")
+        claim_ids = {str(claim_id) for claim_id in topic.get("claim_ids") or []}
+        expected_parent = exact_parent_mapping.get(parent_id) if parent_id else None
+        exact = [
+            other_id for other_id, other in existing.items()
+            if other["level"] == level
+            and (
+                level == "family"
+                or (
+                    expected_parent is not None
+                    and str(other.get("parent_topic_id") or "") == expected_parent
+                )
+            )
+            and normalize_topic_title(str(other.get("label") or ""))
+            == normalize_topic_title(str(topic.get("label") or ""))
+        ]
+        if len(exact) == 1:
+            exact_parent_mapping[topic_id] = exact[0]
+            records.append({
+                "reconciliation_id": f"TIR-{_digest(topic_id, exact[0])}",
+                "candidate_topic_id": topic_id,
+                "label": topic["label"],
+                "topic_level": level,
+                "parent_candidate_topic_id": topic.get("parent_topic_id"),
+                "claim_ids": sorted(claim_ids),
+                "status": "matched_existing",
+                "resolved_topic_id": exact[0],
+                "resolution_action": "exact_normalized_label",
+                "origin_batch_id": topic.get("origin_batch_id"),
+                "review_status": "ai_consensus",
+            })
+            continue
+        overlaps = []
+        for other_id, other in existing.items():
+            # A subtopic shares its parent's claims by construction, and a
+            # subtopic is never a merge candidate for a family.
+            if other_id == parent_id or other["level"] != level:
+                continue
+            shared = claim_ids & other["claim_ids"]
+            if not shared:
+                continue
+            union = claim_ids | other["claim_ids"]
+            overlaps.append({
+                "existing_topic_id": other_id,
+                "existing_label": other["label"],
+                "shared_claim_count": len(shared),
+                "jaccard": round(len(shared) / len(union), 4) if union else 0.0,
+                "shared_claim_ids": sorted(shared),
+            })
+        overlaps.sort(key=lambda row: (-row["jaccard"], row["existing_topic_id"]))
+        records.append({
+            "reconciliation_id": f"TIR-{_digest(topic_id)}",
+            "candidate_topic_id": topic_id,
+            "label": topic["label"],
+            "topic_level": level,
+            "parent_candidate_topic_id": topic.get("parent_topic_id"),
+            "claim_ids": sorted(claim_ids),
+            "status": "pending_match" if overlaps else "pending_new",
+            "candidate_matches": overlaps[:5],
+            "origin_batch_id": topic.get("origin_batch_id"),
+            "review_status": "candidate",
+        })
+    return records
+
+
+_TOPIC_ID_NAMESPACE = uuid.UUID("8df74531-4d41-48a8-a4f7-785da9712077")
+
+
+def _new_canonical_topic_id(reconciliation_id: str) -> str:
+    """Allocate an opaque, repeatable id when a candidate is first approved."""
+    return f"TOPIC-{uuid.uuid5(_TOPIC_ID_NAMESPACE, reconciliation_id).hex}"
+
+
+def pending_topic_identity_ids(package: Mapping[str, Any]) -> list[str]:
+    return [
+        str(row["candidate_topic_id"])
+        for row in package.get("topic_identity_reconciliations") or []
+        if row.get("status") in {"pending_new", "pending_match"}
+    ]
+
+
+def resolve_topic_identity_package(
+    candidate_package: Mapping[str, Any],
+    resolutions: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Persist hierarchy as candidate TopicNodes, plans, decisions, and routes."""
+    """Rewrite candidate references to immutable canonical topic identities.
+
+    ``resolutions`` is keyed by candidate topic id.  Each value uses either
+    ``match_existing`` with ``canonical_topic_id`` or ``create_new``.  Exact
+    matches recorded by discovery require no extra resolution.
+    """
+    resolutions = resolutions or {}
+    reconciliations = [dict(row) for row in candidate_package.get("topic_identity_reconciliations") or []]
+    mapping: dict[str, str] = {}
+    for row in reconciliations:
+        candidate_id = str(row["candidate_topic_id"])
+        if row.get("status") == "matched_existing" and row.get("resolved_topic_id"):
+            mapping[candidate_id] = str(row["resolved_topic_id"])
+            continue
+        decision = dict(resolutions.get(candidate_id) or {})
+        action = str(decision.get("action") or "")
+        if action == "match_existing":
+            canonical_id = str(decision.get("canonical_topic_id") or "")
+            if not canonical_id:
+                raise ValueError(f"{candidate_id}: match_existing requires canonical_topic_id")
+        elif action == "create_new":
+            canonical_id = str(decision.get("canonical_topic_id") or _new_canonical_topic_id(str(row["reconciliation_id"])))
+        else:
+            raise ValueError(f"unresolved topic identity: {candidate_id}")
+        mapping[candidate_id] = canonical_id
+        row.update({
+            "status": "resolved",
+            "resolved_topic_id": canonical_id,
+            "resolution_action": action,
+            "review_status": "approved",
+            "reviewed_by": decision.get("reviewed_by") or "topic_identity_resolution",
+            "review_note": decision.get("review_note") or "",
+        })
+
+    candidate_topics = [dict(row) for row in candidate_package.get("candidate_topic_nodes") or []]
+    created_ids = {
+        mapping[str(row["candidate_topic_id"])]
+        for row in reconciliations
+        if row.get("resolution_action") == "create_new"
+    }
+    topics: list[dict[str, Any]] = []
+    for row in candidate_topics:
+        candidate_id = str(row.pop("topic_id"))
+        canonical_id = mapping[candidate_id]
+        if canonical_id not in created_ids:
+            continue
+        parent = row.get("parent_topic_id")
+        row["topic_id"] = canonical_id
+        row["parent_topic_id"] = mapping[str(parent)] if parent else None
+        row["review_status"] = "candidate"
+        topics.append(row)
+
+    plan_id_map: dict[str, str] = {}
+    decision_id_map: dict[str, str] = {}
+    plans: list[dict[str, Any]] = []
+    for raw_plan in candidate_package.get("candidate_product_plans") or []:
+        plan = dict(raw_plan)
+        old_plan_id = str(plan["plan_id"])
+        canonical_topic_id = mapping[str(plan["canonical_topic_id"])]
+        new_plan_id = f"TP-{_digest(canonical_topic_id)}"
+        plan_id_map[old_plan_id] = new_plan_id
+        plan["plan_id"] = new_plan_id
+        plan["canonical_topic_id"] = canonical_topic_id
+        plan["topic_family_id"] = mapping[str(plan["topic_family_id"])]
+        decisions = []
+        for index, raw_decision in enumerate(plan.get("decisions") or [], start=1):
+            decision = dict(raw_decision)
+            old_decision_id = str(decision["decision_id"])
+            new_decision_id = f"SD-{_digest(new_plan_id, str(index))}"
+            decision_id_map[old_decision_id] = new_decision_id
+            decision["decision_id"] = new_decision_id
+            decision["plan_id"] = new_plan_id
+            decisions.append(decision)
+        plan["decisions"] = decisions
+        plan["decision_ids"] = [row["decision_id"] for row in decisions]
+        plans.append(plan)
+
+    routes: list[dict[str, Any]] = []
+    for raw_route in candidate_package.get("candidate_knowledge_routes") or []:
+        route = dict(raw_route)
+        route["target_id"] = plan_id_map[str(route["target_id"])]
+        route["decision_ids"] = [decision_id_map[str(item)] for item in route.get("decision_ids") or []]
+        route["canonical_topic_ids"] = [mapping[str(item)] for item in route.get("canonical_topic_ids") or []]
+        route["route_id"] = f"KR-{_digest(route['claim_id'], route['target_id'], *route['decision_ids'])}"
+        routes.append(route)
+
+    syntheses: list[dict[str, Any]] = []
+    for raw in candidate_package.get("candidate_cross_source_syntheses") or []:
+        row = dict(raw)
+        topic_id = mapping[str(row["topic_id"])]
+        row["topic_id"] = topic_id
+        if row.get("parent_topic_id"):
+            row["parent_topic_id"] = mapping[str(row["parent_topic_id"])]
+        row["synthesis_id"] = f"SYN-{_digest(topic_id)}"
+        syntheses.append(row)
+
+    return {
+        "schema_version": "wang_topic_structure_canonical_write_v1",
+        "package_id": f"{candidate_package['package_id']}-RESOLVED",
+        "topic_nodes": topics,
+        "knowledge_routes": routes,
+        "cross_source_syntheses": syntheses,
+        "product_plans": plans,
+        "topic_identity_reconciliations": reconciliations,
+        "candidate_generation": {
+            **dict(candidate_package.get("candidate_generation") or {}),
+            "status": "identity_resolved_canonical_write",
+            "pending_identity_candidates": [],
+            "canonical_write_ready": True,
+        },
+    }
+
+
+def build_incremental_package(
+    *,
+    batch_id: str,
+    reviewed_payload: dict[str, Any],
+    existing_topics: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Persist hierarchy as candidate TopicNodes, plans, decisions, and routes.
+
+    This function creates a review artifact, not canonical TopicNodes.  Candidate
+    ids may change between discovery runs; only the resolution step allocates or
+    reuses an immutable canonical identity.
+    """
     topics: list[dict[str, Any]] = []
     plans: list[dict[str, Any]] = []
     syntheses: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
-    prefix = batch_id.removeprefix("RB-")
+    proposed_identities: list[dict[str, Any]] = []
     for family in reviewed_payload.get("topic_families") or []:
         family_key = stable_family_key(family)
-        family_id = f"TOPIC-FAMILY-{prefix}-{family_key}"
+        family_id = f"TCAND-FAMILY-{_digest(batch_id, family_key)}"
         family_claims = sorted(family_claim_ids(family))
         topics.append({
             "topic_id": family_id,
@@ -331,12 +589,18 @@ def build_incremental_package(
             "definition": family.get("organizing_question") or "",
             "topic_level": "family",
             "editorial_rationale": family.get("editorial_rationale") or "",
+            "origin_batch_ids": [batch_id],
             "review_status": "candidate",
             "visibility": "internal",
             "revision": 1,
         })
+        proposed_identities.append({
+            "topic_id": family_id, "label": family["title"], "claim_ids": family_claims,
+            "topic_level": "family", "parent_topic_id": None,
+            "origin_batch_id": batch_id,
+        })
         syntheses.append({
-            "synthesis_id": f"SYN-FAMILY-{prefix}-{family_key}",
+            "synthesis_id": f"SYN-FAMILY-{family_key}",
             "synthesis_type": "topic_family_candidate",
             "title": family["title"],
             "description": family.get("editorial_rationale") or "",
@@ -353,9 +617,9 @@ def build_incremental_package(
                 for section in subtopic.get("sections") or []
                 for claim_id in section.get("claim_ids") or []
             })
-            subtopic_key = _digest(family_key, str(subtopic["title"]), *subtopic_claims)
-            topic_id = f"TOPIC-{prefix}-{subtopic_key}"
-            plan_id = f"TP-{prefix}-{subtopic_key}"
+            subtopic_key = topic_slug(str(family.get("title")), str(subtopic["title"]))
+            topic_id = f"TCAND-{_digest(batch_id, subtopic_key)}"
+            plan_id = f"TCP-{_digest(batch_id, subtopic_key)}"
             topics.append({
                 "topic_id": topic_id,
                 "label": subtopic["title"],
@@ -364,13 +628,19 @@ def build_incremental_package(
                 "definition": subtopic.get("central_question") or "",
                 "topic_level": "subtopic",
                 "editorial_rationale": subtopic.get("editorial_rationale") or "",
+                "origin_batch_ids": [batch_id],
                 "review_status": "candidate",
                 "visibility": "internal",
                 "revision": 1,
             })
+            proposed_identities.append({
+                "topic_id": topic_id, "label": subtopic["title"], "claim_ids": subtopic_claims,
+                "topic_level": "subtopic", "parent_topic_id": family_id,
+                "origin_batch_id": batch_id,
+            })
             decisions = []
             for index, section in enumerate(subtopic.get("sections") or [], start=1):
-                decision_id = f"SD-{prefix}-{subtopic_key}-{index:02d}"
+                decision_id = f"SD-{subtopic_key}-{index:02d}"
                 claim_ids = list(dict.fromkeys(map(str, section.get("claim_ids") or [])))
                 decisions.append({
                     "decision_id": decision_id,
@@ -411,7 +681,7 @@ def build_incremental_package(
                 "revision": 1,
             })
             syntheses.append({
-                "synthesis_id": f"SYN-TOPIC-{prefix}-{subtopic_key}",
+                "synthesis_id": f"SYN-TOPIC-{subtopic_key}",
                 "synthesis_type": "topic_candidate",
                 "title": subtopic["title"],
                 "description": subtopic.get("editorial_rationale") or "",
@@ -423,16 +693,26 @@ def build_incremental_package(
                 "visibility": "internal",
                 "revision": 1,
             })
+    reconciliations = reconcile_topic_identity(proposed_identities, existing_topics)
     return {
-        "schema_version": "wang_topic_structure_incremental_v1",
+        "schema_version": "wang_topic_structure_incremental_v3",
         "package_id": f"TOPIC-STRUCTURE-{batch_id}-{_digest(str(reviewed_payload))}",
-        "topic_nodes": topics,
-        "knowledge_routes": routes,
-        "cross_source_syntheses": syntheses,
-        "product_plans": plans,
+        "topic_nodes": [],
+        "knowledge_routes": [],
+        "cross_source_syntheses": [],
+        "product_plans": [],
+        "candidate_topic_nodes": topics,
+        "candidate_knowledge_routes": routes,
+        "candidate_cross_source_syntheses": syntheses,
+        "candidate_product_plans": plans,
+        "topic_identity_reconciliations": reconciliations,
         "candidate_generation": {
             "status": "reviewed_topic_structure_candidates",
             "scope": SCOPE,
+            "origin_batch_id": batch_id,
             "unassigned_claim_ids": reviewed_payload.get("unassigned_claim_ids") or [],
+            "identity_policy": "candidate_ids_are_not_canonical; canonical_ids_are_reused_or_allocated_once_at_resolution",
+            "pending_identity_candidates": pending_topic_identity_ids({"topic_identity_reconciliations": reconciliations}),
+            "canonical_write_ready": not pending_topic_identity_ids({"topic_identity_reconciliations": reconciliations}),
         },
     }
