@@ -100,8 +100,39 @@ restart_backend() {
 
 restart_frontend() {
   local release="$1"
+  # PM2 restart/startOrRestart preserves the original cwd for an existing app.
+  # Delete and recreate the process so the immutable release path really takes
+  # effect. A failed start is handled by switch_services -> rollback.
+  pm2 delete "$PM2_APP" 2>/dev/null || true
   SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
-    pm2 startOrRestart "$PM2_CONFIG" --only "$PM2_APP" --update-env
+    pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
+}
+
+audit_frontend_release() {
+  local release="$1"
+  local audit_json critical_count
+
+  # npm exits non-zero whenever findings meet its threshold, so capture JSON
+  # explicitly and make our production policy decision from the counts.
+  audit_json="$(npm --prefix "$release/web" audit --omit=dev --json 2>/dev/null || true)"
+  [[ -n "$audit_json" ]] || {
+    printf 'deploy: npm audit returned no result for %s\n' "$release" >&2
+    return 1
+  }
+  critical_count="$(printf '%s' "$audit_json" | node -e '
+    let input = "";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      const report = JSON.parse(input);
+      process.stdout.write(String(report.metadata?.vulnerabilities?.critical ?? 0));
+    });
+  ')" || return 1
+  if ((critical_count > 0)); then
+    printf 'deploy: blocked by %s critical production dependency finding(s)\n' "$critical_count" >&2
+    printf 'deploy: run npm --prefix %s/web audit --omit=dev for details\n' "$release" >&2
+    return 1
+  fi
+  log "Production dependency audit passed (0 critical)"
 }
 
 switch_services() {
@@ -140,7 +171,7 @@ rollback() {
   return 1
 }
 
-for command_name in git tar python3 npm pm2 curl launchctl; do
+for command_name in git tar python3 node npm pm2 curl launchctl; do
   require_command "$command_name"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || fail "PlistBuddy is unavailable"
@@ -230,6 +261,9 @@ if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
 fi
 
 log "Switching production services"
+if ! audit_frontend_release "$RELEASE_DIR"; then
+  fail "release did not pass the production dependency policy; services were not changed"
+fi
 if ! switch_services "$RELEASE_DIR"; then
   printf 'deploy: new release failed; starting rollback\n' >&2
   rollback "$PREVIOUS_RELEASE"
