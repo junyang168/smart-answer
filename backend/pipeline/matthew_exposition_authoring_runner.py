@@ -28,6 +28,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     REVISION_SCHEMA,
     AuthoringContractError,
     build_authoring_packet,
+    build_authoring_packet_from_store,
     build_editorial_review_packet,
     build_final_delta_review_packet,
     canonical_json,
@@ -278,14 +279,20 @@ def run_authoring(
     program_audit_manifest_path: Path | None = None,
     program_audit_draft_id: str | None = None,
     repository_root: Path | None = None,
+    packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    packet = build_authoring_packet(
-        plan_path=plan_path,
-        knowledge_path=knowledge_path,
-        contract_path=contract_path,
-        publication_profile_path=publication_profile_path,
-        quality_profile_path=quality_profile_path,
-    )
+    # A caller that read the plan and its contract from the authoring store
+    # passes the built packet directly; `plan_path` / `contract_path` are then
+    # unused. They remain required for the file-based path, which is still the
+    # only one the CLI exposes.
+    if packet is None:
+        packet = build_authoring_packet(
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     packet_generation = {
         "fingerprint": packet["packet_sha256"],
@@ -898,6 +905,9 @@ def run_authoring(
             program_audit_manifest_path=program_audit_manifest_path,
             program_audit_draft_id=program_audit_draft_id,
             repository_root=repository_root,
+            # Carry the packet so a store-sourced run does not silently fall
+            # back to rebuilding from files on its second revision round.
+            packet=packet,
         )
         return {
             **next_result,
@@ -925,9 +935,20 @@ def run_authoring(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", type=Path, required=True)
+    # PostgreSQL is the authoring authority. `--plan-id` reads the plan and its
+    # contract from there; `--plan` / `--base-contract` read them from local
+    # JSON, which predates the store and is kept until every article has been
+    # migrated.
+    parser.add_argument(
+        "--plan-id",
+        help=(
+            "CompositionPlan id to read from the authoring store, including its "
+            "authoring contract. Mutually exclusive with --plan/--base-contract."
+        ),
+    )
+    parser.add_argument("--plan", type=Path)
     parser.add_argument("--knowledge", type=Path, required=True)
-    parser.add_argument("--base-contract", type=Path, required=True)
+    parser.add_argument("--base-contract", type=Path)
     parser.add_argument("--publication-profile", type=Path, required=True)
     parser.add_argument("--quality-profile", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -964,13 +985,32 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    packet = build_authoring_packet(
-        plan_path=args.plan,
-        knowledge_path=args.knowledge,
-        contract_path=args.base_contract,
-        publication_profile_path=args.publication_profile,
-        quality_profile_path=args.quality_profile,
-    )
+    if args.plan_id and (args.plan or args.base_contract):
+        parser.error("--plan-id cannot be combined with --plan or --base-contract")
+    if not args.plan_id and not (args.plan and args.base_contract):
+        parser.error("either --plan-id, or both --plan and --base-contract, are required")
+
+    if args.plan_id:
+        load_dotenv(PROJECT_ROOT / ".env")
+        from backend.api.canonical_repository.postgres_store import (
+            PostgresKnowledgeStore,
+        )
+
+        packet = build_authoring_packet_from_store(
+            plan_id=args.plan_id,
+            store=PostgresKnowledgeStore(),
+            knowledge_path=args.knowledge,
+            publication_profile_path=args.publication_profile,
+            quality_profile_path=args.quality_profile,
+        )
+    else:
+        packet = build_authoring_packet(
+            plan_path=args.plan,
+            knowledge_path=args.knowledge,
+            contract_path=args.base_contract,
+            publication_profile_path=args.publication_profile,
+            quality_profile_path=args.quality_profile,
+        )
     if args.dry_run:
         print(
             json.dumps(
@@ -987,6 +1027,7 @@ def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     result = run_authoring(
+        packet=packet,
         plan_path=args.plan,
         knowledge_path=args.knowledge,
         contract_path=args.base_contract,

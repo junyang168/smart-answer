@@ -1516,13 +1516,31 @@ def build_authoring_packet_from_store(
         contract_path = tmp_dir / "contract.json"
         plan_path.write_text(plan_document, encoding="utf-8")
         contract_path.write_text(canonical_json(contract), encoding="utf-8")
-        return build_authoring_packet(
+        packet = build_authoring_packet(
             plan_path=plan_path,
             knowledge_path=knowledge_path,
             contract_path=contract_path,
             publication_profile_path=publication_profile_path,
             quality_profile_path=quality_profile_path,
         )
+
+    # The plan and contract were staged through a temporary directory, whose
+    # name differs on every run. Left in `sources`, it makes packet_sha256
+    # non-deterministic, which silently defeats the generation cache: every
+    # run would look like new inputs and re-call the models. Record where they
+    # actually came from instead; the content sha256 stays as computed.
+    for key, object_id in (("plan", plan_id), ("base_contract", plan_payload.get("contract_id"))):
+        packet["sources"][key] = {
+            "authority": "postgresql_authoring_store",
+            "collection": "composition_plans",
+            "object_id": object_id,
+            "plan_revision": plan_payload.get("revision"),
+            "sha256": packet["sources"][key]["sha256"],
+        }
+    packet["packet_sha256"] = sha256_text(canonical_json({
+        key: value for key, value in packet.items() if key != "packet_sha256"
+    }))
+    return packet
 
 
 def build_authoring_packet(

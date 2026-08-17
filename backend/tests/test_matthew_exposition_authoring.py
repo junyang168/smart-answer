@@ -400,6 +400,51 @@ def test_contract_from_plan_payload_round_trips_every_field_the_contract_needs()
     assert contract["status"] == "editor_confirmed"
 
 
+def test_run_authoring_uses_a_supplied_packet_without_rebuilding_from_files(tmp_path):
+    """A store-sourced run has no plan/contract file to rebuild from.
+
+    Passing deliberately non-existent paths proves the supplied packet is used
+    rather than silently re-read from disk, which would crash for --plan-id.
+    """
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    claude = FakeClient([passing_review()], model="fake-claude")
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=tmp_path / "does-not-exist-plan.json",
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=tmp_path / "does-not-exist-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=tmp_path / "out",
+        openai_client=openai,
+        claude_client=claude,
+    )
+    assert result["status"] == "editorial_pass_no_revision"
+
+
+def test_store_built_packet_hash_is_stable_across_runs():
+    """Regression: the plan and contract are staged through a temp directory
+    whose name changes every run. Leaving that path in `sources` made
+    packet_sha256 non-deterministic, which silently defeats the generation
+    cache -- every run would look like new inputs and re-call the models.
+    """
+    store = _store_from_migrated_contract()
+    kwargs = dict(
+        plan_id="CP-matthew-16-13-20",
+        store=store,
+        knowledge_path=KNOWLEDGE_PATH,
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+    )
+    hashes = {build_authoring_packet_from_store(**kwargs)["packet_sha256"] for _ in range(3)}
+    assert len(hashes) == 1
+
+    packet = build_authoring_packet_from_store(**kwargs)
+    assert "tmp" not in json.dumps(packet["sources"], ensure_ascii=False)
+    assert packet["sources"]["plan"]["authority"] == "postgresql_authoring_store"
+    assert packet["sources"]["plan"]["object_id"] == "CP-matthew-16-13-20"
+
+
 def test_build_authoring_packet_from_store_matches_the_file_based_packet():
     store = _store_from_migrated_contract()
     from_file = full_authoring_packet()

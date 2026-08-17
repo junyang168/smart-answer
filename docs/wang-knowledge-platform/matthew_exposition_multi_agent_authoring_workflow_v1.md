@@ -104,11 +104,12 @@ Author Agent 可以把多個 composition decision 組織在同一個讀者小節
 
 完整自动发布命令应明确提供 Program Audit 模板；repository destination 默认来自 `$DATA_BASE_DIR/wang-knowledge-platform/repository`。仓库内 `output/` 已全部退役并由 `.gitignore` 禁止重新纳入版本控制；runtime／staging data 只能写入 `$DATA_BASE_DIR/wang-knowledge-platform/`：
 
+PostgreSQL 是 authoring authority。`--plan-id` 从 authoring store 读取 CompositionPlan 及其 authoring contract（承重步骤、`allowed_operations` / `ineligible_operations`、`base_source`）：
+
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_runner \
-  --plan <composition-plan.json> \
+  --plan-id CP-matthew-16-21-23 \
   --knowledge <knowledge-snapshot.json> \
-  --base-contract <base-manuscript-contract.json> \
   --publication-profile backend/config/publication_profiles/PP-matthew-expository-teaching-v1.json \
   --quality-profile backend/config/editorial_quality_profiles/WQ-matthew-exposition-v1.json \
   --output-dir <authoring-output-dir> \
@@ -117,6 +118,14 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_r
   --auto-accept-maintained-findings \
   --max-revision-rounds 2
 ```
+
+`--plan` 与 `--base-contract` 是迁移期的本机 JSON 路径，与 `--plan-id` 互斥：
+
+```bash
+  --plan <composition-plan.json> --base-contract <base-manuscript-contract.json>
+```
+
+承重步骤此前只存在于版本控制之外的 `base-manuscript-contract-input.json`，且自称 `editor_confirmed` 而无从查证；现已迁入 CompositionPlan 并记录 `contract_confirmed_by` / `contract_confirmed_at`。文件路径保留至全部文章迁移完成为止。knowledge snapshot、publication profile 与 quality profile 仍是文件：来源稿件与共享设定不属于 plan 状态。
 
 ## 6. 失败与停止条件
 
