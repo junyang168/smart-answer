@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises'; // 使用 Node.js 的文件系統模塊 (Promise 版本)
 import path from 'path';
-import nodemailer from 'nodemailer';
+import nodemailer from 'nodemailer9';
 
 // 定義數據存儲的路徑
 // process.cwd() 指向項目的根目錄

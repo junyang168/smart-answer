@@ -4,8 +4,9 @@ const ALLOWED_CATEGORIES = new Set(["basic", "original"]);
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { category: string; reference: string } },
+  props: { params: Promise<{ category: string; reference: string }> }
 ) {
+  const params = await props.params;
   const { category, reference } = params;
   if (!ALLOWED_CATEGORIES.has(category)) {
     return NextResponse.json({ error: "Unsupported category" }, { status: 404 });

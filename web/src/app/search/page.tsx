@@ -34,23 +34,24 @@ const SearchBar: React.FC<SearchBarProps> = ({ org_id, rid, query }) => {
 
 // Define the expected query parameters
 interface PageProps {
-  searchParams: {
+  searchParams: Promise<{
     q?: string; 
     o?: string; 
     rid?: string;
-  };
+  }>;
 }
 
 
-export default async function SearchPage({searchParams} : PageProps) {
-    const org_id :string = searchParams.o || "";
-    const rid :string = searchParams.rid || "";
-    const query :string = searchParams.q || "";
+export default async function SearchPage(props: PageProps) {
+  const searchParams = await props.searchParams;
+  const org_id :string = searchParams.o || "";
+  const rid :string = searchParams.rid || "";
+  const query :string = searchParams.q || "";
 
-    return (   
-      <Suspense fallback={<div>Loading...</div>}>
-        <SearchBar org_id={org_id} rid={rid} query={query} /> 
-      </Suspense>
-      
-    )  
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SearchBar org_id={org_id} rid={rid} query={query} />
+    </Suspense>
+
+  )
 }

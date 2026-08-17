@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 import { VideoThumbnail } from "@/app/components/resources/micro-sermon/VideoThumbnail";
-import {
-  MICRO_SERMON_REVALIDATE,
-  fetchMicroSermons,
-} from "./sermons";
+import { fetchMicroSermons } from "./sermons";
 import type { MicroSermonData } from "./sermons";
 
 export const metadata: Metadata = {
@@ -13,7 +10,7 @@ export const metadata: Metadata = {
     "用简短、清晰的内容，帮助你理解神的话语，并在生活中经历祂的同在。",
 };
 
-export const revalidate = MICRO_SERMON_REVALIDATE;
+export const revalidate = 0;
 
 /**
  * Extract YouTube video ID from various URL formats.

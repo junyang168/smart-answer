@@ -10,10 +10,10 @@ const baseUrl = serviceUrl.replace(/\/$/, "");
 
 async function proxyRequest(
   request: Request,
-  context: { params: { item: string } },
+  context: { params: Promise<{ item: string }> },
   method: "GET" | "PUT"
 ) {
-  const { item } = context.params;
+  const { item } = await context.params;
   const target = `${baseUrl}/slides/${encodeURIComponent(item)}/frame`;
 
   const init: RequestInit = {
@@ -42,10 +42,10 @@ async function proxyRequest(
   return NextResponse.json(payload, { status: response.status });
 }
 
-export async function GET(request: Request, context: { params: { item: string } }) {
+export async function GET(request: Request, context: { params: Promise<{ item: string }> }) {
   return proxyRequest(request, context, "GET");
 }
 
-export async function PUT(request: Request, context: { params: { item: string } }) {
+export async function PUT(request: Request, context: { params: Promise<{ item: string }> }) {
   return proxyRequest(request, context, "PUT");
 }

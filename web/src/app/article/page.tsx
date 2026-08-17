@@ -6,16 +6,17 @@ import { ArticleDetail } from "../interfaces/article_detail";
 
 // Define the expected query parameters
 interface PageProps {
-  searchParams: {
+  searchParams: Promise<{
     i?: string;
     o?: string;
     rid?: string;
     s?: string;
     d?: string;
-  };
+  }>;
 }
 
-export default async function ArticlePage({ searchParams }: PageProps) {
+export default async function ArticlePage(props: PageProps) {
+  const searchParams = await props.searchParams;
   const org_id = searchParams.o || "";
   const rid = searchParams.rid || "";
   const item: string = searchParams.i || "";

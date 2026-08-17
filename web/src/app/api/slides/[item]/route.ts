@@ -8,8 +8,8 @@ if (!serviceUrl) {
 
 const baseUrl = serviceUrl.replace(/\/$/, "");
 
-export async function GET(_request: Request, context: { params: { item: string } }) {
-  const { item } = context.params;
+export async function GET(_request: Request, context: { params: Promise<{ item: string }> }) {
+  const { item } = (await context.params);
   const target = `${baseUrl}/slides/${encodeURIComponent(item)}`;
 
   const response = await fetch(target, {

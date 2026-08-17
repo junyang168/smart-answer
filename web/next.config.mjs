@@ -4,6 +4,9 @@ export default (phase, { defaultConfig }) => {
    * @type {import("next").NextConfig}
    */
   return {
+    turbopack: {
+      root: process.cwd(),
+    },
     experimental: {
       proxyTimeout: 120000,
     },

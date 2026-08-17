@@ -10,7 +10,6 @@ import {
   fetchNotesToManuscriptSeriesDetail,
   fetchSeriesTopics,
   NotesToManuscriptSeriesDetail,
-  NOTES_TO_MANUSCRIPT_REVALIDATE,
   TopicListResponse,
 } from "../data";
 
@@ -18,7 +17,7 @@ type PageProps = {
   params: Promise<{ seriesId: string }>;
 };
 
-export const revalidate = NOTES_TO_MANUSCRIPT_REVALIDATE;
+export const revalidate = 300;
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { seriesId } = await params;

@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { use } from "react";
 import MultiPageEditor from "./MultiPageEditor";
 
-export default function Page({ params }: { params: { id: string } }) {
+export default function Page(props: { params: Promise<{ id: string }> }) {
+    const params = use(props.params);
     const projectId = params.id;
     const [projectTitle, setProjectTitle] = React.useState<string>(projectId);
 

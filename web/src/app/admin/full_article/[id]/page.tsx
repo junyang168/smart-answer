@@ -5,10 +5,11 @@ import { fetchFullArticle } from "@/app/admin/full_article/api";
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
-export default async function FullArticleDetailPage({ params }: PageProps) {
+export default async function FullArticleDetailPage(props: PageProps) {
+  const params = await props.params;
   try {
     const article = await fetchFullArticle(params.id);
     return <FullArticleEditor initialArticle={article} />;

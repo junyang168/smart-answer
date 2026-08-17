@@ -1,6 +1,4 @@
-import { NextAuthOptions, User, getServerSession } from "next-auth";
-import { useSession } from "next-auth/react";
-import { redirect, useRouter } from "next/navigation";
+import { NextAuthOptions, getServerSession } from "next-auth";
 
 import GoogleProvider from "next-auth/providers/google";
 import { getUserByEmail } from "./user-db"
@@ -86,21 +84,6 @@ export const authConfig: NextAuthOptions = {
     strategy: "jwt",
   },
 };
-
-/*
-export async function loginIsRequiredServer() {
-  const session = await getServerSession(authConfig);
-  if (!session) return redirect("/");
-}
-
-export function loginIsRequiredClient() {
-  if (typeof window !== "undefined") {
-    const session = useSession();
-    const router = useRouter();
-    if (!session) router.push("/");
-  }
-}
-*/
 
 /**
  * Get session with dev environment fallback

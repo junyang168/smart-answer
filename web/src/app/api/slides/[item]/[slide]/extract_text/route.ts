@@ -10,9 +10,9 @@ const baseUrl = serviceUrl.replace(/\/$/, "");
 
 export async function POST(
   _request: Request,
-  context: { params: { item: string; slide: string } }
+  context: { params: Promise<{ item: string; slide: string }> }
 ) {
-  const { item, slide } = context.params;
+  const { item, slide } = (await context.params);
   const target = `${baseUrl}/slides/${encodeURIComponent(item)}/${encodeURIComponent(slide)}/extract_text`;
 
   const response = await fetch(target, {

@@ -4,7 +4,8 @@ import { FellowshipDetail } from "@/app/components/fellowship/FellowshipDetail";
 
 const FellowshipDetailFallback = () => <div className="py-20 text-center">正在準備團契回顧...</div>;
 
-export default function FellowshipDetailPage({ params }: { params: { date: string } }) {
+export default async function FellowshipDetailPage(props: { params: Promise<{ date: string }> }) {
+  const params = await props.params;
   const breadcrumbLinks = [
     { name: "首頁", href: "/" },
     { name: "AI 輔助查經", href: "/resources" },

@@ -1,9 +1,10 @@
 "use client";
 
-import React from "react";
+import React, { use } from "react";
 import SplitPaneEditor from "./SplitPaneEditor";
 
-export default function Page({ params }: { params: { filename: string } }) {
+export default function Page(props: { params: Promise<{ filename: string }> }) {
+    const params = use(props.params);
     // Decode filename just in case
     const filename = decodeURIComponent(params.filename);
 

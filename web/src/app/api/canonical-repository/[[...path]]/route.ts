@@ -19,6 +19,7 @@ async function proxy(request: NextRequest, path: string[] | undefined) {
   });
 }
 
-export async function GET(request: NextRequest, { params }: { params: { path?: string[] } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ path?: string[] }> }) {
+  const params = await props.params;
   return proxy(request, params.path);
 }

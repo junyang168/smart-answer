@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import {
     AlertCircle,
@@ -178,7 +178,8 @@ function modeLabel(mode?: string, unitId?: string | null) {
     }
 }
 
-export default function GenerationPage({ params }: { params: { id: string } }) {
+export default function GenerationPage(props: { params: Promise<{ id: string }> }) {
+    const params = use(props.params);
     const router = useRouter();
     const projectId = decodeURIComponent(params.id);
     const [state, setState] = useState<Stage1Status>(DEFAULT_STATUS);

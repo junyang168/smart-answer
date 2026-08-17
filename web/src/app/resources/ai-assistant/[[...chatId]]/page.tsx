@@ -3,15 +3,16 @@ import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import { ChatLayout } from '@/app/components/ai-assistant/ChatLayout';
 import { Suspense } from 'react';
 
-export default function AIAssistantPage({ params }: { params: { chatId?: string[] } }) {
+export default async function AIAssistantPage(props: { params: Promise<{ chatId?: string[] }> }) {
+  const params = await props.params;
   // 從 URL 中解析出 chatId
   const chatId = params.chatId?.[0];
 
-    const breadcrumbLinks = [
-    { name: '首頁', href: '/' },
-    { name: 'AI 輔助查經', href: '/resources' },
-    { name: 'AI 信仰助教' },
-  ];
+  const breadcrumbLinks = [
+  { name: '首頁', href: '/' },
+  { name: 'AI 輔助查經', href: '/resources' },
+  { name: 'AI 信仰助教' },
+];
 
   return (
     <div className="bg-gray-100">
