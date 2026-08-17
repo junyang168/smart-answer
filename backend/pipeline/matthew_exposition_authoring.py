@@ -1359,6 +1359,83 @@ def validate_revision_result(
     )
 
 
+def _sermon_transcript_slices(
+    *,
+    source_documents: list[dict[str, Any]],
+    scoped_fragments: list[dict[str, Any]],
+    sources_manifest: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    """Return the full transcript-segment text behind every scoped sermon fragment.
+
+    A `source_fragments` entry only carries the one sentence an editor picked
+    as `verbatim_excerpt`; the surrounding professor speech in that same
+    transcript segment is otherwise invisible to the Author Agent, even
+    though `source_segment_index` already identifies exactly which segment
+    it came from. This mirrors `base_manuscript_texts`, which gives the
+    author the full notes manuscript rather than only its cited sentences;
+    sermon transcripts previously had no equivalent and were authored from
+    fragment excerpts alone.
+
+    Scope is deliberately narrow: only the segments a scoped fragment
+    actually cites, not the surrounding transcript, so a topic change in a
+    neighbouring segment (a different passage's material) cannot enter the
+    packet unless a fragment already grounds it.
+    """
+
+    documents_by_id = {
+        item.get("source_id"): item
+        for item in source_documents
+        if isinstance(item, dict)
+    }
+    referenced_indices: dict[str, set[int]] = {}
+    for fragment in scoped_fragments:
+        source_id = fragment.get("source_id")
+        segment_index = fragment.get("source_segment_index")
+        document = documents_by_id.get(source_id)
+        if document is None or document.get("source_type") != "sermon_transcript":
+            continue
+        if segment_index is None:
+            continue
+        referenced_indices.setdefault(source_id, set()).add(segment_index)
+
+    slices: dict[str, dict[str, str]] = {}
+    for source_id, indices in referenced_indices.items():
+        document = documents_by_id[source_id]
+        transcript_path = Path(document["source_path"])
+        raw_transcript = transcript_path.read_text(encoding="utf-8")
+        actual_sha256 = sha256_text(raw_transcript)
+        declared_sha256 = document.get("source_sha256")
+        if declared_sha256 and declared_sha256 != actual_sha256:
+            raise AuthoringContractError(
+                f"stale sermon transcript source: {source_id}"
+            )
+        transcript = json.loads(raw_transcript)
+        if isinstance(transcript, list):
+            # `script_review/` transcripts are a bare segment list; only
+            # `script_published/` transcripts wrap it in {"script": [...]}.
+            segments = transcript
+        else:
+            segments = transcript.get("script") or transcript.get("segments") or []
+        segments_by_index = {segment.get("index"): segment for segment in segments}
+
+        segment_texts: dict[str, str] = {}
+        for segment_index in sorted(indices):
+            segment = segments_by_index.get(segment_index)
+            if segment is None:
+                raise AuthoringContractError(
+                    f"referenced sermon segment not found: {source_id}#{segment_index}"
+                )
+            segment_texts[str(segment_index)] = str(segment.get("text") or "")
+        slices[source_id] = segment_texts
+        sources_manifest[f"sermon_transcript_{source_id}"] = {
+            "source_id": source_id,
+            "path": str(transcript_path.resolve()),
+            "sha256": actual_sha256,
+            "segment_indices": sorted(str(index) for index in indices),
+        }
+    return slices
+
+
 def build_authoring_packet(
     *,
     plan_path: str | Path,
@@ -1473,6 +1550,11 @@ def build_authoring_packet(
         if item.get("fragment_id") in fragment_ids
     ]
     scoped_source_ids = {item.get("source_id") for item in scoped_fragments}
+    sermon_transcript_texts = _sermon_transcript_slices(
+        source_documents=knowledge.get("source_documents", []),
+        scoped_fragments=scoped_fragments,
+        sources_manifest=sources,
+    )
     scoped_knowledge = {
         "schema_version": knowledge.get("schema_version"),
         "package_id": knowledge.get("package_id"),
@@ -1524,6 +1606,7 @@ def build_authoring_packet(
         "quality_profile": loaded["quality_profile"],
         "base_manuscript_text": base_manuscript_texts[contract["base_source"]["source_id"]],
         "base_manuscript_texts": base_manuscript_texts,
+        "sermon_transcript_texts": sermon_transcript_texts,
         "publication_gate": {
             "eligible": False,
             "reason": "human publication approval and external program audit are not part of authoring",
