@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from backend.pipeline.matthew_exposition_authoring import (
     canonical_json,
+    evidence_step_fragment_ids,
     sha256_text,
     validate_strict_schema,
 )
@@ -153,11 +154,19 @@ def build_paragraph_material(
             step = evidence_by_id.get(evidence_step_id)
             if step is None:
                 continue
-            fragment = fragments_by_id.get(step.get("source_fragment_id"))
+            # Every fragment behind the step, not only the first: a step whose
+            # reasoning rests on two sentences of the source was being checked
+            # against one of them.
+            excerpts = [
+                excerpt
+                for fragment_id in evidence_step_fragment_ids(step)
+                if (fragment := fragments_by_id.get(fragment_id))
+                and (excerpt := fragment.get("verbatim_excerpt"))
+            ]
             evidence.append(
                 {
                     "statement": step.get("statement"),
-                    "source_excerpt": fragment.get("verbatim_excerpt") if fragment else None,
+                    "source_excerpt": "\n".join(excerpts) or None,
                 }
             )
         entry = {
@@ -188,17 +197,80 @@ def build_paragraph_material(
     return material
 
 
+def cited_transcript_segments(
+    claim_ids: list[str],
+    knowledge: dict[str, Any],
+    transcript_texts: dict[str, dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Return the sermon segments behind the fragments these claims cite.
+
+    The author is told (rule 8e) to prefer the professor's own wording, which
+    lives in the whole transcript segment rather than in the one sentence an
+    editor lifted out of it as `verbatim_excerpt`. Without the segment here,
+    the gate judged a faithful verbatim quote against material that does not
+    contain it and the repair path then replaced his words with the notes'
+    abstract paraphrase -- undoing the instruction it was meant to enforce.
+
+    Scope stays the paragraph's own: only segments a cited fragment already
+    points at, which `_sermon_transcript_slices` has already narrowed to the
+    segments scoped fragments cite. Nothing outside the paragraph's material
+    becomes quotable.
+    """
+
+    claims_by_id = {c.get("claim_id"): c for c in knowledge.get("claims", [])}
+    evidence_by_id = {e.get("evidence_step_id"): e for e in knowledge.get("evidence_steps", [])}
+    fragments_by_id = {f.get("fragment_id"): f for f in knowledge.get("source_fragments", [])}
+
+    segments: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for claim_id in claim_ids:
+        claim = claims_by_id.get(claim_id) or {}
+        for evidence_step_id in claim.get("evidence_step_ids", []):
+            step = evidence_by_id.get(evidence_step_id) or {}
+            for fragment_id in evidence_step_fragment_ids(step):
+                fragment = fragments_by_id.get(fragment_id)
+                if fragment is None:
+                    continue
+                source_id = str(fragment.get("source_id") or "")
+                segment_index = fragment.get("source_segment_index")
+                if segment_index is None:
+                    continue
+                key = (source_id, str(segment_index))
+                if key in seen:
+                    continue
+                text = (transcript_texts.get(source_id) or {}).get(str(segment_index))
+                if not text:
+                    continue
+                seen.add(key)
+                segments.append(
+                    {
+                        "source_id": source_id,
+                        "segment_index": str(segment_index),
+                        "text": text,
+                    }
+                )
+    return segments
+
+
 def build_grounding_packet(
     paragraph_text: str,
     claim_ids: list[str],
     knowledge: dict[str, Any],
     instructions_by_claim: dict[str, str] | None = None,
+    transcript_texts: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     packet = {
         "schema_version": "matthew-exposition-grounding-packet.v1",
         "paragraph_text": paragraph_text,
         "material": build_paragraph_material(claim_ids, knowledge, instructions_by_claim),
     }
+    # Carried once per segment rather than repeated under every claim that
+    # cites it: the same segment backs several claims, and the packet has a
+    # hard byte budget.
+    if transcript_texts:
+        segments = cited_transcript_segments(claim_ids, knowledge, transcript_texts)
+        if segments:
+            packet["professor_transcript_segments"] = segments
     size = len(canonical_json(packet).encode("utf-8"))
     if size > GROUNDING_PACKET_MAX_BYTES:
         raise GroundingCheckError(
@@ -230,9 +302,10 @@ def check_paragraph_grounding(
     *,
     client: Any,
     instructions_by_claim: dict[str, str] | None = None,
+    transcript_texts: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     packet = build_grounding_packet(
-        paragraph_text, claim_ids, knowledge, instructions_by_claim
+        paragraph_text, claim_ids, knowledge, instructions_by_claim, transcript_texts
     )
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     result = client.generate_json(prompt, canonical_json(packet), GROUNDING_RESULT_SCHEMA)
@@ -281,6 +354,7 @@ def check_manuscript_grounding(
     client: Any,
     author_sections: list[dict[str, Any]] | None = None,
     instructions_by_claim: dict[str, str] | None = None,
+    transcript_texts: dict[str, dict[str, str]] | None = None,
     checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
 ) -> dict[str, Any]:
     """Run the grounding check over every checkable paragraph in a manuscript.
@@ -313,6 +387,7 @@ def check_manuscript_grounding(
             result = check_paragraph_grounding(
                 text, claim_ids, knowledge, client=client,
                 instructions_by_claim=instructions_by_claim,
+                transcript_texts=transcript_texts,
             )
         except (GroundingCheckError, ValueError, RuntimeError) as exc:
             # A single paragraph's call failing must not end the run: the

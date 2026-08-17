@@ -4,6 +4,7 @@ from backend.pipeline.manuscript_grounding_check import (
     GroundingCheckError,
     build_grounding_packet,
     build_paragraph_material,
+    cited_transcript_segments,
     check_manuscript_grounding,
     check_paragraph_grounding,
     extract_provenance_paragraphs,
@@ -383,3 +384,119 @@ def test_a_following_heading_is_not_part_of_the_paragraph():
     )
     paragraphs = extract_provenance_paragraphs(markdown)
     assert paragraphs[0]["paragraph_text"] == "段落內容。"
+
+# ---- fragment id spellings and transcript segments ----
+
+
+def _plural_spelling_knowledge():
+    """Knowledge as the authoring store compiles it: the plural spelling only.
+
+    `shared_knowledge_pilot` writes both `source_fragment_ids` and the singular
+    `source_fragment_id` onto every step; knowledge compiled from the store
+    keeps whichever its producer used. Reading only one spelling left the gate
+    with no source excerpt at all on a store-compiled plan.
+    """
+
+    return {
+        "claims": [
+            {"claim_id": "CL1", "statement": "教導進入第二個階段。", "evidence_step_ids": ["E1"]},
+        ],
+        "evidence_steps": [
+            {
+                "evidence_step_id": "E1",
+                "statement": "太16:21的「從此」是結構標誌。",
+                "source_fragment_ids": ["F1", "F2"],
+            },
+        ],
+        "source_fragments": [
+            {
+                "fragment_id": "F1",
+                "source_id": "SRC-1",
+                "source_segment_index": 732,
+                "verbatim_excerpt": "馬太十六章二十一節是耶穌對門徒的教導的第二段的開始。",
+            },
+            {
+                "fragment_id": "F2",
+                "source_id": "SRC-1",
+                "source_segment_index": 732,
+                "verbatim_excerpt": "彼得認識耶穌為基督、彌賽亞，但不認識彌賽亞的性質。",
+            },
+        ],
+    }
+
+
+SEGMENT_732 = (
+    "第一功課是什麼？你要先知道耶穌就是基督。可是門徒通過第一課的考試，耶穌開始教他們第二課。"
+    "馬太十六章二十一節是耶穌對門徒的教導的第二段的開始。"
+)
+TRANSCRIPTS = {"SRC-1": {"732": SEGMENT_732}}
+
+
+def test_material_resolves_excerpts_from_the_plural_fragment_spelling():
+    material = build_paragraph_material(["CL1"], _plural_spelling_knowledge())
+    assert material[0]["evidence"][0]["source_excerpt"] == (
+        "馬太十六章二十一節是耶穌對門徒的教導的第二段的開始。\n"
+        "彼得認識耶穌為基督、彌賽亞，但不認識彌賽亞的性質。"
+    )
+
+
+def test_material_still_resolves_the_singular_fragment_spelling():
+    material = build_paragraph_material(["CL2"], _knowledge())
+    assert material[0]["evidence"][0]["source_excerpt"] == (
+        "彼得並非不認識耶穌是彌賽亞，他的問題在於他不認識彌賽亞的性質。"
+    )
+
+
+def test_cited_segments_carry_the_professors_wording_the_excerpt_left_out():
+    segments = cited_transcript_segments(["CL1"], _plural_spelling_knowledge(), TRANSCRIPTS)
+    assert [(item["source_id"], item["segment_index"]) for item in segments] == [("SRC-1", "732")]
+    # The sentence rule 8e wants quoted is in the segment and in no excerpt.
+    assert "門徒通過第一課的考試" in segments[0]["text"]
+
+
+def test_a_segment_backing_several_claims_is_carried_once():
+    knowledge = _plural_spelling_knowledge()
+    knowledge["claims"].append(
+        {"claim_id": "CL2", "statement": "彼得不認識彌賽亞的性質。", "evidence_step_ids": ["E1"]}
+    )
+    assert len(cited_transcript_segments(["CL1", "CL2"], knowledge, TRANSCRIPTS)) == 1
+
+
+def test_only_segments_a_cited_fragment_points_at_are_carried():
+    transcripts = {"SRC-1": {"732": SEGMENT_732, "733": "另一段講的是別的經文。"}}
+    segments = cited_transcript_segments(["CL1"], _plural_spelling_knowledge(), transcripts)
+    assert [item["segment_index"] for item in segments] == ["732"]
+
+
+def test_packet_omits_the_segment_key_when_no_transcript_is_supplied():
+    packet = build_grounding_packet("段落", ["CL1"], _plural_spelling_knowledge())
+    assert "professor_transcript_segments" not in packet
+
+
+def test_packet_omits_the_segment_key_when_the_claims_cite_no_sermon_segment():
+    # A claim backed only by a notes fragment has no transcript behind it.
+    packet = build_grounding_packet("段落", ["CL1"], _knowledge(), None, TRANSCRIPTS)
+    assert "professor_transcript_segments" not in packet
+
+
+def test_manuscript_check_passes_the_transcript_through_to_each_paragraph():
+    seen = {}
+
+    class RecordingClient:
+        def generate_json(self, _prompt, packet, _schema):
+            seen.update(__import__("json").loads(packet))
+            return _grounded_result()
+
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n'
+        "耶穌先要門徒認出祂是基督，通過了這一課，才開始教他們第二課。"
+    )
+    report = check_manuscript_grounding(
+        markdown,
+        _plural_spelling_knowledge(),
+        client=RecordingClient(),
+        transcript_texts=TRANSCRIPTS,
+    )
+    assert report["passed"]
+    assert "門徒通過第一課的考試" in seen["professor_transcript_segments"][0]["text"]
+

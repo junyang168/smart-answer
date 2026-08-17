@@ -292,6 +292,7 @@ def _run_grounding_stage(
         client=claude_client,
         author_sections=author_sections,
         instructions_by_claim=instructions_from_contract(packet["base_contract"]),
+        transcript_texts=packet.get("sermon_transcript_texts") or {},
     )
     _write_json(
         output_dir / "grounding-report.json",

@@ -1051,6 +1051,25 @@ def validate_editorial_review(
     return outcome
 
 
+def evidence_step_fragment_ids(step: dict[str, Any]) -> list[str]:
+    """Return an evidence step's source fragments from either spelling.
+
+    A step carries `source_fragment_ids` or the singular `source_fragment_id`
+    depending on which producer wrote it: `shared_knowledge_pilot` normalizes
+    both onto every record, while knowledge compiled from the authoring store
+    keeps whichever one its producer used. The two spellings were read in
+    exactly the places the other was populated -- the packet builder collected
+    only the plural, the grounding gate resolved only the singular -- so on a
+    store-compiled plan the sets did not intersect and every paragraph was
+    checked with no source excerpt at all.
+    """
+
+    ids = step.get("source_fragment_ids") or []
+    if not ids and step.get("source_fragment_id"):
+        ids = [step["source_fragment_id"]]
+    return [str(item) for item in ids]
+
+
 def _with_packet_size(packet: dict[str, Any], *, max_bytes: int) -> dict[str, Any]:
     packet["size_budget"] = {"max_bytes": max_bytes, "actual_bytes": 0}
     # The number of digits in actual_bytes can change the serialized size.  A
@@ -1796,7 +1815,7 @@ def build_authoring_packet(
     fragment_ids = {
         fragment_id
         for step in scoped_evidence_steps
-        for fragment_id in step.get("source_fragment_ids", [])
+        for fragment_id in evidence_step_fragment_ids(step)
     }
     scoped_fragments = [
         item
