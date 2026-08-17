@@ -556,6 +556,11 @@ def run_authoring(
             contract=packet["base_contract"],
             manuscript=draft,
             quality_profile=packet["quality_profile"],
+            # This is the merged review inherited from the previous round, not
+            # a fresh assessment. "Below the threshold with nothing blocking
+            # left" is a legitimate state here, and stopping for a human is
+            # already how the runner handles it.
+            require_blocking_finding_when_failing=False,
         )
         comparable_override = {
             key: value

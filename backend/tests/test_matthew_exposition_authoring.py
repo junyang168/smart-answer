@@ -1600,3 +1600,35 @@ def test_out_of_scope_dimension_cannot_fail_its_minimum():
 def test_scoring_rejects_an_unknown_not_applicable_dimension():
     with pytest.raises(AuthoringContractError, match="not-applicable"):
         evaluate_editorial_review(passing_review(), _profile(), {"no_such_dimension": "x"})
+
+
+def test_a_failing_fresh_review_must_say_what_to_change():
+    review = passing_review()
+    for item in review["dimension_scores"]:
+        item["score"] = 0
+    review["findings"] = []
+    with pytest.raises(AuthoringContractError, match="blocking finding"):
+        validate_editorial_review(
+            review,
+            contract=contract(),
+            manuscript=valid_author_result()["manuscript_markdown"],
+            quality_profile=_profile(),
+        )
+
+
+def test_an_inherited_review_may_fail_with_nothing_blocking_left():
+    """Below the threshold with no must-fix findings is a real state for a
+    merged review carried into a later round; the runner stops for a human.
+    """
+    review = passing_review()
+    for item in review["dimension_scores"]:
+        item["score"] = 0
+    review["findings"] = []
+    outcome = validate_editorial_review(
+        review,
+        contract=contract(),
+        manuscript=valid_author_result()["manuscript_markdown"],
+        quality_profile=_profile(),
+        require_blocking_finding_when_failing=False,
+    )
+    assert outcome["passed"] is False

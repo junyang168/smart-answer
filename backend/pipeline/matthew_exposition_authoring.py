@@ -951,6 +951,7 @@ def validate_editorial_review(
     contract: dict[str, Any],
     manuscript: str,
     quality_profile: dict[str, Any],
+    require_blocking_finding_when_failing: bool = True,
 ) -> dict[str, Any]:
     validate_strict_schema(review, EDITORIAL_REVIEW_SCHEMA)
     if review.get("scope_confirmation") != "writing_quality_and_base_preservation":
@@ -993,7 +994,16 @@ def validate_editorial_review(
             raise AuthoringContractError(
                 f"passing editorial review omitted required base steps: {sorted(missing_required)}"
             )
-    if not outcome["passed"] and not any(item["blocking"] for item in review.get("findings", [])):
+    # A reviewer that fails a draft must say what to change -- otherwise the
+    # run has nothing to act on. This does not hold for a merged review
+    # inherited into a later round: "below the threshold, but nothing that
+    # must be fixed" is a real and reportable state, and the runner's own
+    # no-actionable-findings path already handles it by stopping for a human.
+    if (
+        require_blocking_finding_when_failing
+        and not outcome["passed"]
+        and not any(item["blocking"] for item in review.get("findings", []))
+    ):
         raise AuthoringContractError(
             "a failing rubric assessment requires at least one blocking finding"
         )

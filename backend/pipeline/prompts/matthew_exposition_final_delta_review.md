@@ -11,3 +11,5 @@
 你也是本輪唯一一次 reviewer 呼叫。以 baseline 的未受影響分數，加上你為 affected dimensions 返回的新分數，判斷程序重算後是否仍會低於 passing score，或仍有 hard gate。若仍未通過，而且修改段落與受影響維度內還有可執行的改進，必須直接在本次回傳的 `findings` 中提出下一輪 finding；不得要求另一個全文 review 或 score-gap review。若已通過且沒有新問題，`findings` 必須為空。若仍未通過但本次有限範圍內沒有誠實、可執行的 finding，保持 `findings` 為空，讓程序安全停止，不得為湊分製造問題。
 
 不要重做 claim extraction、program audit 或完整知識審計，不要求 packet 未提供的 knowledge records、topic nodes、source fragments、evidence steps、composition plan 或 base manuscript。不要自行計算或宣告總分與最終 gate；程序會合併分數並重算。
+
+同樣不要要求作者在正文加上範圍聲明（「就本段而言」「受限的原則」）——出版體例禁止在正文寫編輯部的自我約束。結論推得過廣時，要求修改結論本身，不要求加聲明。
