@@ -91,8 +91,30 @@ def extract_provenance_paragraphs(markdown: str) -> list[dict[str, Any]]:
     return paragraphs
 
 
+def instructions_from_contract(contract: dict[str, Any]) -> dict[str, str]:
+    """Map claim_id -> the required step's editorial instruction.
+
+    The contract is the authority for what the editorial board decided; a
+    claim record may or may not carry a copy, depending on whether it was
+    created by the step backfill or already existed and was reused. Deriving
+    the map here means a reused claim is not silently missing the instruction
+    its step imposes.
+    """
+
+    instructions: dict[str, str] = {}
+    for section in contract.get("sections") or []:
+        for step in section.get("required_argument_steps") or []:
+            claim_id = step.get("claim_id")
+            statement = step.get("statement")
+            if claim_id and statement:
+                instructions[str(claim_id)] = str(statement)
+    return instructions
+
+
 def build_paragraph_material(
-    claim_ids: list[str], knowledge: dict[str, Any]
+    claim_ids: list[str],
+    knowledge: dict[str, Any],
+    instructions_by_claim: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the claim/evidence/source material a paragraph is allowed to use."""
 
@@ -133,7 +155,9 @@ def build_paragraph_material(
         # the instruction as separately-attributed material stops the gate
         # rejecting a paragraph for following the contract, without letting an
         # editorial decision pass as something the professor said.
-        instruction = claim.get("editorial_instruction")
+        instruction = (instructions_by_claim or {}).get(claim_id) or claim.get(
+            "editorial_instruction"
+        )
         if instruction:
             entry["editorial_instruction"] = {
                 "attribution": "editor",
@@ -144,12 +168,15 @@ def build_paragraph_material(
 
 
 def build_grounding_packet(
-    paragraph_text: str, claim_ids: list[str], knowledge: dict[str, Any]
+    paragraph_text: str,
+    claim_ids: list[str],
+    knowledge: dict[str, Any],
+    instructions_by_claim: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     packet = {
         "schema_version": "matthew-exposition-grounding-packet.v1",
         "paragraph_text": paragraph_text,
-        "material": build_paragraph_material(claim_ids, knowledge),
+        "material": build_paragraph_material(claim_ids, knowledge, instructions_by_claim),
     }
     size = len(canonical_json(packet).encode("utf-8"))
     if size > GROUNDING_PACKET_MAX_BYTES:
@@ -181,8 +208,11 @@ def check_paragraph_grounding(
     knowledge: dict[str, Any],
     *,
     client: Any,
+    instructions_by_claim: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    packet = build_grounding_packet(paragraph_text, claim_ids, knowledge)
+    packet = build_grounding_packet(
+        paragraph_text, claim_ids, knowledge, instructions_by_claim
+    )
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     result = client.generate_json(prompt, canonical_json(packet), GROUNDING_RESULT_SCHEMA)
     validate_grounding_result(result, paragraph_text=paragraph_text)
@@ -229,6 +259,7 @@ def check_manuscript_grounding(
     *,
     client: Any,
     author_sections: list[dict[str, Any]] | None = None,
+    instructions_by_claim: dict[str, str] | None = None,
     checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
 ) -> dict[str, Any]:
     """Run the grounding check over every checkable paragraph in a manuscript.
@@ -258,7 +289,10 @@ def check_manuscript_grounding(
         claim_ids = list(dict.fromkeys([*declared, *section_scope]))
         checked += 1
         try:
-            result = check_paragraph_grounding(text, claim_ids, knowledge, client=client)
+            result = check_paragraph_grounding(
+                text, claim_ids, knowledge, client=client,
+                instructions_by_claim=instructions_by_claim,
+            )
         except GroundingCheckError as exc:
             findings.append(
                 {

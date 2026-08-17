@@ -15,7 +15,10 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
-from backend.pipeline.manuscript_grounding_check import check_manuscript_grounding
+from backend.pipeline.manuscript_grounding_check import (
+    check_manuscript_grounding,
+    instructions_from_contract,
+)
 from backend.pipeline.matthew_exposition_authoring import (
     ADJUDICATION_SCHEMA,
     AUTHOR_RESULT_SCHEMA,
@@ -284,6 +287,7 @@ def _run_grounding_stage(
         packet["knowledge"],
         client=claude_client,
         author_sections=author_sections,
+        instructions_by_claim=instructions_from_contract(packet["base_contract"]),
     )
     _write_json(
         output_dir / "grounding-report.json",
@@ -824,6 +828,19 @@ def run_authoring(
         generate=lambda: openai_client.generate_json(revision_prompt, revision_input, REVISION_SCHEMA),
         force=force,
     )
+    # A revision asking for a plan change is a legitimate outcome: the author
+    # has found that satisfying an accepted finding would need material the
+    # CompositionPlan does not authorise. Handle it before validation, which
+    # rejects the combination of that status with a manuscript -- correctly,
+    # since a handoff must not double as a final draft, but a model returning
+    # both should end the run with a reviewable status rather than a traceback.
+    if revision.get("status") == "plan_change_required":
+        return {
+            "status": "plan_change_required_after_review",
+            "revision_path": str(output_dir / "revision-01.json"),
+            "plan_change_requests": revision.get("plan_change_requests", []),
+            "returned_manuscript_with_handoff": bool(revision.get("manuscript_markdown")),
+        }
     validate_revision_result(
         revision,
         contract=packet["base_contract"],
@@ -841,8 +858,6 @@ def run_authoring(
         raise AuthoringContractError(
             f"blocking findings cannot be deferred: {sorted(deferred_blocking)}"
         )
-    if revision["status"] == "plan_change_required":
-        return {"status": "plan_change_required_after_review", "revision_path": str(output_dir / "revision-01.json")}
     revised_draft = revision.get("manuscript_markdown", "")
     if not revised_draft.strip():
         raise AuthoringContractError("revision must return the complete manuscript")
