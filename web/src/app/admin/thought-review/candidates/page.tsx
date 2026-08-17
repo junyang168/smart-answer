@@ -165,9 +165,11 @@ export default function ThoughtReviewCandidatesPage() {
   return (
     <main className="min-h-screen bg-slate-50 pb-12">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <Link href="/admin/thought-review" className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-700">
-          <ChevronLeft className="h-4 w-4" />返回思想審核
-        </Link>
+        <div className="flex flex-wrap items-center gap-4 text-sm font-semibold">
+          <Link href="/admin/wang" className="inline-flex items-center gap-1 text-indigo-700"><ChevronLeft className="h-4 w-4" />Wang 文庫總覽</Link>
+          <Link href="/admin/thought-review" className="text-slate-600 hover:text-indigo-700">前往知識審核</Link>
+          <Link href="/admin/wang/matthew-progress" className="text-slate-600 hover:text-indigo-700">查看馬太文章進度</Link>
+        </div>
         <header className="mt-4 flex flex-wrap items-end justify-between gap-5 rounded-3xl bg-slate-900 p-7 text-white shadow-sm">
           <div>
             <p className="text-sm font-semibold text-indigo-300">共享知識的產品出口</p>

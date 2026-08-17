@@ -29,6 +29,7 @@ from .canonical_repository.router import (
 )
 from .thought_review import router as thought_review_router
 from .public_wang_articles import router as public_wang_articles_router
+from .matthew_exposition_progress import router as matthew_exposition_progress_router
 
 app = FastAPI()
 
@@ -65,6 +66,7 @@ app.include_router(canonical_repository_router)
 app.include_router(canonical_repository_admin_router)
 app.include_router(thought_review_router)
 app.include_router(public_wang_articles_router)
+app.include_router(matthew_exposition_progress_router)
 
 
 @app.get("/healthz")
