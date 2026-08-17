@@ -318,3 +318,68 @@ def test_contract_instruction_takes_precedence_over_a_stale_claim_copy():
         ["CL1"], knowledge, instructions_from_contract(contract)
     )
     assert material[0]["editorial_instruction"]["statement"] == "現行指令"
+
+
+def test_a_single_paragraph_call_failure_becomes_a_finding_not_a_crash():
+    """Malformed JSON on one paragraph must not discard the other results.
+
+    The gate still fails -- an unchecked paragraph is not an approved one --
+    but the report survives to say which paragraph could not be checked.
+    """
+
+    class Failing:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_json(self, _prompt, _packet, _schema):
+            self.calls += 1
+            if self.calls == 1:
+                raise ValueError("Expecting ':' delimiter: line 1 column 78")
+            return _grounded_result()
+
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n第一段。\n\n'
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL2"]} -->\n第二段。\n'
+    )
+    client = Failing()
+    report = check_manuscript_grounding(markdown, _knowledge(), client=client)
+
+    assert client.calls == 2, "第二段仍要檢查，不能因第一段失敗就中止"
+    assert report["passed"] is False
+    assert report["findings"][0]["code"] == "grounding_check_failed"
+    assert "delimiter" in report["findings"][0]["error"]
+
+
+def test_a_programming_error_still_propagates():
+    class Buggy:
+        def generate_json(self, _prompt, _packet, _schema):
+            raise AssertionError("this is a bug, not a condition to report")
+
+    markdown = '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n段落。\n'
+    with pytest.raises(AssertionError, match="this is a bug"):
+        check_manuscript_grounding(markdown, _knowledge(), client=Buggy())
+
+
+def test_a_footnote_definition_is_not_part_of_the_paragraph_it_follows():
+    """The original-language policy puts the word form in a footnote on
+    purpose; checking it against the paragraph's claims is meaningless, and
+    its transliteration punctuation is what broke the model's JSON output.
+    """
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n'
+        "「體貼」的原文意思是關心、重視。[^1]\n\n"
+        "[^1]: 原文動詞為 φρονέω（fron-eh'-o）。\n"
+    )
+    paragraphs = extract_provenance_paragraphs(markdown)
+    assert paragraphs[0]["paragraph_text"] == "「體貼」的原文意思是關心、重視。[^1]"
+
+
+def test_a_following_heading_is_not_part_of_the_paragraph():
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n'
+        "段落內容。\n\n"
+        "## 神學意義\n\n"
+        "### 由基礎認識進入更深的真理\n"
+    )
+    paragraphs = extract_provenance_paragraphs(markdown)
+    assert paragraphs[0]["paragraph_text"] == "段落內容。"

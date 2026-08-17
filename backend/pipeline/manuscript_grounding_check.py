@@ -35,6 +35,7 @@ from backend.pipeline.matthew_exposition_authoring import (
 PROMPT_PATH = Path(__file__).with_name("prompts") / "manuscript_grounding_check.md"
 
 PROVENANCE_COMMENT_RE = re.compile(r"<!--\s*provenance:\s*(\{.*?\})\s*-->", re.S)
+FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:")
 
 GROUNDING_PACKET_MAX_BYTES = 20_000
 
@@ -62,6 +63,18 @@ class GroundingCheckError(RuntimeError):
     """Raised when a paragraph or its packet cannot be checked as given."""
 
 
+def _paragraph_body(segment: str) -> str:
+    """Return only the prose a provenance comment governs."""
+
+    lines: list[str] = []
+    for line in segment.strip().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or FOOTNOTE_DEFINITION_RE.match(stripped):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def extract_provenance_paragraphs(markdown: str) -> list[dict[str, Any]]:
     """Pair every provenance comment with the paragraph text it governs.
 
@@ -80,7 +93,15 @@ def extract_provenance_paragraphs(markdown: str) -> list[dict[str, Any]]:
         next_comment = PROVENANCE_COMMENT_RE.search(segment)
         if next_comment:
             segment = segment[: next_comment.start()]
-        text = segment.strip()
+        # A provenance comment governs the prose that follows it, but the
+        # segment can run on into a footnote definition or the next heading
+        # (nothing else marks where the paragraph ends). Those are not the
+        # paragraph's assertions: a footnote carries the word form the
+        # original-language policy puts there deliberately, and a heading
+        # belongs to the section, so checking them against the paragraph's
+        # material is meaningless -- and their punctuation (apostrophes in a
+        # transliteration such as fron-eh'-o) is what broke the model's JSON.
+        text = _paragraph_body(segment)
         try:
             provenance = json.loads(match.group(1))
         except json.JSONDecodeError:
@@ -293,7 +314,15 @@ def check_manuscript_grounding(
                 text, claim_ids, knowledge, client=client,
                 instructions_by_claim=instructions_by_claim,
             )
-        except GroundingCheckError as exc:
+        except (GroundingCheckError, ValueError, RuntimeError) as exc:
+            # A single paragraph's call failing must not end the run: the
+            # report is the deliverable, and a malformed-JSON (ValueError) or
+            # transport (RuntimeError) error on one paragraph should surface
+            # as a finding to look at, not as a traceback that discards the
+            # other paragraphs' results. It still fails the gate, because an
+            # unchecked paragraph is not an approved one. AssertionError and
+            # the like are deliberately left to propagate: those are bugs,
+            # not conditions to report.
             findings.append(
                 {
                     "code": "grounding_check_failed",
