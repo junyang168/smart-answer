@@ -644,6 +644,9 @@ def run_authoring(
             "revision continuation requires both baseline review and outcome"
         )
 
+    # Built only on the branch that calls a reviewer; an inherited delta
+    # review has no packet of its own to carry the slice forward.
+    editorial_review_packet: dict[str, Any] | None = None
     if continuation_review is not None and continuation_outcome is not None:
         # A later revision round continues directly from the preceding Delta
         # Review. It must not call a second reviewer before revising again.
@@ -994,6 +997,9 @@ def run_authoring(
         quality_profile=packet["quality_profile"],
         contract=packet["base_contract"],
         baseline_sections=author_result["sections"],
+        # The same slice the first reviewer scored against, not a freshly
+        # built one: the two rounds must agree on what the sources say.
+        source_slice=(editorial_review_packet or {}).get("source_slice"),
     )
     _write_json(
         output_dir / "final-delta-review-packet.json",

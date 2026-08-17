@@ -7,7 +7,21 @@ import tempfile
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
+
+from backend.pipeline.base_contract_coverage import (
+    BOOK_CODE_TO_CHINESE,
+    FLAG_CROSS_REFERENCE,
+    FLAG_ORIGINAL_LANGUAGE,
+    ScriptureRef,
+    annotate_scripture_refs,
+    load_bearing_flags,
+    mark_passage_relevance,
+    parse_passage_range,
+    parse_scripture_refs,
+    split_segments,
+    split_sentences,
+)
 
 
 SCHEMA_VERSION = "matthew-exposition-authoring.v1"
@@ -62,6 +76,14 @@ SECTION_PROSE_DIMENSIONS: set[str] = {
     "approved_written_style",
     "concision_without_compression",
 }
+
+#: Dimensions judged against the sources rather than the prose. Each has a
+#: hard gate, and none can be scored from the manuscript alone.
+SOURCE_JUDGED_DIMENSIONS = frozenset({
+    "source_and_exegesis",
+    "base_manuscript_preservation",
+    "theological_tension_and_attribution",
+})
 
 HARD_FAILURE_DIMENSIONS = {
     "load_bearing_base_argument_removed_or_reordered": "base_manuscript_preservation",
@@ -1225,6 +1247,102 @@ def _with_packet_size(packet: dict[str, Any], *, max_bytes: int) -> dict[str, An
     return packet
 
 
+#: A sentence earns its place in the reviewer's slice by carrying an original
+#: language observation or a cross reference -- the two moves whose fidelity to
+#: the source the reviewer is scoring. `FLAG_INFERENCE_BRIDGE` is deliberately
+#: not here: it fires on ordinary connectives (因此, 所以, 可見), so it selects
+#: most of the prose and says nothing about whether the source supports it.
+EXEGETICAL_SLICE_FLAGS = frozenset({FLAG_ORIGINAL_LANGUAGE, FLAG_CROSS_REFERENCE})
+
+
+def _passage_target(passage: str) -> ScriptureRef:
+    """Return the contract's passage as a reference the base manuscript uses.
+
+    `passage` is an OSIS-style code (`Matt.16.21-Matt.16.23`) while the
+    manuscripts cite in Chinese (太 16:21), so the book has to be translated
+    before the two can be compared.
+    """
+
+    raw = parse_passage_range(passage)
+    return ScriptureRef(
+        BOOK_CODE_TO_CHINESE.get(raw.book, raw.book),
+        raw.chapter,
+        raw.start_verse,
+        raw.end_verse,
+    )
+
+
+def _exegetical_source_slice(
+    *,
+    base_manuscript_texts: dict[str, str],
+    scoped_fragments: list[dict[str, Any]],
+    passage: str,
+    step_excerpts: Sequence[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return the source sentences the three source-judged dimensions need.
+
+    `source_and_exegesis` asks whether the article's exegesis is faithful to
+    the sources, which cannot be answered from the manuscript alone -- yet the
+    reviewer has been scoring it, hard gate and all, with no source in front of
+    it. Sending the whole scoped material instead would not fit beside the
+    draft in the packet budget, and would bury seven writing-quality
+    dimensions under material irrelevant to them.
+
+    So the slice is narrowed twice. First to the passage: the base manuscript
+    keeps only the paragraphs `base_contract_coverage` already counts as
+    explaining this article's verses. Then to the exegesis: within those
+    paragraphs, and among the fragments the author was scoped to, only the
+    sentences carrying an original-language observation or a cross reference.
+    On matt16-21-23 that is three sentences of base manuscript, and the
+    professor's reading of φρονέω is among them.
+    """
+
+    target = _passage_target(passage)
+    base_sentences: list[dict[str, Any]] = []
+    for source_id, text in base_manuscript_texts.items():
+        segments = split_segments(text)
+        annotate_scripture_refs(segments)
+        relevance = mark_passage_relevance(segments, target, step_excerpts=step_excerpts)
+        for index in sorted(relevance):
+            segment = segments[index]
+            for sentence in split_sentences(segment.text):
+                flags = [
+                    flag
+                    for flag in load_bearing_flags(
+                        sentence, parse_scripture_refs(sentence), target
+                    )
+                    if flag in EXEGETICAL_SLICE_FLAGS
+                ]
+                if flags:
+                    # Which flag selected the sentence, and which section it
+                    # sits in, are facts about how this slice was built. The
+                    # reviewer is judging the sentence, so neither is sent.
+                    base_sentences.append(
+                        {"source_id": source_id, "sentence": sentence}
+                    )
+
+    cited_excerpts: list[dict[str, Any]] = []
+    for fragment in scoped_fragments:
+        excerpt = fragment.get("verbatim_excerpt") or ""
+        flags = [
+            flag
+            for flag in load_bearing_flags(excerpt, parse_scripture_refs(excerpt), target)
+            if flag in EXEGETICAL_SLICE_FLAGS
+        ]
+        if flags:
+            cited_excerpts.append(
+                {
+                    "fragment_id": fragment.get("fragment_id"),
+                    "source_id": fragment.get("source_id"),
+                    "verbatim_excerpt": excerpt,
+                }
+            )
+    return {
+        "base_manuscript_exegesis": base_sentences,
+        "cited_source_excerpts": cited_excerpts,
+    }
+
+
 def build_editorial_review_packet(
     *,
     authoring_packet: dict[str, Any],
@@ -1232,8 +1350,16 @@ def build_editorial_review_packet(
 ) -> dict[str, Any]:
     """Build the bounded writing-review projection of an authoring packet.
 
-    Knowledge records, topic nodes, source fragments, evidence steps, the
-    composition plan, and base manuscript text intentionally remain local.
+    Three of the ten dimensions are judgements about the sources rather than
+    the prose -- `base_manuscript_preservation`, `source_and_exegesis` and
+    `theological_tension_and_attribution`, each with a hard gate -- so the
+    packet carries the sentences those three need: the base manuscript
+    sentences the contract preserved, the passage's exegetical sentences, and
+    the contract's declared source tensions. It is a minimum, not a copy of
+    what the author had: knowledge records, topic nodes, the composition plan,
+    whole sermon segments and the base manuscript outside this passage stay
+    local, and the seven writing-quality dimensions get nothing they cannot
+    read off the draft.
     """
 
     manuscript = _require_nonempty_string(
@@ -1244,7 +1370,9 @@ def build_editorial_review_packet(
         authoring_packet.get("quality_profile"), "quality_profile"
     )
     compact_sections = []
+    step_excerpts: list[str] = []
     for section in contract.get("sections", []):
+        steps = section.get("required_argument_steps", [])
         compact_sections.append(
             {
                 "section_id": section["section_id"],
@@ -1253,11 +1381,35 @@ def build_editorial_review_packet(
                         "step_id": step["step_id"],
                         "statement": step["statement"],
                         "required": step.get("required", True),
+                        # The base manuscript's own sentence. `statement` is
+                        # the contract's rewording of it, so without this the
+                        # reviewer can check that a step was mentioned but not
+                        # that what the base manuscript argued survived.
+                        "source_excerpt": step.get("source_excerpt", ""),
                     }
-                    for step in section.get("required_argument_steps", [])
+                    for step in steps
                 ],
             }
         )
+        step_excerpts.extend(
+            excerpt for step in steps if (excerpt := step.get("source_excerpt"))
+        )
+
+    knowledge = _require_mapping(authoring_packet.get("knowledge"), "knowledge")
+    source_slice = _exegetical_source_slice(
+        base_manuscript_texts=authoring_packet.get("base_manuscript_texts") or {},
+        scoped_fragments=knowledge.get("source_fragments", []),
+        passage=_require_nonempty_string(contract.get("passage"), "passage"),
+        step_excerpts=step_excerpts,
+    )
+    # A tension the contract registered is the material the reviewer checks
+    # `theological_tension_and_attribution` against: an article that quietly
+    # harmonised one has removed something the contract said to keep.
+    source_slice["source_tensions"] = [
+        item
+        for item in contract.get("supplemental_material", [])
+        if item.get("operation") == "tension"
+    ]
     packet = {
         "schema_version": "matthew-exposition-editorial-review-packet.v1",
         "manuscript_sha256": sha256_text(manuscript),
@@ -1282,17 +1434,23 @@ def build_editorial_review_packet(
             "hard_failures": quality_profile.get("hard_failures", []),
             "review_calibration": quality_profile.get("review_calibration", {}),
         },
+        "source_slice": source_slice,
         "scope": {
-            "include": ["writing_quality", "base_manuscript_preservation"],
+            "include": [
+                "writing_quality",
+                "base_manuscript_preservation",
+                "source_and_exegesis",
+                "theological_tension_and_attribution",
+            ],
             "exclude": [
                 "program_audit",
                 "claim_extraction",
                 "knowledge_records",
                 "topic_nodes",
-                "source_fragments",
                 "evidence_steps",
                 "composition_plan",
-                "base_manuscript",
+                "sermon_transcript_segments",
+                "base_manuscript_outside_passage",
             ],
         },
     }
@@ -1445,6 +1603,7 @@ def build_final_delta_review_packet(
     quality_profile: dict[str, Any],
     contract: dict[str, Any],
     baseline_sections: list[dict[str, Any]],
+    source_slice: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a SHA-bound final review packet containing revision deltas only."""
 
@@ -1509,6 +1668,14 @@ def build_final_delta_review_packet(
         "affected_dimensions": [dimensions_by_id[item] for item in affected],
         "affected_hard_failures": affected_hard_failures,
     }
+    # The delta reviewer rescores whichever dimensions the revision touched, so
+    # when one of the source-judged three is among them it needs the same
+    # sentences the first reviewer had. Sending them only then keeps a delta
+    # packet that rescores prose alone as small as it was, and keeps a
+    # dimension from being scored against different evidence in round two than
+    # in round one.
+    if source_slice and SOURCE_JUDGED_DIMENSIONS.intersection(affected):
+        packet["source_slice"] = source_slice
     return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
 
 

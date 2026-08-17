@@ -681,9 +681,64 @@ def test_editorial_review_packet_is_bounded_and_excludes_authoring_bulk():
         "base_manuscript_texts",
     }
     assert forbidden.isdisjoint(packet)
+    # The slice carries sentences, never the records they were drawn from, and
+    # never the surrounding sermon speech the author wrote from.
+    assert set(packet["source_slice"]) == {
+        "base_manuscript_exegesis",
+        "cited_source_excerpts",
+        "source_tensions",
+    }
+    authoring_packet = full_authoring_packet()
+    whole_manuscript = authoring_packet["base_manuscript_text"]
+    for row in packet["source_slice"]["base_manuscript_exegesis"]:
+        assert row["sentence"] in whole_manuscript
+        assert len(row["sentence"]) < len(whole_manuscript)
     assert packet["manuscript_sha256"] == sha256_text(
         valid_author_result()["manuscript_markdown"]
     )
+
+
+def test_editorial_review_packet_carries_the_base_sentence_a_step_preserved():
+    """`statement` is the contract's rewording; scoring preservation against it
+    only asks whether a step was mentioned, not whether the base manuscript's
+    own argument survived."""
+
+    packet = build_editorial_review_packet(
+        authoring_packet=full_authoring_packet(),
+        author_result=valid_author_result(),
+    )
+    contract_steps = {
+        step["step_id"]: step
+        for section in contract()["sections"]
+        for step in section["required_argument_steps"]
+    }
+    sent = {
+        step["step_id"]: step
+        for section in packet["base_preservation_contract"]["sections"]
+        for step in section["required_argument_steps"]
+    }
+    assert set(sent) == set(contract_steps)
+    for step_id, step in sent.items():
+        assert step["source_excerpt"] == contract_steps[step_id].get("source_excerpt", "")
+    assert any(step["source_excerpt"] for step in sent.values())
+
+
+def test_editorial_review_packet_keeps_the_slice_inside_the_passage():
+    """A base manuscript covers a whole lecture. Only the paragraphs explaining
+    this article's verses may reach the reviewer, or the slice grows with the
+    lecture rather than with the article."""
+
+    authoring_packet = full_authoring_packet()
+    packet = build_editorial_review_packet(
+        authoring_packet=authoring_packet,
+        author_result=valid_author_result(),
+    )
+    sentences = [
+        row["sentence"] for row in packet["source_slice"]["base_manuscript_exegesis"]
+    ]
+    assert sentences
+    whole = authoring_packet["base_manuscript_text"]
+    assert sum(len(item) for item in sentences) < len(whole) / 2
 
 
 def test_editorial_review_packet_fails_before_sending_oversize_manuscript():
@@ -935,6 +990,63 @@ def test_unchanged_section_dimensions_are_still_inherited():
         "inherited_dimensions"
     ]
     assert outcome["passed"] is True
+
+
+def _delta_packet_for(dimension_id, *, source_slice=None):
+    baseline_review, baseline_outcome, manuscript = verified_baseline()
+    revised = manuscript.replace("進一步的線索", "更清楚的線索", 1)
+    return build_final_delta_review_packet(
+        baseline_review=baseline_review,
+        baseline_outcome=baseline_outcome,
+        baseline_manuscript=manuscript,
+        revised_manuscript=revised,
+        accepted_findings=[
+            {
+                "finding_id": "ERF-test-001",
+                "dimension_id": dimension_id,
+                "section_id": "matt16-18-rock",
+                "severity": "low",
+                "blocking": False,
+                "manuscript_anchor": "進一步的線索",
+                "explanation": "Needs work.",
+                "recommended_action": "Fix it.",
+            }
+        ],
+        dispositions=[
+            {"finding_id": "ERF-test-001", "status": "resolved", "note": "done"}
+        ],
+        quality_profile=load_json(PROFILE_PATH),
+        contract=contract(),
+        baseline_sections=valid_author_result()["sections"],
+        source_slice=source_slice,
+    )
+
+
+def test_delta_packet_carries_the_slice_only_for_the_dimensions_that_need_it():
+    """A dimension must not be scored against the sources in round one and
+    against the manuscript alone in round two. When one of the source-judged
+    three is rescored the delta reviewer gets the same slice; when the revision
+    only touched prose, sending it would just crowd the budget."""
+
+    slice_payload = {"base_manuscript_exegesis": [{"source_id": "s", "sentence": "原文作 πέτρα。"}]}
+
+    rescores_a_source_dimension = _delta_packet_for(
+        "source_and_exegesis", source_slice=slice_payload
+    )
+    affected = {item["id"] for item in rescores_a_source_dimension["affected_dimensions"]}
+    assert "source_and_exegesis" in affected
+    assert rescores_a_source_dimension["source_slice"] == slice_payload
+
+    prose_only = _delta_packet_for("general_reader_readability", source_slice=slice_payload)
+    affected = {item["id"] for item in prose_only["affected_dimensions"]}
+    assert not affected & {
+        "source_and_exegesis",
+        "base_manuscript_preservation",
+        "theological_tension_and_attribution",
+    }
+    assert "source_slice" not in prose_only
+
+    assert "source_slice" not in _delta_packet_for("source_and_exegesis")
 
 
 def test_delta_packet_sha_binding_and_programmatic_score_inheritance():

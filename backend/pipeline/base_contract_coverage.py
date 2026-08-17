@@ -327,7 +327,7 @@ def split_sentences(text: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-def _section_ref_context(segments: Sequence[Segment]) -> None:
+def annotate_scripture_refs(segments: Sequence[Segment]) -> None:
     """就地填入每個 segment 的經文引用（含節數繼承）。"""
 
     last_book_chapter: tuple[str, int] | None = None
@@ -718,7 +718,7 @@ def measure_article(
     for source_id, path in manuscripts:
         text = path.read_text(encoding="utf-8")
         segments = split_segments(text)
-        _section_ref_context(segments)
+        annotate_scripture_refs(segments)
         step_excerpts = [
             step.source_excerpt for step in contract.steps if step.source_id == source_id and step.source_excerpt
         ]

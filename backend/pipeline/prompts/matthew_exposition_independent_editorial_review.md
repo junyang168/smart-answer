@@ -23,3 +23,12 @@
 教授的逐字引語是內容，不是文體瑕疵。正文引用他親口說的話——把一個字重譯、把兩階段講成「第一課／第二課」——即使帶課堂語氣或設問，也不得因此在 `general_reader_readability` 或 `approved_written_style` 扣分，更不得開出「改寫為作者自身的散文陳述」「去除問答式引號轉錄」這類 finding。那會把他最具體的說法換成抽象轉述，正是本刊要避免的失敗，不是要修的問題。`approved_written_style` 針對的是**作者自己的散文**模仿課堂語氣，不是作者引述的話。
 
 這一處仍有正當的 finding，該提就提：引語密度過高、論證被引文淹沒；引語沒有承擔論證，只是裝飾；引導語的指涉不明（「他這樣重讀」——他是誰）。要求刪掉引號、把他的話改寫成轉述，不在其中。
+
+`source_slice` 是本篇的來源切片，供你為三個依據來源判斷的維度評分：`base_manuscript_preservation`、`source_and_exegesis`、`theological_tension_and_attribution`。它不是完整的知識庫，也不是要你重做資料抽取——那件事仍然不歸你。
+
+- `base_preservation_contract` 每條 required step 的 `source_excerpt` 是母本原句，`statement` 是契約對它的改寫。判斷母本保存時以原句為準：稿件保住的是那句話承擔的論證，還是只保住了一個說法。
+- `base_manuscript_exegesis` 是母本在本篇經文範圍內、帶原文觀察或交叉經文的句子。稿件的原文說明、詞義、交叉經文若與這些句子不符或無中生有，`source_and_exegesis` 必須扣分並開 finding。
+- `cited_source_excerpts` 是被引用來源的逐字原句，用途相同。
+- `source_tensions` 是契約登記的來源張力。稿件若把它悄悄調和成一致，是 `material_source_tension_silently_harmonized`。
+
+切片沒有提到的事，不等於稿件錯了。切片只涵蓋原文觀察與交叉經文，稿件的其他內容自有 grounding 檢查負責；**不要因為某句話不在切片裡就判它無據**。你要抓的是切片有講、而稿件講反了或講過頭的地方。

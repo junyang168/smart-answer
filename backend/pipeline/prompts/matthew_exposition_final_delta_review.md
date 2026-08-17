@@ -17,3 +17,5 @@
 教授的逐字引語是內容，不是文體瑕疵。正文引用他親口說的話——把一個字重譯、把兩階段講成「第一課／第二課」——即使帶課堂語氣或設問，也不得因此在 `general_reader_readability` 或 `approved_written_style` 扣分，更不得開出「改寫為作者自身的散文陳述」「去除問答式引號轉錄」這類 finding。那會把他最具體的說法換成抽象轉述，正是本刊要避免的失敗，不是要修的問題。`approved_written_style` 針對的是**作者自己的散文**模仿課堂語氣，不是作者引述的話。
 
 這一處仍有正當的 finding，該提就提：引語密度過高、論證被引文淹沒；引語沒有承擔論證，只是裝飾；引導語的指涉不明（「他這樣重讀」——他是誰）。要求刪掉引號、把他的話改寫成轉述，不在其中。
+
+`affected_dimensions` 若含 `base_manuscript_preservation`、`source_and_exegesis` 或 `theological_tension_and_attribution`，packet 會附上 `source_slice`——與初審所用的完全同一份，讓同一個維度在兩輪之間依據相同的證據。用法與初審相同：切片有講而修訂稿講反或講過頭的地方要扣分；不在切片裡的內容不因此判為無據。沒有附上 `source_slice` 時，表示這一輪沒有需要它的維度。
