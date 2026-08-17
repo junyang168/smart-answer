@@ -25,6 +25,8 @@ class WangPlatformPaths:
     claim_layer_staging: Path
     corpus_survey_staging: Path
     seed_catalog: Path
+    sermon_catalog: Path
+    sermon_catalog_overrides: Path
     matthew_source_coverage: Path
     matthew_source_coverage_report: Path
 
@@ -47,6 +49,8 @@ def wang_platform_paths(data_base_dir: str | Path | None = None) -> WangPlatform
         claim_layer_staging=staging / "claim-layer",
         corpus_survey_staging=staging / "corpus-survey",
         seed_catalog=catalog / "seed-catalog",
+        sermon_catalog=catalog / "sermon_catalog.json",
+        sermon_catalog_overrides=catalog / "sermon_catalog_overrides.json",
         matthew_source_coverage=catalog / "matthew_source_coverage.json",
         matthew_source_coverage_report=catalog / "matthew_source_coverage.md",
     )

@@ -271,7 +271,7 @@ def test_reviewed_catalog_override_separates_primary_and_substantial_passages(tm
     assert record["catalog_assignment"] == "reviewed_override"
 
 
-def test_sermon_api_merges_catalog_from_data_base_root(tmp_path: Path):
+def test_sermon_api_merges_catalog_from_canonical_wang_path(tmp_path: Path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "sermon.json").write_text(
@@ -288,7 +288,9 @@ def test_sermon_api_merges_catalog_from_data_base_root(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    (tmp_path / "sermon_catalog.json").write_text(
+    catalog_path = tmp_path / "wang-knowledge-platform" / "catalog" / "sermon_catalog.json"
+    catalog_path.parent.mkdir(parents=True)
+    catalog_path.write_text(
         json.dumps(
             {
                 "records": [
@@ -325,7 +327,11 @@ def test_sermon_api_merges_catalog_from_data_base_root(tmp_path: Path):
         encoding="utf-8",
     )
 
-    manager = SermonMetaManager(tmp_path, lambda _user_id: {"name": ""})
+    manager = SermonMetaManager(
+        tmp_path,
+        lambda _user_id: {"name": ""},
+        catalog_file_path=catalog_path,
+    )
     sermon = manager.get_sermon_metadata("", "sermon-1")
 
     assert sermon.organization_mode == "topic_led"

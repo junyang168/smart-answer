@@ -12,6 +12,10 @@ def test_wang_platform_paths_share_one_canonical_root(tmp_path: Path) -> None:
     assert paths.claim_layer_staging == paths.root / "staging" / "claim-layer"
     assert paths.corpus_survey_staging == paths.root / "staging" / "corpus-survey"
     assert paths.seed_catalog == paths.root / "catalog" / "seed-catalog"
+    assert paths.sermon_catalog == paths.root / "catalog" / "sermon_catalog.json"
+    assert paths.sermon_catalog_overrides == (
+        paths.root / "catalog" / "sermon_catalog_overrides.json"
+    )
     assert paths.matthew_source_coverage == (
         paths.root / "catalog" / "matthew_source_coverage.json"
     )

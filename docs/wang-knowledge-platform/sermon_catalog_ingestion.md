@@ -22,7 +22,7 @@
 
 - 人工講道 metadata：`$DATA_BASE_DIR/config/sermon.json`
 - 人工系列 metadata：`$DATA_BASE_DIR/config/sermon_series.json`
-- 可重建目錄：`$DATA_BASE_DIR/sermon_catalog.json`
+- 可重建目錄：`$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json`
 
 `sermon_catalog.json` 是 read model。分類器不得改寫 `config/sermon.json`，以免覆蓋人工標題、摘要、發布狀態與核心經文。
 
@@ -53,8 +53,8 @@
 ### 馬太福音全範圍統一來源地圖
 
 `backend.pipeline.matthew_source_coverage_runner` 會把全庫第一遍普查與「馬太福音釋經」
-notes-to-manuscript 系列合併為 `$DATA_BASE_DIR/matthew_source_coverage.json`，並同步產生供同工
-閱讀的 `$DATA_BASE_DIR/matthew_source_coverage.md`。這是馬太福音
+notes-to-manuscript 系列合併為 `$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.json`，並同步產生供同工
+閱讀的 `$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.md`。這是馬太福音
 第一至二十八章檢索範圍內的統一來源清冊與編輯研究資料，不是出版目錄或完成度宣告。某章有來源，不等於材料已足以成篇；某章材料薄弱，也不構成必須補寫的配額：
 
 - 講道只以普查中的 `content_clusters.scripture_refs` 與 `candidate_claims.scripture_refs` 建立章節歸屬；
@@ -76,7 +76,7 @@ notes-to-manuscript 系列合併為 `$DATA_BASE_DIR/matthew_source_coverage.json
 flowchart LR
     A["205 篇 first-pass survey"] --> C["內容結構分類器"]
     B["人工 sermon / series metadata"] --> C
-    C --> D["$DATA_BASE_DIR/sermon_catalog.json"]
+    C --> D["$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json"]
     D --> E["Sermon API 合併人工與生成資料"]
     E --> F["網站：聖經目錄 / 專題講論 / 並重 / 全部講道"]
 ```
@@ -108,13 +108,13 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_source_coverage_runner
 
 ## 运行时刷新
 
-目录使用临时文件加原子替换写入。后端 watcher 必须同时处理 `modified`、`created` 和 `moved` 事件；否则文件虽然已经更新，运行中的 API 仍可能保留旧 catalog。API 在每次加载时将根目录的 `sermon_catalog.json` 与 `config/sermon.json` 按 `transcript_id` 合并。
+目录使用临时文件加原子替换写入。后端 watcher 必须同时处理 `modified`、`created` 和 `moved` 事件；否则文件虽然已经更新，运行中的 API 仍可能保留旧 catalog。API 在每次加载时将 Wang platform catalog 区域的 `sermon_catalog.json` 与 `$DATA_BASE_DIR/config/sermon.json` 按 `transcript_id` 合并。
 
 若 production 没有出现新分类，先检查：
 
 ```bash
-test -f "$DATA_BASE_DIR/sermon_catalog.json"
-python -m json.tool "$DATA_BASE_DIR/sermon_catalog.json" >/dev/null
+test -f "$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json"
+python -m json.tool "$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json" >/dev/null
 ```
 
 随后确认 API 返回的 `organization_mode`、`series_title`、`scripture` 和 `topic` 字段；不应通过复制文件到 repo 或修改 `config/sermon.json` 解决。

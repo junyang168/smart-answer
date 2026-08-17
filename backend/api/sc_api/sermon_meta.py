@@ -1,4 +1,5 @@
 
+from pathlib import Path
 from typing import List, Union, Optional
 from pydantic import BaseModel, Field
 import os
@@ -48,11 +49,13 @@ class Sermon(BaseModel):
 
 class SermonMetaManager:
 
-    def __init__(self, base_folder, user_getter) -> None:
+    def __init__(self, base_folder, user_getter, catalog_file_path: str | Path | None = None) -> None:
         self.base_folder = base_folder
         self.config_folder =  os.path.join(self.base_folder, "config")
         self.metadata_file_path =  os.path.join(self.config_folder,"sermon.json")
-        self.catalog_file_path = os.path.join(self.base_folder, "sermon_catalog.json")
+        self.catalog_file_path = str(
+            catalog_file_path or os.path.join(self.base_folder, "sermon_catalog.json")
+        )
         self.user_getter = user_getter
 #        aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
 #        aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")

@@ -22,9 +22,10 @@ from backend.api.sermon_search.topics import extract_topics
 
 CATALOG_SCHEMA_VERSION = "wang_sermon_catalog_v4"
 CLASSIFIER_VERSION = "content_structure_classifier_v2"
-DEFAULT_SURVEY_DIR = wang_platform_paths().corpus_survey_staging
-DEFAULT_OUTPUT_PATH = DATA_BASE_PATH / "sermon_catalog.json"
-DEFAULT_OVERRIDES_PATH = DATA_BASE_PATH / "config" / "sermon_catalog_overrides.json"
+_PLATFORM_PATHS = wang_platform_paths()
+DEFAULT_SURVEY_DIR = _PLATFORM_PATHS.corpus_survey_staging
+DEFAULT_OUTPUT_PATH = _PLATFORM_PATHS.sermon_catalog
+DEFAULT_OVERRIDES_PATH = _PLATFORM_PATHS.sermon_catalog_overrides
 
 MODE_LABELS = {
     "scripture_led": "經卷釋經",

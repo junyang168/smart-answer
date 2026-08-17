@@ -33,7 +33,7 @@ from backend.api.sermon_search.bible_refs import normalize_ref
 
 SCHEMA_VERSION = "matthew_source_coverage_v3"
 DEFAULT_SURVEY_DIR = WANG_PLATFORM_PATHS.corpus_survey_staging
-DEFAULT_CATALOG_PATH = DATA_BASE_PATH / "sermon_catalog.json"
+DEFAULT_CATALOG_PATH = WANG_PLATFORM_PATHS.sermon_catalog
 DEFAULT_NOTES_ROOT = DATA_BASE_PATH / "notes_to_surmon"
 DEFAULT_NOTES_SERIES_ID = "d5c55bdf-6375-49e9-a08d-22eda1eaf21d"
 DEFAULT_OUTPUT_PATH = WANG_PLATFORM_PATHS.matthew_source_coverage

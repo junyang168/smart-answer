@@ -90,7 +90,7 @@ PostgreSQL 是共享知识和 CompositionPlan 的编辑权威，但不是 editor
 4. API 对每项返回 `authority`、`source_schema_version` 和 `source_warning`；
 5. 后续把缺少的计划作为 candidate CompositionPlan 正式导入 PostgreSQL，移除 fallback。此迁移不改变 reader-visible prose，也不等于人工批准。
 
-不应把 `$DATA_BASE_DIR/matthew_source_coverage.json` 当作文章计划。它可以说明某章存在来源材料，却不能证明该章已规划成篇。
+不应把 `$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.json` 当作文章计划。它可以说明某章存在来源材料，却不能证明该章已规划成篇。
 
 ### 2.3 production/workspace 边界
 
