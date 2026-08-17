@@ -1011,7 +1011,15 @@ def main() -> int:
         ),
     )
     parser.add_argument("--plan", type=Path)
-    parser.add_argument("--knowledge", type=Path, required=True)
+    parser.add_argument(
+        "--knowledge",
+        type=Path,
+        help=(
+            "Knowledge snapshot file. Omit with --plan-id to compile the "
+            "snapshot from the authoring store instead, so claims promoted "
+            "there are visible to the author."
+        ),
+    )
     parser.add_argument("--base-contract", type=Path)
     parser.add_argument("--publication-profile", type=Path, required=True)
     parser.add_argument("--quality-profile", type=Path, required=True)
@@ -1061,6 +1069,8 @@ def main() -> int:
         parser.error("--plan-id cannot be combined with --plan or --base-contract")
     if not args.plan_id and not (args.plan and args.base_contract):
         parser.error("either --plan-id, or both --plan and --base-contract, are required")
+    if not args.plan_id and not args.knowledge:
+        parser.error("--knowledge is required with --plan/--base-contract")
 
     if args.plan_id:
         load_dotenv(PROJECT_ROOT / ".env")
@@ -1071,7 +1081,7 @@ def main() -> int:
         packet = build_authoring_packet_from_store(
             plan_id=args.plan_id,
             store=PostgresKnowledgeStore(),
-            knowledge_path=args.knowledge,
+            knowledge_path=args.knowledge,  # None -> compile from the store
             publication_profile_path=args.publication_profile,
             quality_profile_path=args.quality_profile,
         )

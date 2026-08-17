@@ -1480,7 +1480,7 @@ def build_authoring_packet_from_store(
     *,
     plan_id: str,
     store: Any,
-    knowledge_path: str | Path,
+    knowledge_path: str | Path | None = None,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
 ) -> dict[str, Any]:
@@ -1516,9 +1516,27 @@ def build_authoring_packet_from_store(
         contract_path = tmp_dir / "contract.json"
         plan_path.write_text(plan_document, encoding="utf-8")
         contract_path.write_text(canonical_json(contract), encoding="utf-8")
+
+        # Without this, a claim promoted into the authoring store stays
+        # invisible to the author: the plan comes from PostgreSQL while the
+        # knowledge came from a file written before the promotion, so the
+        # store is the authority for what an article may write but not for
+        # what it may write *about*.
+        resolved_knowledge_path = knowledge_path
+        if resolved_knowledge_path is None:
+            compiled = store.compile_package(package_id=f"PG-COMPILED-{plan_id}")
+            # compile_package stamps a wall-clock `compiled_at`; leaving it in
+            # makes packet_sha256 differ on every run with identical data,
+            # which defeats the generation cache. The store's own object
+            # revisions already carry when each record changed.
+            compiled.pop("compiled_at", None)
+            compiled_path = tmp_dir / "knowledge.json"
+            compiled_path.write_text(canonical_json(compiled), encoding="utf-8")
+            resolved_knowledge_path = compiled_path
+
         packet = build_authoring_packet(
             plan_path=plan_path,
-            knowledge_path=knowledge_path,
+            knowledge_path=resolved_knowledge_path,
             contract_path=contract_path,
             publication_profile_path=publication_profile_path,
             quality_profile_path=quality_profile_path,
@@ -1536,6 +1554,14 @@ def build_authoring_packet_from_store(
             "object_id": object_id,
             "plan_revision": plan_payload.get("revision"),
             "sha256": packet["sources"][key]["sha256"],
+        }
+    if knowledge_path is None:
+        # Compiled from the store through the same temporary directory, so it
+        # carries the same per-run path that would break the fingerprint.
+        packet["sources"]["knowledge"] = {
+            "authority": "postgresql_authoring_store",
+            "compiled": True,
+            "sha256": packet["sources"]["knowledge"]["sha256"],
         }
     packet["packet_sha256"] = sha256_text(canonical_json({
         key: value for key, value in packet.items() if key != "packet_sha256"
@@ -1628,6 +1654,16 @@ def build_authoring_packet(
         if decision.get("decision_id") in contract_decision_ids
         for claim_id in decision.get("claim_ids", [])
     }
+    # A required argument step is an obligation to write specific reasoning,
+    # so the claim carrying that reasoning must be in scope. Without this the
+    # contract obliges the author to write something the grounding gate then
+    # reports as unsupported, because the material never reached the packet.
+    scoped_claim_ids.update(
+        claim_id
+        for section in contract.get("sections", [])
+        for step in section.get("required_argument_steps", [])
+        if (claim_id := step.get("claim_id"))
+    )
     scoped_claim_ids.update(
         claim_id
         for item in contract.get("supplemental_material", [])
