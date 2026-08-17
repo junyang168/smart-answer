@@ -4,8 +4,13 @@ import hashlib
 import json
 from typing import Any
 
+from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 
-EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v1"
+# v2 closes `observation_type` to the six categories the prompt already names.
+# The schema hash feeds `response_schema_sha256`, so every extraction taken
+# under v1 keeps its own fingerprint and stays valid as the record of what
+# that run was actually asked for.
+EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v2"
 
 CLAIM_KINDS = [
     "explicit_claim",
@@ -28,6 +33,12 @@ STEP_TYPES = [
     "dialogue_context",
 ]
 RELATION_TYPES = ["supports", "answers", "qualifies", "applies", "refutes", "contextualizes"]
+# Whether the professor reasoned from an observation or only noted it.  The
+# publication profile's own test is "delete this observation; does the
+# paragraph's conclusion still hold?"  `load_bearing` is the answer "no", and
+# it obliges the extraction to also record the step that reasoning took --
+# see `validate_response`.
+ARGUMENT_ROLES = ["load_bearing", "background"]
 SPEAKERS = ["professor", "audience", "quoted_source", "editorial"]
 STANCES = ["asserted", "questioned", "opposed", "quoted", "neutral"]
 ELIGIBILITY = ["eligible_candidate", "context_only", "withheld_unreviewed"]
@@ -92,11 +103,15 @@ DETAILED_RESPONSE_SCHEMA: dict[str, Any] = {
                     "properties": {
                         "observation_id": {"type": "string"},
                         "statement": {"type": "string"},
-                        "observation_type": {"type": "string"},
+                        "observation_type": {"type": "string", "enum": list(OBSERVATION_TYPES)},
+                        "argument_role": {"type": "string", "enum": ARGUMENT_ROLES},
                         "scripture_refs": {"type": "array", "items": {"type": "string"}},
                         "anchors": {"type": "array", "items": ANCHOR_SCHEMA},
                     },
-                    "required": ["observation_id", "statement", "observation_type", "scripture_refs", "anchors"],
+                    "required": [
+                        "observation_id", "statement", "observation_type", "argument_role",
+                        "scripture_refs", "anchors"
+                    ],
                 },
             },
             "evidence_steps": {
@@ -271,6 +286,17 @@ def validate_response(response: dict[str, Any], transcript: dict[str, Any]) -> N
         if not condition:
             validation_errors.append(message)
 
+    for row in response.get("observations", []):
+        collect(
+            row.get("observation_type") in OBSERVATION_TYPES,
+            f"{row['observation_id']}: observation_type is outside the vocabulary: "
+            f"{row.get('observation_type')!r}",
+        )
+        collect(
+            row.get("argument_role") in ARGUMENT_ROLES,
+            f"{row['observation_id']}: argument_role must be one of {ARGUMENT_ROLES}, "
+            f"got {row.get('argument_role')!r}",
+        )
     for row in response.get("questions", []):
         collect(
             set(row["answer_claim_ids"]) <= ids["claim"],
@@ -297,10 +323,37 @@ def validate_response(response: dict[str, Any], transcript: dict[str, Any]) -> N
             f"{row['claim_id']}: unknown opposed position",
         )
         collect(bool(row["evidence_step_ids"]), f"{row['claim_id']}: claim has no evidence")
+    # An observation may be the source of a relation into the argument: that
+    # edge is how "the professor reasoned from this" is recorded at all.  The
+    # target stays an evidence step -- observations do not support each other.
+    supported_by_observation: set[str] = set()
     for row in response.get("evidence_relations", []):
+        from_id = row["from_id"]
         collect(
-            row["from_id"] in ids["evidence"] and row["to_id"] in ids["evidence"],
+            from_id in ids["evidence"] or from_id in ids["observation"],
+            f"{row['relation_id']}: unknown relation source",
+        )
+        collect(
+            row["to_id"] in ids["evidence"],
             f"{row['relation_id']}: unknown evidence endpoint",
+        )
+        if from_id in ids["observation"] and row["to_id"] in ids["evidence"]:
+            supported_by_observation.add(from_id)
+
+    # The rule this whole schema change exists for.  An observation the
+    # professor reasoned from must also record the step that reasoning took.
+    # Without it an extraction can produce the lexical fact and silently drop
+    # the inference drawn from it in the very next sentence, which is what
+    # happened to Matt 16:23's phroneo: nine drafts could not use an
+    # observation that had never become part of any argument.
+    for row in response.get("observations", []):
+        if row.get("argument_role") != "load_bearing":
+            continue
+        collect(
+            row["observation_id"] in supported_by_observation,
+            f"{row['observation_id']}: load_bearing observation has no relation "
+            f"to an evidence step; either record the step the professor reasoned "
+            f"to, or mark it background",
         )
     for row in response.get("claim_relations", []):
         collect(

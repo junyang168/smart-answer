@@ -64,6 +64,11 @@ class ObservationRecord(EvolvingKnowledgeRecord):
     observation_id: str
     statement: str
     observation_type: Optional[str] = None
+    # `load_bearing` or `background`; extraction v2 onward always sets it.
+    # Optional because the 430 records written before v2 genuinely do not know
+    # which they are, and defaulting them to `background` would assert
+    # something no one has judged.
+    argument_role: Optional[str] = None
     source_fragment_id: Optional[str] = None
     scripture_refs: list[str] = Field(default_factory=list)
 
