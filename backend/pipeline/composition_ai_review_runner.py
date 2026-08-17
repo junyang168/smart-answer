@@ -13,6 +13,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.composition_ai_review import (
     ADJUDICATION_VERSION,
     COMPOSITION_ADJUDICATION_SCHEMA,
@@ -30,8 +31,9 @@ from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KNOWLEDGE = Path("output/claim-layer/shared_knowledge_pilot_v1.json")
-DEFAULT_OUTPUT_DIR = Path("output/claim-layer/composition-reviews")
+CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
+DEFAULT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
+DEFAULT_OUTPUT_DIR = CLAIM_LAYER_ROOT / "composition-reviews"
 CLAUDE_PROMPT = Path("backend/pipeline/prompts/composition_independent_ai_review.md")
 OPENAI_PROMPT = Path("backend/pipeline/prompts/composition_openai_adjudication.md")
 RECONSIDERATION_PROMPT = Path("backend/pipeline/prompts/composition_claude_reconsideration.md")

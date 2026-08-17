@@ -14,7 +14,7 @@
 機器產生的全卷來源總表仍是：
 
 ```text
-$DATA_BASE_DIR/matthew_source_coverage.json
+$DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.json
 ```
 
 本文件是該總表在第十六章的編輯判讀層。
@@ -164,15 +164,15 @@ Claude 逐来源独立复核后，61 条直接通过，15 条提出修改建议�
 这里的“通过”和“自动修正”只表示候选数据已通过来源忠实度检查，不表示人工批准、神学事实核查或出版。合并结果与修正覆盖层位于：
 
 ```text
-output/claim-layer/matthew-16-notes/matthew_16_notes_adjudication.json
-output/claim-layer/matthew-16-notes/matthew_16_notes_claim_overrides.json
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/matthew_16_notes_adjudication.json
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/matthew_16_notes_claim_overrides.json
 ```
 
 模型共识修正已机械应用，修复后的候选知识包与可读验收报告位于：
 
 ```text
-output/claim-layer/matthew-16-notes/matthew_16_notes_reviewed_candidate.json
-output/claim-layer/matthew-16-notes/matthew_16_extraction_review_report.md
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/matthew_16_notes_reviewed_candidate.json
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/matthew_16_extraction_review_report.md
 ```
 
 应用后仍保留 76 条候选主张；来源片段由 212 增至 220，证据步骤由 113 增至 121，错误的主张关系由 39 条减为 37 条。完整性检查确认所有主张都有证据、8 个新增锚点都能逐字回到冻结来源、对象 ID 没有重复；相关自动化测试 20 项全部通过。
@@ -186,8 +186,8 @@ output/claim-layer/matthew-16-notes/matthew_16_extraction_review_report.md
 在这些关系及 76 条候选主张之上，现已形成第十六章笔记基线的篇章编排候选：
 
 ```text
-output/claim-layer/matthew-16-notes/composition_plan_matthew_16_notes.json
-output/claim-layer/matthew-16-notes/matthew_16_composition_plan_report.md
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/composition_plan_matthew_16_notes.json
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/matthew_16_composition_plan_report.md
 ```
 
 六个经文单元严格使用四档成篇判定：

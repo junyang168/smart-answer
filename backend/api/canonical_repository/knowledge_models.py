@@ -92,6 +92,27 @@ class TopicNodeRecord(EvolvingKnowledgeRecord):
     legacy_ids: list[str] = Field(default_factory=list)
 
 
+class TopicIdentityReconciliationRecord(EvolvingKnowledgeRecord):
+    """Persistent editorial decision about a discovered topic candidate.
+
+    Candidate ids identify one discovery artifact only.  ``resolved_topic_id``
+    is the immutable canonical identity chosen by an editor (or an unambiguous
+    exact match to an already established topic).
+    """
+
+    reconciliation_id: str
+    candidate_topic_id: str
+    label: str
+    topic_level: str
+    parent_candidate_topic_id: Optional[str] = None
+    claim_ids: list[str] = Field(default_factory=list)
+    status: str = "pending_new"
+    candidate_matches: list[dict[str, Any]] = Field(default_factory=list)
+    resolved_topic_id: Optional[str] = None
+    resolution_action: Optional[str] = None
+    origin_batch_id: Optional[str] = None
+
+
 class EvidenceStepRecord(EvolvingKnowledgeRecord):
     evidence_step_id: str
     source_fragment_id: Optional[str] = None
@@ -231,6 +252,10 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "observations": (ObservationRecord, "observation_id"),
     "claims": (ClaimRecord, "claim_id"),
     "topic_nodes": (TopicNodeRecord, "topic_id"),
+    "topic_identity_reconciliations": (
+        TopicIdentityReconciliationRecord,
+        "reconciliation_id",
+    ),
     "evidence_steps": (EvidenceStepRecord, "evidence_step_id"),
     "knowledge_relations": (KnowledgeRelationRecord, "relation_id"),
     "claim_relations": (ClaimRelationRecord, "claim_relation_id"),

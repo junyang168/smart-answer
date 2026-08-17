@@ -19,12 +19,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.config.wang_platform_paths import wang_platform_paths
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_COMPARISON = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/comparison-knowledge.json"
-DEFAULT_PATCH = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/composition-update-candidate.json"
-DEFAULT_MANUSCRIPT = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/trial-manuscript-matt16-1-12.md"
-DEFAULT_OUTPUT = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/shared-knowledge-integration"
+CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
+COMPARISON_ROOT = CLAIM_LAYER_ROOT / "matthew-16-notes/sermon-4-1-comparison"
+DEFAULT_COMPARISON = COMPARISON_ROOT / "comparison-knowledge.json"
+DEFAULT_PATCH = COMPARISON_ROOT / "composition-update-candidate.json"
+DEFAULT_MANUSCRIPT = COMPARISON_ROOT / "trial-manuscript-matt16-1-12.md"
+DEFAULT_OUTPUT = COMPARISON_ROOT / "shared-knowledge-integration"
 
 EXPOSITION_PLAN_ID = "CP-matthew-16-1-12"
 SMALL_FAITH_PLAN_ID = "CP-topic-small-faith"

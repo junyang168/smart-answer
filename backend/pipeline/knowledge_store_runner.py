@@ -9,6 +9,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.api.canonical_repository.postgres_store import (
     ActiveSnapshotBlocked,
     PostgresKnowledgeStore,
@@ -29,6 +30,7 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
 
 def main() -> None:
     load_dotenv()
+    platform_paths = wang_platform_paths()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", help="Override KNOWLEDGE_DATABASE_URL")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -54,7 +56,7 @@ def main() -> None:
         "output_root",
         nargs="?",
         type=Path,
-        default=Path("output/claim-layer/compiled"),
+        default=platform_paths.active_snapshots,
     )
 
     review_parser = subparsers.add_parser("sync-review-state")
@@ -62,7 +64,7 @@ def main() -> None:
         "review_state",
         nargs="?",
         type=Path,
-        default=Path("output/claim-layer/review_state.json"),
+        default=platform_paths.claim_layer_staging / "review_state.json",
     )
 
     anchor_parser = subparsers.add_parser("bind-source-anchors")

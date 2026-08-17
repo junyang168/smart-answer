@@ -168,6 +168,9 @@ config.json
 *.db
 gen-ai.log.*
 
+# Generated runtime and pipeline artifacts must never be committed.
+output/
+
 .DS_Store
 
 service_account.json

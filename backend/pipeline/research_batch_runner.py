@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.detailed_knowledge_extraction_runner import _slug
 from backend.pipeline.research_batch import load_research_batch, merge_reviewed_packages
 
@@ -35,6 +37,28 @@ def artifact_paths(output_root: Path, transcript_id: str) -> dict[str, Path]:
     }
 
 
+def reviewed_package_paths(
+    batch: dict[str, Any], *, output_root: Path
+) -> list[Path]:
+    """Resolve reviewed packages, including explicitly reused prior generations.
+
+    Reuse is opt-in per transcript.  Relative paths are resolved from the
+    repository root so a batch config remains portable across machines that
+    share the same checkout layout.
+    """
+
+    reuse = batch.get("reviewed_package_reuse") or {}
+    paths: list[Path] = []
+    for transcript_id in batch["transcript_ids"]:
+        configured = reuse.get(transcript_id)
+        if configured:
+            path = Path(os.path.expandvars(str(configured)))
+            paths.append(path if path.is_absolute() else PROJECT_ROOT / path)
+        else:
+            paths.append(artifact_paths(output_root, transcript_id)["reviewed"])
+    return paths
+
+
 def build_command_plan(
     batch: dict[str, Any], *, transcript_dir: Path, output_root: Path, force: bool
 ) -> list[dict[str, Any]]:
@@ -45,8 +69,11 @@ def build_command_plan(
     adjudicator_model = str(models.get("adjudicator") or "gpt-5.6-sol")
     reconsideration_model = str(models.get("reconsideration") or review_model)
     plan: list[dict[str, Any]] = []
+    reused = set((batch.get("reviewed_package_reuse") or {}).keys())
 
     for transcript_id in batch["transcript_ids"]:
+        if transcript_id in reused:
+            continue
         paths = artifact_paths(output_root, transcript_id)
         extract = [
             sys.executable, "-m", "backend.pipeline.detailed_knowledge_extraction_runner",
@@ -109,7 +136,9 @@ def main() -> int:
 
     batch = load_research_batch(args.batch)
     output_root = args.output_root or (
-        PROJECT_ROOT / "output" / "claim-layer" / "research-batches" / batch["batch_id"]
+        wang_platform_paths().claim_layer_staging
+        / "research-batches"
+        / batch["batch_id"]
     )
     missing = [
         transcript_id for transcript_id in batch["transcript_ids"]
@@ -129,6 +158,13 @@ def main() -> int:
         "transcripts": batch["transcript_ids"],
         "selected_stage": args.stage,
         "commands": selected,
+        "reused_reviewed_packages": {
+            transcript_id: str(path)
+            for transcript_id, path in zip(
+                batch["transcript_ids"], reviewed_package_paths(batch, output_root=output_root)
+            )
+            if transcript_id in (batch.get("reviewed_package_reuse") or {})
+        },
         "merged_output": str(merged_output),
         "would_call_models": not args.dry_run and args.stage in {"all", "extract", "review", "adjudicate"},
     }
@@ -152,10 +188,7 @@ def main() -> int:
             )
             _write_manifest(manifest_path, manifest)
         if args.stage in {"all", "merge"}:
-            reviewed_paths = [
-                artifact_paths(output_root, transcript_id)["reviewed"]
-                for transcript_id in batch["transcript_ids"]
-            ]
+            reviewed_paths = reviewed_package_paths(batch, output_root=output_root)
             absent = [str(path) for path in reviewed_paths if not path.is_file()]
             if absent:
                 raise FileNotFoundError("missing reviewed packages: " + ", ".join(absent))

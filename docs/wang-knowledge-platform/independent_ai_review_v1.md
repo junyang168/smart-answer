@@ -75,11 +75,11 @@ OpenAI 不得盲目接受 Claude。它看到完整逐字稿、候选主张、锚
 
 ## 四、自动补丁与历史保留
 
-`output/claim-layer/claims.json` 保留原始抽取，不被静默覆盖。双方一致的修改写入：
+`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/claims.json` 保留原始抽取，不被静默覆盖。双方一致的修改写入：
 
-- `output/claim-layer/ai_adjudication_v1.json`：双方判断、理由、再审结果和最终状态；
-- `output/claim-layer/claim_statement_overrides_v1.json`：可执行候选覆盖；
-- `output/claim-layer/adjudication-generations/`：旧世代归档。
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/ai_adjudication_v1.json`：双方判断、理由、再审结果和最终状态；
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/claim_statement_overrides_v1.json`：可执行候选覆盖；
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/adjudication-generations/`：旧世代归档。
 
 当前补丁可以替换 statement／claim kind／经文引用，排除弱或错误 anchor，添加逐字存在于 canonical transcript 的新 anchor，并移除被复审明确判定错误的 `ClaimRelation`。新增 anchor 必须通过 transcript、source index 和逐字子串验证；关系移除必须引用当前 package 中存在且与被审主张有关的 relation ID。共享知识构建器读取 override，把新增 anchor 提升为一等 `SourceFragment` 与 `EvidenceStep`；原始机器抽取仍可回溯。
 
@@ -115,7 +115,7 @@ Claude 必须恰好审每一个输入 claim；OpenAI 必须恰好裁定每一个
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_review_runner \
-  --claim-layer-package output/claim-layer/shared_knowledge_pilot_v1.json --dry-run
+  --claim-layer-package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json" --dry-run
 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner --dry-run
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner

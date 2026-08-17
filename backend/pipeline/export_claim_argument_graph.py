@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from backend.config.wang_platform_paths import wang_platform_paths
 
 SCRIPT_PATTERN = re.compile(
     r'<script\s+id=["\']d["\']\s+type=["\']application/json["\']>(.*?)</script>',
@@ -113,10 +114,11 @@ def export_graph(source: Path, destination: Path, claims_path: Path | None = Non
 
 
 def main() -> None:
+    claim_layer_root = wang_platform_paths().claim_layer_staging
     parser = argparse.ArgumentParser(description="Export the embedded claim graph as reviewable JSON")
-    parser.add_argument("--source", type=Path, default=Path("output/claim-layer/claim-graph.html"))
-    parser.add_argument("--output", type=Path, default=Path("output/claim-layer/argument_graph.json"))
-    parser.add_argument("--claims", type=Path, default=Path("output/claim-layer/claims.json"))
+    parser.add_argument("--source", type=Path, default=claim_layer_root / "claim-graph.html")
+    parser.add_argument("--output", type=Path, default=claim_layer_root / "argument_graph.json")
+    parser.add_argument("--claims", type=Path, default=claim_layer_root / "claims.json")
     args = parser.parse_args()
     result = export_graph(args.source, args.output, args.claims)
     print(json.dumps(result["summary"], ensure_ascii=False))

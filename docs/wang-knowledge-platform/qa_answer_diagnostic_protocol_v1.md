@@ -51,16 +51,16 @@ flowchart TD
 ## 四、实现与 artifact
 
 - 诊断 runner：`backend/pipeline/qa_answer_diagnostic_runner.py`
-- 候选问答集：`output/claim-layer/qa_validation_cases_v1.json`
-- 当前共享知识：`output/claim-layer/shared_knowledge_pilot_v1.json`
-- 诊断记录：`output/claim-layer/qa_answer_diagnostics_v1.json`
+- 候选问答集：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/qa_validation_cases_v1.json`
+- 当前共享知识：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json`
+- 诊断记录：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/qa_answer_diagnostics_v1.json`
 - 审核 UI：`/admin/thought-review` →「问答验证」
 
 诊断记录保存：来源与知识包哈希、两种模型、三个 prompt 哈希、逐题 Claude 审核、逐项 OpenAI 裁决、必要时的 Claude 再审、最终错误层和修复队列。
 
 **过期判断同时比对问答集与知识包两个哈希。** 一次诊断裁决的是「这一份答案」对「这一份知识」的忠实度，任何一端改动都会使结论失效；只比对知识包会让改过问题或答案措辞之后的旧诊断继续冒充有效。过期的诊断不会把任何问答留在人工队列中——过期的结论不能要求同工行动。
 
-运行指纹绑定问答集哈希、知识包哈希、三个 prompt 哈希、两种模型与 schema 版本。输入与配置都没有变化时 runner 直接重用既有诊断，不再调用模型；`--force` 可强制重跑。被取代的诊断先归档到 `output/claim-layer/qa-diagnostic-generations/`，与语料复审、篇章复审的世代保存规则一致——它是「AI 当时判过什么」的唯一证据。
+运行指纹绑定问答集哈希、知识包哈希、三个 prompt 哈希、两种模型与 schema 版本。输入与配置都没有变化时 runner 直接重用既有诊断，不再调用模型；`--force` 可强制重跑。被取代的诊断先归档到 `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/qa-diagnostic-generations/`，与语料复审、篇章复审的世代保存规则一致——它是「AI 当时判过什么」的唯一证据。
 
 模型调用按问答逐题执行，避免长批次让推理耗尽输出额度；runner 输出逐题进度。失败时不覆盖上一份完整 artifact。
 

@@ -100,7 +100,7 @@ Author Agent 可以把多個 composition decision 組織在同一個讀者小節
 
 单独的模型评分或 Program Audit 都不能触发发布；必须两者共同通过。repository publisher 会在复制前强制核对成稿、editorial review、Program Audit 与 automated publication decision 的 SHA；任何不一致、低于 90、存在 hard failure 或 audit errors 都会拒绝发布。旧的 `human-publication-decision.v1` 继续向后兼容，但新 workflow 不伪造人工批准。
 
-完整自动发布命令应明确提供 Program Audit 模板；repository destination 默认来自 `DATA_BASE_DIR/wang_repository`：
+完整自动发布命令应明确提供 Program Audit 模板；repository destination 默认来自 `$DATA_BASE_DIR/wang-knowledge-platform/repository`。仓库内 `output/` 已全部退役并由 `.gitignore` 禁止重新纳入版本控制；runtime／staging data 只能写入 `$DATA_BASE_DIR/wang-knowledge-platform/`：
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_runner \
@@ -149,7 +149,7 @@ Final delta 只重评 `source_and_exegesis`、`exegetical_reasoning`、`approved
 
 第一次真实 delta 调用还验证了失败策略：模型漏报受影响 hard-failure assessment 后，本地 validator 立即拒绝结果，没有自动再次发起长请求。契约随后新增明确的 `affected_hard_failures` 列表；新 fingerprint 的调用在 60.174 秒内返回合法 JSON 并通过 SHA、维度集合和 anchor 校验。
 
-发布包位于 `output/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/`。发布稿 SHA 为 `c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`；repository publisher 已核对 manuscript、editorial review、Program Audit 与 human publication decision 的 SHA 后写入 Wang repository runtime。公开读取层可通过 `/resources/wang-repository/articles/matthew-16-1-12` 返回正文，并按四个读者段落呈现六个原声播放器。此次发布只更新 runtime data，没有 push 或 deploy。
+历史 staging 包已复制到 `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/`；正式发布包位于 repository 区域。发布稿 SHA 为 `c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`；repository publisher 已核对 manuscript、editorial review、Program Audit 与 human publication decision 的 SHA 后写入 Wang repository runtime。公开读取层可通过 `/resources/wang-repository/articles/matthew-16-1-12` 返回正文，并按四个读者段落呈现六个原声播放器。此次发布只更新 runtime data，没有 push 或 deploy。
 
 ## 8. 第三篇全自动续轮验证
 
@@ -158,3 +158,5 @@ Final delta 只重评 `source_and_exegesis`、`exegetical_reasoning`、`approved
 正式 runner 现已退役独立 Score-Gap stage：初审一次，此后每轮 revision 只配一次 delta review；delta 必须直接携带下一轮 findings，下一轮不得重新调用初审。自动化测试明确验证两轮 revision 只有三次 Claude reviewer 调用（一次初审、两次 delta），且第二轮不生成 EditorialReviewPacket。上述第三篇的历史 Score-Gap artifact 只保留为诊断记录，不是后续文章的 workflow 范例。
 
 最终稿 SHA 为 `342fa88d5af7c339174bd82a301f0e204f3fd650962029024c01d35c9e97c0d7`。Program Audit 在本地读取完整 knowledge snapshot，检查 4/4 decisions、4 claims、9 evidence steps、9 valid source fragments 与 14/14 provenance paragraphs，结果为 `pass`、0 errors、0 warnings。系统随后生成 `automated-publication-decision.v1`，绑定稿件、90 分 review 与 audit SHA，并发布到 Wang repository；公开 slug 为 `matthew-16-21-23`，读取层返回 4 个原声播放器。
+
+该 workflow 实现已通过 GitHub PR #2 合并到 `main`，merge commit 为 `ba7850527de1432f94016f28195ff56e8449851b`。合并基线上的相关测试为 56 passed。代码合并不等于生产部署：当前 production backend 仍从独立部署目录运行旧版本，在该目录获准更新前，live public UI 不识别 `automated-publication-decision.v1`；不得用伪造 human decision 绕过此版本边界。

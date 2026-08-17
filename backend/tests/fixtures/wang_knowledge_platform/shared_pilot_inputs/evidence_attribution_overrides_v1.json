@@ -1,0 +1,79 @@
+{
+  "schema_version": "wang_evidence_attribution_overrides_v1",
+  "note": "人工審核發現的說話者、立場、話語角色與錨點品質修正；優先於自動推斷。",
+  "evidence": {
+    "L3-E033": {
+      "speaker": "professor",
+      "stance": "opposed",
+      "discourse_role": "quoted_opponent",
+      "support_eligibility": "contextual_only",
+      "anchor_quality": "verified_context",
+      "review_note": "教授在轉述並反駁「預言落空」的讀法，不是認同該立場。"
+    },
+    "L3-E037": {
+      "speaker": "professor",
+      "stance": "endorsed",
+      "discourse_role": "own_reasoning",
+      "support_eligibility": "eligible",
+      "anchor_quality": "verified_candidate",
+      "rejected_highlights": [
+        {
+          "media_time": 2391.0,
+          "text": "所以這裡所說的，「有人在沒有死以前，必看見那一個人子降臨在祂的國裡」，就是耶穌要降臨，耶穌要再來。",
+          "reason": "這是教授隨後以「我說你念錯」加以駁斥的讀法，不能標為教授自己的推理。"
+        }
+      ]
+    },
+    "L3-E040": {
+      "speaker": "audience",
+      "stance": "questioned",
+      "discourse_role": "audience_prompt",
+      "support_eligibility": "contextual_only",
+      "anchor_quality": "truncated",
+      "review_note": "聽眾發言且截斷在半句，只能作為對話背景，不能作為教授的經文證據。"
+    },
+    "L3-E049": {
+      "speaker": "professor",
+      "stance": "endorsed",
+      "discourse_role": "dramatic_paraphrase",
+      "support_eligibility": "eligible_with_label",
+      "anchor_quality": "verified_candidate",
+      "review_note": "這是教授戲劇化代言，不是聖經逐字引文；展示時必須標明。"
+    },
+    "L3-E051": {
+      "speaker": "unknown",
+      "stance": "unknown",
+      "discourse_role": "ai_summary",
+      "support_eligibility": "withheld_missing_anchor",
+      "anchor_quality": "missing",
+      "review_note": "沒有原話和時間碼，等待補回原始來源。"
+    },
+    "L3-E059": {
+      "speaker": "professor",
+      "stance": "endorsed",
+      "discourse_role": "application_summary",
+      "support_eligibility": "withheld_insufficient_quote",
+      "anchor_quality": "insufficient",
+      "review_note": "目前引文只有「你們要聽祂」及孤立引號，不足以單獨支持整句應用釋義。"
+    },
+    "L4-E044": {
+      "speaker": "unknown",
+      "stance": "unknown",
+      "discourse_role": "ai_summary",
+      "support_eligibility": "withheld_missing_anchor",
+      "anchor_quality": "missing",
+      "review_note": "沒有原話和時間碼，只能暫存為待補來源摘要。"
+    },
+    "L4-E054": {
+      "speaker": "professor",
+      "stance": "endorsed",
+      "discourse_role": "own_reasoning",
+      "support_eligibility": "eligible",
+      "anchor_quality": "verified_candidate",
+      "paragraph_key": "896",
+      "media_time": 2596.0,
+      "verbatim_excerpt": "其實信心最主要是什麼呢？我們跟神有好關係。",
+      "review_note": "問答診斷發現原自動錨點誤連到『義』；已改綁同一段中教授直接回答『信心』的逐字原文。"
+    }
+  }
+}

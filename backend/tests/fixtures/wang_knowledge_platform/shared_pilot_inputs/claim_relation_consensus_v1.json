@@ -1,0 +1,57 @@
+{
+  "schema_version": "wang_claim_relation_consensus_v1",
+  "scope": "Structural repairs accepted by the composition AI-review workflow for the 011WSR01 exposition and Son of Man topic pilots.",
+  "relations": [
+    {
+      "claim_relation_id": "CR-CONSENSUS-SON-001",
+      "source_id": "CL-0028",
+      "target_id": "DK-f0eac41a4244-CL001",
+      "relation_type": "corroborates",
+      "reason": "第三讲关于『那个人子』定冠词及但以理书七章背景的主张，与011WSR01中较完整的同一论断跨来源印证；二者保留各自来源，不合并为同一条证据。",
+      "corpus_scope": "cross_sermon",
+      "review_status": "ai_consensus_candidate",
+      "approval_status": "accepted_without_human_escalation",
+      "provenance": {
+        "plan_id": "CP-topic-son-of-man",
+        "decision_ids": ["CD-SON-001", "CD-SON-002"],
+        "independent_review": "composition-reviews/CP-topic-son-of-man.independent-review.json",
+        "adjudication": "composition-reviews/CP-topic-son-of-man.adjudication.json"
+      }
+    },
+    {
+      "claim_relation_id": "CR-CONSENSUS-COVENANT-001",
+      "source_id": "DK-f0eac41a4244-CL012",
+      "target_id": "DK-f0eac41a4244-CL013",
+      "relation_type": "contextualizes",
+      "reason": "对合同、遗命和宗主国—附庸国之约的区分，为宗主国主动施恩、随后提出约之要求的结构提供概念背景；这里只记录语境关系，不夸大为演绎支持。",
+      "corpus_scope": "single_sermon_argument_structure",
+      "review_status": "ai_consensus_candidate",
+      "approval_status": "accepted_without_human_escalation",
+      "provenance": {
+        "plan_id": "CP-matthew-26-1-30-011",
+        "decision_ids": ["CD-M26-011-008"],
+        "independent_review": "composition-reviews/CP-matthew-26-1-30-011.independent-review.json",
+        "adjudication": "composition-reviews/CP-matthew-26-1-30-011.adjudication.json"
+      }
+    }
+  ],
+  "constraints": [
+    {
+      "constraint_id": "CRC-PARALLEL-AMEN-JUDAS-001",
+      "source_id": "DK-f0eac41a4244-CL009",
+      "target_id": "DK-f0eac41a4244-CL010",
+      "forbidden_relation_types": ["supports"],
+      "bidirectional": true,
+      "composition_role": "parallel_context",
+      "reason": "句首Amen的权威语气与犹大在圣餐设立前离席，都是背叛预告段落的并列解释；现有证据不足以断言其中一条支持另一条。",
+      "review_status": "ai_consensus_candidate",
+      "approval_status": "accepted_without_human_escalation",
+      "provenance": {
+        "plan_id": "CP-matthew-26-1-30-011",
+        "decision_ids": ["CD-M26-011-006"],
+        "independent_review": "composition-reviews/CP-matthew-26-1-30-011.independent-review.json",
+        "adjudication": "composition-reviews/CP-matthew-26-1-30-011.adjudication.json"
+      }
+    }
+  ]
+}

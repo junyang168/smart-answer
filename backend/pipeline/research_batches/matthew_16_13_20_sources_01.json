@@ -13,8 +13,8 @@
     "220-426-110-1139"
   ],
   "reviewed_package_reuse": {
-    "2016 NYSC 專題：馬太福音釋經（四）1": "output/claim-layer/detailed-extractions/2016_NYSC_1-a26f0a7e9ba4.reviewed-candidate.json",
-    "S 220206": "output/claim-layer/matthew-16-13-20-sources/reviewed/S_220206-566e8ca150dd.reviewed-candidate.json"
+    "2016 NYSC 專題：馬太福音釋經（四）1": "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/2016_NYSC_1-a26f0a7e9ba4.reviewed-candidate.json",
+    "S 220206": "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-13-20-sources/reviewed/S_220206-566e8ca150dd.reviewed-candidate.json"
   },
   "candidate_generation_policy": {
     "derive_after_independent_extraction": true,

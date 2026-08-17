@@ -1,0 +1,263 @@
+{
+  "schema_version": "wang_claim_relation_ai_review_v1",
+  "generated_at": "2026-08-11T00:11:10.834365+00:00",
+  "source": "output/claim-layer/shared_knowledge_pilot_v1.json",
+  "models": {
+    "independent_reviewer": "claude-sonnet-5",
+    "adjudicator": "gpt-5.6-sol"
+  },
+  "review_fingerprint": {
+    "source_sha256": "b6e287f9dc1213580a7df61d9616fc8abe8d5bf02d92c5dddf9b5bc154f9ab72",
+    "claude_prompt_sha256": "d399f83600946e913322723a6c868a6779b7cee4914740a1deab5cac6bcc2434",
+    "openai_prompt_sha256": "b8c9b796dcf441275884d75b51c1685026ed968fbe875cdc09d205f1b1a5e929",
+    "reconsideration_prompt_sha256": "f9380e86355de04df00f46fd87700cc1bf1899c525d2b200293566752d48c7bf",
+    "schema_version": "wang_claim_relation_ai_review_v1"
+  },
+  "review_policy": {
+    "scope": "relation_structure_no_theological_critique",
+    "scope_enforced_by_prompt_and_runner": true
+  },
+  "claude_review": {
+    "scope_confirmation": "relation_structure_no_theological_critique",
+    "relation_reviews": [
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR001",
+        "decision": "pass",
+        "explanation": "CL002描述'人子'称号在新约中几乎专属耶稣自称的分布模式，这一使用模式弱而间接地印证该称号是指向特定人物（如但以理书异象人物）而非泛指人性，与CL001的论点方向一致，可构成support。",
+        "proposed_relation_type": "supports",
+        "confidence": "medium"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR002",
+        "decision": "remove",
+        "explanation": "CL003论述外邦人得救不须先归化犹太教，其证据(E007)完全未提及司提反或'人子'称号；CL002及其证据(E005、E006)也未涉及救恩范围或外邦人议题。给出的reason声称司提反讲论语境说明救恩超越犹太教，但此说法未见于任一claim的证据文本中，属于外部背景信息，现有证据不能建立此contextualizes关系。",
+        "proposed_relation_type": "contextualizes",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR004",
+        "decision": "pass",
+        "explanation": "CL006的证据(E012)说明膏抹是为耶稣安葬预作准备，这与CL005中耶稣自己定意在逾越节期间被献为祭的立场相呼应——膏抹事件可视为耶稣接受并印证其赴死决心的具体场景，applies关系方向及类型可以成立。",
+        "proposed_relation_type": "applies",
+        "confidence": "medium"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR005",
+        "decision": "pass",
+        "explanation": "CL008说明逾越节筵席的历史与礼仪背景（食物、杯、哈雷尔诗篇、家庭讲述纪念出埃及），这为理解耶稣在逾越节筵席场景中设立圣餐（CL011）提供了必要的历史与礼仪语境，contextualizes关系成立。",
+        "proposed_relation_type": "contextualizes",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR006",
+        "decision": "pass",
+        "explanation": "CL010证据(E022)明确指出犹大接饼后立即离席，未参与随后设立的圣餐，这直接支持了CL011中'耶稣与十一门徒设立圣餐'（即犹大不在场）的具体表述，supports关系及方向成立。",
+        "proposed_relation_type": "supports",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR007",
+        "decision": "pass",
+        "explanation": "CL012区分合同、遗命与宗主附庸之约三种'约'的概念框架，为理解CL011中'立新约的血'一语提供必要的概念背景，但并不直接证明圣餐设立或流血赦罪等具体陈述，contextualizes关系恰当成立。",
+        "proposed_relation_type": "contextualizes",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR008",
+        "decision": "pass",
+        "explanation": "CL013明确指出宗主国先施恩后提要求的结构，这一时序结构正是CL014'遵守要求只能维持既有关系而非建立新关系'论点成立的逻辑前提，supports关系及方向成立。",
+        "proposed_relation_type": "supports",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR009",
+        "decision": "pass",
+        "explanation": "CL013指出宗主国附庸国之约包含附庸国必须遵守的要求这一要素，为CL015'不遵守要求则约破裂'的结论提供了必要前提（若无强制性要求，则谈不上违反导致破裂），supports关系可以成立，但CL013本身未直接陈述违约后果，故为间接支持。",
+        "proposed_relation_type": "supports",
+        "confidence": "medium"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR010",
+        "decision": "pass",
+        "explanation": "CL016说明宗主国单方面决定条款、附庸国不能议价的性质，直接解释了CL017中七十士译本选择διαθήκη（单方面设立）而非συνθήκη（平等协商）的理由，supports关系及方向成立。",
+        "proposed_relation_type": "supports",
+        "confidence": "high"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR011",
+        "decision": "pass",
+        "explanation": "CL012提供合同、遗命与宗主附庸之约的概念区分框架，为理解CL017中两个希腊词选择背后的约的性质提供背景，但未直接给出词义辨析或翻译理由，contextualizes类型（而非supports）更准确，与已修正的最终关系类型一致。",
+        "proposed_relation_type": "contextualizes",
+        "confidence": "high"
+      }
+    ]
+  },
+  "openai_adjudication": {
+    "adjudications": [
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR001",
+        "decision": "accept",
+        "final_relation_type": "supports",
+        "reason": "CL002所述“人子”几乎专用于耶稣自称的分布模式，虽不能单独证明但以理书背景或神性结论，但可间接支持它是特定称号而非泛指人性。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR002",
+        "decision": "accept",
+        "final_relation_type": "",
+        "reason": "CL003只陈述救恩向外邦人开放，既未提及司提反，也未说明“人子”称号的使用分布；现有主张和证据无法为CL002提供语境，关系应删除。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR004",
+        "decision": "reject",
+        "final_relation_type": "contextualizes",
+        "reason": "CL006不是把CL005的一项一般原则应用于具体案例，故applies不准确。不过，为安葬预作准备的膏抹事件提供了耶稣即将受死的叙事处境，可对CL005中耶稣定意赴死的部分形成背景说明，宜改为contextualizes。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR005",
+        "decision": "accept",
+        "final_relation_type": "contextualizes",
+        "reason": "CL008提供逾越节的历法、礼仪及出埃及纪念意义，有助于理解CL011所述圣餐是在逾越节筵席中设立及其杯的语境。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR006",
+        "decision": "accept",
+        "final_relation_type": "supports",
+        "reason": "CL010明确称犹大在圣餐设立前离席，直接支持CL011中参与设立圣餐的是耶稣与其余十一门徒这一部分。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR007",
+        "decision": "accept",
+        "final_relation_type": "contextualizes",
+        "reason": "CL012提供不同“约”概念的比较框架，有助于理解CL011中的“立新约”，但不直接证明圣餐设立、流血或赦罪，contextualizes恰当。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR008",
+        "decision": "accept",
+        "final_relation_type": "supports",
+        "reason": "CL013的先施恩、后提出要求结构表明关系在履行要求前已经建立，构成CL014关于遵守要求只能维持既有关系的逻辑前提。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR009",
+        "decision": "accept",
+        "final_relation_type": "supports",
+        "reason": "CL013说明约中存在附庸国必须遵守的要求，为CL015所述不遵守会导致约破裂提供间接前提；即使不能单独推出全部后果，支持关系仍成立。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR010",
+        "decision": "accept",
+        "final_relation_type": "supports",
+        "reason": "CL016所述条款由宗主国单方面决定且不可协商，直接支持CL017关于选择更能表达单方立定性质之词语的解释。"
+      },
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR011",
+        "decision": "accept",
+        "final_relation_type": "contextualizes",
+        "reason": "CL012提供合同、遗命及宗主附庸之约的概念比较，却未直接陈述两个希腊词的语义差异或实际翻译理由，因此其作用主要是提供CL017的概念背景。"
+      }
+    ],
+    "scope_confirmation": "relation_structure_no_theological_critique"
+  },
+  "claude_reconsideration": {
+    "scope_confirmation": "relation_structure_no_theological_critique",
+    "reconsiderations": [
+      {
+        "claim_relation_id": "DK-f0eac41a4244-CR004",
+        "decision": "accept_openai",
+        "final_relation_type": "contextualizes",
+        "reason": "CL006所述膏抹事件并非将CL005中的一般原则应用于具体情境，而是提供了耶稣即将受死这一叙事背景，故applies不准确，改为contextualizes更符合两者关系的实际结构。"
+      }
+    ]
+  },
+  "outcomes": [
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR001",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "supports",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL002所述“人子”几乎专用于耶稣自称的分布模式，虽不能单独证明但以理书背景或神性结论，但可间接支持它是特定称号而非泛指人性。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR002",
+      "claude_decision": "remove",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL003只陈述救恩向外邦人开放，既未提及司提反，也未说明“人子”称号的使用分布；现有主张和证据无法为CL002提供语境，关系应删除。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR004",
+      "claude_decision": "pass",
+      "openai_decision": "reject",
+      "claude_reconsideration": "accept_openai",
+      "final_relation_type": "contextualizes",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL006所述膏抹事件并非将CL005中的一般原则应用于具体情境，而是提供了耶稣即将受死这一叙事背景，故applies不准确，改为contextualizes更符合两者关系的实际结构。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR005",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "contextualizes",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL008提供逾越节的历法、礼仪及出埃及纪念意义，有助于理解CL011所述圣餐是在逾越节筵席中设立及其杯的语境。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR006",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "supports",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL010明确称犹大在圣餐设立前离席，直接支持CL011中参与设立圣餐的是耶稣与其余十一门徒这一部分。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR007",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "contextualizes",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL012提供不同“约”概念的比较框架，有助于理解CL011中的“立新约”，但不直接证明圣餐设立、流血或赦罪，contextualizes恰当。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR008",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "supports",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL013的先施恩、后提出要求结构表明关系在履行要求前已经建立，构成CL014关于遵守要求只能维持既有关系的逻辑前提。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR009",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "supports",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL013说明约中存在附庸国必须遵守的要求，为CL015所述不遵守会导致约破裂提供间接前提；即使不能单独推出全部后果，支持关系仍成立。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR010",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "supports",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL016所述条款由宗主国单方面决定且不可协商，直接支持CL017关于选择更能表达单方立定性质之词语的解释。"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR011",
+      "claude_decision": "pass",
+      "openai_decision": "accept",
+      "claude_reconsideration": null,
+      "final_relation_type": "contextualizes",
+      "status": "ai_consensus_reviewed",
+      "reason": "CL012提供合同、遗命及宗主附庸之约的概念比较，却未直接陈述两个希腊词的语义差异或实际翻译理由，因此其作用主要是提供CL017的概念背景。"
+    }
+  ]
+}

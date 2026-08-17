@@ -34,7 +34,7 @@ repository 的來源追溯要求。正式資料庫還必須把 Evidence 行號�
 .venv/bin/python -m backend.pipeline.seed_catalog.generator \
   --data-root /opt/homebrew/var/www/church/web/data \
   --series-id d5c55bdf-6375-49e9-a08d-22eda1eaf21d \
-  --output output/seed-catalog/matthew-review-v1
+  --output "$DATA_BASE_DIR/wang-knowledge-platform/catalog/seed-catalog/matthew-review-v1"
 ```
 
 主题树与匹配信号保存在 `taxonomy_seed.json`。修改后重新生成即可；生成器

@@ -11,8 +11,11 @@ from backend.pipeline.matthew_16_argument_integration import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPARISON = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/comparison-knowledge.json"
-PATCH = ROOT / "output/claim-layer/matthew-16-notes/sermon-4-1-comparison/composition-update-candidate.json"
+FIXTURE_DIR = (
+    Path(__file__).parent / "fixtures/wang_knowledge_platform/matthew_16_notes/comparison"
+)
+COMPARISON = FIXTURE_DIR / "comparison-knowledge.json"
+PATCH = FIXTURE_DIR / "composition-update-candidate.json"
 
 
 def _load(path: Path):

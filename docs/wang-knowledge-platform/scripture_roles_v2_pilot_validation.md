@@ -75,7 +75,7 @@
 
 ## 六、产物
 
-- 试验数据：`output/corpus-survey/scripture-v2-pilot/`
+- 试验数据：`$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/scripture-v2-pilot/`
 - 数据格式与验证：`backend/pipeline/corpus_scripture_enrichment.py`
 - 分类 runner：`backend/pipeline/corpus_scripture_enrichment_runner.py`
 - 分类提示词：`backend/pipeline/prompts/corpus_scripture_role_enrichment.md`

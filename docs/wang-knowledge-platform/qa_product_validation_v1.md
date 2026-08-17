@@ -59,7 +59,7 @@ flowchart LR
 - 教授尚未完整回答的问题；
 - 把教授引用的反方说法误当教授立场的归属陷阱。
 
-候选资料位于 `output/claim-layer/qa_validation_cases_v1.json`；内部审核入口为 `/admin/thought-review` 的「问答验证」页签。
+候选资料位于 `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/qa_validation_cases_v1.json`；内部审核入口为 `/admin/thought-review` 的「问答验证」页签。
 
 ## 五、验收标准
 

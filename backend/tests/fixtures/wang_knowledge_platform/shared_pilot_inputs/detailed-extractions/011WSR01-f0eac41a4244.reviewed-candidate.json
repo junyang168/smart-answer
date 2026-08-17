@@ -1,0 +1,3497 @@
+{
+  "schema_version": "wang_shared_knowledge_v1.2",
+  "package_id": "DETAILED-011WSR01-f0eac41a4244",
+  "source_documents": [
+    {
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "source_type": "sermon_transcript",
+      "transcript_id": "011WSR01",
+      "title": "011WSR01",
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "source_path": "/opt/homebrew/var/www/church/web/data/script_published/011WSR01.json",
+      "review_status": "candidate"
+    }
+  ],
+  "source_fragments": [
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q001-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "到底『人子』是什麼意思？",
+      "paragraph_key": "S0002",
+      "source_segment_index": 38,
+      "media_time": 169,
+      "media_end_time": 216,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "a860d0599ee57a611b2ae3531e79884d8de7ee546c59cba0a24fe3d65264fddc",
+      "verbatim_excerpt_sha256": "86e10b3641c6e9b9c1c7e8e9ad36a733391590c8b8e6a09f11011bcbbc2a3865",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q002-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "為什麼新約聖經強調耶穌的人性，可是沒有強調太多耶穌的神性，對不對？",
+      "paragraph_key": "S0004",
+      "source_segment_index": 66,
+      "media_time": 266,
+      "media_end_time": 351,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "9d290a03c6f17a69494598229cc4f26841cc15abadbe0bacf46bd714bb4c3677",
+      "verbatim_excerpt_sha256": "78128df38445e4a627c920908265168c446552301a134e2fb045c4af0ae14cfd",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q003-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "你們要了解這裡所講的這一位『像人子』的，到底是什麼意思？",
+      "paragraph_key": "S0006",
+      "source_segment_index": 133,
+      "media_time": 418,
+      "media_end_time": 494,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c085d16fad3495c6b426bcc1bcdf45e9223c786891d554895ee555cbca7113ce",
+      "verbatim_excerpt_sha256": "54ad123d4fae6570833b11226a4f9da9e57768993a59149c637915051c79009a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q004-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "究竟誰才是合法大祭司？猶太人對此認知混亂，這究竟是怎麼回事？",
+      "paragraph_key": "S0011",
+      "source_segment_index": 427,
+      "media_time": 1053,
+      "media_end_time": 1184,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "55fc7c61a17a2f93074076b9284b7f29cf16f5225b99be28ded5a9bc6f4ee415",
+      "verbatim_excerpt_sha256": "e530d2e9051cbcf179a13dd240a27ef7a3cf00e029e2262132d7e399aa70d830",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q005-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "『阿們』甚麼意思？",
+      "paragraph_key": "S0021",
+      "source_segment_index": 933,
+      "media_time": 2250,
+      "media_end_time": 2396,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c788328996a94b851b628abc9cb12a3ab16749fa10b695ee7eb974666729be38",
+      "verbatim_excerpt_sha256": "49326d0994bc538fb71767a2ca1838c80d594f4b630ae5572f0b143fe5b8110c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q006-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "主啊，是誰呢？",
+      "paragraph_key": "S0025",
+      "source_segment_index": 1145,
+      "media_time": 2744,
+      "media_end_time": 2851,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "2d796c39db3bb8015dc216d5c2a5f90c7a0e910ca801660fcbdeb815cbc05085",
+      "verbatim_excerpt_sha256": "b18c6c89032ca0a214e44901c82ed94b063642892a37ad95642fde336d66fd7f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q007-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "什麼意思？",
+      "paragraph_key": "S0028",
+      "source_segment_index": 1260,
+      "media_time": 3038,
+      "media_end_time": 3084,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "5f063061d8d729dad39ffc3120ac7adaf76163f4a752f599eca8ec2f87d3bae6",
+      "verbatim_excerpt_sha256": "9d21adddc66e38d1069287a6a31f7af4e7926540ed0b174914498951ec247dbe",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q008-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "συνθήκη 還是διαθήκη更合適？",
+      "paragraph_key": "S0043",
+      "source_segment_index": 1702,
+      "media_time": 4355,
+      "media_end_time": 4401,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "f3375ddd0032ec978239c00848dfd556ff419b12dfd294bfb6d7f77c61313d66",
+      "verbatim_excerpt_sha256": "3a112bff34496a80c55aea550e73342987db0f2dccb0c7e126039e725e6693ca",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS001-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "原來啊，人子是強調耶穌的人性。",
+      "paragraph_key": "S0002",
+      "source_segment_index": 38,
+      "media_time": 169,
+      "media_end_time": 216,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "a860d0599ee57a611b2ae3531e79884d8de7ee546c59cba0a24fe3d65264fddc",
+      "verbatim_excerpt_sha256": "169545c8159bf25c4ffb1869b8746c2832d2516c50ccc2a722c9ddd1d9853bfc",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS003-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "你們外邦人若要得救，必須皈依猶太教，成為猶太教徒，方能蒙神賜福。唯有接受猶太教規，才能得著救恩；若不成為猶太人，便與救恩無分。",
+      "paragraph_key": "S0009",
+      "source_segment_index": 323,
+      "media_time": 822,
+      "media_end_time": 946,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "38910d5c53af5651e8d7b83423a8c28c4b7bb3d08f6866c8f036549d6eb54257",
+      "verbatim_excerpt_sha256": "8fb0ea6cdc38163652b7a306c9e930acb9bffa5116b36433d127c568f1c9a965",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS004-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "何用這樣枉費呢？這香膏可賣許多錢賙濟窮人。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 586,
+      "media_time": 1441,
+      "media_end_time": 1537,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "04df368d725aca690f1eba7f3219851946ba3f9b91b4fd62ac630ea0f47ecbe5",
+      "verbatim_excerpt_sha256": "03c4f9967c7053e548d68a04cab5eda97dce5d25299ccf65b8f67c1024811366",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS001-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "耶穌說完了這一切的話，就對門徒說：『你們知道過兩天是逾越節，人子將要被交給人，釘在十字架上。』",
+      "paragraph_key": "S0001",
+      "source_segment_index": 1,
+      "media_time": 0,
+      "media_end_time": 169,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "09429baf4b5f0c5a9418adcef2dca3e55bb2bb81ff0674158b5ae6a6416c4942",
+      "verbatim_excerpt_sha256": "24176904395a0223e8fc7f53b4b728baf3cad4bd6855272d9eca6a2e5dd07b77",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS002-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "因為我們中文沒有冠詞",
+      "paragraph_key": "S0003",
+      "source_segment_index": 51,
+      "media_time": 216,
+      "media_end_time": 266,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7316ae8213fa164418967b6dcaef8487315739acf533b7e5653f86bb24053eb3",
+      "verbatim_excerpt_sha256": "151b12dfc1717f4c3027f632765267242343205004b93c32ea9b94870333421d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS003-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "這裡『人子』的原文，כְּבַר אֱנָשׁ是希伯來文，這個在希臘文翻譯成七十士譯本，ὁ υἱὸς τοῦ ἀνθρώπου。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 66,
+      "media_time": 266,
+      "media_end_time": 351,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "9d290a03c6f17a69494598229cc4f26841cc15abadbe0bacf46bd714bb4c3677",
+      "verbatim_excerpt_sha256": "d844a0d03f71fb821553a76e87a13a052a4fbb321ca0ba334c2facd99da30e6b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS004-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "我在夜間的異象中觀看，見有一位像人子的，駕著天雲而來，被領到亘古常在者面前。祂得了權柄、榮耀、國度，使各方、各國、各族的人都事奉祂。",
+      "paragraph_key": "S0006",
+      "source_segment_index": 133,
+      "media_time": 418,
+      "media_end_time": 494,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c085d16fad3495c6b426bcc1bcdf45e9223c786891d554895ee555cbca7113ce",
+      "verbatim_excerpt_sha256": "472623dfc610936f3f120c035865aa28f02d3f0d9f36457c5315a67884a01072",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS005-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "但以理書在第七章三節到十二節提到他看見四個獸，這四獸其實象徵四個強國的君王",
+      "paragraph_key": "S0007",
+      "source_segment_index": 169,
+      "media_time": 495,
+      "media_end_time": 688,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c766591c32a3e88b166fc168b3c5bfa10ca0e960d1edf7ac121367cfdd5956ff",
+      "verbatim_excerpt_sha256": "5d468f858506fe6331541752c60d54ea6ea23b952f78c85d257844986cd104a2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS006-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "第一個是巴比倫，第二個是波斯，第三個是希臘，第四個是羅馬。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 169,
+      "media_time": 495,
+      "media_end_time": 688,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c766591c32a3e88b166fc168b3c5bfa10ca0e960d1edf7ac121367cfdd5956ff",
+      "verbatim_excerpt_sha256": "37a7812dec41e96dddce2590e52af86b80e6c3e0b615652482c9db8d68514db8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS007-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "馬太福音26章3節、57節，路加福音3章2節，約翰福音11章49節，約翰福音18章13節，路加福音3章2節，路加福音3章20節，皆稱該亞法為大祭司。然而路加福音3章2節與使徒行傳4章6節卻稱亞那為大祭司。",
+      "paragraph_key": "S0011",
+      "source_segment_index": 427,
+      "media_time": 1053,
+      "media_end_time": 1184,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "55fc7c61a17a2f93074076b9284b7f29cf16f5225b99be28ded5a9bc6f4ee415",
+      "verbatim_excerpt_sha256": "6899b8c33c69a124c608ecf6e54bfffc2d6d40bc6e2f352e4ddf085e385a4b90",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS008-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "亞那在公元15年被羅馬人撤職。",
+      "paragraph_key": "S0012",
+      "source_segment_index": 479,
+      "media_time": 1187,
+      "media_end_time": 1338,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "6ffb106a76e5f3ba63b35c259b1d9e9701022e948698403764d3ed2d64459ef9",
+      "verbatim_excerpt_sha256": "cbc25c53113cd12cf1b648af04b6e50b232462cb24a0bf8f305229b39414d26d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS009-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "此時耶路撒冷人口暴增五倍，群眾聚集極易受鼓動。",
+      "paragraph_key": "S0013",
+      "source_segment_index": 542,
+      "media_time": 1344,
+      "media_end_time": 1441,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7dbe51d0b9e35f6977cdcd17490edb19552b9abe7f5f6f0552d23ad47ce9599f",
+      "verbatim_excerpt_sha256": "1bb371a301e3fae4f0d8fde665c84d57b32154ca171d85ce853a2b5442253251",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS010-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "她將香膏澆我身上，是為我安葬預備的。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 586,
+      "media_time": 1441,
+      "media_end_time": 1537,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "04df368d725aca690f1eba7f3219851946ba3f9b91b4fd62ac630ea0f47ecbe5",
+      "verbatim_excerpt_sha256": "0305e06ed1d3e9ff18647eaba5f0f4b0e9b8b0d2d707619be6af6fad575e59b4",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS011-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "出埃及記21章32節記載：若牛觸死奴僕或婢女，主人需賠償三十舍客勒銀子，牛也要用石頭打死。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 659,
+      "media_time": 1599,
+      "media_end_time": 1755,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "06216ba2e2a0bbfb91e54f640a7a6f8406683169a0e8be74a12624031367472c",
+      "verbatim_excerpt_sha256": "c1a02599f895482c48e05d7a07e003e0273d6346f55c7d716b6cda6c40910e57",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS012-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "尼散月的十四號，下午三點到五點左右，各家庭帶羊羔到聖殿，有祭司來殺羊羔",
+      "paragraph_key": "S0017",
+      "source_segment_index": 735,
+      "media_time": 1759,
+      "media_end_time": 1883,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "6ad0ac8d9925f87b6454d904ed7b70ac08b71fd6551f8b1a82796b4a13a6c00f",
+      "verbatim_excerpt_sha256": "eec4d538444c1c0b2194a90fe06e7389cb78fb6abe998d629d05634873ef9989",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS013-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "吃完羊肉後，便喝第三杯酒，稱為「祝福的杯」。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 871,
+      "media_time": 2089,
+      "media_end_time": 2242,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7cde15dad909bbf5541a0f6f097dd9c79fb0f0c95be008d486c913c580c51709",
+      "verbatim_excerpt_sha256": "d7eb6508e771af33abc75c263bdd590341ba42b39c4fa14fde1d8e2bdeb9fc3d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS014-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "參加宴席的人便唱誦「哈雷爾」，即詩篇114篇至118篇，或115篇至118篇，接著喝第四杯酒。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 871,
+      "media_time": 2089,
+      "media_end_time": 2242,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7cde15dad909bbf5541a0f6f097dd9c79fb0f0c95be008d486c913c580c51709",
+      "verbatim_excerpt_sha256": "2ac9ab550793360b40efde2fb3f1bfcb58de8a6e3d7e6eaa90298c8dc71edca1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS015-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "跟我沾手在盤子裡的，就是他要賣我。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1001,
+      "media_time": 2396,
+      "media_end_time": 2518,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "21c281ef24dbc06ca63b801d86651c5917f9c650a4d26228f121eda9efe4adab",
+      "verbatim_excerpt_sha256": "87083162eac2fcff5db1b7ef06d9e17f4669f04079563bbb6f5bd44cdc88857c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS016-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "他吃了以後，撒但就入了他的心。",
+      "paragraph_key": "S0025",
+      "source_segment_index": 1145,
+      "media_time": 2744,
+      "media_end_time": 2851,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "2d796c39db3bb8015dc216d5c2a5f90c7a0e910ca801660fcbdeb815cbc05085",
+      "verbatim_excerpt_sha256": "9515557ed5a7e148ee75b0affbec46539306396da7f9334c2816ce67016e1ab7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS017-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "你們拿著吃，這是我的身體。",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1221,
+      "media_time": 2937,
+      "media_end_time": 3036,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "ff137472eb168c80dd3a1e1d6082d8e727639fe70336d86d2e53b3b25565c328",
+      "verbatim_excerpt_sha256": "de48ddb58a99db10913865755be395b9ee3fde76cb28c404c87373d54572bfa0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS018-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "covenant，“約”的希臘文叫做διαθήκη。",
+      "paragraph_key": "S0031",
+      "source_segment_index": 1312,
+      "media_time": 3319,
+      "media_end_time": 3374,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "ab01df00377b3a6d427ae8dda9827073b04e458002581577c85effb46bd14539",
+      "verbatim_excerpt_sha256": "57643afa8d70441dd0ecc674bb638bbc2329b99258fb17adb3423a168620b5b7",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS019-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "συνθήκη是合同，διαθήκη是遺命，就是will。בְּרִית 是宗主國與附庸國的約。",
+      "paragraph_key": "S0042",
+      "source_segment_index": 1656,
+      "media_time": 4241,
+      "media_end_time": 4354,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "07479e15b7958e13085415c65e1d45b72545e67e7141a3fde7a50aacb7444db9",
+      "verbatim_excerpt_sha256": "1bd3ed18daca3b3347e61125410fe7d79858a659cabc1ba49639bd5acdf99c5d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS020-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "當時有七十多位希伯來文專家在公元前第三世紀時，於埃及的亞歷山大地區，將舊約聖經從希伯來文翻譯成希臘文，這個譯本稱為Septuagint（LXX）。",
+      "paragraph_key": "S0042",
+      "source_segment_index": 1656,
+      "media_time": 4241,
+      "media_end_time": 4354,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "07479e15b7958e13085415c65e1d45b72545e67e7141a3fde7a50aacb7444db9",
+      "verbatim_excerpt_sha256": "b8a28427fcff307e56bc30f19b9cf7174b2c20058c2c115bd1ff51d9bba007d1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E002-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "其實每次在新約聖經裡面，用到『人子』這個字的話，那son of man一定有定冠詞。",
+      "paragraph_key": "S0003",
+      "source_segment_index": 51,
+      "media_time": 216,
+      "media_end_time": 266,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7316ae8213fa164418967b6dcaef8487315739acf533b7e5653f86bb24053eb3",
+      "verbatim_excerpt_sha256": "4b88dbc70ddf4497f3a583b68832316b3532e914f0684721cee1751fa3d7c571",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E003-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "就是說那一個『人子』，不是指任何一個人的人子，就是那一個，\"the\"，冠詞所指的——《但以理書》第七章13-14節。",
+      "paragraph_key": "S0004",
+      "source_segment_index": 66,
+      "media_time": 266,
+      "media_end_time": 351,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "9d290a03c6f17a69494598229cc4f26841cc15abadbe0bacf46bd714bb4c3677",
+      "verbatim_excerpt_sha256": "9e65831e7eebea68dc5f61d94931c2be27016a41743f6cb4df23ddbfbd98e69f",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E004-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "啟示文學的特色在於以象徵符號來表達，比如獸代表人間的君王，而『人子』代表耶穌，指向神自己。",
+      "paragraph_key": "S0007",
+      "source_segment_index": 169,
+      "media_time": 495,
+      "media_end_time": 688,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c766591c32a3e88b166fc168b3c5bfa10ca0e960d1edf7ac121367cfdd5956ff",
+      "verbatim_excerpt_sha256": "647c8e195891cc50234c188f932e35c423f3584302f1245c884b669148d05374",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E005-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "因此耶穌使用The Son of Man，用冠詞the, 這個稱號時，正是引用但以理書第七章的異象，宣告自己就是經文中所預言的那位——那位『人子』即耶穌本身，表明祂正是從神而來的那一位。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 259,
+      "media_time": 689,
+      "media_end_time": 821,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "d22ddf435f051340817f8a3909bc7d2f0be7beeb03c55627c27efeb970bfe32b",
+      "verbatim_excerpt_sha256": "a6826ded8578b8be1475cf1a981fbceeb8a9eae3940814bc347640e93229d358",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E006-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "在新約聖經中，除了使徒行傳第七章五十六節外，沒有人使用『人子』來稱呼耶穌或指涉祂；這稱號的特殊性在於，若細查新約經文，『人子』一詞唯獨出自耶穌之口，祂以此自指，實為強調自己就是神。",
+      "paragraph_key": "S0008",
+      "source_segment_index": 259,
+      "media_time": 689,
+      "media_end_time": 821,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "d22ddf435f051340817f8a3909bc7d2f0be7beeb03c55627c27efeb970bfe32b",
+      "verbatim_excerpt_sha256": "5f87abbe7cbf574396e10477ffd5993f4c918001ef029aefe8e9301179a6afd0",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E007-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "只要接受這恩典，便可得救，無須先歸化猶太教，只需單單信靠耶穌為救主，便已足夠",
+      "paragraph_key": "S0009",
+      "source_segment_index": 323,
+      "media_time": 822,
+      "media_end_time": 946,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "38910d5c53af5651e8d7b83423a8c28c4b7bb3d08f6866c8f036549d6eb54257",
+      "verbatim_excerpt_sha256": "7169f937d27b3d8694b33116fbaf4df5a965d693446ef0aae8ad963dd75d05f4",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E008-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "問題在於：究竟誰才是合法大祭司？猶太人對此認知混亂，這究竟是怎麼回事？",
+      "paragraph_key": "S0011",
+      "source_segment_index": 427,
+      "media_time": 1053,
+      "media_end_time": 1184,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "55fc7c61a17a2f93074076b9284b7f29cf16f5225b99be28ded5a9bc6f4ee415",
+      "verbatim_excerpt_sha256": "eecc5ee8dd2eb97fabbd8aefd0e86ae4110d1084ad831dd0b232e1fbeb98e462",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E009-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "由於大祭司按律應為終身職，猶太人始終不承認羅馬人廢黜亞那的合法性，仍視亞那為合法大祭司。該亞法雖是官方指派，但與亞那有姻親關係，這層背景至關重要。",
+      "paragraph_key": "S0012",
+      "source_segment_index": 479,
+      "media_time": 1187,
+      "media_end_time": 1338,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "6ffb106a76e5f3ba63b35c259b1d9e9701022e948698403764d3ed2d64459ef9",
+      "verbatim_excerpt_sha256": "04680400fa885a07375c99a96b7facefc8bb4a986d427470b191b75d13910bd9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E010-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "大祭司、祭司長與民間長老決議：『不可在逾越節期間行動，以免民眾見我們捉拿耶穌而生亂。』於是暫緩動手。",
+      "paragraph_key": "S0013",
+      "source_segment_index": 542,
+      "media_time": 1344,
+      "media_end_time": 1441,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7dbe51d0b9e35f6977cdcd17490edb19552b9abe7f5f6f0552d23ad47ce9599f",
+      "verbatim_excerpt_sha256": "02a51eb647014bdea376581b5fb153a139151cb2a0032e9abd27c56ead37388d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E011-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "耶穌反而刻意要讓他們捉拿。耶穌自己定意必須在逾越節期間被獻上為祭。",
+      "paragraph_key": "S0014",
+      "source_segment_index": 586,
+      "media_time": 1441,
+      "media_end_time": 1537,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "04df368d725aca690f1eba7f3219851946ba3f9b91b4fd62ac630ea0f47ecbe5",
+      "verbatim_excerpt_sha256": "709c971ebec637aec09e90e605f18bff68ad2cd0f581a5019165d47dbfc6f203",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E012-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "這女人乃是預先用膏抹我，為我安葬作準備。她搶先在我身體未死時膏抹，此舉彰顯了對基督完全的愛。",
+      "paragraph_key": "S0015",
+      "source_segment_index": 630,
+      "media_time": 1537,
+      "media_end_time": 1595,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "567ba6223dee789aa506fb6ad169552a683c0371789a9774c8cffd850b3d7740",
+      "verbatim_excerpt_sha256": "6f600931de37c4b247b9406ffef8a3fe41a54b7a214a4c083de9a6a1c7e5fa0b",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E013-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "這象徵性地表明，猶大以三十舍客勒出賣耶穌，等同將祂的價值貶為婢女的賠償價，顯露他對基督的輕蔑。",
+      "paragraph_key": "S0016",
+      "source_segment_index": 659,
+      "media_time": 1599,
+      "media_end_time": 1755,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "06216ba2e2a0bbfb91e54f640a7a6f8406683169a0e8be74a12624031367472c",
+      "verbatim_excerpt_sha256": "03232cf3a43282a9b1a51c698b9a9ea2b0795b0bfc7ac5536c8febfc310c8106",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E014-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "因為猶太人跟我們不一樣：我們是早上是今天的開始是早上半夜12點，可是猶太人是一天到太陽下山之後那天就過去了。",
+      "paragraph_key": "S0018",
+      "source_segment_index": 786,
+      "media_time": 1883,
+      "media_end_time": 1972,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "b8437d152992a5c8cbefea20a4393458a2c499e1eb2f67ad7bb9ed5952c36240",
+      "verbatim_excerpt_sha256": "afb8bce79846b6e47e98ee4814b9f6aaf0e37ed8ce3aa75667841c98587b58d8",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E015-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "家庭的主人要從出埃及的歷史，說明這些食物的意義。就是神要帶以色列人脫離埃及得自由，要準備離開埃及。",
+      "paragraph_key": "S0019",
+      "source_segment_index": 823,
+      "media_time": 1972,
+      "media_end_time": 2089,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "fd85a4b48535695e1e6570ad72506279060a74a1bef8997b825ad6dc1b238186",
+      "verbatim_excerpt_sha256": "5c6c3bfeaf5a4474601f5ca88a46050f74722308e1d88085c3d3138ebaa330d9",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E017-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "『阿們』的意思就是說『我就是神』，『我以神的立場向你們說話』。",
+      "paragraph_key": "S0021",
+      "source_segment_index": 933,
+      "media_time": 2250,
+      "media_end_time": 2396,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "c788328996a94b851b628abc9cb12a3ab16749fa10b695ee7eb974666729be38",
+      "verbatim_excerpt_sha256": "43575511addca77e04f261e6de91c9bbb5e45e99d867e01cc1c01ba201604a55",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E018-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "那約翰就把『阿們』講兩次：『阿們，阿們，我告訴你』耶穌說：我就是神，我告訴你很重要的話，注意聽。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1001,
+      "media_time": 2396,
+      "media_end_time": 2518,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "21c281ef24dbc06ca63b801d86651c5917f9c650a4d26228f121eda9efe4adab",
+      "verbatim_excerpt_sha256": "938d83192c0cae91d2f2a18608d7179b2bc19109928cd5b53636a879e2e9634a",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E019-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "其實他們吃飯的時候不是坐著吃，他們是躺下來，那要吃的東西放在中間，大家圍繞著這個食物，躺著用左手壓住，用右手把東西拿來吃。",
+      "paragraph_key": "S0022",
+      "source_segment_index": 1001,
+      "media_time": 2396,
+      "media_end_time": 2518,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "21c281ef24dbc06ca63b801d86651c5917f9c650a4d26228f121eda9efe4adab",
+      "verbatim_excerpt_sha256": "6b9c3ea8ae9919b8ee55626383aa214efc6e0beed0be0e6651a8e5cf371c0a53",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E020-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "耶穌用手摸那個要吃的餅，把餅遞給猶大，給猶大最大的面子，彷彿說：『我愛你，我愛你。』",
+      "paragraph_key": "S0023",
+      "source_segment_index": 1058,
+      "media_time": 2518,
+      "media_end_time": 2642,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7ebe8f6fb03383a04215d87fd34f1593aefa9302c928607038e16227f943dbc2",
+      "verbatim_excerpt_sha256": "0d0df99e3bf24b38b2583514fc6e1ec530d58f3ecf64bae75bb3a7d05a9a34c6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E021-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "耶穌就說：『我現在要將這餅給那人，那人就是賣我的人。』於是耶穌將餅交給猶大",
+      "paragraph_key": "S0024",
+      "source_segment_index": 1110,
+      "media_time": 2646,
+      "media_end_time": 2742,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "8ff08cb83eebcf6c8d8ccddc3a63c67c9c82df3f9f16e5a5318fc26ae5e0852a",
+      "verbatim_excerpt_sha256": "d6277e3ff3f63d801223b69cf8d4d7af5de368dccffbc068c1488129f77a893d",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E022-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "於是猶大立即離開，沒有參與耶穌隨後設立的聖餐，因為他提前離開了。",
+      "paragraph_key": "S0025",
+      "source_segment_index": 1145,
+      "media_time": 2744,
+      "media_end_time": 2851,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "2d796c39db3bb8015dc216d5c2a5f90c7a0e910ca801660fcbdeb815cbc05085",
+      "verbatim_excerpt_sha256": "6431be6df4b162ed6f4c17b53e58df4dcb1b91c9c3bbd3d0dd5731a127f5e2a6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E023-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "因此耶穌與十一個門徒在那裡共同設立聖餐，為要紀念耶穌基督為我們捨命，為新約的寶血立定。",
+      "paragraph_key": "S0026",
+      "source_segment_index": 1189,
+      "media_time": 2853,
+      "media_end_time": 2932,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "d9b422b41fc3c48e555b9b829429d6c1bac3b1520fde748e6f794321c943eda5",
+      "verbatim_excerpt_sha256": "c47eebe022deb426a0f4392f8cf46e65246f721e5af54328ecfea85c48981c66",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E024-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "接著又拿起杯來，祝謝後遞給他們說：『你們都喝這杯，因為這是我立約的血，為多人流出，使罪得赦。』",
+      "paragraph_key": "S0027",
+      "source_segment_index": 1221,
+      "media_time": 2937,
+      "media_end_time": 3036,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "ff137472eb168c80dd3a1e1d6082d8e727639fe70336d86d2e53b3b25565c328",
+      "verbatim_excerpt_sha256": "6f17a89df4c608c5d0f0e2fce61c19697a897458b7bfb688d95a1b0fb6838e86",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E025-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "耶穌所說的這杯裡面的血，是代表我立新約的血。",
+      "paragraph_key": "S0028",
+      "source_segment_index": 1260,
+      "media_time": 3038,
+      "media_end_time": 3084,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "5f063061d8d729dad39ffc3120ac7adaf76163f4a752f599eca8ec2f87d3bae6",
+      "verbatim_excerpt_sha256": "c47df3038d0aa636da08505dc6492b23e5d7ad5b0322f90c5c71fd00e285d739",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E026-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "“約”的問題。covenant，“約”的希臘文叫做διαθήκη。第一個是合同的意思。 第二個，遺命，遺囑。希伯來文是בְּרִית 、宗主國附庸國的約。",
+      "paragraph_key": "S0031",
+      "source_segment_index": 1312,
+      "media_time": 3319,
+      "media_end_time": 3374,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "ab01df00377b3a6d427ae8dda9827073b04e458002581577c85effb46bd14539",
+      "verbatim_excerpt_sha256": "bf5664218e7e76760a968b7e084c0a48909acb10786ba798d2d38e448cfb3088",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E027-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "大家在同等地位，我錢少他就不要幫我除草；如果他要價太高，我就說你要求太離譜。",
+      "paragraph_key": "S0033",
+      "source_segment_index": 1363,
+      "media_time": 3451,
+      "media_end_time": 3497,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "a510bbdd83cea8980ffc9af45f38e47a0c8c5cbb5cd4bd51cd2851a2387ce1a4",
+      "verbatim_excerpt_sha256": "8459b4e4299618071c234446dfa2524bc5f29daded50ef5bb65ce14dad8c54b4",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E028-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "這個應許條件由立遺囑者決定，錢要給多少、給誰，是我寫遺囑的人決定的，別人不能管。",
+      "paragraph_key": "S0034",
+      "source_segment_index": 1385,
+      "media_time": 3497,
+      "media_end_time": 3564,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "eeabee5b14706398dd72fe551535a2c4ae1a1441c4a1be7eb89b5258d2dc0ec4",
+      "verbatim_excerpt_sha256": "0a3669dcb05f1907f95efb6c3b4c12d7d27f126126e773aac8db5ce343c04af2",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E029-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "可是還有一個，就是宗主國與附庸國的約，בְּרִית。",
+      "paragraph_key": "S0035",
+      "source_segment_index": 1414,
+      "media_time": 3564,
+      "media_end_time": 3673,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "bd0fc95b4dd165ba24acd076fa33806a709f0dec1192c8b023ef0cbbc5ac5397",
+      "verbatim_excerpt_sha256": "ec949c080142fe635444e194c06f5584b0e3654501f6ed5d1bacd62219072d9c",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E030-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "宗主國先恩待附庸國，把以色列人——猶太人從埃及帶出來，要把他帶進迦南地。可是呢，宗主國對附庸國好之後，宗主國對附庸國有所要求",
+      "paragraph_key": "S0036",
+      "source_segment_index": 1450,
+      "media_time": 3673,
+      "media_end_time": 3749,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "824446b18451909a4381486ba8943a6ed259a2567620f9c3b12040f3b2715c02",
+      "verbatim_excerpt_sha256": "01d1dd875a165adb8dc5b7730197f9535cd696b02869bb532d61d23d3fdc9f68",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E031-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "附庸國若遵守宗主國附庸國的要求，不能建立好關係，不能夠跟宗主國建立好關係，不可能！只有什麼？你如果你立約之後，附庸國如果來遵守宗主國的要求，你只能維持已經有的既有的關係，不能建立好關係。",
+      "paragraph_key": "S0037",
+      "source_segment_index": 1479,
+      "media_time": 3749,
+      "media_end_time": 3860,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "1cd01673ae51510451e4d73a0fc561b7c95ddb28212c01b081d1f5a85af40d3f",
+      "verbatim_excerpt_sha256": "bad07242aad6fb41575de5fd71fa4b14d92c9926baeb82879c63e3d20dbcf37e",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E032-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "附庸國若不遵守要求，約就破裂了，所以約就沒有了，關鍵在這裡。",
+      "paragraph_key": "S0038",
+      "source_segment_index": 1524,
+      "media_time": 3860,
+      "media_end_time": 3998,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "6d092c6b887a2a365d56989a7a2e84a8979a612de02f006765f2cc9f9094ab39",
+      "verbatim_excerpt_sha256": "96c9332232be16df2322337e00c46ee405d00c55ef64aa1c172ec52eaebd6828",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E033-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "“約”，有兩個要素：第一，宗主國先施恩給附庸國；第二，宗主國向附庸國提出要求。",
+      "paragraph_key": "S0039",
+      "source_segment_index": 1571,
+      "media_time": 3999,
+      "media_end_time": 4090,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "aab55144c8b2f29c50c5a17afd150d53128868c5d2863263d93576fea2d56209",
+      "verbatim_excerpt_sha256": "0d3491ca91bf71dd1e9499cef498502e29adeef527e18a70cdf67642758a4061",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E034-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "這兩件事，宗主國完全站在主動地位。他要不要施恩給附庸國，由他決定；他向附庸國的要求，完全由他決定。",
+      "paragraph_key": "S0040",
+      "source_segment_index": 1604,
+      "media_time": 4090,
+      "media_end_time": 4177,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "e287b85dbc830cac677af085d0eb17d0c1f0387aa1b771363875e41f31114303",
+      "verbatim_excerpt_sha256": "1accee2d8dc981d61b40620056bafd5e1de96d6116148c9dd10b835de9d08942",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E035-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "所以附庸國只能全部接受或者全部拒絕。這個觀念非常重要。",
+      "paragraph_key": "S0041",
+      "source_segment_index": 1633,
+      "media_time": 4179,
+      "media_end_time": 4238,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7326909c82bb612db0599e1679996fd8afc93ff0ce68558571cabc474e1a154a",
+      "verbatim_excerpt_sha256": "67989fdb3c1faf1fe8153d7f6c854da36173a380fe736f3252092213785eedc6",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E036-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "當他們要將בְּרִית 這個概念翻譯成希臘文時，只有兩種選擇，兩種譯法。",
+      "paragraph_key": "S0042",
+      "source_segment_index": 1656,
+      "media_time": 4241,
+      "media_end_time": 4354,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "07479e15b7958e13085415c65e1d45b72545e67e7141a3fde7a50aacb7444db9",
+      "verbatim_excerpt_sha256": "35aea711db1e7e34971ee71d947007927ea9da7afc5062a0ccdfddad728533e1",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E037-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "結果他們選擇了後者，因為這個譯法更貼近宗主國與附庸國立約的本質。",
+      "paragraph_key": "S0043",
+      "source_segment_index": 1702,
+      "media_time": 4355,
+      "media_end_time": 4401,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "f3375ddd0032ec978239c00848dfd556ff419b12dfd294bfb6d7f77c61313d66",
+      "verbatim_excerpt_sha256": "bf85c588dbb0d0a5b2f5d8f780266d023850ae839d178a634a044e0db4938a71",
+      "anchor_state": "source_version_bound",
+      "review_status": "candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-f0eac41a4244-CL004-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "該亞法隨後被指派接任大祭司職位。亞那是該亞法的岳父，因為該亞法娶了亞那的女兒。",
+      "paragraph_key": "S0012",
+      "source_segment_index": 479,
+      "media_time": 1187,
+      "media_end_time": 1338,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "6ffb106a76e5f3ba63b35c259b1d9e9701022e948698403764d3ed2d64459ef9",
+      "verbatim_excerpt_sha256": "d066c48a30e95da90cb55f5454c98b306a28abd872c150e4958fc5f61511dcf6",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "fragment_id": "FR-AI-ADJ-DK-f0eac41a4244-CL008-01",
+      "source_id": "SRC-011WSR01-f0eac41a4244",
+      "verbatim_excerpt": "他們第二杯酒喝完後，便開始吃主食，也就是羊肉。吃完羊肉後，便喝第三杯酒，稱為「祝福的杯」。然後，他們再次感謝禱告，參加宴席的人便唱誦「哈雷爾」，即詩篇114篇至118篇，或115篇至118篇，接著喝第四杯酒。",
+      "paragraph_key": "S0020",
+      "source_segment_index": 871,
+      "media_time": 2089,
+      "media_end_time": 2242,
+      "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+      "paragraph_text_sha256": "7cde15dad909bbf5541a0f6f097dd9c79fb0f0c95be008d486c913c580c51709",
+      "verbatim_excerpt_sha256": "71fd975be6151fa79c0826d01ad964472107a9ac4973654720fa8b65db0d4d29",
+      "anchor_state": "source_version_bound",
+      "review_status": "ai_consensus_candidate"
+    }
+  ],
+  "questions": [
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q001",
+      "question_type": "称号释义",
+      "questioner": "professor",
+      "text": "“人子”究竟是什么意思？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q002",
+      "question_type": "听众提出的神学释经问题",
+      "questioner": "audience",
+      "text": "为什么新约强调耶稣的人性，却没有太多强调祂的神性？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q003",
+      "question_type": "旧约异象释义",
+      "questioner": "professor",
+      "text": "但以理书所说的“像人子”者是什么意思？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL004"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q004",
+      "question_type": "历史与经文称谓协调",
+      "questioner": "professor",
+      "text": "亚那和该亚法之中谁是合法大祭司，为什么经文会同时称二人为大祭司？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL009"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q005",
+      "question_type": "原文字义",
+      "questioner": "professor",
+      "text": "耶稣在话语开头所说的“阿们”是什么意思？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL010"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q006",
+      "question_type": "经文人物问题",
+      "questioner": "audience",
+      "text": "耶稣所说将要出卖祂的人是谁？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL011",
+        "DK-f0eac41a4244-CL012",
+        "DK-f0eac41a4244-CL013",
+        "DK-f0eac41a4244-CL014",
+        "DK-f0eac41a4244-CL015",
+        "DK-f0eac41a4244-CL016",
+        "DK-f0eac41a4244-CL017"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q007",
+      "question_type": "新约之血与约的意义",
+      "questioner": "professor",
+      "text": "耶稣说杯中的血是立新约的血，这是什么意思？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "answer_claim_ids": [
+        "DK-f0eac41a4244-CL017"
+      ],
+      "answer_state": "answered",
+      "question_id": "DK-f0eac41a4244-Q008",
+      "question_type": "七十士译本翻译选择",
+      "questioner": "professor",
+      "text": "翻译בְּרִית时，συνθήκη和διαθήκη哪一个更合适？",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q008-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "position_nodes": [
+    {
+      "attribution": "很多人",
+      "position_id": "DK-f0eac41a4244-POS001",
+      "title": "“人子”只强调耶稣人性的观点",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "许多教会中向教授提问的人",
+      "position_id": "DK-f0eac41a4244-POS002",
+      "title": "新约较少强调耶稣神性的观点",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "教授所概括的犹太人传统观念",
+      "position_id": "DK-f0eac41a4244-POS003",
+      "title": "外邦人必须归化犹太教才能得救的立场",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "attribution": "马太福音叙事中的门徒",
+      "position_id": "DK-f0eac41a4244-POS004",
+      "title": "膏抹耶稣是浪费、应改为周济穷人的立场",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-POS004-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "observations": [
+    {
+      "observation_id": "DK-f0eac41a4244-OBS001",
+      "observation_type": "经文文字",
+      "scripture_refs": [
+        "马太福音26:1-2"
+      ],
+      "statement": "马太福音记载耶稣预告两天后是逾越节，并说人子将被交给人钉十字架。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS002",
+      "observation_type": "语言差异",
+      "scripture_refs": [],
+      "statement": "中文没有冠词，因此中文译文不能直接显示教授所强调的定冠词。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS003",
+      "observation_type": "原文与古译本",
+      "scripture_refs": [
+        "但以理书7:13"
+      ],
+      "statement": "教授给出“人子”的希伯来文形式כְּבַר אֱנָשׁ及七十士译本希腊文形式ὁ υἱὸς τοῦ ἀνθρώπου。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS004",
+      "observation_type": "经文文字",
+      "scripture_refs": [
+        "但以理书7:13-14"
+      ],
+      "statement": "但以理异象中的一位像人子者驾云而来，来到亘古常在者面前，并得着权柄、荣耀、国度及万民的事奉。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS005",
+      "observation_type": "叙事结构与象征",
+      "scripture_refs": [
+        "但以理书7:3-12"
+      ],
+      "statement": "但以理书7章3至12节先出现四兽，教授将其观察为四个强国君王的象征。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS006",
+      "observation_type": "历史解释",
+      "scripture_refs": [
+        "但以理书7章"
+      ],
+      "statement": "教授将四兽所对应的国家依次列为巴比伦、波斯、希腊和罗马。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS007",
+      "observation_type": "经文称谓比较",
+      "scripture_refs": [
+        "马太福音26:3",
+        "马太福音26:57",
+        "路加福音3:2",
+        "约翰福音11:49",
+        "约翰福音18:13",
+        "路加福音3:20",
+        "使徒行传4:6"
+      ],
+      "statement": "教授比较多处经文，观察到该亚法和亚那都被称为大祭司。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS008",
+      "observation_type": "历史背景",
+      "scripture_refs": [],
+      "statement": "教授陈述亚那在公元15年被罗马人撤职。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS009",
+      "observation_type": "节期社会背景",
+      "scripture_refs": [
+        "马太福音26:3-5"
+      ],
+      "statement": "教授称逾越节期间耶路撒冷人口增加五倍，增加了群众骚乱风险。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS010",
+      "observation_type": "经文文字",
+      "scripture_refs": [
+        "马太福音26:12"
+      ],
+      "statement": "耶稣在马太福音中把女人的膏抹解释为为祂安葬作预备。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS011",
+      "observation_type": "经文价格规定",
+      "scripture_refs": [
+        "出埃及记21:32"
+      ],
+      "statement": "出埃及记21章32节规定，牛若触死奴仆或婢女，主人需赔偿三十舍客勒银子。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS012",
+      "observation_type": "逾越节历史习俗",
+      "scripture_refs": [
+        "马太福音26:17-30"
+      ],
+      "statement": "教授称尼散月十四日下午三至五点，各家庭把羊羔带到圣殿交由祭司宰杀。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS013",
+      "observation_type": "逾越节礼仪",
+      "scripture_refs": [],
+      "statement": "教授称逾越节筵席吃完羊肉后所喝的第三杯酒叫作“祝福的杯”。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS014",
+      "observation_type": "诗篇与礼仪",
+      "scripture_refs": [
+        "诗篇114-118",
+        "诗篇115-118"
+      ],
+      "statement": "教授称宴席参加者唱诵哈雷尔诗篇后喝第四杯酒。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS015",
+      "observation_type": "经文叙事细节",
+      "scripture_refs": [
+        "马太福音26:23"
+      ],
+      "statement": "马太福音叙事以与耶稣一同在盘中蘸食物的人辨指出卖者。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS016",
+      "observation_type": "平行经文叙事",
+      "scripture_refs": [
+        "约翰福音13:27"
+      ],
+      "statement": "约翰福音平行叙事记载犹大吃了耶稣所递的饼以后，撒但进入他的心。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS016-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS017",
+      "observation_type": "圣餐设立语",
+      "scripture_refs": [
+        "马太福音26:26"
+      ],
+      "statement": "耶稣擘饼递给门徒时称饼为祂的身体。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS018",
+      "observation_type": "原文术语",
+      "scripture_refs": [],
+      "statement": "教授首先以διαθήκη说明希腊文的“约”。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS019",
+      "observation_type": "原文术语区分",
+      "scripture_refs": [],
+      "statement": "在后续总结中，教授明确区分συνθήκη为合同、διαθήκη为遗命、בְּרִית为宗主国与附庸国之约。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "observation_id": "DK-f0eac41a4244-OBS020",
+      "observation_type": "古译本历史背景",
+      "scripture_refs": [],
+      "statement": "教授称七十士译本由公元前三世纪在埃及亚历山大地区的七十多位希伯来文专家译成。",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-OBS020-01"
+      ],
+      "review_status": "candidate"
+    }
+  ],
+  "evidence_steps": [
+    {
+      "discourse_role": "教授提出释义问题",
+      "evidence_step_id": "DK-f0eac41a4244-E001",
+      "produced_claim_ids": [],
+      "scripture_refs": [
+        "马太福音26:2"
+      ],
+      "speaker": "professor",
+      "stance": "questioned",
+      "statement": "教授询问“人子”称号究竟是什么意思。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q001-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "原文语法判断",
+      "evidence_step_id": "DK-f0eac41a4244-E002",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "scripture_refs": [
+        "新约相关人子经文"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授断言，新约每次使用“人子”时，son of man都有定冠词。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E002-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "经文互释",
+      "evidence_step_id": "DK-f0eac41a4244-E003",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "scripture_refs": [
+        "但以理书7:13-14"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "定冠词将耶稣所说的“人子”指向但以理书7章13至14节的特定人物。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E003-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "文体与象征解释",
+      "evidence_step_id": "DK-f0eac41a4244-E004",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL001"
+      ],
+      "scripture_refs": [
+        "但以理书7:3-14"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "在但以理书启示文学的象征体系中，兽代表人间君王，而人子代表耶稣并指向神自己。",
+      "step_type": "literary_context",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E004-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "称号释义结论",
+      "evidence_step_id": "DK-f0eac41a4244-E005",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL001",
+        "DK-f0eac41a4244-CL002"
+      ],
+      "scripture_refs": [
+        "但以理书7:13-14"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣用带定冠词的The Son of Man自称，是引用但以理书异象并宣告自己是从神而来的那一位。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "新约用词分布判断",
+      "evidence_step_id": "DK-f0eac41a4244-E006",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL002"
+      ],
+      "scripture_refs": [
+        "使徒行传7:56"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授指出，使徒行传7章56节是耶稣以外的人称耶稣为“人子”的例外。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E006-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授复述司提反信息并作救恩结论",
+      "evidence_step_id": "DK-f0eac41a4244-E007",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL003"
+      ],
+      "scripture_refs": [
+        "使徒行传7:55-56"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授断言，救恩不以归化犹太教为前提，只需接受恩典并信靠耶稣为救主。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E007-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "历史身份问题",
+      "evidence_step_id": "DK-f0eac41a4244-E008",
+      "produced_claim_ids": [],
+      "scripture_refs": [
+        "马太福音26:3",
+        "马太福音26:57",
+        "路加福音3:2",
+        "使徒行传4:6"
+      ],
+      "speaker": "professor",
+      "stance": "questioned",
+      "statement": "教授询问亚那与该亚法之中谁是合法大祭司，以及经文称谓混乱的原因。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E008-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "宗教政治历史解释",
+      "evidence_step_id": "DK-f0eac41a4244-E009",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL004"
+      ],
+      "scripture_refs": [
+        "马太福音26:57",
+        "约翰福音18:13"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "因大祭司本为终身职，犹太人仍视被罗马撤职的亚那为合法大祭司；该亚法是官方指派者，并与亚那有姻亲关系。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E009-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "叙事与社会背景解释",
+      "evidence_step_id": "DK-f0eac41a4244-E010",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL005"
+      ],
+      "scripture_refs": [
+        "马太福音26:3-5"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "因逾越节期间耶路撒冷人群密集并有暴动风险，领袖决定暂缓捉拿耶稣。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E010-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "叙事神学判断",
+      "evidence_step_id": "DK-f0eac41a4244-E011",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL005"
+      ],
+      "scripture_refs": [
+        "马太福音26:1-5"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣刻意让他们捉拿，并定意在逾越节期间被献上为祭。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E011-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "模拟耶稣并作解释",
+      "evidence_step_id": "DK-f0eac41a4244-E012",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL006"
+      ],
+      "scripture_refs": [
+        "马太福音26:6-13",
+        "约翰福音12:1-11"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授解释女人膏抹耶稣是预先为祂安葬作准备，并彰显对基督完全的爱。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E012-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "旧约价格的象征应用",
+      "evidence_step_id": "DK-f0eac41a4244-E013",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL007"
+      ],
+      "scripture_refs": [
+        "马太福音26:14-16",
+        "出埃及记21:32"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授将出埃及记的三十舍客勒赔偿价应用于犹大出卖耶稣，解释为对基督价值的贬低。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E013-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "历法背景说明",
+      "evidence_step_id": "DK-f0eac41a4244-E014",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL008"
+      ],
+      "scripture_refs": [
+        "马太福音26:17-30"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "犹太人的新一天从太阳下山开始，这决定了逾越节筵席日期的计算方式。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E014-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "逾越节礼仪与历史意义",
+      "evidence_step_id": "DK-f0eac41a4244-E015",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL008"
+      ],
+      "scripture_refs": [
+        "出埃及记"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "逾越节家庭主人借出埃及历史解释食物，纪念神带领以色列人脱离埃及得自由。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E015-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "原文字义问题",
+      "evidence_step_id": "DK-f0eac41a4244-E016",
+      "produced_claim_ids": [],
+      "scripture_refs": [
+        "马太福音26:21"
+      ],
+      "speaker": "professor",
+      "stance": "questioned",
+      "statement": "教授询问耶稣把“阿们”放在话语之前是什么意思。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-Q005-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授释义；内含模拟耶稣口吻",
+      "evidence_step_id": "DK-f0eac41a4244-E017",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL009"
+      ],
+      "scripture_refs": [
+        "马太福音26:21"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授解释，耶稣在句首说“阿们”表示祂以神的身份和立场说话。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E017-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "约翰福音双重阿们的解释；内含模拟耶稣口吻",
+      "evidence_step_id": "DK-f0eac41a4244-E018",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL009"
+      ],
+      "scripture_refs": [
+        "约翰福音13:21"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "约翰所记双重“阿们”被教授解释为强调耶稣的神圣身份和随后话语的重要性。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E018-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "宴席姿势的文化背景",
+      "evidence_step_id": "DK-f0eac41a4244-E019",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL010"
+      ],
+      "scripture_refs": [
+        "马太福音26:20-23"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "最后晚餐时众人是围绕食物躺卧进食，而不是坐着吃。",
+      "step_type": "historical_background",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E019-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "对耶稣动作的戏剧化释义",
+      "evidence_step_id": "DK-f0eac41a4244-E020",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL010"
+      ],
+      "scripture_refs": [
+        "约翰福音13:21-27"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授把耶稣递饼给犹大解释为给予他尊荣并向他表达爱。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E020-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "平行经文叙事复述",
+      "evidence_step_id": "DK-f0eac41a4244-E021",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL010"
+      ],
+      "scripture_refs": [
+        "约翰福音13:21-27"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣以递饼的方式向门徒辨认将要出卖祂的人，并把饼交给犹大。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E021-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "叙事次序结论",
+      "evidence_step_id": "DK-f0eac41a4244-E022",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL010"
+      ],
+      "scripture_refs": [
+        "约翰福音13:27-30"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "犹大接饼后立即离开，所以没有参与随后设立的圣餐。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E022-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "圣餐教义结论",
+      "evidence_step_id": "DK-f0eac41a4244-E023",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL011"
+      ],
+      "scripture_refs": [
+        "马太福音26:26-29"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "耶稣与十一门徒设立圣餐，以纪念祂舍命并以宝血立新约。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E023-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "引用圣餐设立语",
+      "evidence_step_id": "DK-f0eac41a4244-E024",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL011"
+      ],
+      "scripture_refs": [
+        "马太福音26:27-28"
+      ],
+      "speaker": "quoted_source",
+      "stance": "quoted",
+      "statement": "马太福音的设立语将杯称为耶稣立约的血，为多人流出，使罪得赦。",
+      "step_type": "scripture_evidence",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E024-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "教授解释并模拟耶稣口吻",
+      "evidence_step_id": "DK-f0eac41a4244-E025",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL011"
+      ],
+      "scripture_refs": [
+        "马太福音26:28"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授解释，杯中的血代表耶稣用来立新约的血。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E025-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "术语分类的初步陈述",
+      "evidence_step_id": "DK-f0eac41a4244-E026",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL012"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授开始区分合同、遗命或遗嘱，以及希伯来文בְּרִית所表达的宗主国附庸国之约。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E026-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "合同类比",
+      "evidence_step_id": "DK-f0eac41a4244-E027",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL012"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "合同中的双方处于同等地位，可以就价钱和条件讨价还价。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E027-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "遗命概念说明",
+      "evidence_step_id": "DK-f0eac41a4244-E028",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL012"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "遗嘱或遗命的内容由立遗嘱者决定，受益人不能参与决定。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E028-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "希伯来约概念说明",
+      "evidence_step_id": "DK-f0eac41a4244-E029",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL012"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "教授把希伯来文בְּרִית说明为宗主国与附庸国的约。",
+      "step_type": "original_language",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E029-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "以出埃及说明约的次序",
+      "evidence_step_id": "DK-f0eac41a4244-E030",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL013"
+      ],
+      "scripture_refs": [
+        "出埃及记"
+      ],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "宗主国先恩待附庸国，正如神先带以色列人出埃及，之后才向他们提出要求。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E030-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "约与关系的推论",
+      "evidence_step_id": "DK-f0eac41a4244-E031",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL014"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "遵守宗主国要求不能建立关系，只能维持立约时已经建立的关系。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E031-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "违约后果判断",
+      "evidence_step_id": "DK-f0eac41a4244-E032",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL015"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "附庸国若不遵守要求，约就会破裂并失效。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E032-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "约的结构总结",
+      "evidence_step_id": "DK-f0eac41a4244-E033",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL013"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "宗主国附庸国之约包含先施恩和随后提出要求两个要素。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E033-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "宗主权说明",
+      "evidence_step_id": "DK-f0eac41a4244-E034",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL016"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "宗主国在约中完全主动，是否施恩以及提出什么要求都由宗主国决定。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E034-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "附庸国回应方式结论",
+      "evidence_step_id": "DK-f0eac41a4244-E035",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL016"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "附庸国不能协商修改条款，只能全部接受或全部拒绝。",
+      "step_type": "reasoning",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E035-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "翻译选择问题",
+      "evidence_step_id": "DK-f0eac41a4244-E036",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL017"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "questioned",
+      "statement": "教授提出七十士译本翻译בְּרִית时，在两个希腊词之间如何选择的问题。",
+      "step_type": "question",
+      "support_eligibility": "context_only",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E036-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "discourse_role": "翻译选择答案",
+      "evidence_step_id": "DK-f0eac41a4244-E037",
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL017"
+      ],
+      "scripture_refs": [],
+      "speaker": "professor",
+      "stance": "asserted",
+      "statement": "七十士译本选择διαθήκη，因为它比表示平等合同的συνθήκη更接近宗主国附庸国之约的本质。",
+      "step_type": "answer",
+      "support_eligibility": "eligible_candidate",
+      "source_fragment_ids": [
+        "FR-011WSR01-f0eac41a4244-DK-f0eac41a4244-E037-01"
+      ],
+      "review_status": "candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-f0eac41a4244-CL004-01",
+      "statement": "該亞法隨後被指派接任大祭司職位。亞那是該亞法的岳父，因為該亞法娶了亞那的女兒。",
+      "step_type": "historical_background",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL004"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-f0eac41a4244-CL004-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    },
+    {
+      "evidence_step_id": "AI-ADJ-DK-f0eac41a4244-CL008-01",
+      "statement": "他們第二杯酒喝完後，便開始吃主食，也就是羊肉。吃完羊肉後，便喝第三杯酒，稱為「祝福的杯」。然後，他們再次感謝禱告，參加宴席的人便唱誦「哈雷爾」，即詩篇114篇至118篇，或115篇至118篇，接著喝第四杯酒。",
+      "step_type": "historical_background",
+      "speaker": "professor",
+      "stance": "asserted",
+      "discourse_role": "ai_consensus_source_addition",
+      "support_eligibility": "eligible_candidate",
+      "scripture_refs": [],
+      "produced_claim_ids": [
+        "DK-f0eac41a4244-CL008"
+      ],
+      "source_fragment_ids": [
+        "FR-AI-ADJ-DK-f0eac41a4244-CL008-01"
+      ],
+      "review_status": "ai_consensus_candidate"
+    }
+  ],
+  "claims": [
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL001",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E002",
+        "DK-f0eac41a4244-E003",
+        "DK-f0eac41a4244-E004",
+        "DK-f0eac41a4244-E005"
+      ],
+      "opposed_position_ids": [
+        "DK-f0eac41a4244-POS001",
+        "DK-f0eac41a4244-POS002"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:2",
+        "但以理书7:3-14"
+      ],
+      "topic_terms": [
+        "人子",
+        "定冠词",
+        "耶稣的神性",
+        "但以理书",
+        "启示文学"
+      ],
+      "title": "耶稣使用带定冠词的“The Son of Man”是在引用但以理书第七章的异象；该称号的重点不是耶稣的人性，而是祂属神、超越人类的身份和神性。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0003",
+              "media_time": 216,
+              "evidence_id": "DK-f0eac41a4244-E002",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "原文语法判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實每次在新約聖經裡面，用到『人子』這個字的話，那son of man一定有定冠詞。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0004",
+              "media_time": 266,
+              "evidence_id": "DK-f0eac41a4244-E003",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "经文互释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "就是說那一個『人子』，不是指任何一個人的人子，就是那一個，\"the\"，冠詞所指的——《但以理書》第七章13-14節。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0007",
+              "media_time": 495,
+              "evidence_id": "DK-f0eac41a4244-E004",
+              "evidence_type": "literary_context",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "文体与象征解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "啟示文學的特色在於以象徵符號來表達，比如獸代表人間的君王，而『人子』代表耶穌，指向神自己。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0008",
+              "media_time": 689,
+              "evidence_id": "DK-f0eac41a4244-E005",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "称号释义结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因此耶穌使用The Son of Man，用冠詞the, 這個稱號時，正是引用但以理書第七章的異象，宣告自己就是經文中所預言的那位——那位『人子』即耶穌本身，表明祂正是從神而來的那一位。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL002",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E005",
+        "DK-f0eac41a4244-E006"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "使徒行传7:56"
+      ],
+      "topic_terms": [
+        "人子",
+        "耶稣自称",
+        "司提反",
+        "新约用语"
+      ],
+      "title": "在新约中，“人子”称号通常由耶稣用来指自己；除使徒行传7章56节的司提反外，没有其他人用该称号称呼耶稣。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0008",
+              "media_time": 689,
+              "evidence_id": "DK-f0eac41a4244-E005",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "称号释义结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因此耶穌使用The Son of Man，用冠詞the, 這個稱號時，正是引用但以理書第七章的異象，宣告自己就是經文中所預言的那位——那位『人子』即耶穌本身，表明祂正是從神而來的那一位。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0008",
+              "media_time": 689,
+              "evidence_id": "DK-f0eac41a4244-E006",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "新约用词分布判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "在新約聖經中，除了使徒行傳第七章五十六節外，沒有人使用『人子』來稱呼耶穌或指涉祂；這稱號的特殊性在於，若細查新約經文，『人子』一詞唯獨出自耶穌之口，祂以此自指，實為強調自己就是神。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL003",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E007"
+      ],
+      "opposed_position_ids": [
+        "DK-f0eac41a4244-POS003"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "使徒行传7:55-56"
+      ],
+      "topic_terms": [
+        "普世救恩",
+        "外邦人",
+        "犹太教",
+        "信靠基督",
+        "司提反"
+      ],
+      "title": "耶稣的救恩为全世界预备，外邦人不必先归化犹太教或接受犹太教规，只需信靠耶稣基督便可得救。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0009",
+              "media_time": 822,
+              "evidence_id": "DK-f0eac41a4244-E007",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授复述司提反信息并作救恩结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "只要接受這恩典，便可得救，無須先歸化猶太教，只需單單信靠耶穌為救主，便已足夠",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL004",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E009",
+        "AI-ADJ-DK-f0eac41a4244-CL004-01"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:3-5",
+        "马太福音26:57",
+        "路加福音3:2",
+        "约翰福音11:49",
+        "约翰福音18:13",
+        "使徒行传4:6"
+      ],
+      "topic_terms": [
+        "亚那",
+        "该亚法",
+        "大祭司",
+        "罗马统治",
+        "合法性"
+      ],
+      "title": "亚那虽被罗马当局撤职，犹太人仍因大祭司按律应为终身职而视他为合法大祭司；该亚法则是罗马官方指派的大祭司，并且是亚那的女婿。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0012",
+              "media_time": 1187,
+              "evidence_id": "DK-f0eac41a4244-E009",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "宗教政治历史解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "由於大祭司按律應為終身職，猶太人始終不承認羅馬人廢黜亞那的合法性，仍視亞那為合法大祭司。該亞法雖是官方指派，但與亞那有姻親關係，這層背景至關重要。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0012",
+              "media_time": 1187,
+              "evidence_id": "AI-ADJ-DK-f0eac41a4244-CL004-01",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "該亞法隨後被指派接任大祭司職位。亞那是該亞法的岳父，因為該亞法娶了亞那的女兒。",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "02daaba0abfaa2a71f16976ebf5e17eacbeb335548eec0a6bcd4e01a849eb634",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL005",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E010",
+        "DK-f0eac41a4244-E011"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:3-5",
+        "马太福音26:6-13"
+      ],
+      "topic_terms": [
+        "逾越节",
+        "耶稣受难",
+        "祭司长",
+        "神圣时间安排"
+      ],
+      "title": "祭司长和长老原想避开逾越节捉拿耶稣，但耶稣自己定意在逾越节期间被献上为祭。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0013",
+              "media_time": 1344,
+              "evidence_id": "DK-f0eac41a4244-E010",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "叙事与社会背景解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "大祭司、祭司長與民間長老決議：『不可在逾越節期間行動，以免民眾見我們捉拿耶穌而生亂。』於是暫緩動手。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0014",
+              "media_time": 1441,
+              "evidence_id": "DK-f0eac41a4244-E011",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "叙事神学判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌反而刻意要讓他們捉拿。耶穌自己定意必須在逾越節期間被獻上為祭。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "02daaba0abfaa2a71f16976ebf5e17eacbeb335548eec0a6bcd4e01a849eb634",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL006",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E012"
+      ],
+      "opposed_position_ids": [
+        "DK-f0eac41a4244-POS004"
+      ],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:6-13",
+        "约翰福音12:1-11"
+      ],
+      "topic_terms": [
+        "膏抹耶稣",
+        "安葬",
+        "香膏",
+        "爱基督"
+      ],
+      "title": "女人用贵重香膏膏抹耶稣，是在祂受死前预先为安葬作准备，并彰显了对基督完全的爱。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0015",
+              "media_time": 1537,
+              "evidence_id": "DK-f0eac41a4244-E012",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "模拟耶稣并作解释",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這女人乃是預先用膏抹我，為我安葬作準備。她搶先在我身體未死時膏抹，此舉彰顯了對基督完全的愛。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL007",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E013"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:14-16",
+        "出埃及记21:32"
+      ],
+      "topic_terms": [
+        "犹大",
+        "三十舍客勒",
+        "出卖耶稣",
+        "奴仆赔偿价"
+      ],
+      "title": "犹大以三十舍客勒出卖耶稣，象征他把耶稣的价值贬低到奴仆死亡赔偿的价钱，显露其对基督的轻蔑。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0016",
+              "media_time": 1599,
+              "evidence_id": "DK-f0eac41a4244-E013",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "旧约价格的象征应用",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這象徵性地表明，猶大以三十舍客勒出賣耶穌，等同將祂的價值貶為婢女的賠償價，顯露他對基督的輕蔑。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL008",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E014",
+        "DK-f0eac41a4244-E015",
+        "AI-ADJ-DK-f0eac41a4244-CL008-01"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:17-30",
+        "诗篇113-118",
+        "出埃及记"
+      ],
+      "topic_terms": [
+        "逾越节筵席",
+        "尼散月",
+        "犹太历法",
+        "哈雷尔",
+        "出埃及"
+      ],
+      "title": "逾越节筵席按照犹太人日落开始新一天的历法举行，并以食物、酒杯、哈雷尔诗篇和家庭讲述来纪念神使以色列人出埃及得自由的恩典。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0018",
+              "media_time": 1883,
+              "evidence_id": "DK-f0eac41a4244-E014",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "历法背景说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因為猶太人跟我們不一樣：我們是早上是今天的開始是早上半夜12點，可是猶太人是一天到太陽下山之後那天就過去了。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0019",
+              "media_time": 1972,
+              "evidence_id": "DK-f0eac41a4244-E015",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "逾越节礼仪与历史意义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "家庭的主人要從出埃及的歷史，說明這些食物的意義。就是神要帶以色列人脫離埃及得自由，要準備離開埃及。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0020",
+              "media_time": 2089,
+              "evidence_id": "AI-ADJ-DK-f0eac41a4244-CL008-01",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "ai_consensus_source_addition",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "他們第二杯酒喝完後，便開始吃主食，也就是羊肉。吃完羊肉後，便喝第三杯酒，稱為「祝福的杯」。然後，他們再次感謝禱告，參加宴席的人便唱誦「哈雷爾」，即詩篇114篇至118篇，或115篇至118篇，接著喝第四杯酒。",
+                "status": "ai_consensus_candidate"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate",
+      "ai_adjudication": {
+        "status": "ai_consensus_applied",
+        "approval_status": "not_human_approved",
+        "fingerprint": "02daaba0abfaa2a71f16976ebf5e17eacbeb335548eec0a6bcd4e01a849eb634",
+        "structural_notes": []
+      }
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL009",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E017",
+        "DK-f0eac41a4244-E018"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:21",
+        "约翰福音13:21"
+      ],
+      "topic_terms": [
+        "阿们",
+        "耶稣的神性",
+        "说话权威",
+        "约翰福音"
+      ],
+      "title": "耶稣把“阿们”放在话语开头，是以神的身份和权威说话；约翰记载的双重“阿们”更加强调随后话语的重要性。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0021",
+              "media_time": 2250,
+              "evidence_id": "DK-f0eac41a4244-E017",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授释义；内含模拟耶稣口吻",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "『阿們』的意思就是說『我就是神』，『我以神的立場向你們說話』。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0022",
+              "media_time": 2396,
+              "evidence_id": "DK-f0eac41a4244-E018",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "约翰福音双重阿们的解释；内含模拟耶稣口吻",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "那約翰就把『阿們』講兩次：『阿們，阿們，我告訴你』耶穌說：我就是神，我告訴你很重要的話，注意聽。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL010",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E019",
+        "DK-f0eac41a4244-E020",
+        "DK-f0eac41a4244-E021",
+        "DK-f0eac41a4244-E022"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:20-25",
+        "约翰福音13:21-30"
+      ],
+      "topic_terms": [
+        "犹大",
+        "最后晚餐",
+        "递饼",
+        "撒但",
+        "离席"
+      ],
+      "title": "耶稣在筵席中把饼递给犹大，是向他表达尊重和爱；猶大随后受撒但控制并离席，因此没有参加之后设立的圣餐。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0022",
+              "media_time": 2396,
+              "evidence_id": "DK-f0eac41a4244-E019",
+              "evidence_type": "historical_background",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "宴席姿势的文化背景",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "其實他們吃飯的時候不是坐著吃，他們是躺下來，那要吃的東西放在中間，大家圍繞著這個食物，躺著用左手壓住，用右手把東西拿來吃。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0023",
+              "media_time": 2518,
+              "evidence_id": "DK-f0eac41a4244-E020",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "对耶稣动作的戏剧化释义",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌用手摸那個要吃的餅，把餅遞給猶大，給猶大最大的面子，彷彿說：『我愛你，我愛你。』",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0024",
+              "media_time": 2646,
+              "evidence_id": "DK-f0eac41a4244-E021",
+              "evidence_type": "scripture_evidence",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "平行经文叙事复述",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌就說：『我現在要將這餅給那人，那人就是賣我的人。』於是耶穌將餅交給猶大",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0025",
+              "media_time": 2744,
+              "evidence_id": "DK-f0eac41a4244-E022",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "叙事次序结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "於是猶大立即離開，沒有參與耶穌隨後設立的聖餐，因為他提前離開了。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL011",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E023",
+        "DK-f0eac41a4244-E024",
+        "DK-f0eac41a4244-E025"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "马太福音26:26-29"
+      ],
+      "topic_terms": [
+        "圣餐",
+        "新约",
+        "耶稣的血",
+        "赦罪",
+        "十一门徒"
+      ],
+      "title": "耶稣与十一门徒设立圣餐；杯代表祂为多人流出、使罪得赦并用以立新约的血。",
+      "claim_type": "explicit_claim",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0026",
+              "media_time": 2853,
+              "evidence_id": "DK-f0eac41a4244-E023",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "圣餐教义结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "因此耶穌與十一個門徒在那裡共同設立聖餐，為要紀念耶穌基督為我們捨命，為新約的寶血立定。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0027",
+              "media_time": 2937,
+              "evidence_id": "DK-f0eac41a4244-E024",
+              "evidence_type": "scripture_evidence",
+              "speaker": "quoted_source",
+              "stance": "quoted",
+              "discourse_role": "引用圣餐设立语",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "接著又拿起杯來，祝謝後遞給他們說：『你們都喝這杯，因為這是我立約的血，為多人流出，使罪得赦。』",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0028",
+              "media_time": 3038,
+              "evidence_id": "DK-f0eac41a4244-E025",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "教授解释并模拟耶稣口吻",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "耶穌所說的這杯裡面的血，是代表我立新約的血。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL012",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E026",
+        "DK-f0eac41a4244-E027",
+        "DK-f0eac41a4244-E028",
+        "DK-f0eac41a4244-E029"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "约",
+        "合同",
+        "遗命",
+        "宗主国附庸国之约",
+        "διαθήκη",
+        "συνθήκη",
+        "בְּרִית"
+      ],
+      "title": "解释圣经中的“约”必须区分平等双方协商的合同、由立遗嘱者决定的遗命，以及宗主国与附庸国之间的约。",
+      "claim_type": "interpretive_method",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0031",
+              "media_time": 3319,
+              "evidence_id": "DK-f0eac41a4244-E026",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "术语分类的初步陈述",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "“約”的問題。covenant，“約”的希臘文叫做διαθήκη。第一個是合同的意思。 第二個，遺命，遺囑。希伯來文是בְּרִית 、宗主國附庸國的約。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0033",
+              "media_time": 3451,
+              "evidence_id": "DK-f0eac41a4244-E027",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "合同类比",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "大家在同等地位，我錢少他就不要幫我除草；如果他要價太高，我就說你要求太離譜。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0034",
+              "media_time": 3497,
+              "evidence_id": "DK-f0eac41a4244-E028",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "遗命概念说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這個應許條件由立遺囑者決定，錢要給多少、給誰，是我寫遺囑的人決定的，別人不能管。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0035",
+              "media_time": 3564,
+              "evidence_id": "DK-f0eac41a4244-E029",
+              "evidence_type": "original_language",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "希伯来约概念说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "可是還有一個，就是宗主國與附庸國的約，בְּרִית。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL013",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E030",
+        "DK-f0eac41a4244-E033"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [
+        "出埃及记"
+      ],
+      "topic_terms": [
+        "宗主国",
+        "附庸国",
+        "恩典",
+        "约的要求",
+        "stipulation"
+      ],
+      "title": "宗主国与附庸国之约有两个基本要素：宗主国先主动施恩，随后向附庸国提出必须遵守的要求。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0036",
+              "media_time": 3673,
+              "evidence_id": "DK-f0eac41a4244-E030",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "以出埃及说明约的次序",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "宗主國先恩待附庸國，把以色列人——猶太人從埃及帶出來，要把他帶進迦南地。可是呢，宗主國對附庸國好之後，宗主國對附庸國有所要求",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0039",
+              "media_time": 3999,
+              "evidence_id": "DK-f0eac41a4244-E033",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "约的结构总结",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "“約”，有兩個要素：第一，宗主國先施恩給附庸國；第二，宗主國向附庸國提出要求。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL014",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E031"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "遵守要求",
+        "既有关系",
+        "恩典",
+        "行为",
+        "约"
+      ],
+      "title": "附庸国遵守宗主国的要求不能建立好关系，只能维持立约时因宗主国恩典而已经建立的关系。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0037",
+              "media_time": 3749,
+              "evidence_id": "DK-f0eac41a4244-E031",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "约与关系的推论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "附庸國若遵守宗主國附庸國的要求，不能建立好關係，不能夠跟宗主國建立好關係，不可能！只有什麼？你如果你立約之後，附庸國如果來遵守宗主國的要求，你只能維持已經有的既有的關係，不能建立好關係。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL015",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E032"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "违约",
+        "约的破裂",
+        "附庸国",
+        "顺服"
+      ],
+      "title": "附庸国若不遵守宗主国的要求，约就会破裂。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0038",
+              "media_time": 3860,
+              "evidence_id": "DK-f0eac41a4244-E032",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "违约后果判断",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "附庸國若不遵守要求，約就破裂了，所以約就沒有了，關鍵在這裡。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL016",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E034",
+        "DK-f0eac41a4244-E035"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "宗主权",
+        "单方面决定",
+        "约的条款",
+        "接受或拒绝"
+      ],
+      "title": "在宗主国与附庸国之约中，宗主国单方面决定是否施恩及约的全部要求；附庸国不能讨价还价，只能全部接受或全部拒绝。",
+      "claim_type": "reasoning_conclusion",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0040",
+              "media_time": 4090,
+              "evidence_id": "DK-f0eac41a4244-E034",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "宗主权说明",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "這兩件事，宗主國完全站在主動地位。他要不要施恩給附庸國，由他決定；他向附庸國的要求，完全由他決定。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0041",
+              "media_time": 4179,
+              "evidence_id": "DK-f0eac41a4244-E035",
+              "evidence_type": "reasoning",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "附庸国回应方式结论",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "所以附庸國只能全部接受或者全部拒絕。這個觀念非常重要。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    },
+    {
+      "attribution": "professor",
+      "claim_id": "DK-f0eac41a4244-CL017",
+      "evidence_step_ids": [
+        "DK-f0eac41a4244-E036",
+        "DK-f0eac41a4244-E037"
+      ],
+      "opposed_position_ids": [],
+      "review_status": "candidate",
+      "scripture_refs": [],
+      "topic_terms": [
+        "七十士译本",
+        "διαθήκη",
+        "συνθήκη",
+        "בְּרִית",
+        "翻译选择"
+      ],
+      "title": "七十士译本以διαθήκη而非συνθήκη翻译希伯来文בְּרִית，因为διαθήκη更能表达宗主国单方面施恩并制定条款的立约本质。",
+      "claim_type": "interpretive_judgment",
+      "extraction_fingerprints": [
+        "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232"
+      ],
+      "occurrences": [
+        {
+          "transcript_id": "011WSR01",
+          "lecture": "011WSR01",
+          "anchors": [
+            {
+              "paragraph_key": "S0042",
+              "media_time": 4241,
+              "evidence_id": "DK-f0eac41a4244-E036",
+              "evidence_type": "question",
+              "speaker": "professor",
+              "stance": "questioned",
+              "discourse_role": "翻译选择问题",
+              "assertive": false,
+              "proposed_highlight": {
+                "text": "當他們要將בְּרִית 這個概念翻譯成希臘文時，只有兩種選擇，兩種譯法。",
+                "status": "proposed"
+              }
+            },
+            {
+              "paragraph_key": "S0043",
+              "media_time": 4355,
+              "evidence_id": "DK-f0eac41a4244-E037",
+              "evidence_type": "answer",
+              "speaker": "professor",
+              "stance": "asserted",
+              "discourse_role": "翻译选择答案",
+              "assertive": true,
+              "proposed_highlight": {
+                "text": "結果他們選擇了後者，因為這個譯法更貼近宗主國與附庸國立約的本質。",
+                "status": "proposed"
+              }
+            }
+          ]
+        }
+      ],
+      "maturity": "candidate"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "from_id": "DK-f0eac41a4244-E002",
+      "reason": "新约“人子”带有定冠词的原文观察，直接反驳“人子只强调耶稣人性”的说法。",
+      "relation_id": "DK-f0eac41a4244-ER001",
+      "relation_type": "refutes",
+      "to_id": "DK-f0eac41a4244-E001"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E003",
+      "reason": "但以理书第七章提供带定冠词之“那一位人子”的旧约指涉背景。",
+      "relation_id": "DK-f0eac41a4244-ER002",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E002"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E004",
+      "reason": "启示文学中兽与人子的象征对比，支持人子是属神存在者的解释。",
+      "relation_id": "DK-f0eac41a4244-ER003",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E003"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E005",
+      "reason": "耶稣以该称号自称，被解释为有意引用但以理书的异象。",
+      "relation_id": "DK-f0eac41a4244-ER004",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E004"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E006",
+      "reason": "司提反是耶稣以外使用此称号的例外，限定了“唯独出自耶稣之口”的一般表述。",
+      "relation_id": "DK-f0eac41a4244-ER005",
+      "relation_type": "qualifies",
+      "to_id": "DK-f0eac41a4244-E005"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E009",
+      "reason": "亚那被撤职、该亚法被指派以及二人的姻亲关系，回答合法大祭司身份混乱的问题。",
+      "relation_id": "DK-f0eac41a4244-ER006",
+      "relation_type": "answers",
+      "to_id": "DK-f0eac41a4244-E008"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E011",
+      "reason": "耶稣定意在逾越节被献上，限定并反转领袖暂缓在节期行动的计划。",
+      "relation_id": "DK-f0eac41a4244-ER007",
+      "relation_type": "qualifies",
+      "to_id": "DK-f0eac41a4244-E010"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E012",
+      "reason": "女人预先膏抹耶稣的行动具体应用于耶稣两日后受死和安葬。",
+      "relation_id": "DK-f0eac41a4244-ER008",
+      "relation_type": "applies",
+      "to_id": "DK-f0eac41a4244-E011"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E015",
+      "reason": "逾越节宴席的礼仪和出埃及纪念意义，补充其历法与时间背景。",
+      "relation_id": "DK-f0eac41a4244-ER009",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-E014"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E017",
+      "reason": "教授对“阿们”的解释直接回答其所提出的词义问题。",
+      "relation_id": "DK-f0eac41a4244-ER010",
+      "relation_type": "answers",
+      "to_id": "DK-f0eac41a4244-E016"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E018",
+      "reason": "约翰福音的双重“阿们”被用来加强耶稣以神圣权威说话的解释。",
+      "relation_id": "DK-f0eac41a4244-ER011",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E017"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E019",
+      "reason": "筵席时躺卧和共享盘中食物的习惯，为递饼给犹大的动作提供文化语境。",
+      "relation_id": "DK-f0eac41a4244-ER012",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-E020"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E021",
+      "reason": "耶稣明确以递饼辨认出卖者，进一步解释祂递饼给犹大的动作。",
+      "relation_id": "DK-f0eac41a4244-ER013",
+      "relation_type": "qualifies",
+      "to_id": "DK-f0eac41a4244-E020"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E022",
+      "reason": "犹大接饼后离席，支持他没有参与随后圣餐的判断。",
+      "relation_id": "DK-f0eac41a4244-ER014",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E023"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E024",
+      "reason": "马太福音的设立语直接支持圣餐之杯是立约之血并带来赦罪的解释。",
+      "relation_id": "DK-f0eac41a4244-ER015",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E023"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E025",
+      "reason": "教授对杯中之血的总结，重申并解释设立语中的新约意义。",
+      "relation_id": "DK-f0eac41a4244-ER016",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E024"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E027",
+      "reason": "平等双方讨价还价的合同模式，具体说明约概念中的第一种关系。",
+      "relation_id": "DK-f0eac41a4244-ER017",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-E026"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E028",
+      "reason": "由立遗嘱者单方面决定的遗命，具体说明约概念中的第二种关系。",
+      "relation_id": "DK-f0eac41a4244-ER018",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-E026"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E029",
+      "reason": "宗主国与附庸国的关系，具体说明约概念中的第三种关系。",
+      "relation_id": "DK-f0eac41a4244-ER019",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-E026"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E030",
+      "reason": "神先拯救以色列、随后提出要求，是宗主国之约两个要素的实例。",
+      "relation_id": "DK-f0eac41a4244-ER020",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E033"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E031",
+      "reason": "遵守要求只能维持已经建立的关系，是对先施恩后要求结构的推论。",
+      "relation_id": "DK-f0eac41a4244-ER021",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E030"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E032",
+      "reason": "不遵守要求导致约破裂，限定了维持既有关系所需的条件。",
+      "relation_id": "DK-f0eac41a4244-ER022",
+      "relation_type": "qualifies",
+      "to_id": "DK-f0eac41a4244-E031"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E034",
+      "reason": "宗主国决定恩惠和要求，具体展开宗主国在约中的主动地位。",
+      "relation_id": "DK-f0eac41a4244-ER023",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E033"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E035",
+      "reason": "附庸国只能接受或拒绝、不能讨价还价，是宗主国单方面决定的结果。",
+      "relation_id": "DK-f0eac41a4244-ER024",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E034"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E037",
+      "reason": "七十士译本最终选择διαθήκη，回答翻译בְּרִית时应选择哪个希腊词的问题。",
+      "relation_id": "DK-f0eac41a4244-ER025",
+      "relation_type": "answers",
+      "to_id": "DK-f0eac41a4244-E036"
+    },
+    {
+      "from_id": "DK-f0eac41a4244-E035",
+      "reason": "宗主国之约没有平等协商的空间，为选择非合同性质的翻译词提供理由。",
+      "relation_id": "DK-f0eac41a4244-ER026",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-E037"
+    }
+  ],
+  "claim_relations": [
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR001",
+      "from_id": "DK-f0eac41a4244-CL002",
+      "reason": "“人子”称号在新约中的特殊使用分布，进一步支持该称号具有特定的但以理书背景，而非泛指人性。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL001"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR002",
+      "from_id": "DK-f0eac41a4244-CL003",
+      "reason": "司提反使用“人子”称号的讲论语境，被教授用来说明基督救恩超越犹太教范围。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-CL002"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR004",
+      "from_id": "DK-f0eac41a4244-CL006",
+      "reason": "女人膏抹耶稣的行动，被解释为具体应用于耶稣即将受死和安葬的处境。",
+      "relation_type": "applies",
+      "to_id": "DK-f0eac41a4244-CL005"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR005",
+      "from_id": "DK-f0eac41a4244-CL008",
+      "reason": "逾越节纪念出埃及拯救的历史意义，为耶稣在逾越节设立圣餐提供语境。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-CL011"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR006",
+      "from_id": "DK-f0eac41a4244-CL010",
+      "reason": "犹大在圣餐设立前离席，支持教授关于圣餐由耶稣与其余十一门徒共同设立的结论。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL011"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR007",
+      "from_id": "DK-f0eac41a4244-CL012",
+      "reason": "对“约”三种概念的区分，为解释耶稣所说“立约的血”提供概念背景。",
+      "relation_type": "contextualizes",
+      "to_id": "DK-f0eac41a4244-CL011"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR008",
+      "from_id": "DK-f0eac41a4244-CL013",
+      "reason": "宗主国先施恩、后提出要求的结构，是“遵守要求只能维持既有关系”结论的前提。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL014"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR009",
+      "from_id": "DK-f0eac41a4244-CL013",
+      "reason": "宗主国之约包含附庸国必须遵守的要求，因此不遵守会导致约破裂。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL015"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR010",
+      "from_id": "DK-f0eac41a4244-CL016",
+      "reason": "宗主国单方面决定恩惠和条款的性质，解释了七十士译本为何不用表示平等合同的词。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL017"
+    },
+    {
+      "claim_relation_id": "DK-f0eac41a4244-CR011",
+      "from_id": "DK-f0eac41a4244-CL012",
+      "reason": "合同、遗命和宗主国附庸国之约的语义区分，为七十士译本的翻译选择提供比较框架。",
+      "relation_type": "supports",
+      "to_id": "DK-f0eac41a4244-CL017"
+    }
+  ],
+  "extraction": {
+    "source_sha256": "d7f3f7ea3f2ff711fbce4bc9bc1ecdf60b6b98b450e1dc5ff0dc7c74072a2934",
+    "prompt_sha256": "99f96741ff580dc4dc918e37296acdff6b9c2d701ca90d1ba8583e8ab7568100",
+    "model_id": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "max_output_tokens": 32000,
+    "schema_version": "wang_detailed_knowledge_extraction_v1",
+    "response_schema_sha256": "fd6c3946c70568df7fcdfcfa26abf4b360105444f690add63c11751447d99ec1",
+    "generation_fingerprint_sha256": "365b85ac9897a5333e9254b9c2d94bf5a1caf934fea5660feed38fd1fc77bd4f",
+    "fingerprint_sha256": "13e10f3159e3b03d4fbcee1d3839f210720d972717c1e87dcd8914d3c0436232",
+    "generated_at": "2026-08-10T16:22:55.136329+00:00"
+  },
+  "summary": {
+    "source_fragment_count": 68,
+    "question_count": 8,
+    "position_count": 4,
+    "observation_count": 20,
+    "evidence_step_count": 39,
+    "claim_count": 17,
+    "evidence_relation_count": 26,
+    "claim_relation_count": 10
+  },
+  "consensus_application": {
+    "schema_version": "wang_ai_consensus_application_v1",
+    "adjudication_fingerprint": "02daaba0abfaa2a71f16976ebf5e17eacbeb335548eec0a6bcd4e01a849eb634",
+    "applied_claim_ids": [
+      "DK-f0eac41a4244-CL004",
+      "DK-f0eac41a4244-CL005",
+      "DK-f0eac41a4244-CL008"
+    ],
+    "removed_claim_relation_ids": [
+      "DK-f0eac41a4244-CR003"
+    ],
+    "approval_status": "not_human_approved"
+  }
+}

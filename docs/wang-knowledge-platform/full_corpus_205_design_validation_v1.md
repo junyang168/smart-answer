@@ -81,8 +81,8 @@ Terra Medium 将 21 个批次综合为 17 组候选结构。它们不是 17 条�
 
 原始、可机械复核的结果位于：
 
-- `output/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.json`
-- `output/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.md`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.json`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.md`
 
 覆盖数字由程序把模型选中的 batch theme 展开为实际 claim refs 后计算，不是模型自由估计。
 

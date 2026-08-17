@@ -10,7 +10,7 @@
 
 | 对象 | 保存什么 | 关键边界 |
 |---|---|---|
-| `SourceDocument` | 一篇讲道、逐字稿或笔记 | 记录来源身份，不代替精确引文 |
+| `SourceDocument` | 一篇讲道、逐字稿、笔记或已通过来源忠实度审核的笔记整理讲稿 | 记录来源身份、派生谱系和信任状态，不代替精确引文；派生讲稿不得伪装成逐字原话 |
 | `SourceFragment` | 可高亮、可定位的原始片段 | 必须外键到 Canonical Citation；分析包里的段落号与 offset 不能独立充当来源权威 |
 | `Question` | 听众或教授提出的问题 | 允许已回答、部分回答、未回答 |
 | `Observation` | 对经文、原文、背景或文体的观察 | 尚未等同于最终结论 |
@@ -34,6 +34,19 @@
 1. **教授与编辑分开。** 教授的主张、编辑的跨讲归纳、文章的篇章编排必须分别署名。
 2. **知识与产品分开。** 文章使用知识库重新写作，而不是机械“投影”；详略、顺序、岔题处理和缺口属于 `ProductPlan`。
 3. **局部与全库分开。** 两讲中反复出现的内容只能称“两讲中的跨来源模式”或“全库检索线索”，不能直接称教授完整的专题思想。
+
+在出版归属上，教授是可溯源主张与讲授材料的来源，编辑部是新作品的作者／编纂者。经卷目录可以提供完整导航，但 `ProductPlan` 不得把目录空位解释为必须生成的文章。建议经文范围使用以下编辑状态：
+
+- `article_ready`：材料与论证已达到正式成篇门槛；
+- `brief_note_only`：只有足以形成短注的局部材料；
+- `source_index_only`：可列出相关来源，但尚不足以形成解释结论；
+- `deferred_insufficient_material`：目前不出版，等待新增或重新核实材料。
+
+这些状态描述编辑成熟度，不评价某章圣经本身的重要性，也不构成完成率或欠稿数。
+
+### 已审核派生来源
+
+通过 notes-to-manuscript Fidelity Audit 的讲稿可以作为 `verified_notes_manuscript` 进入结构抽取，因为它已经逐点核对上游笔记；但它仍是 `trusted_editorial_derivative`，不是 `primary_spoken_source`。系统必须保存上游笔记、Project、讲稿 revision、Fidelity artifact 和拆分 Project 的 `derived_from` 谱系。来源已经是可读文章，只能免除重复生成和重复 Fidelity Audit，不能免除进入共享论证层。完整规则见[马太福音来源进入论证层与跨来源整合流程](./matthew_source_to_argument_workflow_v1.md)。
 
 ## 四、问答材料的处理
 
@@ -72,11 +85,11 @@
 
 ## 八、当前试验包
 
-`output/claim-layer/shared_knowledge_pilot_v1.json` 是可重复迁移的试验结果。随着 011WSR01 逐句整理加入，当前 main build 已不再固定为早期“2 来源／7 条主张关系”的静态数字；实际数量以包内 `summary.counts` 为准。6条专题 route 均同时保留旧分析 target 和正式 `canonical_topic_ids`。它用于验证模型，不是 205 篇全库的最终分类。
+`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 是可重复迁移的试验结果。随着 011WSR01 逐句整理加入，当前 main build 已不再固定为早期“2 来源／7 条主张关系”的静态数字；实际数量以包内 `summary.counts` 为准。6条专题 route 均同时保留旧分析 target 和正式 `canonical_topic_ids`。它用于验证模型，不是 205 篇全库的最终分类。
 
 ### 主张关系的正边与负约束
 
-篇章审核不能只产生“应补一条关系”的自然语言备注。AI 复审与 OpenAI 仲裁一致接受的结构修复保存于 `output/claim-layer/claim_relation_consensus_v1.json`，并在每次重建时合并：
+篇章审核不能只产生“应补一条关系”的自然语言备注。AI 复审与 OpenAI 仲裁一致接受的结构修复保存于 `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/claim_relation_consensus_v1.json`，并在每次重建时合并：
 
 - `corroborates` 表示不同讲道分别形成、彼此印证的主张；两条主张和两组来源都保留。
 - `contextualizes` 表示一条主张提供理解另一条主张所需的概念或历史背景，不夸大为演绎支持。
@@ -107,7 +120,7 @@
 截至当前版本，同一个模型有三个不同层次，不能混称：
 
 1. **概念与治理层**：本文件定义对象的意义、边界和审核规则。
-2. **候选交换包**：`output/claim-layer/shared_knowledge_pilot_v1.json` 保存第三、第四讲的可重建试验结果，仍是导入来源，不是正式资料库。
+2. **候选交换包**：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 保存第三、第四讲的可重建试验结果，仍是导入来源，不是正式资料库。
 3. **Canonical authoring store**：`backend/api/canonical_repository/knowledge_models.py` 定义版本化 Pydantic records；`postgres_store.py` 以 PostgreSQL 保存对象、版本、关系、ChangeSet、审核事件及影响传播。原来的 `knowledge_importer.py` 与 `store.py` 仍作为 JSON 迁移兼容层，不再是 205 篇规模下的最终主库。
 
 正式 store 目前包含：来源文件、来源片段、问题、观察、主张、权威主题节点、证据步骤、证据关系、主张关系、主张关系约束、外部立场、知识去向、编辑综合、篇章计划、篇章决定、编辑核查与开放张力。每条 record 都保留稳定 ID、`schema_version`、`review_status`、`visibility` 与 `revision`；尚在演进中的研究字段会原样保留，避免新一轮普查先于 schema 更新时丢失资料。
@@ -141,7 +154,9 @@
 - `generation_fingerprint_sha256`：resolved prompt、model ID、reasoning effort、输出 token 限额、schema version 与 response-schema SHA256；同一次全库运行的所有讲道应相同。
 - `fingerprint_sha256`：在 generation identity 上再加入该篇 source SHA256；作为单篇 cache key，并写入其中每条 candidate claim。
 
-cache 只在完整 extraction fingerprint 相同时命中。被新世代取代的 JSON 先复制到 `output/corpus-survey/generations/`，因此可追查旧抽取而不会误作当前结果。旧产物没有 generation fingerprint，下一次运行会自动重抽；跨讲综合会拒绝任何 legacy 输入或多个 generation fingerprint，避免形成混合语料。
+cache 只在完整 extraction fingerprint 相同时命中。被新世代取代的 JSON 先复制到 `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/generations/`，因此可追查旧抽取而不会误作当前结果。旧产物没有 generation fingerprint，下一次运行会自动重抽；跨讲综合会拒绝任何 legacy 输入或多个 generation fingerprint，避免形成混合语料。
+
+以上世代规则适用于另行启动、范围明确的新抽取任务，不适用于封闭的 `CORPUS-SURVEY-205-V1`。该 205 篇 survey 是一次性历史知识地图；旧产物缺 fingerprint 或来源后来发生 SHA drift，只记录为 provenance limitation，不触发重抽，也不得加入后来讲道。新讲道进入 PostgreSQL authoring／ResearchBatch 流程。
 
 `KnowledgeRoute` 表示候选去向，`ProductDependency` 才表示某一产品实际采用的依赖快照。它固定 `consumer_kind + consumer_id + claim_id + pinned_claim_revision`。主张文字、归属、证据、经文、主题或审核有效性发生实质变化时，系统：
 

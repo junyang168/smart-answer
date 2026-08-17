@@ -77,6 +77,19 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError("every transcript_id must be a non-empty string")
     if len(set(transcript_ids)) != len(transcript_ids):
         raise ResearchBatchValidationError("transcript_ids cannot contain duplicates")
+    reuse = payload.get("reviewed_package_reuse") or {}
+    if not isinstance(reuse, dict):
+        raise ResearchBatchValidationError("reviewed_package_reuse must be an object")
+    unknown_reuse = sorted(set(reuse).difference(transcript_ids))
+    if unknown_reuse:
+        raise ResearchBatchValidationError(
+            "reviewed_package_reuse contains transcripts outside the batch: "
+            + ", ".join(unknown_reuse)
+        )
+    if any(not isinstance(value, str) or not value.strip() for value in reuse.values()):
+        raise ResearchBatchValidationError(
+            "every reviewed_package_reuse path must be a non-empty string"
+        )
     policy = payload.get("candidate_generation_policy") or {}
     if policy.get("derive_after_independent_extraction") is not True:
         raise ResearchBatchValidationError(
@@ -86,6 +99,29 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "candidate_generation_policy must allow material to remain unassigned"
         )
+    corrections = payload.get("source_fidelity_corrections") or []
+    if not isinstance(corrections, list):
+        raise ResearchBatchValidationError("source_fidelity_corrections must be a list")
+    correction_ids: set[str] = set()
+    for correction in corrections:
+        if not isinstance(correction, dict):
+            raise ResearchBatchValidationError(
+                "every source_fidelity_correction must be an object"
+            )
+        claim_id = str(correction.get("claim_id") or "").strip()
+        replacement_title = str(correction.get("replacement_title") or "").strip()
+        reason = str(correction.get("reason") or "").strip()
+        verbatim_basis = str(correction.get("verbatim_basis") or "").strip()
+        if not claim_id or not replacement_title or not reason or not verbatim_basis:
+            raise ResearchBatchValidationError(
+                "source_fidelity_corrections require claim_id, replacement_title, "
+                "reason and verbatim_basis"
+            )
+        if claim_id in correction_ids:
+            raise ResearchBatchValidationError(
+                f"duplicate source_fidelity_correction claim_id: {claim_id}"
+            )
+        correction_ids.add(claim_id)
 
 
 def load_research_batch(path: Path) -> dict[str, Any]:
@@ -181,6 +217,56 @@ def merge_reviewed_packages(
                         f"{relation_name} has unresolved {endpoint}: {endpoint_id!r}"
                     )
 
+    corrections_applied: list[dict[str, Any]] = []
+    claims_by_id = {str(row.get("claim_id") or ""): row for row in merged["claims"]}
+    fragments_by_id = {
+        str(row.get("fragment_id") or ""): row for row in merged["source_fragments"]
+    }
+    evidence_by_id = {
+        str(row.get("evidence_step_id") or ""): row for row in merged["evidence_steps"]
+    }
+    for correction in batch.get("source_fidelity_corrections") or []:
+        claim_id = str(correction["claim_id"])
+        claim = claims_by_id.get(claim_id)
+        if claim is None:
+            raise ResearchBatchValidationError(
+                f"source_fidelity_correction references unknown claim: {claim_id}"
+            )
+        basis = str(correction["verbatim_basis"])
+        fragment_ids = {
+            fragment_id
+            for evidence_id in claim.get("evidence_step_ids") or []
+            for fragment_id in (evidence_by_id.get(str(evidence_id), {}).get("source_fragment_ids") or [])
+        }
+        matching_fragments = [
+            fragment_id
+            for fragment_id in fragment_ids
+            if basis in str(fragments_by_id.get(str(fragment_id), {}).get("verbatim_excerpt") or "")
+        ]
+        if not matching_fragments:
+            raise ResearchBatchValidationError(
+                f"source_fidelity_correction is not supported by a claim fragment: {claim_id}"
+            )
+        original_title = str(claim.get("title") or "")
+        claim["title"] = str(correction["replacement_title"])
+        claim["source_fidelity_correction"] = {
+            "status": "source_verified_candidate",
+            "reason": correction["reason"],
+            "verbatim_basis": basis,
+            "supporting_fragment_ids": sorted(matching_fragments),
+            "original_title": original_title,
+        }
+        corrections_applied.append(
+            {
+                "claim_id": claim_id,
+                "original_title": original_title,
+                "replacement_title": claim["title"],
+                "reason": correction["reason"],
+                "supporting_fragment_ids": sorted(matching_fragments),
+                "approval_status": "not_human_approved",
+            }
+        )
+
     return {
         "schema_version": MERGED_SCHEMA_VERSION,
         "batch": {
@@ -199,6 +285,7 @@ def merge_reviewed_packages(
             "policy": batch["candidate_generation_policy"],
         },
         "lineage": lineage,
+        "source_fidelity_corrections": corrections_applied,
         "approval_status": "not_human_approved",
         "summary": {name: len(items) for name, items in merged.items()},
     }

@@ -118,7 +118,7 @@
 
 这项规则避免出现“左栏已经选中主张，但右栏完全空白”的假象。该问题不是知识数据缺失，而是索引状态与详情状态没有同步。前端 TypeScript 检查和本地浏览器 smoke test 都必须确认所选主张的“可核查的论证与原始来源”能够显示。
 
-审核意见另存于 `output/claim-layer/review_state.json`，不会覆盖原始逐字稿、AI 候选或篇章计划。
+审核意见的 legacy 交换副本位于 `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/review_state.json`；PostgreSQL review events 才是审核权威，交换副本不会覆盖原始逐字稿、AI 候选或篇章计划。
 
 - `claims.json`：30 条候选主张；
 - `argument_graph.json`：140 个证据步骤及 125 条关系；

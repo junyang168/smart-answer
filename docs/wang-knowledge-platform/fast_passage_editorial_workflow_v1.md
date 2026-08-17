@@ -12,7 +12,7 @@
 4. 已審核包足以覆蓋時，只把最小切片增量寫入 PostgreSQL。
 5. 只有資料庫與已審核包都不足時，才啟動模型補抽取。
 6. 編排、正文與審核只接收本段切片。
-7. 正文、manifest、精簡知識快照與審核結果發布至 `$DATA_BASE_DIR/wang_repository/editorial_drafts/<draft_id>/`。
+7. 正文、manifest、精簡知識快照與審核結果發布至 `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/<draft_id>/`。
 
 ## 防止主題漂移
 

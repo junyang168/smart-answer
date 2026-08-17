@@ -40,6 +40,7 @@ class KnowledgePackageImporter:
         "claim_relation_constraints": "claim_relation_constraints",
         "position_nodes": "position_nodes",
         "topic_nodes": "topic_nodes",
+        "topic_identity_reconciliations": "topic_identity_reconciliations",
         "knowledge_routes": "knowledge_routes",
         "cross_source_syntheses": "editorial_syntheses",
         "editorial_checks": "editorial_checks",

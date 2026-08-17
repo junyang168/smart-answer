@@ -13,10 +13,13 @@ from backend.pipeline.shared_knowledge_pilot import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+FIXTURE_ROOT = (
+    ROOT / "backend" / "tests" / "fixtures" / "wang_knowledge_platform" / "shared_pilot_inputs"
+)
 
 
 def test_real_pilot_preserves_graph_and_marks_scope() -> None:
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     package = build_shared_knowledge_package(
         json.loads((source / "claims.json").read_text(encoding="utf-8")),
         json.loads((source / "argument_graph.json").read_text(encoding="utf-8")),
@@ -52,7 +55,7 @@ def test_real_pilot_preserves_graph_and_marks_scope() -> None:
 
 def test_question_answer_state_is_derived_not_assumed() -> None:
     """A blanket "linked" label hid unanswered questions from the open list."""
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     graph = json.loads((source / "argument_graph.json").read_text(encoding="utf-8"))
     package = build_shared_knowledge_package(
         json.loads((source / "claims.json").read_text(encoding="utf-8")),
@@ -83,7 +86,7 @@ def test_question_answer_state_is_derived_not_assumed() -> None:
 
 
 def test_compound_question_can_be_only_partially_answered() -> None:
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     package = build_shared_knowledge_package(
         json.loads((source / "claims.json").read_text(encoding="utf-8")),
         json.loads((source / "argument_graph.json").read_text(encoding="utf-8")),
@@ -101,7 +104,7 @@ def test_compound_question_can_be_only_partially_answered() -> None:
 
 
 def test_every_reference_points_to_an_existing_object() -> None:
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     package = build_shared_knowledge_package(
         json.loads((source / "claims.json").read_text(encoding="utf-8")),
         json.loads((source / "argument_graph.json").read_text(encoding="utf-8")),
@@ -131,7 +134,7 @@ def test_every_reference_points_to_an_existing_object() -> None:
 
 
 def test_same_claim_can_route_to_scripture_and_topic_plans() -> None:
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     topic_plan = json.loads(
         (source / "composition_plan_son_of_man.json").read_text(encoding="utf-8")
     )
@@ -232,7 +235,7 @@ def test_same_claim_can_route_to_scripture_and_topic_plans() -> None:
 
 
 def test_reviewed_detailed_sermon_joins_shared_topic_plan() -> None:
-    source = ROOT / "output" / "claim-layer"
+    source = FIXTURE_ROOT
     topic_plan = json.loads(
         (source / "composition_plan_son_of_man.json").read_text(encoding="utf-8")
     )

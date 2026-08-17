@@ -1,0 +1,166 @@
+{
+  "schema_version": "wang_composition_plan_v1",
+  "plan_id": "CP-matthew-26-1-30-011",
+  "title": "马太福音26:1–30释经编排（011WSR01）",
+  "description": "把011WSR01中按马太福音26:1–30推进的解释组织成独立释经轴。人子、Amen与约论可以在章内承担必要解释，但更完整的跨讲论述分别转介专题，不能让专题编排取代经文编排。",
+  "axis": "scripture",
+  "product_type": "scripture_exposition",
+  "corpus_scope": {
+    "detailed_source": "011WSR01",
+    "passage": "太26:1–30",
+    "completeness": "single_sermon_detailed_extraction",
+    "warning": "这是依据一篇讲道形成的候选释经编排；不表示教授关于马太福音26章的全部材料已经汇齐。"
+  },
+  "source_leads": [
+    {
+      "source_lead_id": "SL-M26-011-001",
+      "transcript_id": "011WSR01",
+      "title": "2023年纽约灵命静修会《马太福音释经》第一讲",
+      "scripture_refs": ["太26:1–30"],
+      "evidence_maturity": "ai_consensus_detailed_claims",
+      "priority": "primary",
+      "detailed_package_path": "output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "CD-M26-011-001",
+      "passage": "太26:1–2",
+      "section_title": "受难预告与『那人子』",
+      "action": "main_with_topic_link",
+      "decision": "先在经文脉络中说明耶稣预告逾越节受死，并简要解释『那人子』的限定；定冠词、但以理七章及神性身份的完整论证转介『那人子』专题。",
+      "rationale": "人子称号是本段经文的真实释经问题，但在本章释经中全部展开会淹没受难叙事的推进。",
+      "claim_ids": ["DK-f0eac41a4244-CL001", "DK-f0eac41a4244-CL002"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "DK-f0eac41a4244-CL001",
+        "supporting_claims": ["DK-f0eac41a4244-CL002"],
+        "note": "章内保留结论与必要根据，完整跨讲综合由CP-topic-son-of-man承担。"
+      },
+      "topic_plan_ids": ["CP-topic-son-of-man"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-002",
+      "passage": "太26:3–5",
+      "section_title": "大祭司、领袖的密谋与逾越节时间",
+      "action": "main_section",
+      "decision": "先交代亚那与该亚法的历史背景，再对比领袖想避开节期的计划与耶稣主动在逾越节受死的决定。",
+      "rationale": "历史背景解释人物称谓；时间与主动受死则是教授对叙事冲突的主要解释。",
+      "claim_ids": ["DK-f0eac41a4244-CL004", "DK-f0eac41a4244-CL005"],
+      "claim_hierarchy": {
+        "paragraph_thesis": "DK-f0eac41a4244-CL005",
+        "background_claims": ["DK-f0eac41a4244-CL004"]
+      },
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-003",
+      "passage": "太26:6–13",
+      "section_title": "伯大尼的膏抹：安葬与完全的爱",
+      "action": "main_section",
+      "decision": "按叙事解释女人的行动如何预备耶稣安葬，并呈现她对基督的爱。",
+      "rationale": "这是教授对本段行为意义的直接释经判断。",
+      "claim_ids": ["DK-f0eac41a4244-CL006"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-004",
+      "passage": "太26:14–16",
+      "section_title": "三十舍客勒与犹大对耶稣的估价",
+      "action": "main_section",
+      "decision": "用出埃及记中奴仆死亡赔偿的背景，解释三十舍客勒在叙事中的贬抑意义。",
+      "rationale": "教授以跨经文背景解释金额，而不是把金额当作无意义的细节。",
+      "claim_ids": ["DK-f0eac41a4244-CL007"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-005",
+      "passage": "太26:17–20",
+      "section_title": "逾越节筵席的时间、礼仪与记忆",
+      "action": "main_section",
+      "decision": "说明犹太日历、逾越节食物、酒杯、哈雷尔诗篇与家庭讲述，作为理解最后晚餐的历史礼仪背景。",
+      "rationale": "这些背景不是旁枝，而是理解耶稣如何在逾越节中设立圣餐的必要基础。",
+      "claim_ids": ["DK-f0eac41a4244-CL008"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-006",
+      "passage": "太26:21–25",
+      "section_title": "句首 Amen、递饼给犹大与背叛",
+      "action": "main_section",
+      "decision": "在本段并列解释句首Amen的权威语气，以及耶稣递饼给犹大的动作和犹大离席；两者都是对背叛预告的独立说明，不构成彼此支持关系。",
+      "rationale": "两项解释都直接服务背叛预告；在Amen专题计划尚未建立前不创建悬空转介。",
+      "claim_ids": ["DK-f0eac41a4244-CL009", "DK-f0eac41a4244-CL010"],
+      "claim_hierarchy": {
+        "parallel_context": ["DK-f0eac41a4244-CL009", "DK-f0eac41a4244-CL010"],
+        "note": "两条主张并列服务同一经文段落，不构成彼此支持关系。"
+      },
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-007",
+      "passage": "太26:26–30",
+      "section_title": "圣餐、赦罪之血与新约",
+      "action": "main_section",
+      "decision": "以耶稣与十一门徒设立圣餐为叙事中心，解释饼、杯、赦罪和立新约之间的关系。",
+      "rationale": "这是本讲后半部的经文与神学中心。",
+      "claim_ids": ["DK-f0eac41a4244-CL011"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "available",
+      "review_status": "candidate"
+    },
+    {
+      "decision_id": "CD-M26-011-008",
+      "passage": "太26:28及约论背景",
+      "section_title": "怎样理解圣经中的『约』",
+      "action": "background_appendix",
+      "decision": "本区块作为太26:28的背景附录：CL012、CL013、CL016列为解释『立约的血』直接所需的内容；CL014、CL015、CL017作为约论的延伸系统教导单独标注，待日后建立独立约论专题计划后正式转介，暂不在本经文产品中作为既定正文结论展开。",
+      "rationale": "附录定位本身恰当，但须在内部区分经文解释所需的概念层与延伸约论层，以免附录的完整材料记录被误读为太26:28正文论证的同一层级。",
+      "claim_ids": ["DK-f0eac41a4244-CL012", "DK-f0eac41a4244-CL013", "DK-f0eac41a4244-CL014", "DK-f0eac41a4244-CL015", "DK-f0eac41a4244-CL016", "DK-f0eac41a4244-CL017"],
+      "claim_hierarchy": {
+        "methodological_entry": "DK-f0eac41a4244-CL012",
+        "supporting_claims": ["DK-f0eac41a4244-CL013", "DK-f0eac41a4244-CL016"],
+        "supporting_context": ["DK-f0eac41a4244-CL014", "DK-f0eac41a4244-CL015"],
+        "original_language_support": "DK-f0eac41a4244-CL017",
+        "note": "CL012、CL013、CL016构成解释太26:28『立约的血』所需的概念层；CL014、CL015、CL017保留为教授已经表达的延伸约论材料，待独立约论专题计划建立后正式转介。"
+      },
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "partially_deferred_pending_topic_plan",
+      "review_status": "candidate",
+      "argument_layer_followups": ["日后建立独立约论专题计划时，再将CL014、CL015、CL017正式路由至该专题；在此之前仅将其标记为附录中的延伸系统教导，不提升为太26:28正文解释的直接支持层。"]
+    },
+    {
+      "decision_id": "CD-M26-011-009",
+      "passage": "徒7:55–56引申",
+      "section_title": "司提反异象所带出的福音普世性",
+      "action": "topic_link",
+      "decision": "记录这项教授在讲解人子称号时作出的救恩论引申，但不把它写成马太26:1–30的主要释经段落。",
+      "rationale": "该主张属于真实讲论内容，却不直接回答马太26段落的问题；独立路由比删除或强塞正文更忠实。",
+      "claim_ids": ["DK-f0eac41a4244-CL003"],
+      "topic_plan_ids": ["CP-topic-son-of-man"],
+      "source_lead_ids": ["SL-M26-011-001"],
+      "coverage": "routed_outside_main_exposition",
+      "review_status": "candidate"
+    }
+  ],
+  "acceptance_criteria": [
+    "按太26:1–30的经文顺序组织，而不是按专题词汇重新排序",
+    "人子、Amen和约论只在解释当前经文所需的深度展开，完整论述另行转介",
+    "所有正文结论均连接到011WSR01中已完成双模型复审的主张和来源定位",
+    "教授真实讲过但偏离本段主线的内容必须有明确路由，不能删除或伪装成正文释经",
+    "编排批准与主张来源忠实度审核分开保存"
+  ],
+  "review_status": "candidate"
+}

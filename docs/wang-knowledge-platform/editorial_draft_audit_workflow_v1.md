@@ -41,7 +41,7 @@ flowchart LR
 審計器只讀明確指定的資料，不依靠文章標題相似度猜測：
 
 - `editorial-draft-manifest.json`：初稿、編排計劃、知識快照與 `publication_profile_id` 的明確綁定；Manifest 只能選擇 Profile，不能自行定義必備或可選章節；
-- 供 UI 讀取的初稿運行時產物統一發布至 `$DATA_BASE_DIR/wang_repository/editorial_drafts/<draft_id>/`；Git 中的生成目錄只作可選的過程歸檔，不是 UI 的資料來源；
+- 供 UI 讀取的初稿運行時產物統一發布至 `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/<draft_id>/`；Git 中的生成目錄只作可選的過程歸檔，不是 UI 的資料來源；
 - `backend/config/publication_profiles/<profile_id>.json`：由系統中央維護的出版結構、逐段歸屬政策與可接受的編輯標籤；
 - `material_dispositions`：记录未进入正文的实质材料为何被转附录、转专题、仅保留来源或明确排除；尚未认证的材料可绑定带内容指纹的 staged knowledge record，但必须进入人工认证队列；
 - 篇章編排計劃：穩定的 `decision_id`、標題映射與 `source_claim_ids`；
@@ -285,14 +285,14 @@ flowchart LR
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.editorial_draft_audit_runner \
-  --manifest output/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-manifest.json \
+  --manifest "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-manifest.json" \
   --draft-id DRAFT-M16-001-V1
 ```
 
 產物：
 
 ```text
-output/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-audit.json
+$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-1-12-sources/authoring-v1/publication-v1/editorial-draft-audit.json
 ```
 
 管理員 UI 在打開初稿時會即時計算一次，避免展示與當前 Markdown、編排計劃或知識快照不一致的舊報告。

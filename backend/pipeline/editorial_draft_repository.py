@@ -1,15 +1,16 @@
-"""Publish one manifest-bound editorial draft into ``DATA_BASE_DIR/wang_repository``."""
+"""Publish a manifest-bound draft into the Wang platform repository area."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 from pathlib import Path
 from typing import Any
+
+from backend.config.wang_platform_paths import wang_platform_paths
 
 
 SAFE_DRAFT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -22,10 +23,7 @@ PUBLICATION_DECISION_SCHEMAS = {
 def repository_root(explicit: Path | None = None) -> Path:
     if explicit is not None:
         return explicit.resolve()
-    data_base_dir = os.getenv("DATA_BASE_DIR")
-    if not data_base_dir:
-        raise RuntimeError("DATA_BASE_DIR is required")
-    return (Path(data_base_dir) / "wang_repository").resolve()
+    return wang_platform_paths().repository
 
 
 def _bound_paths(draft: dict[str, Any]) -> list[str]:

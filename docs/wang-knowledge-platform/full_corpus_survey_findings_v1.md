@@ -26,8 +26,8 @@
 
 原始候选报告位于：
 
-- `output/corpus-survey/synthesis/full-corpus/full-corpus-thought-map-candidate-v1.json`
-- `output/corpus-survey/synthesis/full-corpus/full-corpus-thought-map-candidate-v1.md`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus/full-corpus-thought-map-candidate-v1.json`
+- `$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus/full-corpus-thought-map-candidate-v1.md`
 
 ## 二、候选总体形状
 

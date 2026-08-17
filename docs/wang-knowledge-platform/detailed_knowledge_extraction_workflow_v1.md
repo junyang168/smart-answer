@@ -136,8 +136,8 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_review_runner \
-  --claim-layer-package output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json \
-  --claim-layer-output output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json \
+  --claim-layer-package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json" \
+  --claim-layer-output "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json" \
   --spot-check-percent 0
 ```
 
@@ -145,15 +145,15 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_review_runner \
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner \
-  --package output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json \
-  --review output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json \
-  --output output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.adjudication.json \
-  --overrides output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json
+  --package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json" \
+  --review "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json" \
+  --output "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.adjudication.json" \
+  --overrides "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json"
 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.knowledge_consensus_applier \
-  --package output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json \
-  --overrides output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json \
-  --output output/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json
+  --package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json" \
+  --overrides "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json" \
+  --output "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json"
 ```
 
 ## 八、中立 ResearchBatch：批次不是专题
@@ -209,6 +209,6 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
 - 跨讲关系 runner：`backend/pipeline/cross_sermon_relation_runner.py`
 - 跨讲关系测试：`backend/tests/test_cross_sermon_relation.py`
 - 接入共享模型与产品路由：`backend/pipeline/shared_knowledge_pilot.py`
-- 太26释经编排：`output/claim-layer/composition_plan_matthew_26_1_30_011.json`
+- 太26释经编排：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/composition_plan_matthew_26_1_30_011.json`
 - 审核 API：`backend/api/thought_review.py`
 - 测试：`backend/tests/test_detailed_knowledge_extraction.py`、`test_corpus_ai_review.py`、`test_corpus_ai_adjudication.py`
