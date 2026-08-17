@@ -118,3 +118,12 @@ Corpus survey 已建立 SHA-bound 研究快照 `repository/research_corpus_snaps
 封闭性复核未发现 cron、launchd、API 或 web 自动写入入口。V1 旁已增加 SHA 绑定的 `closure-policy.json`（SHA-256 `3957c536bfb34c521f0da850e69816eaa9717668136ae10a840cae3fa11c1e1c`），明确固定 205 篇范围和允许／禁止用途；base manifest 本身未改动。完整 closure audit 位于 `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/corpus-survey-closure-audit-20260816.json`（SHA-256 `e651aae1a378729d194443a1752aacc1460abecd1267538a5715dc197b286d32`）。当时两份 legacy `output/corpus-survey` 各 265 files / 6,984,124 bytes，均为 265/265 V1 SHA matches、0 mismatches，并已有 mode `0444`、通过 265 文件恢复验证的归档。
 
 用户在这两个精确删除候选被说明为唯一剩余步骤后授权继续。安全层拒绝直接永久擦除，因此两份旧目录改以可恢复方式移入 `/Users/junyang/.Trash/corpus-survey-legacy-20260816-175900/`；原路径均已消失，全域扫描剩余 `output/corpus-survey` 为 0。Trash 内保留 530 files，同时独立只读归档继续存在。操作后再次验证 canonical V1 为 265/265 SHA matches、production health `ok`、公开文章 3 篇，未修改 PostgreSQL、Active Snapshot、代码部署或 reader-visible manuscript。执行报告为 `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/corpus-survey-legacy-removal-20260816.json`（SHA-256 `c7d1e729b5370f336be6370277d0d468f5750da644560cdb5ce663e61f38d968`）。
+
+## Sermon catalog projection 补充收口（2026-08-17）
+
+后续 PR 审查发现两项 file-based Wang catalog projection 仍在统一 root 之外：`$DATA_BASE_DIR/sermon_catalog.json` 与 `$DATA_BASE_DIR/config/sermon_catalog_overrides.json`。它们分别以非破坏性复制迁入：
+
+- `$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog.json`，SHA-256 `7690fe92d1cef03ab9c3e4203f69ef6caa4e187822d911cf72a2bf1171196c96`；
+- `$DATA_BASE_DIR/wang-knowledge-platform/catalog/sermon_catalog_overrides.json`，SHA-256 `87ce92cf2c1d98b5cf199743e52f3b48abaac9808da3286d41e053ed2afc1141`。
+
+两组 source/canonical SHA 均相同。Draft PR #27 已让统一 path configuration、catalog builder、Matthew coverage read model、API catalog loader 与 watcher 使用 canonical 路径；相关测试为 60 passed。该 PR 尚未 merge 或 deploy，因此旧两项原件继续保留，不能在 production 完成 cutover、health/API 验证与回滚确认前删除。它们是新增的精确 legacy 删除候选，不是 PostgreSQL authority，也不进入 Git。

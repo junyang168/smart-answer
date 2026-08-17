@@ -14,9 +14,11 @@ from backend.api.canonical_repository.postgres_store import (
     ActiveSnapshotBlocked,
     PostgresKnowledgeStore,
     canonical_json,
-    reviewed_relations_package,
 )
 from backend.pipeline.source_anchor_binding import bind_source_versions
+from backend.pipeline.reviewed_relation_integration import (
+    build_reviewed_relation_integration,
+)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -45,6 +47,16 @@ def main() -> None:
 
     relations = subparsers.add_parser("ingest-reviewed-relations")
     relations.add_argument("artifact", type=Path)
+    relations.add_argument(
+        "--base-package",
+        type=Path,
+        help="Knowledge package containing every claim/evidence endpoint",
+    )
+    relations.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Write the increment, candidate snapshot, report, and human queue",
+    )
     relations.add_argument("--apply", action="store_true")
 
     compile_parser = subparsers.add_parser("compile")
@@ -91,13 +103,49 @@ def main() -> None:
             metadata={"input_path": str(args.package)},
         )
     elif args.command == "ingest-reviewed-relations":
-        package = reviewed_relations_package(_load(args.artifact))
-        result = store.ingest_package(
-            package,
-            source_kind="cross_sermon_relation_consensus",
-            apply=args.apply,
-            metadata={"input_path": str(args.artifact)},
-        )
+        artifact = _load(args.artifact)
+        base = _load(args.base_package) if args.base_package else store.compile_package()
+        integration = build_reviewed_relation_integration(artifact, base)
+        if args.output_dir:
+            _write(args.output_dir / "incremental-package.json", integration["incremental_package"])
+            _write(args.output_dir / "candidate-shared-knowledge.json", integration["candidate_snapshot"])
+            _write(args.output_dir / "human-review-queue.json", {
+                "schema_version": "wang_cross_sermon_human_queue_v1",
+                "items": integration["human_review_queue"],
+            })
+            report = {key: value for key, value in integration.items() if key not in {
+                "incremental_package", "candidate_snapshot", "human_review_queue"
+            }}
+            _write(args.output_dir / "integration-report.json", report)
+        if integration["status"] == "blocked":
+            result = {
+                "status": "blocked",
+                "summary": integration["summary"],
+                "findings": integration["findings"],
+            }
+        else:
+            base_result = None
+            if args.apply and args.base_package:
+                base_result = store.ingest_package(
+                    base,
+                    source_kind="research_batch_knowledge",
+                    apply=True,
+                    metadata={"input_path": str(args.base_package)},
+                )
+            relation_result = store.ingest_package(
+                integration["incremental_package"],
+                source_kind="cross_sermon_relation_consensus",
+                apply=args.apply,
+                metadata={"input_path": str(args.artifact)},
+            )
+            result = {
+                "status": relation_result["status"],
+                "integration_status": integration["status"],
+                "summary": integration["summary"],
+                "base_ingest": base_result,
+                "relation_ingest": relation_result,
+                "output_dir": str(args.output_dir) if args.output_dir else None,
+            }
     elif args.command == "compile":
         package = store.compile_package(package_id=args.package_id)
         _write(args.output, package)

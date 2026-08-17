@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from backend.api.config import CONFIG_DIR, DATA_BASE_PATH
+from backend.api.config import CONFIG_DIR, DATA_BASE_PATH, WANG_SERMON_CATALOG_FILE
 from backend.api.gemini_client import gemini_client
 
 from .access_control import AccessControl
@@ -58,7 +58,11 @@ class SermonManager:
         self.base_folder = str(DATA_BASE_PATH)
         self.config_folder = str(CONFIG_DIR)
         self._acl = AccessControl(self.base_folder)
-        self._sm = SermonMetaManager(self.base_folder, self._acl.get_user)
+        self._sm = SermonMetaManager(
+            self.base_folder,
+            self._acl.get_user,
+            catalog_file_path=WANG_SERMON_CATALOG_FILE,
+        )
         self._scm = SermonCommentManager()
         self.semantic_search_url = os.getenv('SEMANTIC_SEARCH_API_URL')
         self._audit_fields = (
@@ -101,6 +105,9 @@ class SermonManager:
         observer = Observer()
         observer.schedule(event_handler, os.path.dirname(self.config_folder + '/config.json'), recursive=False)
         observer.schedule(event_handler, self.base_folder, recursive=False)
+        catalog_dir = os.path.dirname(self._sm.catalog_file_path)
+        if catalog_dir != self.base_folder and os.path.isdir(catalog_dir):
+            observer.schedule(event_handler, catalog_dir, recursive=False)
         observer.start()
 
     def get_next_fellowship(self):

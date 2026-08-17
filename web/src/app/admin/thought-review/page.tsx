@@ -1410,6 +1410,11 @@ export default function ThoughtReviewPage() {
   return (
     <main className="min-h-screen bg-slate-50 py-8">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
+        <div className="mb-4 flex flex-wrap items-center gap-4 text-sm font-semibold">
+          <Link href="/admin/wang" className="text-indigo-700">← Wang 文庫總覽</Link>
+          <Link href="/admin/wang/matthew-progress" className="text-slate-600 hover:text-indigo-700">馬太文章進度</Link>
+          <Link href="/admin/thought-review/candidates" className="text-slate-600 hover:text-indigo-700">內容候選</Link>
+        </div>
         <header className="rounded-3xl bg-slate-900 p-6 text-white shadow-sm sm:p-8">
           <p className="text-sm font-semibold text-indigo-300">
             王守仁教授思想知識平台 · 設計驗證

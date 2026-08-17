@@ -34,8 +34,7 @@ const groups: AdminGroup[] = [
       { title: "講道稿件", description: "管理講道逐字稿、認領狀態與發布流程。", href: "/admin/surmons" },
       { title: "講道系列", description: "建立系列並整理系列內的講道內容。", href: "/admin/surmon_series" },
       { title: "筆記與逐字稿生成講稿", description: "執行 AI 整理、審閱、合併與發布流程。", href: "/admin/notes-to-sermon/series" },
-      { title: "釋經與專題文庫", description: "審閱經文單元、專題單元及其原始來源。", href: "/admin/canonical-repository" },
-      { title: "思想與篇章審核", description: "用原始证据审核教授主张，并决定释经文章如何编排。", href: "/admin/thought-review" },
+      { title: "Wang 釋經與思想文庫", description: "統一查看文章進度、內容候選、知識審核與出版單元。", href: "/admin/wang" },
       { title: "完整文章", description: "編輯並發布由講道產生的全文內容。", href: "/admin/full_article" },
     ],
   },
@@ -75,8 +74,7 @@ const groups: AdminGroup[] = [
 ];
 
 const quickLinks = [
-  { title: "思想與篇章審核", href: "/admin/thought-review", icon: BookOpen },
-  { title: "釋經與專題文庫", href: "/admin/canonical-repository", icon: Library },
+  { title: "Wang 文庫", href: "/admin/wang", icon: BookOpen },
   { title: "講稿整理", href: "/admin/notes-to-sermon/series", icon: FileText },
   { title: "講道稿件", href: "/admin/surmons", icon: Radio },
 ];

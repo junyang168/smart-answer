@@ -76,3 +76,9 @@ claim、step 與 provenance 全部覆蓋，只能證明材料有被提到，不�
 ## 6. 審核輸出要求
 
 Editorial Review Agent 不只給總分，還必須：逐維度說明證據；逐主要 section 判斷母本步驟是否完整；列出可執行 finding；區分 blocking 與 non-blocking；指出需要退回 Composition Agent 的結構問題。程序 audit 和寫作 rubric 分開呈現，任何一方不得替代另一方。
+
+初审使用不超过 40 KiB 的独立 `EditorialReviewPacket`，不传送完整 knowledge snapshot、CompositionPlan 或 base manuscript。修订后使用 `FinalDeltaReviewPacket`，只检查 changed paragraphs、前次已验证 review、accepted findings、dispositions、受影响维度与 manuscript SHA。未受影响维度不得由模型重新评分，只能从 SHA 绑定且已通过本地校验的 baseline 继承；总分、各维度最低线与 hard failures 一律由程序合并后重新计算。所有 finding anchor 在模型返回后立即与当前稿逐字核对，delta finding 还必须落在修改后的段落内。
+
+## 7. 太16:1–12 发布校准
+
+首篇发布稿的 baseline review 为 86 分。修订只影响 `source_and_exegesis`、`exegetical_reasoning`、`approved_written_style` 与 `pastoral_theological_landing`；Final Delta Review 分别给出 15、13、9、5 分，其余六维从已验证 baseline 继承。程序合并后总分为 90，维度最低线与 hard failures 均通过，delta finding 为 0。同一稿件此前完整重审曾因未修改维度漂移而得到约 80 分；该结果不再作为发布评分。发布稿 SHA 为 `c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`。

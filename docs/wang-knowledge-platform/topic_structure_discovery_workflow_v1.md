@@ -12,12 +12,14 @@ flowchart LR
     R --> D["OpenAI 发现母题、子专题与篇章段落"]
     D --> V["机械检查：无重复、无遗漏"]
     V --> A["Claude 按母题独立复核"]
-    A -->|同意| P["候选 TopicNode、ProductPlan 与 KnowledgeRoute"]
+    A -->|同意| P["候选主题结构（尚无 canonical ID）"]
     A -->|建议替换| O["OpenAI 仲裁"]
     O -->|接受| P
     O -->|拒绝| C2["Claude 再审"]
     C2 -->|接受 OpenAI| P
     C2 -->|仍不同意| H["只把这一项交给人工"]
+    P --> I["主题身份对账：复用既有主题或建立新主题"]
+    I --> W["生成 canonical 写入包"]
 ```
 
 它不从讲道标题生成目录，也不读取现有手工文章来反推答案。现有文章只在结果生成后作为外部验证材料，检查系统是否发现了相近的主要议题，并发现人工文章遗漏或无溯源之处。
@@ -32,7 +34,11 @@ flowchart LR
 
 ## 三、硬性守门规则
 
-- `ResearchBatch` 只是处理范围，不得自动成为母题。
+- `ResearchBatch` 只是处理范围，不得自动成为母题；批次也不得进入主题的**身份**。
+- 自动发现阶段只产生 `TCAND-*` 候选 ID；候选 ID 可以随批次或重新分析而改变，**永远不得作为 canonical topic ID 写入主库**。
+- canonical topic ID 是独立、不可变的身份。身份确认时只能做两种选择：复用一个既有 `TopicNode`，或为新主题分配一次不含标题、批次和 claim 集合的 opaque ID。日后增加讲道、修改标题或调整归组，只形成新 revision，不更换 canonical ID。
+- 名称改变或重新归组会进入持久化的 `topic_identity_reconciliations` 队列，状态为 `pending_match` 或 `pending_new`，并附共用主张数与 Jaccard 作为参考。**系统不会把它直接写成另一棵 canonical 主题树**；确认前，canonical `topic_nodes / knowledge_routes / product_plans` 都保持为空。
+- 只有同层级、同父主题的子专题才可以按名称自动复用；同名但属于不同母题的子专题不得误合并。
 - 结构必须优先来自主张及其 `supports / explains / qualifies / refutes / answers` 等关系，不能以讲道标题代替思想分析。
 - 每条主张只能有一个主要专题归宿，或者明确进入 `unassigned_claim_ids`；未来可以建立交叉链接，但不能复制主张制造重复知识。
 - 替换一个母题时，Claude 必须保存原母题完全相同的 claim ID 集合，防止审核意见偷偷增加或删除教授材料。
@@ -75,17 +81,38 @@ Claude 指出“外邦人纳入与教会辨识”下原来的单一子专题与�
 - 双模型 runner：`backend/pipeline/topic_structure_discovery_runner.py`
 - prompts：`backend/pipeline/prompts/topic_structure_*.md`
 - tests：`backend/tests/test_topic_structure_discovery.py`
-- 核心九篇报告：`output/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/topic-structure/topic-structure-report.md`
-- 可写入 PostgreSQL 的候选包：同目录 `candidate-package.json`
+- 核心九篇报告：`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01/topic-structure/topic-structure-report.md`
+- 身份待确认的候选包：同目录 `candidate-package.json`
+- 身份确认后才生成的 canonical 包：同目录 `canonical-write-package.json`
 
 运行：
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.topic_structure_discovery_runner \
-  --batch-root output/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01
+  --batch-root "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01"
 ```
 
-默认只生成候选文件。确认要进入管理员审核工作台时才加 `--apply`；`--apply` 也只是写入候选对象，不会自动批准或发布。
+默认只生成候选文件。加 `--apply` 时，系统只把 `topic_identity_reconciliations` 写入待确认队列；若仍有未确认身份，会返回 `identity_review_required`，不会写入 canonical TopicNode。
+
+同工确认后，提供一个 resolution 文件，再次执行：
+
+```bash
+PYTHONPATH=. .venv/bin/python -m backend.pipeline.topic_structure_discovery_runner \
+  --batch-root "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-COVENANT-LAW-CORE-NINE-01" \
+  --apply \
+  --identity-resolutions /path/to/topic-identity-resolutions.json
+```
+
+resolution 以候选 ID 为键，只允许：
+
+- `{"action": "match_existing", "canonical_topic_id": "..."}`：复用既有主题；
+- `{"action": "create_new"}`：分配一次 opaque canonical ID。
+
+只有所有身份都解决后，runner 才生成并写入 `canonical-write-package.json`。因此重复执行和后续批次不会堆出平行主题树。
+
+旧版 `candidate-package.json` 若曾把候选主题直接放进 canonical collections，runner 会在缓存命中时自动归档旧文件，并以已经完成双模型复核的 `reviewed-topic-structure.json` 重建 v3 候选包。这个迁移只改变持久化投影，不重新调用模型，也不改变已经复核的母题、子专题和篇章段落内容。
+
+PostgreSQL 的 compiled snapshot 必须同时输出 `topic_identity_reconciliations`。这样管理员工作台可以看到：候选主题来自哪个批次、它与哪些既有主题重叠、最终选择了复用还是新建；不能只在一次 runner 的临时 JSON 中保留这些决定。
 
 ## 六、管理员 UI（2026-08-12）
 

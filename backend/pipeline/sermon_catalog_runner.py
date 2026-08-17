@@ -1,4 +1,4 @@
-"""CLI for rebuilding ``$DATA_BASE_DIR/sermon_catalog.json``."""
+"""CLI for rebuilding the canonical Wang sermon-catalog read model."""
 
 from __future__ import annotations
 

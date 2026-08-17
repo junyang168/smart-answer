@@ -46,6 +46,10 @@ WANG_ACTIVE_SNAPSHOT_DIR: Final[Path] = WANG_PLATFORM_PATHS.active_snapshots
 WANG_STAGING_DIR: Final[Path] = WANG_PLATFORM_PATHS.staging
 WANG_CLAIM_LAYER_STAGING_DIR: Final[Path] = WANG_PLATFORM_PATHS.claim_layer_staging
 WANG_SEED_CATALOG_DIR: Final[Path] = WANG_PLATFORM_PATHS.seed_catalog
+WANG_SERMON_CATALOG_FILE: Final[Path] = WANG_PLATFORM_PATHS.sermon_catalog
+WANG_SERMON_CATALOG_OVERRIDES_FILE: Final[Path] = (
+    WANG_PLATFORM_PATHS.sermon_catalog_overrides
+)
 WANG_MATTHEW_SOURCE_COVERAGE_FILE: Final[Path] = (
     WANG_PLATFORM_PATHS.matthew_source_coverage
 )

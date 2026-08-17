@@ -245,6 +245,11 @@ Functional behavior:
 
 - Public users can browse short-form teaching videos.
 - Admin users can manage video titles, series, YouTube links, and descriptions.
+- The existing public and admin routes are the intended delivery surface for the Wang knowledge platform's three-to-five-minute teaching use case; a separate micro-sermon site is not required.
+- Current records are delivery metadata only. Target knowledge-managed records link one central question and a minimum complete argument to an approved Composition Plan, active knowledge snapshot, claims, relations, exact citations, and ProductDependencies.
+- Two source modes are supported by the target design: an exact Dr. Wang audio/video excerpt with transcript context, and a clearly attributed editorial synthesis assembled from reviewed claims across one or more sermons.
+- A micro-sermon is not a mechanically truncated manuscript. It must preserve material premises and qualifications, link to the complete sermon and deeper exegesis/topic material, and return to review when an upstream dependency becomes stale or invalidated.
+- Full design and rollout details are documented in `docs/wang-knowledge-platform/micro_sermon_product_use_case.md`.
 
 ## Depth Of Faith
 

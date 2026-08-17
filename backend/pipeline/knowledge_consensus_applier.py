@@ -13,7 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline.corpus_survey_runner import _load
+from backend.pipeline.knowledge_source import load_knowledge_source_document
 
 
 class ConsensusApplicationError(ValueError):
@@ -34,6 +34,11 @@ def apply_consensus_overrides(
     package: dict[str, Any], overrides: dict[str, Any], transcripts: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     result = deepcopy(package)
+    adjudication_fingerprint = overrides.get("adjudication_fingerprint")
+    if isinstance(adjudication_fingerprint, dict):
+        adjudication_fingerprint = adjudication_fingerprint.get("fingerprint_sha256")
+    elif adjudication_fingerprint is not None:
+        adjudication_fingerprint = str(adjudication_fingerprint)
     claims = {row["claim_id"]: row for row in result.get("claims", [])}
     evidence = {row["evidence_step_id"]: row for row in result.get("evidence_steps", [])}
     fragments = result.setdefault("source_fragments", [])
@@ -180,16 +185,16 @@ def apply_consensus_overrides(
             raise ConsensusApplicationError(f"claim references missing evidence: {claim['claim_id']}:{sorted(missing)}")
     result["consensus_application"] = {
         "schema_version": "wang_ai_consensus_application_v1",
-        "adjudication_fingerprint": (overrides.get("adjudication_fingerprint") or {}).get("fingerprint_sha256"),
+        "adjudication_fingerprint": adjudication_fingerprint,
         "applied_claim_ids": sorted((overrides.get("claims") or {}).keys()),
         "removed_claim_relation_ids": sorted(relations_to_remove),
         "approval_status": "not_human_approved",
     }
     result["summary"] = {
         **result.get("summary", {}),
-        "source_fragment_count": len(result.get("source_fragments", [])),
-        "evidence_step_count": len(result.get("evidence_steps", [])),
-        "claim_relation_count": len(result.get("claim_relations", [])),
+        "source_fragments_count": len(result.get("source_fragments", [])),
+        "evidence_steps_count": len(result.get("evidence_steps", [])),
+        "claim_relations_count": len(result.get("claim_relations", [])),
     }
     return result
 
@@ -207,9 +212,10 @@ def main() -> int:
     package = json.loads(args.package.read_text(encoding="utf-8"))
     overrides = json.loads(args.overrides.read_text(encoding="utf-8"))
     transcripts = {}
+    transcript_dirs = [args.transcript_dir]
     for source in package.get("source_documents", []):
         transcript_id = str(source.get("transcript_id") or "")
-        transcript, _ = _load(args.transcript_dir / f"{transcript_id}.json")
+        transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
         transcripts[transcript_id] = transcript
     result = apply_consensus_overrides(package, overrides, transcripts)
     args.output.parent.mkdir(parents=True, exist_ok=True)
