@@ -426,8 +426,6 @@ def run_authoring(
         if (
             editorial_outcome.get("manuscript_sha256") != sha256_text(manuscript)
             or editorial_outcome.get("passed") is not True
-            or int(editorial_outcome.get("total_score", -1))
-            < int(packet["quality_profile"]["passing_score"])
             or editorial_outcome.get("hard_gate_failures")
             or editorial_outcome.get("declared_hard_failures")
         ):

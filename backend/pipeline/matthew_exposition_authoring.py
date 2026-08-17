@@ -1122,19 +1122,13 @@ def evaluate_editorial_review(
     unknown_hard_failures = set(declared_hard_failures) - set(quality_profile["hard_failures"])
     if unknown_hard_failures:
         raise AuthoringContractError(f"unknown hard failures: {sorted(unknown_hard_failures)}")
-    # The threshold scales with what was actually measured, so excluding a
-    # dimension neither helps nor penalises: 90/100 becomes 85.5/95.
-    configured_weight = sum(item["weight"] for item in quality_profile["dimensions"])
-    scaled_passing_score = (
-        quality_profile["passing_score"] * applicable_weight / configured_weight
-        if configured_weight
-        else 0
-    )
-    passed = (
-        total >= scaled_passing_score
-        and not hard_gate_failures
-        and not declared_hard_failures
-    )
+    # Every dimension must reach its own minimum; there is no total to pass.
+    # A single number let a weak dimension be carried by the others -- the
+    # published matthew-16-21-23 round one totalled 81 of 100 while scoring 7,
+    # 3 and 3 against minimums of 8, 4 and 4. The dimensions are ten separate
+    # requirements, not components of one score to trade off, so `total_score`
+    # is still reported for a reader and no longer decides anything.
+    passed = not hard_gate_failures and not declared_hard_failures
     return {
         "total_score": total,
         "passed": passed,
@@ -1142,7 +1136,6 @@ def evaluate_editorial_review(
         "declared_hard_failures": declared_hard_failures,
         "not_applicable_dimensions": dict(not_applicable),
         "applicable_weight": applicable_weight,
-        "scaled_passing_score": round(scaled_passing_score, 2),
     }
 
 
@@ -1429,7 +1422,7 @@ def build_editorial_review_packet(
         "quality_profile": {
             "profile_id": quality_profile.get("profile_id"),
             "revision": quality_profile.get("revision"),
-            "passing_score": quality_profile.get("passing_score"),
+            # Each dimension carries its own `minimum`; there is no total.
             "dimensions": quality_profile.get("dimensions", []),
             "hard_failures": quality_profile.get("hard_failures", []),
             "review_calibration": quality_profile.get("review_calibration", {}),

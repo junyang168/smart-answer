@@ -6,11 +6,13 @@
 
 `author_section_ledger[].preserved_step_anchors` 已由程序逐字驗證：每條承重步驟都對應稿件中確實存在的片段。位置驗證只證明該處有文字，不證明推理寫出來了。請到每個 anchor 所在的段落，判斷那是完整的推理（觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論），還是只把來源結論摘要一句；屬於後者時必須扣分並開出 finding。
 
-校準規則：不要把 ledger、claim 或 step ID 的完整覆蓋誤判為寫作充分。逐節追問普通讀者是否能看見「觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論」。若關鍵原文、交叉經文與結論只被並列成來源摘要，`base_manuscript_preservation`、`exegetical_reasoning` 和 `concision_without_compression` 必須扣分；這種稿件不得因技術覆蓋完整而得到 90 分以上。
+校準規則：不要把 ledger、claim 或 step ID 的完整覆蓋誤判為寫作充分。逐節追問普通讀者是否能看見「觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論」。若關鍵原文、交叉經文與結論只被並列成來源摘要，`base_manuscript_preservation`、`exegetical_reasoning` 和 `concision_without_compression` 必須扣分；這種稿件不得因技術覆蓋完整而讓這三項達到門檻——覆蓋完整不是深度。
 
-出版最低線是 90 分，不是 80 分。89 分及以下必須判為未通過；即使總分達到 90，任何維度硬門檻或 hard failure 仍可使文章不通過。
+出版與否不看總分。**每一個維度都必須達到自己的 `minimum`**——即該維度滿分的 80%（15 分項需 12，10 分項需 8，5 分項需 4），任何一項不足即為未通過，其他項再高也補不回來。總分只是報給人看的參考值，不是門檻。任何 hard failure 同樣使文章不通過。
 
-結果必須與 finding 一致：只要總分低於 90、任何維度低於其硬門檻，或存在 hard failure，`findings` 中就必須至少有一項 `blocking: true` 的可執行 finding，並列出造成未通過的維度。不得返回「rubric 未通過但沒有 blocking finding」的結果。只有總分、全部維度門檻與 hard failures 同時通過時，才可以沒有 blocking finding。
+這一條會改變你的評分習慣：不要為了讓總分好看而在某一項給出「差不多可以」的分數。一項寫得不夠好，就照實給不到門檻的分，並開出對應的 blocking finding；那正是這個 rubric 要你做的事。
+
+結果必須與 finding 一致：只要任何維度低於其 `minimum`，或存在 hard failure，`findings` 中就必須至少有一項 `blocking: true` 的可執行 finding，並列出造成未通過的維度。不得返回「rubric 未通過但沒有 blocking finding」的結果。只有全部維度都達到門檻、且沒有 hard failure 時，才可以沒有 blocking finding。
 
 不要重做資料抽取，不作沒有來源的外部神學裁判，不直接代寫。每項 finding 必須先給一個本輪暫用的 `finding_id`，並引用稿件中的短 anchor、說明失敗維度、嚴重度、可執行修改與是否 blocking；runner 會在驗證後改成 canonical ID。技術 audit 與文筆判斷分開。
 

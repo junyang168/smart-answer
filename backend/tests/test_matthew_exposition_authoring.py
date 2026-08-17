@@ -1,4 +1,5 @@
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 
@@ -338,6 +339,8 @@ def test_warnings_skip_quote_fidelity_when_no_source_texts_are_given():
 
 
 def test_hard_gate_cannot_be_offset_by_high_total_score():
+    """Nine dimensions at full marks do not buy the tenth a pass."""
+
     profile = load_json(PROFILE_PATH)
     scores = []
     for dimension in profile["dimensions"]:
@@ -348,53 +351,44 @@ def test_hard_gate_cannot_be_offset_by_high_total_score():
     outcome = evaluate_editorial_review(
         {"dimension_scores": scores, "hard_failures": []}, profile
     )
-    assert outcome["total_score"] >= profile["passing_score"]
+    total_weight = sum(item["weight"] for item in profile["dimensions"])
+    assert outcome["total_score"] > total_weight * 0.9
     assert outcome["passed"] is False
     assert outcome["hard_gate_failures"] == ["base_manuscript_preservation"]
 
 
-def test_publication_requires_reaching_the_threshold_exactly():
-    """One point below the threshold must fail, whatever the threshold is.
+def test_every_dimension_carries_the_same_share_of_its_own_weight():
+    """The bar is 80% of each dimension's weight, not a total. A rubric that
+    gates on a sum lets a weak dimension be carried by the strong ones."""
 
-    Previously this asserted the number 90 directly, so lowering the bar broke
-    a test whose actual subject is the boundary, not the value.
-    """
     profile = load_json(PROFILE_PATH)
-    threshold = profile["passing_score"]
-    total_weight = sum(d["weight"] for d in profile["dimensions"])
-    scores = [
-        {"dimension_id": d["id"], "score": d["weight"], "evidence": "fixture"}
-        for d in profile["dimensions"]
-    ]
-    by_id = {item["dimension_id"]: item for item in scores}
-
-    # Take points off dimensions with no minimum, so only the total moves.
-    deduct = total_weight - threshold
+    assert "passing_score" not in profile
     for dimension in profile["dimensions"]:
-        if deduct <= 0:
-            break
-        if dimension.get("minimum", 0) > 0:
-            continue
-        take = min(deduct, dimension["weight"])
-        by_id[dimension["id"]]["score"] = dimension["weight"] - take
-        deduct -= take
-    assert deduct == 0, "profile has too little slack to build this fixture"
-    reducible = next(
-        d["id"] for d in profile["dimensions"]
-        if d.get("minimum", 0) == 0 and by_id[d["id"]]["score"] > 0
-    )
-    at_threshold = evaluate_editorial_review(
-        {"dimension_scores": scores, "hard_failures": []}, profile
-    )
-    assert at_threshold["total_score"] == threshold
-    assert at_threshold["passed"] is True
+        assert dimension["minimum"] == math.ceil(dimension["weight"] * 0.8)
 
-    by_id[reducible]["score"] -= 1
-    below = evaluate_editorial_review(
-        {"dimension_scores": scores, "hard_failures": []}, profile
-    )
-    assert below["total_score"] == threshold - 1
-    assert below["passed"] is False
+
+def test_publication_requires_every_dimension_to_reach_its_minimum():
+    """One point below a minimum fails, whichever dimension it is."""
+
+    profile = load_json(PROFILE_PATH)
+    for dimension in profile["dimensions"]:
+        scores = [
+            {"dimension_id": item["id"], "score": item["minimum"], "evidence": "fixture"}
+            for item in profile["dimensions"]
+        ]
+        at_minimum = evaluate_editorial_review(
+            {"dimension_scores": scores, "hard_failures": []}, profile
+        )
+        assert at_minimum["passed"] is True, dimension["id"]
+        assert at_minimum["hard_gate_failures"] == []
+
+        by_id = {item["dimension_id"]: item for item in scores}
+        by_id[dimension["id"]]["score"] -= 1
+        below = evaluate_editorial_review(
+            {"dimension_scores": scores, "hard_failures": []}, profile
+        )
+        assert below["passed"] is False, dimension["id"]
+        assert below["hard_gate_failures"] == [dimension["id"]]
 
 
 def test_generation_fingerprint_changes_with_prompt_model_or_input():
@@ -1763,45 +1757,45 @@ def test_out_of_scope_dimension_is_excluded_from_the_total_not_awarded():
     )
     # The one point it did score is removed from the numerator...
     assert excluded["total_score"] == scored["total_score"] - 1
-    # ...and its weight from the denominator, so the threshold scales with it.
+    # ...and its weight from what was measured.
     assert excluded["applicable_weight"] == 95
-    # Derived from the profile so changing the threshold does not break this.
-    assert excluded["scaled_passing_score"] == round(
-        _profile()["passing_score"] * 95 / 100, 2
-    )
     assert excluded["not_applicable_dimensions"] == {
         "pastoral_theological_landing": "contract forbids it"
     }
 
 
-def test_excluding_a_dimension_neither_helps_nor_penalises_a_borderline_article():
-    """An article at exactly the threshold stays at the threshold."""
+def test_excluding_a_dimension_leaves_the_others_judged_as_they_were():
+    """Exclusion removes a dimension from what was measured and from nothing
+    else. With the bar set per dimension there is no total for an excluded
+    weight to drag around, so the remaining nine pass or fail on their own."""
+
+    profile = _profile()
+    minimums = {item["id"]: item["minimum"] for item in profile["dimensions"]}
     review = passing_review()
     for item in review["dimension_scores"]:
-        item["score"] = 0
-    # A full 90 of the 95 applicable points, pastoral excluded.
-    for item in review["dimension_scores"]:
-        if item["dimension_id"] == "source_and_exegesis":
-            item["score"] = 15
-        elif item["dimension_id"] == "base_manuscript_preservation":
-            item["score"] = 15
-        elif item["dimension_id"] == "exegetical_reasoning":
-            item["score"] = 15
-        elif item["dimension_id"] == "argument_organization":
-            item["score"] = 10
-        elif item["dimension_id"] == "general_reader_readability":
-            item["score"] = 10
-        elif item["dimension_id"] == "editorial_voice_restraint":
-            item["score"] = 10
-        elif item["dimension_id"] == "approved_written_style":
-            item["score"] = 10
-        elif item["dimension_id"] == "theological_tension_and_attribution":
-            item["score"] = 5
-    outcome = evaluate_editorial_review(
-        review, _profile(), {"pastoral_theological_landing": "contract forbids it"}
+        item["score"] = minimums[item["dimension_id"]]
+
+    scored = evaluate_editorial_review(review, profile)
+    excluded = evaluate_editorial_review(
+        review, profile, {"pastoral_theological_landing": "contract forbids it"}
     )
-    assert outcome["total_score"] == 90
-    assert outcome["total_score"] >= outcome["scaled_passing_score"]
+    assert scored["passed"] is True
+    assert excluded["passed"] is True
+    assert excluded["applicable_weight"] == 95
+    assert (
+        excluded["total_score"]
+        == scored["total_score"] - minimums["pastoral_theological_landing"]
+    )
+
+    # A failure elsewhere is unaffected by the exclusion.
+    for item in review["dimension_scores"]:
+        if item["dimension_id"] == "approved_written_style":
+            item["score"] -= 1
+    still_failing = evaluate_editorial_review(
+        review, profile, {"pastoral_theological_landing": "contract forbids it"}
+    )
+    assert still_failing["passed"] is False
+    assert still_failing["hard_gate_failures"] == ["approved_written_style"]
 
 
 def test_out_of_scope_dimension_cannot_fail_its_minimum():

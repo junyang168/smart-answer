@@ -1,9 +1,8 @@
 {
   "schema_version": "editorial-writing-quality-profile.v1",
   "profile_id": "WQ-matthew-exposition-v1",
-  "revision": 3,
+  "revision": 4,
   "title": "馬太福音釋經文章寫作質量",
-  "passing_score": 80,
   "reference_score": 80,
   "hard_gate_dimensions": [
     "source_and_exegesis",
@@ -30,22 +29,22 @@
     {
       "id": "argument_organization",
       "weight": 10,
-      "minimum": 0
+      "minimum": 8
     },
     {
       "id": "general_reader_readability",
       "weight": 10,
-      "minimum": 0
+      "minimum": 8
     },
     {
       "id": "editorial_voice_restraint",
       "weight": 10,
-      "minimum": 0
+      "minimum": 8
     },
     {
       "id": "approved_written_style",
       "weight": 10,
-      "minimum": 0
+      "minimum": 8
     },
     {
       "id": "theological_tension_and_attribution",
@@ -55,12 +54,12 @@
     {
       "id": "concision_without_compression",
       "weight": 5,
-      "minimum": 0
+      "minimum": 4
     },
     {
       "id": "pastoral_theological_landing",
       "weight": 5,
-      "minimum": 0
+      "minimum": 4
     }
   ],
   "hard_failures": [
@@ -82,8 +81,12 @@
       "inference_bridge",
       "qualified_conclusion"
     ],
-    "maximum_score_when_load_bearing_steps_are_only_summarized": 89,
-    "failure_example": "Merely listing Petros/petra, Ephesians 2:20, and the conclusion without explaining how each step advances or limits the interpretation."
+    "failure_example": "Merely listing Petros/petra, Ephesians 2:20, and the conclusion without explaining how each step advances or limits the interpretation.",
+    "dimensions_below_minimum_when_load_bearing_steps_are_only_summarized": [
+      "base_manuscript_preservation",
+      "exegetical_reasoning",
+      "concision_without_compression"
+    ]
   },
   "deterministic_warnings": {
     "production_language_terms": [

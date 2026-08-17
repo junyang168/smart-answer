@@ -46,7 +46,7 @@
 
 初稿只调用一次 Independent Editorial Reviewer。此后每一轮 Revision 只调用一次 Final Delta Reviewer；同一次 delta 响应必须同时完成旧 findings 验收、受影响维度评分、受影响 hard failures 检查，以及在程序重算仍无法通过时提出下一轮可执行 findings。不得在 Delta Review 后追加 Score-Gap Review，也不得把修订稿重新送回完整 Editorial Review。
 
-下一轮直接继承本轮 merged review、程序重算 outcome 与 manuscript SHA，然后进入 Revision。若总分或 hard gates 未通过，而 Delta Reviewer 在允许范围内没有诚实、可执行的新 finding，runner 安全停止并转人工；不得为了凑到 90 分增加另一次 reviewer 调用或制造 finding。所有 reviewer packet 继续受 40 KiB 硬上限约束。
+下一轮直接继承本轮 merged review、程序重算 outcome 与 manuscript SHA，然后进入 Revision。若任一维度未达其 minimum 或 hard gates 未通过，而 Delta Reviewer 在允许范围内没有诚实、可执行的新 finding，runner 安全停止并转人工；不得为了让某一维度跨过门槛而增加另一次 reviewer 调用或制造 finding。所有 reviewer packet 继续受 40 KiB 硬上限约束。
 
 ## 4. Agent 状态机
 
