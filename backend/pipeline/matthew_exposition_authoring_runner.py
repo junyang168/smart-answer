@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
+from backend.pipeline.manuscript_grounding_check import check_manuscript_grounding
 from backend.pipeline.matthew_exposition_authoring import (
     ADJUDICATION_SCHEMA,
     AUTHOR_RESULT_SCHEMA,
@@ -259,6 +260,44 @@ def _run_program_audit_stage(
     }
 
 
+def _run_grounding_stage(
+    *,
+    draft: str,
+    packet: dict[str, Any],
+    output_dir: Path,
+    claude_client: Any,
+    force: bool,
+    skip: bool,
+) -> dict[str, Any] | None:
+    """Check every attributed paragraph against the material it declares.
+
+    Returns None when the gate is disabled. The report is written whether or
+    not it passes, so a failed run leaves the evidence behind rather than only
+    a status string.
+    """
+
+    if skip:
+        return None
+    report = check_manuscript_grounding(
+        draft, packet["knowledge"], client=claude_client
+    )
+    _write_json(
+        output_dir / "grounding-report.json",
+        {
+            "schema_version": "matthew-exposition-grounding-report-envelope.v1",
+            "generation": {
+                "fingerprint": report["manuscript_sha256"],
+                "generated_at": _utcnow(),
+                "role": "grounding_reviewer",
+                "provider": "anthropic",
+                "model": claude_client.model,
+            },
+            "result": report,
+        },
+    )
+    return report
+
+
 def run_authoring(
     *,
     plan_path: Path,
@@ -280,6 +319,7 @@ def run_authoring(
     program_audit_draft_id: str | None = None,
     repository_root: Path | None = None,
     packet: dict[str, Any] | None = None,
+    skip_grounding_gate: bool = False,
 ) -> dict[str, Any]:
     # A caller that read the plan and its contract from the authoring store
     # passes the built packet directly; `plan_path` / `contract_path` are then
@@ -468,6 +508,29 @@ def run_authoring(
         }
 
     draft = author_result["manuscript_markdown"]
+
+    # Grounding runs before the writing reviewer, not after it. The rubric
+    # scores whether a paragraph reads like a complete argument; it cannot
+    # tell an inference the sources support from one the author supplied,
+    # because the two are indistinguishable in form. Letting an ungrounded
+    # draft reach review means the score is being computed over prose whose
+    # factual basis nothing has checked.
+    grounding_report = _run_grounding_stage(
+        draft=draft,
+        packet=packet,
+        output_dir=output_dir,
+        claude_client=claude_client,
+        force=force,
+        skip=skip_grounding_gate,
+    )
+    if grounding_report is not None and not grounding_report["passed"]:
+        return {
+            "status": "grounding_gate_failed",
+            "grounding_report_path": str(output_dir / "grounding-report.json"),
+            "authoring_path": str(output_dir / "authoring.json"),
+            "author_cached": author_cached,
+            "unsupported_paragraph_count": len(grounding_report["findings"]),
+        }
     (output_dir / "draft.md").write_text(draft, encoding="utf-8")
     draft_sha = sha256_text(draft)
     if (continuation_review is None) != (continuation_outcome is None):
@@ -908,6 +971,7 @@ def run_authoring(
             # Carry the packet so a store-sourced run does not silently fall
             # back to rebuilding from files on its second revision round.
             packet=packet,
+            skip_grounding_gate=skip_grounding_gate,
         )
         return {
             **next_result,
@@ -982,6 +1046,14 @@ def main() -> int:
             "DATA_BASE_DIR/wang-knowledge-platform/repository."
         ),
     )
+    parser.add_argument(
+        "--skip-grounding-gate",
+        action="store_true",
+        help=(
+            "Skip the per-paragraph grounding check. Diagnostic only: it removes "
+            "the only check that a paragraph does not assert more than its sources."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -1049,6 +1121,7 @@ def main() -> int:
         max_revision_rounds=args.max_revision_rounds,
         program_audit_manifest_path=args.program_audit_manifest,
         program_audit_draft_id=args.program_audit_draft_id,
+        skip_grounding_gate=args.skip_grounding_gate,
         repository_root=args.repository_root,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -3,3 +3,10 @@
 修訂稿的 ledger 必須重新提供 `preserved_step_anchors`：每一條 preserved 的母本承重步驟都要指出修訂稿中承載它的逐字片段，anchor 必須是修訂後 Markdown 的 exact substring。
 
 ledger 與初稿使用同一份契約：`applied_operations` 只能取自該 section 的 `allowed_operations`，`ineligible_operations` 中的操作不得執行也不得申報；`integration_operations` 限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即修訂失敗。
+
+每一段的斷言必須能回到該段 `claim_ids` 所涵蓋的材料，程式會逐段檢查。修訂特別容易在兩種情況下引入無源內容，兩者都不允許：
+
+- finding 要求「把推論鏈補完整」或「讓結論更有力」時，用材料沒有的動機、因果、反事實、神學辯護或一般原則去補；
+- 為了讓改寫後的段落讀起來順，加上材料沒說的過渡性解釋。
+
+材料不足以支持某個 finding 所要求的寫法時，正確做法是在 disposition 說明理由並保持該處簡短，或返回 `plan_change_required`——**不是補一句沒有來源的話**。改短不算失敗，無源才算。

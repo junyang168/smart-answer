@@ -418,8 +418,93 @@ def test_run_authoring_uses_a_supplied_packet_without_rebuilding_from_files(tmp_
         output_dir=tmp_path / "out",
         openai_client=openai,
         claude_client=claude,
+        skip_grounding_gate=True,
     )
     assert result["status"] == "editorial_pass_no_revision"
+
+
+def _grounding(exceeds, assertions=()):
+    return {
+        "schema_version": "matthew-exposition-grounding-result.v1",
+        "exceeds_material": exceeds,
+        "unsupported_assertions": list(assertions),
+        "notes": "",
+    }
+
+
+def test_grounding_gate_stops_an_ungrounded_draft_before_the_writing_reviewer(tmp_path):
+    """The rubric cannot tell a supported inference from an invented one --
+    both look like a complete argument. So grounding runs first, and a failure
+    stops the run before any score is computed over unchecked prose.
+    """
+    # Quote text from inside a checked paragraph: unsupported_assertions are
+    # substring-verified against that paragraph, not the whole document.
+    invented = "彼得是 *Petros*"
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    # The fixture manuscript has exactly 3 paragraphs the gate checks; a
+    # wrong count here would leave a grounding response to be consumed by
+    # the review call and mask what this test is asserting.
+    claude = FakeClient([_grounding(True, [invented])] * 3, model="fake-claude")
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=tmp_path / "out",
+        openai_client=openai,
+        claude_client=claude,
+    )
+    assert result["status"] == "grounding_gate_failed"
+    assert result["unsupported_paragraph_count"] >= 1
+    # The evidence is written out, not just summarised in a status string.
+    report = json.loads((tmp_path / "out" / "grounding-report.json").read_text(encoding="utf-8"))
+    assert report["result"]["passed"] is False
+    unsupported = [
+        f for f in report["result"]["findings"] if f["code"] == "unsupported_assertion"
+    ]
+    assert unsupported, "gate must report which assertions exceeded the material"
+    assert unsupported[0]["unsupported_assertions"] == [invented]
+
+
+def test_grounding_gate_lets_a_grounded_draft_through_to_review(tmp_path):
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    claude = FakeClient([_grounding(False)] * 3 + [passing_review()], model="fake-claude")
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=tmp_path / "out",
+        openai_client=openai,
+        claude_client=claude,
+    )
+    assert result["status"] == "editorial_pass_no_revision"
+    report = json.loads((tmp_path / "out" / "grounding-report.json").read_text(encoding="utf-8"))
+    assert report["result"]["passed"] is True
+
+
+def test_grounding_gate_is_on_by_default(tmp_path):
+    """Skipping must be an explicit choice: a caller that forgets the flag
+    gets the check, not a silently unguarded run.
+    """
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    claude = FakeClient([], model="fake-claude")  # any model call fails
+    with pytest.raises(AssertionError, match="unexpected model call"):
+        run_authoring(
+            packet=full_authoring_packet(),
+            plan_path=PLAN_PATH,
+            knowledge_path=KNOWLEDGE_PATH,
+            contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+            publication_profile_path=PUBLICATION_PROFILE_PATH,
+            quality_profile_path=PROFILE_PATH,
+            output_dir=tmp_path / "out",
+            openai_client=openai,
+            claude_client=claude,
+        )
 
 
 def test_store_built_packet_hash_is_stable_across_runs():
@@ -957,6 +1042,9 @@ def test_runner_reuses_matching_author_and_review_generations(tmp_path):
         "output_dir": tmp_path,
         "openai_client": openai,
         "claude_client": claude,
+        # These tests assert reviewer-call counts and caching; the grounding
+        # gate is a separate Claude call with its own dedicated tests below.
+        "skip_grounding_gate": True,
     }
     first = run_authoring(**kwargs)
     assert first["status"] == "editorial_pass_no_revision"
@@ -1028,6 +1116,7 @@ def test_runner_returns_unified_terminal_after_program_audit(monkeypatch, tmp_pa
         output_dir=tmp_path,
         openai_client=openai,
         claude_client=claude,
+        skip_grounding_gate=True,
         program_audit_manifest_path=tmp_path / "template.json",
         program_audit_draft_id="DRAFT-1",
     )
@@ -1116,6 +1205,7 @@ def test_runner_uses_delta_packet_after_revision_and_recomputes_score(tmp_path):
         output_dir=tmp_path,
         openai_client=openai,
         claude_client=claude,
+        skip_grounding_gate=True,
     )
     assert outcome["status"] == "editorial_pass_after_delta_review"
     assert outcome["rubric_outcome"]["total_score"] == 100
@@ -1242,6 +1332,7 @@ def test_two_revision_rounds_use_one_review_call_per_round(tmp_path):
         output_dir=tmp_path,
         openai_client=openai,
         claude_client=claude,
+        skip_grounding_gate=True,
         max_revision_rounds=2,
     )
 
@@ -1321,6 +1412,7 @@ def test_rejected_finding_maintained_by_reviewer_requires_human(tmp_path):
         output_dir=tmp_path,
         openai_client=openai,
         claude_client=claude,
+        skip_grounding_gate=True,
     )
     assert outcome["status"] == "human_review_required"
     assert len(outcome["human_required_finding_ids"]) == 1
