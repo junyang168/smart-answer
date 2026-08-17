@@ -79,6 +79,24 @@ def valid_author_result():
                     "M16-18-S03",
                     "M16-18-S04",
                 ],
+                "preserved_step_anchors": [
+                    {
+                        "step_id": "M16-18-S01",
+                        "anchor": "彼得是 *Petros*，磐石是 *petra*",
+                    },
+                    {
+                        "step_id": "M16-18-S02",
+                        "anchor": "耶穌的話不能不經解釋就縮成",
+                    },
+                    {
+                        "step_id": "M16-18-S03",
+                        "anchor": "原文把使徒和先知放在同一個定冠詞之下",
+                    },
+                    {
+                        "step_id": "M16-18-S04",
+                        "anchor": "教會終極的根基卻不是使徒個人的身分和權位，而是他們所見證的基督",
+                    },
+                ],
                 "claim_ids_used": [],
                 "integration_operations": ["tension"],
                 "applied_operations": ["preserve", "clarify"],
@@ -103,6 +121,7 @@ def test_author_ledger_allows_many_decisions_in_one_reader_section():
 def test_author_ledger_rejects_unaccounted_base_step():
     result = valid_author_result()
     result["sections"][0]["base_step_ids_preserved"].pop()
+    result["sections"][0]["preserved_step_anchors"].pop()
     with pytest.raises(AuthoringContractError, match="unaccounted base steps"):
         validate_author_result(result, contract=contract(), plan=mini_plan())
 
@@ -110,6 +129,7 @@ def test_author_ledger_rejects_unaccounted_base_step():
 def test_author_ledger_rejects_omission_of_required_base_step():
     result = valid_author_result()
     result["sections"][0]["base_step_ids_preserved"].pop()
+    result["sections"][0]["preserved_step_anchors"].pop()
     result["sections"][0]["omissions"] = [
         {"step_id": "M16-18-S04", "reason": "compressed for length"}
     ]
@@ -134,6 +154,47 @@ def test_author_ledger_requires_output_anchor_in_full_manuscript():
     result["sections"][0]["output_anchor"] = "not in the manuscript"
     with pytest.raises(AuthoringContractError, match="output anchor not found"):
         validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_author_ledger_rejects_preserved_step_without_anchor():
+    result = valid_author_result()
+    result["sections"][0]["preserved_step_anchors"] = [
+        item
+        for item in result["sections"][0]["preserved_step_anchors"]
+        if item["step_id"] != "M16-18-S03"
+    ]
+    with pytest.raises(
+        AuthoringContractError, match="preserved base steps without a manuscript anchor"
+    ):
+        validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_author_ledger_rejects_step_anchor_that_is_not_in_the_manuscript():
+    result = valid_author_result()
+    for item in result["sections"][0]["preserved_step_anchors"]:
+        if item["step_id"] == "M16-18-S02":
+            # A paraphrase of the manuscript, not a literal substring of it.
+            item["anchor"] = "耶穌的話不能不經解釋就縮成教會建造在彼得身上"
+    with pytest.raises(
+        AuthoringContractError, match="preserved step anchor not found in manuscript: M16-18-S02"
+    ):
+        validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_editorial_review_packet_carries_verified_step_anchors():
+    packet = build_editorial_review_packet(
+        authoring_packet=full_authoring_packet(),
+        author_result=valid_author_result(),
+    )
+    ledger = packet["author_section_ledger"][0]
+    assert [item["step_id"] for item in ledger["preserved_step_anchors"]] == [
+        "M16-18-S01",
+        "M16-18-S02",
+        "M16-18-S03",
+        "M16-18-S04",
+    ]
+    for item in ledger["preserved_step_anchors"]:
+        assert item["anchor"] in packet["manuscript_markdown"]
 
 
 def test_author_ledger_rejects_ineligible_operation():

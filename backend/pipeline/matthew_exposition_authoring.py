@@ -78,6 +78,18 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "section_id": {"type": "string"},
                         "decision_ids": {"type": "array", "items": {"type": "string"}},
                         "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
+                        "preserved_step_anchors": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "step_id": {"type": "string"},
+                                    "anchor": {"type": "string"},
+                                },
+                                "required": ["step_id", "anchor"],
+                            },
+                        },
                         "claim_ids_used": {"type": "array", "items": {"type": "string"}},
                         "integration_operations": {"type": "array", "items": {"type": "string"}},
                         "applied_operations": {"type": "array", "items": {"type": "string"}},
@@ -99,6 +111,7 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "section_id",
                         "decision_ids",
                         "base_step_ids_preserved",
+                        "preserved_step_anchors",
                         "claim_ids_used",
                         "integration_operations",
                         "applied_operations",
@@ -581,6 +594,53 @@ def _validate_section_operations(
             )
 
 
+def _validate_preserved_step_anchors(
+    section: dict[str, Any], *, manuscript: str, field: str
+) -> None:
+    """Verify that every preserved required step points at manuscript prose.
+
+    Claiming a step in `base_step_ids_preserved` is a self-report; the literal
+    anchor makes the claim locatable, so a reviewer can judge whether the step
+    was reasoned out or merely summarized.
+    """
+
+    section_id = section.get("section_id") or field
+    preserved = section.get("base_step_ids_preserved", [])
+    if not isinstance(preserved, list):
+        raise AuthoringContractError("base_step_ids_preserved must be an array")
+    entries = section.get("preserved_step_anchors")
+    if not isinstance(entries, list):
+        raise AuthoringContractError("preserved_step_anchors must be an array")
+    anchors: dict[str, str] = {}
+    for index, entry_value in enumerate(entries):
+        entry = _require_mapping(entry_value, f"{field}.preserved_step_anchors[{index}]")
+        step_id = _require_nonempty_string(
+            entry.get("step_id"), f"{field}.preserved_step_anchors[{index}].step_id"
+        )
+        anchor = _require_nonempty_string(
+            entry.get("anchor"), f"{field}.preserved_step_anchors[{index}].anchor"
+        )
+        if step_id in anchors:
+            raise AuthoringContractError(
+                f"section {section_id} anchored base step {step_id} more than once"
+            )
+        if anchor not in manuscript:
+            raise AuthoringContractError(
+                f"preserved step anchor not found in manuscript: {step_id}"
+            )
+        anchors[step_id] = anchor
+    missing = set(preserved) - set(anchors)
+    if missing:
+        raise AuthoringContractError(
+            f"preserved base steps without a manuscript anchor: {sorted(missing)}"
+        )
+    unclaimed = set(anchors) - set(preserved)
+    if unclaimed:
+        raise AuthoringContractError(
+            f"anchored base steps are not listed as preserved: {sorted(unclaimed)}"
+        )
+
+
 def validate_author_result(
     result: dict[str, Any],
     *,
@@ -653,6 +713,9 @@ def validate_author_result(
         covered_decisions.extend(decision_ids)
         _validate_section_operations(
             section, contract=contract, field=f"sections[{section_index}]"
+        )
+        _validate_preserved_step_anchors(
+            section, manuscript=manuscript, field=f"sections[{section_index}]"
         )
         preserved_steps.extend(section.get("base_step_ids_preserved", []))
         used_claim_ids.extend(section.get("claim_ids_used", []))
@@ -928,6 +991,9 @@ def build_editorial_review_packet(
             {
                 "section_id": section["section_id"],
                 "base_step_ids_preserved": section.get("base_step_ids_preserved", []),
+                # Verified step→prose pairs let the reviewer calibrate depth at
+                # the exact place each load-bearing step is supposed to live.
+                "preserved_step_anchors": section.get("preserved_step_anchors", []),
                 "output_anchor": section.get("output_anchor", ""),
             }
             for section in author_result.get("sections", [])

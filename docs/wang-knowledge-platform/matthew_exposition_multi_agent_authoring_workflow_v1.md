@@ -28,11 +28,13 @@
 - writing quality profile；
 - 所有实际文本片段。packet 不得只给模型一个本机文件路径。
 
-对马太福音 1–16 章，补充材料只允许 `corroborate`、`extend`、`qualify`、`tension`、`route_out`；不得用补充讲道取代母本框架。
+对马太福音 1–16 章，补充材料只允许 `corroborate`、`extend`、`qualify`、`tension`、`route_out`；不得用补充讲道取代母本框架。契约每个 section 的 `allowed_operations` 与 `ineligible_operations` 由程序执行：author ledger 的 `applied_operations` 必须落在 `allowed_operations` 之内，任何被列为 `ineligible_operations` 的操作（无论申报在 `applied_operations` 还是 `integration_operations`）都直接判交稿失败，不进 review。
+
+宣告 preserved 的母本承重步骤不再只靠作者自报：ledger 的 `preserved_step_anchors` 必须为每条 preserved step 指出承载它的稿件片段，程序以逐字子串比对验证 anchor 确实存在于稿件中；缺 anchor、anchor 不是 exact substring，或 anchor 指向未申报 preserved 的 step，都在 review 之前失败。位置验证只确认承载点存在，不判断推理是否写足，深度仍由 reviewer 按 rubric 校准。
 
 ### 3.1 EditorialReviewPacket
 
-初次独立审稿使用 `matthew-exposition-editorial-review-packet.v1`，只包含当前稿件及 SHA、精简后的母本承重步骤、author section ledger、writing quality profile 和明确 scope。它不得包含 knowledge records、topic nodes、source fragments、evidence steps、CompositionPlan 或 base manuscript 全文。canonical JSON 硬上限为 40 KiB；超出时在调用模型前失败，不得静默截断。
+初次独立审稿使用 `matthew-exposition-editorial-review-packet.v1`，只包含当前稿件及 SHA、精简后的母本承重步骤、author section ledger（含已验证的 `preserved_step_anchors`，供 reviewer 直接判断该处是推理还是摘要）、writing quality profile 和明确 scope。它不得包含 knowledge records、topic nodes、source fragments、evidence steps、CompositionPlan 或 base manuscript 全文。canonical JSON 硬上限为 40 KiB；超出时在调用模型前失败，不得静默截断。
 
 ### 3.2 FinalDeltaReviewPacket
 

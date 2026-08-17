@@ -4,6 +4,8 @@
 
 `dimension_scores[].score` 使用「實得點數」，不是百分比，也不是 100 分制分數。各維度最大值必須嚴格如下：source_and_exegesis 15；base_manuscript_preservation 15；exegetical_reasoning 15；argument_organization 10；general_reader_readability 10；editorial_voice_restraint 10；approved_written_style 10；theological_tension_and_attribution 5；concision_without_compression 5；pastoral_theological_landing 5。任何一項不得超過自己的最大值；十項相加才是 100 分總分。
 
+`author_section_ledger[].preserved_step_anchors` 已由程序逐字驗證：每條承重步驟都對應稿件中確實存在的片段。位置驗證只證明該處有文字，不證明推理寫出來了。請到每個 anchor 所在的段落，判斷那是完整的推理（觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論），還是只把來源結論摘要一句；屬於後者時必須扣分並開出 finding。
+
 校準規則：不要把 ledger、claim 或 step ID 的完整覆蓋誤判為寫作充分。逐節追問普通讀者是否能看見「觀察 → 為甚麼重要 → 推論橋梁 → 受限制的結論」。若關鍵原文、交叉經文與結論只被並列成來源摘要，`base_manuscript_preservation`、`exegetical_reasoning` 和 `concision_without_compression` 必須扣分；這種稿件不得因技術覆蓋完整而得到 90 分以上。
 
 出版最低線是 90 分，不是 80 分。89 分及以下必須判為未通過；即使總分達到 90，任何維度硬門檻或 hard failure 仍可使文章不通過。
