@@ -1512,3 +1512,56 @@ def test_program_audit_manifest_uses_author_ledger_headings():
     assert draft["audit_config"]["required_scripture_quotations"][0][
         "markdown_heading"
     ] == "經文與問題"
+
+
+def _profile():
+    return load_json(PROFILE_PATH)
+
+
+def _review_scoring(pastoral_score):
+    review = passing_review()
+    for item in review["dimension_scores"]:
+        if item["dimension_id"] == "pastoral_theological_landing":
+            item["score"] = pastoral_score
+    return review
+
+
+def test_a_contract_that_forbids_an_application_chain_puts_the_pastoral_dimension_out_of_scope():
+    from backend.pipeline.matthew_exposition_authoring import out_of_scope_dimensions
+
+    contract_value = contract()
+    contract_value["sections"][0]["ineligible_operations"].append(
+        "invent_life_application_chain"
+    )
+    scoped_out = out_of_scope_dimensions(contract_value)
+    assert "pastoral_theological_landing" in scoped_out
+    assert "invent_life_application_chain" in scoped_out["pastoral_theological_landing"]
+
+
+def test_out_of_scope_dimension_is_awarded_in_full_not_penalised():
+    """生活應用 is optional; omitting one the material cannot support is the
+    correct outcome and must not cost the article points, or the rubric pushes
+    the author to invent the closing paragraph this pipeline exists to prevent.
+    """
+    review = _review_scoring(1)
+    penalised = evaluate_editorial_review(review, _profile())
+    awarded = evaluate_editorial_review(
+        review, _profile(), {"pastoral_theological_landing": "contract forbids it"}
+    )
+    assert awarded["total_score"] - penalised["total_score"] == 4  # 1 -> full weight 5
+    assert awarded["not_applicable_dimensions"] == {
+        "pastoral_theological_landing": "contract forbids it"
+    }
+
+
+def test_out_of_scope_dimension_cannot_fail_its_minimum():
+    review = _review_scoring(0)
+    outcome = evaluate_editorial_review(
+        review, _profile(), {"pastoral_theological_landing": "contract forbids it"}
+    )
+    assert "pastoral_theological_landing" not in outcome["hard_gate_failures"]
+
+
+def test_scoring_rejects_an_unknown_not_applicable_dimension():
+    with pytest.raises(AuthoringContractError, match="not-applicable"):
+        evaluate_editorial_review(passing_review(), _profile(), {"no_such_dimension": "x"})

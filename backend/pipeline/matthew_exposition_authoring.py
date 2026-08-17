@@ -853,8 +853,37 @@ def deterministic_writing_warnings(
     return findings
 
 
+def out_of_scope_dimensions(contract: dict[str, Any]) -> dict[str, str]:
+    """Return dimensions the contract puts out of this article's reach.
+
+    The publication profile lists 生活應用 as optional, and the platform's rule
+    is that a passage without supporting material must not have one invented.
+    But the rubric scores `pastoral_theological_landing` unconditionally, so an
+    article that correctly omits an unsupported application is marked down for
+    obeying the profile -- pressure to invent exactly the kind of unsourced
+    closing paragraph this pipeline exists to prevent.
+
+    Scope is read from the contract, never from the author's or the reviewer's
+    opinion: an author cannot earn the points by claiming its material was
+    thin. A section that forbids inventing an application chain, and has no
+    registered chain to draw on, cannot land pastorally within its own bounds.
+    """
+
+    out_of_scope: dict[str, str] = {}
+    for section in contract.get("sections") or []:
+        ineligible = set(section.get("ineligible_operations") or [])
+        if "invent_life_application_chain" in ineligible:
+            out_of_scope["pastoral_theological_landing"] = (
+                f"contract section {section.get('section_id')} forbids "
+                "invent_life_application_chain and registers no application chain"
+            )
+    return out_of_scope
+
+
 def evaluate_editorial_review(
-    review: dict[str, Any], quality_profile: dict[str, Any]
+    review: dict[str, Any],
+    quality_profile: dict[str, Any],
+    not_applicable: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     configured = {item["id"]: item for item in quality_profile["dimensions"]}
     received = {item.get("dimension_id"): item for item in review.get("dimension_scores", [])}
@@ -863,12 +892,24 @@ def evaluate_editorial_review(
         extra = sorted(set(received) - set(configured))
         raise AuthoringContractError(f"review dimensions mismatch; missing={missing}, extra={extra}")
 
+    not_applicable = not_applicable or {}
+    unknown_na = set(not_applicable) - set(configured)
+    if unknown_na:
+        raise AuthoringContractError(
+            f"unknown not-applicable dimensions: {sorted(unknown_na)}"
+        )
+
     total = 0
     hard_gate_failures: list[str] = []
     for dimension_id, config in configured.items():
         score = received[dimension_id].get("score")
         if not isinstance(score, int) or not 0 <= score <= config["weight"]:
             raise AuthoringContractError(f"invalid score for {dimension_id}: {score}")
+        if dimension_id in not_applicable:
+            # Awarded, not skipped: omitting an unsupported section is the
+            # correct outcome, and must not cost the article points.
+            total += config["weight"]
+            continue
         total += score
         if score < config.get("minimum", 0):
             hard_gate_failures.append(dimension_id)
@@ -887,6 +928,7 @@ def evaluate_editorial_review(
         "passed": passed,
         "hard_gate_failures": hard_gate_failures,
         "declared_hard_failures": declared_hard_failures,
+        "not_applicable_dimensions": dict(not_applicable),
     }
 
 
@@ -923,7 +965,9 @@ def validate_editorial_review(
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
         if anchor not in manuscript:
             raise AuthoringContractError(f"editorial finding anchor not found: {anchor}")
-    outcome = evaluate_editorial_review(review, quality_profile)
+    outcome = evaluate_editorial_review(
+        review, quality_profile, out_of_scope_dimensions(contract)
+    )
     if outcome["passed"]:
         required_steps = {
             step["step_id"]
@@ -1292,6 +1336,7 @@ def validate_final_delta_review(
 
 def merge_final_delta_review(
     *,
+    contract: dict[str, Any] | None = None,
     baseline_review: dict[str, Any],
     baseline_outcome: dict[str, Any],
     delta_review: dict[str, Any],
@@ -1333,7 +1378,9 @@ def merge_final_delta_review(
             "manuscript_sha256": packet["manuscript_sha256"],
         },
     }
-    outcome = evaluate_editorial_review(merged, quality_profile)
+    outcome = evaluate_editorial_review(
+        merged, quality_profile, out_of_scope_dimensions(contract or {})
+    )
     outcome["manuscript_sha256"] = packet["manuscript_sha256"]
     return merged, outcome
 

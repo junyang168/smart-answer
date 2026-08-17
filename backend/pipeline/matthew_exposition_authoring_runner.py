@@ -936,6 +936,7 @@ def run_authoring(
     )
     _canonicalize_findings(delta_review, delta_packet["manuscript_sha256"])
     merged_review, final_outcome = merge_final_delta_review(
+        contract=packet["base_contract"],
         baseline_review=review,
         baseline_outcome=review_outcome,
         delta_review=delta_review,
