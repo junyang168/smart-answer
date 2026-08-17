@@ -43,7 +43,7 @@ __TEST_PARAGRAPH__
 
 ## 生活應用
 
-<!-- provenance: {"attribution":"editor"} -->
+<!-- provenance: {"attribution":"editor","application_chain_id":"AC-1"} -->
 > **編輯說明：** 正文。
 
 ## 附錄
@@ -125,6 +125,16 @@ __TEST_PARAGRAPH__
                                     if editorial_boundary
                                     else {}
                                 ),
+                            }
+                        ],
+                        "application_chains": [
+                            {
+                                "chain_id": "AC-1",
+                                "scripture_context": "太16:1 的處境。",
+                                "professor_interpretation_claim_ids": ["CL-1"],
+                                "enduring_principle": "不變原則。",
+                                "present_context": "今日處境。",
+                                "application_and_limits": "應用與限制。",
                             }
                         ],
                         "material_dispositions": material_dispositions or [],
@@ -288,13 +298,117 @@ def test_audit_rejects_unregistered_optional_application_section(tmp_path: Path)
     draft_path = tmp_path / "draft.md"
     draft_path.write_text(
         draft_path.read_text(encoding="utf-8").replace(
-            "## 生活應用\n\n<!-- provenance: {\"attribution\":\"editor\"} -->\n> **編輯說明：** 正文。\n\n",
+            "## 生活應用\n\n<!-- provenance: {\"attribution\":\"editor\",\"application_chain_id\":\"AC-1\"} -->"
+            "\n> **編輯說明：** 正文。\n\n",
             "",
         ),
         encoding="utf-8",
     )
     passed = audit_editorial_draft(manifest, "DRAFT-1")
     assert passed["status"] == "pass"
+
+
+def test_audit_rejects_application_content_hidden_under_another_section(
+    tmp_path: Path,
+) -> None:
+    """Application content is caught by what it declares, not by its heading."""
+    manifest = _fixture(tmp_path)
+    draft_path = tmp_path / "draft.md"
+    draft_path.write_text(
+        draft_path.read_text(encoding="utf-8").replace(
+            "## 神學意義\n\n<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n正文。\n",
+            "## 神學意義\n\n"
+            "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n正文。\n\n"
+            "<!-- provenance: {\"attribution\":\"editorial_synthesis\",\"claim_ids\":[\"CL-1\"],"
+            "\"synthesis_note\":\"牧養收束。\"} -->\n"
+            "讀者今天也應當省察自己的期待，並在困惑中繼續信靠。\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "fail"
+    undeclared = [
+        item
+        for item in result["findings"]
+        if item["code"] == "undeclared_application_content"
+    ]
+    assert undeclared
+    assert "神學意義" in undeclared[0]["detail"]
+
+
+def test_audit_accepts_registered_application_chain_under_application_section(
+    tmp_path: Path,
+) -> None:
+    """A complete, source-backed life application is legitimate content."""
+    result = audit_editorial_draft(_fixture(tmp_path), "DRAFT-1")
+
+    assert result["status"] == "pass"
+    assert result["summary"]["application_chain_total"] == 1
+    assert result["summary"]["application_paragraph_total"] == 1
+    assert result["application_chains"][0]["chain_id"] == "AC-1"
+    assert result["application_chains"][0]["paragraph_count"] == 1
+
+
+def test_audit_rejects_application_paragraph_pointing_at_unknown_chain(
+    tmp_path: Path,
+) -> None:
+    manifest = _fixture(tmp_path)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_data["drafts"][0]["audit_config"]["application_chains"][0]["chain_id"] = "AC-2"
+    _write_json(manifest, manifest_data)
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "fail"
+    assert any(
+        item["code"] == "application_chain_not_registered"
+        for item in result["findings"]
+    )
+
+
+def test_audit_rejects_incomplete_chain_behind_declared_application(
+    tmp_path: Path,
+) -> None:
+    manifest = _fixture(tmp_path)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    chain = manifest_data["drafts"][0]["audit_config"]["application_chains"][0]
+    chain["professor_interpretation_claim_ids"] = ["CL-UNKNOWN"]
+    chain["application_and_limits"] = ""
+    _write_json(manifest, manifest_data)
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "fail"
+    codes = {item["code"] for item in result["findings"]}
+    assert "incomplete_application_chain" in codes
+    assert "application_chain_missing_claim" in codes
+
+
+def test_audit_accepts_editorial_synthesis_declared_as_non_application(
+    tmp_path: Path,
+) -> None:
+    """Ordinary exegetical synthesis is not treated as application content."""
+    manifest = _fixture(tmp_path)
+    draft_path = tmp_path / "draft.md"
+    draft_path.write_text(
+        draft_path.read_text(encoding="utf-8").replace(
+            "## 神學意義\n",
+            "## 神學意義\n\n"
+            "<!-- provenance: {\"attribution\":\"editorial_synthesis\",\"claim_ids\":[\"CL-1\"],"
+            "\"synthesis_note\":\"綜合本段論證。\",\"contains_application\":false} -->\n"
+            "本段的兩項論證共同指向同一個結論。\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "pass"
+    assert not any(
+        item["code"] == "undeclared_application_content" for item in result["findings"]
+    )
 
 
 def test_audit_preserves_source_only_material_for_human_verification(tmp_path: Path) -> None:

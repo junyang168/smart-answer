@@ -185,6 +185,7 @@
 - `original_language_policy`: 承重的原文觀察進正文並以中文說明其論證作用；詞形、拼寫與時態術語進註釋；同一觀察正文只出現一次
 - `tone`: 平和、清楚、有論證，不保留課堂誇張口吻
 - `application_gate`: 必須保存「經文處境 → 解釋 → 原則 → 目標處境 → 應用」
+- `application_policy`: 應用鏈由內容觸發，不由標題觸發；提出今日處境與行動建議的段落必須宣告 `application_chain_id`，`editorial_synthesis` 段落則須宣告鏈或 `"contains_application": false`
 - `topic_policy`: 深入的跨經文論述轉介專題，不在章內重複展開
 - `authorship`: 編輯部編纂；王教授為思想與講授材料來源
 - `coverage_policy`: 1–28 章是導航骨架；只讓達到成篇門檻的段落進入正文

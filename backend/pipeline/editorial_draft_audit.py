@@ -31,6 +31,19 @@ VALID_ANCHOR_STATES = {
     "valid",
     "current",
 }
+# The five links of an application chain.  These are the published contract
+# for life application and are not redefined by any manuscript.
+REQUIRED_APPLICATION_CHAIN_FIELDS = {
+    "scripture_context": "經文處境",
+    "professor_interpretation_claim_ids": "教授解釋",
+    "enduring_principle": "不變原則",
+    "present_context": "今日處境",
+    "application_and_limits": "應用與限制",
+}
+# Editorial synthesis is prose that no single professor claim carries on its
+# own; it is where an unregistered application can hide.  Such a paragraph must
+# therefore say whether it makes a present-day application.
+DEFAULT_APPLICATION_DECLARATION_ATTRIBUTION = "editorial_synthesis"
 VALID_MATERIAL_DISPOSITIONS = {
     "body",
     "sidebar",
@@ -257,6 +270,10 @@ def _audit_paragraph_provenance(
                 "attribution": None,
                 "claim_ids": [],
                 "scripture_refs": [],
+                # Application content is identified from the paragraph's own
+                # declaration, never guessed from the wording of the prose.
+                "application_chain_id": None,
+                "declares_application": None,
                 "valid": True,
             }
             if not text:
@@ -298,6 +315,14 @@ def _audit_paragraph_provenance(
 
             attribution = str(provenance.get("attribution") or "").strip()
             result["attribution"] = attribution
+            result["application_chain_id"] = (
+                str(provenance.get("application_chain_id") or "").strip() or None
+            )
+            declared_application = provenance.get("contains_application")
+            if isinstance(declared_application, bool):
+                result["declares_application"] = declared_application
+            elif result["application_chain_id"]:
+                result["declares_application"] = True
             if attribution not in valid_attributions:
                 findings.append(
                     _finding(
@@ -372,6 +397,191 @@ def _audit_paragraph_provenance(
                 result["valid"] = False
             results.append(result)
     return results
+
+
+def _resolve_application_policy(
+    profile: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve the application policy from the profile and the manifest.
+
+    The publication contract belongs to the profile.  A manuscript may name a
+    different heading for its application section, or tighten the set of
+    attributions that must declare their application status, but it cannot
+    switch the requirement off by omitting its own ``application_policy``.
+    """
+    profile_policy = profile.get("application_policy") or {}
+    manifest_policy = config.get("application_policy") or {}
+    section = str(
+        manifest_policy.get("section") or profile_policy.get("section") or "生活應用"
+    ).strip()
+    declaration_attributions = {
+        str(value).strip()
+        for value in (
+            list(profile_policy.get("declaration_required_attributions") or [])
+            + list(manifest_policy.get("declaration_required_attributions") or [])
+        )
+        if str(value).strip()
+    } or {DEFAULT_APPLICATION_DECLARATION_ATTRIBUTION}
+    return {
+        "section": section,
+        "requires_registered_chains": bool(
+            profile_policy.get("requires_registered_chains")
+        )
+        or bool(manifest_policy.get("requires_registered_chains")),
+        "declaration_required_attributions": declaration_attributions,
+    }
+
+
+def _audit_application_chains(
+    policy: dict[str, Any],
+    chains: list[dict[str, Any]],
+    claims: dict[str, dict[str, Any]],
+    paragraphs: list[dict[str, Any]],
+    application_section_present: bool,
+    findings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Audit life application as content, not as a heading.
+
+    Life application is legitimate editorial work — the editorial team is the
+    author of the published article.  What it may not be is an unsourced
+    exhortation attached to the end of an exegetical section.  Every paragraph
+    that carries a present-day situation and a course of action must therefore
+    name a registered application chain, wherever in the manuscript it sits.
+    Because code cannot read prose, the trigger is the paragraph's own
+    provenance declaration rather than the wording of the sentences.
+    """
+    chain_results: list[dict[str, Any]] = []
+    chains_by_id: dict[str, dict[str, Any]] = {}
+    for index, chain in enumerate(chains, start=1):
+        chain_id = str(
+            chain.get("chain_id") or chain.get("application_chain_id") or ""
+        ).strip()
+        missing_fields = [
+            label
+            for field, label in REQUIRED_APPLICATION_CHAIN_FIELDS.items()
+            if not chain.get(field)
+        ]
+        if missing_fields:
+            findings.append(
+                _finding(
+                    "incomplete_application_chain",
+                    "error",
+                    "生活應用來源鏈不完整",
+                    f"第 {index} 項缺少：{'、'.join(missing_fields)}。",
+                )
+            )
+        claim_ids = [
+            str(value)
+            for value in chain.get("professor_interpretation_claim_ids", [])
+            if value
+        ]
+        unknown_claim_ids = [claim_id for claim_id in claim_ids if claim_id not in claims]
+        for claim_id in unknown_claim_ids:
+            findings.append(
+                _finding(
+                    "application_chain_missing_claim",
+                    "error",
+                    "生活應用引用的教授主張不存在",
+                    f"找不到 {claim_id}。",
+                    claim_id=claim_id,
+                )
+            )
+        if not chain_id:
+            findings.append(
+                _finding(
+                    "application_chain_without_id",
+                    "warning",
+                    "生活應用推論鏈沒有識別碼",
+                    f"第 {index} 項沒有 chain_id，正文段落無法宣告它。",
+                )
+            )
+        row = {
+            "chain_id": chain_id or None,
+            "index": index,
+            "professor_interpretation_claim_ids": claim_ids,
+            "complete": not missing_fields,
+            "grounded": bool(claim_ids) and not unknown_claim_ids,
+            "paragraph_count": 0,
+        }
+        chain_results.append(row)
+        if chain_id:
+            if chain_id in chains_by_id:
+                findings.append(
+                    _finding(
+                        "duplicate_application_chain_id",
+                        "error",
+                        "生活應用推論鏈識別碼重複",
+                        f"{chain_id} 登記了多次。",
+                    )
+                )
+            else:
+                chains_by_id[chain_id] = row
+
+    if not policy.get("requires_registered_chains"):
+        return chain_results
+
+    if application_section_present and not chains:
+        findings.append(
+            _finding(
+                "unregistered_application_section",
+                "error",
+                "生活應用未登記來源鏈",
+                "生活應用不是必備欄目；若保留，必須逐項登記「經文處境、教授解釋、不變原則、今日處境、應用與限制」。",
+            )
+        )
+
+    declaration_attributions = policy.get("declaration_required_attributions") or set()
+    for paragraph in paragraphs:
+        section = str(paragraph.get("section") or "")
+        excerpt = str(paragraph.get("excerpt") or "")[:80]
+        attribution = paragraph.get("attribution")
+        chain_id = paragraph.get("application_chain_id")
+        declares_application = paragraph.get("declares_application")
+        if chain_id:
+            chain = chains_by_id.get(chain_id)
+            if chain is None:
+                findings.append(
+                    _finding(
+                        "application_chain_not_registered",
+                        "error",
+                        "應用段落引用了未登記的推論鏈",
+                        f"「{section}」中的段落宣告 {chain_id}，但 manifest 的 application_chains 沒有這一條：{excerpt}",
+                    )
+                )
+                paragraph["valid"] = False
+                continue
+            chain["paragraph_count"] += 1
+            # An incomplete or ungrounded chain has already been reported once
+            # against the chain itself; the paragraph is simply not covered.
+            if not chain["complete"] or not chain["grounded"]:
+                paragraph["valid"] = False
+            continue
+        if declares_application is True:
+            findings.append(
+                _finding(
+                    "unregistered_application_paragraph",
+                    "error",
+                    "應用內容沒有登記推論鏈",
+                    f"「{section}」中的段落聲明含有今日應用，必須宣告 application_chain_id：{excerpt}",
+                )
+            )
+            paragraph["valid"] = False
+            continue
+        if declares_application is False:
+            continue
+        if section == policy.get("section") or attribution in declaration_attributions:
+            findings.append(
+                _finding(
+                    "undeclared_application_content",
+                    "error",
+                    "段落未聲明是否為生活應用",
+                    f"「{section}」中的 {attribution or '未歸屬'} 段落必須在 provenance 宣告 application_chain_id，"
+                    f"或以 \"contains_application\": false 聲明不含今日處境與行動建議：{excerpt}",
+                )
+            )
+            paragraph["valid"] = False
+    return chain_results
 
 
 def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
@@ -681,59 +891,20 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
                 )
             )
 
-    # Life application is optional.  If editors choose to include it, every
-    # application must be registered as a complete source-backed chain rather
-    # than inferred from fluent prose alone.
-    application_policy = config.get("application_policy") or {}
-    application_section = str(application_policy.get("section") or "生活應用").strip()
-    application_heading = heading_by_text.get(application_section)
-    application_chains = config.get("application_chains") or []
-    if (
-        application_heading
-        and application_policy.get("requires_registered_chains")
-        and not application_chains
-    ):
-        findings.append(
-            _finding(
-                "unregistered_application_section",
-                "error",
-                "生活應用未登記來源鏈",
-                "生活應用不是必備欄目；若保留，必須逐項登記「經文處境、教授解釋、不變原則、今日處境、應用與限制」。",
-            )
-        )
-    required_chain_fields = {
-        "scripture_context": "經文處境",
-        "professor_interpretation_claim_ids": "教授解釋",
-        "enduring_principle": "不變原則",
-        "present_context": "今日處境",
-        "application_and_limits": "應用與限制",
-    }
-    for index, chain in enumerate(application_chains, start=1):
-        missing_fields = [
-            label
-            for field, label in required_chain_fields.items()
-            if not chain.get(field)
-        ]
-        if missing_fields:
-            findings.append(
-                _finding(
-                    "incomplete_application_chain",
-                    "error",
-                    "生活應用來源鏈不完整",
-                    f"第 {index} 項缺少：{'、'.join(missing_fields)}。",
-                )
-            )
-        for claim_id in chain.get("professor_interpretation_claim_ids", []):
-            if str(claim_id) not in claims:
-                findings.append(
-                    _finding(
-                        "application_chain_missing_claim",
-                        "error",
-                        "生活應用引用的教授主張不存在",
-                        f"找不到 {claim_id}。",
-                        claim_id=str(claim_id),
-                    )
-                )
+    # Life application is legitimate editorial content, and it is optional.
+    # What it may not be is unregistered: every application must be a complete
+    # source-backed chain rather than fluent prose appended to an exegetical
+    # section.  The check is therefore driven by what each paragraph declares
+    # about itself, not by whether a heading named 生活應用 exists.
+    application_policy = _resolve_application_policy(profile, config)
+    application_chains = _audit_application_chains(
+        application_policy,
+        config.get("application_chains") or [],
+        claims,
+        paragraph_provenance,
+        bool(heading_by_text.get(application_policy["section"])),
+        findings,
+    )
 
     plan_ids = set(decisions)
     mapped_ids = set(mapping_by_id)
@@ -1025,9 +1196,14 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
                 item["attribution"] == "editorial_synthesis"
                 for item in paragraph_provenance
             ),
+            "application_chain_total": len(application_chains),
+            "application_paragraph_total": sum(
+                bool(item.get("application_chain_id")) for item in paragraph_provenance
+            ),
         },
         "decisions": decision_results,
         "paragraph_provenance": paragraph_provenance,
+        "application_chains": application_chains,
         "material_dispositions": disposition_results,
         "findings": findings,
     }

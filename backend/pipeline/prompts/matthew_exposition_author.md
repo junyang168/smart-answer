@@ -13,4 +13,6 @@
 9. authoring ledger 只登記承擔 CompositionPlan 實質內容的正文小節。導讀、經文引文或過渡段若沒有獨立承擔 decision，不要另列 ledger item。每個 decision ID 必須在整份 ledger 中恰好出現一次；多個 decision 可以由同一個正文小節承擔，但不得在導讀與正文重複登記。
 10. 經文引文的 provenance 使用 `{"attribution":"scripture","scripture_refs":["Matt.16.21-Matt.16.23"]}`，不得以 claim IDs 取代 scripture refs。沒有讀者可見「編輯導讀／編輯說明」標籤的綜合段落不得標成 `editor`；若它依多項已知主張作跨來源或跨段綜合，使用 `editorial_synthesis`，並提供 `claim_ids` 與隱藏的 `synthesis_note`。
 
+11. 生活應用是正當的內容，但必須登記，且與寫在哪個標題底下無關。任何提出今日處境與行動建議的段落，provenance 必須宣告 `"application_chain_id"`，指向 manifest `application_chains` 中一條完整（經文處境、教授解釋 claim IDs、不變原則、今日處境、應用與限制）且教授解釋端可解析的鏈。`editorial_synthesis` 段落若不提出今日處境與行動建議，必須寫明 `"contains_application": false`；沒有可登記的完整推論鏈時，正確處理是不寫這段應用，而不是把它藏進「神學意義」的結尾。
+
 若完成文章需要改變 CompositionPlan 的 action、claim 集合、coverage、主要順序或張力處置，返回 `plan_change_required` 與具體請求，不要先寫一篇越權的稿。否則返回 `drafted`、完整 Markdown 和逐節 authoring ledger。
