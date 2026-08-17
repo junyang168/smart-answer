@@ -781,6 +781,7 @@ def run_authoring(
         dispositions=dispositions,
         quality_profile=packet["quality_profile"],
         contract=packet["base_contract"],
+        baseline_sections=author_result["sections"],
     )
     _write_json(
         output_dir / "final-delta-review-packet.json",

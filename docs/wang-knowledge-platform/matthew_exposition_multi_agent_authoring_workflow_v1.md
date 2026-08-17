@@ -38,9 +38,9 @@
 
 ### 3.2 FinalDeltaReviewPacket
 
-修订后的最终重审使用 `matthew-exposition-final-delta-review-packet.v1`，只包含修改前后段落、前次已验证 review 与 outcome、accepted findings、finding dispositions、受影响维度及其必须复查的 hard-failure ID，以及前稿／现稿 SHA。不得发送完整修订稿或完整 `AuthoringPacket`。
+修订后的最终重审使用 `matthew-exposition-final-delta-review-packet.v1`，只包含修改前后段落、变动段落所属的 `changed_section_ids`、前次已验证 review 与 outcome、accepted findings、finding dispositions、受影响维度及其必须复查的 hard-failure ID，以及前稿／现稿 SHA。不得发送完整修订稿或完整 `AuthoringPacket`。
 
-程序按 accepted finding 的维度及显式耦合表选择受影响维度。Reviewer 只能重评这些维度；其他维度只能从已完成 schema、逐字 anchor、rubric 与 manuscript SHA 校验的 baseline review 继承。模型不计算最终总分，也不决定 hard gate；runner 合并分数后重新计算总分、维度最低线和 hard failures。
+程序按 accepted finding 的维度及显式耦合表选择受影响维度，并与**实际变动段落所属 section** 的维度取并集：Revision Agent 输出的是完整重写稿，段落可能在没有任何 finding 指向的 section 里改动。程序用 author ledger 的 `output_anchor` 把每个 `changed_paragraphs` 定位到 section（记录在 packet 的 `changed_section_ids`），该 section 的散文级维度（`general_reader_readability`、`approved_written_style`、`concision_without_compression`）与 baseline review 曾在该 section 定位的维度都必须重评，不得继承。段落无法定位到任何 section 时保守地把全部 section 视为已变动。Reviewer 只能重评这些维度；其他维度只能从已完成 schema、逐字 anchor、rubric 与 manuscript SHA 校验的 baseline review 继承。模型不计算最终总分，也不决定 hard gate；runner 合并分数后重新计算总分、维度最低线和 hard failures。
 
 ### 3.3 每轮一次 Reviewer 调用
 

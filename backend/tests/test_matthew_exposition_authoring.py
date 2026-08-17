@@ -407,6 +407,225 @@ def test_delta_dimension_selection_is_explicit_and_bounded():
     ]
 
 
+TWO_SECTION_MANUSCRIPT = "\n\n".join(
+    [
+        "## 甲節：磐石的身份",
+        "希臘文用了兩個相關卻不同的詞：彼得是陽性名詞，磐石是陰性名詞。",
+        "## 乙節：教會的根基",
+        "以弗所書 2:20 把使徒和先知放在同一個定冠詞之下，共同指向房角石基督。",
+        "",
+    ]
+)
+
+
+def two_section_contract():
+    return {
+        "sections": [
+            {
+                "section_id": "sec-a",
+                "decision_ids": ["CD-A"],
+                "required_argument_steps": [
+                    {"step_id": "S-A", "statement": "Petros 與 petra 的詞形不同。"}
+                ],
+            },
+            {
+                "section_id": "sec-b",
+                "decision_ids": ["CD-B"],
+                "required_argument_steps": [
+                    {"step_id": "S-B", "statement": "使徒和先知共同指向基督。"}
+                ],
+            },
+        ]
+    }
+
+
+def two_section_ledger():
+    return [
+        {"section_id": "sec-a", "output_anchor": "## 甲節：磐石的身份"},
+        {"section_id": "sec-b", "output_anchor": "## 乙節：教會的根基"},
+    ]
+
+
+def two_section_baseline():
+    """A verified passing baseline whose findings attribute dimensions to sections."""
+
+    profile = load_json(PROFILE_PATH)
+    review = {
+        "scope_confirmation": "writing_quality_and_base_preservation",
+        "summary": "Both sections preserve the base argument.",
+        "dimension_scores": [
+            {
+                "dimension_id": dimension["id"],
+                "score": dimension["weight"],
+                "evidence": "fixture",
+            }
+            for dimension in profile["dimensions"]
+        ],
+        "hard_failures": [],
+        "section_reviews": [
+            {
+                "section_id": "sec-a",
+                "base_step_ids_preserved": ["S-A"],
+                "assessment": "Readable prose.",
+            },
+            {
+                "section_id": "sec-b",
+                "base_step_ids_preserved": ["S-B"],
+                "assessment": "Readable prose.",
+            },
+        ],
+        "findings": [
+            {
+                "finding_id": "ERF-sec-a-001",
+                "dimension_id": "theological_tension_and_attribution",
+                "section_id": "sec-a",
+                "severity": "low",
+                "blocking": False,
+                "manuscript_anchor": "彼得是陽性名詞",
+                "explanation": "The tension could be attributed more precisely.",
+                "recommended_action": "Name the second source once.",
+            },
+            {
+                "finding_id": "ERF-sec-b-001",
+                "dimension_id": "base_manuscript_preservation",
+                "section_id": "sec-b",
+                "severity": "low",
+                "blocking": False,
+                "manuscript_anchor": "同一個定冠詞之下",
+                "explanation": "The inferential bridge is thin.",
+                "recommended_action": "Spell the bridge out.",
+            },
+        ],
+    }
+    outcome = validate_editorial_review(
+        review,
+        contract=two_section_contract(),
+        manuscript=TWO_SECTION_MANUSCRIPT,
+        quality_profile=profile,
+    )
+    outcome["manuscript_sha256"] = sha256_text(TWO_SECTION_MANUSCRIPT)
+    return review, outcome
+
+
+def test_delta_scope_includes_dimensions_of_changed_sections():
+    baseline_review, baseline_outcome = two_section_baseline()
+    # The accepted finding only points at 甲節; the revision also rewrote 乙節.
+    revised = TWO_SECTION_MANUSCRIPT.replace(
+        "以弗所書 2:20 把使徒和先知放在同一個定冠詞之下，共同指向房角石基督。",
+        "以弗所書 2:20 把使徒和先知放在同一個定冠詞之下，這見證所指向的中心正是基督。",
+        1,
+    )
+    accepted = [
+        {
+            "finding_id": "ERF-sec-a-001",
+            "dimension_id": "theological_tension_and_attribution",
+            "section_id": "sec-a",
+            "severity": "low",
+            "blocking": False,
+            "manuscript_anchor": "彼得是陽性名詞",
+            "explanation": "The tension could be attributed more precisely.",
+            "recommended_action": "Name the second source once.",
+        }
+    ]
+    packet = build_final_delta_review_packet(
+        baseline_review=baseline_review,
+        baseline_outcome=baseline_outcome,
+        baseline_manuscript=TWO_SECTION_MANUSCRIPT,
+        revised_manuscript=revised,
+        accepted_findings=accepted,
+        dispositions=[
+            {"finding_id": "ERF-sec-a-001", "status": "resolved", "note": "named"}
+        ],
+        quality_profile=load_json(PROFILE_PATH),
+        contract=two_section_contract(),
+        baseline_sections=two_section_ledger(),
+    )
+
+    assert packet["changed_section_ids"] == ["sec-b"]
+    affected = {item["id"] for item in packet["affected_dimensions"]}
+    # From the accepted finding.
+    assert "theological_tension_and_attribution" in affected
+    # 乙節's own dimension, which no accepted finding mentioned.
+    assert "base_manuscript_preservation" in affected
+    # Prose written anew can never inherit its readability score.
+    assert "general_reader_readability" in affected
+    assert "load_bearing_base_argument_removed_or_reordered" in packet[
+        "affected_hard_failures"
+    ]
+
+
+def test_unchanged_section_dimensions_are_still_inherited():
+    baseline_review, baseline_outcome = two_section_baseline()
+    profile = load_json(PROFILE_PATH)
+    revised = TWO_SECTION_MANUSCRIPT.replace(
+        "以弗所書 2:20 把使徒和先知放在同一個定冠詞之下，共同指向房角石基督。",
+        "以弗所書 2:20 把使徒和先知放在同一個定冠詞之下，這見證所指向的中心正是基督。",
+        1,
+    )
+    accepted = [
+        {
+            "finding_id": "ERF-sec-b-001",
+            "dimension_id": "base_manuscript_preservation",
+            "section_id": "sec-b",
+            "severity": "low",
+            "blocking": False,
+            "manuscript_anchor": "同一個定冠詞之下",
+            "explanation": "The inferential bridge is thin.",
+            "recommended_action": "Spell the bridge out.",
+        }
+    ]
+    packet = build_final_delta_review_packet(
+        baseline_review=baseline_review,
+        baseline_outcome=baseline_outcome,
+        baseline_manuscript=TWO_SECTION_MANUSCRIPT,
+        revised_manuscript=revised,
+        accepted_findings=accepted,
+        dispositions=[
+            {"finding_id": "ERF-sec-b-001", "status": "resolved", "note": "expanded"}
+        ],
+        quality_profile=profile,
+        contract=two_section_contract(),
+        baseline_sections=two_section_ledger(),
+    )
+    affected = [item["id"] for item in packet["affected_dimensions"]]
+    # 甲節 was not touched, so its attributed dimension is not rescored.
+    assert "theological_tension_and_attribution" not in affected
+
+    weights = {item["id"]: item["weight"] for item in profile["dimensions"]}
+    delta = {
+        "scope_confirmation": "final_delta_writing_quality",
+        "reviewed_manuscript_sha256": packet["manuscript_sha256"],
+        "summary": "The rewritten section is verified.",
+        "dimension_scores": [
+            {
+                "dimension_id": dimension_id,
+                "score": weights[dimension_id],
+                "evidence": "Verified in the supplied changed paragraph.",
+            }
+            for dimension_id in affected
+        ],
+        "hard_failure_assessments": [
+            {"failure_id": failure_id, "failed": False, "evidence": "Not present."}
+            for failure_id in packet["affected_hard_failures"]
+        ],
+        "findings": [],
+    }
+    validate_final_delta_review(
+        delta, packet=packet, revised_manuscript=revised, quality_profile=profile
+    )
+    merged, outcome = merge_final_delta_review(
+        baseline_review=baseline_review,
+        baseline_outcome=baseline_outcome,
+        delta_review=delta,
+        packet=packet,
+        quality_profile=profile,
+    )
+    assert "theological_tension_and_attribution" in merged["score_provenance"][
+        "inherited_dimensions"
+    ]
+    assert outcome["passed"] is True
+
+
 def test_delta_packet_sha_binding_and_programmatic_score_inheritance():
     baseline_review, baseline_outcome, manuscript = verified_baseline()
     revised = manuscript.replace("進一步的線索", "更清楚的線索", 1)
@@ -435,6 +654,7 @@ def test_delta_packet_sha_binding_and_programmatic_score_inheritance():
         dispositions=dispositions,
         quality_profile=profile,
         contract=contract(),
+        baseline_sections=valid_author_result()["sections"],
     )
     assert "manuscript_markdown" not in packet
     assert packet["manuscript_sha256"] == sha256_text(revised)
@@ -499,6 +719,7 @@ def test_unverified_baseline_cannot_supply_inherited_scores():
             dispositions=[{"finding_id": "F", "status": "resolved", "note": "done"}],
             quality_profile=load_json(PROFILE_PATH),
             contract=contract(),
+            baseline_sections=valid_author_result()["sections"],
         )
 
 

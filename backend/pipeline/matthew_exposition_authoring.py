@@ -51,6 +51,16 @@ DELTA_DIMENSION_IMPACTS: dict[str, set[str]] = {
     "pastoral_theological_landing": {"approved_written_style"},
 }
 
+# A Revision Agent rewrites the complete manuscript, so a paragraph inside a
+# section can change without any accepted finding pointing at that section.
+# These dimensions are judged directly on the prose of whichever sections were
+# actually rewritten, so they can never be inherited across such a change.
+SECTION_PROSE_DIMENSIONS: set[str] = {
+    "general_reader_readability",
+    "approved_written_style",
+    "concision_without_compression",
+}
+
 HARD_FAILURE_DIMENSIONS = {
     "load_bearing_base_argument_removed_or_reordered": "base_manuscript_preservation",
     "editorial_or_ai_inference_attributed_to_professor": "theological_tension_and_attribution",
@@ -1023,12 +1033,21 @@ def build_editorial_review_packet(
     return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
 
 
-def select_delta_dimensions(accepted_findings: list[dict[str, Any]]) -> list[str]:
+def select_delta_dimensions(
+    accepted_findings: list[dict[str, Any]],
+    *,
+    changed_section_dimensions: Iterable[str] = (),
+) -> list[str]:
     direct = {
         finding.get("dimension_id")
         for finding in accepted_findings
         if finding.get("dimension_id") in QUALITY_DIMENSION_IDS
     }
+    direct.update(
+        dimension_id
+        for dimension_id in changed_section_dimensions
+        if dimension_id in QUALITY_DIMENSION_IDS
+    )
     affected = set(direct)
     for dimension_id in direct:
         affected.update(DELTA_DIMENSION_IMPACTS.get(dimension_id, set()))
@@ -1057,6 +1076,98 @@ def changed_markdown_paragraphs(before: str, after: str) -> list[dict[str, Any]]
     return changes
 
 
+def _section_anchor_offsets(
+    manuscript: str, sections: list[dict[str, Any]]
+) -> list[tuple[int, str]]:
+    """Locate each ledger section inside a manuscript by its literal anchor."""
+
+    offsets: list[tuple[int, str]] = []
+    for section in sections:
+        section_id = section.get("section_id")
+        anchor = section.get("output_anchor") or ""
+        index = manuscript.find(anchor) if anchor else -1
+        if not section_id or index < 0:
+            return []
+        offsets.append((index, section_id))
+    offsets.sort()
+    return offsets
+
+
+def changed_section_ids(
+    *,
+    sections: list[dict[str, Any]],
+    baseline_manuscript: str,
+    revised_manuscript: str,
+    changes: list[dict[str, Any]],
+) -> list[str]:
+    """Return the ledger sections whose paragraphs the revision actually touched.
+
+    Attribution is deliberately conservative: a paragraph that cannot be placed
+    inside a located section (an unanchored ledger, a rewritten heading, a
+    paragraph before the first anchor) marks every section as changed, so the
+    delta review widens rather than silently inherits.
+    """
+
+    all_ids = sorted({section["section_id"] for section in sections if section.get("section_id")})
+    before_offsets = _section_anchor_offsets(baseline_manuscript, sections)
+    after_offsets = _section_anchor_offsets(revised_manuscript, sections)
+    if not before_offsets or not after_offsets:
+        return all_ids
+
+    def section_at(index: int, offsets: list[tuple[int, str]]) -> str | None:
+        found: str | None = None
+        for start, section_id in offsets:
+            if start <= index:
+                found = section_id
+            else:
+                break
+        return found
+
+    changed: set[str] = set()
+    cursors = {"before": 0, "after": 0}
+    for change in changes:
+        for key, manuscript, offsets in (
+            ("before", baseline_manuscript, before_offsets),
+            ("after", revised_manuscript, after_offsets),
+        ):
+            for paragraph in change.get(f"{key}_paragraphs", []):
+                index = manuscript.find(paragraph, cursors[key])
+                if index < 0:
+                    return all_ids
+                cursors[key] = index + len(paragraph)
+                section_id = section_at(index, offsets)
+                if section_id is None:
+                    return all_ids
+                changed.add(section_id)
+    return sorted(changed)
+
+
+def changed_section_dimensions(
+    *, section_ids: Iterable[str], baseline_review: dict[str, Any]
+) -> list[str]:
+    """Dimensions that the changed sections carry and therefore cannot inherit.
+
+    A section carries the prose-level dimensions plus every dimension the
+    verified baseline review anchored in that section.
+    """
+
+    attribution: dict[str, set[str]] = {}
+    for finding in baseline_review.get("findings", []):
+        section_id = finding.get("section_id")
+        dimension_id = finding.get("dimension_id")
+        if section_id and dimension_id in QUALITY_DIMENSION_IDS:
+            attribution.setdefault(section_id, set()).add(dimension_id)
+    dimensions: set[str] = set()
+    for section_id in section_ids:
+        dimensions.update(SECTION_PROSE_DIMENSIONS)
+        dimensions.update(attribution.get(section_id, set()))
+    return [
+        dimension_id
+        for dimension_id in QUALITY_DIMENSION_IDS
+        if dimension_id in dimensions
+    ]
+
+
 def build_final_delta_review_packet(
     *,
     baseline_review: dict[str, Any],
@@ -1067,6 +1178,7 @@ def build_final_delta_review_packet(
     dispositions: list[dict[str, Any]],
     quality_profile: dict[str, Any],
     contract: dict[str, Any],
+    baseline_sections: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build a SHA-bound final review packet containing revision deltas only."""
 
@@ -1086,7 +1198,23 @@ def build_final_delta_review_packet(
         raise AuthoringContractError("baseline review outcome is not the locally verified result")
     if baseline_outcome.get("manuscript_sha256") != baseline_sha:
         raise AuthoringContractError("baseline review is not verified against the baseline manuscript SHA")
-    affected = select_delta_dimensions(accepted_findings)
+    changes = changed_markdown_paragraphs(baseline_manuscript, revised_manuscript)
+    if not changes:
+        raise AuthoringContractError("revision did not change any manuscript paragraphs")
+    # The Revision Agent rewrites the whole manuscript, so scope follows the
+    # paragraphs that actually moved as well as the accepted findings.
+    revised_section_ids = changed_section_ids(
+        sections=baseline_sections,
+        baseline_manuscript=baseline_manuscript,
+        revised_manuscript=revised_manuscript,
+        changes=changes,
+    )
+    affected = select_delta_dimensions(
+        accepted_findings,
+        changed_section_dimensions=changed_section_dimensions(
+            section_ids=revised_section_ids, baseline_review=baseline_review
+        ),
+    )
     if not affected:
         raise AuthoringContractError("final delta review requires at least one affected dimension")
     expected_ids = {item.get("finding_id") for item in accepted_findings}
@@ -1104,9 +1232,8 @@ def build_final_delta_review_packet(
         "baseline_manuscript_sha256": baseline_sha,
         "baseline_review_sha256": sha256_text(canonical_json(baseline_review)),
         "manuscript_sha256": sha256_text(revised_manuscript),
-        "changed_paragraphs": changed_markdown_paragraphs(
-            baseline_manuscript, revised_manuscript
-        ),
+        "changed_paragraphs": changes,
+        "changed_section_ids": revised_section_ids,
         "baseline_review": {
             "review": baseline_review,
             "verified_outcome": baseline_outcome,
@@ -1116,8 +1243,6 @@ def build_final_delta_review_packet(
         "affected_dimensions": [dimensions_by_id[item] for item in affected],
         "affected_hard_failures": affected_hard_failures,
     }
-    if not packet["changed_paragraphs"]:
-        raise AuthoringContractError("revision did not change any manuscript paragraphs")
     return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
 
 
