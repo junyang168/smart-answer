@@ -10,6 +10,7 @@ DEPLOY_ROOT="${SMART_ANSWER_DEPLOY_ROOT:-/opt/homebrew/var/www/smart-answer-depl
 RELEASES_DIR="$DEPLOY_ROOT/releases"
 ACTIVE_RELEASE_FILE="$DEPLOY_ROOT/active-release"
 LEGACY_RELEASE="${SMART_ANSWER_LEGACY_ROOT:-/opt/homebrew/var/www/smart-answer}"
+WEB_RUNTIME_DATA_DIR="${SMART_ANSWER_WEB_DATA_DIR:-$LEGACY_RELEASE/web/data}"
 BACKEND_PLIST="${SMART_ANSWER_BACKEND_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fullarticleservice.plist}"
 BACKEND_HEALTH="${SMART_ANSWER_BACKEND_HEALTH:-http://127.0.0.1:8555/healthz}"
 FRONTEND_HEALTH="${SMART_ANSWER_FRONTEND_HEALTH:-http://127.0.0.1:3000/}"
@@ -108,6 +109,32 @@ restart_frontend() {
     pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
 }
 
+link_web_runtime_data() {
+  local release="$1"
+  local link_path="$release/web/data"
+
+  [[ -d "$WEB_RUNTIME_DATA_DIR" ]] || {
+    printf 'deploy: frontend runtime data directory missing: %s\n' "$WEB_RUNTIME_DATA_DIR" >&2
+    return 1
+  }
+  [[ -f "$WEB_RUNTIME_DATA_DIR/config/config.json" ]] || {
+    printf 'deploy: Google login configuration missing: %s/config/config.json\n' "$WEB_RUNTIME_DATA_DIR" >&2
+    return 1
+  }
+
+  if [[ -L "$link_path" ]]; then
+    [[ "$(readlink "$link_path")" == "$WEB_RUNTIME_DATA_DIR" ]] || {
+      printf 'deploy: frontend runtime data link points elsewhere: %s\n' "$link_path" >&2
+      return 1
+    }
+  elif [[ -e "$link_path" ]]; then
+    printf 'deploy: refusing to replace existing frontend data path: %s\n' "$link_path" >&2
+    return 1
+  else
+    ln -s "$WEB_RUNTIME_DATA_DIR" "$link_path"
+  fi
+}
+
 audit_frontend_release() {
   local release="$1"
   local audit_json critical_count
@@ -145,6 +172,7 @@ switch_services() {
     printf 'deploy: frontend build missing in %s\n' "$release" >&2
     return 1
   }
+  link_web_runtime_data "$release" || return 1
 
   set_backend_release "$release" || return 1
   restart_backend || return 1
@@ -201,6 +229,7 @@ printf '   source ref:       %s\n' "$TARGET_REF"
 printf '   source commit:    %s\n' "$TARGET_SHA"
 printf '   release:          %s\n' "$RELEASE_DIR"
 printf '   previous release: %s\n' "${PREVIOUS_RELEASE:-none}"
+printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
 
