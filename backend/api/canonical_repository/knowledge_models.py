@@ -215,12 +215,78 @@ class CompositionDecisionRecord(EvolvingKnowledgeRecord):
     claim_ids: list[str] = Field(default_factory=list)
 
 
+class RequiredArgumentStep(BaseModel):
+    """A load-bearing step of the base manuscript an article must preserve.
+
+    `source_excerpt` is the verbatim sentence the step is drawn from, so a
+    programme can verify the step against the manuscript rather than trusting
+    an author's self-report that it was preserved.
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    step_id: str
+    statement: str
+    source_id: str
+    source_excerpt: str
+    role: str = ""
+    source_span: str = ""
+    required: bool = True
+
+
+class BaseSourceBinding(BaseModel):
+    """Which manuscript an article is built on, and which part of it is in scope."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    source_id: str
+    path: str
+    sha256: str
+    fidelity_status: str = ""
+    # Legacy single-heading scope. Selecting scope by heading silently drops
+    # passage material filed under a different heading, so this is retained
+    # for migration only; scripture-scoped selection supersedes it.
+    section_anchor: str = ""
+    scripture_scope: list[str] = Field(default_factory=list)
+
+
+class AuthoringSection(BaseModel):
+    """A reader section, the plan decisions it carries, and its required steps."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    section_id: str
+    decision_ids: list[str] = Field(default_factory=list)
+    required_argument_steps: list[RequiredArgumentStep] = Field(default_factory=list)
+    reader_heading: str = ""
+    thesis: str = ""
+    allowed_operations: list[str] = Field(default_factory=list)
+    ineligible_operations: list[str] = Field(default_factory=list)
+    coverage_boundaries: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class CompositionPlanRecord(EvolvingKnowledgeRecord):
     plan_id: str
     product_type: str
     title: str
     description: str = ""
     decision_ids: list[str] = Field(default_factory=list)
+
+    # Authoring contract. Previously held in an untracked
+    # `base-manuscript-contract-input.json` beside the staging artifacts, which
+    # left the load-bearing steps of every published article outside both
+    # version control and the authoring store, and left its `editor_confirmed`
+    # claim unverifiable. PostgreSQL is the authoring authority; this is where
+    # the contract belongs.
+    contract_id: Optional[str] = None
+    authoring_mode: Optional[str] = None
+    base_source: Optional[BaseSourceBinding] = None
+    additional_base_sources: list[BaseSourceBinding] = Field(default_factory=list)
+    authoring_sections: list[AuthoringSection] = Field(default_factory=list)
+    supplemental_material: list[dict[str, Any]] = Field(default_factory=list)
+    global_rules: list[str] = Field(default_factory=list)
+    contract_confirmed_by: Optional[str] = None
+    contract_confirmed_at: Optional[str] = None
 
 
 class EditorialCheckRecord(EvolvingKnowledgeRecord):
