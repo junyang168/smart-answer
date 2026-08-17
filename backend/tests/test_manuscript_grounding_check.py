@@ -97,6 +97,7 @@ def test_material_carries_claim_statement_evidence_and_source_excerpt():
         {
             "claim_id": "CL2",
             "claim_statement": "他不認識彌賽亞的性質。",
+            "attribution": "professor",
             "evidence": [
                 {
                     "statement": None,
@@ -105,6 +106,25 @@ def test_material_carries_claim_statement_evidence_and_source_excerpt():
             ],
         }
     ]
+
+
+def test_material_carries_an_editorial_instruction_as_separately_attributed_grounds():
+    """A required step's instruction is the editorial board's decision, not the
+    professor's words. It grounds the paragraph, but under its own attribution.
+    """
+    knowledge = _knowledge()
+    knowledge["claims"][1]["editorial_instruction"] = "不把彌賽亞只寫成稱號。"
+    material = build_paragraph_material(["CL2"], knowledge)
+    assert material[0]["attribution"] == "professor"
+    assert material[0]["editorial_instruction"] == {
+        "attribution": "editor",
+        "statement": "不把彌賽亞只寫成稱號。",
+    }
+
+
+def test_material_omits_the_instruction_key_when_a_claim_has_none():
+    material = build_paragraph_material(["CL1"], _knowledge())
+    assert "editorial_instruction" not in material[0]
 
 
 def test_material_refuses_an_unknown_claim_id():
@@ -212,3 +232,47 @@ def test_manuscript_check_records_a_finding_when_a_paragraph_cites_an_unknown_cl
     assert report["passed"] is False
     assert report["findings"][0]["code"] == "grounding_check_failed"
     assert client.calls == 0
+
+
+def test_grounding_uses_the_section_claim_scope_not_only_the_paragraph_declaration():
+    """The plan assigns claims to a reader section; the paragraph declaration is
+    finer than that. Checking only the ids a paragraph repeats rejects faithful
+    sentences whose material was allotted to the section they sit in.
+    """
+    markdown = (
+        "## 一節\n\n"
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n'
+        "段落內容。\n"
+    )
+    sections = [{"output_anchor": "## 一節", "claim_ids_used": ["CL1", "CL2"]}]
+
+    seen = {}
+
+    class Capturing(FakeClient):
+        def generate_json(self, prompt, packet, schema):
+            seen["packet"] = packet
+            return super().generate_json(prompt, packet, schema)
+
+    client = Capturing([_grounded_result()])
+    report = check_manuscript_grounding(
+        markdown, _knowledge(), client=client, author_sections=sections
+    )
+    assert report["passed"] is True
+    assert "CL2" in seen["packet"], "section-assigned material must reach the checker"
+
+
+def test_grounding_falls_back_to_the_paragraph_declaration_without_sections():
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL1"]} -->\n段落。\n'
+    )
+    seen = {}
+
+    class Capturing(FakeClient):
+        def generate_json(self, prompt, packet, schema):
+            seen["packet"] = packet
+            return super().generate_json(prompt, packet, schema)
+
+    client = Capturing([_grounded_result()])
+    check_manuscript_grounding(markdown, _knowledge(), client=client)
+    assert "CL1" in seen["packet"]
+    assert "CL2" not in seen["packet"]

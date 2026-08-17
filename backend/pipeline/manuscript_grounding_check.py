@@ -117,13 +117,29 @@ def build_paragraph_material(
                     "source_excerpt": fragment.get("verbatim_excerpt") if fragment else None,
                 }
             )
-        material.append(
-            {
-                "claim_id": claim_id,
-                "claim_statement": claim.get("statement"),
-                "evidence": evidence,
+        entry = {
+            "claim_id": claim_id,
+            "claim_statement": claim.get("statement"),
+            "attribution": claim.get("attribution") or "professor",
+            "evidence": evidence,
+        }
+        # A required argument step carries two different things: what the
+        # professor said, and the editorial board's decision about how this
+        # article must handle it ("do not reduce the messiah to a title",
+        # "derive the principle only from this passage's two-stage
+        # structure"). Both are legitimate grounds for the author -- the
+        # platform's own position is that the editorial board authors the new
+        # work -- but only the first is the professor's assertion. Supplying
+        # the instruction as separately-attributed material stops the gate
+        # rejecting a paragraph for following the contract, without letting an
+        # editorial decision pass as something the professor said.
+        instruction = claim.get("editorial_instruction")
+        if instruction:
+            entry["editorial_instruction"] = {
+                "attribution": "editor",
+                "statement": instruction,
             }
-        )
+        material.append(entry)
     return material
 
 
@@ -173,11 +189,46 @@ def check_paragraph_grounding(
     return result
 
 
+def section_claim_scope(
+    markdown: str, author_sections: list[dict[str, Any]]
+) -> list[tuple[int, list[str]]]:
+    """Return (start offset, claim ids) per authored section, in document order.
+
+    The CompositionPlan assigns claims to a reader section, not to individual
+    paragraphs; the author's ledger declares them at that same level. Grounding
+    a paragraph only against the ids it happens to repeat in its own provenance
+    comment is therefore stricter than the plan itself, and rejects faithful
+    sentences whose material was allotted to the section they sit in.
+    """
+
+    boundaries: list[tuple[int, list[str]]] = []
+    for section in author_sections:
+        anchor = str(section.get("output_anchor") or "")
+        offset = markdown.find(anchor) if anchor else -1
+        if offset < 0:
+            continue
+        boundaries.append((offset, list(section.get("claim_ids_used") or [])))
+    return sorted(boundaries)
+
+
+def _scope_for_offset(
+    boundaries: list[tuple[int, list[str]]], offset: int
+) -> list[str]:
+    scope: list[str] = []
+    for start, claim_ids in boundaries:
+        if start <= offset:
+            scope = claim_ids
+        else:
+            break
+    return scope
+
+
 def check_manuscript_grounding(
     markdown: str,
     knowledge: dict[str, Any],
     *,
     client: Any,
+    author_sections: list[dict[str, Any]] | None = None,
     checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
 ) -> dict[str, Any]:
     """Run the grounding check over every checkable paragraph in a manuscript.
@@ -189,6 +240,7 @@ def check_manuscript_grounding(
     findings: list[dict[str, Any]] = []
     checked = 0
     skipped = 0
+    boundaries = section_claim_scope(markdown, author_sections or [])
     for paragraph in extract_provenance_paragraphs(markdown):
         provenance = paragraph["provenance"]
         text = paragraph["paragraph_text"]
@@ -196,10 +248,14 @@ def check_manuscript_grounding(
             skipped += 1
             continue
         attribution = provenance.get("attribution")
-        claim_ids = provenance.get("claim_ids") or []
-        if attribution not in checked_attributions or not claim_ids:
+        declared = provenance.get("claim_ids") or []
+        if attribution not in checked_attributions or not declared:
             skipped += 1
             continue
+        # The paragraph's own declaration stays the audit record; grounding
+        # uses it together with the rest of its section's assigned material.
+        section_scope = _scope_for_offset(boundaries, paragraph["comment_offset"])
+        claim_ids = list(dict.fromkeys([*declared, *section_scope]))
         checked += 1
         try:
             result = check_paragraph_grounding(text, claim_ids, knowledge, client=client)
@@ -220,6 +276,7 @@ def check_manuscript_grounding(
                     "code": "unsupported_assertion",
                     "attribution": attribution,
                     "claim_ids": claim_ids,
+                    "declared_claim_ids": declared,
                     "paragraph_excerpt": text[:120],
                     "unsupported_assertions": result["unsupported_assertions"],
                     "notes": result.get("notes", ""),

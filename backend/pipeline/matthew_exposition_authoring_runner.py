@@ -264,6 +264,7 @@ def _run_grounding_stage(
     *,
     draft: str,
     packet: dict[str, Any],
+    author_sections: list[dict[str, Any]],
     output_dir: Path,
     claude_client: Any,
     force: bool,
@@ -279,7 +280,10 @@ def _run_grounding_stage(
     if skip:
         return None
     report = check_manuscript_grounding(
-        draft, packet["knowledge"], client=claude_client
+        draft,
+        packet["knowledge"],
+        client=claude_client,
+        author_sections=author_sections,
     )
     _write_json(
         output_dir / "grounding-report.json",
@@ -518,6 +522,7 @@ def run_authoring(
     grounding_report = _run_grounding_stage(
         draft=draft,
         packet=packet,
+        author_sections=author_result.get("sections") or [],
         output_dir=output_dir,
         claude_client=claude_client,
         force=force,

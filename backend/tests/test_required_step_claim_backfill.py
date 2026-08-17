@@ -119,6 +119,11 @@ def test_package_creates_a_linked_fragment_evidence_and_claim_for_each_pending_s
     assert step["source_fragment_id"] == fragment["fragment_id"]
     assert fragment["verbatim_excerpt"] == "彼得的思維方式是人的思維方式，而非神的思維方式。"
     assert claim["backfilled_for_step_id"] == "S02"
+    # The claim states what the professor said; the step's editorial
+    # instruction is kept separately, not passed off as his assertion.
+    assert claim["statement"] == "彼得的思維方式是人的思維方式，而非神的思維方式。"
+    assert claim["editorial_instruction"] == "把責備連回彼得的思維方式。"
+    assert step["statement"] == "彼得的思維方式是人的思維方式，而非神的思維方式。"
 
 
 def test_plan_update_records_claim_ids_on_every_step_including_reused_ones():

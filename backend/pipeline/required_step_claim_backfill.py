@@ -169,7 +169,15 @@ def build_backfill_package(
             {
                 "evidence_step_id": step.evidence_step_id,
                 "source_fragment_id": step.fragment_id,
-                "statement": step.statement or step.source_excerpt,
+                # The claim states what the professor said, not what the
+                # author must do with it. A step's `statement` is an editorial
+                # instruction ("preserve the full mission content", "do not
+                # reduce the messiah to a title"); storing that as a claim
+                # makes the grounding gate compare prose against a directive
+                # rather than against the material, and correctly rejects
+                # faithful sentences for not restating the instruction. The
+                # instruction stays on the step, where it belongs.
+                "statement": step.source_excerpt,
                 "step_type": "reasoning",
                 "speaker": "professor",
                 "stance": "asserted",
@@ -181,7 +189,8 @@ def build_backfill_package(
         claims.append(
             {
                 "claim_id": step.claim_id,
-                "statement": step.statement or step.source_excerpt,
+                "statement": step.source_excerpt,
+                "editorial_instruction": step.statement,
                 "claim_type": "base_manuscript_argument_step",
                 "attribution": "professor",
                 "evidence_step_ids": [step.evidence_step_id],
