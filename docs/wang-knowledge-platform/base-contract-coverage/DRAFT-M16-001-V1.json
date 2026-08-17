@@ -1,0 +1,679 @@
+{
+  "draft_id": "DRAFT-M16-001-V1",
+  "contract_id": "BMC-matt16-1-12-v1",
+  "passage": "Matt.16.1-Matt.16.12",
+  "target": "太16:1-12",
+  "section_anchor": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+  "base_source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+  "manuscripts": [
+    {
+      "source_id": "notes_manuscript:16章釋經",
+      "path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16章釋經/final.md",
+      "is_base_source": true,
+      "section_anchor": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "section_anchor_found": true,
+      "manuscript_chars": 7074,
+      "contract_scope_chars": 1786,
+      "passage_relevant_chars": 1786
+    },
+    {
+      "source_id": "notes_manuscript:16_章_-_生命",
+      "path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/16_章_-_生命/final.md",
+      "is_base_source": false,
+      "section_anchor": "",
+      "section_anchor_found": null,
+      "manuscript_chars": 15613,
+      "contract_scope_chars": 0,
+      "passage_relevant_chars": 0
+    }
+  ],
+  "required_step_count": 9,
+  "unmatched_step_ids": [],
+  "counts": {
+    "已成為 required step": 12,
+    "在契約範圍內但未成為 step": 31,
+    "完全在契約範圍外": 0
+  },
+  "flag_counts": {
+    "已成為 required step": {
+      "原文觀察": 5,
+      "交叉經文": 2,
+      "推論橋梁": 3
+    },
+    "在契約範圍內但未成為 step": {
+      "原文觀察": 5,
+      "交叉經文": 3,
+      "推論橋梁": 4
+    },
+    "完全在契約範圍外": {
+      "原文觀察": 0,
+      "交叉經文": 0,
+      "推論橋梁": 0
+    }
+  },
+  "sentences": [
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 7,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "太 16:1 記載，法利賽人和撒都該人來試探耶穌，請他從天上顯個神蹟給他們看。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 7,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "這兩個群體在通常情況下是對頭：法利賽人接受口傳的「哈拉卡」（Halakah）——即古人的遺傳，用以解釋如何遵守聖經，例如如何守安息日、飯前洗手等規定；撒都該人則不接受哈拉卡，只承認摩西的五經。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 7,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "在復活問題上，兩者同樣分歧：法利賽人相信將來的復活，撒都該人則否認復活。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 7,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S01-A"
+      ],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "然而在此段經文中，原文使用單一定冠詞，將兩者並列為同一行動主體，表示他們在這件事上聯合起來共同行動，一起向耶穌提出要求。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 9,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "在是否接受口传哈拉卡这一点上，耶稣与撒都该人的立场相同，而雖然耶穌和法利賽人都講復活，但法利賽人相信的復活是將來，而耶穌傳講他的 復活是現在。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 12,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 法利賽人與撒都該人聯合試探（太 16:1）",
+      "kind": "paragraph",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "在有神論的內部，法利賽人屬於相信神的能力持續影響宇宙運行的一派（Theist）；撒都該人則屬於相信神雖然存在、但創造之後便不再介入世界事務的一派（Deist），因此他們不承認神蹟的可能性。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 20,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "太 16:5 記載，門徒渡到那邊去，忘了帶餅。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 20,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "太 16:6 中，耶穌對門徒說，要謹慎，防備法利賽人和撒都該人的酵。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 20,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S02-A"
+      ],
+      "load_bearing_flags": [],
+      "text": "門徒聽到「酵」，彼此議論，以為耶穌是在說他們沒有帶餅的事（太 16:7）。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 22,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "太 16:8 記載，耶穌看出他們的議論，便說："
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 24,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "quote",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "你們這小信的人（ὀλιγόπιστοι），為甚麼因為沒有餅彼此議論呢？"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 26,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S02-B"
+      ],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "耶穌在此使用的「小信」（ὀλιγόπιστοι），並非指門徒信心的強度不足，而是指他們信心的內涵（implication）不足——他們尚未認識到自己所信之信仰的全部含義。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 26,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "耶穌既然已經能用少量的餅和魚使五千人吃飽、使四千人吃飽，當然也能供應門徒的需要。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 26,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "門徒卻因為忘了帶餅而憂慮，正說明他們沒有從已有的親身經歷中推導出耶穌能力的完整意涵。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 28,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "太 16:9–10 中，耶穌明確提醒門徒兩次神蹟的細節："
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 30,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "quote",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "你們還不明白麼、不記得那五個餅、分給五千人、又收拾了多少籃子（κοφίνους）的零碎麼？"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 30,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "quote",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "也不記得那七個餅、分給四千人、又收拾了多少筐子（σπυρίδας）的零碎麼？"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 32,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "原文觀察",
+        "交叉經文"
+      ],
+      "text": "這兩個容器詞彙——κοφίνους 與 σπυρίδας——是不同的詞，分別對應兩次不同的神蹟事件。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 32,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S02-C"
+      ],
+      "load_bearing_flags": [
+        "原文觀察",
+        "交叉經文"
+      ],
+      "text": "五千人吃飽後剩下十二個 κοφίνους（參太 14:20；16:9），四千人吃飽後剩下七個 σπυρίδας（參太 15:37；16:10）。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 32,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S02-C"
+      ],
+      "load_bearing_flags": [
+        "交叉經文"
+      ],
+      "text": "耶穌提醒門徒，剩下幾個就是幾個，這些都是他們親眼所見的事實。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 34,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "太 16:11 中，耶穌明確說明："
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 36,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "quote",
+      "relevance_reason": "heading",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "我對你們說、要防備法利賽人和撒都該人的酵、這話不是指著餅說的．你們怎麼不明白呢？"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 38,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 門徒忘帶餅與「小信」的診斷（太 16:5–11）",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S03-A"
+      ],
+      "load_bearing_flags": [
+        "原文觀察"
+      ],
+      "text": "「酵」所指的，並非字面上的餅，而是法利賽人和撒都該人的「教訓」（διδαχή，原文單數）。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 44,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "耶穌顯神蹟不是在作秀。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 44,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S01-B"
+      ],
+      "load_bearing_flags": [],
+      "text": "法利賽人和撒都該人要求耶穌從天上顯神蹟，是試探性的要求，耶穌不回應這種要求。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 44,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "這一立場與耶穌整體的事工方式一致。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 46,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S03-B"
+      ],
+      "load_bearing_flags": [
+        "原文觀察",
+        "推論橋梁"
+      ],
+      "text": "太 16:12 揭示，法利賽人和撒都該人雖然在哈拉卡與復活等問題上彼此對立，卻共同持有一個教訓（the teaching，原文單數）：不接受耶穌是神所差來的彌賽亞。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 46,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "direct",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S03-B"
+      ],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "這正是耶穌要門徒防備的「酵」的真正所指。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 49,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "原文觀察",
+        "交叉經文"
+      ],
+      "text": "兩次餵飽群眾的神蹟在此具有進一步的神學意涵：耶穌帶來豐盛的靈糧，不僅給猶太人（五千人吃飽後剩下十二個 κοφίνους，參太 14:20；16:9），也給外邦人（四千人吃飽後剩下七個 σπυρίδας，參太 15:37；16:10）。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 49,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 神蹟的性質與彌賽亞的供應",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "交叉經文"
+      ],
+      "text": "彌賽亞的供應涵蓋猶太人與外邦人兩個群體。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 55,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "門徒的「小信」在於他們不知道自己信心的全部內涵。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 55,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "他們已經親眼見過耶穌使五千人和四千人吃飽，卻仍因忘了帶餅而憂慮，沒有從這些經歷中推導出耶穌能力的完整意義。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 55,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S04-B"
+      ],
+      "load_bearing_flags": [],
+      "text": "信徒應當從已有的信仰經歷中認識神能力的全部含義，而不是停留在對個別事件的孤立記憶中。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 57,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S04-A"
+      ],
+      "load_bearing_flags": [],
+      "text": "以顯神蹟作為信仰根基，是一種「淺信」。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 57,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "已成為 required step",
+      "matched_step_ids": [
+        "M16-001-S04-A"
+      ],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "以色列人在曠野天天看見神蹟，仍然不信，這一歷史事實說明神蹟本身並不構成信心的根基。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 57,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "今日若以顯神蹟作為佈道大會叫人決志，容易形成『淺信』。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 57,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 信心的內涵與神蹟的根基",
+      "kind": "paragraph",
+      "relevance_reason": "required_step",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "靈恩派也常強調神蹟。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 61,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "### 附錄",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "Deism（自然神論）認為神創造宇宙之後便不再介入，不再管理世界的事務。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 61,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "### 附錄",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "Theism 則認為神創造之後仍然持續管理宇宙，人的歷史中存在超自然的作為。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 61,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "### 附錄",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "不信派的神學家可視為Deism 這一立場。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 61,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "### 附錄",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "撒都該人的神學立場，可類比為 Deism 的框架。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 67,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 附錄：歷史學家的工作方式",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [],
+      "text": "歷史學家的工作是尋找和評估證據，而不是重現歷史事件本身。"
+    },
+    {
+      "manuscript_id": "notes_manuscript:16章釋經",
+      "line_no": 67,
+      "section_title": "## 一、试探神迹与门徒的小信：看见神迹却没有明白基督",
+      "block_title": "#### 附錄：歷史學家的工作方式",
+      "kind": "paragraph",
+      "relevance_reason": "section_dominant",
+      "in_contract_scope": true,
+      "category": "在契約範圍內但未成為 step",
+      "matched_step_ids": [],
+      "load_bearing_flags": [
+        "推論橋梁"
+      ],
+      "text": "若有人要求以重現的方式來「證明」耶穌從死裡復活，這一要求在方法論上是不合理的——這如同要求把第二次世界大戰重新演一遍才算證明它曾經發生。"
+    }
+  ]
+}
