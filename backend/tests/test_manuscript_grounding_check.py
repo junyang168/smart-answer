@@ -1,5 +1,6 @@
 import pytest
 
+from backend.pipeline.matthew_exposition_authoring import AuthoringContractError
 from backend.pipeline.manuscript_grounding_check import (
     GroundingCheckError,
     build_grounding_packet,
@@ -43,8 +44,7 @@ def _knowledge():
 
 def _grounded_result():
     return {
-        "schema_version": "matthew-exposition-grounding-result.v1",
-        "exceeds_material": False,
+        "schema_version": "matthew-exposition-grounding-result.v2",
         "unsupported_assertions": [],
         "notes": "",
     }
@@ -52,8 +52,7 @@ def _grounded_result():
 
 def _ungrounded_result(paragraph_text):
     return {
-        "schema_version": "matthew-exposition-grounding-result.v1",
-        "exceeds_material": True,
+        "schema_version": "matthew-exposition-grounding-result.v2",
         "unsupported_assertions": [paragraph_text[:6]],
         "notes": "加了材料沒有的因果解釋",
     }
@@ -147,12 +146,27 @@ def test_validate_accepts_a_clean_pass():
     validate_grounding_result(_grounded_result(), paragraph_text="任意段落")
 
 
-def test_validate_requires_assertions_when_exceeds_material_is_true():
+def test_reviewer_cannot_return_a_verdict_of_its_own():
+    """A reply that quotes ungrounded sentences and answers "no" to the yes/no
+    question contradicts its own evidence, and only the opposite inconsistency
+    used to be rejected. There is no longer a field to answer it in."""
+
     result = dict(_grounded_result())
-    result["exceeds_material"] = True
-    result["unsupported_assertions"] = []
-    with pytest.raises(GroundingCheckError, match="unsupported_assertions"):
+    result["exceeds_material"] = False
+    with pytest.raises(AuthoringContractError, match="exceeds_material"):
         validate_grounding_result(result, paragraph_text="任意段落")
+
+
+def test_verdict_follows_the_quoted_sentences():
+    paragraph = "彼得的話表面上像是出於愛護"
+    flagged = check_paragraph_grounding(
+        paragraph, ["CL1"], _knowledge(), client=FakeClient([_ungrounded_result(paragraph)])
+    )
+    assert flagged["exceeds_material"] is True
+    clean = check_paragraph_grounding(
+        paragraph, ["CL1"], _knowledge(), client=FakeClient([_grounded_result()])
+    )
+    assert clean["exceeds_material"] is False
 
 
 def test_validate_requires_assertions_to_be_verbatim_substrings():

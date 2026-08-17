@@ -521,10 +521,12 @@ def test_run_authoring_uses_a_supplied_packet_without_rebuilding_from_files(tmp_
     assert result["status"] == "editorial_pass_no_revision"
 
 
-def _grounding(exceeds, assertions=()):
+def _grounding(assertions=()):
+    """A reviewer reply. The quoted sentences are the whole answer: the gate
+    derives its verdict from them, so there is no verdict to pass in."""
+
     return {
-        "schema_version": "matthew-exposition-grounding-result.v1",
-        "exceeds_material": exceeds,
+        "schema_version": "matthew-exposition-grounding-result.v2",
         "unsupported_assertions": list(assertions),
         "notes": "",
     }
@@ -542,7 +544,7 @@ def test_grounding_gate_stops_an_ungrounded_draft_before_the_writing_reviewer(tm
     # The fixture manuscript has exactly 3 paragraphs the gate checks; a
     # wrong count here would leave a grounding response to be consumed by
     # the review call and mask what this test is asserting.
-    claude = FakeClient([_grounding(True, [invented])] * 3, model="fake-claude")
+    claude = FakeClient([_grounding([invented])] * 3, model="fake-claude")
     result = run_authoring(
         packet=full_authoring_packet(),
         plan_path=PLAN_PATH,
@@ -568,7 +570,7 @@ def test_grounding_gate_stops_an_ungrounded_draft_before_the_writing_reviewer(tm
 
 def test_grounding_gate_lets_a_grounded_draft_through_to_review(tmp_path):
     openai = FakeClient([valid_author_result()], model="fake-openai")
-    claude = FakeClient([_grounding(False)] * 3 + [passing_review()], model="fake-claude")
+    claude = FakeClient([_grounding()] * 3 + [passing_review()], model="fake-claude")
     result = run_authoring(
         packet=full_authoring_packet(),
         plan_path=PLAN_PATH,
@@ -1754,8 +1756,8 @@ def test_grounding_failure_is_repaired_and_rechecked_before_giving_up(tmp_path):
                 return passing_review()
             text = json.loads(packet)["paragraph_text"]
             if self.calls > self.passes_after:
-                return _grounding(False)
-            return _grounding(True, [text.strip().splitlines()[0][:10]])
+                return _grounding()
+            return _grounding([text.strip().splitlines()[0][:10]])
 
     openai = FakeClient([valid_author_result(), valid_author_result()], model="fake-openai")
     claude = Grounder(passes_after=3)
@@ -1783,7 +1785,7 @@ def test_grounding_repair_is_bounded(tmp_path):
         def generate_json(self, _prompt, packet, _schema):
             AlwaysFails.calls += 1
             text = json.loads(packet)["paragraph_text"]
-            return _grounding(True, [text.strip().splitlines()[0][:10]])
+            return _grounding([text.strip().splitlines()[0][:10]])
 
     openai = FakeClient([valid_author_result()] * 5, model="fake-openai")
     claude = AlwaysFails()

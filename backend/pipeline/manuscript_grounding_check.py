@@ -40,19 +40,26 @@ FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:")
 
 GROUNDING_PACKET_MAX_BYTES = 20_000
 
+#: The reviewer lists the sentences it cannot ground and nothing else. It also
+#: used to answer a yes/no `exceeds_material`, which the two fields made it
+#: possible to contradict: validation rejected a "yes" with an empty list but
+#: not a "no" alongside a full one, and `check_manuscript_grounding` reads only
+#: the verdict, so such a paragraph would pass with its quoted sentences
+#: unread. That has not been seen happen in a real run -- the field is removed
+#: because it is redundant and can disagree with its own evidence, not to fix
+#: an observed miss. The verdict is derived in `check_paragraph_grounding`.
 GROUNDING_RESULT_SCHEMA: dict[str, Any] = {
-    "name": "matthew_exposition_grounding_result_v1",
+    "name": "matthew_exposition_grounding_result_v2",
     "strict": True,
     "schema": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "exceeds_material", "unsupported_assertions", "notes"],
+        "required": ["schema_version", "unsupported_assertions", "notes"],
         "properties": {
             "schema_version": {
                 "type": "string",
-                "enum": ["matthew-exposition-grounding-result.v1"],
+                "enum": ["matthew-exposition-grounding-result.v2"],
             },
-            "exceeds_material": {"type": "boolean"},
             "unsupported_assertions": {"type": "array", "items": {"type": "string"}},
             "notes": {"type": "string"},
         },
@@ -284,10 +291,6 @@ def validate_grounding_result(
     result: dict[str, Any], *, paragraph_text: str
 ) -> None:
     validate_strict_schema(result, GROUNDING_RESULT_SCHEMA)
-    if result["exceeds_material"] and not result["unsupported_assertions"]:
-        raise GroundingCheckError(
-            "exceeds_material is true but no unsupported_assertions were given"
-        )
     for assertion in result["unsupported_assertions"]:
         if assertion not in paragraph_text:
             raise GroundingCheckError(
@@ -310,6 +313,9 @@ def check_paragraph_grounding(
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     result = client.generate_json(prompt, canonical_json(packet), GROUNDING_RESULT_SCHEMA)
     validate_grounding_result(result, paragraph_text=paragraph_text)
+    # Derived, never self-reported: quoting a sentence it cannot ground is the
+    # finding, so there is no separate verdict to disagree with it.
+    result["exceeds_material"] = bool(result["unsupported_assertions"])
     return result
 
 
