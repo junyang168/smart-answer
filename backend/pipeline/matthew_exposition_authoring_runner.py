@@ -59,6 +59,7 @@ PROMPTS = {
     "adjudication": PROMPT_DIR / "matthew_exposition_editorial_adjudication.md",
     "reconsideration": PROMPT_DIR / "matthew_exposition_editorial_reconsideration.md",
     "revision": PROMPT_DIR / "matthew_exposition_author_revision.md",
+    "grounding_revision": PROMPT_DIR / "matthew_exposition_grounding_revision.md",
     "delta_review": PROMPT_DIR / "matthew_exposition_final_delta_review.md",
 }
 
@@ -328,6 +329,8 @@ def run_authoring(
     repository_root: Path | None = None,
     packet: dict[str, Any] | None = None,
     skip_grounding_gate: bool = False,
+    grounding_attempt: int = 1,
+    max_grounding_attempts: int = 2,
 ) -> dict[str, Any]:
     # A caller that read the plan and its contract from the authoring store
     # passes the built packet directly; `plan_path` / `contract_path` are then
@@ -532,9 +535,73 @@ def run_authoring(
         force=force,
         skip=skip_grounding_gate,
     )
+    # A one-word drift from the material must not discard the whole draft.
+    # The gate runs before the writing reviewer, so without this there is no
+    # path back: the author gets one attempt and any paragraph that overreaches
+    # ends the run. Feed the findings back for a bounded, targeted repair.
+    if (
+        grounding_report is not None
+        and not grounding_report["passed"]
+        and grounding_attempt < max_grounding_attempts
+        and all(f["code"] == "unsupported_assertion" for f in grounding_report["findings"])
+    ):
+        repair_prompt = _read_prompt("grounding_revision")
+        repair_input = canonical_json(
+            {"manuscript_markdown": draft, "findings": grounding_report["findings"]}
+        )
+        repair_fingerprint = generation_fingerprint(
+            inputs={
+                "repair_input_sha256": sha256_text(repair_input),
+                "generation_parameters": _client_generation_parameters(openai_client),
+            },
+            prompt_text=repair_prompt,
+            schema=AUTHOR_RESULT_SCHEMA,
+            model=openai_client.model,
+            reasoning=f"grounding_repair_{grounding_attempt}",
+        )
+        repaired, _ = _run_cached_stage(
+            path=output_dir / f"grounding-repair-{grounding_attempt:02d}.json",
+            schema_version="matthew-exposition-authoring.v1",
+            fingerprint=repair_fingerprint,
+            producer={
+                "role": "grounding_repair_author",
+                "provider": "openai",
+                "model": openai_client.model,
+                "attempt": grounding_attempt,
+            },
+            generate=lambda: openai_client.generate_json(
+                repair_prompt, repair_input, AUTHOR_RESULT_SCHEMA
+            ),
+            force=force,
+        )
+        return run_authoring(
+            packet=packet,
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+            output_dir=output_dir,
+            openai_client=openai_client,
+            claude_client=claude_client,
+            force=force,
+            auto_accept_maintained_findings=auto_accept_maintained_findings,
+            seed_author_result=repaired,
+            revision_round=revision_round,
+            max_revision_rounds=max_revision_rounds,
+            continuation_review=continuation_review,
+            continuation_outcome=continuation_outcome,
+            program_audit_manifest_path=program_audit_manifest_path,
+            program_audit_draft_id=program_audit_draft_id,
+            repository_root=repository_root,
+            skip_grounding_gate=skip_grounding_gate,
+            grounding_attempt=grounding_attempt + 1,
+            max_grounding_attempts=max_grounding_attempts,
+        )
     if grounding_report is not None and not grounding_report["passed"]:
         return {
             "status": "grounding_gate_failed",
+            "grounding_attempts": grounding_attempt,
             "grounding_report_path": str(output_dir / "grounding-report.json"),
             "authoring_path": str(output_dir / "authoring.json"),
             "author_cached": author_cached,

@@ -1632,3 +1632,71 @@ def test_an_inherited_review_may_fail_with_nothing_blocking_left():
         require_blocking_finding_when_failing=False,
     )
     assert outcome["passed"] is False
+
+
+def test_grounding_failure_is_repaired_and_rechecked_before_giving_up(tmp_path):
+    """The gate runs before the writing reviewer, so without a repair path a
+    single overreaching sentence would discard the whole draft.
+    """
+    class Grounder:
+        """Flags the first sentence of whichever paragraph it is given, so the
+        quoted assertion is always a real substring of that paragraph."""
+
+        def __init__(self, passes_after):
+            self.model = "fake-claude"
+            self.calls = 0
+            self.passes_after = passes_after
+
+        def generate_json(self, _prompt, packet, _schema, **_kwargs):
+            self.calls += 1
+            if "dimension_scores" in str(_schema):
+                return passing_review()
+            text = json.loads(packet)["paragraph_text"]
+            if self.calls > self.passes_after:
+                return _grounding(False)
+            return _grounding(True, [text.strip().splitlines()[0][:10]])
+
+    openai = FakeClient([valid_author_result(), valid_author_result()], model="fake-openai")
+    claude = Grounder(passes_after=3)
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=tmp_path / "out",
+        openai_client=openai,
+        claude_client=claude,
+    )
+    assert result["status"] == "editorial_pass_no_revision"
+    assert openai.calls == 2, "author drafted once, then repaired once"
+    assert (tmp_path / "out" / "grounding-repair-01.json").is_file()
+
+
+def test_grounding_repair_is_bounded(tmp_path):
+    class AlwaysFails:
+        model = "fake-claude"
+        calls = 0
+
+        def generate_json(self, _prompt, packet, _schema):
+            AlwaysFails.calls += 1
+            text = json.loads(packet)["paragraph_text"]
+            return _grounding(True, [text.strip().splitlines()[0][:10]])
+
+    openai = FakeClient([valid_author_result()] * 5, model="fake-openai")
+    claude = AlwaysFails()
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=tmp_path / "out",
+        openai_client=openai,
+        claude_client=claude,
+        max_grounding_attempts=2,
+    )
+    assert result["status"] == "grounding_gate_failed"
+    assert result["grounding_attempts"] == 2
