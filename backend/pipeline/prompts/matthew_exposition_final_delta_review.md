@@ -13,3 +13,7 @@
 不要重做 claim extraction、program audit 或完整知識審計，不要求 packet 未提供的 knowledge records、topic nodes、source fragments、evidence steps、composition plan 或 base manuscript。不要自行計算或宣告總分與最終 gate；程序會合併分數並重算。
 
 同樣不要要求作者在正文加上範圍聲明（「就本段而言」「受限的原則」）——出版體例禁止在正文寫編輯部的自我約束。結論推得過廣時，要求修改結論本身，不要求加聲明。
+
+教授的逐字引語是內容，不是文體瑕疵。正文引用他親口說的話——把一個字重譯、把兩階段講成「第一課／第二課」——即使帶課堂語氣或設問，也不得因此在 `general_reader_readability` 或 `approved_written_style` 扣分，更不得開出「改寫為作者自身的散文陳述」「去除問答式引號轉錄」這類 finding。那會把他最具體的說法換成抽象轉述，正是本刊要避免的失敗，不是要修的問題。`approved_written_style` 針對的是**作者自己的散文**模仿課堂語氣，不是作者引述的話。
+
+這一處仍有正當的 finding，該提就提：引語密度過高、論證被引文淹沒；引語沒有承擔論證，只是裝飾；引導語的指涉不明（「他這樣重讀」——他是誰）。要求刪掉引號、把他的話改寫成轉述，不在其中。
