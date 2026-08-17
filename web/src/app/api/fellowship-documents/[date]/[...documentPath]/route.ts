@@ -1,5 +1,5 @@
 import { createReadStream } from "fs";
-import { readFile, stat } from "fs/promises";
+import { stat } from "fs/promises";
 import path from "path";
 import { Readable } from "stream";
 import { NextRequest, NextResponse } from "next/server";
@@ -15,24 +15,6 @@ const CONTENT_TYPES: Record<string, string> = {
 const HIDDEN_PREFIXES = ["audio/", "tmp/", "temp/", "cache/"];
 const FELLOWSHIP_ANALYSIS_DOCUMENT = "主題與查經重點.md";
 const FELLOWSHIP_GENERATED_TRANSCRIPT = "recording.transcript.generated.md";
-
-async function readRootEnvValue(key: string): Promise<string | null> {
-  const candidates = [path.resolve(process.cwd(), ".env"), path.resolve(process.cwd(), "..", ".env")];
-  for (const envPath of candidates) {
-    try {
-      const content = await readFile(envPath, "utf-8");
-      const line = content
-        .split(/\r?\n/)
-        .find((entry) => entry.trim().startsWith(`${key}=`));
-      if (line) {
-        return line.slice(line.indexOf("=") + 1).trim().replace(/^['"]|['"]$/g, "");
-      }
-    } catch {
-      // Ignore missing env files; callers will return 404 if no docs root can be resolved.
-    }
-  }
-  return null;
-}
 
 function fellowshipDateToFolderName(date: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -82,7 +64,7 @@ async function resolveFellowshipDocument(date: string, documentPath: string): Pr
     return null;
   }
 
-  const dataBaseDir = process.env.DATA_BASE_DIR ?? (await readRootEnvValue("DATA_BASE_DIR"));
+  const dataBaseDir = process.env.DATA_BASE_DIR;
   const docsRoot =
     process.env.FELLOWSHIP_DOCS_DIR ??
     (dataBaseDir ? path.join(dataBaseDir, "fellowship", "docs") : null);
@@ -97,7 +79,7 @@ async function resolveFellowshipDocument(date: string, documentPath: string): Pr
   }
 
   try {
-    const fileStat = await stat(filePath);
+    const fileStat = await stat(/* turbopackIgnore: true */ filePath);
     if (!fileStat.isFile()) {
       return null;
     }
@@ -164,7 +146,11 @@ function baseHeaders(file: Awaited<ReturnType<typeof resolveFellowshipDocument>>
   return headers;
 }
 
-export async function GET(request: NextRequest, { params }: { params: { date: string; documentPath: string[] } }) {
+export async function GET(
+  request: NextRequest,
+  props: { params: Promise<{ date: string; documentPath: string[] }> }
+) {
+  const params = await props.params;
   const documentPath = params.documentPath.join("/");
   const file = await resolveFellowshipDocument(params.date, documentPath);
   if (!file) {
@@ -186,14 +172,18 @@ export async function GET(request: NextRequest, { params }: { params: { date: st
     headers.set("content-range", `bytes ${start}-${end}/${file.size}`);
   }
 
-  const stream = createReadStream(file.path, { start, end });
+  const stream = createReadStream(/* turbopackIgnore: true */ file.path, { start, end });
   return new NextResponse(Readable.toWeb(stream) as ReadableStream, {
     status: range ? 206 : 200,
     headers,
   });
 }
 
-export async function HEAD(request: NextRequest, { params }: { params: { date: string; documentPath: string[] } }) {
+export async function HEAD(
+  request: NextRequest,
+  props: { params: Promise<{ date: string; documentPath: string[] }> }
+) {
+  const params = await props.params;
   const documentPath = params.documentPath.join("/");
   const file = await resolveFellowshipDocument(params.date, documentPath);
   if (!file) {

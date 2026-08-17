@@ -47,10 +47,12 @@ async function proxy(request: NextRequest, target: string) {
   });
 }
 
-export async function PUT(request: NextRequest, { params }: { params: { episodeId: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ episodeId: string }> }) {
+  const params = await props.params;
   return proxy(request, buildTarget(params.episodeId));
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { episodeId: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ episodeId: string }> }) {
+  const params = await props.params;
   return proxy(request, buildTarget(params.episodeId));
 }

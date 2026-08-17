@@ -19,7 +19,8 @@ async function fetchArticle(slug: string): Promise<PublicWangArticle | null> {
   return response.json();
 }
 
-export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+export async function generateMetadata(props: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const params = await props.params;
   const article = await fetchArticle(params.slug);
   if (!article) return { title: "找不到文章" };
   const description = `從馬太福音 ${article.passage.replace(/^太/, "")} 閱讀認信、磐石、教會與天國鑰匙，並聆聽王守仁教授相關原聲講解。`;
@@ -36,7 +37,8 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   };
 }
 
-export default async function PublicWangArticlePage({ params }: { params: { slug: string } }) {
+export default async function PublicWangArticlePage(props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const article = await fetchArticle(params.slug);
   if (!article) notFound();
   const path = `/resources/wang-repository/articles/${article.slug}`;

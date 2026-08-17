@@ -10,9 +10,9 @@ const baseUrl = serviceUrl.replace(/\/$/, "");
 
 export async function POST(
   request: Request,
-  context: { params: { item: string; capture: string } }
+  context: { params: Promise<{ item: string; capture: string }> }
 ) {
-  const { item, capture } = context.params;
+  const { item, capture } = (await context.params);
   const target = `${baseUrl}/slides/${encodeURIComponent(item)}/captures/${encodeURIComponent(capture)}/persist`;
 
   const response = await fetch(target, {

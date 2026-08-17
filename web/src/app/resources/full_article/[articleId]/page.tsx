@@ -72,13 +72,14 @@ async function fetchSermonTitleMap(
   return map;
 }
 
-export default async function FullArticleViewer({
-  params,
-  searchParams,
-}: {
-  params: { articleId: string };
-  searchParams?: Record<string, string | string[] | undefined>;
-}) {
+export default async function FullArticleViewer(
+  props: {
+    params: Promise<{ articleId: string }>;
+    searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const disableCache = typeof searchParams?.nocache !== "undefined";
   const article = await fetchArticle(params.articleId, { disableCache });
   if (!article) {

@@ -9,11 +9,12 @@ function safeDecodeURIComponent(value: string): string {
   }
 }
 
-export default function FellowshipMarkdownDocumentPage({
-  params,
-}: {
-  params: { date: string; documentPath: string[] };
-}) {
+export default async function FellowshipMarkdownDocumentPage(
+  props: {
+    params: Promise<{ date: string; documentPath: string[] }>;
+  }
+) {
+  const params = await props.params;
   const date = safeDecodeURIComponent(params.date);
   const documentPath = params.documentPath.map(safeDecodeURIComponent).join("/");
   const breadcrumbLinks = [

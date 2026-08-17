@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
-import { DEPTH_OF_FAITH_REVALIDATE, fetchDepthOfFaithEpisodes } from './episodes';
+import { fetchDepthOfFaithEpisodes } from './episodes';
 
 export const metadata: Metadata = {
   title: '信仰的深度 | AI 輔助查經',
@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     '透過「信仰的深度」網路廣播，探索真理、堅固信心，並隨時隨地聆聽王守仁教授的聖經教導。',
 };
 
-export const revalidate = DEPTH_OF_FAITH_REVALIDATE;
+export const revalidate = 0;
 
 export default async function DepthOfFaithPage() {
   const breadcrumbLinks = [

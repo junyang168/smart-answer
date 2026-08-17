@@ -2,8 +2,8 @@ import { Suspense } from "react";
 import { SurmonEditor } from "@/app/components/admin/surmons/SurmonEditor";
 
 type PageProps = {
-  params: { item: string };
-  searchParams?: { [key: string]: string | string[] | undefined };
+  params: Promise<{ item: string }>;
+  searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
 const EditorFallback = () => (
@@ -19,7 +19,9 @@ const toBoolean = (value: string | string[] | undefined): boolean => {
   return lowered === "true" || lowered === "1" || lowered === "changes";
 };
 
-export default function SurmonEditorPage({ params, searchParams }: PageProps) {
+export default async function SurmonEditorPage(props: PageProps) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const item = decodeURIComponent(params.item);
   const query = searchParams ?? {};
   const viewChanges = toBoolean(query.view) || toBoolean(query.c) || toBoolean(query.mode);

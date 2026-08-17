@@ -15,7 +15,7 @@ async function proxy(request: NextRequest, path?: string[]) {
   return new NextResponse(response.body, { status: response.status, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
 }
 
-export async function GET(req: NextRequest, ctx: { params: { path?: string[] } }) { return proxy(req, ctx.params.path); }
-export async function POST(req: NextRequest, ctx: { params: { path?: string[] } }) { return proxy(req, ctx.params.path); }
-export async function PUT(req: NextRequest, ctx: { params: { path?: string[] } }) { return proxy(req, ctx.params.path); }
-export async function PATCH(req: NextRequest, ctx: { params: { path?: string[] } }) { return proxy(req, ctx.params.path); }
+export async function GET(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) { return proxy(req, (await ctx.params).path); }
+export async function POST(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) { return proxy(req, (await ctx.params).path); }
+export async function PUT(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) { return proxy(req, (await ctx.params).path); }
+export async function PATCH(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) { return proxy(req, (await ctx.params).path); }

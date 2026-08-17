@@ -3,17 +3,14 @@ import Link from "next/link";
 
 import { Breadcrumb } from "@/app/components/common/Breadcrumb";
 
-import {
-  fetchNotesToManuscriptSeries,
-  NOTES_TO_MANUSCRIPT_REVALIDATE,
-} from "./data";
+import { fetchNotesToManuscriptSeries } from "./data";
 
 export const metadata: Metadata = {
   title: "講義轉逐字稿系列 | AI 輔助查經",
   description: "按系列查看講義轉逐字稿的教學講稿，並閱讀完整逐字稿內容。",
 };
 
-export const revalidate = NOTES_TO_MANUSCRIPT_REVALIDATE;
+export const revalidate = 300;
 
 export default async function NotesToManuscriptSeriesPage() {
   const breadcrumbLinks = [

@@ -14,24 +14,6 @@ const RAW_BACKEND_BASE =
   (process.env.NODE_ENV === "production" ? "http://127.0.0.1:8555" : "http://127.0.0.1:8222");
 const BACKEND_BASE = RAW_BACKEND_BASE.replace(/\/$/, "");
 
-async function readRootEnvValue(key: string): Promise<string | null> {
-  const candidates = [path.resolve(process.cwd(), ".env"), path.resolve(process.cwd(), "..", ".env")];
-  for (const envPath of candidates) {
-    try {
-      const content = await readFile(envPath, "utf-8");
-      const line = content
-        .split(/\r?\n/)
-        .find((entry) => entry.trim().startsWith(`${key}=`));
-      if (line) {
-        return line.slice(line.indexOf("=") + 1).trim().replace(/^['"]|['"]$/g, "");
-      }
-    } catch {
-      // Ignore missing env files; the HTTP fallback below still works.
-    }
-  }
-  return null;
-}
-
 function fellowshipDateToFolderName(date: string): string {
   const isoMatch = date.match(/^\d{4}-\d{2}-\d{2}$/);
   if (isoMatch) {
@@ -81,7 +63,7 @@ async function readMarkdownDocumentFromDisk(date: string, documentPath: string):
     throw new Error("Unable to load fellowship document");
   }
 
-  const dataBaseDir = process.env.DATA_BASE_DIR ?? (await readRootEnvValue("DATA_BASE_DIR"));
+  const dataBaseDir = process.env.DATA_BASE_DIR;
   const docsDir =
     process.env.FELLOWSHIP_DOCS_DIR ??
     (dataBaseDir ? path.join(dataBaseDir, "fellowship", "docs") : null);
@@ -96,7 +78,7 @@ async function readMarkdownDocumentFromDisk(date: string, documentPath: string):
   }
 
   try {
-    return await readFile(candidate, "utf-8");
+    return await readFile(/* turbopackIgnore: true */ candidate, "utf-8");
   } catch {
     return null;
   }

@@ -8,14 +8,13 @@ import { ScriptureMarkdown } from "@/app/components/full-article/ScriptureMarkdo
 import {
   fetchNotesToManuscriptManuscript,
   fetchNotesToManuscriptSeriesDetail,
-  NOTES_TO_MANUSCRIPT_REVALIDATE,
 } from "../../data";
 
 type PageProps = {
   params: Promise<{ seriesId: string; projectId: string }>;
 };
 
-export const revalidate = NOTES_TO_MANUSCRIPT_REVALIDATE;
+export const revalidate = 300;
 
 function decodeRouteSegment(value: string) {
   try {

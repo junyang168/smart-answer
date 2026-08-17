@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { isValidElement, useEffect, useMemo, useState, type ReactNode } from "react";
+import { isValidElement, useEffect, useMemo, useState, type ReactNode, use } from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Headphones, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -138,7 +138,8 @@ type EditorialDraftAudit = {
   findings: AuditFinding[];
 };
 
-export default function EditorialDraftPage({ params }: { params: { draftId: string } }) {
+export default function EditorialDraftPage(props: { params: Promise<{ draftId: string }> }) {
+  const params = use(props.params);
   const [draft, setDraft] = useState<EditorialDraft | null>(null);
   const [error, setError] = useState("");
 

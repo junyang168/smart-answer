@@ -19,7 +19,12 @@ export const ArticleDetailView = () => {
     const [error, setError] = useState<string | null>(null);
 
     const params = useParams();
-    const articleId = decodeURIComponent(Array.isArray(params.articleId) ? params.articleId[0] : params.articleId);
+    const rawArticleId = params?.articleId;
+    const articleId = typeof rawArticleId === 'string'
+        ? decodeURIComponent(rawArticleId)
+        : Array.isArray(rawArticleId) && rawArticleId[0]
+            ? decodeURIComponent(rawArticleId[0])
+            : '';
 
     useEffect(() => {
         if (!articleId) return;

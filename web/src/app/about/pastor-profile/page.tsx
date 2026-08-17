@@ -4,7 +4,6 @@ import Image from 'next/image';
 import { Mail, Phone } from 'lucide-react';
 import ReactMarkdown from 'react-markdown'; // 我們將用它來渲染帶有列表格式的內容
 import remarkGfm from 'remark-gfm';
-import { useSearchParams } from 'next/navigation'; 
 
 // ... 將上面的 pastorProfileData 對象粘貼到這裡 ...
 // 假設的數據結構
@@ -67,57 +66,58 @@ const ProfileSection = ({ title, content }: {
 
 // Define the expected query parameters
 interface PageProps {
-    searchParams: {
+    searchParams: Promise<{
       from?: string;
       from_title?: string;
-    };
+    }>;
   }
 
 
-export default function PastorProfilePage({ searchParams }: PageProps) {
-  const from = searchParams?.from || 'about';
-  const from_title = searchParams?.from_title || '關於我們';
+export default async function PastorProfilePage(props: PageProps) {
+    const searchParams = await props.searchParams;
+    const from = searchParams?.from || 'about';
+    const from_title = searchParams?.from_title || '關於我們';
 
-  const breadcrumbLinks = [
-    { name: '首頁', href: '/' },
-    { name: from_title, href: '/' + from },
-    { name: '牧師簡介' },
-  ];
+    const breadcrumbLinks = [
+      { name: '首頁', href: '/' },
+      { name: from_title, href: '/' + from },
+      { name: '牧師簡介' },
+    ];
 
 
-  return (
-    <div className="bg-gray-50">
-      <div className="container mx-auto px-6 py-12">
-        <Breadcrumb links={breadcrumbLinks} />
-        
-        <div className="lg:flex lg:gap-12">
+    return (
+      <div className="bg-gray-50">
+        <div className="container mx-auto px-6 py-12">
+          <Breadcrumb links={breadcrumbLinks} />
 
-          {/* 左側邊欄 (桌面端) */}
-          <aside className="lg:w-1/3 xl:w-1/4 mb-10 lg:mb-0">
-            <div className="sticky top-24">
-              <Image 
-                src={pastorProfileData.avatar}
-                alt={pastorProfileData.name}
-                width={400}
-                height={400}
-                className="rounded-lg shadow-lg w-full"
-              />
-              <div className="mt-6 bg-white p-6 rounded-lg shadow-md">
-                <h1 className="text-2xl font-bold">{pastorProfileData.name}</h1>
-                <p className="text-md text-gray-600 mt-1">{pastorProfileData.title.zh} / {pastorProfileData.title.en}</p>
+          <div className="lg:flex lg:gap-12">
+
+            {/* 左側邊欄 (桌面端) */}
+            <aside className="lg:w-1/3 xl:w-1/4 mb-10 lg:mb-0">
+              <div className="sticky top-24">
+                <Image
+                  src={pastorProfileData.avatar}
+                  alt={pastorProfileData.name}
+                  width={400}
+                  height={400}
+                  className="rounded-lg shadow-lg w-full"
+                />
+                <div className="mt-6 bg-white p-6 rounded-lg shadow-md">
+                  <h1 className="text-2xl font-bold">{pastorProfileData.name}</h1>
+                  <p className="text-md text-gray-600 mt-1">{pastorProfileData.title.zh} / {pastorProfileData.title.en}</p>
+                </div>
               </div>
-            </div>
-          </aside>
+            </aside>
 
-          {/* 右側主內容區 (桌面端) */}
-          <main className="lg:w-2/3 xl:w-3/4">
-            {pastorProfileData.sections.map(section => (
-                <ProfileSection key={section.title.en} title={section.title} content={section.content} />
-            ))}
-          </main>
+            {/* 右側主內容區 (桌面端) */}
+            <main className="lg:w-2/3 xl:w-3/4">
+              {pastorProfileData.sections.map(section => (
+                  <ProfileSection key={section.title.en} title={section.title} content={section.content} />
+              ))}
+            </main>
 
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
 }
