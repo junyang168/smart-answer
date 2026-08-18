@@ -27,12 +27,20 @@ from backend.pipeline.composition_ai_review import (
     validate_reconsideration,
     validate_review,
 )
+from backend.pipeline.passage_knowledge_slice import Passage, _record_overlaps
+from backend.pipeline.base_contract_coverage import parse_passage_range
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
-DEFAULT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
+# Composition review used to default to a hand-exported
+# `shared_knowledge_pilot_v1.json`. Nothing rebuilt it, so it drifted: by the
+# time Matthew 16:21-23 was replanned the file held 47 claims against the
+# store's 475, and four of the five claims that passage was missing were
+# simply not in the file the reviewer read. The store is the authority, so
+# compile from it and keep the file only as an explicit override.
+STALE_PILOT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
 DEFAULT_OUTPUT_DIR = CLAIM_LAYER_ROOT / "composition-reviews"
 CLAUDE_PROMPT = Path("backend/pipeline/prompts/composition_independent_ai_review.md")
 OPENAI_PROMPT = Path("backend/pipeline/prompts/composition_openai_adjudication.md")
@@ -54,6 +62,62 @@ def _archive(path: Path) -> None:
         shutil.copy2(path, target)
 
 
+def _plan_passage(plan: dict[str, Any]) -> Passage | None:
+    """The passage this plan covers, when it states one."""
+
+    raw = str(plan.get("passage") or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = parse_passage_range(raw)
+    except (ValueError, AttributeError):
+        return None
+    return Passage(parsed.book, parsed.chapter, parsed.start_verse, parsed.end_verse)
+
+
+# Fields carried on a plan or a decision that this review is never asked to
+# reason about. `source_presentations` is the reader player's timeline
+# (start/end seconds, presentation ids); the rest is the authoring contract the
+# article writer uses later. None of the three prompts mentions any of them,
+# and together they were two fifths of the payload. Trimming is safe because
+# `apply_consensus` patches the full plan, not this projection.
+_PLAN_FIELDS_NOT_REVIEWED = frozenset({
+    "authoring_sections", "supplemental_material", "base_source",
+    "additional_base_sources", "global_rules", "source_presentation_policy",
+    "authoring_mode", "manuscript_sha256", "contract_id",
+    "contract_schema_version", "contract_confirmed_by", "contract_confirmed_at",
+})
+_DECISION_FIELDS_NOT_REVIEWED = frozenset({
+    "source_presentations", "source_presentation_summary",
+})
+
+
+def _reviewable_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """The plan as the composition reviewer needs to see it."""
+
+    trimmed = {
+        key: value
+        for key, value in plan.items()
+        if key not in _PLAN_FIELDS_NOT_REVIEWED and key != "decisions"
+    }
+    trimmed["decisions"] = [
+        {
+            key: value
+            for key, value in decision.items()
+            if key not in _DECISION_FIELDS_NOT_REVIEWED
+        }
+        for decision in plan.get("decisions", [])
+    ]
+    return trimmed
+
+
+def _compact(row: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys carrying nothing. Repeated over ~115 evidence rows, the empty
+    ones cost more than the material they surround."""
+
+    return {key: value for key, value in row.items() if value not in (None, "", [], {})}
+
+
 def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[str, Any]:
     referenced_ids = {
         claim_id
@@ -65,6 +129,13 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
         for item in plan.get("source_leads", [])
         if item.get("transcript_id")
     }
+    # A claim the plan does not yet use is exactly what this review exists to
+    # find -- `unrouted_material` is one of its issue types. It could only ever
+    # see one that arrived through `source_leads`/`occurrences`, and both are
+    # empty on the Matthew plans, so material added to the argument layer after
+    # the plan was built stayed invisible to the reviewer that should route it.
+    # Anything the plan's own passage covers belongs in front of it.
+    passage = _plan_passage(plan)
     fragments = {item["fragment_id"]: item for item in knowledge.get("source_fragments", [])}
     evidence = {item["evidence_step_id"]: item for item in knowledge.get("evidence_steps", [])}
 
@@ -75,7 +146,12 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
             str(item.get("transcript_id") or "")
             for item in claim.get("occurrences", [])
         }
-        if claim["claim_id"] not in referenced_ids and not (occurrence_transcripts & source_transcripts):
+        in_passage = passage is not None and _record_overlaps(claim, passage)
+        if (
+            claim["claim_id"] not in referenced_ids
+            and not (occurrence_transcripts & source_transcripts)
+            and not in_passage
+        ):
             continue
         included_ids.add(claim["claim_id"])
         evidence_rows = []
@@ -87,36 +163,47 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
             if not fragment_ids and step.get("source_fragment_id"):
                 fragment_ids = [step["source_fragment_id"]]
             evidence_rows.append(
-                {
-                    "evidence_step_id": evidence_id,
-                    "function": step.get("function"),
-                    "statement": step.get("statement"),
-                    "support_eligibility": step.get("support_eligibility"),
-                    "source_fragments": [
-                        {
-                            "fragment_id": fragment_id,
-                            "transcript_id": next(
-                                (
-                                    source.get("transcript_id")
-                                    for source in knowledge.get("source_documents", [])
-                                    if source.get("source_id")
-                                    == (fragments.get(fragment_id) or {}).get("source_id")
-                                ),
-                                None,
-                            ),
-                            "media_time": (fragments.get(fragment_id) or {}).get("media_time"),
-                            "verbatim_excerpt": str(
-                                (fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""
-                            )[:360],
-                        }
-                        for fragment_id in fragment_ids
-                    ],
-                }
+                _compact(
+                    {
+                        "evidence_step_id": evidence_id,
+                        "function": step.get("function"),
+                        "statement": step.get("statement"),
+                        "support_eligibility": step.get("support_eligibility"),
+                        "source_fragments": [
+                            _compact(
+                                {
+                                    "fragment_id": fragment_id,
+                                    "transcript_id": next(
+                                        (
+                                            source.get("transcript_id")
+                                            for source in knowledge.get("source_documents", [])
+                                            if source.get("source_id")
+                                            == (fragments.get(fragment_id) or {}).get("source_id")
+                                        ),
+                                        None,
+                                    ),
+                                    "media_time": (fragments.get(fragment_id) or {}).get("media_time"),
+                                    "verbatim_excerpt": str(
+                                        (fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""
+                                    )[:360],
+                                }
+                            )
+                            for fragment_id in fragment_ids
+                        ],
+                    }
+                )
             )
         candidates.append(
             {
                 "claim_id": claim["claim_id"],
-                "title": claim.get("title"),
+                # No claim in the store carries `title` -- all 460 state
+                # themselves in `statement`. Sending the title alone handed the
+                # reviewer a nameless claim and left it to infer the assertion
+                # from the evidence steps underneath it; sending both would add
+                # 52 null fields. `assigned_decision_ids` deliberately stays
+                # even when empty: that is how the reviewer sees a claim no
+                # decision has routed yet.
+                "statement": claim.get("statement") or claim.get("title"),
                 "claim_type": claim.get("claim_type"),
                 "scripture_refs": claim.get("scripture_refs", []),
                 "assigned_decision_ids": [
@@ -139,7 +226,7 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
         if item.get("source_id") in included_ids or item.get("target_id") in included_ids
     ]
     return {
-        "plan": plan,
+        "plan": _reviewable_plan(plan),
         "available_claims": candidates,
         "claim_relations": claim_relations,
         "claim_relation_constraints": claim_relation_constraints,
@@ -190,6 +277,11 @@ def _normalize_review_response(response: dict[str, Any]) -> dict[str, Any]:
         "proposed_add_claim_ids": [],
         "proposed_remove_claim_ids": [],
         "proposed_coverage": "",
+        # A strict schema makes every proposal field required, so a reviewer
+        # with nothing to change still has to write something here -- and
+        # restating a boundary that already exists reads to validation as a
+        # proposal on a pass row.
+        "proposed_editorial_boundary": "",
         "human_review_reason": "",
     }
     for row in response.get("decision_reviews", []):
@@ -286,7 +378,9 @@ def run_one(
             openai_prompt,
             adjudication_input,
             COMPOSITION_ADJUDICATION_SCHEMA,
-            lambda response: validate_adjudication(response, actionable, claim_ids),
+            lambda response: validate_adjudication(
+                response, actionable, claim_ids, plan.get("plan_id")
+            ),
         )
     else:
         adjudication = {
@@ -355,12 +449,21 @@ def run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, action="append", required=True)
-    parser.add_argument("--knowledge", type=Path, default=DEFAULT_KNOWLEDGE)
+    parser.add_argument(
+        "--knowledge",
+        type=Path,
+        default=None,
+        help="Knowledge snapshot to review against. Defaults to a fresh compile "
+        "from the PostgreSQL authoring store.",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--openai-reasoning-effort", default="medium")
-    parser.add_argument("--max-output-tokens", type=int, default=20000)
+    # Claude Sonnet 5 thinks adaptively, and thinking is spent from the same
+    # budget as the answer. At 20000 a full nine-decision review reached
+    # max_tokens having emitted no text at all.
+    parser.add_argument("--max-output-tokens", type=int, default=64000)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--reuse-review", action="store_true")
     args = parser.parse_args()
@@ -369,7 +472,7 @@ def main() -> int:
             json.dumps(
                 {
                     "plans": [str(path) for path in args.plan],
-                    "knowledge": str(args.knowledge),
+                    "knowledge": str(args.knowledge or "<compiled from store>"),
                     "claude_model": args.claude_model,
                     "openai_model": args.openai_model,
                     "would_call_models": False,
@@ -380,9 +483,23 @@ def main() -> int:
         return 0
 
     load_dotenv(PROJECT_ROOT / ".env")
+    knowledge_path = args.knowledge
+    if knowledge_path is None:
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        knowledge_path = args.output_dir / "knowledge-compiled.json"
+        compiled = PostgresKnowledgeStore().compile_package(
+            package_id="composition-review"
+        )
+        knowledge_path.write_text(
+            json.dumps(compiled, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     claude = Stage1AnthropicClient(
         model=args.claude_model,
-        timeout_seconds=300,
+        # Streaming carries the large output budget, but the SDK still applies
+        # this as its HTTP timeout; a nine-decision review runs past 300s.
+        timeout_seconds=1200,
         max_retries=3,
         max_output_tokens=args.max_output_tokens,
     )
@@ -397,7 +514,7 @@ def main() -> int:
     for plan_path in args.plan:
         result = run_one(
             plan_path=plan_path,
-            knowledge_path=args.knowledge,
+            knowledge_path=knowledge_path,
             output_dir=args.output_dir,
             claude_client=claude,
             openai_client=openai,

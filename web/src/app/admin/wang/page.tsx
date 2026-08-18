@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Activity, ArrowUpRight, BookOpenText, Database, FileCheck2, ShieldCheck } from "lucide-react";
+import { Activity, ArrowUpRight, BookOpenText, Database, FileCheck2, Network, ShieldCheck } from "lucide-react";
 
 const areas = [
   { href: "/admin/wang/matthew-progress", title: "馬太福音文章進度", description: "從篇章計畫一直看到 repository 與 production，明確顯示阻塞和部署滯後。", icon: Activity, accent: "bg-indigo-100 text-indigo-700" },
   { href: "/admin/thought-review/candidates", title: "釋經與專題候選", description: "按經卷查看已有材料、篇章編排和編輯稿，不把候選誤當成文章。", icon: BookOpenText, accent: "bg-sky-100 text-sky-700" },
   { href: "/admin/thought-review", title: "共享知識審核", description: "處理主張、證據、跨講綜合、問答診斷與篇章編排審核。", icon: Database, accent: "bg-emerald-100 text-emerald-700" },
+  { href: "/admin/wang/argument-layer", title: "論證層檢視", description: "一個來源一張圖：教授從問題、經文走到結論的每一步，以及哪些材料還沒進入論證。只看，不改。", icon: Network, accent: "bg-slate-100 text-slate-700" },
   { href: "/admin/canonical-repository", title: "Canonical 出版單元", description: "維護舊式 canonical units、來源引用與公開索引。", icon: FileCheck2, accent: "bg-amber-100 text-amber-800" },
 ];
 

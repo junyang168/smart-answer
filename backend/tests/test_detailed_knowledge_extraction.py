@@ -45,7 +45,7 @@ def _response() -> dict:
         ],
         "observations": [
             {
-                "observation_id": "OBS001", "statement": "人子领受永远权柄", "observation_type": "scripture_text",
+                "observation_id": "OBS001", "statement": "人子领受永远权柄", "observation_type": "scripture_text", "argument_role": "background",
                 "scripture_refs": ["但以理书7:13-14"],
                 "anchors": [{"segment_index": "S0002", "start_time": 8.0, "end_time": 16.0, "verbatim_excerpt": "那一位人子领受永远的权柄"}],
             }

@@ -181,6 +181,21 @@ class StructuredLogger:
             self.callback(role, message)
 
 
+# Anthropic's own guidance: a non-streaming request should stay near 16000
+# max_tokens so it finishes inside the SDK's HTTP timeout; anything larger
+# belongs on the streaming path.
+STREAMING_OUTPUT_THRESHOLD = 16000
+
+
+class OutputBudgetExceeded(RuntimeError):
+    """The model spent `max_tokens` without emitting any text.
+
+    Retrying cannot help: the same request produces the same overflow, and
+    each attempt is billed in full. Raised so `_with_retries` can stop
+    immediately instead of paying for the same failure three times.
+    """
+
+
 class Stage1AnthropicClient:
     def __init__(
         self,
@@ -253,6 +268,11 @@ class Stage1AnthropicClient:
         for attempt in range(1, self.max_retries + 1):
             try:
                 return func()
+            except OutputBudgetExceeded:
+                # Deterministic: the same request overflows the same way, and
+                # every attempt is billed for the full input and the full
+                # output budget it burned. Surface it on the first one.
+                raise
             except Exception as exc:  # pragma: no cover - SDK exception surface varies by version
                 last_error = exc
                 if attempt >= self.max_retries:
@@ -370,7 +390,18 @@ class Stage1AnthropicClient:
             request["temperature"] = temperature
             request["thinking"] = {"type": "disabled"}
         try:
-            message = client.messages.create(**request)
+            # A large `max_tokens` has to stream. The SDK's HTTP timeout covers
+            # the whole non-streaming request, so a generation big enough to
+            # need the budget is also long enough to exceed it -- and on an
+            # adaptive-thinking model the thinking is spent from that same
+            # budget, which is what makes these calls long. Streaming has no
+            # such ceiling; `get_final_message()` returns the same object
+            # `create()` would have.
+            if self.max_output_tokens > STREAMING_OUTPUT_THRESHOLD:
+                with client.messages.stream(**request) as stream:
+                    message = stream.get_final_message()
+            else:
+                message = client.messages.create(**request)
         except Exception as exc:
             raise RuntimeError(self._format_exception(exc)) from exc
 
@@ -381,6 +412,19 @@ class Stage1AnthropicClient:
             for block in getattr(message, "content", [])
             if getattr(block, "type", None) == "text" and getattr(block, "text", "").strip()
         ]
+        # Checked before the text, because a truncated answer is not an answer.
+        # With no text at all the budget went entirely on thinking; with some,
+        # the response stops mid-token and the caller sees a JSON parse error
+        # and retries it as though it were transport noise. Both are the same
+        # deterministic overflow and neither survives a retry.
+        if getattr(message, "stop_reason", None) == "max_tokens":
+            usage = getattr(message, "usage", None)
+            spent = "without emitting any text" if not text_blocks else "mid-answer"
+            raise OutputBudgetExceeded(
+                f"the model reached max_tokens ({self.max_output_tokens}) {spent}. "
+                "Raise max_output_tokens or send a smaller payload. "
+                f"input_tokens={getattr(usage, 'input_tokens', '?')}"
+            )
         if not text_blocks:
             raise RuntimeError(f"Anthropic response missing text content: {message}")
         return "\n".join(text_blocks).strip()

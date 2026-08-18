@@ -28,23 +28,25 @@
 - writing quality profile；
 - 所有实际文本片段。packet 不得只给模型一个本机文件路径。
 
-对马太福音 1–16 章，补充材料只允许 `corroborate`、`extend`、`qualify`、`tension`、`route_out`；不得用补充讲道取代母本框架。
+对马太福音 1–16 章，补充材料只允许 `corroborate`、`extend`、`qualify`、`tension`、`route_out`；不得用补充讲道取代母本框架。契约每个 section 的 `allowed_operations` 与 `ineligible_operations` 由程序执行：author ledger 的 `applied_operations` 必须落在 `allowed_operations` 之内，任何被列为 `ineligible_operations` 的操作（无论申报在 `applied_operations` 还是 `integration_operations`）都直接判交稿失败，不进 review。
+
+宣告 preserved 的母本承重步骤不再只靠作者自报：ledger 的 `preserved_step_anchors` 必须为每条 preserved step 指出承载它的稿件片段，程序以逐字子串比对验证 anchor 确实存在于稿件中；缺 anchor、anchor 不是 exact substring，或 anchor 指向未申报 preserved 的 step，都在 review 之前失败。位置验证只确认承载点存在，不判断推理是否写足，深度仍由 reviewer 按 rubric 校准。
 
 ### 3.1 EditorialReviewPacket
 
-初次独立审稿使用 `matthew-exposition-editorial-review-packet.v1`，只包含当前稿件及 SHA、精简后的母本承重步骤、author section ledger、writing quality profile 和明确 scope。它不得包含 knowledge records、topic nodes、source fragments、evidence steps、CompositionPlan 或 base manuscript 全文。canonical JSON 硬上限为 40 KiB；超出时在调用模型前失败，不得静默截断。
+初次独立审稿使用 `matthew-exposition-editorial-review-packet.v1`，只包含当前稿件及 SHA、精简后的母本承重步骤、author section ledger（含已验证的 `preserved_step_anchors`，供 reviewer 直接判断该处是推理还是摘要）、writing quality profile 和明确 scope。它不得包含 knowledge records、topic nodes、source fragments、evidence steps、CompositionPlan 或 base manuscript 全文。canonical JSON 硬上限为 40 KiB；超出时在调用模型前失败，不得静默截断。
 
 ### 3.2 FinalDeltaReviewPacket
 
-修订后的最终重审使用 `matthew-exposition-final-delta-review-packet.v1`，只包含修改前后段落、前次已验证 review 与 outcome、accepted findings、finding dispositions、受影响维度及其必须复查的 hard-failure ID，以及前稿／现稿 SHA。不得发送完整修订稿或完整 `AuthoringPacket`。
+修订后的最终重审使用 `matthew-exposition-final-delta-review-packet.v1`，只包含修改前后段落、变动段落所属的 `changed_section_ids`、前次已验证 review 与 outcome、accepted findings、finding dispositions、受影响维度及其必须复查的 hard-failure ID，以及前稿／现稿 SHA。不得发送完整修订稿或完整 `AuthoringPacket`。
 
-程序按 accepted finding 的维度及显式耦合表选择受影响维度。Reviewer 只能重评这些维度；其他维度只能从已完成 schema、逐字 anchor、rubric 与 manuscript SHA 校验的 baseline review 继承。模型不计算最终总分，也不决定 hard gate；runner 合并分数后重新计算总分、维度最低线和 hard failures。
+程序按 accepted finding 的维度及显式耦合表选择受影响维度，并与**实际变动段落所属 section** 的维度取并集：Revision Agent 输出的是完整重写稿，段落可能在没有任何 finding 指向的 section 里改动。程序用 author ledger 的 `output_anchor` 把每个 `changed_paragraphs` 定位到 section（记录在 packet 的 `changed_section_ids`），该 section 的散文级维度（`general_reader_readability`、`approved_written_style`、`concision_without_compression`）与 baseline review 曾在该 section 定位的维度都必须重评，不得继承。段落无法定位到任何 section 时保守地把全部 section 视为已变动。Reviewer 只能重评这些维度；其他维度只能从已完成 schema、逐字 anchor、rubric 与 manuscript SHA 校验的 baseline review 继承。模型不计算最终总分，也不决定 hard gate；runner 合并分数后重新计算总分、维度最低线和 hard failures。
 
 ### 3.3 每轮一次 Reviewer 调用
 
 初稿只调用一次 Independent Editorial Reviewer。此后每一轮 Revision 只调用一次 Final Delta Reviewer；同一次 delta 响应必须同时完成旧 findings 验收、受影响维度评分、受影响 hard failures 检查，以及在程序重算仍无法通过时提出下一轮可执行 findings。不得在 Delta Review 后追加 Score-Gap Review，也不得把修订稿重新送回完整 Editorial Review。
 
-下一轮直接继承本轮 merged review、程序重算 outcome 与 manuscript SHA，然后进入 Revision。若总分或 hard gates 未通过，而 Delta Reviewer 在允许范围内没有诚实、可执行的新 finding，runner 安全停止并转人工；不得为了凑到 90 分增加另一次 reviewer 调用或制造 finding。所有 reviewer packet 继续受 40 KiB 硬上限约束。
+下一轮直接继承本轮 merged review、程序重算 outcome 与 manuscript SHA，然后进入 Revision。若任一维度未达其 minimum 或 hard gates 未通过，而 Delta Reviewer 在允许范围内没有诚实、可执行的新 finding，runner 安全停止并转人工；不得为了让某一维度跨过门槛而增加另一次 reviewer 调用或制造 finding。所有 reviewer packet 继续受 40 KiB 硬上限约束。
 
 ## 4. Agent 状态机
 
@@ -69,7 +71,7 @@ flowchart LR
   Q -->|"still fail"| H
 ```
 
-圖中的 rubric `pass` 必須是總分至少 90，並且所有維度硬門檻與 hard failure 檢查同時通過；89 分及以下不得生成自动发布决定。
+圖中的 rubric `pass` 的判準是：每一個適用維度都達到 quality profile 為它設的 `minimum`（profile revision 4 為各自 weight 的 80%），且沒有宣告任何 hard failure。**沒有總分門檻**——`total_score` 只報給人看，不決定任何事。單一總分曾讓弱維度被其他維度抬過去：已發表的太16:21–23 首輪總分 81/100，其中三個維度是 7、3、3，對應的最低線是 8、4、4。十個維度是十項各自獨立的要求，不是可以互相抵換的分項。
 
 Author Agent 可以把多個 composition decision 組織在同一個讀者小節中；這只是呈現層決定，現有 audit 也允許多對一的 heading 映射。若現有 manifest 要求多處「編輯說明」，作者可先把資料邊界集中成較少、較自然的說明，再由 audit 檢查各 decision 是否仍被覆蓋。只有當作者需要改變 action、claim 集合、coverage、主要順序或張力處置時，才返回 `plan_change_required`，提出具體 change request 後停止；它不能靜默改動 CompositionPlan 的實質意圖。
 
@@ -102,11 +104,12 @@ Author Agent 可以把多個 composition decision 組織在同一個讀者小節
 
 完整自动发布命令应明确提供 Program Audit 模板；repository destination 默认来自 `$DATA_BASE_DIR/wang-knowledge-platform/repository`。仓库内 `output/` 已全部退役并由 `.gitignore` 禁止重新纳入版本控制；runtime／staging data 只能写入 `$DATA_BASE_DIR/wang-knowledge-platform/`：
 
+PostgreSQL 是 authoring authority。`--plan-id` 从 authoring store 读取 CompositionPlan 及其 authoring contract（承重步骤、`allowed_operations` / `ineligible_operations`、`base_source`）：
+
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_runner \
-  --plan <composition-plan.json> \
+  --plan-id CP-matthew-16-21-23 \
   --knowledge <knowledge-snapshot.json> \
-  --base-contract <base-manuscript-contract.json> \
   --publication-profile backend/config/publication_profiles/PP-matthew-expository-teaching-v1.json \
   --quality-profile backend/config/editorial_quality_profiles/WQ-matthew-exposition-v1.json \
   --output-dir <authoring-output-dir> \
@@ -115,6 +118,14 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_r
   --auto-accept-maintained-findings \
   --max-revision-rounds 2
 ```
+
+`--plan` 与 `--base-contract` 是迁移期的本机 JSON 路径，与 `--plan-id` 互斥：
+
+```bash
+  --plan <composition-plan.json> --base-contract <base-manuscript-contract.json>
+```
+
+承重步骤此前只存在于版本控制之外的 `base-manuscript-contract-input.json`，且自称 `editor_confirmed` 而无从查证；现已迁入 CompositionPlan 并记录 `contract_confirmed_by` / `contract_confirmed_at`。文件路径保留至全部文章迁移完成为止。knowledge snapshot、publication profile 与 quality profile 仍是文件：来源稿件与共享设定不属于 plan 状态。
 
 ## 6. 失败与停止条件
 
@@ -126,7 +137,7 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_r
 - 低于 90 的 merged review 若没有可执行 delta findings：安全停止并转人工；不得追加 score-gap review，也不得通过同稿完整重评制造新 baseline。
 - final review 单次 timeout 必须在 180–300 秒内；transport 或截断 JSON 最多重试一次。返回后才发现的 JSON schema、SHA、维度集合或 anchor 错误直接失败，不再次发起长请求。
 - 每次 reviewer 返回后，finding anchor 必须在写 artifact 或进入下游前逐字验证；delta finding 还必须位于本次 `after_paragraphs`。
-- 未能生成 SHA 绑定的 `automated-publication-decision.v1`：不得写入 repository；生成条件是 editorial score 至少 90、无 hard gates/hard failures、Program Audit 通过且零 errors。
+- 未能生成 SHA 绑定的 `automated-publication-decision.v1`：不得写入 repository；生成条件是每个适用维度都达到 quality profile 中它自己的 `minimum`、无 declared hard failures、Program Audit 通过且零 errors。门槛以 profile 为准，不在此处复述数字。
 
 ## 7. 实跑验证与首篇发布
 

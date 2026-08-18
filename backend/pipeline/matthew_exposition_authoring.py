@@ -3,9 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
+import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
+
+from backend.pipeline.base_contract_coverage import (
+    BOOK_CODE_TO_CHINESE,
+    FLAG_CROSS_REFERENCE,
+    FLAG_ORIGINAL_LANGUAGE,
+    ScriptureRef,
+    annotate_scripture_refs,
+    load_bearing_flags,
+    mark_passage_relevance,
+    parse_passage_range,
+    parse_scripture_refs,
+    split_segments,
+    split_sentences,
+)
 
 
 SCHEMA_VERSION = "matthew-exposition-authoring.v1"
@@ -51,6 +67,24 @@ DELTA_DIMENSION_IMPACTS: dict[str, set[str]] = {
     "pastoral_theological_landing": {"approved_written_style"},
 }
 
+# A Revision Agent rewrites the complete manuscript, so a paragraph inside a
+# section can change without any accepted finding pointing at that section.
+# These dimensions are judged directly on the prose of whichever sections were
+# actually rewritten, so they can never be inherited across such a change.
+SECTION_PROSE_DIMENSIONS: set[str] = {
+    "general_reader_readability",
+    "approved_written_style",
+    "concision_without_compression",
+}
+
+#: Dimensions judged against the sources rather than the prose. Each has a
+#: hard gate, and none can be scored from the manuscript alone.
+SOURCE_JUDGED_DIMENSIONS = frozenset({
+    "source_and_exegesis",
+    "base_manuscript_preservation",
+    "theological_tension_and_attribution",
+})
+
 HARD_FAILURE_DIMENSIONS = {
     "load_bearing_base_argument_removed_or_reordered": "base_manuscript_preservation",
     "editorial_or_ai_inference_attributed_to_professor": "theological_tension_and_attribution",
@@ -77,30 +111,17 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                     "properties": {
                         "section_id": {"type": "string"},
                         "decision_ids": {"type": "array", "items": {"type": "string"}},
-                        "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
                         "claim_ids_used": {"type": "array", "items": {"type": "string"}},
                         "integration_operations": {"type": "array", "items": {"type": "string"}},
-                        "omissions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "step_id": {"type": "string"},
-                                    "reason": {"type": "string"},
-                                },
-                                "required": ["step_id", "reason"],
-                            },
-                        },
+                        "applied_operations": {"type": "array", "items": {"type": "string"}},
                         "output_anchor": {"type": "string"},
                     },
                     "required": [
                         "section_id",
                         "decision_ids",
-                        "base_step_ids_preserved",
                         "claim_ids_used",
                         "integration_operations",
-                        "omissions",
+                        "applied_operations",
                         "output_anchor",
                     ],
                 },
@@ -155,10 +176,10 @@ EDITORIAL_REVIEW_SCHEMA: dict[str, Any] = {
                     "additionalProperties": False,
                     "properties": {
                         "section_id": {"type": "string"},
-                        "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
+
                         "assessment": {"type": "string"},
                     },
-                    "required": ["section_id", "base_step_ids_preserved", "assessment"],
+                    "required": ["section_id", "assessment"],
                 },
             },
             "findings": {
@@ -406,6 +427,36 @@ def _require_nonempty_string(value: Any, field: str) -> str:
     return value
 
 
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:\s*", re.MULTILINE)
+_FOOTNOTE_REFERENCE_RE = re.compile(r"\[\^[^\]]+\]")
+
+
+def _anchor_text(markdown: str) -> str:
+    """Reduce Markdown to the prose a reader sees, for anchor membership checks.
+
+    Every agent that anchors a finding quotes the sentence it is talking about,
+    and it quotes what the reader sees -- `phroneō`, not `*phroneō*`. Matching
+    that against the Markdown source rejects the quote as fabricated, which is
+    what happened to the Matthew 16:21-23 review: its only defect was two
+    emphasis markers around a Greek verb.
+
+    Provenance comments are dropped first. They are invisible to the reader, so
+    no anchor ever quotes one, and their snake_case identifiers would otherwise
+    be mistaken for emphasis by the underscore rule below.
+    """
+
+    text = _HTML_COMMENT_RE.sub(" ", markdown)
+    text = _FOOTNOTE_DEFINITION_RE.sub("", text)
+    text = _FOOTNOTE_REFERENCE_RE.sub("", text)
+    text = text.replace("*", "").replace("_", "").replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _anchor_present(anchor: str, markdown: str) -> bool:
+    return _anchor_text(anchor) in _anchor_text(markdown)
+
+
 def _duplicates(values: Iterable[str]) -> set[str]:
     seen: set[str] = set()
     repeated: set[str] = set()
@@ -417,14 +468,28 @@ def _duplicates(values: Iterable[str]) -> set[str]:
 
 
 def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = True) -> None:
+    """Check a base contract's shape and that its excerpts still match the source.
+
+    There used to be a `status == "editor_confirmed"` gate here, from an early
+    version that has since been replaced. What it had become was a check that a
+    string was non-empty: `status` was derived from `contract_confirmed_by`,
+    which was a `--confirmed-by` argument to a migration script. The three
+    Matthew plans all carry `junyang168` and a round `00:00:00` timestamp, and
+    the editor named there had never seen the contracts. No prompt mentions the
+    field and no agent uses it. A gate that certifies nothing is worse than no
+    gate, because it reads as though the system guarantees a human looked.
+
+    Real contract confirmation needs an action that can be verified -- an
+    interface, a record, a binding to the contract's SHA -- and belongs with
+    the review workbench.
+    """
+
     if contract.get("schema_version") != "matthew-exposition-base-contract.v1":
         raise AuthoringContractError("unsupported base contract schema_version")
     _require_nonempty_string(contract.get("contract_id"), "contract_id")
     _require_nonempty_string(contract.get("passage"), "passage")
     if contract.get("authoring_mode") != "verified_manuscript_integration":
         raise AuthoringContractError("unsupported authoring_mode")
-    if contract.get("status") != "editor_confirmed":
-        raise AuthoringContractError("base contract must be editor_confirmed")
     base_source = _require_mapping(contract.get("base_source"), "base_source")
     source_records = [base_source, *contract.get("additional_base_sources", [])]
     base_texts: dict[str, str] = {}
@@ -468,42 +533,93 @@ def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = Tr
         decision_ids = section.get("decision_ids")
         if not isinstance(decision_ids, list) or not decision_ids:
             raise AuthoringContractError(f"section {section_id} requires decision_ids")
-        steps = section.get("required_argument_steps")
-        if not isinstance(steps, list) or not steps:
-            raise AuthoringContractError(f"section {section_id} requires argument steps")
-        for step_index, step_value in enumerate(steps):
-            step = _require_mapping(step_value, f"{section_id}.steps[{step_index}]")
-            step_ids.append(
-                _require_nonempty_string(step.get("step_id"), f"{section_id}.step_id")
-            )
-            _require_nonempty_string(step.get("statement"), f"{section_id}.statement")
-            if verify_source:
-                step_source_id = _require_nonempty_string(
-                    step.get("source_id", base_source["source_id"]),
-                    f"{section_id}.source_id",
-                )
-                if step_source_id not in base_texts:
-                    raise AuthoringContractError(
-                        f"unknown base source_id for {step['step_id']}: {step_source_id}"
-                    )
-                excerpt = _require_nonempty_string(
-                    step.get("source_excerpt"), f"{section_id}.source_excerpt"
-                )
-                if excerpt not in base_texts[step_source_id]:
-                    raise AuthoringContractError(
-                        f"base step excerpt not found for {step['step_id']}"
-                    )
+        # A section no longer has to declare argument steps. The list they
+        # formed was a second copy of material that now lives in the claim
+        # layer, written by a model and never reviewed, and the editorial
+        # constraints mixed into its prose are already in the section's
+        # `ineligible_operations`. Sections that still carry steps are still
+        # validated, so the field can be removed article by article.
 
     if duplicates := _duplicates(section_ids):
         raise AuthoringContractError(f"duplicate section_ids: {sorted(duplicates)}")
-    if duplicates := _duplicates(step_ids):
-        raise AuthoringContractError(f"duplicate step_ids: {sorted(duplicates)}")
 
     for item_index, item_value in enumerate(contract.get("supplemental_material", [])):
         item = _require_mapping(item_value, f"supplemental_material[{item_index}]")
         if item.get("operation") not in SUPPLEMENT_OPERATIONS:
             raise AuthoringContractError(
                 f"unsupported supplemental operation: {item.get('operation')}"
+            )
+
+
+def _governing_contract_sections(
+    section: dict[str, Any], contract: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Return the contract sections whose operation policy binds a ledger item.
+
+    An author may merge several composition decisions into one reader section,
+    so a ledger item is bound by every contract section it draws decisions
+    from; an exact section_id match takes precedence when it exists.
+    """
+
+    section_id = section.get("section_id")
+    matched = [
+        item for item in contract["sections"] if item["section_id"] == section_id
+    ]
+    if matched:
+        return matched
+    decision_ids = set(section.get("decision_ids", []))
+    return [
+        item
+        for item in contract["sections"]
+        if decision_ids & set(item["decision_ids"])
+    ]
+
+
+def _validate_section_operations(
+    section: dict[str, Any], *, contract: dict[str, Any], field: str
+) -> None:
+    """Enforce the contract's allowed/ineligible operations for one ledger item."""
+
+    section_id = section.get("section_id") or field
+    governing = _governing_contract_sections(section, contract)
+    allowed: set[str] = set()
+    ineligible: set[str] = set()
+    for governing_section in governing:
+        allowed.update(governing_section.get("allowed_operations", []))
+        ineligible.update(governing_section.get("ineligible_operations", []))
+
+    applied = section.get("applied_operations")
+    if not isinstance(applied, list) or not applied:
+        raise AuthoringContractError(
+            f"section {section_id} must declare at least one applied operation"
+        )
+    for index, operation in enumerate(applied):
+        _require_nonempty_string(operation, f"{field}.applied_operations[{index}]")
+    if duplicates := _duplicates(applied):
+        raise AuthoringContractError(
+            f"section {section_id} declared an operation twice: {sorted(duplicates)}"
+        )
+
+    integration_operations = section.get("integration_operations", [])
+    if not isinstance(integration_operations, list):
+        raise AuthoringContractError("integration_operations must be an array")
+    unsupported = set(integration_operations) - SUPPLEMENT_OPERATIONS
+    if unsupported:
+        raise AuthoringContractError(
+            f"section {section_id} used unsupported supplemental operations: {sorted(unsupported)}"
+        )
+
+    executed = set(applied) | set(integration_operations)
+    blocked = executed & ineligible
+    if blocked:
+        raise AuthoringContractError(
+            f"section {section_id} used ineligible operations: {sorted(blocked)}"
+        )
+    if allowed:
+        outside = set(applied) - allowed
+        if outside:
+            raise AuthoringContractError(
+                f"section {section_id} used operations outside allowed_operations: {sorted(outside)}"
             )
 
 
@@ -549,24 +665,11 @@ def validate_author_result(
         raise AuthoringContractError(
             f"contract decision_ids missing from plan: {sorted(missing_from_plan)}"
         )
-    contract_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-    }
-    required_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-        if step.get("required", True)
-    }
     authored_sections = result.get("sections")
     if not isinstance(authored_sections, list) or not authored_sections:
         raise AuthoringContractError("drafted result requires sections")
 
     covered_decisions: list[str] = []
-    preserved_steps: list[str] = []
-    omitted_steps: list[str] = []
     used_claim_ids: list[str] = []
     for section_index, section_value in enumerate(authored_sections):
         section = _require_mapping(section_value, f"sections[{section_index}]")
@@ -577,17 +680,12 @@ def validate_author_result(
         if unknown_decisions:
             raise AuthoringContractError(f"unknown decision_ids: {sorted(unknown_decisions)}")
         covered_decisions.extend(decision_ids)
-        preserved_steps.extend(section.get("base_step_ids_preserved", []))
+        _validate_section_operations(
+            section, contract=contract, field=f"sections[{section_index}]"
+        )
         used_claim_ids.extend(section.get("claim_ids_used", []))
-        omissions = section.get("omissions", [])
-        if not isinstance(omissions, list):
-            raise AuthoringContractError("omissions must be an array")
-        for omission in omissions:
-            omission = _require_mapping(omission, "omission")
-            omitted_steps.append(_require_nonempty_string(omission.get("step_id"), "omission.step_id"))
-            _require_nonempty_string(omission.get("reason"), "omission.reason")
         anchor = _require_nonempty_string(section.get("output_anchor"), "output_anchor")
-        if anchor not in manuscript:
+        if not _anchor_present(anchor, manuscript):
             raise AuthoringContractError(f"output anchor not found in manuscript: {anchor}")
 
     if duplicates := _duplicates(covered_decisions):
@@ -596,19 +694,19 @@ def validate_author_result(
         raise AuthoringContractError(
             f"uncovered decisions: {sorted(plan_decisions - set(covered_decisions))}"
         )
-    unknown_steps = (set(preserved_steps) | set(omitted_steps)) - contract_steps
-    if unknown_steps:
-        raise AuthoringContractError(f"unknown base step_ids: {sorted(unknown_steps)}")
-    accounted_steps = set(preserved_steps) | set(omitted_steps)
-    if contract_steps - accounted_steps:
-        raise AuthoringContractError(
-            f"unaccounted base steps: {sorted(contract_steps - accounted_steps)}"
-        )
-    omitted_required = set(omitted_steps) & required_steps
-    if omitted_required:
-        raise AuthoringContractError(
-            f"required base steps cannot be omitted in a drafted result: {sorted(omitted_required)}"
-        )
+    # The required-argument-step ledger is gone. It was a second copy of
+    # material that now lives in the claim layer, written by a model and never
+    # reviewed, and its obligations forced prose the sources could not support.
+    # A half-retired state was worse than either end of it: the contract had
+    # stopped requiring steps while the schema still made the author report
+    # them, so the author filled the gap left by a removed step by inventing
+    # the id that would have come next, and the run died on it.
+    #
+    # What an author still accounts for is decisions and claims: every decision
+    # covered exactly once, every cited claim in scope, every section anchored
+    # in the manuscript. Whether the base manuscript's reasoning survived is
+    # the `base_manuscript_preservation` dimension's judgment, made against the
+    # material rather than against an unreviewed checklist.
     if valid_claim_ids is not None:
         unknown_claim_ids = set(used_claim_ids) - valid_claim_ids
         if unknown_claim_ids:
@@ -665,12 +763,149 @@ def rebind_review_after_hidden_metadata_normalization(
     }
 
 
-def deterministic_writing_warnings(
-    markdown: str, quality_profile: dict[str, Any]
+#: A provenance comment and the prose it governs; `manuscript_grounding_check`
+#: imports from this module, so its own copy of this pattern cannot be reused
+#: here without an import cycle.
+_PROVENANCE_COMMENT_RE = re.compile(r"<!--\s*provenance:\s*(\{.*?\})\s*-->", re.S)
+#: An elision written as a single, doubled, or longer run of dots: the house
+#: convention is 「⋯⋯」 but a draft that writes one 「…」 means the same thing.
+_QUOTE_ELISION_RE = re.compile(r"[⋯…]+|\.{3,}")
+
+#: A quoted span shorter than this is a term being named (「體貼」那個字), not a
+#: sentence being quoted, and naming a word is not a claim about what the
+#: professor said. Set from the shortest real quote worth checking rather than
+#: from a corpus measurement; it is a warning threshold, not a gate.
+QUOTE_FIDELITY_MIN_CHARS = 8
+
+#: Quoted prose is checked for invented words, not for copied punctuation: a
+#: spoken transcript is punctuated by whoever transcribed it, so requiring a
+#: quote to reproduce 、 where the body reads ，would fail faithful quotes.
+_QUOTE_MATCH_STRIP_RE = re.compile(
+    r"[\s，。、；：！？「」『』（）《》〈〉—–\-…⋯,.;:!?\'\"()\[\]]+"
+)
+
+
+def _outermost_quoted_spans(text: str) -> list[str]:
+    """Return the content of each outermost 「…」 span, nesting included.
+
+    Quotes of the professor nest by convention -- he names a word inside a
+    sentence he is quoting (「我們中文翻成「體貼」那個字」) -- and a pattern that
+    stops at the first closing bracket matches only the inner 「體貼」, which is
+    below the term-mention threshold. The whole outer sentence would then be
+    skipped, losing exactly the quote rule 8e is about. Nested brackets are
+    stripped from the comparison key, so the span is matched against the source
+    as one run of prose.
+    """
+
+    spans: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(text):
+        if char == "「":
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif char == "」" and depth:
+            depth -= 1
+            if depth == 0:
+                spans.append(text[start:index])
+    return spans
+
+
+def _quote_match_key(text: str) -> str:
+    return _QUOTE_MATCH_STRIP_RE.sub("", unicodedata.normalize("NFKC", text))
+
+
+def quote_fidelity_warnings(
+    markdown: str,
+    source_texts: Iterable[str],
+    *,
+    checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
+    min_chars: int = QUOTE_FIDELITY_MIN_CHARS,
 ) -> list[dict[str, Any]]:
+    """Report quoted spans that no source text contains verbatim.
+
+    Rule 8e tells the author to prefer the professor's own wording over a
+    paraphrase of it, which introduces a failure the pipeline did not have
+    before: prose of the author's own composition placed inside quotation
+    marks and attributed to him. That is worse than the abstract paraphrase
+    8e exists to remove -- an invented quote is a fabricated source, while an
+    abstract paraphrase is merely flat -- so the instruction ships with a
+    check behind it.
+
+    Only spans in paragraphs claiming `checked_attributions` are examined, and
+    only those at least `min_chars` long; a shorter span names a term rather
+    than quoting a sentence. `⋯⋯` marks an elision the author is allowed to
+    make, so each side of it is matched separately, in order, against the same
+    source text -- a quote may skip material but may not reorder it or join
+    two speakers.
+
+    Known false positive: a scripture sentence quoted inside a professor
+    paragraph is verbatim from the Bible, which is not among the source texts.
+    That is why this returns warnings for the adjudicator to read rather than
+    a gate result, and why it does not raise.
+    """
+
+    keys = [_quote_match_key(item) for item in source_texts if item]
+    warnings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    matches = list(_PROVENANCE_COMMENT_RE.finditer(markdown))
+    for index, match in enumerate(matches):
+        try:
+            provenance = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(provenance, dict):
+            continue
+        if provenance.get("attribution") not in checked_attributions:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        for quoted in _outermost_quoted_spans(markdown[match.end() : end]):
+            pieces = [
+                piece for part in _QUOTE_ELISION_RE.split(quoted)
+                if (piece := _quote_match_key(part))
+            ]
+            if sum(len(piece) for piece in pieces) < min_chars:
+                continue
+            if any(_pieces_in_order(pieces, key) for key in keys):
+                continue
+            if quoted in seen:
+                continue
+            seen.add(quoted)
+            warnings.append({"code": "quote_not_verbatim", "quoted_text": quoted})
+    return warnings
+
+
+def _pieces_in_order(pieces: list[str], key: str) -> bool:
+    cursor = 0
+    for piece in pieces:
+        found = key.find(piece, cursor)
+        if found < 0:
+            return False
+        cursor = found + len(piece)
+    return True
+
+
+def deterministic_writing_warnings(
+    markdown: str,
+    quality_profile: dict[str, Any],
+    *,
+    source_texts: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Run the checks that need no model over a draft.
+
+    `source_texts` are the professor's own words -- the sermon transcript
+    segments and base manuscripts the packet carries -- against which quoted
+    spans are matched. Callers without them (a test, a CLI reading only a
+    manuscript) get every other check and skip quote fidelity, rather than
+    having every quote reported as unmatched against an empty corpus.
+    """
+
     text = reader_text(markdown)
     warning_profile = quality_profile.get("deterministic_warnings", {})
     findings: list[dict[str, Any]] = []
+    if source_texts is not None:
+        findings.extend(quote_fidelity_warnings(markdown, source_texts))
     for term in warning_profile.get("production_language_terms", []):
         count = text.lower().count(str(term).lower())
         if count:
@@ -702,8 +937,82 @@ def deterministic_writing_warnings(
     return findings
 
 
+def hard_failures_after_adjudication(
+    review: dict[str, Any], withdrawn_finding_ids: set[str]
+) -> tuple[list[str], dict[str, str]]:
+    """Drop hard failures whose every supporting finding was rejected.
+
+    A reviewer declares a hard failure and files the finding that evidences
+    it. When adjudication rejects that finding -- concluding, say, that the
+    inference chain is present and only its order could be improved -- the
+    declaration it rested on has been overturned too. Leaving it standing
+    deadlocks the run: nothing is left to revise, yet a one-vote veto still
+    blocks publication, so every draft ends at human review no matter how
+    good it is.
+
+    A hard failure with no finding behind it is left alone. Nothing was
+    adjudicated, so there is nothing to overturn, and a safety declaration
+    should not evaporate for lack of paperwork.
+    """
+
+    findings_by_dimension: dict[str, list[dict[str, Any]]] = {}
+    for finding in review.get("findings", []):
+        dimension = finding.get("dimension_id")
+        if dimension:
+            findings_by_dimension.setdefault(dimension, []).append(finding)
+
+    kept: list[str] = []
+    withdrawn: dict[str, str] = {}
+    for failure_id in review.get("hard_failures", []):
+        dimension = HARD_FAILURE_DIMENSIONS.get(failure_id)
+        supporting = findings_by_dimension.get(dimension or "", [])
+        if supporting and all(
+            item["finding_id"] in withdrawn_finding_ids for item in supporting
+        ):
+            withdrawn[failure_id] = (
+                f"every finding for {dimension} was rejected in adjudication: "
+                + ", ".join(sorted(item["finding_id"] for item in supporting))
+            )
+        else:
+            kept.append(failure_id)
+    return kept, withdrawn
+
+
+def out_of_scope_dimensions(contract: dict[str, Any]) -> dict[str, str]:
+    """Return dimensions the contract puts out of this article's reach.
+
+    The publication profile lists 生活應用 as optional, and the platform's rule
+    is that a passage without supporting material must not have one invented.
+    But the rubric scores `pastoral_theological_landing` unconditionally, so an
+    article that correctly omits an unsupported application is marked down for
+    obeying the profile -- pressure to invent exactly the kind of unsourced
+    closing paragraph this pipeline exists to prevent.
+
+    Scope is read from the contract, never from the author's or the reviewer's
+    opinion: an author cannot earn the points by claiming its material was
+    thin. A section forbidden to invent an application chain cannot land
+    pastorally within its own bounds.
+
+    This once also spoke of a section having no registered application chain to
+    draw on. That registry has been retired and the check never read it, so the
+    clause described a coincidence rather than a condition.
+    """
+
+    out_of_scope: dict[str, str] = {}
+    for section in contract.get("sections") or []:
+        ineligible = set(section.get("ineligible_operations") or [])
+        if "invent_life_application_chain" in ineligible:
+            out_of_scope["pastoral_theological_landing"] = (
+                f"contract section {section.get('section_id')} forbids "
+                "invent_life_application_chain"
+            )
+    return out_of_scope
+
+
 def evaluate_editorial_review(
-    review: dict[str, Any], quality_profile: dict[str, Any]
+    review: dict[str, Any],
+    quality_profile: dict[str, Any],
+    not_applicable: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     configured = {item["id"]: item for item in quality_profile["dimensions"]}
     received = {item.get("dimension_id"): item for item in review.get("dimension_scores", [])}
@@ -712,12 +1021,27 @@ def evaluate_editorial_review(
         extra = sorted(set(received) - set(configured))
         raise AuthoringContractError(f"review dimensions mismatch; missing={missing}, extra={extra}")
 
+    not_applicable = not_applicable or {}
+    unknown_na = set(not_applicable) - set(configured)
+    if unknown_na:
+        raise AuthoringContractError(
+            f"unknown not-applicable dimensions: {sorted(unknown_na)}"
+        )
+
     total = 0
+    applicable_weight = 0
     hard_gate_failures: list[str] = []
     for dimension_id, config in configured.items():
         score = received[dimension_id].get("score")
         if not isinstance(score, int) or not 0 <= score <= config["weight"]:
             raise AuthoringContractError(f"invalid score for {dimension_id}: {score}")
+        if dimension_id in not_applicable:
+            # Excluded from both numerator and denominator. Awarding the full
+            # weight instead would score an article that wrote no application
+            # the same as one that wrote an excellent one; the dimension was
+            # not measured, so it should not contribute either way.
+            continue
+        applicable_weight += config["weight"]
         total += score
         if score < config.get("minimum", 0):
             hard_gate_failures.append(dimension_id)
@@ -726,16 +1050,20 @@ def evaluate_editorial_review(
     unknown_hard_failures = set(declared_hard_failures) - set(quality_profile["hard_failures"])
     if unknown_hard_failures:
         raise AuthoringContractError(f"unknown hard failures: {sorted(unknown_hard_failures)}")
-    passed = (
-        total >= quality_profile["passing_score"]
-        and not hard_gate_failures
-        and not declared_hard_failures
-    )
+    # Every dimension must reach its own minimum; there is no total to pass.
+    # A single number let a weak dimension be carried by the others -- the
+    # published matthew-16-21-23 round one totalled 81 of 100 while scoring 7,
+    # 3 and 3 against minimums of 8, 4 and 4. The dimensions are ten separate
+    # requirements, not components of one score to trade off, so `total_score`
+    # is still reported for a reader and no longer decides anything.
+    passed = not hard_gate_failures and not declared_hard_failures
     return {
         "total_score": total,
         "passed": passed,
         "hard_gate_failures": hard_gate_failures,
         "declared_hard_failures": declared_hard_failures,
+        "not_applicable_dimensions": dict(not_applicable),
+        "applicable_weight": applicable_weight,
     }
 
 
@@ -745,6 +1073,7 @@ def validate_editorial_review(
     contract: dict[str, Any],
     manuscript: str,
     quality_profile: dict[str, Any],
+    require_blocking_finding_when_failing: bool = True,
 ) -> dict[str, Any]:
     validate_strict_schema(review, EDITORIAL_REVIEW_SCHEMA)
     if review.get("scope_confirmation") != "writing_quality_and_base_preservation":
@@ -756,40 +1085,46 @@ def validate_editorial_review(
         raise AuthoringContractError(
             "editorial review must cover every contract section exactly once"
         )
-    known_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-    }
-    reviewed_steps = {
-        step_id for item in section_reviews for step_id in item["base_step_ids_preserved"]
-    }
-    if reviewed_steps - known_steps:
-        raise AuthoringContractError(
-            f"editorial review used unknown base steps: {sorted(reviewed_steps - known_steps)}"
-        )
     for finding in review.get("findings", []):
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
-        if anchor not in manuscript:
+        if not _anchor_present(anchor, manuscript):
             raise AuthoringContractError(f"editorial finding anchor not found: {anchor}")
-    outcome = evaluate_editorial_review(review, quality_profile)
-    if outcome["passed"]:
-        required_steps = {
-            step["step_id"]
-            for section in contract["sections"]
-            for step in section["required_argument_steps"]
-            if step.get("required", True)
-        }
-        missing_required = required_steps - reviewed_steps
-        if missing_required:
-            raise AuthoringContractError(
-                f"passing editorial review omitted required base steps: {sorted(missing_required)}"
-            )
-    if not outcome["passed"] and not any(item["blocking"] for item in review.get("findings", [])):
+    outcome = evaluate_editorial_review(
+        review, quality_profile, out_of_scope_dimensions(contract)
+    )
+    # A reviewer that fails a draft must say what to change -- otherwise the
+    # run has nothing to act on. This does not hold for a merged review
+    # inherited into a later round: "below the threshold, but nothing that
+    # must be fixed" is a real and reportable state, and the runner's own
+    # no-actionable-findings path already handles it by stopping for a human.
+    if (
+        require_blocking_finding_when_failing
+        and not outcome["passed"]
+        and not any(item["blocking"] for item in review.get("findings", []))
+    ):
         raise AuthoringContractError(
             "a failing rubric assessment requires at least one blocking finding"
         )
     return outcome
+
+
+def evidence_step_fragment_ids(step: dict[str, Any]) -> list[str]:
+    """Return an evidence step's source fragments from either spelling.
+
+    A step carries `source_fragment_ids` or the singular `source_fragment_id`
+    depending on which producer wrote it: `shared_knowledge_pilot` normalizes
+    both onto every record, while knowledge compiled from the authoring store
+    keeps whichever one its producer used. The two spellings were read in
+    exactly the places the other was populated -- the packet builder collected
+    only the plural, the grounding gate resolved only the singular -- so on a
+    store-compiled plan the sets did not intersect and every paragraph was
+    checked with no source excerpt at all.
+    """
+
+    ids = step.get("source_fragment_ids") or []
+    if not ids and step.get("source_fragment_id"):
+        ids = [step["source_fragment_id"]]
+    return [str(item) for item in ids]
 
 
 def _with_packet_size(packet: dict[str, Any], *, max_bytes: int) -> dict[str, Any]:
@@ -809,6 +1144,102 @@ def _with_packet_size(packet: dict[str, Any], *, max_bytes: int) -> dict[str, An
     return packet
 
 
+#: A sentence earns its place in the reviewer's slice by carrying an original
+#: language observation or a cross reference -- the two moves whose fidelity to
+#: the source the reviewer is scoring. `FLAG_INFERENCE_BRIDGE` is deliberately
+#: not here: it fires on ordinary connectives (因此, 所以, 可見), so it selects
+#: most of the prose and says nothing about whether the source supports it.
+EXEGETICAL_SLICE_FLAGS = frozenset({FLAG_ORIGINAL_LANGUAGE, FLAG_CROSS_REFERENCE})
+
+
+def _passage_target(passage: str) -> ScriptureRef:
+    """Return the contract's passage as a reference the base manuscript uses.
+
+    `passage` is an OSIS-style code (`Matt.16.21-Matt.16.23`) while the
+    manuscripts cite in Chinese (太 16:21), so the book has to be translated
+    before the two can be compared.
+    """
+
+    raw = parse_passage_range(passage)
+    return ScriptureRef(
+        BOOK_CODE_TO_CHINESE.get(raw.book, raw.book),
+        raw.chapter,
+        raw.start_verse,
+        raw.end_verse,
+    )
+
+
+def _exegetical_source_slice(
+    *,
+    base_manuscript_texts: dict[str, str],
+    scoped_fragments: list[dict[str, Any]],
+    passage: str,
+    step_excerpts: Sequence[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return the source sentences the three source-judged dimensions need.
+
+    `source_and_exegesis` asks whether the article's exegesis is faithful to
+    the sources, which cannot be answered from the manuscript alone -- yet the
+    reviewer has been scoring it, hard gate and all, with no source in front of
+    it. Sending the whole scoped material instead would not fit beside the
+    draft in the packet budget, and would bury seven writing-quality
+    dimensions under material irrelevant to them.
+
+    So the slice is narrowed twice. First to the passage: the base manuscript
+    keeps only the paragraphs `base_contract_coverage` already counts as
+    explaining this article's verses. Then to the exegesis: within those
+    paragraphs, and among the fragments the author was scoped to, only the
+    sentences carrying an original-language observation or a cross reference.
+    On matt16-21-23 that is three sentences of base manuscript, and the
+    professor's reading of φρονέω is among them.
+    """
+
+    target = _passage_target(passage)
+    base_sentences: list[dict[str, Any]] = []
+    for source_id, text in base_manuscript_texts.items():
+        segments = split_segments(text)
+        annotate_scripture_refs(segments)
+        relevance = mark_passage_relevance(segments, target, step_excerpts=step_excerpts)
+        for index in sorted(relevance):
+            segment = segments[index]
+            for sentence in split_sentences(segment.text):
+                flags = [
+                    flag
+                    for flag in load_bearing_flags(
+                        sentence, parse_scripture_refs(sentence), target
+                    )
+                    if flag in EXEGETICAL_SLICE_FLAGS
+                ]
+                if flags:
+                    # Which flag selected the sentence, and which section it
+                    # sits in, are facts about how this slice was built. The
+                    # reviewer is judging the sentence, so neither is sent.
+                    base_sentences.append(
+                        {"source_id": source_id, "sentence": sentence}
+                    )
+
+    cited_excerpts: list[dict[str, Any]] = []
+    for fragment in scoped_fragments:
+        excerpt = fragment.get("verbatim_excerpt") or ""
+        flags = [
+            flag
+            for flag in load_bearing_flags(excerpt, parse_scripture_refs(excerpt), target)
+            if flag in EXEGETICAL_SLICE_FLAGS
+        ]
+        if flags:
+            cited_excerpts.append(
+                {
+                    "fragment_id": fragment.get("fragment_id"),
+                    "source_id": fragment.get("source_id"),
+                    "verbatim_excerpt": excerpt,
+                }
+            )
+    return {
+        "base_manuscript_exegesis": base_sentences,
+        "cited_source_excerpts": cited_excerpts,
+    }
+
+
 def build_editorial_review_packet(
     *,
     authoring_packet: dict[str, Any],
@@ -816,8 +1247,16 @@ def build_editorial_review_packet(
 ) -> dict[str, Any]:
     """Build the bounded writing-review projection of an authoring packet.
 
-    Knowledge records, topic nodes, source fragments, evidence steps, the
-    composition plan, and base manuscript text intentionally remain local.
+    Three of the ten dimensions are judgements about the sources rather than
+    the prose -- `base_manuscript_preservation`, `source_and_exegesis` and
+    `theological_tension_and_attribution`, each with a hard gate -- so the
+    packet carries the sentences those three need: the base manuscript
+    sentences the contract preserved, the passage's exegetical sentences, and
+    the contract's declared source tensions. It is a minimum, not a copy of
+    what the author had: knowledge records, topic nodes, the composition plan,
+    whole sermon segments and the base manuscript outside this passage stay
+    local, and the seven writing-quality dimensions get nothing they cannot
+    read off the draft.
     """
 
     manuscript = _require_nonempty_string(
@@ -827,21 +1266,44 @@ def build_editorial_review_packet(
     quality_profile = _require_mapping(
         authoring_packet.get("quality_profile"), "quality_profile"
     )
-    compact_sections = []
-    for section in contract.get("sections", []):
-        compact_sections.append(
-            {
-                "section_id": section["section_id"],
-                "required_argument_steps": [
-                    {
-                        "step_id": step["step_id"],
-                        "statement": step["statement"],
-                        "required": step.get("required", True),
-                    }
-                    for step in section.get("required_argument_steps", [])
-                ],
-            }
-        )
+    compact_sections = [
+        {
+            "section_id": section["section_id"],
+            "thesis": section.get("thesis", ""),
+            "allowed_operations": section.get("allowed_operations", []),
+            "ineligible_operations": section.get("ineligible_operations", []),
+        }
+        for section in contract.get("sections", [])
+    ]
+
+    knowledge = _require_mapping(authoring_packet.get("knowledge"), "knowledge")
+    # The sentences the base manuscript actually argued from, drawn from the
+    # claim layer rather than from a contract checklist. They mark which of its
+    # paragraphs the source slice must carry, so the reviewer judging
+    # `base_manuscript_preservation` sees what there was to preserve.
+    step_excerpts = [
+        excerpt
+        for step in knowledge.get("evidence_steps", [])
+        for fragment_id in evidence_step_fragment_ids(step)
+        if (fragment := next(
+            (f for f in knowledge.get("source_fragments", [])
+             if f.get("fragment_id") == fragment_id), None))
+        and (excerpt := fragment.get("verbatim_excerpt"))
+    ]
+    source_slice = _exegetical_source_slice(
+        base_manuscript_texts=authoring_packet.get("base_manuscript_texts") or {},
+        scoped_fragments=knowledge.get("source_fragments", []),
+        passage=_require_nonempty_string(contract.get("passage"), "passage"),
+        step_excerpts=step_excerpts,
+    )
+    # A tension the contract registered is the material the reviewer checks
+    # `theological_tension_and_attribution` against: an article that quietly
+    # harmonised one has removed something the contract said to keep.
+    source_slice["source_tensions"] = [
+        item
+        for item in contract.get("supplemental_material", [])
+        if item.get("operation") == "tension"
+    ]
     packet = {
         "schema_version": "matthew-exposition-editorial-review-packet.v1",
         "manuscript_sha256": sha256_text(manuscript),
@@ -850,7 +1312,8 @@ def build_editorial_review_packet(
         "author_section_ledger": [
             {
                 "section_id": section["section_id"],
-                "base_step_ids_preserved": section.get("base_step_ids_preserved", []),
+                # Verified step→prose pairs let the reviewer calibrate depth at
+                # the exact place each load-bearing step is supposed to live.
                 "output_anchor": section.get("output_anchor", ""),
             }
             for section in author_result.get("sections", [])
@@ -858,34 +1321,76 @@ def build_editorial_review_packet(
         "quality_profile": {
             "profile_id": quality_profile.get("profile_id"),
             "revision": quality_profile.get("revision"),
-            "passing_score": quality_profile.get("passing_score"),
+            # Each dimension carries its own `minimum`; there is no total.
             "dimensions": quality_profile.get("dimensions", []),
             "hard_failures": quality_profile.get("hard_failures", []),
             "review_calibration": quality_profile.get("review_calibration", {}),
         },
+        "source_slice": source_slice,
+        # Material the contract put in scope that the manuscript never cited.
+        # The reviewer already reads the manuscript, so it knows what was used;
+        # what it could not see was what was available and left on the table --
+        # and `pastoral_theological_landing` is precisely a judgment about
+        # whether the article landed on material it had.
+        #
+        # It cost a run: the reviewer scored the landing 3 of 5, could name no
+        # material for one, and invented a discipleship application instead.
+        # Adjudication rejected it for citing no evidence -- correctly -- and
+        # the reviewer withdrew, both concluding the passage simply had no
+        # application to make. Four claims of `claim_type: "application"` were
+        # sitting in the author's packet unused, and neither agent could see
+        # them. Only the uncited ones are sent: the full set is 13KB against a
+        # 40KB budget, and the used ones are already in the prose.
+        "unused_scoped_claims": [
+            {
+                "claim_id": item.get("claim_id"),
+                "claim_type": item.get("claim_type"),
+                # Two shapes exist: the store spells this `statement`, an
+                # older knowledge projection spells it `title`. Reading one
+                # sends the reviewer a claim with no text, which is the whole
+                # failure this field was added to end.
+                "statement": item.get("statement") or item.get("title"),
+            }
+            for item in knowledge.get("claims", [])
+            if item.get("claim_id") and str(item["claim_id"]) not in manuscript
+        ],
         "scope": {
-            "include": ["writing_quality", "base_manuscript_preservation"],
+            "include": [
+                "writing_quality",
+                "base_manuscript_preservation",
+                "source_and_exegesis",
+                "theological_tension_and_attribution",
+            ],
             "exclude": [
                 "program_audit",
                 "claim_extraction",
                 "knowledge_records",
                 "topic_nodes",
-                "source_fragments",
                 "evidence_steps",
                 "composition_plan",
-                "base_manuscript",
+                "sermon_transcript_segments",
+                "base_manuscript_outside_passage",
             ],
         },
     }
     return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
 
 
-def select_delta_dimensions(accepted_findings: list[dict[str, Any]]) -> list[str]:
+def select_delta_dimensions(
+    accepted_findings: list[dict[str, Any]],
+    *,
+    changed_section_dimensions: Iterable[str] = (),
+) -> list[str]:
     direct = {
         finding.get("dimension_id")
         for finding in accepted_findings
         if finding.get("dimension_id") in QUALITY_DIMENSION_IDS
     }
+    direct.update(
+        dimension_id
+        for dimension_id in changed_section_dimensions
+        if dimension_id in QUALITY_DIMENSION_IDS
+    )
     affected = set(direct)
     for dimension_id in direct:
         affected.update(DELTA_DIMENSION_IMPACTS.get(dimension_id, set()))
@@ -914,6 +1419,98 @@ def changed_markdown_paragraphs(before: str, after: str) -> list[dict[str, Any]]
     return changes
 
 
+def _section_anchor_offsets(
+    manuscript: str, sections: list[dict[str, Any]]
+) -> list[tuple[int, str]]:
+    """Locate each ledger section inside a manuscript by its literal anchor."""
+
+    offsets: list[tuple[int, str]] = []
+    for section in sections:
+        section_id = section.get("section_id")
+        anchor = section.get("output_anchor") or ""
+        index = manuscript.find(anchor) if anchor else -1
+        if not section_id or index < 0:
+            return []
+        offsets.append((index, section_id))
+    offsets.sort()
+    return offsets
+
+
+def changed_section_ids(
+    *,
+    sections: list[dict[str, Any]],
+    baseline_manuscript: str,
+    revised_manuscript: str,
+    changes: list[dict[str, Any]],
+) -> list[str]:
+    """Return the ledger sections whose paragraphs the revision actually touched.
+
+    Attribution is deliberately conservative: a paragraph that cannot be placed
+    inside a located section (an unanchored ledger, a rewritten heading, a
+    paragraph before the first anchor) marks every section as changed, so the
+    delta review widens rather than silently inherits.
+    """
+
+    all_ids = sorted({section["section_id"] for section in sections if section.get("section_id")})
+    before_offsets = _section_anchor_offsets(baseline_manuscript, sections)
+    after_offsets = _section_anchor_offsets(revised_manuscript, sections)
+    if not before_offsets or not after_offsets:
+        return all_ids
+
+    def section_at(index: int, offsets: list[tuple[int, str]]) -> str | None:
+        found: str | None = None
+        for start, section_id in offsets:
+            if start <= index:
+                found = section_id
+            else:
+                break
+        return found
+
+    changed: set[str] = set()
+    cursors = {"before": 0, "after": 0}
+    for change in changes:
+        for key, manuscript, offsets in (
+            ("before", baseline_manuscript, before_offsets),
+            ("after", revised_manuscript, after_offsets),
+        ):
+            for paragraph in change.get(f"{key}_paragraphs", []):
+                index = manuscript.find(paragraph, cursors[key])
+                if index < 0:
+                    return all_ids
+                cursors[key] = index + len(paragraph)
+                section_id = section_at(index, offsets)
+                if section_id is None:
+                    return all_ids
+                changed.add(section_id)
+    return sorted(changed)
+
+
+def changed_section_dimensions(
+    *, section_ids: Iterable[str], baseline_review: dict[str, Any]
+) -> list[str]:
+    """Dimensions that the changed sections carry and therefore cannot inherit.
+
+    A section carries the prose-level dimensions plus every dimension the
+    verified baseline review anchored in that section.
+    """
+
+    attribution: dict[str, set[str]] = {}
+    for finding in baseline_review.get("findings", []):
+        section_id = finding.get("section_id")
+        dimension_id = finding.get("dimension_id")
+        if section_id and dimension_id in QUALITY_DIMENSION_IDS:
+            attribution.setdefault(section_id, set()).add(dimension_id)
+    dimensions: set[str] = set()
+    for section_id in section_ids:
+        dimensions.update(SECTION_PROSE_DIMENSIONS)
+        dimensions.update(attribution.get(section_id, set()))
+    return [
+        dimension_id
+        for dimension_id in QUALITY_DIMENSION_IDS
+        if dimension_id in dimensions
+    ]
+
+
 def build_final_delta_review_packet(
     *,
     baseline_review: dict[str, Any],
@@ -924,6 +1521,8 @@ def build_final_delta_review_packet(
     dispositions: list[dict[str, Any]],
     quality_profile: dict[str, Any],
     contract: dict[str, Any],
+    baseline_sections: list[dict[str, Any]],
+    source_slice: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a SHA-bound final review packet containing revision deltas only."""
 
@@ -943,7 +1542,23 @@ def build_final_delta_review_packet(
         raise AuthoringContractError("baseline review outcome is not the locally verified result")
     if baseline_outcome.get("manuscript_sha256") != baseline_sha:
         raise AuthoringContractError("baseline review is not verified against the baseline manuscript SHA")
-    affected = select_delta_dimensions(accepted_findings)
+    changes = changed_markdown_paragraphs(baseline_manuscript, revised_manuscript)
+    if not changes:
+        raise AuthoringContractError("revision did not change any manuscript paragraphs")
+    # The Revision Agent rewrites the whole manuscript, so scope follows the
+    # paragraphs that actually moved as well as the accepted findings.
+    revised_section_ids = changed_section_ids(
+        sections=baseline_sections,
+        baseline_manuscript=baseline_manuscript,
+        revised_manuscript=revised_manuscript,
+        changes=changes,
+    )
+    affected = select_delta_dimensions(
+        accepted_findings,
+        changed_section_dimensions=changed_section_dimensions(
+            section_ids=revised_section_ids, baseline_review=baseline_review
+        ),
+    )
     if not affected:
         raise AuthoringContractError("final delta review requires at least one affected dimension")
     expected_ids = {item.get("finding_id") for item in accepted_findings}
@@ -961,9 +1576,8 @@ def build_final_delta_review_packet(
         "baseline_manuscript_sha256": baseline_sha,
         "baseline_review_sha256": sha256_text(canonical_json(baseline_review)),
         "manuscript_sha256": sha256_text(revised_manuscript),
-        "changed_paragraphs": changed_markdown_paragraphs(
-            baseline_manuscript, revised_manuscript
-        ),
+        "changed_paragraphs": changes,
+        "changed_section_ids": revised_section_ids,
         "baseline_review": {
             "review": baseline_review,
             "verified_outcome": baseline_outcome,
@@ -973,8 +1587,14 @@ def build_final_delta_review_packet(
         "affected_dimensions": [dimensions_by_id[item] for item in affected],
         "affected_hard_failures": affected_hard_failures,
     }
-    if not packet["changed_paragraphs"]:
-        raise AuthoringContractError("revision did not change any manuscript paragraphs")
+    # The delta reviewer rescores whichever dimensions the revision touched, so
+    # when one of the source-judged three is among them it needs the same
+    # sentences the first reviewer had. Sending them only then keeps a delta
+    # packet that rescores prose alone as small as it was, and keeps a
+    # dimension from being scored against different evidence in round two than
+    # in round one.
+    if source_slice and SOURCE_JUDGED_DIMENSIONS.intersection(affected):
+        packet["source_slice"] = source_slice
     return _with_packet_size(packet, max_bytes=EDITORIAL_REVIEW_PACKET_MAX_BYTES)
 
 
@@ -1017,12 +1637,15 @@ def validate_final_delta_review(
         if finding["dimension_id"] not in affected:
             raise AuthoringContractError("delta finding uses an unaffected dimension")
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
-        if anchor not in revised_manuscript or anchor not in changed_text:
+        if not _anchor_present(anchor, revised_manuscript) or not _anchor_present(
+            anchor, changed_text
+        ):
             raise AuthoringContractError(f"delta finding anchor not found in changed manuscript text: {anchor}")
 
 
 def merge_final_delta_review(
     *,
+    contract: dict[str, Any] | None = None,
     baseline_review: dict[str, Any],
     baseline_outcome: dict[str, Any],
     delta_review: dict[str, Any],
@@ -1064,7 +1687,9 @@ def merge_final_delta_review(
             "manuscript_sha256": packet["manuscript_sha256"],
         },
     }
-    outcome = evaluate_editorial_review(merged, quality_profile)
+    outcome = evaluate_editorial_review(
+        merged, quality_profile, out_of_scope_dimensions(contract or {})
+    )
     outcome["manuscript_sha256"] = packet["manuscript_sha256"]
     return merged, outcome
 
@@ -1089,6 +1714,230 @@ def validate_revision_result(
         plan=plan,
         valid_claim_ids=valid_claim_ids,
     )
+
+
+def _sermon_transcript_slices(
+    *,
+    source_documents: list[dict[str, Any]],
+    scoped_fragments: list[dict[str, Any]],
+    sources_manifest: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    """Return the full transcript-segment text behind every scoped sermon fragment.
+
+    A `source_fragments` entry only carries the one sentence an editor picked
+    as `verbatim_excerpt`; the surrounding professor speech in that same
+    transcript segment is otherwise invisible to the Author Agent, even
+    though `source_segment_index` already identifies exactly which segment
+    it came from. This mirrors `base_manuscript_texts`, which gives the
+    author the full notes manuscript rather than only its cited sentences;
+    sermon transcripts previously had no equivalent and were authored from
+    fragment excerpts alone.
+
+    Scope is deliberately narrow: only the segments a scoped fragment
+    actually cites, not the surrounding transcript, so a topic change in a
+    neighbouring segment (a different passage's material) cannot enter the
+    packet unless a fragment already grounds it.
+    """
+
+    documents_by_id = {
+        item.get("source_id"): item
+        for item in source_documents
+        if isinstance(item, dict)
+    }
+    referenced_indices: dict[str, set[int]] = {}
+    for fragment in scoped_fragments:
+        source_id = fragment.get("source_id")
+        segment_index = fragment.get("source_segment_index")
+        document = documents_by_id.get(source_id)
+        if document is None or document.get("source_type") != "sermon_transcript":
+            continue
+        if segment_index is None:
+            continue
+        referenced_indices.setdefault(source_id, set()).add(segment_index)
+
+    slices: dict[str, dict[str, str]] = {}
+    for source_id, indices in referenced_indices.items():
+        document = documents_by_id[source_id]
+        transcript_path = Path(document["source_path"])
+        raw_transcript = transcript_path.read_text(encoding="utf-8")
+        actual_sha256 = sha256_text(raw_transcript)
+        declared_sha256 = document.get("source_sha256")
+        if declared_sha256 and declared_sha256 != actual_sha256:
+            raise AuthoringContractError(
+                f"stale sermon transcript source: {source_id}"
+            )
+        transcript = json.loads(raw_transcript)
+        if isinstance(transcript, list):
+            # `script_review/` transcripts are a bare segment list; only
+            # `script_published/` transcripts wrap it in {"script": [...]}.
+            segments = transcript
+        else:
+            segments = transcript.get("script") or transcript.get("segments") or []
+        segments_by_index = {segment.get("index"): segment for segment in segments}
+
+        segment_texts: dict[str, str] = {}
+        for segment_index in sorted(indices):
+            segment = segments_by_index.get(segment_index)
+            if segment is None:
+                raise AuthoringContractError(
+                    f"referenced sermon segment not found: {source_id}#{segment_index}"
+                )
+            segment_texts[str(segment_index)] = str(segment.get("text") or "")
+        slices[source_id] = segment_texts
+        sources_manifest[f"sermon_transcript_{source_id}"] = {
+            "source_id": source_id,
+            "path": str(transcript_path.resolve()),
+            "sha256": actual_sha256,
+            "segment_indices": sorted(str(index) for index in indices),
+        }
+    return slices
+
+
+def contract_from_plan_payload(
+    plan_payload: dict[str, Any], *, plan_document_sha256: str
+) -> dict[str, Any]:
+    """Reconstruct a base-contract dict from an authoring-store plan record.
+
+    The contract used to be a standalone JSON file, referencing its plan only
+    by a `composition_plan.sha256` staleness check. It is now stored as fields
+    on the plan record itself (`authoring_contract_migration.py`), so this is
+    the inverse of that migration's merge: it rebuilds the exact shape
+    `validate_base_contract` and the rest of this module already expect,
+    letting the packet builder stay unaware of whether the contract came from
+    the store or a file.
+
+    `plan_document_sha256` must be the sha256 the caller will compute over the
+    exact plan document `build_authoring_packet` hashes, or the built-in
+    "stale composition plan" check will always fail: the plan and its
+    contract are now the same PostgreSQL record, not two files that can drift
+    apart, so this reconstructs the check as an identity rather than a real
+    staleness guard.
+    """
+
+    return {
+        "schema_version": plan_payload.get("contract_schema_version"),
+        "contract_id": plan_payload.get("contract_id"),
+        "passage": plan_payload.get("passage"),
+        "authoring_mode": plan_payload.get("authoring_mode"),
+        "composition_plan": {
+            "plan_id": plan_payload.get("plan_id"),
+            "sha256": plan_document_sha256,
+        },
+        "base_source": plan_payload.get("base_source"),
+        "additional_base_sources": plan_payload.get("additional_base_sources") or [],
+        "sections": plan_payload.get("authoring_sections") or [],
+        "supplemental_material": plan_payload.get("supplemental_material") or [],
+        "global_rules": plan_payload.get("global_rules") or [],
+    }
+
+
+def build_authoring_packet_from_store(
+    *,
+    plan_id: str,
+    store: Any,
+    knowledge_path: str | Path | None = None,
+    compiled_snapshot_path: str | Path | None = None,
+    publication_profile_path: str | Path,
+    quality_profile_path: str | Path,
+) -> dict[str, Any]:
+    """Build an authoring packet with the plan and contract read from PostgreSQL.
+
+    `store` is a `PostgresKnowledgeStore` (typed as `Any` to avoid a hard
+    import dependency for callers that already have one). The knowledge
+    snapshot, publication profile and quality profile remain files: source
+    manuscripts and shared config are not authored-plan state and do not
+    belong in this migration.
+
+    `compiled_snapshot_path` is where to keep the snapshot compiled from the
+    store when `knowledge_path` is omitted. Without it the snapshot only ever
+    exists inside this function's temporary directory, so every later stage
+    that needs the file -- the Program Audit above all -- has nothing to read.
+    Pinning it as a run artifact also means the audit sees the exact material
+    the author wrote against, rather than a separately supplied file that may
+    have drifted from the store.
+    """
+
+    # One definition of "the plan as a document", shared with the store's
+    # `export-plan`: the file handed to the composition review and the plan
+    # this packet is built from must be the same thing.
+    try:
+        plan = store.get_plan_document(plan_id)
+    except KeyError as exc:
+        raise AuthoringContractError(str(exc)) from exc
+    if plan is None:
+        raise AuthoringContractError(f"plan not found in authoring store: {plan_id}")
+    plan_payload = {key: value for key, value in plan.items() if key != "decisions"}
+    plan_document = canonical_json(plan)
+    contract = contract_from_plan_payload(
+        plan_payload, plan_document_sha256=sha256_text(plan_document)
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        plan_path = tmp_dir / "plan.json"
+        contract_path = tmp_dir / "contract.json"
+        plan_path.write_text(plan_document, encoding="utf-8")
+        contract_path.write_text(canonical_json(contract), encoding="utf-8")
+
+        # Without this, a claim promoted into the authoring store stays
+        # invisible to the author: the plan comes from PostgreSQL while the
+        # knowledge came from a file written before the promotion, so the
+        # store is the authority for what an article may write but not for
+        # what it may write *about*.
+        resolved_knowledge_path = knowledge_path
+        if resolved_knowledge_path is None:
+            compiled = store.compile_package(package_id=f"PG-COMPILED-{plan_id}")
+            # compile_package stamps a wall-clock `compiled_at`; leaving it in
+            # makes packet_sha256 differ on every run with identical data,
+            # which defeats the generation cache. The store's own object
+            # revisions already carry when each record changed.
+            compiled.pop("compiled_at", None)
+            # Written where the caller can keep it when one was named. The
+            # path never reaches packet_sha256 -- `sources["knowledge"]` is
+            # rewritten to the compiled form below -- so a durable location
+            # produces the same fingerprint the temporary one did, and an
+            # existing generation cache stays valid.
+            if compiled_snapshot_path is None:
+                compiled_path = tmp_dir / "knowledge.json"
+            else:
+                compiled_path = Path(compiled_snapshot_path)
+                compiled_path.parent.mkdir(parents=True, exist_ok=True)
+            compiled_path.write_text(canonical_json(compiled), encoding="utf-8")
+            resolved_knowledge_path = compiled_path
+
+        packet = build_authoring_packet(
+            plan_path=plan_path,
+            knowledge_path=resolved_knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+        )
+
+    # The plan and contract were staged through a temporary directory, whose
+    # name differs on every run. Left in `sources`, it makes packet_sha256
+    # non-deterministic, which silently defeats the generation cache: every
+    # run would look like new inputs and re-call the models. Record where they
+    # actually came from instead; the content sha256 stays as computed.
+    for key, object_id in (("plan", plan_id), ("base_contract", plan_payload.get("contract_id"))):
+        packet["sources"][key] = {
+            "authority": "postgresql_authoring_store",
+            "collection": "composition_plans",
+            "object_id": object_id,
+            "plan_revision": plan_payload.get("revision"),
+            "sha256": packet["sources"][key]["sha256"],
+        }
+    if knowledge_path is None:
+        # Compiled from the store through the same temporary directory, so it
+        # carries the same per-run path that would break the fingerprint.
+        packet["sources"]["knowledge"] = {
+            "authority": "postgresql_authoring_store",
+            "compiled": True,
+            "sha256": packet["sources"]["knowledge"]["sha256"],
+        }
+    packet["packet_sha256"] = sha256_text(canonical_json({
+        key: value for key, value in packet.items() if key != "packet_sha256"
+    }))
+    return packet
 
 
 def build_authoring_packet(
@@ -1176,6 +2025,10 @@ def build_authoring_packet(
         if decision.get("decision_id") in contract_decision_ids
         for claim_id in decision.get("claim_ids", [])
     }
+    # A required argument step is an obligation to write specific reasoning,
+    # so the claim carrying that reasoning must be in scope. Without this the
+    # contract obliges the author to write something the grounding gate then
+    # reports as unsupported, because the material never reached the packet.
     scoped_claim_ids.update(
         claim_id
         for item in contract.get("supplemental_material", [])
@@ -1197,7 +2050,7 @@ def build_authoring_packet(
     fragment_ids = {
         fragment_id
         for step in scoped_evidence_steps
-        for fragment_id in step.get("source_fragment_ids", [])
+        for fragment_id in evidence_step_fragment_ids(step)
     }
     scoped_fragments = [
         item
@@ -1205,6 +2058,11 @@ def build_authoring_packet(
         if item.get("fragment_id") in fragment_ids
     ]
     scoped_source_ids = {item.get("source_id") for item in scoped_fragments}
+    sermon_transcript_texts = _sermon_transcript_slices(
+        source_documents=knowledge.get("source_documents", []),
+        scoped_fragments=scoped_fragments,
+        sources_manifest=sources,
+    )
     scoped_knowledge = {
         "schema_version": knowledge.get("schema_version"),
         "package_id": knowledge.get("package_id"),
@@ -1222,24 +2080,23 @@ def build_authoring_packet(
             for item in knowledge.get("claim_relations", [])
             if item.get("source_id") in scoped_claim_ids and item.get("target_id") in scoped_claim_ids
         ],
-        "knowledge_routes": [
-            item
-            for item in knowledge.get("knowledge_routes", [])
-            if item.get("claim_id") in scoped_claim_ids
-        ],
-        "topic_nodes": knowledge.get("topic_nodes", []),
-        "product_plans": [
-            {
-                **item,
-                "decisions": [
-                    decision
-                    for decision in item.get("decisions", [])
-                    if decision.get("decision_id") in contract_decision_ids
-                ],
-            }
-            for item in knowledge.get("product_plans", [])
-            if item.get("plan_id") == plan.get("plan_id")
-        ],
+        # Three collections used to ride along here and no longer do. They
+        # were 24% of a 372KB packet, sent again on every draft, and no author
+        # prompt has ever mentioned any of them:
+        #
+        #   product_plans   -- the same plan already at `packet["plan"]`, sent
+        #                      a second time inside the knowledge slice.
+        #   topic_nodes     -- all 59, the one collection this otherwise
+        #                      carefully scoped slice never filtered. The
+        #                      editorial review packet's own `scope.exclude`
+        #                      lists topic_nodes as out of scope for this work.
+        #   knowledge_routes-- where each claim goes next (exposition, topic,
+        #                      Q&A). Editorial workflow state, not material to
+        #                      write from.
+        #
+        # Nothing in the pipeline reads them off this packet: the grounding
+        # check and the review packet take claims, evidence steps and source
+        # fragments, and the Program Audit reads the snapshot file instead.
         "scope": {
             "decision_ids": sorted(contract_decision_ids),
             "claim_ids": sorted(scoped_claim_ids),
@@ -1256,6 +2113,7 @@ def build_authoring_packet(
         "quality_profile": loaded["quality_profile"],
         "base_manuscript_text": base_manuscript_texts[contract["base_source"]["source_id"]],
         "base_manuscript_texts": base_manuscript_texts,
+        "sermon_transcript_texts": sermon_transcript_texts,
         "publication_gate": {
             "eligible": False,
             "reason": "human publication approval and external program audit are not part of authoring",

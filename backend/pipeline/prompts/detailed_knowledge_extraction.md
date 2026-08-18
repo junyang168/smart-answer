@@ -6,7 +6,13 @@
 
 1. `questions`：教授提出的问题、听众问题，以及讲道确实留下的未答问题。
 2. `positions`：教授引述后反驳的外部立场。反方立场必须成为独立对象，不得伪装成教授主张。
-3. `observations`：经文文字、原文、文体、上下文、历史文化和叙事结构观察。
+3. `observations`：经文文字、原文、文体、上下文、历史文化和叙事结构观察。`observation_type` 必须取自以下六个值，不得自创写法：
+   - `scripture_text`（经文文字）
+   - `original_language`（原文：词义、语法、时态、抄本用词）
+   - `literary_form`（文体：体裁、诗歌平行、修辞格式）
+   - `literary_context`（上下文：与前后文或其他经文的关系）
+   - `historical_cultural`（历史文化：背景、地理、习俗、礼仪）
+   - `narrative_structure`（叙事结构：事件次序、段落安排、论证结构）
 4. `evidence_steps`：教授论证过程中的具体一步，包括经文证据、原文判断、理由、回答、限定和应用。
 5. `claims`：教授明确主张或由本篇论证直接得出的结论；编辑归纳必须标成 `editorial_inference`。
 6. `relations`：证据步骤之间及主张之间的支持、回答、限定、应用、反驳和语境关系。
@@ -18,6 +24,17 @@
 - 听众发言使用 `speaker=audience`，只能是问题或对话背景，不能成为教授主张的合格支持证据。
 - 戏剧化代言、模拟耶稣或反方说话，必须用 discourse_role 明示，不得误当经文原句。
 - `support_eligibility=eligible_candidate` 只用于教授自己明确断言且原文锚点完整的证据；其他使用 `context_only` 或 `withheld_unreviewed`。
+
+观察与论证的关系（`argument_role`）：
+
+- 事实本身是 `observation`；教授**从这个事实推出**的东西是 `evidence_step`。两者不是二选一：同一句话常常两者都要产出。
+- 教授只是指出、没有据以推论的观察，标 `argument_role=background`。
+- 教授据以推出结论的观察，标 `argument_role=load_bearing`，并且**必须**同时产出它所支撑的那一步 `evidence_step`，再用 `evidence_relations` 从 observation 连到该 evidence step（`relation_type=supports`）。
+- 判准是：删掉这项观察，该段结论还站得住吗？站不住就是 `load_bearing`。
+- `load_bearing` 而没有建立关系，会被机械校验判为失败。不要为了通过校验把承重的观察改标 `background`；正确做法是把教授推出的那一步补上。
+
+例：教授写「此处原文动词 φρονέω 意为『关心、重视』。耶稣责备彼得的，是他在思维与关注的方向上偏向人的意思。」
+前一句是 `observation`（`original_language`、`load_bearing`），后一句是 `evidence_step`（`original_language`），并建立 observation → evidence_step 的 `supports` 关系。只抽前一句是错的。
 
 完整性规则：
 

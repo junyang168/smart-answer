@@ -43,7 +43,7 @@ __TEST_PARAGRAPH__
 
 ## 生活應用
 
-<!-- provenance: {"attribution":"editor"} -->
+<!-- provenance: {"attribution":"editor","application_chain_id":"AC-1"} -->
 > **編輯說明：** 正文。
 
 ## 附錄
@@ -127,6 +127,16 @@ __TEST_PARAGRAPH__
                                 ),
                             }
                         ],
+                        "application_chains": [
+                            {
+                                "chain_id": "AC-1",
+                                "scripture_context": "太16:1 的處境。",
+                                "professor_interpretation_claim_ids": ["CL-1"],
+                                "enduring_principle": "不變原則。",
+                                "present_context": "今日處境。",
+                                "application_and_limits": "應用與限制。",
+                            }
+                        ],
                         "material_dispositions": material_dispositions or [],
                     },
                 }
@@ -188,8 +198,11 @@ def test_audit_rejects_missing_composition_heading(tmp_path: Path) -> None:
 
     result = audit_editorial_draft(manifest, "DRAFT-1")
 
-    assert result["status"] == "fail"
-    assert any(item["code"] == "missing_decision_heading" for item in result["findings"])
+    assert result["status"] == "pass_with_warnings"
+    assert any(
+        item["code"] == "missing_decision_heading" and item["severity"] == "warning"
+        for item in result["findings"]
+    )
 
 
 def test_audit_rejects_missing_scripture_and_question_section(tmp_path: Path) -> None:
@@ -218,9 +231,13 @@ def test_audit_rejects_unlabelled_editorial_inference(tmp_path: Path) -> None:
         _fixture(tmp_path, editorial_boundary=True), "DRAFT-1"
     )
 
-    assert result["status"] == "fail"
+    # Reported, not blocking. This check needs the manifest to name the heading
+    # that carries the label, and nothing rebuilds the manifest when an article
+    # is restructured -- see MANIFEST_SHAPE_CODES.
+    assert result["status"] == "pass_with_warnings"
     assert any(
         item["code"] == "missing_editorial_attribution"
+        and item["severity"] == "warning"
         for item in result["findings"]
     )
 
@@ -250,7 +267,7 @@ def test_audit_requires_declared_scripture_quotation(tmp_path: Path) -> None:
     _write_json(manifest, manifest_data)
 
     failed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert failed["status"] == "fail"
+    assert failed["status"] == "pass_with_warnings"
     assert any(
         item["code"] == "missing_scripture_quotation"
         for item in failed["findings"]
@@ -268,33 +285,105 @@ def test_audit_requires_declared_scripture_quotation(tmp_path: Path) -> None:
     assert passed["status"] == "pass"
 
 
-def test_audit_rejects_unregistered_optional_application_section(tmp_path: Path) -> None:
+def test_an_application_section_without_chains_is_no_longer_a_failure(tmp_path: Path) -> None:
+    """A 生活應用 section used to fail unless every paragraph pointed at a
+    registered five-link chain. No article ever registered one, so the rule
+    only ever blocked applications the professor had actually made.
+    """
+
     manifest = _fixture(tmp_path)
-    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
-    manifest_data["drafts"][0]["audit_config"]["application_policy"] = {
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["drafts"][0]["audit_config"]["application_policy"] = {
         "section": "生活應用",
         "requires_registered_chains": True,
     }
-    manifest_data["drafts"][0]["audit_config"]["application_chains"] = []
-    _write_json(manifest, manifest_data)
+    data["drafts"][0]["audit_config"]["application_chains"] = []
+    _write_json(manifest, data)
 
-    failed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert failed["status"] == "fail"
-    assert any(
-        item["code"] == "unregistered_application_section"
-        for item in failed["findings"]
-    )
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+    codes = {item["code"] for item in result["findings"]}
+    assert "unregistered_application_section" not in codes
 
+
+def test_application_content_no_longer_needs_a_registered_chain(
+    tmp_path: Path,
+) -> None:
+    """Registration is retired. A five-link chain -- scripture context,
+    professor's interpretation, enduring principle, present context,
+    application and limits -- asked for a structure finer than the source has:
+    the professor states an application in a sentence and illustrates it, and
+    no chain was ever registered for any article. What registration was for --
+    an application must not be invented -- is what the grounding gate does
+    already, against the claims the paragraph declares.
+
+    On Matt.16.1-12 the contract required an application while this rule
+    forbade writing one, and the run deadlocked with nothing to point at.
+    """
+
+    manifest = _fixture(tmp_path)
     draft_path = tmp_path / "draft.md"
     draft_path.write_text(
         draft_path.read_text(encoding="utf-8").replace(
-            "## 生活應用\n\n<!-- provenance: {\"attribution\":\"editor\"} -->\n> **編輯說明：** 正文。\n\n",
-            "",
+            "## 神學意義\n\n<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n正文。\n",
+            "## 神學意義\n\n"
+            "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n正文。\n\n"
+            "<!-- provenance: {\"attribution\":\"editorial_synthesis\",\"claim_ids\":[\"CL-1\"],"
+            "\"synthesis_note\":\"牧養收束。\"} -->\n"
+            "讀者今天也應當省察自己的期待，並在困惑中繼續信靠。\n",
         ),
         encoding="utf-8",
     )
-    passed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert passed["status"] == "pass"
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    codes = {item["code"] for item in result["findings"]}
+    assert "undeclared_application_content" not in codes
+    assert "unregistered_application_paragraph" not in codes
+    assert "application_chain_not_registered" not in codes
+    assert "unregistered_application_section" not in codes
+
+
+def test_audit_rejects_incomplete_chain_behind_declared_application(
+    tmp_path: Path,
+) -> None:
+    manifest = _fixture(tmp_path)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    chain = manifest_data["drafts"][0]["audit_config"]["application_chains"][0]
+    chain["professor_interpretation_claim_ids"] = ["CL-UNKNOWN"]
+    chain["application_and_limits"] = ""
+    _write_json(manifest, manifest_data)
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "fail"
+    codes = {item["code"] for item in result["findings"]}
+    assert "incomplete_application_chain" in codes
+    assert "application_chain_missing_claim" in codes
+
+
+def test_audit_accepts_editorial_synthesis_declared_as_non_application(
+    tmp_path: Path,
+) -> None:
+    """Ordinary exegetical synthesis is not treated as application content."""
+    manifest = _fixture(tmp_path)
+    draft_path = tmp_path / "draft.md"
+    draft_path.write_text(
+        draft_path.read_text(encoding="utf-8").replace(
+            "## 神學意義\n",
+            "## 神學意義\n\n"
+            "<!-- provenance: {\"attribution\":\"editorial_synthesis\",\"claim_ids\":[\"CL-1\"],"
+            "\"synthesis_note\":\"綜合本段論證。\",\"contains_application\":false} -->\n"
+            "本段的兩項論證共同指向同一個結論。\n",
+        ),
+        encoding="utf-8",
+    )
+
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+
+    assert result["status"] == "pass"
+    assert not any(
+        item["code"] == "undeclared_application_content" for item in result["findings"]
+    )
 
 
 def test_audit_preserves_source_only_material_for_human_verification(tmp_path: Path) -> None:
@@ -492,3 +581,61 @@ def test_audit_allows_internal_id_only_in_sermon_link_target(tmp_path: Path) -> 
     result = audit_editorial_draft(manifest, "DRAFT-1")
 
     assert result["status"] == "pass"
+
+
+def test_a_footnote_definition_is_apparatus_not_unattributed_prose(tmp_path: Path) -> None:
+    """Regression: the audit read `[^1]: ...` lines as a body paragraph, found
+    no provenance comment above them, and reported a real article's entire
+    footnote block as prose with no source attribution.
+    """
+
+    from backend.pipeline.editorial_draft_audit import _markdown_blocks
+
+    blocks = _markdown_blocks(
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n"
+        "這是有來源的正文。\n"
+        "\n"
+        "[^1]: 希臘文為 Χριστός，意為「受膏者」。\n"
+        "[^2]: 「彼得」為 Πέτρος。\n"
+    )
+    assert [block["text"] for block in blocks] == ["這是有來源的正文。"]
+
+
+def test_the_blocking_checks_are_the_ones_that_need_no_checklist() -> None:
+    """The audit's remaining errors must be provable from the manuscript and
+    the knowledge layer alone. Anything that also needs the manifest to still
+    describe this version of the article is a warning: a run of a real article
+    produced fourteen errors, every one of them the checklist describing the
+    previous version, and a gate that cries wolf that often teaches its reader
+    to bypass it.
+    """
+
+    from backend.pipeline.editorial_draft_audit import MANIFEST_SHAPE_CODES, _finding
+
+    for code in MANIFEST_SHAPE_CODES:
+        assert _finding(code, "error", "t", "d")["severity"] == "warning"
+
+    # A paragraph with no provenance at all is still blocking, and is the one
+    # thing no other gate covers: the grounding check skips a paragraph that
+    # declares no claims, so nothing else would ever look at it.
+    assert _finding("unmapped_manuscript_paragraph", "error", "t", "d")["severity"] == "error"
+    assert _finding("invalid_source_anchor", "error", "t", "d")["severity"] == "error"
+
+
+def test_a_provenance_comment_over_a_footnote_is_not_left_dangling() -> None:
+    """Regression on the footnote fix itself. Skipping footnote lines stopped
+    them being audited as unattributed prose, but an author marks each footnote
+    with its own provenance -- and that comment was then reported as a source
+    marker with no body under it.
+    """
+
+    from backend.pipeline.editorial_draft_audit import _markdown_blocks
+
+    blocks = _markdown_blocks(
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n"
+        "有來源的正文。\n"
+        "\n"
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-2\"]} -->\n"
+        "[^1]: 原文為 ὀλιγόπιστοι。\n"
+    )
+    assert [block["text"] for block in blocks] == ["有來源的正文。"]

@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
+from backend.pipeline.manuscript_grounding_check import check_manuscript_grounding
 from backend.pipeline.matthew_exposition_authoring import (
     ADJUDICATION_SCHEMA,
     AUTHOR_RESULT_SCHEMA,
@@ -28,6 +29,10 @@ from backend.pipeline.matthew_exposition_authoring import (
     REVISION_SCHEMA,
     AuthoringContractError,
     build_authoring_packet,
+    build_authoring_packet_from_store,
+    evaluate_editorial_review,
+    hard_failures_after_adjudication,
+    out_of_scope_dimensions,
     build_editorial_review_packet,
     build_final_delta_review_packet,
     canonical_json,
@@ -54,6 +59,7 @@ PROMPTS = {
     "adjudication": PROMPT_DIR / "matthew_exposition_editorial_adjudication.md",
     "reconsideration": PROMPT_DIR / "matthew_exposition_editorial_reconsideration.md",
     "revision": PROMPT_DIR / "matthew_exposition_author_revision.md",
+    "grounding_revision": PROMPT_DIR / "matthew_exposition_grounding_revision.md",
     "delta_review": PROMPT_DIR / "matthew_exposition_final_delta_review.md",
 }
 
@@ -226,6 +232,25 @@ def _build_program_audit_manifest(
     return {"schema_version": staged["schema_version"], "drafts": [draft]}
 
 
+def _require_audit_draft(parser: Any, manifest_path: Path, draft_id: str) -> None:
+    """Fail at argument-parse time on a manifest that cannot name the draft."""
+
+    try:
+        template = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        parser.error(f"--program-audit-manifest is not readable JSON: {exc}")
+    matches = [
+        item
+        for item in template.get("drafts", [])
+        if isinstance(item, dict) and item.get("draft_id") == draft_id
+    ]
+    if len(matches) != 1:
+        parser.error(
+            f"--program-audit-manifest must contain draft_id exactly once: "
+            f"{draft_id} (found {len(matches)})"
+        )
+
+
 def _run_program_audit_stage(
     *,
     template_path: Path,
@@ -258,6 +283,128 @@ def _run_program_audit_stage(
     }
 
 
+def _professor_source_texts(packet: dict[str, Any]) -> list[str]:
+    """Every text in the packet that carries the professor's own wording.
+
+    Rule 8e sends the author to the sermon transcript segments for his exact
+    phrasing; a quote in the draft is checked back against the same texts,
+    plus the base manuscripts, so a quote lifted from the approved notes is
+    not reported as invented.
+    """
+
+    return [
+        *(
+            text
+            for segments in (packet.get("sermon_transcript_texts") or {}).values()
+            for text in segments.values()
+        ),
+        *(packet.get("base_manuscript_texts") or {}).values(),
+    ]
+
+
+def _run_grounding_stage(
+    *,
+    draft: str,
+    packet: dict[str, Any],
+    author_sections: list[dict[str, Any]],
+    output_dir: Path,
+    claude_client: Any,
+    force: bool,
+    skip: bool,
+    report_name: str = "grounding-report.json",
+) -> dict[str, Any] | None:
+    """Check every attributed paragraph against the material it declares.
+
+    Returns None when the gate is disabled. The report is written whether or
+    not it passes, so a failed run leaves the evidence behind rather than only
+    a status string.
+    """
+
+    if skip:
+        return None
+    report = check_manuscript_grounding(
+        draft,
+        packet["knowledge"],
+        client=claude_client,
+        author_sections=author_sections,
+        # A claim created from a base-manuscript sentence carries the
+        # editorial instruction itself; there is no contract checklist to
+        # read it from any more.
+        transcript_texts=packet.get("sermon_transcript_texts") or {},
+        # Shared across the repair rounds of one run: a paragraph the repair
+        # did not touch keeps the verdict it was already given, so the gate
+        # converges instead of re-rolling every paragraph each attempt.
+        cache_dir=output_dir / "grounding-cache",
+    )
+    _write_json(
+        output_dir / report_name,
+        {
+            "schema_version": "matthew-exposition-grounding-report-envelope.v1",
+            "generation": {
+                "fingerprint": report["manuscript_sha256"],
+                "generated_at": _utcnow(),
+                "role": "grounding_reviewer",
+                "provider": "anthropic",
+                "model": claude_client.model,
+            },
+            "result": report,
+        },
+    )
+    return report
+
+
+def _repair_grounding(
+    *,
+    manuscript: str,
+    sections: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+    output_dir: Path,
+    openai_client: Any,
+    attempt: int,
+    name: str,
+    force: bool,
+) -> dict[str, Any]:
+    """Rewrite the paragraphs a grounding report named, and nothing else."""
+
+    prompt = _read_prompt("grounding_revision")
+    repair_input = canonical_json(
+        {
+            "manuscript_markdown": manuscript,
+            "findings": findings,
+            # The ledger travels with the draft so the repair can return it
+            # unchanged; regenerating it from scratch loses decision_ids and
+            # anchors that the repair has no reason to touch.
+            "sections": sections,
+        }
+    )
+    fingerprint = generation_fingerprint(
+        inputs={
+            "repair_input_sha256": sha256_text(repair_input),
+            "generation_parameters": _client_generation_parameters(openai_client),
+        },
+        prompt_text=prompt,
+        schema=AUTHOR_RESULT_SCHEMA,
+        model=openai_client.model,
+        reasoning=f"grounding_repair_{attempt}",
+    )
+    repaired, _ = _run_cached_stage(
+        path=output_dir / name,
+        schema_version="matthew-exposition-authoring.v1",
+        fingerprint=fingerprint,
+        producer={
+            "role": "grounding_repair_author",
+            "provider": "openai",
+            "model": openai_client.model,
+            "attempt": attempt,
+        },
+        generate=lambda: openai_client.generate_json(
+            prompt, repair_input, AUTHOR_RESULT_SCHEMA
+        ),
+        force=force,
+    )
+    return repaired
+
+
 def run_authoring(
     *,
     plan_path: Path,
@@ -278,14 +425,39 @@ def run_authoring(
     program_audit_manifest_path: Path | None = None,
     program_audit_draft_id: str | None = None,
     repository_root: Path | None = None,
+    packet: dict[str, Any] | None = None,
+    skip_grounding_gate: bool = False,
+    grounding_attempt: int = 1,
+    max_grounding_attempts: int = 3,
 ) -> dict[str, Any]:
-    packet = build_authoring_packet(
-        plan_path=plan_path,
-        knowledge_path=knowledge_path,
-        contract_path=contract_path,
-        publication_profile_path=publication_profile_path,
-        quality_profile_path=quality_profile_path,
-    )
+    # Both program-audit inputs, and the snapshot file the audit copies, are
+    # checked before the first model call. They are only *used* on a passing
+    # editorial path, at the very end of the run -- so a missing one used to
+    # surface after the author, the grounding gate and both reviewers had been
+    # paid for, and `knowledge_path=None` surfaced as a TypeError out of
+    # `shutil.copyfile` rather than as a reviewable status.
+    if (program_audit_manifest_path is None) != (program_audit_draft_id is None):
+        raise AuthoringContractError(
+            "program audit requires both manifest path and draft_id"
+        )
+    if program_audit_manifest_path is not None and knowledge_path is None:
+        raise AuthoringContractError(
+            "program audit needs the knowledge snapshot the packet was built "
+            "from; pass the compiled snapshot's path as knowledge_path"
+        )
+
+    # A caller that read the plan and its contract from the authoring store
+    # passes the built packet directly; `plan_path` / `contract_path` are then
+    # unused. They remain required for the file-based path, which is still the
+    # only one the CLI exposes.
+    if packet is None:
+        packet = build_authoring_packet(
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     packet_generation = {
         "fingerprint": packet["packet_sha256"],
@@ -321,10 +493,83 @@ def run_authoring(
         editorial_outcome: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
-        if (program_audit_manifest_path is None) != (program_audit_draft_id is None):
-            raise AuthoringContractError(
-                "program audit requires both manifest path and draft_id"
-            )
+        # The gate ran before the writing reviewer, on the author's draft. The
+        # revision then rewrote prose to satisfy editorial findings and nothing
+        # re-checked it, so the manuscript that actually publishes had never
+        # passed the gate at all -- and the revision prompt's own warning names
+        # exactly what it introduces: motives, causes and transitions the
+        # material does not carry, added to complete a chain or to smooth a
+        # sentence. Checking here covers every finishing path; the per-paragraph
+        # cache means an unchanged paragraph costs nothing and only what the
+        # revision actually rewrote is paid for.
+        final_grounding = _run_grounding_stage(
+            draft=manuscript,
+            packet=packet,
+            author_sections=manuscript_sections,
+            output_dir=output_dir,
+            claude_client=claude_client,
+            force=force,
+            skip=skip_grounding_gate,
+            report_name="final-grounding-report.json",
+        )
+        if final_grounding is not None and not final_grounding["passed"]:
+            # The pre-review gate repairs and retries; this one used to only
+            # stop. That asymmetry is not defensible: the revision is exactly
+            # where an unsupported clause gets introduced, so the gate that
+            # catches it is the one most in need of a way back. Matthew
+            # 16:21-23 failed here on a five-word framing its paragraph had not
+            # declared material for, with the whole editorial pass already
+            # paid for.
+            #
+            # Repair, then re-enter through the same recursion the pre-review
+            # gate uses, so the repaired draft is re-grounded before any
+            # reviewer is paid again.
+            if grounding_attempt < max_grounding_attempts and all(
+                finding["code"] == "unsupported_assertion"
+                for finding in final_grounding["findings"]
+            ):
+                repaired = _repair_grounding(
+                    manuscript=manuscript,
+                    sections=manuscript_sections,
+                    findings=final_grounding["findings"],
+                    output_dir=output_dir,
+                    openai_client=openai_client,
+                    attempt=grounding_attempt,
+                    name=f"final-grounding-repair-{grounding_attempt:02d}.json",
+                    force=force,
+                )
+                return run_authoring(
+                    packet=packet,
+                    plan_path=plan_path,
+                    knowledge_path=knowledge_path,
+                    contract_path=contract_path,
+                    publication_profile_path=publication_profile_path,
+                    quality_profile_path=quality_profile_path,
+                    output_dir=output_dir,
+                    openai_client=openai_client,
+                    claude_client=claude_client,
+                    force=force,
+                    auto_accept_maintained_findings=auto_accept_maintained_findings,
+                    seed_author_result=repaired,
+                    revision_round=revision_round,
+                    max_revision_rounds=max_revision_rounds,
+                    program_audit_manifest_path=program_audit_manifest_path,
+                    program_audit_draft_id=program_audit_draft_id,
+                    repository_root=repository_root,
+                    skip_grounding_gate=skip_grounding_gate,
+                    grounding_attempt=grounding_attempt + 1,
+                    max_grounding_attempts=max_grounding_attempts,
+                )
+            return {
+                **result,
+                "status": "final_grounding_gate_failed",
+                "editorial_status": editorial_status,
+                "grounding_attempts": grounding_attempt,
+                "final_grounding_report_path": str(
+                    output_dir / "final-grounding-report.json"
+                ),
+                "unsupported_paragraph_count": len(final_grounding["findings"]),
+            }
         if program_audit_manifest_path is None or program_audit_draft_id is None:
             return result
         audit = _run_program_audit_stage(
@@ -345,8 +590,6 @@ def run_authoring(
         if (
             editorial_outcome.get("manuscript_sha256") != sha256_text(manuscript)
             or editorial_outcome.get("passed") is not True
-            or int(editorial_outcome.get("total_score", -1))
-            < int(packet["quality_profile"]["passing_score"])
             or editorial_outcome.get("hard_gate_failures")
             or editorial_outcome.get("declared_hard_failures")
         ):
@@ -387,6 +630,17 @@ def run_authoring(
             "publication": publication,
         }
 
+    # A grounding repair recurses into the same output directory. Writing its
+    # seeded result over `authoring.json` destroyed the author's own artifact,
+    # whose fingerprint is what lets a re-invocation skip the author call: the
+    # seed's fingerprint is keyed on the seed manuscript, so a fresh run never
+    # matched it and re-drafted the whole article from scratch. One
+    # interrupted run cost six full drafts.
+    author_path = (
+        output_dir / "authoring.json"
+        if grounding_attempt == 1
+        else output_dir / f"authoring-grounding-{grounding_attempt:02d}.json"
+    )
     if seed_author_result is None:
         author_prompt = _read_prompt("author")
         author_fingerprint = generation_fingerprint(
@@ -400,7 +654,7 @@ def run_authoring(
             reasoning=getattr(openai_client, "reasoning_effort", "unknown"),
         )
         author_result, author_cached = _run_cached_stage(
-            path=output_dir / "authoring.json",
+            path=author_path,
             schema_version="matthew-exposition-authoring.v1",
             fingerprint=author_fingerprint,
             producer={"role": "author", "provider": "openai", "model": openai_client.model},
@@ -430,7 +684,7 @@ def run_authoring(
             reasoning="verified_prior_revision",
         )
         author_result, author_cached = _run_cached_stage(
-            path=output_dir / "authoring.json",
+            path=author_path,
             schema_version="matthew-exposition-authoring.v1",
             fingerprint=author_fingerprint,
             producer={
@@ -456,11 +710,80 @@ def run_authoring(
     if author_result["status"] == "plan_change_required":
         return {
             "status": "plan_change_required",
-            "authoring_path": str(output_dir / "authoring.json"),
+            "authoring_path": str(author_path),
             "author_cached": author_cached,
         }
 
     draft = author_result["manuscript_markdown"]
+
+    # Grounding runs before the writing reviewer, not after it. The rubric
+    # scores whether a paragraph reads like a complete argument; it cannot
+    # tell an inference the sources support from one the author supplied,
+    # because the two are indistinguishable in form. Letting an ungrounded
+    # draft reach review means the score is being computed over prose whose
+    # factual basis nothing has checked.
+    grounding_report = _run_grounding_stage(
+        draft=draft,
+        packet=packet,
+        author_sections=author_result.get("sections") or [],
+        output_dir=output_dir,
+        claude_client=claude_client,
+        force=force,
+        skip=skip_grounding_gate,
+    )
+    # A one-word drift from the material must not discard the whole draft.
+    # The gate runs before the writing reviewer, so without this there is no
+    # path back: the author gets one attempt and any paragraph that overreaches
+    # ends the run. Feed the findings back for a bounded, targeted repair.
+    if (
+        grounding_report is not None
+        and not grounding_report["passed"]
+        and grounding_attempt < max_grounding_attempts
+        and all(f["code"] == "unsupported_assertion" for f in grounding_report["findings"])
+    ):
+        repaired = _repair_grounding(
+            manuscript=draft,
+            sections=author_result["sections"],
+            findings=grounding_report["findings"],
+            output_dir=output_dir,
+            openai_client=openai_client,
+            attempt=grounding_attempt,
+            name=f"grounding-repair-{grounding_attempt:02d}.json",
+            force=force,
+        )
+        return run_authoring(
+            packet=packet,
+            plan_path=plan_path,
+            knowledge_path=knowledge_path,
+            contract_path=contract_path,
+            publication_profile_path=publication_profile_path,
+            quality_profile_path=quality_profile_path,
+            output_dir=output_dir,
+            openai_client=openai_client,
+            claude_client=claude_client,
+            force=force,
+            auto_accept_maintained_findings=auto_accept_maintained_findings,
+            seed_author_result=repaired,
+            revision_round=revision_round,
+            max_revision_rounds=max_revision_rounds,
+            continuation_review=continuation_review,
+            continuation_outcome=continuation_outcome,
+            program_audit_manifest_path=program_audit_manifest_path,
+            program_audit_draft_id=program_audit_draft_id,
+            repository_root=repository_root,
+            skip_grounding_gate=skip_grounding_gate,
+            grounding_attempt=grounding_attempt + 1,
+            max_grounding_attempts=max_grounding_attempts,
+        )
+    if grounding_report is not None and not grounding_report["passed"]:
+        return {
+            "status": "grounding_gate_failed",
+            "grounding_attempts": grounding_attempt,
+            "grounding_report_path": str(output_dir / "grounding-report.json"),
+            "authoring_path": str(author_path),
+            "author_cached": author_cached,
+            "unsupported_paragraph_count": len(grounding_report["findings"]),
+        }
     (output_dir / "draft.md").write_text(draft, encoding="utf-8")
     draft_sha = sha256_text(draft)
     if (continuation_review is None) != (continuation_outcome is None):
@@ -468,6 +791,9 @@ def run_authoring(
             "revision continuation requires both baseline review and outcome"
         )
 
+    # Built only on the branch that calls a reviewer; an inherited delta
+    # review has no packet of its own to carry the slice forward.
+    editorial_review_packet: dict[str, Any] | None = None
     if continuation_review is not None and continuation_outcome is not None:
         # A later revision round continues directly from the preceding Delta
         # Review. It must not call a second reviewer before revising again.
@@ -477,6 +803,11 @@ def run_authoring(
             contract=packet["base_contract"],
             manuscript=draft,
             quality_profile=packet["quality_profile"],
+            # This is the merged review inherited from the previous round, not
+            # a fresh assessment. "Below the threshold with nothing blocking
+            # left" is a legitimate state here, and stopping for a human is
+            # already how the runner handles it.
+            require_blocking_finding_when_failing=False,
         )
         comparable_override = {
             key: value
@@ -578,7 +909,9 @@ def run_authoring(
         )
         review_outcome["manuscript_sha256"] = draft_sha
     writing_warnings = deterministic_writing_warnings(
-        draft, packet["quality_profile"]
+        draft,
+        packet["quality_profile"],
+        source_texts=_professor_source_texts(packet),
     )
     # Persist canonical finding IDs and deterministic checks even on a cache hit.
     review_artifact = json.loads((output_dir / "independent-editorial-review.json").read_text(encoding="utf-8"))
@@ -693,12 +1026,30 @@ def run_authoring(
         accepted_ids.update(auto_accepted_ids)
         maintained_ids.clear()
     accepted_findings = [item for item in findings if item["finding_id"] in accepted_ids]
+
+    # A hard failure rests on the finding that evidenced it. If adjudication
+    # rejected that finding, the declaration went with it -- otherwise the run
+    # deadlocks: nothing left to revise, but a one-vote veto still standing.
+    kept_failures, withdrawn_failures = hard_failures_after_adjudication(
+        review, withdrawn_ids
+    )
+    if withdrawn_failures:
+        review["hard_failures"] = kept_failures
+        review_outcome = evaluate_editorial_review(
+            review,
+            packet["quality_profile"],
+            out_of_scope_dimensions(packet["base_contract"]),
+        )
+        review_outcome["manuscript_sha256"] = draft_sha
+
     consensus = {
         "schema_version": "matthew-exposition-reviewed-findings.v1",
         "accepted_finding_ids": sorted(accepted_ids),
         "auto_accepted_maintained_finding_ids": sorted(auto_accepted_ids),
         "withdrawn_finding_ids": sorted(withdrawn_ids),
         "human_required_finding_ids": sorted(maintained_ids),
+        "withdrawn_hard_failures": withdrawn_failures,
+        "rubric_outcome_after_adjudication": review_outcome,
     }
     _write_json(output_dir / "reviewed-editorial-findings.json", consensus)
     if maintained_ids:
@@ -749,6 +1100,19 @@ def run_authoring(
         generate=lambda: openai_client.generate_json(revision_prompt, revision_input, REVISION_SCHEMA),
         force=force,
     )
+    # A revision asking for a plan change is a legitimate outcome: the author
+    # has found that satisfying an accepted finding would need material the
+    # CompositionPlan does not authorise. Handle it before validation, which
+    # rejects the combination of that status with a manuscript -- correctly,
+    # since a handoff must not double as a final draft, but a model returning
+    # both should end the run with a reviewable status rather than a traceback.
+    if revision.get("status") == "plan_change_required":
+        return {
+            "status": "plan_change_required_after_review",
+            "revision_path": str(output_dir / "revision-01.json"),
+            "plan_change_requests": revision.get("plan_change_requests", []),
+            "returned_manuscript_with_handoff": bool(revision.get("manuscript_markdown")),
+        }
     validate_revision_result(
         revision,
         contract=packet["base_contract"],
@@ -766,8 +1130,6 @@ def run_authoring(
         raise AuthoringContractError(
             f"blocking findings cannot be deferred: {sorted(deferred_blocking)}"
         )
-    if revision["status"] == "plan_change_required":
-        return {"status": "plan_change_required_after_review", "revision_path": str(output_dir / "revision-01.json")}
     revised_draft = revision.get("manuscript_markdown", "")
     if not revised_draft.strip():
         raise AuthoringContractError("revision must return the complete manuscript")
@@ -781,6 +1143,10 @@ def run_authoring(
         dispositions=dispositions,
         quality_profile=packet["quality_profile"],
         contract=packet["base_contract"],
+        baseline_sections=author_result["sections"],
+        # The same slice the first reviewer scored against, not a freshly
+        # built one: the two rounds must agree on what the sources say.
+        source_slice=(editorial_review_packet or {}).get("source_slice"),
     )
     _write_json(
         output_dir / "final-delta-review-packet.json",
@@ -845,6 +1211,7 @@ def run_authoring(
     )
     _canonicalize_findings(delta_review, delta_packet["manuscript_sha256"])
     merged_review, final_outcome = merge_final_delta_review(
+        contract=packet["base_contract"],
         baseline_review=review,
         baseline_outcome=review_outcome,
         delta_review=delta_review,
@@ -859,7 +1226,9 @@ def run_authoring(
         "merged_review": merged_review,
         "rubric_outcome": final_outcome,
         "deterministic_warnings": deterministic_writing_warnings(
-            revised_draft, packet["quality_profile"]
+            revised_draft,
+            packet["quality_profile"],
+            source_texts=_professor_source_texts(packet),
         ),
     }
     _write_json(output_dir / "final-delta-editorial-review.json", delta_artifact)
@@ -897,6 +1266,10 @@ def run_authoring(
             program_audit_manifest_path=program_audit_manifest_path,
             program_audit_draft_id=program_audit_draft_id,
             repository_root=repository_root,
+            # Carry the packet so a store-sourced run does not silently fall
+            # back to rebuilding from files on its second revision round.
+            packet=packet,
+            skip_grounding_gate=skip_grounding_gate,
         )
         return {
             **next_result,
@@ -924,9 +1297,28 @@ def run_authoring(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", type=Path, required=True)
-    parser.add_argument("--knowledge", type=Path, required=True)
-    parser.add_argument("--base-contract", type=Path, required=True)
+    # PostgreSQL is the authoring authority. `--plan-id` reads the plan and its
+    # contract from there; `--plan` / `--base-contract` read them from local
+    # JSON, which predates the store and is kept until every article has been
+    # migrated.
+    parser.add_argument(
+        "--plan-id",
+        help=(
+            "CompositionPlan id to read from the authoring store, including its "
+            "authoring contract. Mutually exclusive with --plan/--base-contract."
+        ),
+    )
+    parser.add_argument("--plan", type=Path)
+    parser.add_argument(
+        "--knowledge",
+        type=Path,
+        help=(
+            "Knowledge snapshot file. Omit with --plan-id to compile the "
+            "snapshot from the authoring store instead, so claims promoted "
+            "there are visible to the author."
+        ),
+    )
+    parser.add_argument("--base-contract", type=Path)
     parser.add_argument("--publication-profile", type=Path, required=True)
     parser.add_argument("--quality-profile", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -934,6 +1326,7 @@ def main() -> int:
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-reasoning-effort", default="medium")
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
+    parser.add_argument("--claude-max-output-tokens", type=int, default=64000)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--auto-accept-maintained-findings",
@@ -960,16 +1353,79 @@ def main() -> int:
             "DATA_BASE_DIR/wang-knowledge-platform/repository."
         ),
     )
+    parser.add_argument(
+        "--max-grounding-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Grounding checks per run, so at most this many minus one targeted "
+            "repairs (default: 3). The bound exists so a run cannot loop, not "
+            "to cap it at any particular number: it was 2 when every attempt "
+            "re-checked every paragraph, which was both expensive and unable "
+            "to converge. With per-paragraph verdicts cached, a repair costs "
+            "only the paragraphs it rewrote."
+        ),
+    )
+    parser.add_argument(
+        "--skip-grounding-gate",
+        action="store_true",
+        help=(
+            "Skip the per-paragraph grounding check. Diagnostic only: it removes "
+            "the only check that a paragraph does not assert more than its sources."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    packet = build_authoring_packet(
-        plan_path=args.plan,
-        knowledge_path=args.knowledge,
-        contract_path=args.base_contract,
-        publication_profile_path=args.publication_profile,
-        quality_profile_path=args.quality_profile,
-    )
+    if args.plan_id and (args.plan or args.base_contract):
+        parser.error("--plan-id cannot be combined with --plan or --base-contract")
+    if not args.plan_id and not (args.plan and args.base_contract):
+        parser.error("either --plan-id, or both --plan and --base-contract, are required")
+    if not args.plan_id and not args.knowledge:
+        parser.error("--knowledge is required with --plan/--base-contract")
+    if bool(args.program_audit_manifest) != bool(args.program_audit_draft_id):
+        parser.error(
+            "--program-audit-manifest and --program-audit-draft-id must be given together"
+        )
+    # The manifest is not read until the run has already passed editorial
+    # review, so a draft_id that is absent or duplicated there used to end a
+    # fully paid run. It costs one file read to say so before anything starts.
+    if args.program_audit_manifest:
+        _require_audit_draft(parser, args.program_audit_manifest, args.program_audit_draft_id)
+
+    # Written beside the run's other artifacts rather than into a temporary
+    # directory that disappears with the packet builder: the Program Audit
+    # copies this file at the end of the run, and it is the record of what the
+    # author actually wrote against.
+    knowledge_path = args.knowledge
+    if args.plan_id:
+        load_dotenv(PROJECT_ROOT / ".env")
+        from backend.api.canonical_repository.postgres_store import (
+            PostgresKnowledgeStore,
+        )
+
+        compiled_snapshot_path = (
+            None if args.dry_run or args.knowledge
+            else args.output_dir / "compiled-knowledge-snapshot.json"
+        )
+        packet = build_authoring_packet_from_store(
+            plan_id=args.plan_id,
+            store=PostgresKnowledgeStore(),
+            knowledge_path=args.knowledge,  # None -> compile from the store
+            compiled_snapshot_path=compiled_snapshot_path,
+            publication_profile_path=args.publication_profile,
+            quality_profile_path=args.quality_profile,
+        )
+        if compiled_snapshot_path is not None:
+            knowledge_path = compiled_snapshot_path
+    else:
+        packet = build_authoring_packet(
+            plan_path=args.plan,
+            knowledge_path=args.knowledge,
+            contract_path=args.base_contract,
+            publication_profile_path=args.publication_profile,
+            quality_profile_path=args.quality_profile,
+        )
     if args.dry_run:
         print(
             json.dumps(
@@ -986,8 +1442,9 @@ def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     result = run_authoring(
+        packet=packet,
         plan_path=args.plan,
-        knowledge_path=args.knowledge,
+        knowledge_path=knowledge_path,
         contract_path=args.base_contract,
         publication_profile_path=args.publication_profile,
         quality_profile_path=args.quality_profile,
@@ -1001,12 +1458,19 @@ def main() -> int:
             model=args.claude_model,
             timeout_seconds=args.timeout_seconds,
             max_retries=FINAL_REVIEW_MAX_ATTEMPTS,
+            # The editorial review scores ten dimensions with evidence for each
+            # and then writes its findings, while an adaptive-thinking model
+            # spends its reasoning from this same budget. At the 20000 default
+            # the review came back truncated mid-string.
+            max_output_tokens=args.claude_max_output_tokens,
         ),
         force=args.force,
         auto_accept_maintained_findings=args.auto_accept_maintained_findings,
         max_revision_rounds=args.max_revision_rounds,
         program_audit_manifest_path=args.program_audit_manifest,
         program_audit_draft_id=args.program_audit_draft_id,
+        skip_grounding_gate=args.skip_grounding_gate,
+        max_grounding_attempts=args.max_grounding_attempts,
         repository_root=args.repository_root,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

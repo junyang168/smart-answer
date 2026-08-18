@@ -178,8 +178,15 @@ class KnowledgePackageImporter:
             if not claim.evidence_step_ids:
                 findings.append(f"Claim {claim.claim_id} has no evidence steps")
 
+        # A relation may start at an observation -- that edge is how "the
+        # professor reasoned from this observation" is recorded, and the
+        # extraction schema allows it.  Both layers have to agree, or a package
+        # this store accepts becomes one the importer rejects.  The target
+        # stays an evidence step: observations do not support each other.
+        observation_ids = self._available_ids(records, "observations")
+        relation_sources = evidence_ids | observation_ids
         for relation in records["knowledge_relations"]:
-            if relation.from_id not in evidence_ids or relation.to_id not in evidence_ids:
+            if relation.from_id not in relation_sources or relation.to_id not in evidence_ids:
                 findings.append(
                     f"Knowledge relation {relation.relation_id} has unresolved endpoint(s): "
                     f"{relation.from_id} -> {relation.to_id}"

@@ -154,9 +154,13 @@ def compile_package(
         row["claim_id"] = id_maps["claim"][row["claim_id"]]
         row["evidence_step_ids"] = [id_maps["evidence"][value] for value in row["evidence_step_ids"]]
         row["opposed_position_ids"] = [id_maps["position"][value] for value in row["opposed_position_ids"]]
+    # A relation's source is an evidence step or an observation -- the latter
+    # is how "the professor reasoned from this observation" is recorded.  The
+    # two id spaces do not collide (E001 vs OBS001), so one lookup covers both.
+    relation_sources = {**id_maps["evidence"], **id_maps["observation"]}
     for row in response["evidence_relations"]:
         row["relation_id"] = id_maps["evidence_relation"][row["relation_id"]]
-        row["from_id"] = id_maps["evidence"][row["from_id"]]
+        row["from_id"] = relation_sources[row["from_id"]]
         row["to_id"] = id_maps["evidence"][row["to_id"]]
     for row in response["claim_relations"]:
         row["claim_relation_id"] = id_maps["claim_relation"][row["claim_relation_id"]]

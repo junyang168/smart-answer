@@ -17,6 +17,8 @@
 - 把“建议文章怎么写”伪装成教授主张；
 - 因为同一主张能服务多个产品，就把不同产品的编排决定合并。
 
+某个决定标为 coverage_gap 时，它同时带着一条 editorial_boundary：命令正文写出「现有材料不足以解释本段」。若知识层现在已有可支撑该段的 Claim，光把它加进 claim_ids 是不够的——action、coverage 与 editorial_boundary 是同一个状态，只改前两项会让作者同时收到两道相反的指令。这种情况请一并给出 proposed_editorial_boundary: "withdrawn"。材料仍然不足时留空字符串，不要复述现状。
+
 如果编排本身可以修改，使用 changes_suggested 并给出最小修改。若问题其实出在论证层，应在 argument_layer_findings 登记后续任务；不要靠扩大某个 Claim 来掩盖缺口。只有材料本身无法裁定时才使用 human_review_required。
 
 请直接完成逐项审核，不要展开冗长的内部推演。输出说明应简洁、具体，并优先指出会改变编排或暴露论证层缺口的问题。

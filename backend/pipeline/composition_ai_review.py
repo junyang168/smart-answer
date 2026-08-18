@@ -130,6 +130,10 @@ COMPOSITION_REVIEW_SCHEMA: dict[str, Any] = {
                         "proposed_add_claim_ids": {"type": "array", "items": {"type": "string"}},
                         "proposed_remove_claim_ids": {"type": "array", "items": {"type": "string"}},
                         "proposed_coverage": {"type": "string"},
+                        "proposed_editorial_boundary": {
+                            "type": "string",
+                            "enum": ["", "required", "withdrawn"],
+                        },
                         "rationale": {"type": "string"},
                         "confidence": {"type": "string", "enum": CONFIDENCE},
                         "human_review_reason": {"type": "string"},
@@ -144,6 +148,7 @@ COMPOSITION_REVIEW_SCHEMA: dict[str, Any] = {
                         "proposed_add_claim_ids",
                         "proposed_remove_claim_ids",
                         "proposed_coverage",
+                        "proposed_editorial_boundary",
                         "rationale",
                         "confidence",
                         "human_review_reason",
@@ -162,6 +167,16 @@ PATCH_PROPERTIES = {
     "add_claim_ids": {"type": "array", "items": {"type": "string"}},
     "remove_claim_ids": {"type": "array", "items": {"type": "string"}},
     "coverage": {"type": "string"},
+    # `action`, `coverage` and this are one state, not three: the audit's
+    # `declared_coverage_gap` only exempts a claimless decision when all three
+    # agree. Without this the review could promote a coverage gap to a real
+    # section and route material into it, but not withdraw the note ordering
+    # the author to declare that no material exists.
+    #
+    # A string, not a boolean, because the schema is strict and every patch
+    # field is required: a boolean has no value meaning "leave this alone",
+    # so every accepted patch would restate it. "" is no change, as elsewhere.
+    "editorial_boundary": {"type": "string", "enum": ["", "required", "withdrawn"]},
     "topic_plan_ids": {"type": "array", "items": {"type": "string"}},
     "claim_hierarchy": {
         "type": "object",
@@ -315,6 +330,7 @@ def validate_review(response: dict[str, Any], plan: dict[str, Any], claim_ids: s
             row.get("proposed_add_claim_ids"),
             row.get("proposed_remove_claim_ids"),
             row.get("proposed_coverage"),
+            row.get("proposed_editorial_boundary"),
         ]
         if row["decision"] == "pass":
             _require(not issues, f"{decision_id}: pass cannot contain issues")
@@ -343,6 +359,7 @@ def validate_adjudication(
     response: dict[str, Any],
     actionable_reviews: list[dict[str, Any]],
     claim_ids: set[str],
+    plan_id: str | None = None,
 ) -> None:
     _require(
         response.get("scope_confirmation")
@@ -357,6 +374,14 @@ def validate_adjudication(
     for row in rows:
         patch = row.get("patch") or {}
         _require(patch.get("action", "") in COMPOSITION_ACTIONS, f"{row['decision_id']}: invalid action")
+        # `topic_plan_ids` routes a decision out to a *topic* plan. Naming the
+        # plan the decision already belongs to routes it to itself, which says
+        # nothing and survived the "must be a real plan_id" rule because the
+        # plan's own id is, of course, real.
+        _require(
+            plan_id is None or plan_id not in (patch.get("topic_plan_ids") or []),
+            f"{row['decision_id']}: topic_plan_ids cannot name the decision's own plan",
+        )
         hierarchy = patch.get("claim_hierarchy") or {}
         hierarchy_claim_ids = [
             hierarchy.get("paragraph_thesis"),
@@ -410,6 +435,53 @@ def review_fingerprint(*, plan_bytes: bytes, knowledge_bytes: bytes, prompt: str
     return identity
 
 
+# `CompositionDecisionRecord` accepts either spelling of these two fields and
+# reads the first of each pair first. A decision read out of the store carries
+# the first spelling; a patch is written in the second. Setting only the second
+# leaves the stale first in place, so the reviewed candidate looks changed and
+# is silently restored to its old value the moment it is ingested. Whenever a
+# patch touches one of these, both spellings have to move together.
+_ALIASED_DECISION_FIELDS = (("decision_type", "action"), ("reason", "rationale"))
+
+
+def _set_decision_field(target: dict[str, Any], patched: str, value: Any) -> None:
+    target[patched] = value
+    for stored, alias in _ALIASED_DECISION_FIELDS:
+        if patched == alias and stored in target:
+            target[stored] = value
+
+
+def _retire_stale_coverage_boundary(
+    plan: dict[str, Any], decision: dict[str, Any]
+) -> None:
+    """Drop the authoring boundary a decision no longer needs.
+
+    A CompositionPlan record carries two halves that constrain the same
+    passage: the composition decisions, and the authoring contract the writer
+    works from. Each `coverage_boundaries` entry names the decision it belongs
+    to, and exists to say "this passage has no material, keep it to scripture
+    and a short note". When the review routes material into that decision, the
+    boundary is stale by construction -- nothing was decided about it, its
+    premise simply stopped being true.
+
+    Left behind, the writer receives both instructions at once: use this claim,
+    and do not explain this passage. That is not a question for an editor; it
+    is half a rebuild.
+    """
+
+    decision_id = decision.get("decision_id")
+    still_a_gap = (decision.get("action") or decision.get("decision_type")) == "coverage_gap"
+    if not decision_id or still_a_gap:
+        return
+    for section in plan.get("authoring_sections") or []:
+        boundaries = section.get("coverage_boundaries")
+        if not boundaries:
+            continue
+        section["coverage_boundaries"] = [
+            item for item in boundaries if item.get("decision_id") != decision_id
+        ]
+
+
 def apply_consensus(
     plan: dict[str, Any],
     adjudication: dict[str, Any],
@@ -428,13 +500,21 @@ def apply_consensus(
             patch = row["patch"]
             target = decisions[decision_id]
             if patch.get("action"):
-                target["action"] = patch["action"]
+                _set_decision_field(target, "action", patch["action"])
             if patch.get("decision_text"):
                 target["decision"] = patch["decision_text"]
             if patch.get("rationale"):
-                target["rationale"] = patch["rationale"]
+                _set_decision_field(target, "rationale", patch["rationale"])
             if patch.get("coverage"):
                 target["coverage"] = patch["coverage"]
+            if patch.get("editorial_boundary") == "withdrawn":
+                # Drop the whole boundary rather than leaving `required: false`
+                # behind: the audit reads `editorial_boundary.required`, and a
+                # decision that no longer needs an editorial note has nothing
+                # left to say about one.
+                target.pop("editorial_boundary", None)
+            elif patch.get("editorial_boundary") == "required":
+                target.setdefault("editorial_boundary", {})["required"] = True
             if patch.get("topic_plan_ids"):
                 target["topic_plan_ids"] = patch["topic_plan_ids"]
             if patch.get("claim_hierarchy") and any(patch["claim_hierarchy"].values()):
@@ -457,6 +537,7 @@ def apply_consensus(
                     item for item in patch["argument_layer_followups"]
                     if item not in followups
                 )
+            _retire_stale_coverage_boundary(result, target)
             outcomes.append({"decision_id": decision_id, "status": "auto_applied"})
             continue
         reconsidered_row = reconsidered.get(decision_id)

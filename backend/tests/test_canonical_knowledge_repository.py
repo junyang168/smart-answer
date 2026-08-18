@@ -280,3 +280,37 @@ def test_claim_change_invalidates_reverse_product_dependency(tmp_path: Path) -> 
     assert len(events) == 1
     assert dependency_id in events[0].affected_dependency_ids
     assert "withdraw_or_rebuild_published_consumers" in events[0].required_actions
+
+
+def test_a_relation_may_start_at_an_observation():
+    """The extraction schema allows observation -> evidence_step, so the
+    importer must too; otherwise the store accepts a package the importer
+    then rejects."""
+    from backend.api.canonical_repository.knowledge_importer import (
+        KnowledgePackageImporter,
+        KnowledgePackageValidationError,
+    )
+
+    class _EmptyStore:
+        def list_knowledge_records(self, collection):
+            return []
+
+    def _records(from_id):
+        return KnowledgePackageImporter._model_records({
+            "package_id": "T",
+            "observations": [{"observation_id": "OBS-1", "statement": "原文作『陰間的門』。"}],
+            "evidence_steps": [{"evidence_step_id": "E-1", "statement": "所以不能勝過教會。"}],
+            "knowledge_relations": [{
+                "relation_id": "KR-1", "from_id": from_id, "to_id": "E-1",
+                "relation_type": "supports", "reason": "教授據此推論。",
+            }],
+        })
+
+    importer = KnowledgePackageImporter.__new__(KnowledgePackageImporter)
+    importer.store = _EmptyStore()
+
+    importer._validate_links(_records("OBS-1"))
+    importer._validate_links(_records("E-1"))
+
+    with pytest.raises(KnowledgePackageValidationError):
+        importer._validate_links(_records("OBS-999"))

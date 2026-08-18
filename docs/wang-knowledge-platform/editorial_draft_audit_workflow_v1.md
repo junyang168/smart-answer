@@ -173,6 +173,18 @@ Author Agent 若把完整經文集中放在 `經文與問題`，runner 可以把
 
 任何一步缺失，或引用了不存在的教授主張，均為硬錯誤。若現有材料沒有形成完整且與本段高度相關的推論鏈，正確處理是省略生活應用，而不是讓 AI 生成一段看似合理的勸勉；未採用的來源材料仍按 `material_dispositions` 保存，不得從知識庫消失。
 
+#### 由內容觸發，不由標題觸發
+
+生活應用是編輯部正當的著作內容，不是被禁止的內容；被禁止的只有「未登記」。因此這項檢查不再以是否存在 `生活應用` 小標題為前提。太16:21–23 的發布稿把應用寫在「神學意義」的最後一段，舊規則因為找不到該標題而整條跳過，正是這個機制讓一段無源勸勉通過了審計。
+
+程序無法閱讀散文，也不應以「今天」「我們應當」之類的字面特徵猜測；猜測會把正常釋經誤判為應用。判定改為以段落自己的 provenance 宣告為準：
+
+- 段落宣告 `application_chain_id`，該 ID 必須對應 `application_chains` 中一條**完整且教授解釋端可解析**的鏈；
+- 出版體例 `application_policy.declaration_required_attributions`（預設 `editorial_synthesis`）所列歸屬的段落，以及應用欄目底下的每一段，必須二選一：宣告 `application_chain_id`，或以 `"contains_application": false` 明確聲明不提出今日處境與行動建議；
+- 兩者皆無即為硬錯誤 `undeclared_application_content`，無論它寫在哪一個標題底下。
+
+`application_policy` 由出版體例統一持有。Manifest 可以指定不同的欄目名稱或**增列**需要聲明的歸屬，但不能靠省略自己的 `application_policy` 把檢查關掉：兩處的 `requires_registered_chains` 取或，`declaration_required_attributions` 取聯集。
+
 ### 4.7 專題轉介
 
 若初稿把深入內容轉介至專題，審計器檢查 `KnowledgeRoute` 和目標連結：

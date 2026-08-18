@@ -1,10 +1,9 @@
 {
   "schema_version": "editorial-writing-quality-profile.v1",
   "profile_id": "WQ-matthew-exposition-v1",
-  "revision": 2,
+  "revision": 4,
   "title": "馬太福音釋經文章寫作質量",
-  "passing_score": 90,
-  "reference_score": 90,
+  "reference_score": 80,
   "hard_gate_dimensions": [
     "source_and_exegesis",
     "base_manuscript_preservation",
@@ -12,16 +11,56 @@
     "theological_tension_and_attribution"
   ],
   "dimensions": [
-    { "id": "source_and_exegesis", "weight": 15, "minimum": 12 },
-    { "id": "base_manuscript_preservation", "weight": 15, "minimum": 12 },
-    { "id": "exegetical_reasoning", "weight": 15, "minimum": 12 },
-    { "id": "argument_organization", "weight": 10, "minimum": 0 },
-    { "id": "general_reader_readability", "weight": 10, "minimum": 0 },
-    { "id": "editorial_voice_restraint", "weight": 10, "minimum": 0 },
-    { "id": "approved_written_style", "weight": 10, "minimum": 0 },
-    { "id": "theological_tension_and_attribution", "weight": 5, "minimum": 4 },
-    { "id": "concision_without_compression", "weight": 5, "minimum": 0 },
-    { "id": "pastoral_theological_landing", "weight": 5, "minimum": 0 }
+    {
+      "id": "source_and_exegesis",
+      "weight": 15,
+      "minimum": 12
+    },
+    {
+      "id": "base_manuscript_preservation",
+      "weight": 15,
+      "minimum": 12
+    },
+    {
+      "id": "exegetical_reasoning",
+      "weight": 15,
+      "minimum": 12
+    },
+    {
+      "id": "argument_organization",
+      "weight": 10,
+      "minimum": 8
+    },
+    {
+      "id": "general_reader_readability",
+      "weight": 10,
+      "minimum": 8
+    },
+    {
+      "id": "editorial_voice_restraint",
+      "weight": 10,
+      "minimum": 8
+    },
+    {
+      "id": "approved_written_style",
+      "weight": 10,
+      "minimum": 8
+    },
+    {
+      "id": "theological_tension_and_attribution",
+      "weight": 5,
+      "minimum": 4
+    },
+    {
+      "id": "concision_without_compression",
+      "weight": 5,
+      "minimum": 4
+    },
+    {
+      "id": "pastoral_theological_landing",
+      "weight": 5,
+      "minimum": 4
+    }
   ],
   "hard_failures": [
     "load_bearing_base_argument_removed_or_reordered",
@@ -42,8 +81,12 @@
       "inference_bridge",
       "qualified_conclusion"
     ],
-    "maximum_score_when_load_bearing_steps_are_only_summarized": 89,
-    "failure_example": "Merely listing Petros/petra, Ephesians 2:20, and the conclusion without explaining how each step advances or limits the interpretation."
+    "failure_example": "Merely listing Petros/petra, Ephesians 2:20, and the conclusion without explaining how each step advances or limits the interpretation.",
+    "dimensions_below_minimum_when_load_bearing_steps_are_only_summarized": [
+      "base_manuscript_preservation",
+      "exegetical_reasoning",
+      "concision_without_compression"
+    ]
   },
   "deterministic_warnings": {
     "production_language_terms": [
@@ -61,7 +104,12 @@
       "王教授強調",
       "按王教授"
     ],
-    "visible_editor_labels": ["編輯說明", "編輯導讀", "編者按", "資料說明"],
+    "visible_editor_labels": [
+      "編輯說明",
+      "編輯導讀",
+      "編者按",
+      "資料說明"
+    ],
     "max_professor_name_mentions_per_1000_cjk_chars": 3,
     "max_visible_editor_labels_per_article": 2
   }
