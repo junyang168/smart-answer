@@ -55,9 +55,12 @@ label.zoom{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
 input[type=range]{width:104px}
 
 main{flex:1;display:flex;min-height:0}
+#gutter{width:106px;flex:none;border-right:1px solid var(--rule);background:var(--card);
+  overflow:hidden;position:relative}
+#gutter .inner{position:absolute;inset:0}
 #canvas-wrap{flex:1;overflow:auto;position:relative}
 #stage{position:relative;transform-origin:0 0}
-.lane-label{position:absolute;left:0;font-size:11px;letter-spacing:.06em;color:var(--muted);
+.lane-label{position:absolute;left:0;right:0;font-size:11px;letter-spacing:.06em;color:var(--muted);
   padding-left:10px;pointer-events:none;font-weight:600}
 .lane-label i{display:block;font-style:normal;font-weight:400;font-size:10px;color:var(--faint);letter-spacing:0}
 .lane-rule{position:absolute;left:0;border-top:1px dashed var(--rule);pointer-events:none}
@@ -120,13 +123,52 @@ aside h3{font-size:11px;letter-spacing:.07em;color:var(--muted);margin:16px 0 6p
 .none{color:var(--faint);font-size:12px}
 footer{border-top:1px solid var(--rule);padding:6px 16px;font-size:11px;color:var(--faint);
   background:var(--card);display:flex;gap:15px;flex-wrap:wrap}
+
+#minimap{position:relative;height:38px;border-bottom:1px solid var(--rule);background:var(--card);
+  cursor:crosshair;overflow:hidden;flex:none}
+#minimap .mm{position:absolute;border-radius:1px}
+#minimap .vp{position:absolute;top:0;bottom:0;border:1px solid var(--indigo);
+  background:color-mix(in srgb, var(--indigo) 12%, transparent);pointer-events:none}
+#minimap .mmlabel{position:absolute;left:6px;top:2px;font-size:9.5px;color:var(--faint);
+  font-family:var(--font-data);pointer-events:none}
+
+#results{position:absolute;top:44px;left:0;width:min(560px,60vw);max-height:60vh;overflow:auto;
+  background:var(--card);border:1px solid var(--rule-strong);border-radius:9px;z-index:40;
+  box-shadow:0 8px 28px rgba(0,0,0,.22);padding:5px}
+#results:empty{display:none}
+#results .hit{display:block;width:100%;text-align:left;border:0;background:transparent;font:inherit;
+  font-size:12px;padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--ink)}
+#results .hit:hover{background:var(--indigo-soft)}
+#results .hit .where{display:block;font-size:10px;color:var(--faint);font-family:var(--font-data)}
+#results .more{font-size:11px;color:var(--faint);padding:4px 8px}
+.searchwrap{position:relative}
+
+#overview{flex:1;overflow:auto;padding:22px 26px}
+#overview h2{font-size:15px;margin:0 0 4px;font-weight:650}
+#overview p.lead{margin:0 0 18px;color:var(--muted);font-size:12.5px;max-width:74ch;line-height:1.75}
+table.ov{border-collapse:collapse;width:100%;font-size:12.5px}
+table.ov th{text-align:right;font-weight:600;color:var(--muted);font-size:11px;padding:0 8px 7px;
+  border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+table.ov th:first-child,table.ov td:first-child{text-align:left}
+table.ov td{padding:7px 8px;border-bottom:1px solid var(--rule);text-align:right;
+  font-family:var(--font-data);white-space:nowrap}
+table.ov tr{cursor:pointer}
+table.ov tbody tr:hover td{background:var(--indigo-soft)}
+table.ov td.name{font-family:var(--font-ui);max-width:34ch;overflow:hidden;text-overflow:ellipsis}
+table.ov td.name i{font-style:normal;color:var(--faint);font-size:10.5px;font-family:var(--font-data);
+  margin-left:7px}
+.bar{display:inline-block;height:7px;border-radius:2px;vertical-align:middle;margin-left:7px}
+.bar.linked{background:var(--supports)} .bar.iso{background:var(--warn)}
+td .gap{color:var(--warn)}
+td .ok{color:var(--good)}
 </style>
 </head>
 <body>
 <header>
   <h1>論證層<small>authoring store · 直接讀 PostgreSQL</small></h1>
+  <button class="chip" id="to-overview">← 全庫總覽</button>
   <select id="source"></select>
-  <input type="search" id="search" placeholder="搜尋節點文字…">
+  <span class="searchwrap"><input type="search" id="search" placeholder="搜尋全庫節點文字…"><div id="results"></div></span>
   <div class="stats" id="stats"></div>
 </header>
 
@@ -147,7 +189,11 @@ footer{border-top:1px solid var(--rule);padding:6px 16px;font-size:11px;color:va
   <label class="zoom">縮放 <input type="range" id="zoom" min="30" max="150" value="72"><span id="zoomval">72%</span></label>
 </div>
 
+<div id="minimap"></div>
+
 <main>
+  <div id="overview"></div>
+  <div id="gutter"><div class="inner"></div></div>
   <div id="canvas-wrap"><div id="stage"><svg id="edges"></svg></div></div>
   <aside id="detail" class="empty">點任一節點看教授原話、關係與審核狀態</aside>
 </main>
@@ -169,7 +215,7 @@ const LANE_HINT = ['問題與反方立場','經文、原文、歷史背景','推
 const OBS_LANE = LANES.length;
 
 const COL_W = 132, GAP_X = 10, LANE_H = 112, CLAIM_H = 66, CLAIM_GAP = 6,
-      PAD_L = 104, PAD_T = 12, ZONE_GAP = 16;
+      PAD_L = 16, PAD_T = 12, ZONE_GAP = 16;
 
 const REL_COLOR = {supports:'--supports',qualifies:'--qualifies',refutes:'--refutes',
   answers:'--answers',applies:'--applies',contextualizes:'--contextualizes'};
@@ -178,7 +224,7 @@ const KIND_NAME = {step:'論證步驟',question:'問題',position:'反方立場'
 const ELIG_BAD = e => !!e && (e.startsWith('withheld') || e === 'context_only' || e === 'contextual_only');
 
 const state = {
-  source:0, rels:new Set(Object.keys(REL_COLOR)), isolated:false, withheld:false,
+  view:'overview', source:0, rels:new Set(Object.keys(REL_COLOR)), isolated:false, withheld:false,
   showObs:true, showClaims:true, zoom:0.72, selected:null, search:''
 };
 
@@ -187,7 +233,11 @@ const el = {
   edges:document.getElementById('edges'), detail:document.getElementById('detail'),
   stats:document.getElementById('stats'), wrap:document.getElementById('canvas-wrap'),
   zoom:document.getElementById('zoom'), zoomval:document.getElementById('zoomval'),
-  search:document.getElementById('search'), foot:document.getElementById('foot-note')
+  search:document.getElementById('search'), foot:document.getElementById('foot-note'),
+  overview:document.getElementById('overview'), minimap:document.getElementById('minimap'),
+  gutter:document.getElementById('gutter'), gutterInner:document.querySelector('#gutter .inner'),
+  results:document.getElementById('results'), toOverview:document.getElementById('to-overview'),
+  toolbar:document.querySelector('.toolbar')
 };
 
 DATA.sources.forEach((s,i)=>{
@@ -273,11 +323,6 @@ function render(){
     rule.className = 'zone-rule';
     rule.style.cssText = `top:${laneTop - ZONE_GAP/2}px;width:${width}px`;
     el.stage.appendChild(rule);
-    const lab = document.createElement('div');
-    lab.className = 'lane-label';
-    lab.style.cssText = `top:${PAD_T}px;width:${PAD_L}px;color:var(--claim)`;
-    lab.innerHTML = `共享主張<i>${src.stats.claims} 條</i>`;
-    el.stage.appendChild(lab);
   }
   const labels = state.showObs ? [...LANES,'觀察'] : LANES;
   labels.forEach((name,i)=>{
@@ -285,14 +330,8 @@ function render(){
     rule.className = 'lane-rule';
     rule.style.cssText = `top:${laneTop + i*LANE_H - 8}px;width:${width}px`;
     el.stage.appendChild(rule);
-    const lab = document.createElement('div');
-    lab.className = 'lane-label';
-    lab.style.cssText = `top:${laneTop + i*LANE_H - 4}px;width:${PAD_L}px`;
-    const hint = i===OBS_LANE ? `${src.stats.observations} 條，進入論證 ${src.stats.observations_linked}` : LANE_HINT[i];
-    lab.innerHTML = `${name}<i>${escapeHtml(hint)}</i>`;
-    if(i===OBS_LANE) lab.style.color = 'var(--obs)';
-    el.stage.appendChild(lab);
   });
+  current.geo = {laneTop, labels};
 
   const q = state.search.trim();
   const visible = new Map();
@@ -388,6 +427,29 @@ function render(){
   current.visible = visible; current.paths = paths; current.members = members;
   renderStats(src);
   highlight(state.selected);
+  renderMinimap();
+  renderGutter();
+}
+
+// Lane names live outside the scrolling canvas: scroll to the end of an
+// argument and you still need to know which row is 結論.
+function renderGutter(){
+  if(state.view !== 'source') return;
+  const {laneTop, labels} = current.geo;
+  const z = state.zoom;
+  let html = '';
+  if(current.L.claimRows)
+    html += `<div class="lane-label" style="top:${PAD_T*z}px;color:var(--claim)">`
+      + `共享主張<i>${current.src.stats.claims} 條</i></div>`;
+  labels.forEach((name,i)=>{
+    const hint = i===OBS_LANE
+      ? `${current.src.stats.observations} 條，入論證 ${current.src.stats.observations_linked}`
+      : LANE_HINT[i];
+    html += `<div class="lane-label" style="top:${(laneTop + i*LANE_H - 4)*z}px`
+      + `${i===OBS_LANE?';color:var(--obs)':''}">${escapeHtml(name)}<i>${escapeHtml(hint)}</i></div>`;
+  });
+  el.gutterInner.innerHTML = html;
+  el.gutterInner.style.transform = `translateY(${-el.wrap.scrollTop}px)`;
 }
 
 function renderStats(src){
@@ -531,19 +593,160 @@ function scrollToNode(id){
   el.wrap.scrollTo({left: v.box.x*state.zoom - el.wrap.clientWidth/2 + 80, behavior:'smooth'});
 }
 
-el.source.addEventListener('change', ()=>{
-  state.source = +el.source.value; state.selected = null;
+// ---- corpus overview -------------------------------------------------
+// Twenty-four sources is more than a dropdown can show honestly, and the
+// numbers that matter — how much of a source never entered the argument —
+// are exactly the ones a picker hides.
+function renderOverview(){
+  const maxSteps = Math.max(...DATA.sources.map(s=>s.stats.steps), 1);
+  const rows = DATA.sources.map((src,i)=>{
+    const s = src.stats;
+    const w = 96 * s.steps / maxSteps;
+    const isoW = s.steps ? w * s.steps_isolated / s.steps : 0;
+    const obsGap = s.observations - s.observations_linked;
+    return `<tr data-src="${i}">
+      <td class="name">${escapeHtml(src.title)}${src.source_type==='notes_manuscript'?'<i>手稿</i>':''}${src.note?`<i>${escapeHtml(src.note)}</i>`:''}</td>
+      <td>${s.steps}<span class="bar linked" style="width:${Math.max(0,w-isoW)}px"></span><span class="bar iso" style="width:${isoW}px"></span></td>
+      <td class="${s.steps_isolated?'gap':'ok'}">${s.steps_isolated}</td>
+      <td>${s.edges || '<span class="gap">0</span>'}</td>
+      <td>${s.claims}</td>
+      <td>${s.questions}</td>
+      <td>${s.positions}</td>
+      <td>${s.observations}</td>
+      <td class="${obsGap?'gap':'ok'}">${obsGap}</td>
+    </tr>`;
+  }).join('');
+  const T = DATA.totals;
+  el.overview.innerHTML = `<h2>全庫論證層總覽</h2>
+    <p class="lead">每一列是一個來源。「孤立」是沒有任何關係邊的 evidence_step，
+    「觀察未入論證」是沒有任何關係邊的 observation。這兩欄不是資料品質分數，
+    是還沒有人做過的判斷有多少。點任一列進入該來源的論證圖。</p>
+    <table class="ov">
+      <thead><tr><th>來源</th><th>步驟</th><th>孤立</th><th>關係</th><th>主張</th>
+        <th>問題</th><th>反方</th><th>觀察</th><th>觀察未入論證</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td class="name"><b>全庫 ${DATA.sources.length} 個來源</b></td>
+        <td>${T.steps}</td><td class="gap">${T.steps_isolated}</td><td>${T.edges}</td>
+        <td>${T.claims}</td><td>${T.questions}</td><td>${T.positions}</td>
+        <td>${T.observations}</td><td class="gap">${T.observations - T.observations_linked}</td>
+      </tr></tfoot>
+    </table>`;
+  el.overview.querySelectorAll('tbody tr').forEach(tr=>
+    tr.addEventListener('click', ()=>openSource(+tr.dataset.src)));
+}
+
+function setView(view){
+  state.view = view;
+  const source = view === 'source';
+  el.overview.style.display = source ? 'none' : 'block';
+  el.wrap.style.display = source ? 'block' : 'none';
+  el.detail.style.display = source ? 'block' : 'none';
+  el.minimap.style.display = source ? 'block' : 'none';
+  el.gutter.style.display = source ? 'block' : 'none';
+  el.toolbar.style.display = source ? 'flex' : 'none';
+  el.source.style.display = source ? 'block' : 'none';
+  el.toOverview.style.display = source ? 'inline-flex' : 'none';
+  el.stats.style.visibility = source ? 'visible' : 'hidden';
+  if(!source) renderOverview();
+}
+
+function openSource(index){
+  state.source = index;
+  state.selected = null;
+  el.source.value = String(index);
   el.detail.className = 'empty';
   el.detail.textContent = '點任一節點看教授原話、關係與審核狀態';
   el.wrap.scrollLeft = 0;
+  setView('source');
   render();
+}
+
+// ---- minimap ---------------------------------------------------------
+// A source is several thousand pixels wide; without an overview strip the
+// only way to find the far end of an argument is to scroll blindly.
+function renderMinimap(){
+  if(state.view !== 'source') return;
+  const stageW = parseFloat(el.stage.style.width) || 1;
+  const mmW = el.minimap.clientWidth || 1;
+  const scale = mmW / stageW;
+  const laneRow = n => n.kind==='claim' ? 0 : n.lane===OBS_LANE ? 7 : n.lane+1;
+  const marks = [...current.visible.values()].map(({node,box})=>{
+    const color = node.kind==='claim' ? 'var(--claim)'
+      : node.lane===OBS_LANE ? 'var(--obs)' : `var(--lane${node.lane})`;
+    return `<i class="mm" style="left:${box.x*scale}px;width:${Math.max(1.5,COL_W*scale)}px;`
+      + `top:${3 + laneRow(node)*4}px;height:3px;background:${color};`
+      + `${node.kind==='observation' && !node.linked ? 'opacity:.45' : ''}"></i>`;
+  }).join('');
+  el.minimap.innerHTML = marks + `<span class="mmlabel">${escapeHtml(current.src.title)}</span><div class="vp"></div>`;
+  syncViewport();
+}
+
+function syncViewport(){
+  const vp = el.minimap.querySelector('.vp');
+  if(!vp) return;
+  const stageW = parseFloat(el.stage.style.width) || 1;
+  const scale = (el.minimap.clientWidth || 1) / stageW;
+  vp.style.left = (el.wrap.scrollLeft / state.zoom) * scale + 'px';
+  vp.style.width = Math.min(stageW, el.wrap.clientWidth / state.zoom) * scale + 'px';
+}
+
+function minimapScroll(event){
+  const stageW = parseFloat(el.stage.style.width) || 1;
+  const scale = (el.minimap.clientWidth || 1) / stageW;
+  const x = event.clientX - el.minimap.getBoundingClientRect().left;
+  el.wrap.scrollLeft = (x / scale) * state.zoom - el.wrap.clientWidth/2;
+}
+el.minimap.addEventListener('pointerdown', e=>{ minimapScroll(e); el.minimap.setPointerCapture(e.pointerId); });
+el.minimap.addEventListener('pointermove', e=>{ if(e.buttons) minimapScroll(e); });
+el.wrap.addEventListener('scroll', ()=>{
+  syncViewport();
+  el.gutterInner.style.transform = `translateY(${-el.wrap.scrollTop}px)`;
 });
+window.addEventListener('resize', ()=>{ renderMinimap(); });
+
+// ---- search across every source --------------------------------------
+function runSearch(){
+  const q = state.search.trim();
+  highlight(state.selected);
+  if(q.length < 1){ el.results.innerHTML = ''; return; }
+  const hits = [];
+  DATA.sources.forEach((src,i)=>{
+    const scan = (items, kind) => items.forEach(item=>{
+      if(hits.length >= 200) return;
+      const text = item.statement || item.text || '';
+      if(text.includes(q) || item.id.includes(q)) hits.push({src:i, kind, item, text});
+    });
+    scan(src.claims,'claim'); scan(src.steps,'step'); scan(src.questions,'question');
+    scan(src.observations,'observation'); scan(src.positions,'position');
+  });
+  if(!hits.length){ el.results.innerHTML = '<p class="more">沒有符合的節點。</p>'; return; }
+  el.results.innerHTML = hits.slice(0,40).map((h,idx)=>
+    `<button class="hit" data-hit="${idx}">${escapeHtml(h.text.slice(0,80))}
+      <span class="where">${escapeHtml(KIND_NAME[h.kind])}　${escapeHtml(h.item.id)}　${escapeHtml(DATA.sources[h.src].title)}</span></button>`).join('')
+    + (hits.length > 40 ? `<p class="more">另有 ${hits.length-40} 筆未列出</p>` : '');
+  el.results.querySelectorAll('[data-hit]').forEach(b=>b.addEventListener('click', ()=>{
+    const hit = hits[+b.dataset.hit];
+    if(hit.src !== state.source || state.view !== 'source') openSource(hit.src);
+    el.results.innerHTML = '';
+    select(hit.item.id);
+    scrollToNode(hit.item.id);
+  }));
+}
+document.addEventListener('click', e=>{
+  if(!e.target.closest('.searchwrap')) el.results.innerHTML = '';
+});
+
+el.toOverview.addEventListener('click', ()=>{ el.results.innerHTML=''; setView('overview'); });
+el.source.addEventListener('change', ()=>{ openSource(+el.source.value); });
 el.zoom.addEventListener('input', ()=>{
   state.zoom = +el.zoom.value/100;
   el.zoomval.textContent = el.zoom.value+'%';
   el.stage.style.transform = `scale(${state.zoom})`;
+  syncViewport();
+  renderGutter();
 });
-el.search.addEventListener('input', ()=>{ state.search = el.search.value; highlight(state.selected); });
+el.search.addEventListener('input', ()=>{ state.search = el.search.value; runSearch(); });
 document.querySelectorAll('[data-rel]').forEach(b=>b.addEventListener('click', ()=>{
   const on = b.getAttribute('aria-pressed')==='true';
   b.setAttribute('aria-pressed', String(!on));
@@ -562,7 +765,7 @@ Object.entries({'f-isolated':'isolated','f-withheld':'withheld','f-obs':'showObs
   });
 
 el.source.value = '0';
-render();
+setView('overview');
 </script>
 </body>
 </html>

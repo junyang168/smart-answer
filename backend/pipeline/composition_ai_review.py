@@ -435,6 +435,22 @@ def review_fingerprint(*, plan_bytes: bytes, knowledge_bytes: bytes, prompt: str
     return identity
 
 
+# `CompositionDecisionRecord` accepts either spelling of these two fields and
+# reads the first of each pair first. A decision read out of the store carries
+# the first spelling; a patch is written in the second. Setting only the second
+# leaves the stale first in place, so the reviewed candidate looks changed and
+# is silently restored to its old value the moment it is ingested. Whenever a
+# patch touches one of these, both spellings have to move together.
+_ALIASED_DECISION_FIELDS = (("decision_type", "action"), ("reason", "rationale"))
+
+
+def _set_decision_field(target: dict[str, Any], patched: str, value: Any) -> None:
+    target[patched] = value
+    for stored, alias in _ALIASED_DECISION_FIELDS:
+        if patched == alias and stored in target:
+            target[stored] = value
+
+
 def apply_consensus(
     plan: dict[str, Any],
     adjudication: dict[str, Any],
@@ -453,19 +469,11 @@ def apply_consensus(
             patch = row["patch"]
             target = decisions[decision_id]
             if patch.get("action"):
-                target["action"] = patch["action"]
-                # The store spells this `decision_type` and the projection
-                # spells it `action`; `CompositionDecisionRecord` accepts
-                # either but reads `decision_type` first. Writing only
-                # `action` onto a store-sourced decision therefore looks
-                # applied here and is silently discarded on ingest, restoring
-                # the value the review just changed.
-                if "decision_type" in target:
-                    target["decision_type"] = patch["action"]
+                _set_decision_field(target, "action", patch["action"])
             if patch.get("decision_text"):
                 target["decision"] = patch["decision_text"]
             if patch.get("rationale"):
-                target["rationale"] = patch["rationale"]
+                _set_decision_field(target, "rationale", patch["rationale"])
             if patch.get("coverage"):
                 target["coverage"] = patch["coverage"]
             if patch.get("editorial_boundary") == "withdrawn":

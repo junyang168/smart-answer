@@ -501,6 +501,28 @@ def test_promoting_an_action_updates_the_name_the_store_reads_first() -> None:
     assert decision["decision_type"] == "main_section"
 
 
+def test_a_patched_rationale_replaces_the_reason_the_store_reads_first() -> None:
+    """The same alias trap one field over: `reason` is read before
+    `rationale`, so a promoted decision kept the justification for the
+    coverage gap it had just stopped being.
+    """
+
+    plan = _coverage_gap_plan()
+    plan["decisions"][0]["reason"] = "教授未講透之處也不可由AI填滿。"
+    patch = _empty_patch()
+    patch["rationale"] = "材料已足以解釋本段，coverage_gap 前提不再成立。"
+    candidate, _ = apply_consensus(
+        plan,
+        {"adjudications": [
+            {"decision_id": "CD-1", "decision": "accept", "rationale": "同意", "patch": patch}
+        ]},
+        None,
+    )
+    decision = candidate["decisions"][0]
+    assert decision["rationale"].startswith("材料已足以")
+    assert decision["reason"] == decision["rationale"]
+
+
 def test_a_decision_cannot_be_routed_to_its_own_plan() -> None:
     """`topic_plan_ids` routes out to a *topic* plan. The adjudicator named the
     scripture plan the decision already belongs to, which passed the "must be a
