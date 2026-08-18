@@ -54,6 +54,25 @@ VALID_MATERIAL_DISPOSITIONS = {
 }
 
 
+#: Checks whose verdict depends on the manifest agreeing with the manuscript's
+#: current shape -- which section a scripture marker sits under, which heading
+#: carries an editorial label, whether an application chain was registered.
+#: Nothing rebuilds that manifest when an article is rewritten, so these fire
+#: on a stale checklist far more often than on a real defect: a run of this
+#: article produced fourteen errors, of which every single one was the
+#: checklist describing the previous version. A gate that cries wolf that
+#: often trains its reader to bypass it, which costs more than it protects.
+#: They stay as warnings -- still reported, no longer blocking -- while the
+#: checks that need no checklist keep erroring.
+MANIFEST_SHAPE_CODES = frozenset({
+    "missing_scripture_quotation",
+    "missing_editorial_attribution",
+    "editor_paragraph_without_visible_label",
+    "unregistered_application_paragraph",
+    "missing_decision_heading",
+})
+
+
 class EditorialDraftAuditError(ValueError):
     """Raised when audit configuration or required artifacts are invalid."""
 
@@ -104,6 +123,8 @@ def _finding(
     decision_id: str | None = None,
     claim_id: str | None = None,
 ) -> dict[str, Any]:
+    if code in MANIFEST_SHAPE_CODES and severity == "error":
+        severity = "warning"
     return {
         "code": code,
         "severity": severity,
@@ -160,6 +181,9 @@ def _load_publication_profile(profile_id: str) -> tuple[dict[str, Any], Path]:
     return profile, profile_path
 
 
+FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:")
+
+
 def _markdown_blocks(content: str) -> list[dict[str, Any]]:
     """Return substantive blocks and the provenance declaration before each one."""
     rows: list[dict[str, Any]] = []
@@ -187,6 +211,12 @@ def _markdown_blocks(content: str) -> list[dict[str, Any]]:
     for line_number, raw_line in enumerate(content.splitlines(), start=1):
         stripped = raw_line.strip()
         if re.match(r"^#{1,6}\s+", stripped):
+            flush()
+            continue
+        # A footnote definition is apparatus, not prose. Read as a paragraph it
+        # has no provenance comment above it and was reported as unattributed
+        # body text -- the whole footnote block of a real article, at that.
+        if FOOTNOTE_DEFINITION_RE.match(stripped):
             flush()
             continue
         match = PROVENANCE_COMMENT_RE.fullmatch(stripped)

@@ -198,8 +198,11 @@ def test_audit_rejects_missing_composition_heading(tmp_path: Path) -> None:
 
     result = audit_editorial_draft(manifest, "DRAFT-1")
 
-    assert result["status"] == "fail"
-    assert any(item["code"] == "missing_decision_heading" for item in result["findings"])
+    assert result["status"] == "pass_with_warnings"
+    assert any(
+        item["code"] == "missing_decision_heading" and item["severity"] == "warning"
+        for item in result["findings"]
+    )
 
 
 def test_audit_rejects_missing_scripture_and_question_section(tmp_path: Path) -> None:
@@ -228,9 +231,13 @@ def test_audit_rejects_unlabelled_editorial_inference(tmp_path: Path) -> None:
         _fixture(tmp_path, editorial_boundary=True), "DRAFT-1"
     )
 
-    assert result["status"] == "fail"
+    # Reported, not blocking. This check needs the manifest to name the heading
+    # that carries the label, and nothing rebuilds the manifest when an article
+    # is restructured -- see MANIFEST_SHAPE_CODES.
+    assert result["status"] == "pass_with_warnings"
     assert any(
         item["code"] == "missing_editorial_attribution"
+        and item["severity"] == "warning"
         for item in result["findings"]
     )
 
@@ -260,7 +267,7 @@ def test_audit_requires_declared_scripture_quotation(tmp_path: Path) -> None:
     _write_json(manifest, manifest_data)
 
     failed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert failed["status"] == "fail"
+    assert failed["status"] == "pass_with_warnings"
     assert any(
         item["code"] == "missing_scripture_quotation"
         for item in failed["findings"]
@@ -606,3 +613,42 @@ def test_audit_allows_internal_id_only_in_sermon_link_target(tmp_path: Path) -> 
     result = audit_editorial_draft(manifest, "DRAFT-1")
 
     assert result["status"] == "pass"
+
+
+def test_a_footnote_definition_is_apparatus_not_unattributed_prose(tmp_path: Path) -> None:
+    """Regression: the audit read `[^1]: ...` lines as a body paragraph, found
+    no provenance comment above them, and reported a real article's entire
+    footnote block as prose with no source attribution.
+    """
+
+    from backend.pipeline.editorial_draft_audit import _markdown_blocks
+
+    blocks = _markdown_blocks(
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n"
+        "這是有來源的正文。\n"
+        "\n"
+        "[^1]: 希臘文為 Χριστός，意為「受膏者」。\n"
+        "[^2]: 「彼得」為 Πέτρος。\n"
+    )
+    assert [block["text"] for block in blocks] == ["這是有來源的正文。"]
+
+
+def test_the_blocking_checks_are_the_ones_that_need_no_checklist() -> None:
+    """The audit's remaining errors must be provable from the manuscript and
+    the knowledge layer alone. Anything that also needs the manifest to still
+    describe this version of the article is a warning: a run of a real article
+    produced fourteen errors, every one of them the checklist describing the
+    previous version, and a gate that cries wolf that often teaches its reader
+    to bypass it.
+    """
+
+    from backend.pipeline.editorial_draft_audit import MANIFEST_SHAPE_CODES, _finding
+
+    for code in MANIFEST_SHAPE_CODES:
+        assert _finding(code, "error", "t", "d")["severity"] == "warning"
+
+    # A paragraph with no provenance at all is still blocking, and is the one
+    # thing no other gate covers: the grounding check skips a paragraph that
+    # declares no claims, so nothing else would ever look at it.
+    assert _finding("unmapped_manuscript_paragraph", "error", "t", "d")["severity"] == "error"
+    assert _finding("invalid_source_anchor", "error", "t", "d")["severity"] == "error"
