@@ -27,6 +27,8 @@ from backend.pipeline.composition_ai_review import (
     validate_reconsideration,
     validate_review,
 )
+from backend.pipeline.passage_knowledge_slice import Passage, _record_overlaps
+from backend.pipeline.base_contract_coverage import parse_passage_range
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
@@ -54,6 +56,19 @@ def _archive(path: Path) -> None:
         shutil.copy2(path, target)
 
 
+def _plan_passage(plan: dict[str, Any]) -> Passage | None:
+    """The passage this plan covers, when it states one."""
+
+    raw = str(plan.get("passage") or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = parse_passage_range(raw)
+    except (ValueError, AttributeError):
+        return None
+    return Passage(parsed.book, parsed.chapter, parsed.start_verse, parsed.end_verse)
+
+
 def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[str, Any]:
     referenced_ids = {
         claim_id
@@ -65,6 +80,13 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
         for item in plan.get("source_leads", [])
         if item.get("transcript_id")
     }
+    # A claim the plan does not yet use is exactly what this review exists to
+    # find -- `unrouted_material` is one of its issue types. It could only ever
+    # see one that arrived through `source_leads`/`occurrences`, and both are
+    # empty on the Matthew plans, so material added to the argument layer after
+    # the plan was built stayed invisible to the reviewer that should route it.
+    # Anything the plan's own passage covers belongs in front of it.
+    passage = _plan_passage(plan)
     fragments = {item["fragment_id"]: item for item in knowledge.get("source_fragments", [])}
     evidence = {item["evidence_step_id"]: item for item in knowledge.get("evidence_steps", [])}
 
@@ -75,7 +97,12 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
             str(item.get("transcript_id") or "")
             for item in claim.get("occurrences", [])
         }
-        if claim["claim_id"] not in referenced_ids and not (occurrence_transcripts & source_transcripts):
+        in_passage = passage is not None and _record_overlaps(claim, passage)
+        if (
+            claim["claim_id"] not in referenced_ids
+            and not (occurrence_transcripts & source_transcripts)
+            and not in_passage
+        ):
             continue
         included_ids.add(claim["claim_id"])
         evidence_rows = []
@@ -117,6 +144,11 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
             {
                 "claim_id": claim["claim_id"],
                 "title": claim.get("title"),
+                # No claim in the store carries `title` -- every one states
+                # itself in `statement`. Sending only the title handed the
+                # reviewer a nameless claim and left it to infer the assertion
+                # from the evidence steps underneath it.
+                "statement": claim.get("statement"),
                 "claim_type": claim.get("claim_type"),
                 "scripture_refs": claim.get("scripture_refs", []),
                 "assigned_decision_ids": [

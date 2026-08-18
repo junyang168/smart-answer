@@ -539,6 +539,28 @@ class PostgresKnowledgeStore:
             row = cursor.fetchone()
         return dict(row[0]) if row else None
 
+    def get_plan_document(self, plan_id: str) -> Optional[dict[str, Any]]:
+        """A CompositionPlan with its decisions inlined.
+
+        The store keeps a plan and its decisions as separate objects, but every
+        consumer -- the authoring packet builder, the composition review, an
+        exported file -- wants them as one document. Assembling it here keeps
+        one definition of what "the plan" is.
+        """
+
+        plan = self.get_record("composition_plans", plan_id)
+        if plan is None:
+            return None
+        decisions = []
+        for decision_id in plan.get("decision_ids") or []:
+            decision = self.get_record("composition_decisions", decision_id)
+            if decision is None:
+                raise KeyError(
+                    f"decision {decision_id} referenced by {plan_id} is not in the store"
+                )
+            decisions.append(decision)
+        return {**plan, "decisions": decisions}
+
     def migrate(self) -> list[str]:
         applied: list[str] = []
         with self.connect() as conn:

@@ -1930,18 +1930,16 @@ def build_authoring_packet_from_store(
     have drifted from the store.
     """
 
-    plan_payload = store.get_record("composition_plans", plan_id)
-    if plan_payload is None:
+    # One definition of "the plan as a document", shared with the store's
+    # `export-plan`: the file handed to the composition review and the plan
+    # this packet is built from must be the same thing.
+    try:
+        plan = store.get_plan_document(plan_id)
+    except KeyError as exc:
+        raise AuthoringContractError(str(exc)) from exc
+    if plan is None:
         raise AuthoringContractError(f"plan not found in authoring store: {plan_id}")
-    decisions = []
-    for decision_id in plan_payload.get("decision_ids") or []:
-        decision = store.get_record("composition_decisions", decision_id)
-        if decision is None:
-            raise AuthoringContractError(
-                f"decision {decision_id} referenced by {plan_id} is not in the authoring store"
-            )
-        decisions.append(decision)
-    plan = {**plan_payload, "decisions": decisions}
+    plan_payload = {key: value for key, value in plan.items() if key != "decisions"}
     plan_document = canonical_json(plan)
     contract = contract_from_plan_payload(
         plan_payload, plan_document_sha256=sha256_text(plan_document)

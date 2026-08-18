@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from backend.api.canonical_repository.postgres_store import (
     SOURCE_KEYS,
+    PostgresKnowledgeStore,
     build_active_snapshot,
     build_change_set_plan,
     normalize_package,
@@ -227,3 +230,73 @@ def test_active_snapshot_rejects_approved_claim_with_unbound_source() -> None:
     codes = {item["code"] for item in findings if item["severity"] == "error"}
     assert "approved_claim_has_unbound_evidence" in codes
     assert "approved_claim_without_publishable_evidence" in codes
+
+
+class _RecordStore:
+    """Enough of the store for `get_plan_document`, which only reads records."""
+
+    get_plan_document = PostgresKnowledgeStore.get_plan_document
+
+    def __init__(self, records: dict) -> None:
+        self._records = records
+
+    def get_record(self, collection: str, object_id: str):
+        return self._records.get(collection, {}).get(object_id)
+
+
+def test_plan_document_inlines_its_decisions_and_survives_a_package_round_trip() -> None:
+    """`export-plan` writes this shape and `ingest-plan` wraps it back up, so
+    a plan can leave the store for the composition review and return revised.
+    """
+
+    store = _RecordStore(
+        {
+            "composition_plans": {
+                "CP-1": {
+                    "plan_id": "CP-1",
+                    "title": "測試編排計劃",
+                    "product_type": "scripture_exposition",
+                    "decision_ids": ["CD-1", "CD-2"],
+                }
+            },
+            "composition_decisions": {
+                "CD-1": {
+                    "decision_id": "CD-1", "plan_id": "CP-1", "claim_ids": [],
+                    "decision_type": "coverage_gap", "decision": "只引經文。",
+                },
+                "CD-2": {
+                    "decision_id": "CD-2", "plan_id": "CP-1", "claim_ids": ["CL-1"],
+                    "decision_type": "main_section", "decision": "展開論證。",
+                },
+            },
+        }
+    )
+    document = store.get_plan_document("CP-1")
+    assert [item["decision_id"] for item in document["decisions"]] == ["CD-1", "CD-2"]
+    assert store.get_plan_document("CP-missing") is None
+
+    # The wrapper `ingest-plan` builds: the importer splits an inlined
+    # `product_plans` entry back into a plan plus its decisions.
+    normalized = normalize_package(
+        {
+            "schema_version": "wang_shared_knowledge_v1.3",
+            "package_id": "PLAN-CP-1",
+            "product_plans": [document],
+        }
+    )
+    assert set(normalized["composition_plans"]) == {"CP-1"}
+    assert set(normalized["composition_decisions"]) == {"CD-1", "CD-2"}
+    assert normalized["composition_plans"]["CP-1"]["decision_ids"] == ["CD-1", "CD-2"]
+
+
+def test_plan_document_refuses_a_decision_the_store_does_not_have() -> None:
+    store = _RecordStore(
+        {
+            "composition_plans": {
+                "CP-1": {"plan_id": "CP-1", "title": "t", "product_type": "x", "decision_ids": ["CD-gone"]}
+            },
+            "composition_decisions": {},
+        }
+    )
+    with pytest.raises(KeyError, match="CD-gone"):
+        store.get_plan_document("CP-1")

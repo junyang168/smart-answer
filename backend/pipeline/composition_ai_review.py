@@ -130,6 +130,10 @@ COMPOSITION_REVIEW_SCHEMA: dict[str, Any] = {
                         "proposed_add_claim_ids": {"type": "array", "items": {"type": "string"}},
                         "proposed_remove_claim_ids": {"type": "array", "items": {"type": "string"}},
                         "proposed_coverage": {"type": "string"},
+                        "proposed_editorial_boundary": {
+                            "type": "string",
+                            "enum": ["", "required", "withdrawn"],
+                        },
                         "rationale": {"type": "string"},
                         "confidence": {"type": "string", "enum": CONFIDENCE},
                         "human_review_reason": {"type": "string"},
@@ -144,6 +148,7 @@ COMPOSITION_REVIEW_SCHEMA: dict[str, Any] = {
                         "proposed_add_claim_ids",
                         "proposed_remove_claim_ids",
                         "proposed_coverage",
+                        "proposed_editorial_boundary",
                         "rationale",
                         "confidence",
                         "human_review_reason",
@@ -162,6 +167,16 @@ PATCH_PROPERTIES = {
     "add_claim_ids": {"type": "array", "items": {"type": "string"}},
     "remove_claim_ids": {"type": "array", "items": {"type": "string"}},
     "coverage": {"type": "string"},
+    # `action`, `coverage` and this are one state, not three: the audit's
+    # `declared_coverage_gap` only exempts a claimless decision when all three
+    # agree. Without this the review could promote a coverage gap to a real
+    # section and route material into it, but not withdraw the note ordering
+    # the author to declare that no material exists.
+    #
+    # A string, not a boolean, because the schema is strict and every patch
+    # field is required: a boolean has no value meaning "leave this alone",
+    # so every accepted patch would restate it. "" is no change, as elsewhere.
+    "editorial_boundary": {"type": "string", "enum": ["", "required", "withdrawn"]},
     "topic_plan_ids": {"type": "array", "items": {"type": "string"}},
     "claim_hierarchy": {
         "type": "object",
@@ -315,6 +330,7 @@ def validate_review(response: dict[str, Any], plan: dict[str, Any], claim_ids: s
             row.get("proposed_add_claim_ids"),
             row.get("proposed_remove_claim_ids"),
             row.get("proposed_coverage"),
+            row.get("proposed_editorial_boundary"),
         ]
         if row["decision"] == "pass":
             _require(not issues, f"{decision_id}: pass cannot contain issues")
@@ -435,6 +451,14 @@ def apply_consensus(
                 target["rationale"] = patch["rationale"]
             if patch.get("coverage"):
                 target["coverage"] = patch["coverage"]
+            if patch.get("editorial_boundary") == "withdrawn":
+                # Drop the whole boundary rather than leaving `required: false`
+                # behind: the audit reads `editorial_boundary.required`, and a
+                # decision that no longer needs an editorial note has nothing
+                # left to say about one.
+                target.pop("editorial_boundary", None)
+            elif patch.get("editorial_boundary") == "required":
+                target.setdefault("editorial_boundary", {})["required"] = True
             if patch.get("topic_plan_ids"):
                 target["topic_plan_ids"] = patch["topic_plan_ids"]
             if patch.get("claim_hierarchy") and any(patch["claim_hierarchy"].values()):

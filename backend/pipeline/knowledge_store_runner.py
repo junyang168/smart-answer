@@ -63,6 +63,24 @@ def main() -> None:
     compile_parser.add_argument("output", type=Path)
     compile_parser.add_argument("--package-id")
 
+    # A CompositionPlan lives in the store, but the composition review reads
+    # its plan from a file. These two move one plan out and the reviewed
+    # result back in, so "the argument layer changed, rebuild the plan" is a
+    # chain that runs end to end instead of stopping at a format mismatch.
+    export_plan = subparsers.add_parser(
+        "export-plan", help="Write one CompositionPlan, decisions inlined, to a file."
+    )
+    export_plan.add_argument("plan_id")
+    export_plan.add_argument("output", type=Path)
+
+    ingest_plan = subparsers.add_parser(
+        "ingest-plan",
+        help="Ingest a reviewed CompositionPlan document, wrapping it as a package.",
+    )
+    ingest_plan.add_argument("plan", type=Path)
+    ingest_plan.add_argument("--source-kind", default="reviewed_composition_plan")
+    ingest_plan.add_argument("--apply", action="store_true")
+
     active_parser = subparsers.add_parser("compile-active")
     active_parser.add_argument(
         "output_root",
@@ -146,6 +164,36 @@ def main() -> None:
                 "relation_ingest": relation_result,
                 "output_dir": str(args.output_dir) if args.output_dir else None,
             }
+    elif args.command == "export-plan":
+        plan = store.get_plan_document(args.plan_id)
+        if plan is None:
+            raise SystemExit(f"plan not found in authoring store: {args.plan_id}")
+        _write(args.output, plan)
+        result = {
+            "status": "exported",
+            "plan_id": args.plan_id,
+            "revision": plan.get("revision"),
+            "decisions": len(plan["decisions"]),
+            "output": str(args.output),
+        }
+    elif args.command == "ingest-plan":
+        plan = _load(args.plan)
+        plan_id = plan.get("plan_id")
+        if not plan_id:
+            raise SystemExit(f"not a CompositionPlan document: {args.plan}")
+        # The importer splits an inlined `product_plans` entry back into a plan
+        # and its decisions, which is the exact shape `export-plan` writes.
+        package = {
+            "schema_version": "wang_shared_knowledge_v1.3",
+            "package_id": f"PLAN-{plan_id}",
+            "product_plans": [plan],
+        }
+        result = store.ingest_package(
+            package,
+            source_kind=args.source_kind,
+            apply=args.apply,
+            metadata={"input_path": str(args.plan)},
+        )
     elif args.command == "compile":
         package = store.compile_package(package_id=args.package_id)
         _write(args.output, package)

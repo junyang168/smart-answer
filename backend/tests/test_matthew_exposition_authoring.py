@@ -30,6 +30,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     validate_strict_schema,
     AUTHOR_RESULT_SCHEMA,
 )
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.matthew_exposition_authoring_runner import (
     _build_program_audit_manifest,
     _call_final_reviewer,
@@ -444,6 +445,10 @@ class _FakeAuthoringStore:
 
     def get_record(self, collection, object_id):
         return self._records.get(collection, {}).get(object_id)
+
+    # Borrowed rather than reimplemented: the real assembly is the thing under
+    # test here, and it reaches the store only through `get_record`.
+    get_plan_document = PostgresKnowledgeStore.get_plan_document
 
     def compile_package(self, *, package_id=None):
         """Mirror the real store: a full snapshot stamped with `compiled_at`.
