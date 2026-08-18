@@ -531,9 +531,15 @@ def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = Tr
         decision_ids = section.get("decision_ids")
         if not isinstance(decision_ids, list) or not decision_ids:
             raise AuthoringContractError(f"section {section_id} requires decision_ids")
-        steps = section.get("required_argument_steps")
-        if not isinstance(steps, list) or not steps:
-            raise AuthoringContractError(f"section {section_id} requires argument steps")
+        # A section no longer has to declare argument steps. The list they
+        # formed was a second copy of material that now lives in the claim
+        # layer, written by a model and never reviewed, and the editorial
+        # constraints mixed into its prose are already in the section's
+        # `ineligible_operations`. Sections that still carry steps are still
+        # validated, so the field can be removed article by article.
+        steps = section.get("required_argument_steps") or []
+        if not isinstance(steps, list):
+            raise AuthoringContractError(f"section {section_id} argument steps must be a list")
         for step_index, step_value in enumerate(steps):
             step = _require_mapping(step_value, f"{section_id}.steps[{step_index}]")
             step_ids.append(
@@ -787,16 +793,16 @@ def validate_author_result(
     unknown_steps = (set(preserved_steps) | set(omitted_steps)) - contract_steps
     if unknown_steps:
         raise AuthoringContractError(f"unknown base step_ids: {sorted(unknown_steps)}")
-    accounted_steps = set(preserved_steps) | set(omitted_steps)
-    if contract_steps - accounted_steps:
-        raise AuthoringContractError(
-            f"unaccounted base steps: {sorted(contract_steps - accounted_steps)}"
-        )
-    omitted_required = set(omitted_steps) & required_steps
-    if omitted_required:
-        raise AuthoringContractError(
-            f"required base steps cannot be omitted in a drafted result: {sorted(omitted_required)}"
-        )
+    # An author is no longer required to account for every contract step, nor
+    # forbidden to omit one. The obligation forced prose the material could not
+    # support -- on Matt.16.1-12 a step required a present-day application the
+    # sources never made, and the run deadlocked because writing it was also
+    # forbidden. What a step still says about the material is available as a
+    # claim; whether the article preserved the base manuscript's reasoning is
+    # the `base_manuscript_preservation` dimension's judgment, made against the
+    # material rather than against an unreviewed checklist. Steps an author
+    # does declare are still checked above: an unknown id, or an anchor that is
+    # not in the manuscript, is still a failure.
     if valid_claim_ids is not None:
         unknown_claim_ids = set(used_claim_ids) - valid_claim_ids
         if unknown_claim_ids:

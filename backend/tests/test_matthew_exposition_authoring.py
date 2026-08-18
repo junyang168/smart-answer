@@ -127,22 +127,48 @@ def test_author_ledger_allows_many_decisions_in_one_reader_section():
     validate_author_result(valid_author_result(), contract=contract(), plan=mini_plan())
 
 
-def test_author_ledger_rejects_unaccounted_base_step():
+def test_an_author_need_not_account_for_every_contract_step():
+    """The obligation forced prose the material could not support. On
+    Matt.16.1-12 a step required a present-day application the sources never
+    made, and the run deadlocked: writing it was also forbidden, because the
+    application-registration rule had nothing registered. The list itself was
+    a second copy of material that now lives in the claim layer, written by a
+    model and never reviewed.
+    """
+
     result = valid_author_result()
     result["sections"][0]["base_step_ids_preserved"].pop()
     result["sections"][0]["preserved_step_anchors"].pop()
-    with pytest.raises(AuthoringContractError, match="unaccounted base steps"):
-        validate_author_result(result, contract=contract(), plan=mini_plan())
+    validate_author_result(result, contract=contract(), plan=mini_plan())
 
 
-def test_author_ledger_rejects_omission_of_required_base_step():
+def test_a_required_step_may_now_be_omitted_with_a_reason():
     result = valid_author_result()
     result["sections"][0]["base_step_ids_preserved"].pop()
     result["sections"][0]["preserved_step_anchors"].pop()
     result["sections"][0]["omissions"] = [
         {"step_id": "M16-18-S04", "reason": "compressed for length"}
     ]
-    with pytest.raises(AuthoringContractError, match="required base steps cannot be omitted"):
+    validate_author_result(result, contract=contract(), plan=mini_plan())
+
+
+def test_a_step_the_author_does_declare_is_still_checked():
+    """Dropping the obligation is not dropping the check. An id the contract
+    never had, or an anchor that is not in the manuscript, still fails.
+    """
+
+    result = valid_author_result()
+    anchor = result["sections"][0]["preserved_step_anchors"][0]["anchor"]
+    result["sections"][0]["base_step_ids_preserved"].append("M16-18-S99")
+    result["sections"][0]["preserved_step_anchors"].append(
+        {"step_id": "M16-18-S99", "anchor": anchor}
+    )
+    with pytest.raises(AuthoringContractError, match="unknown base step_ids"):
+        validate_author_result(result, contract=contract(), plan=mini_plan())
+
+    result = valid_author_result()
+    result["sections"][0]["preserved_step_anchors"][0]["anchor"] = "這句話不在稿件裡"
+    with pytest.raises(AuthoringContractError, match="preserved step anchor not found"):
         validate_author_result(result, contract=contract(), plan=mini_plan())
 
 
