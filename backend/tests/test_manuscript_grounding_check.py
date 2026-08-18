@@ -514,3 +514,67 @@ def test_manuscript_check_passes_the_transcript_through_to_each_paragraph():
     assert report["passed"]
     assert "門徒通過第一課的考試" in seen["professor_transcript_segments"][0]["text"]
 
+
+
+def test_section_scope_material_carries_the_claim_without_its_whole_argument():
+    """Regression: a paragraph is grounded against its own declaration widened
+    by its section's scope. Sending every evidence chain for both put 19KB of
+    argument behind a 192-byte paragraph, blew the packet budget, and left
+    fifteen of eighteen paragraphs unchecked -- and an oversized packet raises
+    `GroundingCheckError`, which is not an `unsupported_assertion`, so the
+    repair path could not run either.
+
+    What the paragraph cites needs its chain: that is what separates a
+    supported inference from an invented one. The rest of the section only has
+    to say whether an assertion is inside material this section may draw on,
+    which the statement answers by itself.
+    """
+
+    knowledge = {
+        "claims": [
+            {
+                "claim_id": "CL-CITED",
+                "statement": "段落引用的主張。",
+                "evidence_step_ids": ["E-1"],
+            },
+            {
+                "claim_id": "CL-SECTION",
+                "statement": "同節的其他材料。",
+                "evidence_step_ids": ["E-2"],
+            },
+        ],
+        "evidence_steps": [
+            {"evidence_step_id": "E-1", "statement": "引用主張的證據。", "source_fragment_id": "FR-1"},
+            {"evidence_step_id": "E-2", "statement": "其他材料的證據。", "source_fragment_id": "FR-2"},
+        ],
+        "source_fragments": [
+            {"fragment_id": "FR-1", "verbatim_excerpt": "教授原話一"},
+            {"fragment_id": "FR-2", "verbatim_excerpt": "教授原話二"},
+        ],
+    }
+    material = build_paragraph_material(
+        ["CL-CITED", "CL-SECTION"], knowledge, None, declared_claim_ids=["CL-CITED"]
+    )
+    by_id = {item["claim_id"]: item for item in material}
+
+    assert by_id["CL-CITED"]["evidence"][0]["source_excerpt"] == "教授原話一"
+    # In scope, and said so, but without an argument the paragraph never cited.
+    assert by_id["CL-SECTION"]["claim_statement"] == "同節的其他材料。"
+    assert "evidence" not in by_id["CL-SECTION"]
+    assert by_id["CL-SECTION"]["scope"] == "section_material_not_cited_by_this_paragraph"
+
+
+def test_omitting_declared_ids_keeps_every_claim_at_full_depth():
+    """Callers that do not distinguish the two -- every existing one -- must
+    keep the behaviour they had.
+    """
+
+    knowledge = {
+        "claims": [{"claim_id": "CL-1", "statement": "主張。", "evidence_step_ids": ["E-1"]}],
+        "evidence_steps": [
+            {"evidence_step_id": "E-1", "statement": "證據。", "source_fragment_id": "FR-1"}
+        ],
+        "source_fragments": [{"fragment_id": "FR-1", "verbatim_excerpt": "原話"}],
+    }
+    material = build_paragraph_material(["CL-1"], knowledge)
+    assert material[0]["evidence"][0]["source_excerpt"] == "原話"

@@ -451,6 +451,37 @@ def _set_decision_field(target: dict[str, Any], patched: str, value: Any) -> Non
             target[stored] = value
 
 
+def _retire_stale_coverage_boundary(
+    plan: dict[str, Any], decision: dict[str, Any]
+) -> None:
+    """Drop the authoring boundary a decision no longer needs.
+
+    A CompositionPlan record carries two halves that constrain the same
+    passage: the composition decisions, and the authoring contract the writer
+    works from. Each `coverage_boundaries` entry names the decision it belongs
+    to, and exists to say "this passage has no material, keep it to scripture
+    and a short note". When the review routes material into that decision, the
+    boundary is stale by construction -- nothing was decided about it, its
+    premise simply stopped being true.
+
+    Left behind, the writer receives both instructions at once: use this claim,
+    and do not explain this passage. That is not a question for an editor; it
+    is half a rebuild.
+    """
+
+    decision_id = decision.get("decision_id")
+    still_a_gap = (decision.get("action") or decision.get("decision_type")) == "coverage_gap"
+    if not decision_id or still_a_gap:
+        return
+    for section in plan.get("authoring_sections") or []:
+        boundaries = section.get("coverage_boundaries")
+        if not boundaries:
+            continue
+        section["coverage_boundaries"] = [
+            item for item in boundaries if item.get("decision_id") != decision_id
+        ]
+
+
 def apply_consensus(
     plan: dict[str, Any],
     adjudication: dict[str, Any],
@@ -506,6 +537,7 @@ def apply_consensus(
                     item for item in patch["argument_layer_followups"]
                     if item not in followups
                 )
+            _retire_stale_coverage_boundary(result, target)
             outcomes.append({"decision_id": decision_id, "status": "auto_applied"})
             continue
         reconsidered_row = reconsidered.get(decision_id)

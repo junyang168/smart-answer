@@ -545,3 +545,65 @@ def test_a_decision_cannot_be_routed_to_its_own_plan() -> None:
     patch["topic_plan_ids"] = ["CP-topic-son-of-man"]
     validate_adjudication(response, [actionable], {"CL-1"}, "CP-test")
     validate_adjudication(response, [actionable], {"CL-1"})
+
+
+def test_promoting_a_decision_retires_the_authoring_boundary_bound_to_it() -> None:
+    """A CompositionPlan carries two halves that constrain the same passage:
+    the decisions, and the authoring contract the writer works from. The review
+    rebuilt only the decisions, so the writer was handed a claim to use and a
+    contract clause forbidding him to explain the passage, and stopped.
+
+    The boundary names its decision. Once material is routed into that
+    decision, the boundary's premise is simply no longer true -- there is
+    nothing here for an editor to decide.
+    """
+
+    plan = _coverage_gap_plan()
+    plan["authoring_sections"] = [
+        {
+            "section_id": "reader-sec-02",
+            "coverage_boundaries": [
+                {"passage": "Matt.16.17", "decision_id": "CD-OTHER", "rule": "仍無材料"}
+            ],
+        },
+        {
+            "section_id": "reader-sec-03",
+            "coverage_boundaries": [
+                {"passage": "Matt.16.18b", "decision_id": "CD-1", "rule": "不補陰間之門語義"}
+            ],
+        },
+    ]
+    patch = _empty_patch()
+    patch.update({"action": "main_section", "coverage": "available", "add_claim_ids": ["CL-HADES"]})
+    candidate, _ = apply_consensus(
+        plan,
+        {"adjudications": [
+            {"decision_id": "CD-1", "decision": "accept", "rationale": "材料已補齊", "patch": patch}
+        ]},
+        None,
+    )
+    sections = {s["section_id"]: s for s in candidate["authoring_sections"]}
+    assert sections["reader-sec-03"]["coverage_boundaries"] == []
+    # A boundary for a decision that is still a coverage gap must survive:
+    # that passage really does still have no material.
+    assert sections["reader-sec-02"]["coverage_boundaries"][0]["passage"] == "Matt.16.17"
+
+
+def test_a_decision_that_stays_a_coverage_gap_keeps_its_boundary() -> None:
+    plan = _coverage_gap_plan()
+    plan["authoring_sections"] = [
+        {
+            "section_id": "reader-sec-03",
+            "coverage_boundaries": [{"passage": "Matt.16.18b", "decision_id": "CD-1"}],
+        }
+    ]
+    patch = _empty_patch()
+    patch["rationale"] = "只改寫理由，仍然沒有材料"
+    candidate, _ = apply_consensus(
+        plan,
+        {"adjudications": [
+            {"decision_id": "CD-1", "decision": "accept", "rationale": "同意", "patch": patch}
+        ]},
+        None,
+    )
+    assert candidate["authoring_sections"][0]["coverage_boundaries"]

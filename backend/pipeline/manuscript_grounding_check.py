@@ -38,7 +38,14 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "manuscript_grounding_check.
 PROVENANCE_COMMENT_RE = re.compile(r"<!--\s*provenance:\s*(\{.*?\})\s*-->", re.S)
 FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:")
 
-GROUNDING_PACKET_MAX_BYTES = 20_000
+#: A guard against a runaway packet, not a model limit -- one check runs
+#: against a 1M-token context. At 20_000 it stopped being a guard and became
+#: the gate's own failure mode: a paragraph citing seven claims across several
+#: sermons carries ~18KB of the professor's transcript, which rule 8e puts
+#: there on purpose, and the whole run failed with fifteen paragraphs never
+#: checked at all. An oversized packet also raises `GroundingCheckError`, which
+#: is not an `unsupported_assertion`, so the repair path cannot run either.
+GROUNDING_PACKET_MAX_BYTES = 60_000
 
 #: The reviewer lists the sentences it cannot ground and nothing else. It also
 #: used to answer a yes/no `exceeds_material`, which the two fields made it
@@ -144,9 +151,24 @@ def build_paragraph_material(
     claim_ids: list[str],
     knowledge: dict[str, Any],
     instructions_by_claim: dict[str, str] | None = None,
+    declared_claim_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return the claim/evidence/source material a paragraph is allowed to use."""
+    """Return the claim/evidence/source material a paragraph is allowed to use.
 
+    `claim_ids` is the paragraph's declaration widened by its section's scope;
+    `declared_claim_ids` is the declaration itself. The two answer different
+    questions and need different depth. What the paragraph cites is the audit
+    record, and its evidence chain is what separates a supported inference from
+    an invented one. The rest of the section's scope only has to answer whether
+    an assertion falls inside material this section may draw on at all, which
+    the claim statement settles on its own.
+
+    Sending every chain for both put 19KB of evidence behind a 192-byte
+    paragraph and pushed the packet past its budget, so the gate could not
+    check the paragraph at all. Omit the argument and it stays checkable.
+    """
+
+    declared = set(declared_claim_ids) if declared_claim_ids is not None else set(claim_ids)
     claims_by_id = {c.get("claim_id"): c for c in knowledge.get("claims", [])}
     evidence_by_id = {e.get("evidence_step_id"): e for e in knowledge.get("evidence_steps", [])}
     fragments_by_id = {f.get("fragment_id"): f for f in knowledge.get("source_fragments", [])}
@@ -156,6 +178,16 @@ def build_paragraph_material(
         claim = claims_by_id.get(claim_id)
         if claim is None:
             raise GroundingCheckError(f"paragraph cites unknown claim_id: {claim_id}")
+        if claim_id not in declared:
+            material.append(
+                {
+                    "claim_id": claim_id,
+                    "claim_statement": claim.get("statement"),
+                    "attribution": claim.get("attribution") or "professor",
+                    "scope": "section_material_not_cited_by_this_paragraph",
+                }
+            )
+            continue
         evidence: list[dict[str, Any]] = []
         for evidence_step_id in claim.get("evidence_step_ids", []):
             step = evidence_by_id.get(evidence_step_id)
@@ -265,17 +297,26 @@ def build_grounding_packet(
     knowledge: dict[str, Any],
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
+    declared_claim_ids: list[str] | None = None,
 ) -> dict[str, Any]:
+    declared = declared_claim_ids if declared_claim_ids is not None else claim_ids
     packet = {
         "schema_version": "matthew-exposition-grounding-packet.v1",
         "paragraph_text": paragraph_text,
-        "material": build_paragraph_material(claim_ids, knowledge, instructions_by_claim),
+        "material": build_paragraph_material(
+            claim_ids, knowledge, instructions_by_claim, declared_claim_ids=declared
+        ),
     }
     # Carried once per segment rather than repeated under every claim that
     # cites it: the same segment backs several claims, and the packet has a
     # hard byte budget.
     if transcript_texts:
-        segments = cited_transcript_segments(claim_ids, knowledge, transcript_texts)
+        # The paragraph's own declaration, not its section's scope. This
+        # function's contract is that nothing outside the paragraph's material
+        # becomes quotable; widening the caller's `claim_ids` to the section
+        # broke that silently, and pulled 57KB of transcript in behind a
+        # 192-byte paragraph.
+        segments = cited_transcript_segments(declared, knowledge, transcript_texts)
         if segments:
             packet["professor_transcript_segments"] = segments
     size = len(canonical_json(packet).encode("utf-8"))
@@ -306,9 +347,11 @@ def check_paragraph_grounding(
     client: Any,
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
+    declared_claim_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     packet = build_grounding_packet(
-        paragraph_text, claim_ids, knowledge, instructions_by_claim, transcript_texts
+        paragraph_text, claim_ids, knowledge, instructions_by_claim, transcript_texts,
+        declared_claim_ids=declared_claim_ids,
     )
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     result = client.generate_json(prompt, canonical_json(packet), GROUNDING_RESULT_SCHEMA)
@@ -394,6 +437,7 @@ def check_manuscript_grounding(
                 text, claim_ids, knowledge, client=client,
                 instructions_by_claim=instructions_by_claim,
                 transcript_texts=transcript_texts,
+                declared_claim_ids=list(dict.fromkeys(declared)),
             )
         except (GroundingCheckError, ValueError, RuntimeError) as exc:
             # A single paragraph's call failing must not end the run: the
