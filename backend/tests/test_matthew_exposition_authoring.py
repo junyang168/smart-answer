@@ -2151,3 +2151,58 @@ def test_a_hard_failure_with_no_finding_behind_it_is_left_alone():
     kept, withdrawn = hard_failures_after_adjudication(review, withdrawn_finding_ids={"F-1"})
     assert kept == ["exegetical_observation_inference_conclusion_chain_missing"]
     assert withdrawn == {}
+
+
+def test_a_grounding_repair_does_not_destroy_the_author_artifact(tmp_path):
+    """Regression: a repair recurses into the same output directory and wrote
+    its seeded result over `authoring.json`. That file's fingerprint is what
+    lets a re-invocation skip the author call, and the seed's fingerprint is
+    keyed on the seed manuscript instead, so a fresh run never matched and
+    re-drafted the whole article. One interrupted run cost six full drafts.
+    """
+
+    class Grounder:
+        def __init__(self):
+            self.model = "fake-claude"
+            self.calls = 0
+
+        def generate_json(self, _prompt, packet, _schema, **_kwargs):
+            self.calls += 1
+            if "dimension_scores" in str(_schema):
+                return passing_review()
+            text = json.loads(packet)["paragraph_text"]
+            if "已修正" in text:
+                return _grounding()
+            return _grounding([text.strip().splitlines()[0][:10]])
+
+    repaired = valid_author_result()
+    repaired["manuscript_markdown"] = "\n".join(
+        line + "（已修正）"
+        if line.strip() and not line.startswith(("#", ">", "<!--", "[^"))
+        else line
+        for line in repaired["manuscript_markdown"].splitlines()
+    )
+    out = tmp_path / "out"
+    openai = FakeClient([valid_author_result(), repaired], model="fake-openai")
+    run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=out,
+        openai_client=openai,
+        claude_client=Grounder(),
+    )
+
+    author_artifact = json.loads((out / "authoring.json").read_text(encoding="utf-8"))
+    assert author_artifact["generation"]["role"] == "author", (
+        "the author's own artifact must survive the repair that follows it"
+    )
+    assert "已修正" not in author_artifact["result"]["manuscript_markdown"]
+    seeded = out / "authoring-grounding-02.json"
+    assert seeded.is_file(), "the repair's seed keeps its own path"
+    assert json.loads(seeded.read_text(encoding="utf-8"))["generation"]["role"] == (
+        "revision_round_seed"
+    )

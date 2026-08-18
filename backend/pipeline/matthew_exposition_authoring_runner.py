@@ -501,6 +501,17 @@ def run_authoring(
             "publication": publication,
         }
 
+    # A grounding repair recurses into the same output directory. Writing its
+    # seeded result over `authoring.json` destroyed the author's own artifact,
+    # whose fingerprint is what lets a re-invocation skip the author call: the
+    # seed's fingerprint is keyed on the seed manuscript, so a fresh run never
+    # matched it and re-drafted the whole article from scratch. One
+    # interrupted run cost six full drafts.
+    author_path = (
+        output_dir / "authoring.json"
+        if grounding_attempt == 1
+        else output_dir / f"authoring-grounding-{grounding_attempt:02d}.json"
+    )
     if seed_author_result is None:
         author_prompt = _read_prompt("author")
         author_fingerprint = generation_fingerprint(
@@ -514,7 +525,7 @@ def run_authoring(
             reasoning=getattr(openai_client, "reasoning_effort", "unknown"),
         )
         author_result, author_cached = _run_cached_stage(
-            path=output_dir / "authoring.json",
+            path=author_path,
             schema_version="matthew-exposition-authoring.v1",
             fingerprint=author_fingerprint,
             producer={"role": "author", "provider": "openai", "model": openai_client.model},
@@ -544,7 +555,7 @@ def run_authoring(
             reasoning="verified_prior_revision",
         )
         author_result, author_cached = _run_cached_stage(
-            path=output_dir / "authoring.json",
+            path=author_path,
             schema_version="matthew-exposition-authoring.v1",
             fingerprint=author_fingerprint,
             producer={
@@ -570,7 +581,7 @@ def run_authoring(
     if author_result["status"] == "plan_change_required":
         return {
             "status": "plan_change_required",
-            "authoring_path": str(output_dir / "authoring.json"),
+            "authoring_path": str(author_path),
             "author_cached": author_cached,
         }
 
@@ -666,7 +677,7 @@ def run_authoring(
             "status": "grounding_gate_failed",
             "grounding_attempts": grounding_attempt,
             "grounding_report_path": str(output_dir / "grounding-report.json"),
-            "authoring_path": str(output_dir / "authoring.json"),
+            "authoring_path": str(author_path),
             "author_cached": author_cached,
             "unsupported_paragraph_count": len(grounding_report["findings"]),
         }
