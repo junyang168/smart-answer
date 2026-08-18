@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.pipeline.matthew_exposition_authoring import (
+    _anchor_present,
     AuthoringContractError,
     EDITORIAL_REVIEW_PACKET_MAX_BYTES,
     build_authoring_packet,
@@ -2285,3 +2286,22 @@ def test_a_contract_no_longer_has_to_claim_it_was_confirmed():
     contract = contract.get("result", contract)
     contract.pop("status", None)
     validate_base_contract(contract, verify_source=False)
+
+
+def test_anchor_matching_ignores_markdown_the_reader_never_sees():
+    """An agent anchors on the sentence a reader sees, not on its Markdown source.
+
+    Matthew 16:21-23's review was rejected as fabricated because the reviewer
+    quoted `phroneō` where the manuscript had `*phroneō*`.
+    """
+
+    manuscript = (
+        "<!-- provenance: {\"attribution\":\"editorial_synthesis\"} -->\n"
+        "耶穌責備彼得，因為他不體貼神的意思[^1]。\n\n"
+        "[^1]: 原文動詞為 *phroneō*（φρονέω），意為「關心、重視」。\n"
+    )
+
+    assert _anchor_present("原文動詞為 phroneō（φρονέω），意為「關心、重視」。", manuscript)
+    assert _anchor_present("耶穌責備彼得，因為他不體貼神的意思。", manuscript)
+    assert not _anchor_present("耶穌稱彼得為第一任教皇。", manuscript)
+    assert not _anchor_present("editorial_synthesis", manuscript)

@@ -427,6 +427,36 @@ def _require_nonempty_string(value: Any, field: str) -> str:
     return value
 
 
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:\s*", re.MULTILINE)
+_FOOTNOTE_REFERENCE_RE = re.compile(r"\[\^[^\]]+\]")
+
+
+def _anchor_text(markdown: str) -> str:
+    """Reduce Markdown to the prose a reader sees, for anchor membership checks.
+
+    Every agent that anchors a finding quotes the sentence it is talking about,
+    and it quotes what the reader sees -- `phroneō`, not `*phroneō*`. Matching
+    that against the Markdown source rejects the quote as fabricated, which is
+    what happened to the Matthew 16:21-23 review: its only defect was two
+    emphasis markers around a Greek verb.
+
+    Provenance comments are dropped first. They are invisible to the reader, so
+    no anchor ever quotes one, and their snake_case identifiers would otherwise
+    be mistaken for emphasis by the underscore rule below.
+    """
+
+    text = _HTML_COMMENT_RE.sub(" ", markdown)
+    text = _FOOTNOTE_DEFINITION_RE.sub("", text)
+    text = _FOOTNOTE_REFERENCE_RE.sub("", text)
+    text = text.replace("*", "").replace("_", "").replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _anchor_present(anchor: str, markdown: str) -> bool:
+    return _anchor_text(anchor) in _anchor_text(markdown)
+
+
 def _duplicates(values: Iterable[str]) -> set[str]:
     seen: set[str] = set()
     repeated: set[str] = set()
@@ -655,7 +685,7 @@ def validate_author_result(
         )
         used_claim_ids.extend(section.get("claim_ids_used", []))
         anchor = _require_nonempty_string(section.get("output_anchor"), "output_anchor")
-        if anchor not in manuscript:
+        if not _anchor_present(anchor, manuscript):
             raise AuthoringContractError(f"output anchor not found in manuscript: {anchor}")
 
     if duplicates := _duplicates(covered_decisions):
@@ -1053,7 +1083,7 @@ def validate_editorial_review(
         )
     for finding in review.get("findings", []):
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
-        if anchor not in manuscript:
+        if not _anchor_present(anchor, manuscript):
             raise AuthoringContractError(f"editorial finding anchor not found: {anchor}")
     outcome = evaluate_editorial_review(
         review, quality_profile, out_of_scope_dimensions(contract)
@@ -1603,7 +1633,9 @@ def validate_final_delta_review(
         if finding["dimension_id"] not in affected:
             raise AuthoringContractError("delta finding uses an unaffected dimension")
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
-        if anchor not in revised_manuscript or anchor not in changed_text:
+        if not _anchor_present(anchor, revised_manuscript) or not _anchor_present(
+            anchor, changed_text
+        ):
             raise AuthoringContractError(f"delta finding anchor not found in changed manuscript text: {anchor}")
 
 
