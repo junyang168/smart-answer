@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -71,6 +74,33 @@ app.include_router(public_wang_articles_router)
 app.include_router(matthew_exposition_progress_router)
 
 
+def _release_identity() -> dict[str, str]:
+    """Read the release marker the deployment wrote beside this code.
+
+    `{"status": "ok"}` proves something is answering, not that the thing
+    answering is the build anyone intended. Deciding whether a deploy had
+    landed meant comparing process start times, a checkout's HEAD and lsof
+    output to reach an indirect answer -- for a question that should be one
+    request. The deploy writes `release.json` into the release it builds, so
+    the running service can simply say which commit it is.
+
+    Absent or unreadable means this is not a deployed release (a dev run, or a
+    tree predating the marker); the health check still passes, because liveness
+    does not depend on knowing the commit.
+    """
+
+    marker = Path(__file__).resolve().parents[2] / "release.json"
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {
+        key: str(payload[key])
+        for key in ("release", "deployed_at")
+        if isinstance(payload, dict) and payload.get(key)
+    }
+
+
 @app.get("/healthz")
 def healthcheck() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", **_release_identity()}
