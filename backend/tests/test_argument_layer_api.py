@@ -72,5 +72,22 @@ def test_search_also_matches_an_id(corpus: dict) -> None:
     assert argument_layer.search("DK-abc123-E002")["total"] == 1
 
 
+def test_search_by_id_ignores_case(corpus: dict) -> None:
+    """A reviewer pasting an id from a log should not have to match its case."""
+    assert argument_layer.search("dk-abc123-e002")["hits"][0]["id"] == "DK-abc123-E002"
+
+
+def test_an_exact_id_outranks_a_statement_that_merely_contains_it(corpus: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = corpus["sources"][0]
+    source["claims"].append(_node("DK-abc123-CL002", "見 DK-abc123-E002 的討論"))
+    hits = argument_layer.search("DK-abc123-E002")["hits"]
+    assert [hit["id"] for hit in hits] == ["DK-abc123-E002", "DK-abc123-CL002"]
+
+
+def test_a_bare_label_matches_that_node_in_every_source(corpus: dict) -> None:
+    """`E001` is reused by every source, so it stays a list, not a jump."""
+    assert argument_layer.search("E001")["hits"][0]["id"] == "DK-abc123-E001"
+
+
 def test_empty_query_returns_nothing_rather_than_the_whole_corpus(corpus: dict) -> None:
     assert argument_layer.search("   ") == {"query": "   ", "total": 0, "hits": []}

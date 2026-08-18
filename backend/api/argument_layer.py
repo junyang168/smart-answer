@@ -87,8 +87,8 @@ def search(q: str, limit: int = 40) -> dict[str, Any]:
     needle = q.strip()
     if not needle:
         return {"query": q, "total": 0, "hits": []}
+    folded = needle.casefold()
     data = _data()
-    hits: list[dict[str, Any]] = []
     kinds = (
         ("claim", "claims"),
         ("step", "steps"),
@@ -96,12 +96,34 @@ def search(q: str, limit: int = 40) -> dict[str, Any]:
         ("observation", "observations"),
         ("position", "positions"),
     )
+
+    # An id typed in full is a request for one node, so it outranks the dozens
+    # of statements that merely contain the same characters.  `E017` is a label
+    # every source reuses, so a bare label stays a match rather than a jump.
+    EXACT, PARTIAL_ID, TEXT = 0, 1, 2
+
+    def rank(item: dict[str, Any], statement: str) -> int | None:
+        item_id = str(item["id"]).casefold()
+        label = str(item.get("label", "")).casefold()
+        if folded in {item_id, label}:
+            return EXACT
+        if folded in item_id or folded in label:
+            return PARTIAL_ID
+        if folded in statement.casefold():
+            return TEXT
+        return None
+
+    ranked: list[tuple[int, dict[str, Any]]] = []
     for source in data["sources"]:
         for kind, collection in kinds:
             for item in source[collection]:
                 statement = item.get("statement", "")
-                if needle in statement or needle in item["id"]:
-                    hits.append(
+                score = rank(item, statement)
+                if score is None:
+                    continue
+                ranked.append(
+                    (
+                        score,
                         {
                             "kind": kind,
                             "id": item["id"],
@@ -109,8 +131,12 @@ def search(q: str, limit: int = 40) -> dict[str, Any]:
                             "statement": statement,
                             "source_key": source["key"],
                             "source_title": source["title"],
-                        }
+                        },
                     )
+                )
+    # A stable sort keeps claims ahead of the steps that produced them.
+    ranked.sort(key=lambda entry: entry[0])
+    hits = [entry[1] for entry in ranked]
     return {"query": q, "total": len(hits), "hits": hits[: max(1, min(limit, 200))]}
 
 

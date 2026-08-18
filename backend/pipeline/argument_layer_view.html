@@ -173,7 +173,7 @@ td .ok{color:var(--good)}
   <h1>論證層<small>authoring store · 直接讀 PostgreSQL</small></h1>
   <button class="chip" id="to-overview">← 全庫總覽</button>
   <select id="source"></select>
-  <span class="searchwrap"><input type="search" id="search" placeholder="搜尋全庫節點文字…"><div id="results"></div></span>
+  <span class="searchwrap"><input type="search" id="search" placeholder="搜尋全庫：節點文字或 ID…"><div id="results"></div></span>
   <div class="stats" id="stats"></div>
 </header>
 
@@ -720,16 +720,26 @@ function runSearch(){
   const q = state.search.trim();
   highlight(state.selected);
   if(q.length < 1){ el.results.innerHTML = ''; return; }
-  const hits = [];
+  // An id typed in full is a request for one node, so it outranks the dozens of
+  // statements that merely contain the same characters.  `E017` is a label every
+  // source reuses, so a bare label stays a match rather than a jump.
+  const folded = q.toLowerCase();
+  const ranked = [];
   DATA.sources.forEach((src,i)=>{
     const scan = (items, kind) => items.forEach(item=>{
-      if(hits.length >= 200) return;
-      const text = item.statement || item.text || '';
-      if(text.includes(q) || item.id.includes(q)) hits.push({src:i, kind, item, text});
+      const text = item.statement || '';
+      const id = item.id.toLowerCase(), label = (item.label||'').toLowerCase();
+      const rank = (folded === id || folded === label) ? 0
+        : (id.includes(folded) || label.includes(folded)) ? 1
+        : text.toLowerCase().includes(folded) ? 2 : null;
+      if(rank !== null) ranked.push({rank, src:i, kind, item, text});
     });
     scan(src.claims,'claim'); scan(src.steps,'step'); scan(src.questions,'question');
     scan(src.observations,'observation'); scan(src.positions,'position');
   });
+  // A stable sort keeps claims ahead of the steps that produced them.
+  ranked.sort((a,b)=>a.rank-b.rank);
+  const hits = ranked;
   if(!hits.length){ el.results.innerHTML = '<p class="more">沒有符合的節點。</p>'; return; }
   el.results.innerHTML = hits.slice(0,40).map((h,idx)=>
     `<button class="hit" data-hit="${idx}">${escapeHtml(h.text.slice(0,80))}

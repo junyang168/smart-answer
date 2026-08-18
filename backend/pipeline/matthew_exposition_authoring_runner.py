@@ -376,7 +376,7 @@ def run_authoring(
     packet: dict[str, Any] | None = None,
     skip_grounding_gate: bool = False,
     grounding_attempt: int = 1,
-    max_grounding_attempts: int = 2,
+    max_grounding_attempts: int = 3,
 ) -> dict[str, Any]:
     # Both program-audit inputs, and the snapshot file the audit copies, are
     # checked before the first model call. They are only *used* on a passing
@@ -1239,6 +1239,19 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--max-grounding-attempts",
+        type=int,
+        default=3,
+        help=(
+            "Grounding checks per run, so at most this many minus one targeted "
+            "repairs (default: 3). The bound exists so a run cannot loop, not "
+            "to cap it at any particular number: it was 2 when every attempt "
+            "re-checked every paragraph, which was both expensive and unable "
+            "to converge. With per-paragraph verdicts cached, a repair costs "
+            "only the paragraphs it rewrote."
+        ),
+    )
+    parser.add_argument(
         "--skip-grounding-gate",
         action="store_true",
         help=(
@@ -1337,6 +1350,7 @@ def main() -> int:
         program_audit_manifest_path=args.program_audit_manifest,
         program_audit_draft_id=args.program_audit_draft_id,
         skip_grounding_gate=args.skip_grounding_gate,
+        max_grounding_attempts=args.max_grounding_attempts,
         repository_root=args.repository_root,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
