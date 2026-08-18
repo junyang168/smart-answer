@@ -63,6 +63,7 @@ main{flex:1;display:flex;min-height:0}
 .lane-label{position:absolute;left:0;right:0;font-size:11px;letter-spacing:.06em;color:var(--muted);
   padding-left:10px;pointer-events:none;font-weight:600}
 .lane-label i{display:block;font-style:normal;font-weight:400;font-size:10px;color:var(--faint);letter-spacing:0}
+.lane-label.mono{font-family:var(--font-data)}
 .lane-rule{position:absolute;left:0;border-top:1px dashed var(--rule);pointer-events:none}
 .zone-rule{position:absolute;left:0;border-top:1px solid var(--rule-strong);pointer-events:none}
 svg#edges{position:absolute;inset:0;overflow:visible;pointer-events:none}
@@ -80,7 +81,7 @@ svg#edges path.member.hot{opacity:.85}
 .node.sel{box-shadow:0 0 0 2px var(--indigo)}
 .node .id{font-family:var(--font-data);font-size:9.5px;color:var(--faint);letter-spacing:.03em;
   display:flex;justify-content:space-between;gap:4px;white-space:nowrap;overflow:hidden}
-.node .kind{font-size:9.5px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .kind{font-family:var(--font-data);font-size:9.5px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .node .txt{font-size:11.5px;line-height:1.45;margin-top:2px;
   display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
 .node.lane0{border-left-color:var(--lane0)} .node.lane1{border-left-color:var(--lane1)}
@@ -145,7 +146,11 @@ footer{border-top:1px solid var(--rule);padding:6px 16px;font-size:11px;color:va
 
 #overview{flex:1;overflow:auto;padding:22px 26px}
 #overview h2{font-size:15px;margin:0 0 4px;font-weight:650}
-#overview p.lead{margin:0 0 18px;color:var(--muted);font-size:12.5px;max-width:74ch;line-height:1.75}
+#overview p.legend{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;
+  font-size:11.5px;color:var(--muted);margin:0 0 16px}
+#overview p.legend span{display:inline-flex;align-items:center;gap:6px}
+#overview p.legend .bar{margin-left:0}
+#overview p.lead{margin:0 0 8px;color:var(--muted);font-size:12.5px;max-width:74ch;line-height:1.75}
 table.ov{border-collapse:collapse;width:100%;font-size:12.5px}
 table.ov th{text-align:right;font-weight:600;color:var(--muted);font-size:11px;padding:0 8px 7px;
   border-bottom:1px solid var(--rule-strong);white-space:nowrap}
@@ -183,8 +188,8 @@ td .ok{color:var(--good)}
   <span class="sep"></span>
   <button class="chip" id="f-isolated" aria-pressed="false">只看孤立節點</button>
   <button class="chip" id="f-withheld" aria-pressed="false">只看不合格證據</button>
-  <button class="chip" id="f-obs" aria-pressed="true">觀察列</button>
-  <button class="chip" id="f-claims" aria-pressed="true">主張列</button>
+  <button class="chip" id="f-obs" aria-pressed="true">observations</button>
+  <button class="chip" id="f-claims" aria-pressed="true">claims</button>
   <span class="sep"></span>
   <label class="zoom">縮放 <input type="range" id="zoom" min="30" max="150" value="72"><span id="zoomval">72%</span></label>
 </div>
@@ -201,9 +206,9 @@ td .ok{color:var(--good)}
 <footer>
   <span>橫軸＝教授講述順序（逐字稿段落）</span>
   <span>縱軸＝論證動作</span>
-  <span>主張放在它最後一步證據的位置，底線＝取材範圍</span>
+  <span>claim 放在它最後一步證據的位置，底線＝取材範圍</span>
   <span>紅框＝沒有合格錨點，不得當證據</span>
-  <span>灰列＝observation，尚未進入論證</span>
+  <span>灰列＝observations，尚未進入論證</span>
   <span id="foot-note"></span>
 </footer>
 
@@ -219,8 +224,8 @@ const COL_W = 132, GAP_X = 10, LANE_H = 112, CLAIM_H = 66, CLAIM_GAP = 6,
 
 const REL_COLOR = {supports:'--supports',qualifies:'--qualifies',refutes:'--refutes',
   answers:'--answers',applies:'--applies',contextualizes:'--contextualizes'};
-const STANCE = {asserted:'主張',endorsed:'認同',opposed:'反對',questioned:'提問',quoted:'引述',neutral:'中性',unknown:'未定'};
-const KIND_NAME = {step:'論證步驟',question:'問題',position:'反方立場',observation:'觀察',claim:'共享主張'};
+// Store collections keep their own names; only editorial concepts get Chinese.
+const KIND_NAME = {step:'evidence_step',question:'question',position:'position_node',observation:'observation',claim:'claim'};
 const ELIG_BAD = e => !!e && (e.startsWith('withheld') || e === 'context_only' || e === 'contextual_only');
 
 const state = {
@@ -243,11 +248,11 @@ const el = {
 DATA.sources.forEach((s,i)=>{
   const o = document.createElement('option');
   o.value = i;
-  o.textContent = `${s.title}　·　${s.stats.steps} 步 / ${s.stats.edges} 關係 / ${s.stats.claims} 主張 / ${s.stats.observations} 觀察`;
+  o.textContent = `${s.title}　·　${s.stats.steps} steps / ${s.stats.edges} relations / ${s.stats.claims} claims / ${s.stats.observations} observations`;
   el.source.appendChild(o);
 });
 const T = DATA.totals;
-el.foot.textContent = `全庫 ${DATA.sources.length} 個來源：${T.steps} steps（孤立 ${T.steps_isolated}）、${T.edges} 關係、${T.claims} claims、${T.observations} observations（進入論證 ${T.observations_linked}）`;
+el.foot.textContent = `全庫 ${DATA.sources.length} 個 source：${T.steps} steps（孤立 ${T.steps_isolated}）、${T.edges} 關係、${T.claims} claims、${T.observations} observations（進入論證 ${T.observations_linked}）`;
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const tag = (text, cls) => text ? `<span class="tag ${cls||''}">${escapeHtml(text)}</span>` : '';
@@ -324,7 +329,7 @@ function render(){
     rule.style.cssText = `top:${laneTop - ZONE_GAP/2}px;width:${width}px`;
     el.stage.appendChild(rule);
   }
-  const labels = state.showObs ? [...LANES,'觀察'] : LANES;
+  const labels = state.showObs ? [...LANES,'observations'] : LANES;
   labels.forEach((name,i)=>{
     const rule = document.createElement('div');
     rule.className = 'lane-rule';
@@ -439,13 +444,13 @@ function renderGutter(){
   const z = state.zoom;
   let html = '';
   if(current.L.claimRows)
-    html += `<div class="lane-label" style="top:${PAD_T*z}px;color:var(--claim)">`
-      + `共享主張<i>${current.src.stats.claims} 條</i></div>`;
+    html += `<div class="lane-label mono" style="top:${PAD_T*z}px;color:var(--claim)">`
+      + `claims<i>${current.src.stats.claims}</i></div>`;
   labels.forEach((name,i)=>{
     const hint = i===OBS_LANE
-      ? `${current.src.stats.observations} 條，入論證 ${current.src.stats.observations_linked}`
+      ? `${current.src.stats.observations}，linked ${current.src.stats.observations_linked}`
       : LANE_HINT[i];
-    html += `<div class="lane-label" style="top:${(laneTop + i*LANE_H - 4)*z}px`
+    html += `<div class="lane-label${i===OBS_LANE?' mono':''}" style="top:${(laneTop + i*LANE_H - 4)*z}px`
       + `${i===OBS_LANE?';color:var(--obs)':''}">${escapeHtml(name)}<i>${escapeHtml(hint)}</i></div>`;
   });
   el.gutterInner.innerHTML = html;
@@ -455,12 +460,12 @@ function renderGutter(){
 function renderStats(src){
   const s = src.stats;
   el.stats.innerHTML = [
-    `步驟 <b>${s.steps}</b>${s.steps_isolated?` <span class="gap">孤立 ${s.steps_isolated}</span>`:''}`,
-    `關係 <b>${s.edges}</b>`,
-    `主張 <b>${s.claims}</b>`,
-    `問題 <b>${s.questions}</b>`,
-    `反方 <b>${s.positions}</b>`,
-    `<span class="${s.observations_linked < s.observations ? 'gap':''}">觀察 <b>${s.observations}</b>（進入論證 ${s.observations_linked}）</span>`
+    `evidence_steps <b>${s.steps}</b>${s.steps_isolated?` <span class="gap">isolated ${s.steps_isolated}</span>`:''}`,
+    `relations <b>${s.edges}</b>`,
+    `claims <b>${s.claims}</b>`,
+    `questions <b>${s.questions}</b>`,
+    `positions <b>${s.positions}</b>`,
+    `<span class="${s.observations_linked < s.observations ? 'gap':''}">observations <b>${s.observations}</b>（linked ${s.observations_linked}）</span>`
   ].join('');
 }
 
@@ -544,7 +549,7 @@ function select(id){
       html += `<p class="note">尚未經人工批准。批准只代表可在當前語料範圍內代表教授，不等於完成事實或神學核查。</p>`;
     if(node.review_note)
       html += `<h3>人工審核註記</h3><p>${escapeHtml(node.review_note)}${node.reviewed_by?`（${escapeHtml(node.reviewed_by)}）`:''}</p>`;
-    html += `<h3>由這些步驟走到（${node.step_ids.length}）</h3>` + (node.step_ids.length ? refList(node.step_ids) : `<p class="none">沒有掛上任何證據步驟。</p>`);
+    html += `<h3>由這些 evidence_step 走到（${node.step_ids.length}）</h3>` + (node.step_ids.length ? refList(node.step_ids) : `<p class="none">沒有掛上任何 evidence_step。</p>`);
     if(node.opposed_position_ids.length)
       html += `<h3>教授反對的立場（${node.opposed_position_ids.length}）</h3>` + refList(node.opposed_position_ids);
   } else {
@@ -552,20 +557,20 @@ function select(id){
     html += `<div class="meta">
       ${tag(node.step_type || node.observation_type || node.question_type)}
       ${tag(node.discourse_role)}
-      ${node.speaker && node.speaker!=='professor' ? tag('說話者：'+node.speaker,'bad') : tag(node.speaker)}
-      ${tag(STANCE[node.stance] || node.stance)}
+      ${node.speaker && node.speaker!=='professor' ? tag('speaker: '+node.speaker,'bad') : tag(node.speaker)}
+      ${tag(node.stance)}
       ${node.eligibility ? tag(node.eligibility, bad?'bad':'good') : ''}
-      ${node.anchor_quality ? tag('錨點：'+node.anchor_quality, node.anchor_quality==='missing'?'bad':'') : ''}
-      ${node.kind==='observation' ? (node.argument_role ? tag('argument_role：'+node.argument_role) : tag('argument_role 未判定','bad')) : ''}
-      ${node.answer_state ? tag('answer_state：'+node.answer_state) : ''}
+      ${node.anchor_quality ? tag('anchor_quality: '+node.anchor_quality, node.anchor_quality==='missing'?'bad':'') : ''}
+      ${node.kind==='observation' ? (node.argument_role ? tag('argument_role: '+node.argument_role) : tag('argument_role 未判定','bad')) : ''}
+      ${node.answer_state ? tag('answer_state: '+node.answer_state) : ''}
       ${node.answer_verified_by_human===false ? tag('未經人工確認','bad') : ''}
-      ${node.questioner ? tag('提問者：'+node.questioner) : ''}
+      ${node.questioner ? tag('questioner: '+node.questioner) : ''}
       ${node.attribution ? tag(node.attribution) : ''}
       ${tag(node.review_status)}
       ${(node.scripture_refs||[]).map(r=>tag(r)).join('')}</div>`;
     if(bad) html += `<p class="note">沒有合格錨點，依審核規則不得作為論證證據。</p>`;
     if(node.kind==='observation' && !node.linked)
-      html += `<p class="note">這條觀察沒有任何關係邊，尚未進入任何論證。</p>`;
+      html += `<p class="note">這條 observation 沒有任何關係邊，尚未進入任何論證。</p>`;
 
     html += `<h3>教授原話</h3>`;
     html += (node.quotes||[]).length
@@ -578,7 +583,7 @@ function select(id){
     html += `<h3>這一步支撐了什麼（${out.length}）</h3>` + relList(out, 'to');
     html += `<h3>什麼支撐了這一步（${inc.length}）</h3>` + relList(inc, 'from');
     if((node.claim_ids||[]).length)
-      html += `<h3>${node.kind==='question'?'回答它的主張':'產生的主張'}（${node.claim_ids.length}）</h3>` + refList(node.claim_ids);
+      html += `<h3>${node.kind==='question'?'回答它的 claim':'產生的 claim'}（${node.claim_ids.length}）</h3>` + refList(node.claim_ids);
   }
 
   el.detail.innerHTML = html;
@@ -618,15 +623,20 @@ function renderOverview(){
   }).join('');
   const T = DATA.totals;
   el.overview.innerHTML = `<h2>全庫論證層總覽</h2>
-    <p class="lead">每一列是一個來源。「孤立」是沒有任何關係邊的 evidence_step，
-    「觀察未入論證」是沒有任何關係邊的 observation。這兩欄不是資料品質分數，
-    是還沒有人做過的判斷有多少。點任一列進入該來源的論證圖。</p>
+    <p class="lead">每一列是一個 source。兩個 <code>isolated</code> 欄位是同一個量測：
+    沒有任何關係邊的節點——前一個算 evidence_steps，後一個算 observations。
+    它不是資料品質分數，是還沒有人做過的判斷有多少。點任一列進入該 source 的論證圖。</p>
+    <p class="legend">
+      <span><i class="bar linked" style="width:32px"></i>有關係邊</span>
+      <span><i class="bar iso" style="width:16px"></i><code>isolated</code></span>
+      <span>整條長度＝該 source 的 evidence_steps 佔全庫最多者（${maxSteps}）的比例</span>
+    </p>
     <table class="ov">
-      <thead><tr><th>來源</th><th>步驟</th><th>孤立</th><th>關係</th><th>主張</th>
-        <th>問題</th><th>反方</th><th>觀察</th><th>觀察未入論證</th></tr></thead>
+      <thead><tr><th>source</th><th>evidence_steps</th><th>isolated</th><th>relations</th><th>claims</th>
+        <th>questions</th><th>positions</th><th>observations</th><th>isolated</th></tr></thead>
       <tbody>${rows}</tbody>
       <tfoot><tr>
-        <td class="name"><b>全庫 ${DATA.sources.length} 個來源</b></td>
+        <td class="name"><b>全庫 ${DATA.sources.length} 個 source</b></td>
         <td>${T.steps}</td><td class="gap">${T.steps_isolated}</td><td>${T.edges}</td>
         <td>${T.claims}</td><td>${T.questions}</td><td>${T.positions}</td>
         <td>${T.observations}</td><td class="gap">${T.observations - T.observations_linked}</td>

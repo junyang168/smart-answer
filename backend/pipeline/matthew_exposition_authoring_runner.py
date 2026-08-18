@@ -331,6 +331,10 @@ def _run_grounding_stage(
         author_sections=author_sections,
         instructions_by_claim=instructions_from_contract(packet["base_contract"]),
         transcript_texts=packet.get("sermon_transcript_texts") or {},
+        # Shared across the repair rounds of one run: a paragraph the repair
+        # did not touch keeps the verdict it was already given, so the gate
+        # converges instead of re-rolling every paragraph each attempt.
+        cache_dir=output_dir / "grounding-cache",
     )
     _write_json(
         output_dir / "grounding-report.json",

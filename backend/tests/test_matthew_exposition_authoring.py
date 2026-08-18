@@ -2039,7 +2039,19 @@ def test_grounding_failure_is_repaired_and_rechecked_before_giving_up(tmp_path):
                 return _grounding()
             return _grounding([text.strip().splitlines()[0][:10]])
 
-    openai = FakeClient([valid_author_result(), valid_author_result()], model="fake-openai")
+    # The repair rewrites the paragraphs it was given findings on, so the
+    # recheck asks about different prose. It must: an unchanged paragraph now
+    # keeps the verdict it was already given, because re-asking a
+    # byte-identical packet was returning a different answer and no repair
+    # round could converge.
+    repaired = valid_author_result()
+    repaired["manuscript_markdown"] = "\n".join(
+        line + "（已依 grounding 意見修正）"
+        if line.strip() and not line.startswith(("#", ">", "<!--", "[^"))
+        else line
+        for line in repaired["manuscript_markdown"].splitlines()
+    )
+    openai = FakeClient([valid_author_result(), repaired], model="fake-openai")
     claude = Grounder(passes_after=3)
     result = run_authoring(
         packet=full_authoring_packet(),

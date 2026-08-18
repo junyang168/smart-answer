@@ -339,6 +339,27 @@ def validate_grounding_result(
             )
 
 
+def _cached_verdict(cache_dir: Path | None, fingerprint: str) -> dict[str, Any] | None:
+    if cache_dir is None:
+        return None
+    path = cache_dir / f"{fingerprint}.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _store_verdict(cache_dir: Path | None, fingerprint: str, result: dict[str, Any]) -> None:
+    if cache_dir is None:
+        return
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / f"{fingerprint}.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def check_paragraph_grounding(
     paragraph_text: str,
     claim_ids: list[str],
@@ -348,13 +369,31 @@ def check_paragraph_grounding(
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
     declared_claim_ids: list[str] | None = None,
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     packet = build_grounding_packet(
         paragraph_text, claim_ids, knowledge, instructions_by_claim, transcript_texts,
         declared_claim_ids=declared_claim_ids,
     )
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
-    result = client.generate_json(prompt, canonical_json(packet), GROUNDING_RESULT_SCHEMA)
+    payload = canonical_json(packet)
+    # This is the only stage in the pipeline without a generation cache, and it
+    # is the one that has to be asked the same question repeatedly: the repair
+    # loop re-checks the whole manuscript after rewriting a few paragraphs.
+    # These calls are not deterministic -- Sonnet 5 rejects `temperature` and
+    # thinks adaptively -- so an untouched paragraph could pass one round and
+    # fail the next on a byte-identical packet. Four did. A repair that fixes
+    # three paragraphs while re-rolling the verdict on nineteen cannot
+    # converge, so the gate never settles no matter how good the prose is.
+    #
+    # Keying on the packet means an unchanged paragraph keeps the verdict it
+    # was given, and a round costs only the paragraphs that actually changed.
+    fingerprint = sha256_text(prompt + payload)
+    result = _cached_verdict(cache_dir, fingerprint)
+    if result is None:
+        result = client.generate_json(prompt, payload, GROUNDING_RESULT_SCHEMA)
+        validate_grounding_result(result, paragraph_text=paragraph_text)
+        _store_verdict(cache_dir, fingerprint, result)
     validate_grounding_result(result, paragraph_text=paragraph_text)
     # Derived, never self-reported: quoting a sentence it cannot ground is the
     # finding, so there is no separate verdict to disagree with it.
@@ -405,6 +444,7 @@ def check_manuscript_grounding(
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
     checked_attributions: frozenset[str] = frozenset({"professor", "editorial_synthesis"}),
+    cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Run the grounding check over every checkable paragraph in a manuscript.
 
@@ -438,6 +478,7 @@ def check_manuscript_grounding(
                 instructions_by_claim=instructions_by_claim,
                 transcript_texts=transcript_texts,
                 declared_claim_ids=list(dict.fromkeys(declared)),
+                cache_dir=cache_dir,
             )
         except (GroundingCheckError, ValueError, RuntimeError) as exc:
             # A single paragraph's call failing must not end the run: the

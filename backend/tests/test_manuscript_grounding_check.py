@@ -578,3 +578,78 @@ def test_omitting_declared_ids_keeps_every_claim_at_full_depth():
     }
     material = build_paragraph_material(["CL-1"], knowledge)
     assert material[0]["evidence"][0]["source_excerpt"] == "原話"
+
+
+def test_an_unchanged_paragraph_keeps_the_verdict_it_was_given(tmp_path):
+    """Regression: these calls are not deterministic -- Sonnet 5 rejects
+    `temperature` and thinks adaptively -- and grounding was the only stage
+    without a generation cache. In a real run four paragraphs sent a
+    byte-identical packet in two rounds, passed the first and failed the
+    second. A repair that fixes three paragraphs while re-rolling the verdict
+    on nineteen cannot converge, so the gate never settles however good the
+    prose is.
+    """
+
+    knowledge = {
+        "claims": [{"claim_id": "CL-1", "statement": "主張。", "evidence_step_ids": []}],
+        "evidence_steps": [],
+        "source_fragments": [],
+    }
+
+    class Flaky:
+        model = "fake"
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate_json(self, _prompt, _payload, _schema, **_kwargs):
+            self.calls += 1
+            return {
+                "schema_version": "matthew-exposition-grounding-result.v2",
+                # Passes first, would flag on any later call.
+                "unsupported_assertions": [] if self.calls == 1 else ["這段話"],
+                "notes": "",
+            }
+
+    client = Flaky()
+    cache = tmp_path / "grounding-cache"
+    kwargs = dict(client=client, cache_dir=cache)
+
+    first = check_paragraph_grounding("這段話有依據。", ["CL-1"], knowledge, **kwargs)
+    second = check_paragraph_grounding("這段話有依據。", ["CL-1"], knowledge, **kwargs)
+    assert first["exceeds_material"] is False
+    assert second["exceeds_material"] is False
+    assert client.calls == 1, "an unchanged paragraph must not be re-asked"
+
+    # Different prose is a different question and is asked afresh.
+    third = check_paragraph_grounding("這段話沒有依據。", ["CL-1"], knowledge, **kwargs)
+    assert client.calls == 2
+    assert third["exceeds_material"] is False or third["unsupported_assertions"]
+
+
+def test_without_a_cache_directory_every_paragraph_is_asked(tmp_path):
+    """Callers that pass no cache -- a diagnostic CLI, a test -- keep the
+    behaviour they had."""
+
+    knowledge = {
+        "claims": [{"claim_id": "CL-1", "statement": "主張。", "evidence_step_ids": []}],
+        "evidence_steps": [],
+        "source_fragments": [],
+    }
+
+    class Counting:
+        model = "fake"
+        calls = 0
+
+        def generate_json(self, _prompt, _payload, _schema, **_kwargs):
+            type(self).calls += 1
+            return {
+                "schema_version": "matthew-exposition-grounding-result.v2",
+                "unsupported_assertions": [],
+                "notes": "",
+            }
+
+    client = Counting()
+    check_paragraph_grounding("同一段。", ["CL-1"], knowledge, client=client)
+    check_paragraph_grounding("同一段。", ["CL-1"], knowledge, client=client)
+    assert Counting.calls == 2
