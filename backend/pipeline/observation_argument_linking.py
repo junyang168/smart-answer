@@ -67,16 +67,45 @@ class Step:
     relation_type: str = "supports"
 
 
+@dataclass(frozen=True)
+class Attachment:
+    """An observation recorded as further evidence for a claim that exists.
+
+    Distinct from `step`: the professor's conclusion is already claimed, and
+    what is missing is that one of the facts he argued it from was never part
+    of the claim's evidence.  Caesarea Philippi is this shape -- CL008 asserts
+    that Jesus asked the question in a Gentile city emphasising imperial
+    authority, and the geography behind calling it Gentile sits outside it.
+    Adding a claim instead would assert a bare fact as though it were a
+    conclusion, which is the failure mode of promoting an observation whole.
+    """
+
+    observation_id: str
+    claim_id: str
+    source_id: str
+    segment_index: str
+    excerpt: str
+    statement: str
+    fragment_id: str
+    evidence_step_id: str
+    relation_id: str
+    reason: str
+    step_type: str = "historical_cultural"
+    relation_type: str = "supports"
+
+
 @dataclass
 class LinkingPlan:
     links: list[Link] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
 
 
 def load_plan(payload: dict[str, Any]) -> LinkingPlan:
     return LinkingPlan(
         links=[Link(**row) for row in payload.get("links", [])],
         steps=[Step(**row) for row in payload.get("steps", [])],
+        attachments=[Attachment(**row) for row in payload.get("attachments", [])],
     )
 
 
@@ -193,6 +222,70 @@ def build_linking_package(
             "review_status": "candidate",
         })
 
+    for attachment in plan.attachments:
+        observation = store.get_record("observations", attachment.observation_id)
+        _require(observation is not None, f"observation not found: {attachment.observation_id}")
+        claim = store.get_record("claims", attachment.claim_id)
+        _require(claim is not None, f"claim not found: {attachment.claim_id}")
+        for collection, object_id in (
+            ("source_fragments", attachment.fragment_id),
+            ("evidence_steps", attachment.evidence_step_id),
+            ("knowledge_relations", attachment.relation_id),
+        ):
+            _require(
+                store.get_record(collection, object_id) is None,
+                f"{collection}/{object_id} already exists, refusing to overwrite",
+            )
+        _require(bool(attachment.reason.strip()), f"{attachment.relation_id}: reason is required")
+
+        transcript = transcripts.get(attachment.source_id)
+        _require(transcript is not None, f"transcript not supplied for {attachment.source_id}")
+        text = _segment_text(transcript, attachment.segment_index)
+        _require(
+            attachment.excerpt in text,
+            f"{attachment.evidence_step_id}: excerpt is not verbatim in "
+            f"{attachment.source_id} {attachment.segment_index}",
+        )
+
+        fragments.append({
+            "fragment_id": attachment.fragment_id,
+            "source_id": attachment.source_id,
+            "paragraph_key": attachment.segment_index,
+            "verbatim_excerpt": attachment.excerpt,
+            "anchor_state": "source_version_bound",
+            "review_status": "candidate",
+        })
+        evidence_steps.append({
+            "evidence_step_id": attachment.evidence_step_id,
+            "source_fragment_id": attachment.fragment_id,
+            "statement": attachment.statement,
+            "step_type": attachment.step_type,
+            "speaker": "professor",
+            "stance": "asserted",
+            "discourse_role": f"grounds_attached_for_observation:{attachment.observation_id}",
+            "support_eligibility": "eligible_candidate",
+            "produced_claim_ids": [attachment.claim_id],
+            "scripture_refs": observation.get("scripture_refs") or [],
+            "review_status": "candidate",
+        })
+        # The claim keeps every field it already has; only its evidence grows.
+        # Rewriting anything else here would silently restate the professor's
+        # conclusion while claiming to add a ground for it.
+        updated = dict(claim)
+        existing_steps = [str(value) for value in updated.get("evidence_step_ids") or []]
+        if attachment.evidence_step_id not in existing_steps:
+            existing_steps.append(attachment.evidence_step_id)
+        updated["evidence_step_ids"] = existing_steps
+        claims.append(updated)
+        relations.append({
+            "relation_id": attachment.relation_id,
+            "from_id": attachment.observation_id,
+            "to_id": attachment.evidence_step_id,
+            "relation_type": attachment.relation_type,
+            "reason": attachment.reason,
+            "review_status": "candidate",
+        })
+
     return {
         "package_id": "OBSERVATION-ARGUMENT-LINKING-V1",
         "source_documents": [],
@@ -245,8 +338,10 @@ def main(argv: list[str] | None = None) -> int:
     for relation in package["knowledge_relations"]:
         print(f"\n  {relation['from_id']} -> {relation['to_id']}")
         print(f"    {relation['reason']}")
+    attached_claim_ids = {attachment.claim_id for attachment in plan.attachments}
     for claim in package["claims"]:
-        print(f"\n  new claim {claim['claim_id']}")
+        kind = "evidence added to" if claim["claim_id"] in attached_claim_ids else "new claim"
+        print(f"\n  {kind} {claim['claim_id']}")
         print(f"    {claim['statement']}")
 
     if not args.apply:

@@ -194,3 +194,74 @@ def test_a_plan_round_trips_from_json():
     })
     assert plan.links[0].relation_type == "supports"
     assert plan.steps == []
+
+
+def _attachment(**overrides):
+    values = dict(
+        observation_id="OBS-1", claim_id="CL-EXISTING", source_id="SRC-1",
+        segment_index="S0002", excerpt=EXCERPT,
+        statement="該城在黑門山下，居民多為外邦人。",
+        fragment_id="FR-A", evidence_step_id="E-A", relation_id="KR-A",
+        reason="教授以地理說明這是外邦城市。",
+    )
+    values.update(overrides)
+    from backend.pipeline.observation_argument_linking import Attachment
+
+    return Attachment(**values)
+
+
+def _store_with_claim():
+    return _store(claims={"CL-EXISTING": {
+        "claim_id": "CL-EXISTING",
+        "statement": "耶穌在強調皇帝權柄的外邦城市提問。",
+        "claim_type": "interpretive_judgment",
+        "evidence_step_ids": ["E-OLD"],
+        "maturity": "candidate",
+    }})
+
+
+def test_an_attachment_adds_evidence_to_a_claim_without_restating_it():
+    from backend.pipeline.observation_argument_linking import LinkingPlan as Plan
+
+    package = build_linking_package(
+        Plan(attachments=[_attachment()]),
+        store=_store_with_claim(), transcripts=_transcripts(),
+    )
+    claim = package["claims"][0]
+    assert claim["evidence_step_ids"] == ["E-OLD", "E-A"]
+    assert claim["statement"] == "耶穌在強調皇帝權柄的外邦城市提問。"
+    assert package["evidence_steps"][0]["produced_claim_ids"] == ["CL-EXISTING"]
+    assert package["knowledge_relations"][0]["to_id"] == "E-A"
+
+
+def test_an_attachment_to_a_missing_claim_is_refused():
+    from backend.pipeline.observation_argument_linking import LinkingPlan as Plan
+
+    with pytest.raises(LinkingError, match="claim not found"):
+        build_linking_package(
+            Plan(attachments=[_attachment(claim_id="CL-9")]),
+            store=_store_with_claim(), transcripts=_transcripts(),
+        )
+
+
+def test_an_attachment_excerpt_must_also_be_verbatim():
+    from backend.pipeline.observation_argument_linking import LinkingPlan as Plan
+
+    with pytest.raises(LinkingError, match="not verbatim"):
+        build_linking_package(
+            Plan(attachments=[_attachment(excerpt="教授說這城在山上。")]),
+            store=_store_with_claim(), transcripts=_transcripts(),
+        )
+
+
+def test_attaching_the_same_step_twice_does_not_duplicate_it():
+    from backend.pipeline.observation_argument_linking import LinkingPlan as Plan
+
+    store = _store(claims={"CL-EXISTING": {
+        "claim_id": "CL-EXISTING", "statement": "既有結論。",
+        "evidence_step_ids": ["E-A"], "maturity": "candidate",
+    }})
+    package = build_linking_package(
+        Plan(attachments=[_attachment()]), store=store, transcripts=_transcripts()
+    )
+    assert package["claims"][0]["evidence_step_ids"] == ["E-A"]
