@@ -975,7 +975,12 @@ def audit_editorial_draft(manifest_path: Path, draft_id: str) -> dict[str, Any]:
 
         claim_ids = [str(value) for value in decision.get("claim_ids", []) if value]
         declared_coverage_gap = (
-            decision.get("action") == "coverage_gap"
+            # The store spells this `decision_type`, a projection spells it
+            # `action`, and `CompositionDecisionRecord` accepts both. Reading
+            # only one meant a snapshot compiled from the store failed this
+            # exemption and reported every declared coverage gap as a decision
+            # without claims.
+            (decision.get("action") or decision.get("decision_type")) == "coverage_gap"
             and decision.get("coverage") == "missing"
             and editorial_boundary.get("required") is True
         )

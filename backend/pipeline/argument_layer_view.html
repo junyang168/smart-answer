@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>論證層 · 王守仁教授語料</title>
+<style>
+:root{
+  --paper:#F2F3F0; --card:#FBFBF9; --ink:#1B1F24; --muted:#6A7078; --faint:#8D9299;
+  --rule:#D7DAD4; --rule-strong:#BFC3BC; --indigo:#26527A; --indigo-soft:#E4EAF1;
+  --lane0:#8C6D3A; --lane1:#5B7A8C; --lane2:#26527A; --lane3:#4A6350; --lane4:#7A5B36;
+  --claim:#3F4A6B; --claim-soft:#E6E8F0; --obs:#9AA0A6;
+  --supports:#26527A; --qualifies:#B07A22; --refutes:#8C3A38; --answers:#4A6350;
+  --contextualizes:#9AA0A6; --applies:#6B4E8C;
+  --warn:#8C3A38; --warn-soft:#F5E6E5; --good:#4A6350;
+  --font-ui:system-ui,-apple-system,"Segoe UI","PingFang TC","PingFang SC","Microsoft JhengHei","Noto Sans TC",sans-serif;
+  --font-src:"Songti TC","Songti SC","Source Han Serif TC","Noto Serif TC",Georgia,serif;
+  --font-data:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#14171A; --card:#1B1F23; --ink:#E5E7E3; --muted:#8D939B; --faint:#71767D;
+  --rule:#2A2F35; --rule-strong:#3A4048; --indigo:#7FA9D4; --indigo-soft:#1E2A38;
+  --lane0:#C0A070; --lane1:#8FB0C2; --lane2:#7FA9D4; --lane3:#8FB09A; --lane4:#C2A272;
+  --claim:#98A3C8; --claim-soft:#212636; --obs:#6E747B;
+  --supports:#7FA9D4; --qualifies:#D9A94E; --refutes:#D08480; --answers:#8FB09A;
+  --contextualizes:#6E747B; --applies:#A98FD0;
+  --warn:#D08480; --warn-soft:#2E2020; --good:#8FB09A;
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-ui);
+  font-size:14px;line-height:1.55;display:flex;flex-direction:column;overflow:hidden}
+
+header{border-bottom:1px solid var(--rule);padding:9px 16px;display:flex;gap:14px;
+  align-items:center;flex-wrap:wrap;background:var(--card)}
+h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.02em;white-space:nowrap}
+h1 small{display:block;font-size:11px;font-weight:400;color:var(--muted);letter-spacing:0}
+select,input[type=search]{font:inherit;font-size:13px;background:var(--card);color:var(--ink);
+  border:1px solid var(--rule-strong);border-radius:7px;padding:5px 9px;max-width:min(44vw,470px)}
+input[type=search]{width:172px}
+.stats{display:flex;gap:13px;flex-wrap:wrap;font-size:12px;color:var(--muted);
+  font-family:var(--font-data);margin-left:auto;align-items:center}
+.stats b{color:var(--ink);font-weight:650}
+.stats .gap{color:var(--warn)}
+
+.toolbar{border-bottom:1px solid var(--rule);padding:6px 16px;display:flex;gap:7px;
+  align-items:center;flex-wrap:wrap;background:var(--card);font-size:12px}
+.chip{border:1px solid var(--rule-strong);border-radius:999px;padding:3px 10px;cursor:pointer;
+  user-select:none;background:transparent;color:var(--muted);font:inherit;display:inline-flex;
+  align-items:center;gap:6px}
+.chip[aria-pressed=true]{color:var(--ink);border-color:currentColor;background:var(--indigo-soft)}
+.chip .swatch{width:14px;height:0;border-top-width:2px;border-top-style:solid;display:inline-block}
+.sep{width:1px;height:18px;background:var(--rule);margin:0 3px}
+label.zoom{display:inline-flex;align-items:center;gap:6px;color:var(--muted)}
+input[type=range]{width:104px}
+
+main{flex:1;display:flex;min-height:0}
+#canvas-wrap{flex:1;overflow:auto;position:relative}
+#stage{position:relative;transform-origin:0 0}
+.lane-label{position:absolute;left:0;font-size:11px;letter-spacing:.06em;color:var(--muted);
+  padding-left:10px;pointer-events:none;font-weight:600}
+.lane-label i{display:block;font-style:normal;font-weight:400;font-size:10px;color:var(--faint);letter-spacing:0}
+.lane-rule{position:absolute;left:0;border-top:1px dashed var(--rule);pointer-events:none}
+.zone-rule{position:absolute;left:0;border-top:1px solid var(--rule-strong);pointer-events:none}
+svg#edges{position:absolute;inset:0;overflow:visible;pointer-events:none}
+svg#edges path{fill:none;stroke-width:1.5;opacity:.45}
+svg#edges path.dim{opacity:.05}
+svg#edges path.hot{stroke-width:2.6;opacity:1}
+svg#edges path.member{stroke:var(--claim);stroke-width:1.2;stroke-dasharray:2 3;opacity:0}
+svg#edges path.member.hot{opacity:.85}
+
+.node{position:absolute;background:var(--card);border:1px solid var(--rule-strong);
+  border-radius:8px;padding:5px 8px;cursor:pointer;overflow:hidden;
+  border-left-width:3px;transition:box-shadow .12s,opacity .12s}
+.node:hover{box-shadow:0 2px 10px rgba(0,0,0,.16)}
+.node.dim{opacity:.14}
+.node.sel{box-shadow:0 0 0 2px var(--indigo)}
+.node .id{font-family:var(--font-data);font-size:9.5px;color:var(--faint);letter-spacing:.03em;
+  display:flex;justify-content:space-between;gap:4px;white-space:nowrap;overflow:hidden}
+.node .kind{font-size:9.5px;color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .txt{font-size:11.5px;line-height:1.45;margin-top:2px;
+  display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
+.node.lane0{border-left-color:var(--lane0)} .node.lane1{border-left-color:var(--lane1)}
+.node.lane2{border-left-color:var(--lane2)} .node.lane3{border-left-color:var(--lane3)}
+.node.lane4{border-left-color:var(--lane4)}
+.node.question{background:linear-gradient(180deg,var(--indigo-soft),var(--card))}
+.node.position{border-left-color:var(--warn);border-left-style:double;border-left-width:4px}
+.node.observation{border-left-color:var(--obs);background:transparent;border-style:dashed;color:var(--muted)}
+.node.observation.linked{border-style:solid;color:var(--ink);background:var(--card)}
+.node.withheld{border-color:var(--warn)}
+.node .flag{color:var(--warn);font-weight:700}
+.node.claim{border:1px solid var(--claim);border-left-width:4px;background:var(--claim-soft)}
+.node.claim.approved{border-color:var(--good);border-left-color:var(--good)}
+.reach{position:absolute;height:2px;background:var(--claim);opacity:.3;border-radius:2px;pointer-events:none}
+.reach.dim{opacity:.06} .reach.hot{opacity:.9;height:3px}
+
+aside{width:392px;flex:none;border-left:1px solid var(--rule);background:var(--card);
+  overflow:auto;padding:16px 18px}
+aside.empty{display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:13px;text-align:center}
+aside h2{font-size:14px;margin:0 0 2px;font-weight:650}
+aside .idline{font-family:var(--font-data);font-size:11px;color:var(--faint);margin-bottom:10px}
+aside .statement{font-size:14.5px;line-height:1.75;margin:0 0 12px}
+.meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+.tag{font-size:10.5px;border:1px solid var(--rule-strong);border-radius:5px;padding:1px 6px;
+  color:var(--muted);font-family:var(--font-data)}
+.tag.bad{color:var(--warn);border-color:var(--warn);background:var(--warn-soft)}
+.tag.good{color:var(--good);border-color:var(--good)}
+.note{font-size:12px;margin:-4px 0 12px;padding:6px 9px;border-radius:6px;
+  background:var(--warn-soft);color:var(--warn)}
+aside h3{font-size:11px;letter-spacing:.07em;color:var(--muted);margin:16px 0 6px;font-weight:600;
+  border-top:1px solid var(--rule);padding-top:10px}
+.quote{font-family:var(--font-src);font-size:13.5px;line-height:1.85;border-left:2px solid var(--rule-strong);
+  padding:2px 0 2px 10px;margin:0 0 8px}
+.quote .where{display:block;font-family:var(--font-data);font-size:10px;color:var(--faint);margin-top:3px}
+.rel{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;
+  padding:4px 6px;cursor:pointer;font:inherit;font-size:12px;color:var(--ink)}
+.rel:hover{background:var(--indigo-soft)}
+.rel .rtype{font-family:var(--font-data);font-size:10px;padding-right:6px}
+.rel .why{display:block;color:var(--muted);font-size:11px;padding-left:2px}
+.none{color:var(--faint);font-size:12px}
+footer{border-top:1px solid var(--rule);padding:6px 16px;font-size:11px;color:var(--faint);
+  background:var(--card);display:flex;gap:15px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>論證層<small>authoring store · 直接讀 PostgreSQL</small></h1>
+  <select id="source"></select>
+  <input type="search" id="search" placeholder="搜尋節點文字…">
+  <div class="stats" id="stats"></div>
+</header>
+
+<div class="toolbar">
+  <span style="color:var(--muted)">關係</span>
+  <button class="chip" data-rel="supports" aria-pressed="true"><i class="swatch" style="border-top-color:var(--supports)"></i>supports</button>
+  <button class="chip" data-rel="qualifies" aria-pressed="true"><i class="swatch" style="border-top-color:var(--qualifies)"></i>qualifies</button>
+  <button class="chip" data-rel="refutes" aria-pressed="true"><i class="swatch" style="border-top-color:var(--refutes)"></i>refutes</button>
+  <button class="chip" data-rel="answers" aria-pressed="true"><i class="swatch" style="border-top-color:var(--answers)"></i>answers</button>
+  <button class="chip" data-rel="applies" aria-pressed="true"><i class="swatch" style="border-top-color:var(--applies)"></i>applies</button>
+  <button class="chip" data-rel="contextualizes" aria-pressed="true"><i class="swatch" style="border-top-color:var(--contextualizes)"></i>contextualizes</button>
+  <span class="sep"></span>
+  <button class="chip" id="f-isolated" aria-pressed="false">只看孤立節點</button>
+  <button class="chip" id="f-withheld" aria-pressed="false">只看不合格證據</button>
+  <button class="chip" id="f-obs" aria-pressed="true">觀察列</button>
+  <button class="chip" id="f-claims" aria-pressed="true">主張列</button>
+  <span class="sep"></span>
+  <label class="zoom">縮放 <input type="range" id="zoom" min="30" max="150" value="72"><span id="zoomval">72%</span></label>
+</div>
+
+<main>
+  <div id="canvas-wrap"><div id="stage"><svg id="edges"></svg></div></div>
+  <aside id="detail" class="empty">點任一節點看教授原話、關係與審核狀態</aside>
+</main>
+
+<footer>
+  <span>橫軸＝教授講述順序（逐字稿段落）</span>
+  <span>縱軸＝論證動作</span>
+  <span>主張放在它最後一步證據的位置，底線＝取材範圍</span>
+  <span>紅框＝沒有合格錨點，不得當證據</span>
+  <span>灰列＝observation，尚未進入論證</span>
+  <span id="foot-note"></span>
+</footer>
+
+<script id="data" type="application/json">__ARGUMENT_LAYER_DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById('data').textContent);
+const LANES = DATA.lanes;
+const LANE_HINT = ['問題與反方立場','經文、原文、歷史背景','推理與限定','結論','應用'];
+const OBS_LANE = LANES.length;
+
+const COL_W = 132, GAP_X = 10, LANE_H = 112, CLAIM_H = 66, CLAIM_GAP = 6,
+      PAD_L = 104, PAD_T = 12, ZONE_GAP = 16;
+
+const REL_COLOR = {supports:'--supports',qualifies:'--qualifies',refutes:'--refutes',
+  answers:'--answers',applies:'--applies',contextualizes:'--contextualizes'};
+const STANCE = {asserted:'主張',endorsed:'認同',opposed:'反對',questioned:'提問',quoted:'引述',neutral:'中性',unknown:'未定'};
+const KIND_NAME = {step:'論證步驟',question:'問題',position:'反方立場',observation:'觀察',claim:'共享主張'};
+const ELIG_BAD = e => !!e && (e.startsWith('withheld') || e === 'context_only' || e === 'contextual_only');
+
+const state = {
+  source:0, rels:new Set(Object.keys(REL_COLOR)), isolated:false, withheld:false,
+  showObs:true, showClaims:true, zoom:0.72, selected:null, search:''
+};
+
+const el = {
+  source:document.getElementById('source'), stage:document.getElementById('stage'),
+  edges:document.getElementById('edges'), detail:document.getElementById('detail'),
+  stats:document.getElementById('stats'), wrap:document.getElementById('canvas-wrap'),
+  zoom:document.getElementById('zoom'), zoomval:document.getElementById('zoomval'),
+  search:document.getElementById('search'), foot:document.getElementById('foot-note')
+};
+
+DATA.sources.forEach((s,i)=>{
+  const o = document.createElement('option');
+  o.value = i;
+  o.textContent = `${s.title}　·　${s.stats.steps} 步 / ${s.stats.edges} 關係 / ${s.stats.claims} 主張 / ${s.stats.observations} 觀察`;
+  el.source.appendChild(o);
+});
+const T = DATA.totals;
+el.foot.textContent = `全庫 ${DATA.sources.length} 個來源：${T.steps} steps（孤立 ${T.steps_isolated}）、${T.edges} 關係、${T.claims} claims、${T.observations} observations（進入論證 ${T.observations_linked}）`;
+
+const escapeHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const tag = (text, cls) => text ? `<span class="tag ${cls||''}">${escapeHtml(text)}</span>` : '';
+const fmtTime = t => { const s = Math.round(t); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; };
+
+function layout(src){
+  const timeline = [];
+  src.questions.forEach(q => timeline.push({...q, kind:'question', lane:0}));
+  src.positions.forEach(p => timeline.push({...p, kind:'position', lane:0}));
+  src.steps.forEach(s => timeline.push({...s, kind:'step'}));
+  src.observations.forEach(o => timeline.push({...o, kind:'observation', lane:OBS_LANE}));
+  // One column per node in the order the professor said it: reading the canvas
+  // left to right is reading the source in order.
+  timeline.sort((a,b)=>(a.rank??1e9)-(b.rank??1e9) || a.ordinal-b.ordinal || a.id.localeCompare(b.id));
+  timeline.forEach((n,i)=>{ n.col = i; });
+
+  const byId = new Map(timeline.map(n=>[n.id,n]));
+  const linked = new Set();
+  src.edges.forEach(e=>{ linked.add(e.from); linked.add(e.to); });
+  timeline.forEach(n=>{ n.linked = linked.has(n.id); });
+
+  // A claim sits at its last piece of evidence — where the professor arrives at
+  // it — and carries a bar back to its first, so a conclusion drawing on the
+  // whole source looks different from one drawn from three adjacent steps.
+  const claims = [];
+  src.claims.forEach(c=>{
+    const cols = c.step_ids.map(id=>byId.get(id)).filter(Boolean).map(n=>n.col);
+    claims.push({...c, kind:'claim', lane:-1,
+      col: cols.length ? Math.max(...cols) : 0,
+      from: cols.length ? Math.min(...cols) : 0,
+      orphan: cols.length === 0});
+  });
+  claims.sort((a,b)=>a.col-b.col || a.ordinal-b.ordinal);
+  const rowEnd = [];
+  claims.forEach(c=>{
+    let row = rowEnd.findIndex(end => end < c.col);
+    if(row === -1){ row = rowEnd.length; rowEnd.push(-1); }
+    rowEnd[row] = c.col;
+    c.row = row;
+    byId.set(c.id, c);
+  });
+  const claimRows = state.showClaims ? Math.max(rowEnd.length, 1) : 0;
+  return {timeline, claims, byId, claimRows};
+}
+
+const colX = col => PAD_L + col*(COL_W+GAP_X);
+
+function boxOf(n, L){
+  const laneTop = PAD_T + L.claimRows*(CLAIM_H+CLAIM_GAP) + (L.claimRows?ZONE_GAP:0);
+  if(n.kind === 'claim') return {x:colX(n.col), y:PAD_T + n.row*(CLAIM_H+CLAIM_GAP), w:COL_W, h:CLAIM_H};
+  return {x:colX(n.col), y:laneTop + n.lane*LANE_H, w:COL_W,
+          h:n.kind==='observation' ? 74 : 92};
+}
+
+let current = null;
+
+function render(){
+  const src = DATA.sources[state.source];
+  const L = layout(src);
+  current = {src, L};
+  [...el.stage.querySelectorAll('.node,.reach,.lane-label,.lane-rule,.zone-rule')].forEach(x=>x.remove());
+
+  const width = colX(L.timeline.length) + 40;
+  const laneTop = PAD_T + L.claimRows*(CLAIM_H+CLAIM_GAP) + (L.claimRows?ZONE_GAP:0);
+  const laneCount = LANES.length + (state.showObs?1:0);
+  const height = laneTop + laneCount*LANE_H + 24;
+  el.stage.style.width = width+'px';
+  el.stage.style.height = height+'px';
+  el.stage.style.transform = `scale(${state.zoom})`;
+
+  if(L.claimRows){
+    const rule = document.createElement('div');
+    rule.className = 'zone-rule';
+    rule.style.cssText = `top:${laneTop - ZONE_GAP/2}px;width:${width}px`;
+    el.stage.appendChild(rule);
+    const lab = document.createElement('div');
+    lab.className = 'lane-label';
+    lab.style.cssText = `top:${PAD_T}px;width:${PAD_L}px;color:var(--claim)`;
+    lab.innerHTML = `共享主張<i>${src.stats.claims} 條</i>`;
+    el.stage.appendChild(lab);
+  }
+  const labels = state.showObs ? [...LANES,'觀察'] : LANES;
+  labels.forEach((name,i)=>{
+    const rule = document.createElement('div');
+    rule.className = 'lane-rule';
+    rule.style.cssText = `top:${laneTop + i*LANE_H - 8}px;width:${width}px`;
+    el.stage.appendChild(rule);
+    const lab = document.createElement('div');
+    lab.className = 'lane-label';
+    lab.style.cssText = `top:${laneTop + i*LANE_H - 4}px;width:${PAD_L}px`;
+    const hint = i===OBS_LANE ? `${src.stats.observations} 條，進入論證 ${src.stats.observations_linked}` : LANE_HINT[i];
+    lab.innerHTML = `${name}<i>${escapeHtml(hint)}</i>`;
+    if(i===OBS_LANE) lab.style.color = 'var(--obs)';
+    el.stage.appendChild(lab);
+  });
+
+  const q = state.search.trim();
+  const visible = new Map();
+  const place = n => {
+    const box = boxOf(n, L);
+    const d = document.createElement('div');
+    d.className = `node ${n.kind} lane${n.lane}`;
+    const bad = n.kind==='step' && ELIG_BAD(n.eligibility);
+    if(bad) d.classList.add('withheld');
+    if(n.kind==='observation' && n.linked) d.classList.add('linked');
+    if(n.kind==='claim' && n.review_status==='approved') d.classList.add('approved');
+    d.style.cssText += `left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px`;
+    const kindLabel = n.kind==='question' ? (n.question_type || '問題')
+      : n.kind==='position' ? '反方立場'
+      : n.kind==='claim' ? n.claim_type
+      : n.kind==='observation' ? (n.observation_type || 'observation')
+      : (n.step_type || n.discourse_role || '—');
+    d.innerHTML = `<span class="id"><span>${escapeHtml(n.label)}</span>${bad?'<span class="flag">⚠</span>':''}</span>`
+      + `<span class="kind">${escapeHtml(kindLabel)}</span>`
+      + `<div class="txt" style="-webkit-line-clamp:${n.kind==='observation'?3:n.kind==='claim'?2:4}">${escapeHtml(n.statement)}</div>`;
+    d.addEventListener('click', ()=>select(n.id));
+    d.addEventListener('mouseenter', ()=>highlight(n.id));
+    d.addEventListener('mouseleave', ()=>highlight(state.selected));
+    el.stage.appendChild(d);
+    visible.set(n.id, {node:n, box, dom:d});
+  };
+
+  L.timeline.forEach(n=>{
+    if(n.kind==='observation' && !state.showObs) return;
+    if(state.isolated && n.linked) return;
+    if(state.withheld && !(n.kind==='step' && ELIG_BAD(n.eligibility))) return;
+    place(n);
+  });
+  if(state.showClaims && !state.isolated && !state.withheld){
+    L.claims.forEach(c=>{
+      place(c);
+      if(c.from < c.col){
+        const bar = document.createElement('div');
+        bar.className = 'reach';
+        bar.dataset.claim = c.id;
+        bar.style.cssText = `left:${colX(c.from)+4}px;top:${PAD_T + c.row*(CLAIM_H+CLAIM_GAP) + CLAIM_H - 2}px;width:${colX(c.col)-colX(c.from)+COL_W/2}px`;
+        el.stage.appendChild(bar);
+      }
+    });
+  }
+
+  const svg = el.edges;
+  svg.setAttribute('width', width); svg.setAttribute('height', height);
+  svg.innerHTML = `<defs>${Object.entries(REL_COLOR).map(([k,v])=>
+    `<marker id="a-${k}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+       <path d="M0,0 L8,4 L0,8 z" fill="var(${v})"/></marker>`).join('')}</defs>`;
+  const paths = [];
+  // Edges leave a card's side and enter the other card's side, so a line never
+  // crosses the text it connects.
+  src.edges.forEach(e=>{
+    if(!state.rels.has(e.type)) return;
+    const a = visible.get(e.from), b = visible.get(e.to);
+    if(!a || !b) return;
+    const forward = a.box.x <= b.box.x;
+    const ax = forward ? a.box.x + a.box.w : a.box.x;
+    const bx = forward ? b.box.x : b.box.x + b.box.w;
+    const ay = a.box.y + a.box.h/2, by = b.box.y + b.box.h/2;
+    const dx = Math.max(26, Math.abs(bx-ax)*0.4) * (forward?1:-1);
+    const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d', `M${ax},${ay} C${ax+dx},${ay} ${bx-dx},${by} ${bx},${by}`);
+    p.setAttribute('stroke', `var(${REL_COLOR[e.type]})`);
+    if(e.type==='contextualizes') p.setAttribute('stroke-dasharray','4 3');
+    p.setAttribute('marker-end', `url(#a-${e.type})`);
+    p.dataset.from = e.from; p.dataset.to = e.to;
+    svg.appendChild(p); paths.push(p);
+  });
+  // Claim membership is drawn but hidden until that claim is the focus; showing
+  // every claim's members at once buries the argument in lines.
+  const members = [];
+  if(state.showClaims){
+    L.claims.forEach(c=>{
+      const a = visible.get(c.id);
+      if(!a) return;
+      c.step_ids.forEach(sid=>{
+        const b = visible.get(sid);
+        if(!b) return;
+        const ax = a.box.x + a.box.w/2, ay = a.box.y + a.box.h;
+        const bx = b.box.x + b.box.w/2, by = b.box.y;
+        const p = document.createElementNS('http://www.w3.org/2000/svg','path');
+        p.setAttribute('d', `M${ax},${ay} C${ax},${ay+40} ${bx},${by-40} ${bx},${by}`);
+        p.setAttribute('class','member');
+        p.dataset.claim = c.id; p.dataset.step = sid;
+        svg.appendChild(p); members.push(p);
+      });
+    });
+  }
+
+  current.visible = visible; current.paths = paths; current.members = members;
+  renderStats(src);
+  highlight(state.selected);
+}
+
+function renderStats(src){
+  const s = src.stats;
+  el.stats.innerHTML = [
+    `步驟 <b>${s.steps}</b>${s.steps_isolated?` <span class="gap">孤立 ${s.steps_isolated}</span>`:''}`,
+    `關係 <b>${s.edges}</b>`,
+    `主張 <b>${s.claims}</b>`,
+    `問題 <b>${s.questions}</b>`,
+    `反方 <b>${s.positions}</b>`,
+    `<span class="${s.observations_linked < s.observations ? 'gap':''}">觀察 <b>${s.observations}</b>（進入論證 ${s.observations_linked}）</span>`
+  ].join('');
+}
+
+function neighbours(id){
+  const set = new Set([id]);
+  current.src.edges.forEach(e=>{
+    if(e.from===id) set.add(e.to);
+    if(e.to===id) set.add(e.from);
+  });
+  const node = current.L.byId.get(id);
+  if(node && node.kind==='claim') node.step_ids.forEach(s=>set.add(s));
+  if(node && node.claim_ids) node.claim_ids.forEach(c=>set.add(c));
+  if(node && node.opposed_position_ids) node.opposed_position_ids.forEach(p=>set.add(p));
+  return set;
+}
+
+function matchesSearch(id){
+  const q = state.search.trim();
+  if(!q) return true;
+  const n = current.L.byId.get(id);
+  return !!n && ((n.statement||'').includes(q) || n.id.includes(q));
+}
+
+function highlight(id){
+  const on = !!id;
+  const near = on ? neighbours(id) : null;
+  current.visible.forEach(({dom}, nid)=>{
+    // The ring marks what is selected; hovering only dims the unrelated.
+    dom.classList.toggle('sel', nid===state.selected);
+    dom.classList.toggle('dim', on ? !near.has(nid) : !matchesSearch(nid));
+  });
+  current.paths.forEach(p=>{
+    const hot = on && (p.dataset.from===id || p.dataset.to===id);
+    p.classList.toggle('hot', hot);
+    p.classList.toggle('dim', on && !hot);
+  });
+  current.members.forEach(p=>{
+    p.classList.toggle('hot', on && (p.dataset.claim===id || p.dataset.step===id));
+  });
+  [...el.stage.querySelectorAll('.reach')].forEach(bar=>{
+    bar.classList.toggle('hot', on && bar.dataset.claim===id);
+    bar.classList.toggle('dim', on && bar.dataset.claim!==id);
+  });
+}
+
+function relList(edges, side){
+  if(!edges.length) return `<p class="none">無</p>`;
+  return edges.map(e=>{
+    const other = e[side];
+    const n = current.L.byId.get(other);
+    return `<button class="rel" data-goto="${other}">
+      <span class="rtype" style="color:var(${REL_COLOR[e.type]||'--muted'})">${e.type}</span>
+      ${escapeHtml(n ? (n.statement||'').slice(0,70) : other)}
+      ${e.reason ? `<span class="why">${escapeHtml(e.reason)}</span>` : ''}</button>`;
+  }).join('');
+}
+
+function refList(ids){
+  return ids.map(id=>{
+    const n = current.L.byId.get(id);
+    return `<button class="rel" data-goto="${id}">
+      <span class="rtype">${escapeHtml(n ? n.label : id)}</span>
+      ${escapeHtml(n ? (n.statement||'').slice(0,64) : '（不在本來源）')}</button>`;
+  }).join('');
+}
+
+function select(id){
+  const node = current.L.byId.get(id);
+  if(!node) return;
+  state.selected = id;
+  el.detail.classList.remove('empty');
+  const src = current.src;
+  let html = `<h2>${KIND_NAME[node.kind]}</h2><div class="idline">${escapeHtml(node.id)}</div>`;
+  html += `<p class="statement">${escapeHtml(node.statement)}</p>`;
+
+  if(node.kind === 'claim'){
+    html += `<div class="meta">${tag(node.claim_type)}${tag(node.attribution)}${tag('maturity: '+node.maturity)}
+      ${tag(node.review_status, node.review_status==='approved'?'good':'')}
+      ${node.scripture_refs.map(r=>tag(r)).join('')}${node.topic_terms.map(t=>tag(t)).join('')}</div>`;
+    if(node.review_status !== 'approved')
+      html += `<p class="note">尚未經人工批准。批准只代表可在當前語料範圍內代表教授，不等於完成事實或神學核查。</p>`;
+    if(node.review_note)
+      html += `<h3>人工審核註記</h3><p>${escapeHtml(node.review_note)}${node.reviewed_by?`（${escapeHtml(node.reviewed_by)}）`:''}</p>`;
+    html += `<h3>由這些步驟走到（${node.step_ids.length}）</h3>` + (node.step_ids.length ? refList(node.step_ids) : `<p class="none">沒有掛上任何證據步驟。</p>`);
+    if(node.opposed_position_ids.length)
+      html += `<h3>教授反對的立場（${node.opposed_position_ids.length}）</h3>` + refList(node.opposed_position_ids);
+  } else {
+    const bad = node.kind==='step' && ELIG_BAD(node.eligibility);
+    html += `<div class="meta">
+      ${tag(node.step_type || node.observation_type || node.question_type)}
+      ${tag(node.discourse_role)}
+      ${node.speaker && node.speaker!=='professor' ? tag('說話者：'+node.speaker,'bad') : tag(node.speaker)}
+      ${tag(STANCE[node.stance] || node.stance)}
+      ${node.eligibility ? tag(node.eligibility, bad?'bad':'good') : ''}
+      ${node.anchor_quality ? tag('錨點：'+node.anchor_quality, node.anchor_quality==='missing'?'bad':'') : ''}
+      ${node.kind==='observation' ? (node.argument_role ? tag('argument_role：'+node.argument_role) : tag('argument_role 未判定','bad')) : ''}
+      ${node.answer_state ? tag('answer_state：'+node.answer_state) : ''}
+      ${node.answer_verified_by_human===false ? tag('未經人工確認','bad') : ''}
+      ${node.questioner ? tag('提問者：'+node.questioner) : ''}
+      ${node.attribution ? tag(node.attribution) : ''}
+      ${tag(node.review_status)}
+      ${(node.scripture_refs||[]).map(r=>tag(r)).join('')}</div>`;
+    if(bad) html += `<p class="note">沒有合格錨點，依審核規則不得作為論證證據。</p>`;
+    if(node.kind==='observation' && !node.linked)
+      html += `<p class="note">這條觀察沒有任何關係邊，尚未進入任何論證。</p>`;
+
+    html += `<h3>教授原話</h3>`;
+    html += (node.quotes||[]).length
+      ? node.quotes.map(q=>`<p class="quote">${escapeHtml(q.text)}
+          <span class="where">${escapeHtml(q.id)}　段落 ${escapeHtml(q.paragraph_key ?? '—')}${q.media_time!=null?'　'+fmtTime(q.media_time):''}　${escapeHtml(q.anchor_state)}</span></p>`).join('')
+      : `<p class="none">沒有掛上任何逐字稿片段。</p>`;
+
+    const out = src.edges.filter(e=>e.from===node.id);
+    const inc = src.edges.filter(e=>e.to===node.id);
+    html += `<h3>這一步支撐了什麼（${out.length}）</h3>` + relList(out, 'to');
+    html += `<h3>什麼支撐了這一步（${inc.length}）</h3>` + relList(inc, 'from');
+    if((node.claim_ids||[]).length)
+      html += `<h3>${node.kind==='question'?'回答它的主張':'產生的主張'}（${node.claim_ids.length}）</h3>` + refList(node.claim_ids);
+  }
+
+  el.detail.innerHTML = html;
+  el.detail.querySelectorAll('[data-goto]').forEach(b=>
+    b.addEventListener('click', ()=>{ select(b.dataset.goto); scrollToNode(b.dataset.goto); }));
+  highlight(id);
+}
+
+function scrollToNode(id){
+  const v = current.visible.get(id);
+  if(!v) return;
+  el.wrap.scrollTo({left: v.box.x*state.zoom - el.wrap.clientWidth/2 + 80, behavior:'smooth'});
+}
+
+el.source.addEventListener('change', ()=>{
+  state.source = +el.source.value; state.selected = null;
+  el.detail.className = 'empty';
+  el.detail.textContent = '點任一節點看教授原話、關係與審核狀態';
+  el.wrap.scrollLeft = 0;
+  render();
+});
+el.zoom.addEventListener('input', ()=>{
+  state.zoom = +el.zoom.value/100;
+  el.zoomval.textContent = el.zoom.value+'%';
+  el.stage.style.transform = `scale(${state.zoom})`;
+});
+el.search.addEventListener('input', ()=>{ state.search = el.search.value; highlight(state.selected); });
+document.querySelectorAll('[data-rel]').forEach(b=>b.addEventListener('click', ()=>{
+  const on = b.getAttribute('aria-pressed')==='true';
+  b.setAttribute('aria-pressed', String(!on));
+  if(on) state.rels.delete(b.dataset.rel); else state.rels.add(b.dataset.rel);
+  render();
+}));
+Object.entries({'f-isolated':'isolated','f-withheld':'withheld','f-obs':'showObs','f-claims':'showClaims'})
+  .forEach(([id,key])=>{
+    const b = document.getElementById(id);
+    b.addEventListener('click', ()=>{
+      const on = b.getAttribute('aria-pressed')==='true';
+      b.setAttribute('aria-pressed', String(!on));
+      state[key] = !on;
+      render();
+    });
+  });
+
+el.source.value = '0';
+render();
+</script>
+</body>
+</html>

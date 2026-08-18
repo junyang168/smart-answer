@@ -359,6 +359,7 @@ def validate_adjudication(
     response: dict[str, Any],
     actionable_reviews: list[dict[str, Any]],
     claim_ids: set[str],
+    plan_id: str | None = None,
 ) -> None:
     _require(
         response.get("scope_confirmation")
@@ -373,6 +374,14 @@ def validate_adjudication(
     for row in rows:
         patch = row.get("patch") or {}
         _require(patch.get("action", "") in COMPOSITION_ACTIONS, f"{row['decision_id']}: invalid action")
+        # `topic_plan_ids` routes a decision out to a *topic* plan. Naming the
+        # plan the decision already belongs to routes it to itself, which says
+        # nothing and survived the "must be a real plan_id" rule because the
+        # plan's own id is, of course, real.
+        _require(
+            plan_id is None or plan_id not in (patch.get("topic_plan_ids") or []),
+            f"{row['decision_id']}: topic_plan_ids cannot name the decision's own plan",
+        )
         hierarchy = patch.get("claim_hierarchy") or {}
         hierarchy_claim_ids = [
             hierarchy.get("paragraph_thesis"),
@@ -445,6 +454,14 @@ def apply_consensus(
             target = decisions[decision_id]
             if patch.get("action"):
                 target["action"] = patch["action"]
+                # The store spells this `decision_type` and the projection
+                # spells it `action`; `CompositionDecisionRecord` accepts
+                # either but reads `decision_type` first. Writing only
+                # `action` onto a store-sourced decision therefore looks
+                # applied here and is silently discarded on ingest, restoring
+                # the value the review just changed.
+                if "decision_type" in target:
+                    target["decision_type"] = patch["action"]
             if patch.get("decision_text"):
                 target["decision"] = patch["decision_text"]
             if patch.get("rationale"):

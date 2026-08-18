@@ -181,6 +181,12 @@ class StructuredLogger:
             self.callback(role, message)
 
 
+# Anthropic's own guidance: a non-streaming request should stay near 16000
+# max_tokens so it finishes inside the SDK's HTTP timeout; anything larger
+# belongs on the streaming path.
+STREAMING_OUTPUT_THRESHOLD = 16000
+
+
 class OutputBudgetExceeded(RuntimeError):
     """The model spent `max_tokens` without emitting any text.
 
@@ -384,7 +390,18 @@ class Stage1AnthropicClient:
             request["temperature"] = temperature
             request["thinking"] = {"type": "disabled"}
         try:
-            message = client.messages.create(**request)
+            # A large `max_tokens` has to stream. The SDK's HTTP timeout covers
+            # the whole non-streaming request, so a generation big enough to
+            # need the budget is also long enough to exceed it -- and on an
+            # adaptive-thinking model the thinking is spent from that same
+            # budget, which is what makes these calls long. Streaming has no
+            # such ceiling; `get_final_message()` returns the same object
+            # `create()` would have.
+            if self.max_output_tokens > STREAMING_OUTPUT_THRESHOLD:
+                with client.messages.stream(**request) as stream:
+                    message = stream.get_final_message()
+            else:
+                message = client.messages.create(**request)
         except Exception as exc:
             raise RuntimeError(self._format_exception(exc)) from exc
 

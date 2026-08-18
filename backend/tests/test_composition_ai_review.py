@@ -454,3 +454,72 @@ def test_an_unrouted_claim_still_says_so_after_compaction() -> None:
     assert step["support_eligibility"] == "eligible_candidate"
     assert "media_time" not in step["source_fragments"][0]
     assert step["source_fragments"][0]["verbatim_excerpt"] == "陰間的門"
+
+
+def test_a_pass_row_restating_the_existing_boundary_is_normalized_away() -> None:
+    """Regression: the review schema is strict, so a reviewer with nothing to
+    change still has to emit `proposed_editorial_boundary`. Restating the
+    boundary a decision already has read to validation as a proposal on a pass
+    row and ended the whole review.
+    """
+
+    row = _pass_review("CD-1")
+    row["proposed_editorial_boundary"] = "required"
+    normalized = _normalize_review_response(
+        {
+            "scope_confirmation": "composition_and_argument_structure_no_theological_critique",
+            "decision_reviews": [row],
+        }
+    )
+    normalized_row = normalized["decision_reviews"][0]
+    assert normalized_row["proposed_editorial_boundary"] == ""
+    # Blanking is still discarding model output; the artifact records it.
+    assert normalized_row["normalized_away"]["proposed_editorial_boundary"] == "required"
+
+
+def test_promoting_an_action_updates_the_name_the_store_reads_first() -> None:
+    """Regression: the reviewed candidate carried `action: main_section` beside
+    the untouched `decision_type: coverage_gap` it came out of the store with.
+    `CompositionDecisionRecord` accepts either name but reads `decision_type`
+    first, so ingesting the result restored exactly the value the review had
+    just changed -- the promotion looked applied and silently evaporated.
+    """
+
+    plan = _coverage_gap_plan()
+    plan["decisions"][0]["decision_type"] = "coverage_gap"
+    patch = _empty_patch()
+    patch.update({"action": "main_section", "add_claim_ids": ["CL-HADES"]})
+    candidate, _ = apply_consensus(
+        plan,
+        {"adjudications": [
+            {"decision_id": "CD-1", "decision": "accept", "rationale": "材料已補齊", "patch": patch}
+        ]},
+        None,
+    )
+    decision = candidate["decisions"][0]
+    assert decision["action"] == "main_section"
+    assert decision["decision_type"] == "main_section"
+
+
+def test_a_decision_cannot_be_routed_to_its_own_plan() -> None:
+    """`topic_plan_ids` routes out to a *topic* plan. The adjudicator named the
+    scripture plan the decision already belongs to, which passed the "must be a
+    real plan_id" rule because the plan's own id is real.
+    """
+
+    actionable = {"decision_id": "CD-1", "decision": "changes_suggested", "issues": [{"issue_type": "claim_omitted"}]}
+    patch = _empty_patch()
+    patch["topic_plan_ids"] = ["CP-test"]
+    response = {
+        "scope_confirmation": "composition_and_argument_structure_no_theological_critique",
+        "adjudications": [
+            {"decision_id": "CD-1", "decision": "accept", "rationale": "同意", "patch": patch}
+        ],
+    }
+    with pytest.raises(CompositionReviewValidationError, match="own plan"):
+        validate_adjudication(response, [actionable], {"CL-1"}, "CP-test")
+    # A real topic plan is still fine, and the check is skipped when no plan id
+    # is supplied so existing callers keep working.
+    patch["topic_plan_ids"] = ["CP-topic-son-of-man"]
+    validate_adjudication(response, [actionable], {"CL-1"}, "CP-test")
+    validate_adjudication(response, [actionable], {"CL-1"})

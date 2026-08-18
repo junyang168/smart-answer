@@ -271,6 +271,11 @@ def _normalize_review_response(response: dict[str, Any]) -> dict[str, Any]:
         "proposed_add_claim_ids": [],
         "proposed_remove_claim_ids": [],
         "proposed_coverage": "",
+        # A strict schema makes every proposal field required, so a reviewer
+        # with nothing to change still has to write something here -- and
+        # restating a boundary that already exists reads to validation as a
+        # proposal on a pass row.
+        "proposed_editorial_boundary": "",
         "human_review_reason": "",
     }
     for row in response.get("decision_reviews", []):
@@ -367,7 +372,9 @@ def run_one(
             openai_prompt,
             adjudication_input,
             COMPOSITION_ADJUDICATION_SCHEMA,
-            lambda response: validate_adjudication(response, actionable, claim_ids),
+            lambda response: validate_adjudication(
+                response, actionable, claim_ids, plan.get("plan_id")
+            ),
         )
     else:
         adjudication = {
@@ -466,7 +473,9 @@ def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     claude = Stage1AnthropicClient(
         model=args.claude_model,
-        timeout_seconds=300,
+        # Streaming carries the large output budget, but the SDK still applies
+        # this as its HTTP timeout; a nine-decision review runs past 300s.
+        timeout_seconds=1200,
         max_retries=3,
         max_output_tokens=args.max_output_tokens,
     )
