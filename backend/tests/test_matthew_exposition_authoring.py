@@ -2305,3 +2305,59 @@ def test_anchor_matching_ignores_markdown_the_reader_never_sees():
     assert _anchor_present("耶穌責備彼得，因為他不體貼神的意思。", manuscript)
     assert not _anchor_present("耶穌稱彼得為第一任教皇。", manuscript)
     assert not _anchor_present("editorial_synthesis", manuscript)
+
+
+def test_both_grounding_gates_repair_through_the_same_path(tmp_path):
+    """The finishing gate used to only stop, where the pre-review gate repaired.
+
+    That asymmetry is backwards: the revision is where an unsupported clause
+    gets introduced, so the gate that catches it is the one most in need of a
+    way back. Matthew 16:21-23 failed there on a five-word framing its
+    paragraph had not declared material for, with the whole editorial pass
+    already paid for and no way to spend five more words fixing it.
+    """
+
+    from backend.pipeline import matthew_exposition_authoring_runner as runner
+
+    author = valid_author_result()
+    findings = [
+        {
+            "code": "unsupported_assertion",
+            "attribution": "professor",
+            "claim_ids": [],
+            "declared_claim_ids": [],
+            "paragraph_excerpt": "兩階段教導的重點不只在方法",
+            "unsupported_assertions": ["兩階段教導的重點不只在方法"],
+            "notes": "the paragraph declares no material about teaching method",
+        }
+    ]
+    sent_inputs = []
+
+    class Recording(FakeClient):
+        def generate_json(self, system_prompt, user_prompt, schema, **kwargs):
+            sent_inputs.append(user_prompt)
+            return super().generate_json(system_prompt, user_prompt, schema, **kwargs)
+
+    openai = Recording([valid_author_result()], model="fake-openai")
+    repaired = runner._repair_grounding(
+        manuscript=author["manuscript_markdown"],
+        sections=author["sections"],
+        findings=findings,
+        output_dir=tmp_path,
+        openai_client=openai,
+        attempt=1,
+        name="final-grounding-repair-01.json",
+        force=False,
+    )
+
+    assert repaired["manuscript_markdown"]
+    assert (tmp_path / "final-grounding-repair-01.json").is_file(), (
+        "the finishing gate's repair is filed under its own name, so a run's "
+        "two repair rounds stay distinguishable"
+    )
+    sent = json.loads(sent_inputs[-1])
+    assert sent["findings"] == findings, "the repair is told exactly what to fix"
+    assert sent["sections"] == author["sections"], (
+        "the ledger travels with the draft; regenerating it loses anchors the "
+        "repair has no reason to touch"
+    )

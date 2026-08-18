@@ -353,6 +353,58 @@ def _run_grounding_stage(
     return report
 
 
+def _repair_grounding(
+    *,
+    manuscript: str,
+    sections: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+    output_dir: Path,
+    openai_client: Any,
+    attempt: int,
+    name: str,
+    force: bool,
+) -> dict[str, Any]:
+    """Rewrite the paragraphs a grounding report named, and nothing else."""
+
+    prompt = _read_prompt("grounding_revision")
+    repair_input = canonical_json(
+        {
+            "manuscript_markdown": manuscript,
+            "findings": findings,
+            # The ledger travels with the draft so the repair can return it
+            # unchanged; regenerating it from scratch loses decision_ids and
+            # anchors that the repair has no reason to touch.
+            "sections": sections,
+        }
+    )
+    fingerprint = generation_fingerprint(
+        inputs={
+            "repair_input_sha256": sha256_text(repair_input),
+            "generation_parameters": _client_generation_parameters(openai_client),
+        },
+        prompt_text=prompt,
+        schema=AUTHOR_RESULT_SCHEMA,
+        model=openai_client.model,
+        reasoning=f"grounding_repair_{attempt}",
+    )
+    repaired, _ = _run_cached_stage(
+        path=output_dir / name,
+        schema_version="matthew-exposition-authoring.v1",
+        fingerprint=fingerprint,
+        producer={
+            "role": "grounding_repair_author",
+            "provider": "openai",
+            "model": openai_client.model,
+            "attempt": attempt,
+        },
+        generate=lambda: openai_client.generate_json(
+            prompt, repair_input, AUTHOR_RESULT_SCHEMA
+        ),
+        force=force,
+    )
+    return repaired
+
+
 def run_authoring(
     *,
     plan_path: Path,
@@ -461,10 +513,58 @@ def run_authoring(
             report_name="final-grounding-report.json",
         )
         if final_grounding is not None and not final_grounding["passed"]:
+            # The pre-review gate repairs and retries; this one used to only
+            # stop. That asymmetry is not defensible: the revision is exactly
+            # where an unsupported clause gets introduced, so the gate that
+            # catches it is the one most in need of a way back. Matthew
+            # 16:21-23 failed here on a five-word framing its paragraph had not
+            # declared material for, with the whole editorial pass already
+            # paid for.
+            #
+            # Repair, then re-enter through the same recursion the pre-review
+            # gate uses, so the repaired draft is re-grounded before any
+            # reviewer is paid again.
+            if grounding_attempt < max_grounding_attempts and all(
+                finding["code"] == "unsupported_assertion"
+                for finding in final_grounding["findings"]
+            ):
+                repaired = _repair_grounding(
+                    manuscript=manuscript,
+                    sections=manuscript_sections,
+                    findings=final_grounding["findings"],
+                    output_dir=output_dir,
+                    openai_client=openai_client,
+                    attempt=grounding_attempt,
+                    name=f"final-grounding-repair-{grounding_attempt:02d}.json",
+                    force=force,
+                )
+                return run_authoring(
+                    packet=packet,
+                    plan_path=plan_path,
+                    knowledge_path=knowledge_path,
+                    contract_path=contract_path,
+                    publication_profile_path=publication_profile_path,
+                    quality_profile_path=quality_profile_path,
+                    output_dir=output_dir,
+                    openai_client=openai_client,
+                    claude_client=claude_client,
+                    force=force,
+                    auto_accept_maintained_findings=auto_accept_maintained_findings,
+                    seed_author_result=repaired,
+                    revision_round=revision_round,
+                    max_revision_rounds=max_revision_rounds,
+                    program_audit_manifest_path=program_audit_manifest_path,
+                    program_audit_draft_id=program_audit_draft_id,
+                    repository_root=repository_root,
+                    skip_grounding_gate=skip_grounding_gate,
+                    grounding_attempt=grounding_attempt + 1,
+                    max_grounding_attempts=max_grounding_attempts,
+                )
             return {
                 **result,
                 "status": "final_grounding_gate_failed",
                 "editorial_status": editorial_status,
+                "grounding_attempts": grounding_attempt,
                 "final_grounding_report_path": str(
                     output_dir / "final-grounding-report.json"
                 ),
@@ -641,40 +741,14 @@ def run_authoring(
         and grounding_attempt < max_grounding_attempts
         and all(f["code"] == "unsupported_assertion" for f in grounding_report["findings"])
     ):
-        repair_prompt = _read_prompt("grounding_revision")
-        repair_input = canonical_json(
-            {
-                "manuscript_markdown": draft,
-                "findings": grounding_report["findings"],
-                # The ledger travels with the draft so the repair can return it
-                # unchanged; regenerating it from scratch loses decision_ids and
-                # anchors that the repair has no reason to touch.
-                "sections": author_result["sections"],
-            }
-        )
-        repair_fingerprint = generation_fingerprint(
-            inputs={
-                "repair_input_sha256": sha256_text(repair_input),
-                "generation_parameters": _client_generation_parameters(openai_client),
-            },
-            prompt_text=repair_prompt,
-            schema=AUTHOR_RESULT_SCHEMA,
-            model=openai_client.model,
-            reasoning=f"grounding_repair_{grounding_attempt}",
-        )
-        repaired, _ = _run_cached_stage(
-            path=output_dir / f"grounding-repair-{grounding_attempt:02d}.json",
-            schema_version="matthew-exposition-authoring.v1",
-            fingerprint=repair_fingerprint,
-            producer={
-                "role": "grounding_repair_author",
-                "provider": "openai",
-                "model": openai_client.model,
-                "attempt": grounding_attempt,
-            },
-            generate=lambda: openai_client.generate_json(
-                repair_prompt, repair_input, AUTHOR_RESULT_SCHEMA
-            ),
+        repaired = _repair_grounding(
+            manuscript=draft,
+            sections=author_result["sections"],
+            findings=grounding_report["findings"],
+            output_dir=output_dir,
+            openai_client=openai_client,
+            attempt=grounding_attempt,
+            name=f"grounding-repair-{grounding_attempt:02d}.json",
             force=force,
         )
         return run_authoring(
