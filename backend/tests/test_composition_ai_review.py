@@ -377,3 +377,80 @@ def test_a_plan_without_a_passage_still_projects() -> None:
         {"claims": [], "evidence_steps": [], "source_fragments": [], "source_documents": []},
     )
     assert projection["available_claims"] == []
+
+
+def test_projection_drops_what_the_review_is_never_asked_about() -> None:
+    """Two fifths of this payload was material no prompt mentions: the reader
+    player's timeline on each decision, and the authoring contract carried on
+    the plan. The reviewer judges which claims belong in which decision.
+
+    Safe because `apply_consensus` patches the full plan, not this projection,
+    so nothing trimmed here is missing from the reviewed candidate.
+    """
+
+    from backend.pipeline.composition_ai_review_runner import _claim_projection
+
+    plan = _coverage_gap_plan()
+    plan["global_rules"] = ["寫作規則"]
+    plan["authoring_sections"] = [{"section_id": "reader-sec-01"}]
+    plan["base_source"] = {"source_id": "SRC-1"}
+    plan["decisions"][0]["source_presentations"] = [
+        {"presentation_id": "SP-1", "start_seconds": 2507, "end_seconds": 3202}
+    ]
+    plan["decisions"][0]["source_presentation_summary"] = {"mode": "segment_group"}
+
+    projected = _claim_projection(
+        plan,
+        {"claims": [], "evidence_steps": [], "source_fragments": [], "source_documents": []},
+    )["plan"]
+
+    for dropped in ("global_rules", "authoring_sections", "base_source"):
+        assert dropped not in projected
+    decision = projected["decisions"][0]
+    assert "source_presentations" not in decision
+    assert "source_presentation_summary" not in decision
+    # Everything the review actually reasons about survives.
+    assert decision["decision_id"] == "CD-1"
+    assert decision["claim_ids"] == []
+    assert decision["coverage"] == "missing"
+    assert decision["editorial_boundary"]["required"] is True
+
+
+def test_an_unrouted_claim_still_says_so_after_compaction() -> None:
+    """Empty values are dropped from evidence rows, but not from the claim:
+    `assigned_decision_ids: []` is how the reviewer sees unrouted material,
+    and an absent key would make that invisible again.
+    """
+
+    from backend.pipeline.composition_ai_review_runner import _claim_projection
+
+    knowledge = {
+        "claims": [
+            {
+                "claim_id": "CL-HADES",
+                "statement": "太16:18原文字面作「陰間的門」。",
+                "scripture_refs": ["太16:18"],
+                "evidence_step_ids": ["E-1"],
+            }
+        ],
+        "evidence_steps": [
+            {
+                "evidence_step_id": "E-1",
+                "statement": "教授說明原文字面。",
+                "support_eligibility": "eligible_candidate",
+                "function": None,
+                "source_fragment_id": "FR-1",
+            }
+        ],
+        "source_fragments": [
+            {"fragment_id": "FR-1", "verbatim_excerpt": "陰間的門", "media_time": None}
+        ],
+        "source_documents": [],
+    }
+    claim = _claim_projection(_coverage_gap_plan(), knowledge)["available_claims"][0]
+    assert claim["assigned_decision_ids"] == []
+    step = claim["evidence"][0]
+    assert "function" not in step, "a null function is 115 rows of noise"
+    assert step["support_eligibility"] == "eligible_candidate"
+    assert "media_time" not in step["source_fragments"][0]
+    assert step["source_fragments"][0]["verbatim_excerpt"] == "陰間的門"

@@ -181,6 +181,15 @@ class StructuredLogger:
             self.callback(role, message)
 
 
+class OutputBudgetExceeded(RuntimeError):
+    """The model spent `max_tokens` without emitting any text.
+
+    Retrying cannot help: the same request produces the same overflow, and
+    each attempt is billed in full. Raised so `_with_retries` can stop
+    immediately instead of paying for the same failure three times.
+    """
+
+
 class Stage1AnthropicClient:
     def __init__(
         self,
@@ -253,6 +262,11 @@ class Stage1AnthropicClient:
         for attempt in range(1, self.max_retries + 1):
             try:
                 return func()
+            except OutputBudgetExceeded:
+                # Deterministic: the same request overflows the same way, and
+                # every attempt is billed for the full input and the full
+                # output budget it burned. Surface it on the first one.
+                raise
             except Exception as exc:  # pragma: no cover - SDK exception surface varies by version
                 last_error = exc
                 if attempt >= self.max_retries:
@@ -382,6 +396,15 @@ class Stage1AnthropicClient:
             if getattr(block, "type", None) == "text" and getattr(block, "text", "").strip()
         ]
         if not text_blocks:
+            if getattr(message, "stop_reason", None) == "max_tokens":
+                usage = getattr(message, "usage", None)
+                raise OutputBudgetExceeded(
+                    "the model reached max_tokens "
+                    f"({self.max_output_tokens}) without emitting any text: it "
+                    "spent the whole budget thinking. Raise max_output_tokens "
+                    "or send a smaller payload. "
+                    f"input_tokens={getattr(usage, 'input_tokens', '?')}"
+                )
             raise RuntimeError(f"Anthropic response missing text content: {message}")
         return "\n".join(text_blocks).strip()
 

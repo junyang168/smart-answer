@@ -69,6 +69,49 @@ def _plan_passage(plan: dict[str, Any]) -> Passage | None:
     return Passage(parsed.book, parsed.chapter, parsed.start_verse, parsed.end_verse)
 
 
+# Fields carried on a plan or a decision that this review is never asked to
+# reason about. `source_presentations` is the reader player's timeline
+# (start/end seconds, presentation ids); the rest is the authoring contract the
+# article writer uses later. None of the three prompts mentions any of them,
+# and together they were two fifths of the payload. Trimming is safe because
+# `apply_consensus` patches the full plan, not this projection.
+_PLAN_FIELDS_NOT_REVIEWED = frozenset({
+    "authoring_sections", "supplemental_material", "base_source",
+    "additional_base_sources", "global_rules", "source_presentation_policy",
+    "authoring_mode", "manuscript_sha256", "contract_id",
+    "contract_schema_version", "contract_confirmed_by", "contract_confirmed_at",
+})
+_DECISION_FIELDS_NOT_REVIEWED = frozenset({
+    "source_presentations", "source_presentation_summary",
+})
+
+
+def _reviewable_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """The plan as the composition reviewer needs to see it."""
+
+    trimmed = {
+        key: value
+        for key, value in plan.items()
+        if key not in _PLAN_FIELDS_NOT_REVIEWED and key != "decisions"
+    }
+    trimmed["decisions"] = [
+        {
+            key: value
+            for key, value in decision.items()
+            if key not in _DECISION_FIELDS_NOT_REVIEWED
+        }
+        for decision in plan.get("decisions", [])
+    ]
+    return trimmed
+
+
+def _compact(row: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys carrying nothing. Repeated over ~115 evidence rows, the empty
+    ones cost more than the material they surround."""
+
+    return {key: value for key, value in row.items() if value not in (None, "", [], {})}
+
+
 def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[str, Any]:
     referenced_ids = {
         claim_id
@@ -114,41 +157,47 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
             if not fragment_ids and step.get("source_fragment_id"):
                 fragment_ids = [step["source_fragment_id"]]
             evidence_rows.append(
-                {
-                    "evidence_step_id": evidence_id,
-                    "function": step.get("function"),
-                    "statement": step.get("statement"),
-                    "support_eligibility": step.get("support_eligibility"),
-                    "source_fragments": [
-                        {
-                            "fragment_id": fragment_id,
-                            "transcript_id": next(
-                                (
-                                    source.get("transcript_id")
-                                    for source in knowledge.get("source_documents", [])
-                                    if source.get("source_id")
-                                    == (fragments.get(fragment_id) or {}).get("source_id")
-                                ),
-                                None,
-                            ),
-                            "media_time": (fragments.get(fragment_id) or {}).get("media_time"),
-                            "verbatim_excerpt": str(
-                                (fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""
-                            )[:360],
-                        }
-                        for fragment_id in fragment_ids
-                    ],
-                }
+                _compact(
+                    {
+                        "evidence_step_id": evidence_id,
+                        "function": step.get("function"),
+                        "statement": step.get("statement"),
+                        "support_eligibility": step.get("support_eligibility"),
+                        "source_fragments": [
+                            _compact(
+                                {
+                                    "fragment_id": fragment_id,
+                                    "transcript_id": next(
+                                        (
+                                            source.get("transcript_id")
+                                            for source in knowledge.get("source_documents", [])
+                                            if source.get("source_id")
+                                            == (fragments.get(fragment_id) or {}).get("source_id")
+                                        ),
+                                        None,
+                                    ),
+                                    "media_time": (fragments.get(fragment_id) or {}).get("media_time"),
+                                    "verbatim_excerpt": str(
+                                        (fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""
+                                    )[:360],
+                                }
+                            )
+                            for fragment_id in fragment_ids
+                        ],
+                    }
+                )
             )
         candidates.append(
             {
                 "claim_id": claim["claim_id"],
-                "title": claim.get("title"),
-                # No claim in the store carries `title` -- every one states
-                # itself in `statement`. Sending only the title handed the
+                # No claim in the store carries `title` -- all 460 state
+                # themselves in `statement`. Sending the title alone handed the
                 # reviewer a nameless claim and left it to infer the assertion
-                # from the evidence steps underneath it.
-                "statement": claim.get("statement"),
+                # from the evidence steps underneath it; sending both would add
+                # 52 null fields. `assigned_decision_ids` deliberately stays
+                # even when empty: that is how the reviewer sees a claim no
+                # decision has routed yet.
+                "statement": claim.get("statement") or claim.get("title"),
                 "claim_type": claim.get("claim_type"),
                 "scripture_refs": claim.get("scripture_refs", []),
                 "assigned_decision_ids": [
@@ -171,7 +220,7 @@ def _claim_projection(plan: dict[str, Any], knowledge: dict[str, Any]) -> dict[s
         if item.get("source_id") in included_ids or item.get("target_id") in included_ids
     ]
     return {
-        "plan": plan,
+        "plan": _reviewable_plan(plan),
         "available_claims": candidates,
         "claim_relations": claim_relations,
         "claim_relation_constraints": claim_relation_constraints,
@@ -392,7 +441,10 @@ def main() -> int:
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--openai-reasoning-effort", default="medium")
-    parser.add_argument("--max-output-tokens", type=int, default=20000)
+    # Claude Sonnet 5 thinks adaptively, and thinking is spent from the same
+    # budget as the answer. At 20000 a full nine-decision review reached
+    # max_tokens having emitted no text at all.
+    parser.add_argument("--max-output-tokens", type=int, default=64000)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--reuse-review", action="store_true")
     args = parser.parse_args()
