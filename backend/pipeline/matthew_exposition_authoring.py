@@ -466,14 +466,28 @@ def _duplicates(values: Iterable[str]) -> set[str]:
 
 
 def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = True) -> None:
+    """Check a base contract's shape and that its excerpts still match the source.
+
+    There used to be a `status == "editor_confirmed"` gate here, from an early
+    version that has since been replaced. What it had become was a check that a
+    string was non-empty: `status` was derived from `contract_confirmed_by`,
+    which was a `--confirmed-by` argument to a migration script. The three
+    Matthew plans all carry `junyang168` and a round `00:00:00` timestamp, and
+    the editor named there had never seen the contracts. No prompt mentions the
+    field and no agent uses it. A gate that certifies nothing is worse than no
+    gate, because it reads as though the system guarantees a human looked.
+
+    Real contract confirmation needs an action that can be verified -- an
+    interface, a record, a binding to the contract's SHA -- and belongs with
+    the review workbench.
+    """
+
     if contract.get("schema_version") != "matthew-exposition-base-contract.v1":
         raise AuthoringContractError("unsupported base contract schema_version")
     _require_nonempty_string(contract.get("contract_id"), "contract_id")
     _require_nonempty_string(contract.get("passage"), "passage")
     if contract.get("authoring_mode") != "verified_manuscript_integration":
         raise AuthoringContractError("unsupported authoring_mode")
-    if contract.get("status") != "editor_confirmed":
-        raise AuthoringContractError("base contract must be editor_confirmed")
     base_source = _require_mapping(contract.get("base_source"), "base_source")
     source_records = [base_source, *contract.get("additional_base_sources", [])]
     base_texts: dict[str, str] = {}
@@ -1927,7 +1941,6 @@ def contract_from_plan_payload(
         "sections": plan_payload.get("authoring_sections") or [],
         "supplemental_material": plan_payload.get("supplemental_material") or [],
         "global_rules": plan_payload.get("global_rules") or [],
-        "status": "editor_confirmed" if plan_payload.get("contract_confirmed_by") else None,
     }
 
 

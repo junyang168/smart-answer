@@ -314,6 +314,7 @@ def _run_grounding_stage(
     claude_client: Any,
     force: bool,
     skip: bool,
+    report_name: str = "grounding-report.json",
 ) -> dict[str, Any] | None:
     """Check every attributed paragraph against the material it declares.
 
@@ -337,7 +338,7 @@ def _run_grounding_stage(
         cache_dir=output_dir / "grounding-cache",
     )
     _write_json(
-        output_dir / "grounding-report.json",
+        output_dir / report_name,
         {
             "schema_version": "matthew-exposition-grounding-report-envelope.v1",
             "generation": {
@@ -441,6 +442,35 @@ def run_authoring(
         editorial_outcome: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
+        # The gate ran before the writing reviewer, on the author's draft. The
+        # revision then rewrote prose to satisfy editorial findings and nothing
+        # re-checked it, so the manuscript that actually publishes had never
+        # passed the gate at all -- and the revision prompt's own warning names
+        # exactly what it introduces: motives, causes and transitions the
+        # material does not carry, added to complete a chain or to smooth a
+        # sentence. Checking here covers every finishing path; the per-paragraph
+        # cache means an unchanged paragraph costs nothing and only what the
+        # revision actually rewrote is paid for.
+        final_grounding = _run_grounding_stage(
+            draft=manuscript,
+            packet=packet,
+            author_sections=manuscript_sections,
+            output_dir=output_dir,
+            claude_client=claude_client,
+            force=force,
+            skip=skip_grounding_gate,
+            report_name="final-grounding-report.json",
+        )
+        if final_grounding is not None and not final_grounding["passed"]:
+            return {
+                **result,
+                "status": "final_grounding_gate_failed",
+                "editorial_status": editorial_status,
+                "final_grounding_report_path": str(
+                    output_dir / "final-grounding-report.json"
+                ),
+                "unsupported_paragraph_count": len(final_grounding["findings"]),
+            }
         if program_audit_manifest_path is None or program_audit_draft_id is None:
             return result
         audit = _run_program_audit_stage(

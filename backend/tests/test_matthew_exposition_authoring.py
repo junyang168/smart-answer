@@ -511,7 +511,10 @@ def test_contract_from_plan_payload_round_trips_every_field_the_contract_needs()
     # silently become a different falsy value.
     assert contract["supplemental_material"] == original.get("supplemental_material", [])
     assert contract["global_rules"] == original.get("global_rules", [])
-    assert contract["status"] == "editor_confirmed"
+    # No `status`: the `editor_confirmed` gate was residual from an early
+    # version and certified nothing -- it read a string that a migration
+    # script's `--confirmed-by` argument had written.
+    assert "status" not in contract
 
 
 def test_run_authoring_uses_a_supplied_packet_without_rebuilding_from_files(tmp_path):
@@ -2245,3 +2248,137 @@ def test_review_packet_shows_scoped_material_the_manuscript_left_unused():
         "an id alone tells the reviewer nothing about whether it could land"
     )
     assert len(canonical_json(review_packet).encode()) <= EDITORIAL_REVIEW_PACKET_MAX_BYTES
+
+
+def test_the_manuscript_that_publishes_is_ground_checked(tmp_path):
+    """Regression: the gate ran before the writing reviewer, on the author's
+    draft. The revision then rewrote prose to satisfy editorial findings and
+    nothing re-checked it, so the manuscript that actually published had never
+    passed the gate. A real run's publishable draft was four rewritten
+    paragraphs deep and one of them overreached; it was caught only because the
+    check was run by hand.
+
+    The finishing check runs on every path that finishes an editorial pass, and
+    writes its own report rather than overwriting the author's.
+    """
+
+    class Grounder:
+        model = "fake-claude"
+
+        def generate_json(self, _prompt, packet, schema, **_kwargs):
+            if "dimension_scores" in str(schema):
+                return passing_review()
+            return _grounding()
+
+    out = tmp_path / "out"
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=out,
+        openai_client=FakeClient([valid_author_result()], model="fake-openai"),
+        claude_client=Grounder(),
+    )
+
+    assert result["status"] == "editorial_pass_no_revision"
+    assert (out / "final-grounding-report.json").is_file(), (
+        "the manuscript being finished must be checked, not assumed"
+    )
+    assert (out / "grounding-report.json").is_file(), (
+        "the author's own report is not overwritten by the finishing check"
+    )
+
+
+def test_a_finishing_manuscript_that_overreaches_does_not_reach_publication(tmp_path):
+    """The finishing check has to be able to stop the run, not merely report."""
+
+    class Grounder:
+        model = "fake-claude"
+
+        def __init__(self):
+            self.seen = 0
+
+        def generate_json(self, _prompt, packet, schema, **_kwargs):
+            if "dimension_scores" in str(schema):
+                return passing_review()
+            self.seen += 1
+            # Clean while the author's draft is checked; the finishing check
+            # asks about the same paragraphs and is answered from cache, so
+            # flag every paragraph to stand in for a revision that overreached.
+            text = json.loads(packet)["paragraph_text"]
+            return _grounding([text.strip().splitlines()[0][:10]])
+
+    out = tmp_path / "out"
+    result = run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=out,
+        openai_client=FakeClient(
+            [valid_author_result(), valid_author_result()], model="fake-openai"
+        ),
+        claude_client=Grounder(),
+        max_grounding_attempts=1,
+    )
+    assert result["status"] == "grounding_gate_failed"
+    assert "draft_path" not in result, "an ungrounded manuscript never reaches publication"
+
+
+def test_the_final_check_reuses_what_the_first_one_already_answered(tmp_path):
+    """Only what the revision rewrote costs anything: the two checks share one
+    cache, so a manuscript the revision did not touch is free to re-verify.
+    """
+
+    class Counting:
+        model = "fake-claude"
+
+        def __init__(self):
+            self.paragraph_calls = 0
+
+        def generate_json(self, _prompt, packet, schema, **_kwargs):
+            if "dimension_scores" in str(schema):
+                return passing_review()
+            self.paragraph_calls += 1
+            return _grounding()
+
+    claude = Counting()
+    out = tmp_path / "out"
+    run_authoring(
+        packet=full_authoring_packet(),
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        output_dir=out,
+        openai_client=FakeClient([valid_author_result()], model="fake-openai"),
+        claude_client=claude,
+    )
+    checked = len(list((out / "grounding-cache").iterdir()))
+    assert claude.paragraph_calls == checked, (
+        "the finishing check asked nothing the author's check had already answered"
+    )
+
+
+def test_a_contract_no_longer_has_to_claim_it_was_confirmed():
+    """The `editor_confirmed` gate was residual from an early version. What it
+    had become was a check that a string was non-empty: `status` came from
+    `contract_confirmed_by`, which came from a migration script's
+    `--confirmed-by` argument. All three Matthew plans carry `junyang168` and a
+    round `00:00:00` timestamp, and that editor had never seen the contracts.
+    A gate that certifies nothing reads as though the system guarantees a human
+    looked, which is worse than having no gate at all.
+    """
+
+    contract = json.loads(
+        (FIXTURE_DIR / "base-manuscript-contract.json").read_text(encoding="utf-8")
+    )
+    contract = contract.get("result", contract)
+    contract.pop("status", None)
+    validate_base_contract(contract, verify_source=False)
