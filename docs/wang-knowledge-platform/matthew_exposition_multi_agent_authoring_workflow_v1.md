@@ -71,7 +71,7 @@ flowchart LR
   Q -->|"still fail"| H
 ```
 
-圖中的 rubric `pass` 必須是總分至少 90，並且所有維度硬門檻與 hard failure 檢查同時通過；89 分及以下不得生成自动发布决定。
+圖中的 rubric `pass` 的判準是：每一個適用維度都達到 quality profile 為它設的 `minimum`（profile revision 4 為各自 weight 的 80%），且沒有宣告任何 hard failure。**沒有總分門檻**——`total_score` 只報給人看，不決定任何事。單一總分曾讓弱維度被其他維度抬過去：已發表的太16:21–23 首輪總分 81/100，其中三個維度是 7、3、3，對應的最低線是 8、4、4。十個維度是十項各自獨立的要求，不是可以互相抵換的分項。
 
 Author Agent 可以把多個 composition decision 組織在同一個讀者小節中；這只是呈現層決定，現有 audit 也允許多對一的 heading 映射。若現有 manifest 要求多處「編輯說明」，作者可先把資料邊界集中成較少、較自然的說明，再由 audit 檢查各 decision 是否仍被覆蓋。只有當作者需要改變 action、claim 集合、coverage、主要順序或張力處置時，才返回 `plan_change_required`，提出具體 change request 後停止；它不能靜默改動 CompositionPlan 的實質意圖。
 
@@ -137,7 +137,7 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.matthew_exposition_authoring_r
 - 低于 90 的 merged review 若没有可执行 delta findings：安全停止并转人工；不得追加 score-gap review，也不得通过同稿完整重评制造新 baseline。
 - final review 单次 timeout 必须在 180–300 秒内；transport 或截断 JSON 最多重试一次。返回后才发现的 JSON schema、SHA、维度集合或 anchor 错误直接失败，不再次发起长请求。
 - 每次 reviewer 返回后，finding anchor 必须在写 artifact 或进入下游前逐字验证；delta finding 还必须位于本次 `after_paragraphs`。
-- 未能生成 SHA 绑定的 `automated-publication-decision.v1`：不得写入 repository；生成条件是 editorial score 至少 90、无 hard gates/hard failures、Program Audit 通过且零 errors。
+- 未能生成 SHA 绑定的 `automated-publication-decision.v1`：不得写入 repository；生成条件是每个适用维度都达到 quality profile 中它自己的 `minimum`、无 declared hard failures、Program Audit 通过且零 errors。门槛以 profile 为准，不在此处复述数字。
 
 ## 7. 实跑验证与首篇发布
 
