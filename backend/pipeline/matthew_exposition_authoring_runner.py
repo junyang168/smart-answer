@@ -1212,6 +1212,7 @@ def main() -> int:
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-reasoning-effort", default="medium")
     parser.add_argument("--timeout-seconds", type=float, default=240.0)
+    parser.add_argument("--claude-max-output-tokens", type=int, default=64000)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--auto-accept-maintained-findings",
@@ -1343,6 +1344,11 @@ def main() -> int:
             model=args.claude_model,
             timeout_seconds=args.timeout_seconds,
             max_retries=FINAL_REVIEW_MAX_ATTEMPTS,
+            # The editorial review scores ten dimensions with evidence for each
+            # and then writes its findings, while an adaptive-thinking model
+            # spends its reasoning from this same budget. At the 20000 default
+            # the review came back truncated mid-string.
+            max_output_tokens=args.claude_max_output_tokens,
         ),
         force=args.force,
         auto_accept_maintained_findings=args.auto_accept_maintained_findings,

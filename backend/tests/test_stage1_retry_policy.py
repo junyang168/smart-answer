@@ -68,3 +68,54 @@ def test_output_budget_exceeded_is_a_runtime_error() -> None:
     """
 
     assert issubclass(OutputBudgetExceeded, RuntimeError)
+
+
+class _Message:
+    def __init__(self, stop_reason, content):
+        self.stop_reason = stop_reason
+        self.content = content
+        self.usage = None
+
+
+class _Text:
+    type = "text"
+
+    def __init__(self, text):
+        self.text = text
+
+
+def _post(client, message):
+    """Run the response-handling half of `_post_chat_completion`."""
+
+    # Below STREAMING_OUTPUT_THRESHOLD so the non-streaming branch runs; the
+    # response handling under test is shared by both.
+    client.max_output_tokens = 8000
+    client.client = type("C", (), {"messages": type("M", (), {"create": staticmethod(lambda **_: message)})()})()
+    client.model = "claude-sonnet-5"
+    client.timeout_seconds = 60.0
+    client.system_cache_ttl = "1h"
+    client.prefix_cache_ttl = "5m"
+    return client._post_chat_completion(system_prompt="s", user_prompt="u", temperature=0.0)
+
+
+def test_a_truncated_answer_is_an_overflow_not_transport_noise() -> None:
+    """Regression: the budget check only fired when the model emitted no text
+    at all. A review that ran out mid-string came back as half a JSON document,
+    the caller raised a parse error, and the retry loop sent the same oversized
+    request twice more before giving up.
+    """
+
+    client = _client(3)
+    with pytest.raises(OutputBudgetExceeded, match="mid-answer"):
+        _post(client, _Message("max_tokens", [_Text('{"partial": "cut off here')]))
+
+
+def test_an_empty_answer_still_names_the_budget() -> None:
+    client = _client(3)
+    with pytest.raises(OutputBudgetExceeded, match="without emitting any text"):
+        _post(client, _Message("max_tokens", []))
+
+
+def test_a_complete_answer_is_returned() -> None:
+    client = _client(3)
+    assert _post(client, _Message("end_turn", [_Text('{"ok": true}')])) == '{"ok": true}'

@@ -412,16 +412,20 @@ class Stage1AnthropicClient:
             for block in getattr(message, "content", [])
             if getattr(block, "type", None) == "text" and getattr(block, "text", "").strip()
         ]
+        # Checked before the text, because a truncated answer is not an answer.
+        # With no text at all the budget went entirely on thinking; with some,
+        # the response stops mid-token and the caller sees a JSON parse error
+        # and retries it as though it were transport noise. Both are the same
+        # deterministic overflow and neither survives a retry.
+        if getattr(message, "stop_reason", None) == "max_tokens":
+            usage = getattr(message, "usage", None)
+            spent = "without emitting any text" if not text_blocks else "mid-answer"
+            raise OutputBudgetExceeded(
+                f"the model reached max_tokens ({self.max_output_tokens}) {spent}. "
+                "Raise max_output_tokens or send a smaller payload. "
+                f"input_tokens={getattr(usage, 'input_tokens', '?')}"
+            )
         if not text_blocks:
-            if getattr(message, "stop_reason", None) == "max_tokens":
-                usage = getattr(message, "usage", None)
-                raise OutputBudgetExceeded(
-                    "the model reached max_tokens "
-                    f"({self.max_output_tokens}) without emitting any text: it "
-                    "spent the whole budget thinking. Raise max_output_tokens "
-                    "or send a smaller payload. "
-                    f"input_tokens={getattr(usage, 'input_tokens', '?')}"
-                )
             raise RuntimeError(f"Anthropic response missing text content: {message}")
         return "\n".join(text_blocks).strip()
 
