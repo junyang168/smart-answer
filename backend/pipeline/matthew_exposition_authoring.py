@@ -990,8 +990,12 @@ def out_of_scope_dimensions(contract: dict[str, Any]) -> dict[str, str]:
 
     Scope is read from the contract, never from the author's or the reviewer's
     opinion: an author cannot earn the points by claiming its material was
-    thin. A section that forbids inventing an application chain, and has no
-    registered chain to draw on, cannot land pastorally within its own bounds.
+    thin. A section forbidden to invent an application chain cannot land
+    pastorally within its own bounds.
+
+    This once also spoke of a section having no registered application chain to
+    draw on. That registry has been retired and the check never read it, so the
+    clause described a coincidence rather than a condition.
     """
 
     out_of_scope: dict[str, str] = {}
@@ -1000,7 +1004,7 @@ def out_of_scope_dimensions(contract: dict[str, Any]) -> dict[str, str]:
         if "invent_life_application_chain" in ineligible:
             out_of_scope["pastoral_theological_landing"] = (
                 f"contract section {section.get('section_id')} forbids "
-                "invent_life_application_chain and registers no application chain"
+                "invent_life_application_chain"
             )
     return out_of_scope
 
