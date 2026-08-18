@@ -1,6 +1,6 @@
 # Matthew exposition current authoring session
 
-Updated: 2026-08-16 (America/Chicago)
+Updated: 2026-08-18 (America/Chicago)
 
 ## Project boundary
 
@@ -9,7 +9,9 @@ This session belongs to Wang Knowledge Platform, not notes-to-sermon-agent. Do n
 ## Completed articles
 
 - Article 1, Matt.16.1–12: editorial pass, Program Audit, human approval and repository publication completed. Published manuscript SHA: `c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`.
-- Article 2, Matt.16.13–20: multi-agent authoring, technical audit, SHA-bound human approval and repository publication completed. It is publicly listed as `matthew-16-13-20`; its approval is independent of Article 1.
+- Article 2, Matt.16.13–20: regenerated from the rebuilt knowledge layer and republished on 2026-08-18 (#62). Published manuscript SHA: `93d0597a6dea0635b72fea034de8fee727325115ae3be2edaa38498336a20e72`; editorial review 91 with every dimension at or above its own minimum; Program Audit `pass_with_warnings`, 0 errors, 15 warnings. The decision is `human-publication-decision.v1` — the user read the draft and judged the disputed sentence themselves, so this is not an automated decision and must not be described as one. The previous 2026-08-15 publication is kept at `repository/editorial_drafts/.backup-DRAFT-M16-002-V1-20260818/`. Publicly listed as `matthew-16-13-20`; its approval is independent of Article 1.
+
+  **Read this before regenerating anything.** It published while the argument layer is still incomplete. The grounding gate correctly flagged 「君王與祭司的職分在制度上分開，不可集於一身」 as unsupported; the sentence is verbatim in the base manuscript (`notes_manuscript:16章釋經`, lines 91 and 113) but was never extracted into the claim layer, so the gate could not see it. It survived because the user recognised it as the professor's teaching, not because anything verified it. Across the three articles, 26 base-manuscript sentences flagged load-bearing are absent from the claim layer (#64). On the next article nobody may be standing there to recognise the sentence, and its deletion would be silent.
 - Article 3, Matt.16.21–23: Author Agent, two revision rounds, Program Audit, automated publication decision and repository publication completed. Its diagnostic run used a now-retired score-gap call; do not copy that call into a new article workflow. Published manuscript SHA: `342fa88d5af7c339174bd82a301f0e204f3fd650962029024c01d35c9e97c0d7`; editorial score 90; Program Audit `pass`, 0 errors and 0 warnings; public slug `matthew-16-21-23`.
 
 The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
@@ -35,11 +37,20 @@ No cron, launchd, API, or web invocation writes this survey automatically. The c
 - Program Audit: `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/DRAFT-M16-003-V1/program-audit.json`
 - Program Audit staging artifacts: `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-21-23-sources/authoring-v1/round-02/program-audit/`
 
+## Open work before the next batch
+
+Four issues carry what the 2026-08-18 session found but did not finish. #64 is the root cause of the other authoring symptoms and should go first.
+
+- **#64** — base-manuscript sentences marked load-bearing that never entered the claim layer. Every downstream gate reads only the claim layer, so such material does not exist as far as this system is concerned. `CP-matthew-16-1-12` still has 0 of 9 required steps carrying a `claim_id`, the same mine that stopped Article 2.
+- **#65** — derived artifacts with no rebuild path. The Program Audit reported 14 errors on a sound article, every one of them the manifest describing the previous version. Its manifest-shape checks are warnings for now; restore them to errors once the manifest is derived rather than hand-maintained.
+- **#66** — the manuscript that publishes has never passed the grounding gate. The gate runs before the writing review; the revision then rewrites prose and nothing re-checks it. Article 2's publication was only safe because that check was run by hand first.
+- **#67** — sermon generation, where expansion is the form's requirement rather than a violation. Needs #64 and #66 as its foundation.
+
 ## Publication rule
 
 Matthew exposition articles now publish automatically when the program verifies that every applicable rubric dimension reached its own minimum, that no hard failure was declared, and that the Program Audit is `pass` or `pass_with_warnings` with zero errors. The dimension minimums live in the quality profile (revision 4: 80% of each weight); no total score gates publication. The workflow creates `automated-publication-decision.v1`; it must not claim human approval. Repository publication is part of the authoring workflow, but source-code push and production deployment remain separate operations.
 
-For a new article, start from its existing fast-passage CompositionPlan and knowledge snapshot, confirm the article's authoring contract on that plan (base source, required argument steps, allowed/ineligible operations), and invoke `backend.pipeline.matthew_exposition_authoring_runner` with `--plan-id <CompositionPlan id>`, `--program-audit-manifest`, `--program-audit-draft-id`, `--auto-accept-maintained-findings`, and `--max-revision-rounds 2`.
+For a new article, start from its existing fast-passage CompositionPlan and knowledge snapshot, confirm the article's authoring contract on that plan (base source, required argument steps, allowed/ineligible operations), and invoke `backend.pipeline.matthew_exposition_authoring_runner` with `--plan-id <CompositionPlan id>`, `--program-audit-manifest`, `--program-audit-draft-id`, `--auto-accept-maintained-findings`, `--max-revision-rounds 2`, and `--max-grounding-attempts 4`. Omitting `--knowledge` compiles the snapshot from the store and writes it to the run directory as `compiled-knowledge-snapshot.json`, which is what the Program Audit reads; the two must be the same snapshot or the audit judges material the author never saw. Long runs get reaped when started as a tracked background task — launch detached and poll instead.
 
 The authoring contract now lives on the CompositionPlan in PostgreSQL, not in a `base-manuscript-contract-input.json` beside the staging artifacts. `--plan` / `--base-contract` still read those files for articles not yet migrated, and are mutually exclusive with `--plan-id`. Migrate an existing contract with `backend.pipeline.authoring_contract_migration`, which verifies every `source_excerpt` is still a verbatim substring of the manuscript it names before writing anything.
 
