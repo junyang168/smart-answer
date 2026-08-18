@@ -11,6 +11,9 @@ characters and the same sentence becomes two fragments and the link disappears.
 So a single coverage percentage hides two unrelated failures with different
 fixes.  This separates them:
 
+  linked_by_relation       a knowledge_relation records that this observation
+                           feeds that step -- the only status that is not an
+                           inference from proximity
   in_argument              the fragment really is cited by an evidence step
   paired_by_excerpt        no shared fragment, but an evidence step in the same
                            paragraph quotes a superstring or substring of the
@@ -23,8 +26,9 @@ fixes.  This separates them:
                            at all.
   no_anchor                the observation resolves to no fragment.
 
-Every status is a *structural* judgment scoped to one source paragraph, and
-that is the hard limit on what these numbers mean.  A professor who states a
+Apart from `linked_by_relation`, every status is a *structural* judgment
+scoped to one source paragraph, and that is the hard limit on what these
+numbers mean.  A professor who states a
 fact in one paragraph and draws the conclusion five paragraphs later produces
 `paragraph_has_no_evidence` even though the argument layer is complete: Matt
 16:19's future perfect sits at S0063 with its inference at S0068, and is
@@ -46,6 +50,7 @@ from typing import Any, Optional
 
 from backend.pipeline.observation_type_vocabulary import classify
 
+LINKED_BY_RELATION = "linked_by_relation"
 IN_ARGUMENT = "in_argument"
 PAIRED_BY_EXCERPT = "paired_by_excerpt"
 SAME_PARAGRAPH_UNPAIRED = "same_paragraph_unpaired"
@@ -53,6 +58,7 @@ PARAGRAPH_HAS_NO_EVIDENCE = "paragraph_has_no_evidence"
 NO_ANCHOR = "no_anchor"
 
 STATUSES: tuple[str, ...] = (
+    LINKED_BY_RELATION,
     IN_ARGUMENT,
     PAIRED_BY_EXCERPT,
     SAME_PARAGRAPH_UNPAIRED,
@@ -62,7 +68,7 @@ STATUSES: tuple[str, ...] = (
 
 # Statuses where the observation's content is present in the argument layer,
 # whether or not an edge records it.
-REACHED = frozenset({IN_ARGUMENT, PAIRED_BY_EXCERPT})
+REACHED = frozenset({LINKED_BY_RELATION, IN_ARGUMENT, PAIRED_BY_EXCERPT})
 
 
 def fragment_ids(record: dict[str, Any]) -> list[str]:
@@ -89,8 +95,21 @@ def classify_observation(
     fragments: dict[str, dict[str, Any]],
     evidence_fragment_ids: set[str],
     evidence_by_paragraph: dict[tuple[str, str], list[tuple[str, str]]],
+    related_evidence: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Decide one observation's status, and say which evidence step it points at."""
+
+    # A recorded relation is the strongest answer and the only one that is not
+    # an inference from proximity: someone said this observation feeds that
+    # step.  It is checked first so a real edge is never reported as a guess.
+    observation_id = str(observation.get("observation_id") or "")
+    related = (related_evidence or {}).get(observation_id) or []
+    if related:
+        return {
+            "status": LINKED_BY_RELATION,
+            "evidence_step_id": related[0],
+            "paragraph": None,
+        }
 
     own = fragment_ids(observation)
     resolved = [fragment_id for fragment_id in own if fragment_id in fragments]
@@ -163,6 +182,21 @@ def measure_coverage(package: dict[str, Any]) -> dict[str, Any]:
             if fragment is not None:
                 evidence_by_paragraph[_paragraph(fragment)].append((step_id, _excerpt(fragment)))
 
+    evidence_ids = {
+        str(row.get("evidence_step_id")) for row in evidence_steps if row.get("evidence_step_id")
+    }
+    observation_ids = {
+        str(row.get("observation_id"))
+        for row in package.get("observations", [])
+        if row.get("observation_id")
+    }
+    related_evidence: dict[str, list[str]] = defaultdict(list)
+    for row in package.get("knowledge_relations", []):
+        from_id = str(row.get("from_id") or row.get("source_id") or "")
+        to_id = str(row.get("to_id") or row.get("target_id") or "")
+        if from_id in observation_ids and to_id in evidence_ids:
+            related_evidence[from_id].append(to_id)
+
     observations = package.get("observations", [])
     status_counts: Counter[str] = Counter()
     by_category: dict[str, Counter[str]] = defaultdict(Counter)
@@ -175,6 +209,7 @@ def measure_coverage(package: dict[str, Any]) -> dict[str, Any]:
             fragments=fragments,
             evidence_fragment_ids=evidence_fragment_ids,
             evidence_by_paragraph=evidence_by_paragraph,
+            related_evidence=related_evidence,
         )
         status = outcome["status"]
         status_counts[status] += 1
@@ -204,6 +239,7 @@ def measure_coverage(package: dict[str, Any]) -> dict[str, Any]:
             "evidence_steps": len(evidence_steps),
             "reached_argument_layer": reached,
             "reached_pct": round(100.0 * reached / total, 1) if total else 0.0,
+            "linked_by_relation": status_counts[LINKED_BY_RELATION],
             "linked_by_shared_fragment": status_counts[IN_ARGUMENT],
             "linked_by_shared_fragment_pct": (
                 round(100.0 * status_counts[IN_ARGUMENT] / total, 1) if total else 0.0
@@ -279,8 +315,9 @@ def main(argv: list[str] | None = None) -> int:
         f"reached the argument layer      {totals['reached_argument_layer']}"
         f"  ({totals['reached_pct']}%)"
     )
+    print(f"  recorded by a relation        {totals['linked_by_relation']}")
     print(
-        f"  of which linked by fragment   {totals['linked_by_shared_fragment']}"
+        f"  linked only by fragment       {totals['linked_by_shared_fragment']}"
         f"  ({totals['linked_by_shared_fragment_pct']}%)  <- the old metric"
     )
     print()

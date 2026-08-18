@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from backend.pipeline.observation_argument_coverage import (
     IN_ARGUMENT,
+    LINKED_BY_RELATION,
     NO_ANCHOR,
     PAIRED_BY_EXCERPT,
     PARAGRAPH_HAS_NO_EVIDENCE,
@@ -188,6 +189,7 @@ def test_every_observation_lands_in_exactly_one_status():
     ))
     assert sum(report["status_counts"].values()) == 4
     assert report["status_counts"] == {
+        LINKED_BY_RELATION: 0,
         IN_ARGUMENT: 1,
         PAIRED_BY_EXCERPT: 1,
         SAME_PARAGRAPH_UNPAIRED: 0,
@@ -196,3 +198,47 @@ def test_every_observation_lands_in_exactly_one_status():
     }
     assert report["totals"]["reached_argument_layer"] == 2
     assert report["totals"]["reached_pct"] == 50.0
+
+
+def test_a_recorded_relation_outranks_every_proximity_guess():
+    """The edge is the point of the schema change: once someone has recorded
+    that this observation feeds that step, the measure must stop guessing."""
+    report = measure_coverage({
+        **_package(
+            fragments=[
+                _fragment("FR-OBS", "原來那個字是『陰間的門』", paragraph="S0019"),
+                _fragment("FR-E", "別段的話。", paragraph="S0099"),
+            ],
+            observations=[{
+                "observation_id": "OBS-15", "observation_type": "original_language",
+                "source_fragment_ids": ["FR-OBS"],
+            }],
+            evidence_steps=[{"evidence_step_id": "E-H", "source_fragment_ids": ["FR-E"]}],
+        ),
+        "knowledge_relations": [{
+            "relation_id": "KR-1", "from_id": "OBS-15", "to_id": "E-H",
+            "relation_type": "supports", "reason": "教授據此推出。",
+        }],
+    })
+    assert report["status_counts"][LINKED_BY_RELATION] == 1
+    assert report["status_counts"][PARAGRAPH_HAS_NO_EVIDENCE] == 0
+    assert report["totals"]["reached_argument_layer"] == 1
+    assert report["observations"][0]["paired_evidence_step_id"] == "E-H"
+
+
+def test_a_relation_to_something_that_is_not_an_evidence_step_is_ignored():
+    report = measure_coverage({
+        **_package(
+            fragments=[_fragment("FR-OBS", "甲。")],
+            observations=[{
+                "observation_id": "OBS-1", "observation_type": "scripture_text",
+                "source_fragment_ids": ["FR-OBS"],
+            }],
+            evidence_steps=[],
+        ),
+        "knowledge_relations": [{
+            "relation_id": "KR-1", "from_id": "OBS-1", "to_id": "CL-1",
+            "relation_type": "supports", "reason": "指向 claim，不是 step。",
+        }],
+    })
+    assert report["status_counts"][LINKED_BY_RELATION] == 0
