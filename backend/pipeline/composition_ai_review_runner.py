@@ -34,7 +34,13 @@ from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
-DEFAULT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
+# Composition review used to default to a hand-exported
+# `shared_knowledge_pilot_v1.json`. Nothing rebuilt it, so it drifted: by the
+# time Matthew 16:21-23 was replanned the file held 47 claims against the
+# store's 475, and four of the five claims that passage was missing were
+# simply not in the file the reviewer read. The store is the authority, so
+# compile from it and keep the file only as an explicit override.
+STALE_PILOT_KNOWLEDGE = CLAIM_LAYER_ROOT / "shared_knowledge_pilot_v1.json"
 DEFAULT_OUTPUT_DIR = CLAIM_LAYER_ROOT / "composition-reviews"
 CLAUDE_PROMPT = Path("backend/pipeline/prompts/composition_independent_ai_review.md")
 OPENAI_PROMPT = Path("backend/pipeline/prompts/composition_openai_adjudication.md")
@@ -443,7 +449,13 @@ def run_one(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, action="append", required=True)
-    parser.add_argument("--knowledge", type=Path, default=DEFAULT_KNOWLEDGE)
+    parser.add_argument(
+        "--knowledge",
+        type=Path,
+        default=None,
+        help="Knowledge snapshot to review against. Defaults to a fresh compile "
+        "from the PostgreSQL authoring store.",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--claude-model", default="claude-sonnet-5")
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
@@ -460,7 +472,7 @@ def main() -> int:
             json.dumps(
                 {
                     "plans": [str(path) for path in args.plan],
-                    "knowledge": str(args.knowledge),
+                    "knowledge": str(args.knowledge or "<compiled from store>"),
                     "claude_model": args.claude_model,
                     "openai_model": args.openai_model,
                     "would_call_models": False,
@@ -471,6 +483,18 @@ def main() -> int:
         return 0
 
     load_dotenv(PROJECT_ROOT / ".env")
+    knowledge_path = args.knowledge
+    if knowledge_path is None:
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        knowledge_path = args.output_dir / "knowledge-compiled.json"
+        compiled = PostgresKnowledgeStore().compile_package(
+            package_id="composition-review"
+        )
+        knowledge_path.write_text(
+            json.dumps(compiled, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     claude = Stage1AnthropicClient(
         model=args.claude_model,
         # Streaming carries the large output budget, but the SDK still applies
@@ -490,7 +514,7 @@ def main() -> int:
     for plan_path in args.plan:
         result = run_one(
             plan_path=plan_path,
-            knowledge_path=args.knowledge,
+            knowledge_path=knowledge_path,
             output_dir=args.output_dir,
             claude_client=claude,
             openai_client=openai,
