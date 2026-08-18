@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BookOpenText, Database, FileCheck2, LayoutDashboard } from "lucide-react";
+import { Activity, BookOpenText, Database, FileCheck2, LayoutDashboard, Network } from "lucide-react";
 
 const sections = [
   { href: "/admin/wang", label: "總覽", icon: LayoutDashboard, exact: true },
   { href: "/admin/wang/matthew-progress", label: "馬太進度", icon: Activity },
   { href: "/admin/thought-review/candidates", label: "內容候選", icon: BookOpenText },
   { href: "/admin/thought-review", label: "知識審核", icon: Database },
+  { href: "/admin/wang/argument-layer", label: "論證層", icon: Network },
   { href: "/admin/canonical-repository", label: "出版單元", icon: FileCheck2 },
 ];
 
