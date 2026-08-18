@@ -235,6 +235,25 @@ def _build_program_audit_manifest(
     return {"schema_version": staged["schema_version"], "drafts": [draft]}
 
 
+def _require_audit_draft(parser: Any, manifest_path: Path, draft_id: str) -> None:
+    """Fail at argument-parse time on a manifest that cannot name the draft."""
+
+    try:
+        template = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        parser.error(f"--program-audit-manifest is not readable JSON: {exc}")
+    matches = [
+        item
+        for item in template.get("drafts", [])
+        if isinstance(item, dict) and item.get("draft_id") == draft_id
+    ]
+    if len(matches) != 1:
+        parser.error(
+            f"--program-audit-manifest must contain draft_id exactly once: "
+            f"{draft_id} (found {len(matches)})"
+        )
+
+
 def _run_program_audit_stage(
     *,
     template_path: Path,
@@ -355,6 +374,22 @@ def run_authoring(
     grounding_attempt: int = 1,
     max_grounding_attempts: int = 2,
 ) -> dict[str, Any]:
+    # Both program-audit inputs, and the snapshot file the audit copies, are
+    # checked before the first model call. They are only *used* on a passing
+    # editorial path, at the very end of the run -- so a missing one used to
+    # surface after the author, the grounding gate and both reviewers had been
+    # paid for, and `knowledge_path=None` surfaced as a TypeError out of
+    # `shutil.copyfile` rather than as a reviewable status.
+    if (program_audit_manifest_path is None) != (program_audit_draft_id is None):
+        raise AuthoringContractError(
+            "program audit requires both manifest path and draft_id"
+        )
+    if program_audit_manifest_path is not None and knowledge_path is None:
+        raise AuthoringContractError(
+            "program audit needs the knowledge snapshot the packet was built "
+            "from; pass the compiled snapshot's path as knowledge_path"
+        )
+
     # A caller that read the plan and its contract from the authoring store
     # passes the built packet directly; `plan_path` / `contract_path` are then
     # unused. They remain required for the file-based path, which is still the
@@ -402,10 +437,6 @@ def run_authoring(
         editorial_outcome: dict[str, Any],
         result: dict[str, Any],
     ) -> dict[str, Any]:
-        if (program_audit_manifest_path is None) != (program_audit_draft_id is None):
-            raise AuthoringContractError(
-                "program audit requires both manifest path and draft_id"
-            )
         if program_audit_manifest_path is None or program_audit_draft_id is None:
             return result
         audit = _run_program_audit_stage(
@@ -1220,20 +1251,41 @@ def main() -> int:
         parser.error("either --plan-id, or both --plan and --base-contract, are required")
     if not args.plan_id and not args.knowledge:
         parser.error("--knowledge is required with --plan/--base-contract")
+    if bool(args.program_audit_manifest) != bool(args.program_audit_draft_id):
+        parser.error(
+            "--program-audit-manifest and --program-audit-draft-id must be given together"
+        )
+    # The manifest is not read until the run has already passed editorial
+    # review, so a draft_id that is absent or duplicated there used to end a
+    # fully paid run. It costs one file read to say so before anything starts.
+    if args.program_audit_manifest:
+        _require_audit_draft(parser, args.program_audit_manifest, args.program_audit_draft_id)
 
+    # Written beside the run's other artifacts rather than into a temporary
+    # directory that disappears with the packet builder: the Program Audit
+    # copies this file at the end of the run, and it is the record of what the
+    # author actually wrote against.
+    knowledge_path = args.knowledge
     if args.plan_id:
         load_dotenv(PROJECT_ROOT / ".env")
         from backend.api.canonical_repository.postgres_store import (
             PostgresKnowledgeStore,
         )
 
+        compiled_snapshot_path = (
+            None if args.dry_run or args.knowledge
+            else args.output_dir / "compiled-knowledge-snapshot.json"
+        )
         packet = build_authoring_packet_from_store(
             plan_id=args.plan_id,
             store=PostgresKnowledgeStore(),
             knowledge_path=args.knowledge,  # None -> compile from the store
+            compiled_snapshot_path=compiled_snapshot_path,
             publication_profile_path=args.publication_profile,
             quality_profile_path=args.quality_profile,
         )
+        if compiled_snapshot_path is not None:
+            knowledge_path = compiled_snapshot_path
     else:
         packet = build_authoring_packet(
             plan_path=args.plan,
@@ -1260,7 +1312,7 @@ def main() -> int:
     result = run_authoring(
         packet=packet,
         plan_path=args.plan,
-        knowledge_path=args.knowledge,
+        knowledge_path=knowledge_path,
         contract_path=args.base_contract,
         publication_profile_path=args.publication_profile,
         quality_profile_path=args.quality_profile,

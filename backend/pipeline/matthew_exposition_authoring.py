@@ -1909,6 +1909,7 @@ def build_authoring_packet_from_store(
     plan_id: str,
     store: Any,
     knowledge_path: str | Path | None = None,
+    compiled_snapshot_path: str | Path | None = None,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
 ) -> dict[str, Any]:
@@ -1919,6 +1920,14 @@ def build_authoring_packet_from_store(
     snapshot, publication profile and quality profile remain files: source
     manuscripts and shared config are not authored-plan state and do not
     belong in this migration.
+
+    `compiled_snapshot_path` is where to keep the snapshot compiled from the
+    store when `knowledge_path` is omitted. Without it the snapshot only ever
+    exists inside this function's temporary directory, so every later stage
+    that needs the file -- the Program Audit above all -- has nothing to read.
+    Pinning it as a run artifact also means the audit sees the exact material
+    the author wrote against, rather than a separately supplied file that may
+    have drifted from the store.
     """
 
     plan_payload = store.get_record("composition_plans", plan_id)
@@ -1958,7 +1967,16 @@ def build_authoring_packet_from_store(
             # which defeats the generation cache. The store's own object
             # revisions already carry when each record changed.
             compiled.pop("compiled_at", None)
-            compiled_path = tmp_dir / "knowledge.json"
+            # Written where the caller can keep it when one was named. The
+            # path never reaches packet_sha256 -- `sources["knowledge"]` is
+            # rewritten to the compiled form below -- so a durable location
+            # produces the same fingerprint the temporary one did, and an
+            # existing generation cache stays valid.
+            if compiled_snapshot_path is None:
+                compiled_path = tmp_dir / "knowledge.json"
+            else:
+                compiled_path = Path(compiled_snapshot_path)
+                compiled_path.parent.mkdir(parents=True, exist_ok=True)
             compiled_path.write_text(canonical_json(compiled), encoding="utf-8")
             resolved_knowledge_path = compiled_path
 

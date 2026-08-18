@@ -1,3 +1,4 @@
+import argparse
 import json
 import math
 from copy import deepcopy
@@ -32,6 +33,8 @@ from backend.pipeline.matthew_exposition_authoring import (
 from backend.pipeline.matthew_exposition_authoring_runner import (
     _build_program_audit_manifest,
     _call_final_reviewer,
+    _require_audit_draft,
+    _run_program_audit_stage,
     run_authoring,
 )
 
@@ -441,6 +444,19 @@ class _FakeAuthoringStore:
 
     def get_record(self, collection, object_id):
         return self._records.get(collection, {}).get(object_id)
+
+    def compile_package(self, *, package_id=None):
+        """Mirror the real store: a full snapshot stamped with `compiled_at`.
+
+        The stamp is the reason the caller strips it -- a wall-clock field
+        would make packet_sha256 differ on every run with identical data.
+        """
+
+        package = json.loads(KNOWLEDGE_PATH.read_text(encoding="utf-8"))
+        package["package_id"] = package_id or "PG-SNAPSHOT-TEST"
+        package["compiled_at"] = "2026-08-17T12:00:00Z"
+        package["authority"] = "postgresql_authoring_store"
+        return package
 
 
 def _store_from_migrated_contract():
@@ -1330,6 +1346,159 @@ def test_runner_returns_unified_terminal_after_program_audit(monkeypatch, tmp_pa
     assert outcome["status"] == "workflow_published"
     assert outcome["editorial_status"] == "editorial_pass_no_revision"
     assert outcome["program_audit"]["manuscript_sha256"] == manuscript_sha
+
+
+def test_compiled_snapshot_is_kept_as_a_run_artifact_without_moving_the_fingerprint(tmp_path):
+    """Regression: the snapshot compiled from the store lived only inside the
+    packet builder's temporary directory, which is deleted when it returns.
+    The Program Audit copies that file at the end of the run, so the whole
+    `--plan-id` without `--knowledge` path -- the one the session guide tells
+    a new article to use -- died on `shutil.copyfile(None, ...)` after every
+    model call had been paid for.
+
+    Keeping it must not move packet_sha256, or every existing generation
+    cache would miss and the run would re-call every model.
+    """
+
+    store = _store_from_migrated_contract()
+    snapshot_path = tmp_path / "run" / "compiled-knowledge-snapshot.json"
+    kwargs = dict(
+        plan_id="CP-matthew-16-13-20",
+        store=store,
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+    )
+    kept = build_authoring_packet_from_store(compiled_snapshot_path=snapshot_path, **kwargs)
+    ephemeral = build_authoring_packet_from_store(**kwargs)
+
+    assert snapshot_path.is_file()
+    assert kept["packet_sha256"] == ephemeral["packet_sha256"]
+    assert kept["sources"]["knowledge"]["compiled"] is True
+    assert "path" not in kept["sources"]["knowledge"]
+
+    written = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert "compiled_at" not in written, "wall-clock stamp would break the cache"
+    # The audit reads this file directly, so it has to carry the collections
+    # the audit looks the draft's plan and claims up in.
+    assert {"product_plans", "claims", "evidence_steps"} <= set(written)
+
+
+def test_program_audit_without_a_knowledge_snapshot_fails_before_any_model_call(tmp_path):
+    """The snapshot is only *used* on a passing editorial path, at the end of
+    the run. A missing one must not be discovered there.
+    """
+
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    claude = FakeClient([passing_review()], model="fake-claude")
+
+    with pytest.raises(AuthoringContractError, match="knowledge snapshot"):
+        run_authoring(
+            plan_path=PLAN_PATH,
+            knowledge_path=None,
+            contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+            publication_profile_path=PUBLICATION_PROFILE_PATH,
+            quality_profile_path=PROFILE_PATH,
+            output_dir=tmp_path,
+            openai_client=openai,
+            claude_client=claude,
+            skip_grounding_gate=True,
+            program_audit_manifest_path=tmp_path / "template.json",
+            program_audit_draft_id="DRAFT-1",
+        )
+    assert openai.calls == 0 and claude.calls == 0
+
+
+def test_half_specified_program_audit_fails_before_any_model_call(tmp_path):
+    openai = FakeClient([valid_author_result()], model="fake-openai")
+    claude = FakeClient([passing_review()], model="fake-claude")
+
+    with pytest.raises(AuthoringContractError, match="manifest path and draft_id"):
+        run_authoring(
+            plan_path=PLAN_PATH,
+            knowledge_path=KNOWLEDGE_PATH,
+            contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+            publication_profile_path=PUBLICATION_PROFILE_PATH,
+            quality_profile_path=PROFILE_PATH,
+            output_dir=tmp_path,
+            openai_client=openai,
+            claude_client=claude,
+            skip_grounding_gate=True,
+            program_audit_manifest_path=tmp_path / "template.json",
+        )
+    assert openai.calls == 0 and claude.calls == 0
+
+
+def test_program_audit_stage_copies_the_snapshot_it_was_given(tmp_path):
+    """The stage that used to receive None. Exercised unmocked, because the
+    only existing program-audit test replaces this function wholesale.
+    """
+
+    template_path = tmp_path / "template.json"
+    template_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "editorial-draft-manifest.v1",
+                "drafts": [{"draft_id": "DRAFT-1", "audit_config": {}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sections = valid_author_result()["sections"]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            "backend.pipeline.matthew_exposition_authoring_runner.write_editorial_draft_audit",
+            lambda manifest_path, draft_id: _stub_audit_output(manifest_path),
+        )
+        audit = _run_program_audit_stage(
+            template_path=template_path,
+            draft_id="DRAFT-1",
+            knowledge_path=KNOWLEDGE_PATH,
+            output_dir=tmp_path,
+            manuscript="# 標題\n\n段落。\n",
+            manuscript_sections=sections,
+        )
+
+    staged = tmp_path / "program-audit/knowledge-snapshot.json"
+    assert staged.is_file()
+    assert json.loads(staged.read_text(encoding="utf-8")) == load_json(KNOWLEDGE_PATH)
+    assert audit["status"] == "pass"
+
+
+def test_audit_manifest_precheck_rejects_a_draft_id_it_cannot_name(tmp_path):
+    """`_build_program_audit_manifest` already refuses a draft_id it cannot
+    find exactly once, but it only runs after the article has passed review.
+    The same check at parse time costs one file read.
+    """
+
+    manifest_path = tmp_path / "template.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "editorial-draft-manifest.v1",
+                "drafts": [{"draft_id": "DRAFT-1"}, {"draft_id": "DRAFT-1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    parser = argparse.ArgumentParser()
+    for draft_id in ("DRAFT-2", "DRAFT-1"):  # absent, then duplicated
+        with pytest.raises(SystemExit):
+            _require_audit_draft(parser, manifest_path, draft_id)
+
+    manifest_path.write_text("not json", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        _require_audit_draft(parser, manifest_path, "DRAFT-1")
+
+
+def _stub_audit_output(manifest_path):
+    """Write the audit result `_run_program_audit_stage` reads back."""
+
+    audit_path = Path(manifest_path).parent / "program-audit.json"
+    audit_path.write_text(
+        json.dumps({"status": "pass", "summary": {"error_total": 0, "warning_total": 0}}),
+        encoding="utf-8",
+    )
+    return audit_path
 
 
 def test_runner_uses_delta_packet_after_revision_and_recomputes_score(tmp_path):
