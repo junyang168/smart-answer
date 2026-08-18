@@ -34,3 +34,12 @@
 - `source_tensions` 是契約登記的來源張力。稿件若把它悄悄調和成一致，是 `material_source_tension_silently_harmonized`。
 
 切片沒有提到的事，不等於稿件錯了。切片只涵蓋原文觀察與交叉經文，稿件的其他內容自有 grounding 檢查負責；**不要因為某句話不在切片裡就判它無據**。你要抓的是切片有講、而稿件講反了或講過頭的地方。
+
+packet 的 `unused_scoped_claims` 是契約已放進本篇範圍、但稿件一條都沒有引用的材料。它存在是因為你讀得到稿子、讀不到材料庫：評判 `pastoral_theological_landing` 時，你需要知道「這篇有沒有可落地的材料」，而不是只能憑印象斷定有或沒有。
+
+用法只有兩種：
+
+- 稿件結尾沒有落點，而 `unused_scoped_claims` 裡有可支撐的材料（例如 `claim_type` 為 `application` 的條目）——**在 finding 裡指名那幾條 claim_id**，讓修訂有據可循。
+- `unused_scoped_claims` 裡沒有可支撐的材料——**就不要要求加落點**。材料不足時寧可讓這一維度失分，也不可要求作者寫一段沒有來源的今日應用；那正是這條管線存在的理由。
+
+這個欄位**不是**待辦清單。一條材料沒被引用，通常只表示它不屬於這篇的論證線；不得僅因某條 claim 未被使用就開 finding。

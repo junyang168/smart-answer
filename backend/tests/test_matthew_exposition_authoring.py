@@ -14,6 +14,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     contract_from_plan_payload,
     build_editorial_review_packet,
     build_final_delta_review_packet,
+    canonical_json,
     changed_markdown_paragraphs,
     deterministic_writing_warnings,
     quote_fidelity_warnings,
@@ -2206,3 +2207,41 @@ def test_a_grounding_repair_does_not_destroy_the_author_artifact(tmp_path):
     assert json.loads(seeded.read_text(encoding="utf-8"))["generation"]["role"] == (
         "revision_round_seed"
     )
+
+
+def test_review_packet_shows_scoped_material_the_manuscript_left_unused():
+    """Regression: the reviewer scored `pastoral_theological_landing` 3 of 5,
+    could name no material for a landing, and proposed a discipleship
+    application instead. Adjudication rejected it for citing no evidence --
+    correctly -- and the reviewer withdrew, both concluding the passage had no
+    application to make. Four claims of `claim_type: "application"` were in the
+    author's packet unused, and the review packet carried no claims at all, so
+    neither agent could look.
+
+    Only the uncited ones are sent. The full set is 13KB against a 40KB budget,
+    and what the manuscript used is already in the prose in front of the
+    reviewer.
+    """
+
+    packet = full_authoring_packet()
+    author = valid_author_result()
+    manuscript = author["manuscript_markdown"]
+    scoped = {item["claim_id"] for item in packet["knowledge"]["claims"]}
+    cited = {claim_id for claim_id in scoped if claim_id in manuscript}
+    assert cited, "fixture must cite at least one scoped claim"
+    assert scoped - cited, "fixture must leave at least one scoped claim unused"
+
+    review_packet = build_editorial_review_packet(
+        authoring_packet=packet, author_result=author
+    )
+    unused = review_packet["unused_scoped_claims"]
+    ids = {item["claim_id"] for item in unused}
+
+    assert ids == scoped - cited, (
+        "exactly the scoped material the manuscript did not cite -- what it did "
+        "cite is already in the prose in front of the reviewer"
+    )
+    assert all(item.get("statement") for item in unused), (
+        "an id alone tells the reviewer nothing about whether it could land"
+    )
+    assert len(canonical_json(review_packet).encode()) <= EDITORIAL_REVIEW_PACKET_MAX_BYTES

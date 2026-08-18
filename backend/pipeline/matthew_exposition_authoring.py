@@ -1428,6 +1428,33 @@ def build_editorial_review_packet(
             "review_calibration": quality_profile.get("review_calibration", {}),
         },
         "source_slice": source_slice,
+        # Material the contract put in scope that the manuscript never cited.
+        # The reviewer already reads the manuscript, so it knows what was used;
+        # what it could not see was what was available and left on the table --
+        # and `pastoral_theological_landing` is precisely a judgment about
+        # whether the article landed on material it had.
+        #
+        # It cost a run: the reviewer scored the landing 3 of 5, could name no
+        # material for one, and invented a discipleship application instead.
+        # Adjudication rejected it for citing no evidence -- correctly -- and
+        # the reviewer withdrew, both concluding the passage simply had no
+        # application to make. Four claims of `claim_type: "application"` were
+        # sitting in the author's packet unused, and neither agent could see
+        # them. Only the uncited ones are sent: the full set is 13KB against a
+        # 40KB budget, and the used ones are already in the prose.
+        "unused_scoped_claims": [
+            {
+                "claim_id": item.get("claim_id"),
+                "claim_type": item.get("claim_type"),
+                # Two shapes exist: the store spells this `statement`, an
+                # older knowledge projection spells it `title`. Reading one
+                # sends the reviewer a claim with no text, which is the whole
+                # failure this field was added to end.
+                "statement": item.get("statement") or item.get("title"),
+            }
+            for item in knowledge.get("claims", [])
+            if item.get("claim_id") and str(item["claim_id"]) not in manuscript
+        ],
         "scope": {
             "include": [
                 "writing_quality",
@@ -2159,24 +2186,23 @@ def build_authoring_packet(
             for item in knowledge.get("claim_relations", [])
             if item.get("source_id") in scoped_claim_ids and item.get("target_id") in scoped_claim_ids
         ],
-        "knowledge_routes": [
-            item
-            for item in knowledge.get("knowledge_routes", [])
-            if item.get("claim_id") in scoped_claim_ids
-        ],
-        "topic_nodes": knowledge.get("topic_nodes", []),
-        "product_plans": [
-            {
-                **item,
-                "decisions": [
-                    decision
-                    for decision in item.get("decisions", [])
-                    if decision.get("decision_id") in contract_decision_ids
-                ],
-            }
-            for item in knowledge.get("product_plans", [])
-            if item.get("plan_id") == plan.get("plan_id")
-        ],
+        # Three collections used to ride along here and no longer do. They
+        # were 24% of a 372KB packet, sent again on every draft, and no author
+        # prompt has ever mentioned any of them:
+        #
+        #   product_plans   -- the same plan already at `packet["plan"]`, sent
+        #                      a second time inside the knowledge slice.
+        #   topic_nodes     -- all 59, the one collection this otherwise
+        #                      carefully scoped slice never filtered. The
+        #                      editorial review packet's own `scope.exclude`
+        #                      lists topic_nodes as out of scope for this work.
+        #   knowledge_routes-- where each claim goes next (exposition, topic,
+        #                      Q&A). Editorial workflow state, not material to
+        #                      write from.
+        #
+        # Nothing in the pipeline reads them off this packet: the grounding
+        # check and the review packet take claims, evidence steps and source
+        # fragments, and the Program Audit reads the snapshot file instead.
         "scope": {
             "decision_ids": sorted(contract_decision_ids),
             "claim_ids": sorted(scoped_claim_ids),
