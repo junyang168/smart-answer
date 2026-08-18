@@ -86,6 +86,25 @@ wait_for_health() {
   return 1
 }
 
+# Answering is not the same as answering from the release we just switched to.
+# A stale process still holding the port answers exactly as happily as the new
+# one, which is how a service can sit 36 days behind while every deploy reports
+# success.
+assert_backend_release() {
+  local expected="$1" reported
+  reported="$(curl -fsS --max-time 5 "$BACKEND_HEALTH" 2>/dev/null \
+    | sed -n 's/.*"release"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p')"
+  if [[ -z "$reported" ]]; then
+    log "Backend reports no release id; skipping identity check (pre-marker build)"
+    return 0
+  fi
+  if [[ "$reported" != "$expected" ]]; then
+    printf 'deploy: backend is serving %s, expected %s\n' "$reported" "$expected" >&2
+    return 1
+  fi
+  log "Backend is serving $expected"
+}
+
 set_backend_release() {
   local release="$1"
   /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$BACKEND_PLIST" \
@@ -177,6 +196,7 @@ switch_services() {
   set_backend_release "$release" || return 1
   restart_backend || return 1
   wait_for_health backend "$BACKEND_HEALTH" || return 1
+  assert_backend_release "$(basename "$release")" || return 1
 
   restart_frontend "$release" || return 1
   wait_for_health frontend "$FRONTEND_HEALTH" || return 1
@@ -346,6 +366,10 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   "$RELEASE_DIR/backend/.venv/bin/pip" install --disable-pip-version-check \
     -r "$RELEASE_DIR/backend/requirements.txt"
   "$RELEASE_DIR/backend/.venv/bin/python3" -m compileall -q "$RELEASE_DIR/backend"
+
+  # The running service reads this to answer /healthz with its own commit.
+  printf '{"release": "%s", "deployed_at": "%s"}\n' \
+    "$TARGET_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RELEASE_DIR/release.json"
 
   log "Installing and building frontend"
   npm --prefix "$RELEASE_DIR/web" ci
