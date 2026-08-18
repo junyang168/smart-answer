@@ -620,3 +620,22 @@ def test_the_blocking_checks_are_the_ones_that_need_no_checklist() -> None:
     # declares no claims, so nothing else would ever look at it.
     assert _finding("unmapped_manuscript_paragraph", "error", "t", "d")["severity"] == "error"
     assert _finding("invalid_source_anchor", "error", "t", "d")["severity"] == "error"
+
+
+def test_a_provenance_comment_over_a_footnote_is_not_left_dangling() -> None:
+    """Regression on the footnote fix itself. Skipping footnote lines stopped
+    them being audited as unattributed prose, but an author marks each footnote
+    with its own provenance -- and that comment was then reported as a source
+    marker with no body under it.
+    """
+
+    from backend.pipeline.editorial_draft_audit import _markdown_blocks
+
+    blocks = _markdown_blocks(
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->\n"
+        "有來源的正文。\n"
+        "\n"
+        "<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-2\"]} -->\n"
+        "[^1]: 原文為 ὀλιγόπιστοι。\n"
+    )
+    assert [block["text"] for block in blocks] == ["有來源的正文。"]

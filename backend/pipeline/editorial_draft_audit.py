@@ -213,11 +213,14 @@ def _markdown_blocks(content: str) -> list[dict[str, Any]]:
         if re.match(r"^#{1,6}\s+", stripped):
             flush()
             continue
-        # A footnote definition is apparatus, not prose. Read as a paragraph it
-        # has no provenance comment above it and was reported as unattributed
-        # body text -- the whole footnote block of a real article, at that.
+        # A footnote definition is apparatus, not prose: read as a paragraph it
+        # was reported as unattributed body text, the whole footnote block of a
+        # real article at that. A provenance comment standing before one
+        # belongs to it and is not a comment left dangling over nothing, so
+        # both are dropped together.
         if FOOTNOTE_DEFINITION_RE.match(stripped):
             flush()
+            pending = None
             continue
         match = PROVENANCE_COMMENT_RE.fullmatch(stripped)
         if match:
