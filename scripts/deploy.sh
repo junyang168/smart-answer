@@ -202,6 +202,46 @@ rollback() {
 for command_name in git tar python3 node npm pm2 curl launchctl; do
   require_command "$command_name"
 done
+
+# The release venv's interpreter is whatever built it, and `python3 -m venv`
+# takes whatever `python3` the deploying shell resolves to. This machine has
+# three: 3.9.6 at /usr/bin, 3.12.8 at /usr/local/bin, 3.13.2 under Homebrew. A
+# deploy from the wrong shell built a 3.9.6 venv; the build succeeded, and the
+# service died at import on `MicroSermon | None`, which 3.9 cannot evaluate.
+#
+# `.python-version` is the contract, and it names the version the test suite
+# runs on. The path is resolved on the machine rather than committed, so this
+# stays portable; SMART_ANSWER_PYTHON overrides it for an unusual host.
+python_minor() {
+  "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true
+}
+
+resolve_python() {
+  local candidate
+  if [[ -n "${SMART_ANSWER_PYTHON:-}" ]]; then
+    [[ -x "$SMART_ANSWER_PYTHON" ]] || fail "SMART_ANSWER_PYTHON is not executable: $SMART_ANSWER_PYTHON"
+    [[ "$(python_minor "$SMART_ANSWER_PYTHON")" == "$REQUIRED_PYTHON" ]] \
+      || fail "SMART_ANSWER_PYTHON is not Python $REQUIRED_PYTHON: $SMART_ANSWER_PYTHON"
+    printf '%s\n' "$SMART_ANSWER_PYTHON"
+    return 0
+  fi
+  for candidate in \
+    "python$REQUIRED_PYTHON" \
+    python3 \
+    "/Library/Frameworks/Python.framework/Versions/$REQUIRED_PYTHON/bin/python3" \
+    "/opt/homebrew/bin/python$REQUIRED_PYTHON" \
+    "/usr/local/bin/python$REQUIRED_PYTHON"
+  do
+    candidate="$(command -v "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    [[ -x "$candidate" ]] || continue
+    if [[ "$(python_minor "$candidate")" == "$REQUIRED_PYTHON" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 [[ -x /usr/libexec/PlistBuddy ]] || fail "PlistBuddy is unavailable"
 [[ -f "$BACKEND_PLIST" ]] || fail "backend LaunchAgent not found: $BACKEND_PLIST"
 [[ -f "$PM2_CONFIG" ]] || fail "PM2 config not found: $PM2_CONFIG"
@@ -211,6 +251,14 @@ git -C "$SOURCE_REPO" fetch --prune origin
 TARGET_SHA="$(git -C "$SOURCE_REPO" rev-parse --verify "$TARGET_REF^{commit}")" \
   || fail "cannot resolve Git ref: $TARGET_REF"
 MAIN_SHA="$(git -C "$SOURCE_REPO" rev-parse --verify 'origin/main^{commit}')"
+
+# Read the version contract out of the commit being deployed, not out of
+# whatever branch the source checkout happens to be on.
+REQUIRED_PYTHON="$(git -C "$SOURCE_REPO" show "$TARGET_SHA:.python-version" 2>/dev/null || true)"
+REQUIRED_PYTHON="${REQUIRED_PYTHON//[[:space:]]/}"
+[[ -n "$REQUIRED_PYTHON" ]] || fail "$TARGET_SHA carries no .python-version"
+PYTHON_BIN="$(resolve_python)" \
+  || fail "no Python $REQUIRED_PYTHON interpreter found; install it or set SMART_ANSWER_PYTHON"
 
 if [[ "$ALLOW_NON_MAIN" != true ]] && ! git -C "$SOURCE_REPO" merge-base --is-ancestor "$TARGET_SHA" "$MAIN_SHA"; then
   fail "$TARGET_SHA is not contained in origin/main; merge it first or explicitly use --allow-non-main"
@@ -229,6 +277,7 @@ printf '   source ref:       %s\n' "$TARGET_REF"
 printf '   source commit:    %s\n' "$TARGET_SHA"
 printf '   release:          %s\n' "$RELEASE_DIR"
 printf '   previous release: %s\n' "${PREVIOUS_RELEASE:-none}"
+printf '   python:           %s (%s)\n' "$REQUIRED_PYTHON" "$PYTHON_BIN"
 printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
@@ -244,13 +293,35 @@ fi
 chmod 600 "$BACKEND_PLIST"
 
 mkdir -p "$RELEASES_DIR"
+
+# A release is about 1.5 GB of venv, node_modules and .next build. Running the
+# disk out mid-build leaves a half-written tree and takes down everything else
+# sharing the volume, PostgreSQL included, so refuse before starting rather
+# than fail somewhere inside npm.
+REQUIRED_FREE_MB="${SMART_ANSWER_MIN_FREE_MB:-6144}"
+available_mb="$(df -m "$DEPLOY_ROOT" | awk 'NR==2 {print $4}')"
+if [[ -z "$available_mb" ]]; then
+  fail "cannot determine free space on $DEPLOY_ROOT"
+fi
+if ((available_mb < REQUIRED_FREE_MB)); then
+  fail "only ${available_mb} MB free on $DEPLOY_ROOT; need ${REQUIRED_FREE_MB} MB. Remove old releases under $RELEASES_DIR (keep the active one and the rollback target)."
+fi
+log "Free space: ${available_mb} MB"
+
 if ! mkdir "$DEPLOY_ROOT/.deploy-lock" 2>/dev/null; then
   fail "another deployment appears to be running: $DEPLOY_ROOT/.deploy-lock"
 fi
 trap 'rmdir "$DEPLOY_ROOT/.deploy-lock" 2>/dev/null || true' EXIT
 
+# `.deploy-complete` now means "this release has served healthy traffic", not
+# "the build finished". A release that builds and then fails its health check
+# used to be marked complete anyway, so every retry reused the broken tree and
+# could never recover -- the 3.9.6 venv had to be deleted by hand. Everything
+# under a release is derived from one immutable commit, so rebuilding an
+# unverified one is always safe and always cheaper than a person diagnosing it.
 if [[ -d "$RELEASE_DIR" && ! -f "$RELEASE_DIR/.deploy-complete" ]]; then
-  fail "incomplete release already exists; inspect and remove it manually: $RELEASE_DIR"
+  log "Discarding an unverified release and rebuilding: $RELEASE_DIR"
+  rm -rf "$RELEASE_DIR"
 fi
 
 if [[ ! -d "$RELEASE_DIR" ]]; then
@@ -267,8 +338,11 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
     fi
   done
 
-  log "Creating isolated backend environment"
-  python3 -m venv "$RELEASE_DIR/backend/.venv"
+  log "Creating isolated backend environment (Python $REQUIRED_PYTHON via $PYTHON_BIN)"
+  "$PYTHON_BIN" -m venv "$RELEASE_DIR/backend/.venv"
+  venv_minor="$(python_minor "$RELEASE_DIR/backend/.venv/bin/python3")"
+  [[ "$venv_minor" == "$REQUIRED_PYTHON" ]] \
+    || fail "release venv reports Python $venv_minor, expected $REQUIRED_PYTHON"
   "$RELEASE_DIR/backend/.venv/bin/pip" install --disable-pip-version-check \
     -r "$RELEASE_DIR/backend/requirements.txt"
   "$RELEASE_DIR/backend/.venv/bin/python3" -m compileall -q "$RELEASE_DIR/backend"
@@ -276,8 +350,6 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   log "Installing and building frontend"
   npm --prefix "$RELEASE_DIR/web" ci
   npm --prefix "$RELEASE_DIR/web" run build
-
-  touch "$RELEASE_DIR/.deploy-complete"
 else
   log "Reusing previously built immutable release"
 fi
@@ -299,6 +371,7 @@ if ! switch_services "$RELEASE_DIR"; then
   exit 1
 fi
 
+touch "$RELEASE_DIR/.deploy-complete"
 printf '%s\n' "$RELEASE_DIR" > "$ACTIVE_RELEASE_FILE"
 printf '%s %s previous=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET_SHA" "${PREVIOUS_RELEASE:-none}" \
   >> "$DEPLOY_ROOT/deployments.log"
