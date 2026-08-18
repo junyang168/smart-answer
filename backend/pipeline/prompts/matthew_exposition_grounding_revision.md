@@ -10,7 +10,7 @@
 4. 不動沒有被標出的段落，不動 provenance 註解，不動 ledger 的 claim_ids 與 anchors，除非某個 anchor 落在你改動的文字裡——那就同步更新它，並保持它仍是稿件的逐字子字串。
 5. 返回完整 Markdown 與完整 ledger。ledger 的每個 section 必須原樣帶回初稿already有的全部欄位，一個都不能少：
 
-   `section_id`、`decision_ids`、`base_step_ids_preserved`、`preserved_step_anchors`、`claim_ids_used`、`applied_operations`、`integration_operations`、`omissions`、`output_anchor`
+   `section_id`、`decision_ids`、`claim_ids_used`、`applied_operations`、`integration_operations`、`omissions`、`output_anchor`
 
    除非你改動的文字剛好落在某個 anchor 內（那就同步更新該 anchor），否則這些欄位一律照抄初稿的值。ledger 不完整會直接判失敗，不進下一步。
 

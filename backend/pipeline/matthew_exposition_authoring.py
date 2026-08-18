@@ -111,45 +111,17 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                     "properties": {
                         "section_id": {"type": "string"},
                         "decision_ids": {"type": "array", "items": {"type": "string"}},
-                        "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
-                        "preserved_step_anchors": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "step_id": {"type": "string"},
-                                    "anchor": {"type": "string"},
-                                },
-                                "required": ["step_id", "anchor"],
-                            },
-                        },
                         "claim_ids_used": {"type": "array", "items": {"type": "string"}},
                         "integration_operations": {"type": "array", "items": {"type": "string"}},
                         "applied_operations": {"type": "array", "items": {"type": "string"}},
-                        "omissions": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "step_id": {"type": "string"},
-                                    "reason": {"type": "string"},
-                                },
-                                "required": ["step_id", "reason"],
-                            },
-                        },
                         "output_anchor": {"type": "string"},
                     },
                     "required": [
                         "section_id",
                         "decision_ids",
-                        "base_step_ids_preserved",
-                        "preserved_step_anchors",
                         "claim_ids_used",
                         "integration_operations",
                         "applied_operations",
-                        "omissions",
                         "output_anchor",
                     ],
                 },
@@ -204,10 +176,10 @@ EDITORIAL_REVIEW_SCHEMA: dict[str, Any] = {
                     "additionalProperties": False,
                     "properties": {
                         "section_id": {"type": "string"},
-                        "base_step_ids_preserved": {"type": "array", "items": {"type": "string"}},
+
                         "assessment": {"type": "string"},
                     },
-                    "required": ["section_id", "base_step_ids_preserved", "assessment"],
+                    "required": ["section_id", "assessment"],
                 },
             },
             "findings": {
@@ -648,53 +620,6 @@ def _validate_section_operations(
             )
 
 
-def _validate_preserved_step_anchors(
-    section: dict[str, Any], *, manuscript: str, field: str
-) -> None:
-    """Verify that every preserved required step points at manuscript prose.
-
-    Claiming a step in `base_step_ids_preserved` is a self-report; the literal
-    anchor makes the claim locatable, so a reviewer can judge whether the step
-    was reasoned out or merely summarized.
-    """
-
-    section_id = section.get("section_id") or field
-    preserved = section.get("base_step_ids_preserved", [])
-    if not isinstance(preserved, list):
-        raise AuthoringContractError("base_step_ids_preserved must be an array")
-    entries = section.get("preserved_step_anchors")
-    if not isinstance(entries, list):
-        raise AuthoringContractError("preserved_step_anchors must be an array")
-    anchors: dict[str, str] = {}
-    for index, entry_value in enumerate(entries):
-        entry = _require_mapping(entry_value, f"{field}.preserved_step_anchors[{index}]")
-        step_id = _require_nonempty_string(
-            entry.get("step_id"), f"{field}.preserved_step_anchors[{index}].step_id"
-        )
-        anchor = _require_nonempty_string(
-            entry.get("anchor"), f"{field}.preserved_step_anchors[{index}].anchor"
-        )
-        if step_id in anchors:
-            raise AuthoringContractError(
-                f"section {section_id} anchored base step {step_id} more than once"
-            )
-        if anchor not in manuscript:
-            raise AuthoringContractError(
-                f"preserved step anchor not found in manuscript: {step_id}"
-            )
-        anchors[step_id] = anchor
-    missing = set(preserved) - set(anchors)
-    if missing:
-        raise AuthoringContractError(
-            f"preserved base steps without a manuscript anchor: {sorted(missing)}"
-        )
-    unclaimed = set(anchors) - set(preserved)
-    if unclaimed:
-        raise AuthoringContractError(
-            f"anchored base steps are not listed as preserved: {sorted(unclaimed)}"
-        )
-
-
 def validate_author_result(
     result: dict[str, Any],
     *,
@@ -737,24 +662,11 @@ def validate_author_result(
         raise AuthoringContractError(
             f"contract decision_ids missing from plan: {sorted(missing_from_plan)}"
         )
-    contract_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-    }
-    required_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-        if step.get("required", True)
-    }
     authored_sections = result.get("sections")
     if not isinstance(authored_sections, list) or not authored_sections:
         raise AuthoringContractError("drafted result requires sections")
 
     covered_decisions: list[str] = []
-    preserved_steps: list[str] = []
-    omitted_steps: list[str] = []
     used_claim_ids: list[str] = []
     for section_index, section_value in enumerate(authored_sections):
         section = _require_mapping(section_value, f"sections[{section_index}]")
@@ -768,18 +680,7 @@ def validate_author_result(
         _validate_section_operations(
             section, contract=contract, field=f"sections[{section_index}]"
         )
-        _validate_preserved_step_anchors(
-            section, manuscript=manuscript, field=f"sections[{section_index}]"
-        )
-        preserved_steps.extend(section.get("base_step_ids_preserved", []))
         used_claim_ids.extend(section.get("claim_ids_used", []))
-        omissions = section.get("omissions", [])
-        if not isinstance(omissions, list):
-            raise AuthoringContractError("omissions must be an array")
-        for omission in omissions:
-            omission = _require_mapping(omission, "omission")
-            omitted_steps.append(_require_nonempty_string(omission.get("step_id"), "omission.step_id"))
-            _require_nonempty_string(omission.get("reason"), "omission.reason")
         anchor = _require_nonempty_string(section.get("output_anchor"), "output_anchor")
         if anchor not in manuscript:
             raise AuthoringContractError(f"output anchor not found in manuscript: {anchor}")
@@ -790,19 +691,19 @@ def validate_author_result(
         raise AuthoringContractError(
             f"uncovered decisions: {sorted(plan_decisions - set(covered_decisions))}"
         )
-    unknown_steps = (set(preserved_steps) | set(omitted_steps)) - contract_steps
-    if unknown_steps:
-        raise AuthoringContractError(f"unknown base step_ids: {sorted(unknown_steps)}")
-    # An author is no longer required to account for every contract step, nor
-    # forbidden to omit one. The obligation forced prose the material could not
-    # support -- on Matt.16.1-12 a step required a present-day application the
-    # sources never made, and the run deadlocked because writing it was also
-    # forbidden. What a step still says about the material is available as a
-    # claim; whether the article preserved the base manuscript's reasoning is
+    # The required-argument-step ledger is gone. It was a second copy of
+    # material that now lives in the claim layer, written by a model and never
+    # reviewed, and its obligations forced prose the sources could not support.
+    # A half-retired state was worse than either end of it: the contract had
+    # stopped requiring steps while the schema still made the author report
+    # them, so the author filled the gap left by a removed step by inventing
+    # the id that would have come next, and the run died on it.
+    #
+    # What an author still accounts for is decisions and claims: every decision
+    # covered exactly once, every cited claim in scope, every section anchored
+    # in the manuscript. Whether the base manuscript's reasoning survived is
     # the `base_manuscript_preservation` dimension's judgment, made against the
-    # material rather than against an unreviewed checklist. Steps an author
-    # does declare are still checked above: an unknown id, or an anchor that is
-    # not in the manuscript, is still a failure.
+    # material rather than against an unreviewed checklist.
     if valid_claim_ids is not None:
         unknown_claim_ids = set(used_claim_ids) - valid_claim_ids
         if unknown_claim_ids:
@@ -1177,18 +1078,6 @@ def validate_editorial_review(
         raise AuthoringContractError(
             "editorial review must cover every contract section exactly once"
         )
-    known_steps = {
-        step["step_id"]
-        for section in contract["sections"]
-        for step in section["required_argument_steps"]
-    }
-    reviewed_steps = {
-        step_id for item in section_reviews for step_id in item["base_step_ids_preserved"]
-    }
-    if reviewed_steps - known_steps:
-        raise AuthoringContractError(
-            f"editorial review used unknown base steps: {sorted(reviewed_steps - known_steps)}"
-        )
     for finding in review.get("findings", []):
         anchor = _require_nonempty_string(finding.get("manuscript_anchor"), "manuscript_anchor")
         if anchor not in manuscript:
@@ -1196,18 +1085,6 @@ def validate_editorial_review(
     outcome = evaluate_editorial_review(
         review, quality_profile, out_of_scope_dimensions(contract)
     )
-    if outcome["passed"]:
-        required_steps = {
-            step["step_id"]
-            for section in contract["sections"]
-            for step in section["required_argument_steps"]
-            if step.get("required", True)
-        }
-        missing_required = required_steps - reviewed_steps
-        if missing_required:
-            raise AuthoringContractError(
-                f"passing editorial review omitted required base steps: {sorted(missing_required)}"
-            )
     # A reviewer that fails a draft must say what to change -- otherwise the
     # run has nothing to act on. This does not hold for a merged review
     # inherited into a later round: "below the threshold, but nothing that
@@ -1431,10 +1308,8 @@ def build_editorial_review_packet(
         "author_section_ledger": [
             {
                 "section_id": section["section_id"],
-                "base_step_ids_preserved": section.get("base_step_ids_preserved", []),
                 # Verified step→prose pairs let the reviewer calibrate depth at
                 # the exact place each load-bearing step is supposed to live.
-                "preserved_step_anchors": section.get("preserved_step_anchors", []),
                 "output_anchor": section.get("output_anchor", ""),
             }
             for section in author_result.get("sections", [])

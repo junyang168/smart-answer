@@ -9,7 +9,7 @@
 5. 不把一個 composition decision 機械地變成一個標題；可用較少的讀者小節連續覆蓋多個 decision。
 6. 先完整呈現母本論證，再自然交代補充來源的不同著重。不得靜默調和真張力。
 7. 每個實質段落之前保留符合 publication profile 的 provenance 註解，格式必須是單行有效 JSON：`<!-- provenance: {"attribution":"professor","claim_ids":["DK-..."]} -->`。不可使用 `key=value` 格式，也不可把註解放在段落之後。跨來源編輯綜合使用 `editorial_synthesis`，並提供 `claim_ids` 與隱藏的 `synthesis_note`；它不需要在讀者正文反覆顯示「編輯說明」。
-8. ledger 中列出全部 step ID，不等於論證已保留。每個承重步驟都要讓讀者看見：觀察了甚麼、為甚麼重要、如何推到下一步、結論受到甚麼限制。若只用一兩句列出 Petros/petra、弗 2:20 和結論，即使溯源正確也屬壓縮失敗。
+8. 母本的承重推理必須讓讀者看見,不能只留結論。每一步都要讓讀者看見：觀察了甚麼、為甚麼重要、如何推到下一步、結論受到甚麼限制。若只用一兩句列出 Petros/petra、弗 2:20 和結論，即使溯源正確也屬壓縮失敗。
 
    但「把推論鏈寫完整」不等於「可以自己補推論」。第 8 條要求你把材料裡已有的推理講清楚，**不是**要求你補上材料沒有的環節。當一段的材料只夠支持較短的結論，正確做法是寫得短，不是把鏈條補滿。**寧可段落短，不可無源。**
 
@@ -35,7 +35,7 @@
 
    引用教授本人的話不屬本條。「他把這個字重譯成⋯⋯」是在寫內容，「補充講道把這一點說得更具體」才是在描述來源形式。分辨方法：這句話交代的是**教授說了甚麼**，還是**這段材料屬於哪一層**。前者可以寫，後者不寫。
 
-8d. **遵守約束，但不要把約束寫進正文。** 你受到範圍限制、承重步驟、不得超出材料等規則約束——這些規則是編輯部的工作紀律，不是讀者要讀的內容。守規矩的證據放在 ledger、provenance 與 grounding 檢查裡，那裡本來就是給審核看的。
+8d. **遵守約束，但不要把約束寫進正文。** 你受到範圍限制、契約操作與不得超出材料等規則約束——這些規則是編輯部的工作紀律，不是讀者要讀的內容。守規矩的證據放在 ledger、provenance 與 grounding 檢查裡，那裡本來就是給審核看的。
 
    不要寫：「就本段而言」「一項受限的教導原則」「本段所顯明的」「在現有材料範圍內」「本文不進一步展開」。把同一句話去掉自我聲明就好：「有效教導需要配合學習者當前的理解程度」本身已經完整。
 
@@ -52,7 +52,6 @@
 9. authoring ledger 只登記承擔 CompositionPlan 實質內容的正文小節。導讀、經文引文或過渡段若沒有獨立承擔 decision，不要另列 ledger item。每個 decision ID 必須在整份 ledger 中恰好出現一次；多個 decision 可以由同一個正文小節承擔，但不得在導讀與正文重複登記。
 10. 經文引文的 provenance 使用 `{"attribution":"scripture","scripture_refs":["Matt.16.21-Matt.16.23"]}`，不得以 claim IDs 取代 scripture refs。沒有讀者可見「編輯導讀／編輯說明」標籤的綜合段落不得標成 `editor`；若它依多項已知主張作跨來源或跨段綜合，使用 `editorial_synthesis`，並提供 `claim_ids` 與隱藏的 `synthesis_note`。
 
-11. 每一條宣告為 preserved 的母本承重步驟，都必須在 `preserved_step_anchors` 指出承載它的稿件片段：`{"step_id":"...","anchor":"..."}`。anchor 必須從你自己的 Markdown 逐字複製一段連續文字，不得改寫、補字或正規化標點；程式會逐字比對。列了 step ID 卻沒有 anchor，或 anchor 不是稿件的 exact substring，交稿即失敗。
 12. 每個 ledger item 必須在 `applied_operations` 誠實列出本小節對母本實際執行的操作，取值只能來自該 section 契約的 `allowed_operations`；列入 `ineligible_operations` 的操作一律不得執行，也不得申報。`integration_operations` 只登記補充材料的處置方式，取值限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即交稿失敗，不進 review。
 13. 生活應用是正當的內容，跟其他段落用同一條規則:提出今日處境或行動建議的段落，`claim_ids` 必須列出它所依據的材料，程式會逐段檢查該段的斷言有沒有超出那些材料。教授講過的應用引用得到；他沒講過的，材料撐不住,就不要寫。**不要為了讓文章有個結尾而補一段通用應用**——材料不足時不寫，是正確處理，不是缺漏。`editorial_synthesis` 段落不需要另外聲明含不含應用。
 
