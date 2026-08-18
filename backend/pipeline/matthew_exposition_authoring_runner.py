@@ -15,10 +15,7 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
-from backend.pipeline.manuscript_grounding_check import (
-    check_manuscript_grounding,
-    instructions_from_contract,
-)
+from backend.pipeline.manuscript_grounding_check import check_manuscript_grounding
 from backend.pipeline.matthew_exposition_authoring import (
     ADJUDICATION_SCHEMA,
     AUTHOR_RESULT_SCHEMA,
@@ -330,7 +327,9 @@ def _run_grounding_stage(
         packet["knowledge"],
         client=claude_client,
         author_sections=author_sections,
-        instructions_by_claim=instructions_from_contract(packet["base_contract"]),
+        # A claim created from a base-manuscript sentence carries the
+        # editorial instruction itself; there is no contract checklist to
+        # read it from any more.
         transcript_texts=packet.get("sermon_transcript_texts") or {},
         # Shared across the repair rounds of one run: a paragraph the repair
         # did not touch keeps the verdict it was already given, so the gate

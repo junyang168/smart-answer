@@ -220,28 +220,6 @@ class CompositionDecisionRecord(EvolvingKnowledgeRecord):
     claim_ids: list[str] = Field(default_factory=list)
 
 
-class RequiredArgumentStep(BaseModel):
-    """A load-bearing step of the base manuscript an article must preserve.
-
-    `source_excerpt` is the verbatim sentence the step is drawn from, so a
-    programme can verify the step against the manuscript rather than trusting
-    an author's self-report that it was preserved.
-    """
-
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
-
-    step_id: str
-    statement: str
-    # Optional: an older contract shape lets a step omit source_id and fall
-    # back to its section's base_source, which `validate_base_contract`
-    # still honours (`step.get("source_id", base_source["source_id"])`).
-    source_id: Optional[str] = None
-    source_excerpt: str
-    role: str = ""
-    source_span: str = ""
-    required: bool = True
-
-
 class BaseSourceBinding(BaseModel):
     """Which manuscript an article is built on, and which part of it is in scope."""
 
@@ -265,7 +243,6 @@ class AuthoringSection(BaseModel):
 
     section_id: str
     decision_ids: list[str] = Field(default_factory=list)
-    required_argument_steps: list[RequiredArgumentStep] = Field(default_factory=list)
     reader_heading: str = ""
     thesis: str = ""
     allowed_operations: list[str] = Field(default_factory=list)

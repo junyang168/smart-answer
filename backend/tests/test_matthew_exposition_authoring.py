@@ -383,29 +383,31 @@ class _FakeAuthoringStore:
 def _store_from_migrated_contract():
     """Build a fake store whose plan/decisions mirror the real JSON fixtures.
 
-    This exercises the same merge the real migration performs
-    (`authoring_contract_migration.merge_contract_into_plan`), so a store-backed
-    packet can be compared against the file-backed one built from the exact
-    same source contract and plan.
+    The contract now lives on the plan record as fields; this merges the two
+    fixtures the same way, so a store-backed packet can be compared against the
+    file-backed one built from the same source contract and plan.
     """
 
-    from backend.pipeline.authoring_contract_migration import (
-        load_contract,
-        merge_contract_into_plan,
-    )
-
     plan = json.loads(PLAN_PATH.read_text(encoding="utf-8"))
-    contract = load_contract(FIXTURE_DIR / "base-manuscript-contract.json")
+    raw = json.loads((FIXTURE_DIR / "base-manuscript-contract.json").read_text(encoding="utf-8"))
+    contract = raw.get("result", raw)
     decisions = plan.pop("decisions")
     plan["decision_ids"] = [d["decision_id"] for d in decisions]
-    merged_plan = merge_contract_into_plan(
-        plan, contract, confirmed_by="test-editor", confirmed_at="2026-08-17T00:00:00Z"
-    )
-    decisions_by_id = {d["decision_id"]: d for d in decisions}
+    plan.update({
+        "contract_schema_version": contract.get("schema_version"),
+        "contract_id": contract.get("contract_id"),
+        "passage": contract.get("passage"),
+        "authoring_mode": contract.get("authoring_mode"),
+        "base_source": contract.get("base_source"),
+        "additional_base_sources": contract.get("additional_base_sources") or [],
+        "authoring_sections": contract.get("sections") or [],
+        "supplemental_material": contract.get("supplemental_material") or [],
+        "global_rules": contract.get("global_rules") or [],
+    })
     return _FakeAuthoringStore(
-        {"composition_plans": {merged_plan["plan_id"]: merged_plan}, "composition_decisions": decisions_by_id}
+        {"composition_plans": {plan["plan_id"]: plan},
+         "composition_decisions": {d["decision_id"]: d for d in decisions}}
     )
-
 
 def test_contract_from_plan_payload_round_trips_every_field_the_contract_needs():
     """Regression: an earlier version of this reconstruction silently dropped
@@ -632,30 +634,24 @@ def test_editorial_review_packet_is_bounded_and_excludes_authoring_bulk():
     )
 
 
-def test_editorial_review_packet_carries_the_base_sentence_a_step_preserved():
-    """`statement` is the contract's rewording; scoring preservation against it
-    only asks whether a step was mentioned, not whether the base manuscript's
-    own argument survived."""
+def test_editorial_review_packet_carries_the_base_sentences_from_the_claim_layer():
+    """The reviewer scoring `base_manuscript_preservation` needs the sentences
+    the base manuscript argued from. They used to come from the contract's
+    step list; they now come from the claim layer's own source fragments,
+    which is where that material lives.
+    """
 
     packet = build_editorial_review_packet(
         authoring_packet=full_authoring_packet(),
         author_result=valid_author_result(),
     )
-    contract_steps = {
-        step["step_id"]: step
-        for section in contract()["sections"]
-        for step in section["required_argument_steps"]
-    }
-    sent = {
-        step["step_id"]: step
-        for section in packet["base_preservation_contract"]["sections"]
-        for step in section["required_argument_steps"]
-    }
-    assert set(sent) == set(contract_steps)
-    for step_id, step in sent.items():
-        assert step["source_excerpt"] == contract_steps[step_id].get("source_excerpt", "")
-    assert any(step["source_excerpt"] for step in sent.values())
-
+    sections = packet["base_preservation_contract"]["sections"]
+    assert sections, "the reviewer still sees the contract's sections"
+    assert all("required_argument_steps" not in item for item in sections)
+    assert all("ineligible_operations" in item for item in sections), (
+        "what the section may not do is what the contract still constrains"
+    )
+    assert packet["source_slice"], "the base manuscript's own sentences reach the reviewer"
 
 def test_editorial_review_packet_keeps_the_slice_inside_the_passage():
     """A base manuscript covers a whole lecture. Only the paragraphs explaining

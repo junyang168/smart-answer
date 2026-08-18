@@ -509,36 +509,9 @@ def validate_base_contract(contract: dict[str, Any], *, verify_source: bool = Tr
         # constraints mixed into its prose are already in the section's
         # `ineligible_operations`. Sections that still carry steps are still
         # validated, so the field can be removed article by article.
-        steps = section.get("required_argument_steps") or []
-        if not isinstance(steps, list):
-            raise AuthoringContractError(f"section {section_id} argument steps must be a list")
-        for step_index, step_value in enumerate(steps):
-            step = _require_mapping(step_value, f"{section_id}.steps[{step_index}]")
-            step_ids.append(
-                _require_nonempty_string(step.get("step_id"), f"{section_id}.step_id")
-            )
-            _require_nonempty_string(step.get("statement"), f"{section_id}.statement")
-            if verify_source:
-                step_source_id = _require_nonempty_string(
-                    step.get("source_id", base_source["source_id"]),
-                    f"{section_id}.source_id",
-                )
-                if step_source_id not in base_texts:
-                    raise AuthoringContractError(
-                        f"unknown base source_id for {step['step_id']}: {step_source_id}"
-                    )
-                excerpt = _require_nonempty_string(
-                    step.get("source_excerpt"), f"{section_id}.source_excerpt"
-                )
-                if excerpt not in base_texts[step_source_id]:
-                    raise AuthoringContractError(
-                        f"base step excerpt not found for {step['step_id']}"
-                    )
 
     if duplicates := _duplicates(section_ids):
         raise AuthoringContractError(f"duplicate section_ids: {sorted(duplicates)}")
-    if duplicates := _duplicates(step_ids):
-        raise AuthoringContractError(f"duplicate step_ids: {sorted(duplicates)}")
 
     for item_index, item_value in enumerate(contract.get("supplemental_material", [])):
         item = _require_mapping(item_value, f"supplemental_material[{item_index}]")
@@ -1259,33 +1232,30 @@ def build_editorial_review_packet(
     quality_profile = _require_mapping(
         authoring_packet.get("quality_profile"), "quality_profile"
     )
-    compact_sections = []
-    step_excerpts: list[str] = []
-    for section in contract.get("sections", []):
-        steps = section.get("required_argument_steps", [])
-        compact_sections.append(
-            {
-                "section_id": section["section_id"],
-                "required_argument_steps": [
-                    {
-                        "step_id": step["step_id"],
-                        "statement": step["statement"],
-                        "required": step.get("required", True),
-                        # The base manuscript's own sentence. `statement` is
-                        # the contract's rewording of it, so without this the
-                        # reviewer can check that a step was mentioned but not
-                        # that what the base manuscript argued survived.
-                        "source_excerpt": step.get("source_excerpt", ""),
-                    }
-                    for step in steps
-                ],
-            }
-        )
-        step_excerpts.extend(
-            excerpt for step in steps if (excerpt := step.get("source_excerpt"))
-        )
+    compact_sections = [
+        {
+            "section_id": section["section_id"],
+            "thesis": section.get("thesis", ""),
+            "allowed_operations": section.get("allowed_operations", []),
+            "ineligible_operations": section.get("ineligible_operations", []),
+        }
+        for section in contract.get("sections", [])
+    ]
 
     knowledge = _require_mapping(authoring_packet.get("knowledge"), "knowledge")
+    # The sentences the base manuscript actually argued from, drawn from the
+    # claim layer rather than from a contract checklist. They mark which of its
+    # paragraphs the source slice must carry, so the reviewer judging
+    # `base_manuscript_preservation` sees what there was to preserve.
+    step_excerpts = [
+        excerpt
+        for step in knowledge.get("evidence_steps", [])
+        for fragment_id in evidence_step_fragment_ids(step)
+        if (fragment := next(
+            (f for f in knowledge.get("source_fragments", [])
+             if f.get("fragment_id") == fragment_id), None))
+        and (excerpt := fragment.get("verbatim_excerpt"))
+    ]
     source_slice = _exegetical_source_slice(
         base_manuscript_texts=authoring_packet.get("base_manuscript_texts") or {},
         scoped_fragments=knowledge.get("source_fragments", []),
@@ -2023,12 +1993,6 @@ def build_authoring_packet(
     # so the claim carrying that reasoning must be in scope. Without this the
     # contract obliges the author to write something the grounding gate then
     # reports as unsupported, because the material never reached the packet.
-    scoped_claim_ids.update(
-        claim_id
-        for section in contract.get("sections", [])
-        for step in section.get("required_argument_steps", [])
-        if (claim_id := step.get("claim_id"))
-    )
     scoped_claim_ids.update(
         claim_id
         for item in contract.get("supplemental_material", [])

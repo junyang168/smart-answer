@@ -293,48 +293,6 @@ def test_grounding_falls_back_to_the_paragraph_declaration_without_sections():
     assert "CL2" not in seen["packet"]
 
 
-def test_instructions_come_from_the_contract_even_for_a_reused_claim():
-    """A claim created before the step backfill has no editorial_instruction of
-    its own; the contract still imposes one, and grounding must see it.
-    """
-    from backend.pipeline.manuscript_grounding_check import instructions_from_contract
-
-    contract = {
-        "sections": [
-            {
-                "required_argument_steps": [
-                    {"step_id": "S-C", "claim_id": "CL1", "statement": "說明責備的焦點。"}
-                ]
-            }
-        ]
-    }
-    instructions = instructions_from_contract(contract)
-    assert instructions == {"CL1": "說明責備的焦點。"}
-
-    knowledge = _knowledge()          # CL1 carries no editorial_instruction
-    material = build_paragraph_material(["CL1"], knowledge, instructions)
-    assert material[0]["editorial_instruction"] == {
-        "attribution": "editor",
-        "statement": "說明責備的焦點。",
-    }
-
-
-def test_contract_instruction_takes_precedence_over_a_stale_claim_copy():
-    from backend.pipeline.manuscript_grounding_check import instructions_from_contract
-
-    knowledge = _knowledge()
-    knowledge["claims"][0]["editorial_instruction"] = "舊的指令"
-    contract = {
-        "sections": [
-            {"required_argument_steps": [{"claim_id": "CL1", "statement": "現行指令"}]}
-        ]
-    }
-    material = build_paragraph_material(
-        ["CL1"], knowledge, instructions_from_contract(contract)
-    )
-    assert material[0]["editorial_instruction"]["statement"] == "現行指令"
-
-
 def test_a_single_paragraph_call_failure_becomes_a_finding_not_a_crash():
     """Malformed JSON on one paragraph must not discard the other results.
 
@@ -653,3 +611,27 @@ def test_without_a_cache_directory_every_paragraph_is_asked(tmp_path):
     check_paragraph_grounding("同一段。", ["CL-1"], knowledge, client=client)
     check_paragraph_grounding("同一段。", ["CL-1"], knowledge, client=client)
     assert Counting.calls == 2
+
+def test_a_claim_carries_its_own_editorial_instruction():
+    """The instruction map used to come from the contract's required steps.
+    With those retired, a claim created from a base-manuscript sentence carries
+    the instruction itself -- which is where it belonged: an instruction is
+    about one piece of material, not about a checklist.
+    """
+
+    knowledge = {
+        "claims": [{
+            "claim_id": "CL1",
+            "statement": "母本的承重推理。",
+            "editorial_instruction": "保留完整推理，不要壓成一句結論。",
+            "evidence_step_ids": [],
+        }],
+        "evidence_steps": [],
+        "source_fragments": [],
+    }
+    material = build_paragraph_material(["CL1"], knowledge)
+    assert material[0]["editorial_instruction"] == {
+        "attribution": "editor",
+        "statement": "保留完整推理，不要壓成一句結論。",
+    }
+

@@ -127,26 +127,6 @@ def extract_provenance_paragraphs(markdown: str) -> list[dict[str, Any]]:
     return paragraphs
 
 
-def instructions_from_contract(contract: dict[str, Any]) -> dict[str, str]:
-    """Map claim_id -> the required step's editorial instruction.
-
-    The contract is the authority for what the editorial board decided; a
-    claim record may or may not carry a copy, depending on whether it was
-    created by the step backfill or already existed and was reused. Deriving
-    the map here means a reused claim is not silently missing the instruction
-    its step imposes.
-    """
-
-    instructions: dict[str, str] = {}
-    for section in contract.get("sections") or []:
-        for step in section.get("required_argument_steps") or []:
-            claim_id = step.get("claim_id")
-            statement = step.get("statement")
-            if claim_id and statement:
-                instructions[str(claim_id)] = str(statement)
-    return instructions
-
-
 def build_paragraph_material(
     claim_ids: list[str],
     knowledge: dict[str, Any],
