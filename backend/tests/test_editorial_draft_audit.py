@@ -285,40 +285,41 @@ def test_audit_requires_declared_scripture_quotation(tmp_path: Path) -> None:
     assert passed["status"] == "pass"
 
 
-def test_audit_rejects_unregistered_optional_application_section(tmp_path: Path) -> None:
+def test_an_application_section_without_chains_is_no_longer_a_failure(tmp_path: Path) -> None:
+    """A 生活應用 section used to fail unless every paragraph pointed at a
+    registered five-link chain. No article ever registered one, so the rule
+    only ever blocked applications the professor had actually made.
+    """
+
     manifest = _fixture(tmp_path)
-    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
-    manifest_data["drafts"][0]["audit_config"]["application_policy"] = {
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["drafts"][0]["audit_config"]["application_policy"] = {
         "section": "生活應用",
         "requires_registered_chains": True,
     }
-    manifest_data["drafts"][0]["audit_config"]["application_chains"] = []
-    _write_json(manifest, manifest_data)
+    data["drafts"][0]["audit_config"]["application_chains"] = []
+    _write_json(manifest, data)
 
-    failed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert failed["status"] == "fail"
-    assert any(
-        item["code"] == "unregistered_application_section"
-        for item in failed["findings"]
-    )
-
-    draft_path = tmp_path / "draft.md"
-    draft_path.write_text(
-        draft_path.read_text(encoding="utf-8").replace(
-            "## 生活應用\n\n<!-- provenance: {\"attribution\":\"editor\",\"application_chain_id\":\"AC-1\"} -->"
-            "\n> **編輯說明：** 正文。\n\n",
-            "",
-        ),
-        encoding="utf-8",
-    )
-    passed = audit_editorial_draft(manifest, "DRAFT-1")
-    assert passed["status"] == "pass"
+    result = audit_editorial_draft(manifest, "DRAFT-1")
+    codes = {item["code"] for item in result["findings"]}
+    assert "unregistered_application_section" not in codes
 
 
-def test_audit_rejects_application_content_hidden_under_another_section(
+def test_application_content_no_longer_needs_a_registered_chain(
     tmp_path: Path,
 ) -> None:
-    """Application content is caught by what it declares, not by its heading."""
+    """Registration is retired. A five-link chain -- scripture context,
+    professor's interpretation, enduring principle, present context,
+    application and limits -- asked for a structure finer than the source has:
+    the professor states an application in a sentence and illustrates it, and
+    no chain was ever registered for any article. What registration was for --
+    an application must not be invented -- is what the grounding gate does
+    already, against the claims the paragraph declares.
+
+    On Matt.16.1-12 the contract required an application while this rule
+    forbade writing one, and the run deadlocked with nothing to point at.
+    """
+
     manifest = _fixture(tmp_path)
     draft_path = tmp_path / "draft.md"
     draft_path.write_text(
@@ -335,44 +336,11 @@ def test_audit_rejects_application_content_hidden_under_another_section(
 
     result = audit_editorial_draft(manifest, "DRAFT-1")
 
-    assert result["status"] == "fail"
-    undeclared = [
-        item
-        for item in result["findings"]
-        if item["code"] == "undeclared_application_content"
-    ]
-    assert undeclared
-    assert "神學意義" in undeclared[0]["detail"]
-
-
-def test_audit_accepts_registered_application_chain_under_application_section(
-    tmp_path: Path,
-) -> None:
-    """A complete, source-backed life application is legitimate content."""
-    result = audit_editorial_draft(_fixture(tmp_path), "DRAFT-1")
-
-    assert result["status"] == "pass"
-    assert result["summary"]["application_chain_total"] == 1
-    assert result["summary"]["application_paragraph_total"] == 1
-    assert result["application_chains"][0]["chain_id"] == "AC-1"
-    assert result["application_chains"][0]["paragraph_count"] == 1
-
-
-def test_audit_rejects_application_paragraph_pointing_at_unknown_chain(
-    tmp_path: Path,
-) -> None:
-    manifest = _fixture(tmp_path)
-    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
-    manifest_data["drafts"][0]["audit_config"]["application_chains"][0]["chain_id"] = "AC-2"
-    _write_json(manifest, manifest_data)
-
-    result = audit_editorial_draft(manifest, "DRAFT-1")
-
-    assert result["status"] == "fail"
-    assert any(
-        item["code"] == "application_chain_not_registered"
-        for item in result["findings"]
-    )
+    codes = {item["code"] for item in result["findings"]}
+    assert "undeclared_application_content" not in codes
+    assert "unregistered_application_paragraph" not in codes
+    assert "application_chain_not_registered" not in codes
+    assert "unregistered_application_section" not in codes
 
 
 def test_audit_rejects_incomplete_chain_behind_declared_application(

@@ -54,6 +54,6 @@
 
 11. 每一條宣告為 preserved 的母本承重步驟，都必須在 `preserved_step_anchors` 指出承載它的稿件片段：`{"step_id":"...","anchor":"..."}`。anchor 必須從你自己的 Markdown 逐字複製一段連續文字，不得改寫、補字或正規化標點；程式會逐字比對。列了 step ID 卻沒有 anchor，或 anchor 不是稿件的 exact substring，交稿即失敗。
 12. 每個 ledger item 必須在 `applied_operations` 誠實列出本小節對母本實際執行的操作，取值只能來自該 section 契約的 `allowed_operations`；列入 `ineligible_operations` 的操作一律不得執行，也不得申報。`integration_operations` 只登記補充材料的處置方式，取值限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即交稿失敗，不進 review。
-13. 生活應用是正當的內容，但必須登記，且與寫在哪個標題底下無關。任何提出今日處境與行動建議的段落，provenance 必須宣告 `"application_chain_id"`，指向 manifest `application_chains` 中一條完整（經文處境、教授解釋 claim IDs、不變原則、今日處境、應用與限制）且教授解釋端可解析的鏈。`editorial_synthesis` 段落若不提出今日處境與行動建議，必須寫明 `"contains_application": false`；沒有可登記的完整推論鏈時，正確處理是不寫這段應用，而不是把它藏進「神學意義」的結尾。
+13. 生活應用是正當的內容，跟其他段落用同一條規則:提出今日處境或行動建議的段落，`claim_ids` 必須列出它所依據的材料，程式會逐段檢查該段的斷言有沒有超出那些材料。教授講過的應用引用得到；他沒講過的，材料撐不住,就不要寫。**不要為了讓文章有個結尾而補一段通用應用**——材料不足時不寫，是正確處理，不是缺漏。`editorial_synthesis` 段落不需要另外聲明含不含應用。
 
 若完成文章需要改變 CompositionPlan 的 action、claim 集合、coverage、主要順序或張力處置，返回 `plan_change_required` 與具體請求，不要先寫一篇越權的稿。否則返回 `drafted`、完整 Markdown 和逐節 authoring ledger。

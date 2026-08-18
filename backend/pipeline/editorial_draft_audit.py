@@ -548,8 +548,23 @@ def _audit_application_chains(
             else:
                 chains_by_id[chain_id] = row
 
-    if not policy.get("requires_registered_chains"):
-        return chain_results
+    # Registration is retired. A five-link chain -- scripture context,
+    # professor's interpretation, enduring principle, present context,
+    # application and limits -- asked for a structure finer than the source
+    # has. The professor states an application in a sentence and illustrates
+    # it: "when you argue with someone, argue from what they accept; Paul
+    # argued from the Old Testament to Jews and never to Gentiles." Nothing in
+    # that decomposes into five registered fields, and no chain has ever been
+    # registered for any article.
+    #
+    # What registration was for -- an application must not be invented -- is
+    # what the grounding gate already does, paragraph by paragraph, against
+    # the claims the paragraph declares. An application the professor made is
+    # a claim the paragraph can cite; one he did not make fails the gate. The
+    # form was doing that job again, and worse: on Matt.16.1-12 the contract
+    # required an application while this rule forbade writing it, and the run
+    # deadlocked with nothing registered to point at.
+    return chain_results
 
     if application_section_present and not chains:
         findings.append(
