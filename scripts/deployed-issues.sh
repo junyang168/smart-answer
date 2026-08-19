@@ -33,10 +33,22 @@ compare="$(git -C "$SOURCE_REPO" rev-parse --verify "$COMPARE_REF^{commit}")"
 printf '線上 %s · 依據 %s\n' "${live:0:7}" "$source"
 printf '比對 %s (%s)\n\n' "$COMPARE_REF" "${compare:0:7}"
 
-# A merge subject like "Title (#54)" is how a squashed or merged PR lands.
+# A PR lands under one of two subjects, and reading only one of them silently
+# drops every ticket the other carried:
+#
+#   squash merge  Title (#54)
+#   merge commit  Merge pull request #54 from owner/branch
+#
+# The 2026-08-19 release was merged the second way. Its PR declared `Closes #N`
+# and the three issues closed correctly, yet this report listed none of them --
+# the same invisibility the `Closes #N` rule exists to prevent, arriving from
+# the reporting side instead. Accept both rather than rely on everyone
+# remembering which button to press.
 pr_numbers() {
   git -C "$SOURCE_REPO" log --format='%s' "$1..$2" \
-    | sed -n 's/.*(#\([0-9][0-9]*\)).*/\1/p' | sort -un
+    | sed -n -e 's/.*(#\([0-9][0-9]*\)).*/\1/p' \
+             -e 's/^Merge pull request #\([0-9][0-9]*\) .*/\1/p' \
+    | sort -un
 }
 
 report() {
