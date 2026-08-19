@@ -157,11 +157,10 @@ function ArticleCard({ article }: { article: ProgressArticle }) {
             <p className="mt-1 text-slate-600">{formatTime(article.updated_at)}</p>
           </div>
           <div className="flex flex-wrap gap-3 md:col-span-3">
-            {article.links.draft && <Link href={article.links.draft} className="inline-flex items-center gap-1 font-bold text-indigo-700">開啟稿件與審核 artifact <ArrowUpRight className="h-4 w-4" /></Link>}
             {article.links.public && <Link href={article.links.public} className="inline-flex items-center gap-1 font-bold text-indigo-700">開啟本機公開文章 <ArrowUpRight className="h-4 w-4" /></Link>}
             {([[
               "編審 JSON", article.links.editorial_review,
-            ], ["Program Audit", article.links.program_audit], ["出版決定", article.links.publication_decision], ["Manifest", article.links.manifest]] as const).map(([label, href]) => href ? <a key={label} href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-slate-600 hover:text-indigo-700">{label}<ArrowUpRight className="h-3.5 w-3.5" /></a> : null)}
+            ], ["稿件", article.links.manuscript], ["Program Audit", article.links.program_audit], ["出版決定", article.links.publication_decision], ["Manifest", article.links.manifest]] as const).map(([label, href]) => href ? <a key={label} href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-slate-600 hover:text-indigo-700">{label}<ArrowUpRight className="h-3.5 w-3.5" /></a> : null)}
           </div>
         </div>
       )}
@@ -287,7 +286,7 @@ export default function MatthewProgressPage() {
 
       <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950 p-5 text-sm text-slate-300">
         <span>Schema: <code className="text-white">{data.schema_version}</code> · 計算於 {formatTime(data.generated_at)}</span>
-        <Link href="/admin/thought-review/candidates?axis=scripture" className="inline-flex items-center gap-1 font-black text-indigo-300">查看內容候選 <ArrowUpRight className="h-4 w-4" /></Link>
+        <Link href="/admin/wang/source-coverage" className="inline-flex items-center gap-1 font-black text-indigo-300">查看來源覆蓋 <ArrowUpRight className="h-4 w-4" /></Link>
       </footer>
     </main>
   );

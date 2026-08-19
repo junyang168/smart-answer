@@ -377,7 +377,6 @@ def _repository_articles(production_slugs: set[str] | None) -> list[dict[str, An
                     ),
                     "updated_at": datetime.fromtimestamp(max(timestamps), timezone.utc).isoformat() if timestamps else None,
                     "links": {
-                        "draft": f"/admin/thought-review/candidates/drafts/{draft_id}",
                         "public": f"/resources/wang-repository/articles/{slug}" if slug else None,
                         "manifest": f"/api/admin/wang/matthew-progress/artifacts/{draft_id}/manifest",
                         "manuscript": f"/api/admin/wang/matthew-progress/artifacts/{draft_id}/manuscript",

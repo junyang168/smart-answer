@@ -41,7 +41,6 @@ export type ProgressArticle = {
   next_step: string | null;
   updated_at: string | null;
   links: {
-    draft: string | null;
     public: string | null;
     manifest: string | null;
     manuscript: string | null;

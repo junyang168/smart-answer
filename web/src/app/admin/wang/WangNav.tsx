@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, BookOpenText, Database, FileCheck2, LayoutDashboard, Network } from "lucide-react";
+import { Activity, FileCheck2, Highlighter, LayoutDashboard, Network } from "lucide-react";
 
 const sections = [
   { href: "/admin/wang", label: "總覽", icon: LayoutDashboard, exact: true },
   { href: "/admin/wang/matthew-progress", label: "馬太進度", icon: Activity },
-  { href: "/admin/thought-review/candidates", label: "內容候選", icon: BookOpenText },
-  { href: "/admin/thought-review", label: "知識審核", icon: Database },
   { href: "/admin/wang/argument-layer", label: "論證層", icon: Network },
+  { href: "/admin/wang/source-coverage", label: "來源覆蓋", icon: Highlighter },
   { href: "/admin/canonical-repository", label: "出版單元", icon: FileCheck2 },
 ];
 
@@ -17,8 +16,8 @@ export function WangNav() {
   const pathname = usePathname();
   return (
     <div className="overflow-x-auto border-b border-slate-200 bg-white">
-      <div className="flex min-w-max items-center gap-1 py-2" aria-label="Wang 文庫後台導覽">
-        <Link href="/admin/wang" className="mr-4 px-2 text-sm font-black tracking-wide text-slate-950">WANG 文庫</Link>
+      <div className="flex min-w-max items-center gap-1 py-2" aria-label="王教授文庫後台導覽">
+        <Link href="/admin/wang" className="mr-4 px-2 text-sm font-black tracking-wide text-slate-950">王教授文庫</Link>
         {sections.map((item) => {
           const Icon = item.icon;
           const active = item.exact ? pathname === item.href : pathname.startsWith(item.href);

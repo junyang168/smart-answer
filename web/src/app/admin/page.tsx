@@ -74,7 +74,7 @@ const groups: AdminGroup[] = [
 ];
 
 const quickLinks = [
-  { title: "Wang 文庫", href: "/admin/wang", icon: BookOpen },
+  { title: "王教授文庫", href: "/admin/wang", icon: BookOpen },
   { title: "講稿整理", href: "/admin/notes-to-sermon/series", icon: FileText },
   { title: "講道稿件", href: "/admin/surmons", icon: Radio },
 ];

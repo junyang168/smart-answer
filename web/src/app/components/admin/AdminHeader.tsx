@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/admin", label: "控制台", exact: true },
   { href: "/admin/notes-to-sermon/series", label: "講稿整理" },
-  { href: "/admin/wang", label: "Wang 文庫" },
+  { href: "/admin/wang", label: "王教授文庫" },
   { href: "/", label: "網站首頁", exact: true },
 ];
 
@@ -29,7 +29,7 @@ export const AdminHeader = () => {
         </Link>
         <nav aria-label="後台主導覽" className="flex max-w-full items-center gap-1 overflow-x-auto text-sm font-semibold">
           {navItems.map((item) => {
-            const isWangLegacy = item.href === "/admin/wang" && (pathname.startsWith("/admin/thought-review") || pathname.startsWith("/admin/canonical-repository"));
+            const isWangLegacy = item.href === "/admin/wang" && pathname.startsWith("/admin/canonical-repository");
             const isActive = isWangLegacy || (item.exact ? pathname === item.href : pathname.startsWith(item.href));
             return (
               <Link
