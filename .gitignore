@@ -177,3 +177,7 @@ service_account.json
 
 token.json
 client_secret.json
+
+# Claude Code: the project hooks are shared, personal overrides and worktrees are not.
+.claude/*
+!.claude/settings.json
