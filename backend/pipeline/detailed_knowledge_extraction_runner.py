@@ -36,6 +36,7 @@ from backend.pipeline.extraction_sections import (
     save_plan,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
+from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
@@ -599,8 +600,48 @@ def _run(
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
     output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # The ledger is arithmetic over the package that was just written -- no
+    # model call, nothing to approve -- so every extraction can carry its own
+    # scoreboard instead of it having to be recomputed by hand later. It reports
+    # and does not gate: a red light onto a queue nobody can drain gets switched
+    # off within a month, and who may switch this one on is not this runner's
+    # decision to make.
+    package["coverage"] = _coverage(source_path, output_path)
+    output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _print_usage(source_id, usage_rows)
+    _print_coverage(source_id, package["coverage"])
     return "created", output_path
+
+
+def _coverage(source_path: Path, package_path: Path) -> dict[str, Any]:
+    """The ledger's verdict on the package just written, or why it could not run.
+
+    A failure here must not fail the extraction: the package is already valid
+    and on disk, and a scoreboard that can take the run down with it is worse
+    than one that says it is missing.
+    """
+
+    try:
+        report = run_ledger(source_path, package_path)
+    except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+    return {"available": True, **report}
+
+
+def _print_coverage(source_id: str, coverage: dict[str, Any]) -> None:
+    if not coverage.get("available"):
+        print(json.dumps({"coverage": source_id, **coverage}, ensure_ascii=False))
+        return
+    prose = (coverage.get("by_category") or {}).get("prose") or {}
+    print(json.dumps({
+        "coverage": source_id,
+        "prose_represented": prose.get("represented"),
+        "prose_total": prose.get("total"),
+        "prose_pct": prose.get("represented_pct"),
+        "sentences": coverage.get("sentences"),
+        "unprocessed": coverage.get("unprocessed"),
+        "fragments_unplaced": coverage.get("fragments_unplaced"),
+    }, ensure_ascii=False))
 
 
 def run_source(

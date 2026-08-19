@@ -97,6 +97,22 @@ flowchart LR
 - **生成的小标题不写回来源档**。插入会让其后所有 S 编号位移，锚点、ledger inventory、`source_sha256` 全跟着变；而这里只需要边界，标题文字放进 prompt 当 breadcrumb 就够了。
 - **计画按来源雜湊快取，其指纹进 `extraction_identity`**。它是模型调用，不快取的话重跑可能重新分段，两次抽取就不可比。
 
+### 每次抽取自带计分板
+
+抽取完成后，runner 直接对刚写出的包跑一次 ledger，结果存进 `package["coverage"]`，并打印一行：
+
+```json
+{"coverage": "notes_manuscript:16_章_-_彌賽亞，捨己", "prose_represented": 128,
+ "prose_total": 132, "prose_pct": 97.0, "sentences": 208, "unprocessed": 65,
+ "fragments_unplaced": 0}
+```
+
+ledger 是对包的算术，不调模型、不批准任何东西，所以可以每次都跑，不必事后手工重算。
+
+**它报告，不设闸。** ledger 自己的设计文件写着：一个通向排不干的队列的红灯，一个月内就会被关掉。谁有权拿这个分数挡住流程，是另一个决定，不由抽取 runner 代做。
+
+计分板出错也不会让抽取失败——包在此之前已经写到磁盘、已经通过全部机械校验，分数是可选的那一部分。算不出来就记 `{"available": false, "reason": ...}`。
+
 ### 模型
 
 预设 `claude-opus-5`，DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`）。同一章节、同一套完整生产规则下两者都通过校验，但：

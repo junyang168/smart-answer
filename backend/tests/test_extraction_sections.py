@@ -221,3 +221,49 @@ def test_audit_rejects_a_sentence_from_outside_the_section() -> None:
     ])
     with pytest.raises(DetailedExtractionValidationError, match="not in this section"):
         validate_sentence_audit(response, _transcript(), _sentences())
+
+
+# --------------------------------------------------------------------------
+# The ledger rides along with the extraction (#88)
+# --------------------------------------------------------------------------
+
+
+def test_coverage_is_recorded_on_the_package_it_scores(tmp_path: Path) -> None:
+    """The scoreboard belongs in the package, not in someone's shell history."""
+
+    from backend.pipeline.detailed_knowledge_extraction_runner import _coverage
+
+    source = tmp_path / "final.md"
+    source.write_text(
+        "## 一、標題\n\n彼得宣認耶穌是基督，這一認信本身是正確的。\n", encoding="utf-8"
+    )
+    package_path = tmp_path / "pkg.json"
+    package_path.write_text(json.dumps({
+        "source_documents": [{"source_id": "SRC"}],
+        "source_fragments": [{
+            "fragment_id": "FR-1", "paragraph_key": "S0002",
+            "verbatim_excerpt": "彼得宣認耶穌是基督",
+        }],
+        "evidence_steps": [{"evidence_step_id": "E001", "source_fragment_ids": ["FR-1"]}],
+        "observations": [], "questions": [], "position_nodes": [],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    coverage = _coverage(source, package_path)
+    assert coverage["available"] is True
+    assert coverage["by_category"]["prose"]["represented"] == 1
+    assert coverage["by_category"]["heading"]["represented"] == 0
+
+
+def test_a_broken_scoreboard_does_not_take_the_extraction_down(tmp_path: Path) -> None:
+    """The package is already valid and on disk; the score is the optional part."""
+
+    from backend.pipeline.detailed_knowledge_extraction_runner import _coverage
+
+    source = tmp_path / "final.md"
+    source.write_text("## 一、標題\n\n正文。\n", encoding="utf-8")
+    broken = tmp_path / "pkg.json"
+    broken.write_text(json.dumps({"source_documents": []}), encoding="utf-8")
+
+    coverage = _coverage(source, broken)
+    assert coverage["available"] is False
+    assert "IndexError" in coverage["reason"] or "KeyError" in coverage["reason"]
