@@ -196,6 +196,12 @@ class OutputBudgetExceeded(RuntimeError):
     """
 
 
+#: Models whose thinking is adaptive and whose sampling parameters are removed.
+#: Matches the family prefix so a later dated variant does not silently fall
+#: back to the Claude 4.x request shape.
+ADAPTIVE_THINKING_MODELS = re.compile(r"^claude-(opus-5|sonnet-5|fable-5|mythos-5|opus-4-[678])")
+
+
 class Stage1AnthropicClient:
     def __init__(
         self,
@@ -382,11 +388,16 @@ class Stage1AnthropicClient:
             ],
             "messages": [{"role": "user", "content": user_content}],
         }
-        # Claude Sonnet 5 uses adaptive thinking by default and rejects the
-        # legacy sampling/thinking combination used by Claude 4.x.  Omitting
-        # these fields is both forward-compatible and records the real model
-        # behavior in the surrounding extraction/review fingerprint.
-        if not self.model.startswith("claude-sonnet-5"):
+        # Claude 5 models use adaptive thinking and reject the legacy
+        # sampling/thinking combination used by Claude 4.x: `temperature` and
+        # `budget_tokens` are removed, and on Opus 5 thinking is on by default.
+        # The check was written for Sonnet 5 alone, so Opus 5 was being sent
+        # `thinking: disabled` — measurably the wrong setting for extraction,
+        # where reasoning is what produces the argument structure rather than a
+        # flat list of observations (#88).  Omitting the fields is both
+        # forward-compatible and records the real model behavior in the
+        # surrounding extraction/review fingerprint.
+        if not ADAPTIVE_THINKING_MODELS.match(self.model):
             request["temperature"] = temperature
             request["thinking"] = {"type": "disabled"}
         try:
@@ -479,16 +490,24 @@ class Stage1OpenAIClient:
         max_retries: int = 3,
         max_output_tokens: int = 20000,
         reasoning_effort: str = "medium",
+        base_url: Optional[str] = None,
+        api_key_env: str = "OPENAI_API_KEY",
     ) -> None:
-        api_key = os.environ.get("OPENAI_API_KEY")
+        # `base_url` / `api_key_env` exist so an OpenAI-compatible provider --
+        # DeepSeek is the one in use -- reaches the same structured-output path
+        # instead of growing a second adapter that drifts from this one.
+        api_key = os.environ.get(api_key_env)
         if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is not set")
+            raise ValueError(f"{api_key_env} environment variable is not set")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.max_output_tokens = max_output_tokens
         self.reasoning_effort = reasoning_effort
-        self.client = OpenAI(api_key=api_key, max_retries=0, timeout=timeout_seconds)
+        self.client = OpenAI(
+            api_key=api_key, max_retries=0, timeout=timeout_seconds,
+            **({"base_url": base_url} if base_url else {}),
+        )
         # The Anthropic client above has kept `last_usage` since it was written;
         # this one never did, so an OpenAI run reported nothing about what it
         # cost.  That matters most for the cached prefix: `generate_json` puts

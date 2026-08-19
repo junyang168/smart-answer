@@ -36,8 +36,22 @@ from backend.pipeline.extraction_sections import (
     save_plan,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
-from backend.pipeline.stage1 import Stage1OpenAIClient
+from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
+
+#: What each supported model needs to be reached. Opus 5 is the default: on the
+#: same section under the same production rules it and DeepSeek v4 pro both pass
+#: validation, but Opus marks 13 load_bearing observations to DeepSeek's 3 and
+#: keeps the source's Traditional characters, and that observation layer is what
+#: #86 / #62 / the ledger are built on. DeepSeek stays wired up as the cheap
+#: fallback (about a third of the cost) for runs where that layer matters less.
+MODEL_BACKENDS = {
+    "claude": {"kind": "anthropic"},
+    "gpt": {"kind": "openai"},
+    "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com",
+                 "api_key_env": "DEEPSEEK_API_KEY"},
+}
+DEFAULT_MODEL = "claude-opus-5"
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
 DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extractions"
@@ -249,7 +263,7 @@ def _extract_sections(
     header: str,
     plan: SectionPlan,
     output_dir: Path,
-    client: Stage1OpenAIClient,
+    client: Stage1OpenAIClient | Stage1AnthropicClient,
     prompt: str,
     fingerprint: str,
     force: bool,
@@ -540,7 +554,7 @@ def _run(
     source_path: Path,
     header: str,
     output_dir: Path,
-    client: Stage1OpenAIClient,
+    client: Stage1OpenAIClient | Stage1AnthropicClient,
     prompt: str,
     reasoning_effort: str,
     sections: SectionSettings,
@@ -628,6 +642,29 @@ def run_one(
     )
 
 
+def build_client(
+    model: str, *, reasoning_effort: str, max_output_tokens: int
+) -> Stage1OpenAIClient | Stage1AnthropicClient:
+    """The client for a model id, chosen by its family prefix."""
+
+    family = model.split("-", 1)[0]
+    backend = MODEL_BACKENDS.get(family)
+    if backend is None:
+        raise ValueError(
+            f"unknown model family {family!r}; expected one of {sorted(MODEL_BACKENDS)}"
+        )
+    if backend["kind"] == "anthropic":
+        return Stage1AnthropicClient(
+            model=model, timeout_seconds=900, max_retries=3,
+            max_output_tokens=max_output_tokens,
+        )
+    return Stage1OpenAIClient(
+        model=model, reasoning_effort=reasoning_effort, timeout_seconds=900,
+        max_retries=3, max_output_tokens=max_output_tokens,
+        base_url=backend.get("base_url"), api_key_env=backend.get("api_key_env", "OPENAI_API_KEY"),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transcript-dir", type=Path, default=DEFAULT_TRANSCRIPT_DIR)
@@ -635,7 +672,8 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ids", nargs="+")
     group.add_argument("--source-manifest", type=Path)
-    parser.add_argument("--model", default="gpt-5.6-sol")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help="claude-* (default), gpt-*, or deepseek-*")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     parser.add_argument("--max-output-tokens", type=int, default=32000)
     parser.add_argument("--section-level", type=int, default=DEFAULT_SECTION_LEVEL,
@@ -679,9 +717,9 @@ def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     prompt_path = NOTES_PROMPT_PATH if source_rows else PROMPT_PATH
     prompt = prompt_path.read_text(encoding="utf-8")
-    client = Stage1OpenAIClient(
-        model=args.model, reasoning_effort=args.reasoning_effort,
-        timeout_seconds=600, max_retries=3, max_output_tokens=args.max_output_tokens,
+    client = build_client(
+        args.model, reasoning_effort=args.reasoning_effort,
+        max_output_tokens=args.max_output_tokens,
     )
     counts = {"created": 0, "skipped": 0, "failed": 0}
     for path in paths:

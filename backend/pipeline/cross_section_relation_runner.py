@@ -12,10 +12,10 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT
-from backend.pipeline.cross_window_relation import (
+from backend.pipeline.cross_section_relation import (
     DISCOVERY_SCHEMA,
     PROMPT_PATH,
-    CrossWindowValidationError,
+    CrossSectionValidationError,
     apply_proposals,
     build_catalogue,
     discovery_identity,
@@ -28,19 +28,17 @@ from backend.pipeline.stage1 import Stage1OpenAIClient
 VALIDATION_ATTEMPTS = 3
 
 
-def _minimum_span(package: dict[str, Any], override: int | None) -> int:
-    """One past what the window plan already guarantees.
+def _section_boundaries(package: dict[str, Any]) -> list[int]:
+    """Where the package says its sections start.
 
-    Derived from the package rather than configured, so the two stages cannot
-    drift apart: widen the extraction windows and this stage narrows to match,
-    with no second place to remember.
+    Read off the package rather than configured, so the two stages cannot drift
+    apart: resection the source and this stage follows, with no second place to
+    remember. A package with no plan is treated as one section, which makes
+    every proposal same-section and therefore rejected -- the safe direction.
     """
 
-    if override is not None:
-        return override
-    plan = (package.get("extraction") or {}).get("window_plan") or {}
-    context = int(plan.get("context") or 0)
-    return 2 * context + 1 if context else 11
+    plan = (package.get("extraction") or {}).get("section_plan") or {}
+    return [int(value) for value in plan.get("boundaries") or [0]]
 
 
 def run(
@@ -49,34 +47,38 @@ def run(
     output_path: Path,
     client: Stage1OpenAIClient,
     prompt: str,
-    minimum_span: int | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     raw = package_path.read_bytes()
     package = json.loads(raw.decode("utf-8"))
-    span = _minimum_span(package, minimum_span)
+    boundaries = _section_boundaries(package)
     identity = discovery_identity(
         package_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
-        model_id=client.model, minimum_span=span,
+        model_id=client.model, section_count=len(boundaries),
     )
     if output_path.is_file() and not force:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
-        stored = (existing.get("cross_window_relations") or {}).get("fingerprint_sha256")
+        stored = (existing.get("cross_section_relations") or {}).get("fingerprint_sha256")
         if stored == identity["fingerprint_sha256"]:
             return existing
 
     positions = record_positions(package)
     catalogue = build_catalogue(package, positions)
     if not catalogue:
-        raise CrossWindowValidationError(f"{package_path}: no anchored records to relate")
+        raise CrossSectionValidationError(f"{package_path}: no anchored records to relate")
+    section_of = {
+        row["id"]: sum(1 for start in boundaries if start <= positions[row["id"]])
+        for row in catalogue
+    }
     user_input = (
         f"来源 ID：{package['source_documents'][0]['source_id']}\n"
-        f"最小跨度：{span} 段。段距小于 {span} 的关系不得提出。\n\n"
+        f"本篇共 {len(boundaries)} 个章节。**只能提出两端分属不同章节的关系**；"
+        f"同一章节内的关系由抽取阶段负责，在此提出会被拒绝。\n\n"
         "以下是本篇已抽取的论证层对象清单，按段号排序：\n\n"
-        + render_catalogue(catalogue)
+        + render_catalogue(catalogue, section_of)
     )
 
-    last_error: CrossWindowValidationError | None = None
+    last_error: CrossSectionValidationError | None = None
     response = None
     for attempt in range(1, VALIDATION_ATTEMPTS + 1):
         feedback = ""
@@ -90,13 +92,13 @@ def run(
             prompt, feedback, DISCOVERY_SCHEMA, cache_prefix=user_input
         )
         try:
-            validate_proposals(candidate, package, positions=positions, minimum_span=span)
+            validate_proposals(candidate, package, positions=positions, boundaries=boundaries)
             response = candidate
             break
-        except CrossWindowValidationError as exc:
+        except CrossSectionValidationError as exc:
             last_error = exc
     if response is None:
-        raise last_error or CrossWindowValidationError("cross-window discovery failed")
+        raise last_error or CrossSectionValidationError("cross-window discovery failed")
 
     updated = apply_proposals(package, response, identity=identity)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +111,7 @@ def run(
     print(json.dumps({
         "package": str(package_path.name),
         "records_considered": len(catalogue),
-        "minimum_span": span,
+        "sections": len(boundaries),
         "evidence_relations_added": len(response.get("evidence_relations") or []),
         "claim_relations_added": len(response.get("claim_relations") or []),
     }, ensure_ascii=False))
@@ -122,10 +124,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
-    parser.add_argument(
-        "--minimum-span", type=int,
-        help="override the span the window plan already guarantees",
-    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 
@@ -138,7 +136,6 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=600, max_retries=3, max_output_tokens=16000,
         ),
         prompt=PROMPT_PATH.read_text(encoding="utf-8"),
-        minimum_span=args.minimum_span,
         force=args.force,
     )
     return 0

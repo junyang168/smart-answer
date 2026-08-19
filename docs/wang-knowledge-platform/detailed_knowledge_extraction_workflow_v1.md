@@ -55,113 +55,60 @@ flowchart LR
 
 所有模型输出默认是 `candidate`。AI 共识修正后的结果仍是 `not_human_approved`，不能因此自动公开出版。
 
-## 三点五、第一遍抽取的单位是窗口，不是整篇
+## 三点五、第一遍抽取的单位是章节，不是整篇
 
 ### 为什么改
 
-整篇一次读完，模型做的是**取舍**，不是**穷举**。太16:21–23 母本在 #86 修复之后，134 句实质散文只有 66 句进入论证层（49%）；输出用了 32,000 上限中的约 18,000，所以不是被截断，是它自己选的。同一个模型、同一份文字，逐句提问时（ledger second pass）判定第一遍漏掉的句子里有 **45%** 是真材料。
+整篇一次读完，模型做的是**取舍**，不是**穷举**。太16:21–23 母本在 #86 修复之后，132 句实质散文只有 66 句进入论证层（50%）；输出用了 32,000 上限中的约 18,000，所以不是被截断，是它自己选的。
 
-差别只在提问方式：
+试过两种做法：
 
-| | 整篇模式 | 窗口模式 |
-|---|---|---|
-| 范围 | 整份文件 | 约 5 段 |
-| 上下文 | 全文 | 该段前后各 5 段（只读） |
-| 指示 | 「整理出论证层」（开放） | 「这几段里每一句承载论证的都要产出」（穷举） |
+| | 调用次数 | 实质散文 | 生产机械校验 |
+|---|---:|---:|---|
+| 整篇一次问 | 1 | 50% | — |
+| 滑动窗口（5 段一块，曾实作） | 26 | 98% | PASS |
+| **`##` 章节 + 逐句自检** | **4** | **100%** | **PASS** |
 
-### 怎么切
+**起作用的不是把材料切碎，是把问题问死。** 整块 1391 字一次给模型仍是 100%——「整理出论证层」是开放问题，无法从内部验证；「这 42 句，一句一句交代」有答案，而且答案可以核对。滑动窗口那一整套切碎、重叠、归属去重、跨窗口补边的机器，解决的是一个列句子清单就能解决的问题，因此退场。
 
-两条规则撑起整个设计：
+### 为什么切在 `##`
 
-- **看得宽，只答窄**：一个窗口看见 `fetch + 2 × context` 段，但只为中间 `fetch` 段负责，并且在那几段里必须穷举。
-- **每段只有一个归属窗口**：任何一段都恰好落在一个窗口的负责范围内，所以**重复不可能产生**——去重是归属问题，不是相似度问题。
+因为那是它当初被撰写的地方。笔记管线一个 `##` 生成一个 unit（`stage1_units.json` 记录本母本四个 unit，正好是四个 `##`），实测也印证：抽取产出的 264 条关系，**0 条跨 `##`**。
 
-重叠买到的不是更多记录，是模型看得懂手上这条记录**为什么**重要。窗口每次前进 `fetch` 段、宽 `fetch + 2 × context` 段，因此两段被同一窗口同时看见的**保证距离是 `2 × context`**。默认 `fetch=5, context=5`：15 段的视野，10 段的保证，对应全库 380 条可定位 observation → evidence_step 关系的 ≤10 段一行——講道 97.1%、母本 98.6%。
+`###` 以下不是边界，是单元**内部**的编辑骨架——釋經 / 神學意義 / 生活應用 / 附錄。20 条远距离关系**全部**跨 `###`：编辑把事实放在「釋經」，把由它推出的一步放在「神學意義」。按 `###` 切，切的正是 `load_bearing` 要保住的那条边。
 
-### `##` 是硬边界，`###` 不是
+### 逐句自检
 
-「用标题切」这件事里藏着两个不同的东西，只有一个是边界。
-
-**`##` 是生成单元。** 母本不是一次写成的：`stage1_units.json` 记录太16:21–23 母本有四个 unit，而它们**正好就是四个 `##` 段落**，每个 unit 由自己的 `start_line`／`end_line` 独立生成。
-
-```
-u001  Wrede彌賽亞秘密理論的內容與批判        = ## 一、
-u002  從馬可福音現象回應Wrede的錯誤解經      = ## 二、
-u003  彌賽亞身分與性質的兩階段教導           = ## 三、
-u004  捨己與背十字架的釋經與應用             = ## 四、
-```
-
-实测也印证：窗口模式产出的 264 条窗口内关系，**0 条**跨 `##`；20 条跨窗口远距离关系，只有 1 条跨。
-
-所以**窗口不跨 `##`，上下文也裁到单元边界为止**。隔壁单元的文字不是本段论证的背景，它是另一段独立写成的论证，恰好排在旁边。
-
-**`###` 以下不是边界。** 它是单元**内部**的编辑骨架——釋經 / 神學意義 / 生活應用 / 附錄。那 20 条远距离关系**全部**跨 `###`：编辑把事实放在「釋經」，把由它推出的一步放在「神學意義」。按 `###` 切，切的正是这条工作要保住的边。
-
-| | 窗口内关系 (264) | 远距离关系 (20) |
-|---|---:|---:|
-| 跨 `##` | **0 (0%)** | **1 (5%)** |
-| 跨 `###` | 2 (1%) | 20 (100%) |
-| 跨 `####` | 4 (2%) | 20 (100%) |
-
-另一个理由是覆盖面：115 份已发布逐字稿中 25 份做过分段（用 `##` 与 `###`），其余 90 份没有任何标题。没有标题的来源只有一个单元，纯机械切窗——机制对两类来源是同一套。
-
-`###` 仍然有用，只是用在别处：窗口 prompt 带上所在标题链（`二、從馬可福音現象回應Wrede的錯誤解經 > 附錄`），以及边界落在它附近时吸附过去。
+- prompt 末尾列出本章节每一句，各带一个 ID；schema 的 `sentence_audit` 每句恰好一条。
+- `extracted` 必须有**锚点落在这一句上**；`not_extracted` 必须写理由。
+- **「意思相近、已被别处涵盖」不算 `extracted`。** 这条是实测出来的：Opus 自报 4 句 `extracted`，理由写「已由 O7/E4 涵蓋」「與 E5 同義」——它答的是「这材料在不在」，ledger 问的是「锚点落没落在这句上」。只有后者是下游每一道闸门看得见的，所以只认后者。
+- 程序逐句核对自报与锚点，不符即整次失败退回重试。
 
 ### 合并
 
-- **ID**：每个窗口都答 `OBS001`、`E001`，合并前加窗口前缀（`W03-OBS001`），再加来源命名空间。
-- **归属**：记录属于**第一个锚点所在段落的归属窗口**；其他窗口对同一段产出的记录是冗余的，丢弃。
-- **关系改写**：指向被丢弃记录的关系，改写到覆盖同一段文字的存活记录上。
-- **无法改写时保留记录**，不是丢掉关系。近似重复的记录看得见、代价小；被切断的 observation → evidence_step 边会让一条 `load_bearing` 观察变成孤儿，而那正是这条工作线要消灭的失败。
+章节不重叠，所以合并就是拼接：`combine_sections` 加上各章节的 ID 前缀，没有归属规则、没有跨度匹配、没有去重。`load_bearing` 校验也不再延后——章节内含它所推出的那一步，完整合约在单次调用内就能判。
 
-### `load_bearing` 校验移到合并之后
+### 没有 `##` 的来源
 
-`argument_role=load_bearing` 却没有对应关系即整次失败——这条规则**在单个窗口内无法回答**：它所推出的那一步可能在下一个窗口的负责范围里。在窗口层强制它，不会让模型更努力，只会让最省事的过关方式变成把观察改标 `background`，也就是 #86 刚堵上的那个漏洞。
+115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能（`GeminiClient.generate_subtitles`）取得边界。
 
-所以窗口层只校验机械事项（锚点逐字、ID、枚举、窗口内引用完整）；`load_bearing` 与「主张必须有证据」等整体规则在合并后的完整包上执行。
+两个设计约束：
 
-### 跨窗口关系：把窗口看不见的那几条买回来
+- **生成的小标题不写回来源档**。插入会让其后所有 S 编号位移，锚点、ledger inventory、`source_sha256` 全跟着变；而这里只需要边界，标题文字放进 prompt 当 breadcrumb 就够了。
+- **计画按来源雜湊快取，其指纹进 `extraction_identity`**。它是模型调用，不快取的话重跑可能重新分段，两次抽取就不可比。
 
-窗口保证 10 段。太16:21–23 母本的整篇模式产出过 7 条跨度 11–21 段的关系，每一条都是编辑骨架的那道缝：事实在「釋經」，由它推出的一步在「神學意義」，中间隔着「附錄」。
+### 模型
 
-```
-span 16  可8:27-33 彼得宣认后耶稣立刻预告受苦  →  门徒缺少的是对弥赛亚性质的认识
-span 21  马可反复呈现的四项现象              →  太16:20 保密命令要放在事工处境中解释
-```
+预设 `claude-opus-5`，DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`）。同一章节、同一套完整生产规则下两者都通过校验，但：
 
-所以合并之后再跑一次 `cross_window_relation_runner`。它**不重读原文**：此时每条记录都已经是「一句话 + 一个段号」，问题的宽度是 374 条短陈述，不是一份讲稿。两条约束让它不会变成第二次抽取：
+| | obs | step | claim | `load_bearing` | 繁/简 | 成本 |
+|---|---:|---:|---:|---|---|---:|
+| Opus 5 | 15 | 12 | 9 | 13 条 | 繁 86/简 7 | $0.371 |
+| DeepSeek v4 pro | 4 | 21 | 10 | 3 条 | 繁 10/简 44 | $0.106 |
 
-- 只能在**清单里已有的对象之间**建立关系。它看不到原文，所以无从引用，也无从新增材料。
-- 只能提出**跨度大于窗口保证**的关系。窗口能看见的那些是抽取的职责；在这里重提，等于让一个没有锚点的模型去翻案一个有锚点的判断。
+DeepSeek 便宜约三倍，但繁简输出不稳（锚点是繁體、statement 是简体），且几乎不标 `load_bearing`——孤儿率归零不是因为关系建对了，是因为不去踩那条线。observation 与 `load_bearing` 正是 #86／#62／ledger 这条线专门要的那一层，所以预设用 Opus。
 
-最小跨度**从包里的 window_plan 推出**（`2 × context + 1`），不另外配置：窗口调宽，这一阶段自动收窄，没有第二个地方需要记得改。
-
-实测在太16:21–23 母本上补回 11 条证据关系与 9 条主张关系，整篇模式那 7 条的内容全部涵盖。
-
-### 可复现性
-
-窗口计划（`fetch`、`context`、`snap`、窗口边界）进入抽取指纹。不进指纹的话，换一个窗口大小重跑会匹配到旧指纹而被跳过，staging 里就留下一个回答着没人再问的问题的包。
-
-每个窗口的通过结果按指纹缓存。一份来源现在是几十次调用，没有缓存的话第 20 个窗口失败就等于前 19 个白跑。
-
-### 实测：太16:21–23 母本
-
-```
-                        整篇模式(v2)      窗口模式(v3)
-实质散文                 66/132  50.0%    130/132  98.5%
-经文引用区块              9/19   47.4%     16/19   84.2%
-全部句子                 75/208  36.1%    148/208  71.2%
-
-observation                 24                125
-evidence_step               29                142
-claim                       23                107
-evidence relation           32                208   (含跨窗口补回 11)
-claim relation              16                 76   (含跨窗口补回  9)
-```
-
-markdown 标题 51 句维持 0%，这是设计使然，不是缺口——它们本来就不该进入分母。
-
-代价：24 个窗口、38 次调用、358k tokens（prompt cache 命中 47%），约 25 分钟。整篇模式是 1 次调用。这是本改动的真实成本，不要在别处假装它不存在。
+> **不要只看覆盖率。** 实测过一组「覆盖率 100% 但品质最差」的产出：关闭推理后 DeepSeek 覆盖率 100%，但 `load_bearing` 孤儿率 67%（过不了机械校验）、claim 从 13 条掉到 7 条、statement 转成简体而锚点仍是繁體。覆盖率量的是「句子有没有被锚点碰到」，量不出「有没有想明白这句支撑什么」。
 
 ## 四、程序机械闸门
 
@@ -240,20 +187,20 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_
   --ids 011WSR01
 ```
 
-窗口大小可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
+切分层级可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
 
 ```bash
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
-  --ids 011WSR01 --window-fetch 5 --window-context 5 --dry-run
+  --ids 011WSR01 --section-level 2 --dry-run
 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.sentence_ledger_runner \
   --source <来源文件> --package <抽取包>
 ```
 
-合并之后补回跨窗口关系（最小跨度从包里的 window_plan 推出，通常不必指定）：
+合并之后补回跨章节关系（章节边界从包里的 `section_plan` 读出，不必指定）：
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_window_relation_runner \
+PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_section_relation_runner \
   --package <抽取包> --output <补关系后的包>
 ```
 
@@ -323,11 +270,11 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
 
 - 抽取 schema 与验证：`backend/pipeline/detailed_knowledge_extraction.py`
 - 抽取 runner：`backend/pipeline/detailed_knowledge_extraction_runner.py`
-- 窗口切分与合并：`backend/pipeline/extraction_windows.py`
-- 跨窗口关系：`backend/pipeline/cross_window_relation.py`、`cross_window_relation_runner.py`
-- 跨窗口关系 prompt：`backend/pipeline/prompts/cross_window_relation_discovery.md`
+- 章节切分与合并：`backend/pipeline/extraction_sections.py`
+- 跨章节关系：`backend/pipeline/cross_section_relation.py`、`cross_section_relation_runner.py`
+- 跨章节关系 prompt：`backend/pipeline/prompts/cross_section_relation_discovery.md`
 - 抽取 prompt：`backend/pipeline/prompts/detailed_knowledge_extraction.md`、`detailed_notes_knowledge_extraction.md`
-- 窗口测试：`backend/tests/test_extraction_windows.py`、`test_windowed_extraction_runner.py`、`test_cross_window_relation.py`
+- 章节测试：`backend/tests/test_extraction_sections.py`、`test_cross_section_relation.py`
 - Claude 复审：`backend/pipeline/corpus_ai_review.py`、`corpus_ai_review_runner.py`
 - OpenAI 仲裁：`backend/pipeline/corpus_ai_adjudication.py`、`corpus_ai_adjudication_runner.py`
 - 共识补丁应用：`backend/pipeline/knowledge_consensus_applier.py`
