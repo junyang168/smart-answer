@@ -73,6 +73,38 @@ def _validation_feedback(
     )
 
 
+def _usage_row(usage: Any, attempt: int) -> dict[str, Any]:
+    """Flatten one call's token usage, tolerating the SDK's optional fields.
+
+    `cached_tokens` is the number worth watching: the source text is sent as a
+    cached prefix precisely so a validation retry re-reads it instead of paying
+    for it again, and this is the only evidence that it happens.
+    """
+
+    details = getattr(usage, "prompt_tokens_details", None)
+    return {
+        "attempt": attempt,
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "cached_tokens": getattr(details, "cached_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+    }
+
+
+def _print_usage(source_id: str, usage_rows: list[dict[str, Any]]) -> None:
+    if not usage_rows:
+        return
+    total = sum(r["total_tokens"] or 0 for r in usage_rows)
+    cached = sum(r["cached_tokens"] or 0 for r in usage_rows)
+    prompt = sum(r["prompt_tokens"] or 0 for r in usage_rows)
+    hit = f"{100 * cached / prompt:.0f}%" if prompt else "n/a"
+    print(json.dumps({
+        "usage": source_id, "calls": len(usage_rows), "total_tokens": total,
+        "prompt_tokens": prompt, "cached_tokens": cached, "cache_hit": hit,
+        "completion_tokens": sum(r["completion_tokens"] or 0 for r in usage_rows),
+    }, ensure_ascii=False))
+
+
 def _archive_rejected_candidate(
     *, output_dir: Path, transcript_id: str, attempt: int, candidate: dict[str, Any],
     error: DetailedExtractionValidationError,
@@ -124,6 +156,7 @@ def compile_package(
     *, transcript_id: str, transcript_path: Path, transcript: dict[str, Any], raw: bytes,
     response: dict[str, Any], extraction: dict[str, Any],
     source_descriptor: dict[str, Any] | None = None,
+    usage_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
@@ -282,6 +315,10 @@ def compile_package(
             "evidence_relation_count": len(response["evidence_relations"]),
             "claim_relation_count": len(response["claim_relations"]),
         },
+        # Per-attempt token usage, including the rejected attempts: a package
+        # that needed three tries cost three calls, and the summary counts alone
+        # never showed that.
+        "usage": list(usage_rows or []),
     }
     return package
 
@@ -310,6 +347,7 @@ def run_source(
     )
     last_error: DetailedExtractionValidationError | None = None
     last_candidate: dict[str, Any] | None = None
+    usage_rows: list[dict[str, Any]] = []
     response = None
     for attempt in range(1, VALIDATION_ATTEMPTS + 1):
         feedback = ""
@@ -325,6 +363,7 @@ def run_source(
         candidate = client.generate_json(
             prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
         )
+        usage_rows.append(_usage_row(client.last_usage, attempt))
         try:
             validate_response(candidate, source)
             response = candidate
@@ -341,11 +380,12 @@ def run_source(
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
-        source_descriptor=source_descriptor,
+        source_descriptor=source_descriptor, usage_rows=usage_rows,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
     output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print_usage(source_id, usage_rows)
     return "created", output_path
 
 
@@ -372,6 +412,7 @@ def run_one(
     )
     last_error: DetailedExtractionValidationError | None = None
     last_candidate: dict[str, Any] | None = None
+    usage_rows: list[dict[str, Any]] = []
     response = None
     for attempt in range(1, VALIDATION_ATTEMPTS + 1):
         feedback = ""
@@ -385,6 +426,7 @@ def run_one(
         candidate = client.generate_json(
             prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
         )
+        usage_rows.append(_usage_row(client.last_usage, attempt))
         try:
             validate_response(candidate, transcript)
             response = candidate
@@ -404,10 +446,12 @@ def run_one(
     package = compile_package(
         transcript_id=transcript_id, transcript_path=transcript_path,
         transcript=transcript, raw=raw, response=response, extraction=identity,
+        usage_rows=usage_rows,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
     output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print_usage(transcript_id, usage_rows)
     return "created", output_path
 
 
