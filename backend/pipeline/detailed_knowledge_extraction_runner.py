@@ -23,6 +23,7 @@ from backend.pipeline.detailed_knowledge_extraction import (
     validate_response,
 )
 from backend.pipeline.extraction_windows import (
+    DEFAULT_BARRIER_LEVEL,
     DEFAULT_CONTEXT,
     DEFAULT_FETCH,
     DEFAULT_SNAP,
@@ -489,6 +490,7 @@ class WindowSettings:
     fetch: int = DEFAULT_FETCH
     context: int = DEFAULT_CONTEXT
     snap: int = DEFAULT_SNAP
+    barrier_level: int | None = DEFAULT_BARRIER_LEVEL
 
 
 def _run(
@@ -515,14 +517,16 @@ def _run(
     """
 
     plan = plan_windows(
-        _segment_texts(source), fetch=windows.fetch, context=windows.context, snap=windows.snap
+        _segment_texts(source), fetch=windows.fetch, context=windows.context,
+        snap=windows.snap, barrier_level=windows.barrier_level,
     )
     identity = extraction_identity(
         source_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
         model_id=client.model, reasoning_effort=reasoning_effort,
         max_output_tokens=client.max_output_tokens,
         window_plan=window_plan_identity(
-            plan, fetch=windows.fetch, context=windows.context, snap=windows.snap
+            plan, fetch=windows.fetch, context=windows.context, snap=windows.snap,
+            barrier_level=windows.barrier_level,
         ),
     )
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
@@ -606,11 +610,14 @@ def main() -> int:
                         help="read-only segments shown on each side of the fetch zone")
     parser.add_argument("--window-snap", type=int, default=DEFAULT_SNAP,
                         help="how far a window boundary may move to land on a heading")
+    parser.add_argument("--window-barrier-level", type=int, default=DEFAULT_BARRIER_LEVEL,
+                        help="headings at or above this level close a window; 0 disables")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     windows = WindowSettings(
-        fetch=args.window_fetch, context=args.window_context, snap=args.window_snap
+        fetch=args.window_fetch, context=args.window_context, snap=args.window_snap,
+        barrier_level=args.window_barrier_level or None,
     )
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
     paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]
@@ -620,8 +627,8 @@ def main() -> int:
     if args.dry_run:
         def window_count(source: dict[str, Any]) -> int:
             return len(plan_windows(
-                _segment_texts(source), fetch=windows.fetch,
-                context=windows.context, snap=windows.snap,
+                _segment_texts(source), fetch=windows.fetch, context=windows.context,
+                snap=windows.snap, barrier_level=windows.barrier_level,
             ))
 
         plans = {path.stem: window_count(_load(path)[0]) for path in paths}
@@ -635,7 +642,8 @@ def main() -> int:
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
             "window_fetch": windows.fetch, "window_context": windows.context,
-            "window_snap": windows.snap, "windows_per_source": plans,
+            "window_snap": windows.snap, "window_barrier_level": windows.barrier_level,
+            "windows_per_source": plans,
             "would_call_openai": False,
         }, ensure_ascii=False))
         return 0
