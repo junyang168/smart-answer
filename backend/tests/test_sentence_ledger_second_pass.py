@@ -173,3 +173,31 @@ def test_is_assertion_needs_a_claim():
     rows[0] = answer(asked[0], verdict=IS_ASSERTION, claim=None, reason_code=None, rationale="")
     with pytest.raises(SecondPassValidationError, match="needs a claim"):
         validate_response({"verdicts": rows}, asked)
+
+
+# ---------------------------------------------------------------------------
+# batching and recombination
+# ---------------------------------------------------------------------------
+
+from backend.pipeline.sentence_ledger_second_pass_runner import batch, combine  # noqa: E402
+
+
+def test_batches_are_deterministic_and_lose_nothing():
+    asked = questions()
+    groups = batch(asked, 1)
+    assert [q.sentence_id for group in groups for q in group] == [q.sentence_id for q in asked]
+    assert batch(asked, 1) == batch(asked, 1)
+
+
+def test_recombination_is_rechecked_over_the_whole_set():
+    """Each batch validated against its own questions does not prove the union
+    covers every question exactly once -- and nothing silently going missing is
+    the entire point of this stage."""
+
+    asked = questions()
+    first, second = batch(asked, 1)
+    good = combine([{"verdicts": [answer(first[0])]}, {"verdicts": [answer(second[0])]}], asked)
+    assert len(good["verdicts"]) == 2
+
+    with pytest.raises(SecondPassValidationError, match="answered 0 times"):
+        combine([{"verdicts": [answer(first[0])]}], asked)
