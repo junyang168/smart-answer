@@ -6,6 +6,13 @@ import pytest
 
 from backend.pipeline.base_contract_coverage import BOOK_CODE_TO_CHINESE, ScriptureRef, parse_passage_range
 from backend.pipeline.sentence_ledger import (
+    FRAGMENT,
+    HEADING,
+    LIST_ITEM,
+    PROSE,
+    SCRIPTURE_QUOTATION,
+    classify_sentence,
+    summarise_by_category,
     AUTO_TERMINAL_REASONS,
     EXACT_SPAN,
     EXCLUDED,
@@ -200,3 +207,107 @@ def test_a_fragment_no_record_cites_is_not_treated_as_coverage():
     spans, unplaced = place_fragments(_package("君王與祭司", cited=False), SEGMENTS)
     assert spans == []
     assert unplaced == []
+
+
+# --------------------------------------------------------------------------
+# Sentence categories (#88): the total is not the score
+# --------------------------------------------------------------------------
+
+
+def test_categories_separate_prose_from_the_structure_around_it():
+    """Headings are 51 of 208 sentences and represented 0% by design.
+
+    Averaged into one number they hide every change in the denominator that
+    matters, which is why #88's acceptance is written against prose alone.
+    """
+
+    assert classify_sentence("## 一、彌賽亞秘密", "## 一、彌賽亞秘密") == HEADING
+    assert classify_sentence("> 當下、耶穌囑咐門徒。", "當下、耶穌囑咐門徒。") == SCRIPTURE_QUOTATION
+    assert classify_sentence("- Logos Bible Software", "- Logos Bible Software") == LIST_ITEM
+    assert classify_sentence("太 16:21 記載：", "太 16:21 記載：") == FRAGMENT
+    assert classify_sentence(
+        "這節經文記載耶穌在彼得宣認祂是基督之後，立即命令門徒對外保密。",
+        "這節經文記載耶穌在彼得宣認祂是基督之後，立即命令門徒對外保密。",
+    ) == PROSE
+
+
+def test_a_quotation_split_across_sentences_stays_a_quotation():
+    """The block decides, not the sentence: half a quotation is still quoted."""
+
+    block = "> 從此耶穌才指示門徒。他必須上耶路撒冷去。"
+    assert classify_sentence(block, "他必須上耶路撒冷去。") == SCRIPTURE_QUOTATION
+
+
+def test_category_counts_split_the_verdicts_they_came_from():
+    segments = [(1, "## 標題"), (2, "彼得宣認耶穌是基督，這一認信本身是正確的。")]
+    inventory = build_inventory(segments, source_id="SRC")
+    heading, prose = inventory[0], inventory[-1]
+    rows = reconcile(
+        inventory,
+        [AnchoredSpan("E001", prose.segment_index, prose.char_start, prose.char_end)],
+    )
+    summaries = summarise_by_category(inventory, rows, dict(segments))
+    assert summaries[PROSE].represented == 1
+    assert summaries[PROSE].unprocessed == 0
+    assert summaries[HEADING].represented == 0
+    assert summaries[HEADING].unprocessed == 1
+    assert heading.sentence_id in summaries[HEADING].unprocessed_ids
+
+
+# --------------------------------------------------------------------------
+# Placing a fragment whose phrase the source repeats
+# --------------------------------------------------------------------------
+
+
+def _repeated_package(sha: str | None, paragraph_key: str = "S0002"):
+    package = _package("同一句話")
+    fragment = package["source_fragments"][0]
+    fragment["paragraph_key"] = paragraph_key
+    if sha is not None:
+        fragment["source_sha256"] = sha
+    return package
+
+
+def test_a_repeated_phrase_resolves_by_the_key_it_was_validated_against():
+    """The 太16 母本 states the same geography under 釋經 and again under 附錄.
+
+    Extraction checked the excerpt was verbatim in the segment it named, so the
+    key is evidence rather than a guess -- while the source it was checked
+    against is still the source in hand.
+    """
+
+    segments = [(1, "同一句話。"), (2, "同一句話。")]
+    spans, unplaced = place_fragments(_repeated_package("SHA-NOW"), segments, "SHA-NOW")
+    assert unplaced == []
+    assert [span.segment_index for span in spans] == [2]
+
+
+def test_a_repeated_phrase_stays_unplaced_when_the_source_has_moved_on():
+    """Only 20% of claimed indices in the staged packages still resolve.
+
+    A key validated against a source that has since been re-segmented is not
+    evidence about this source, so ambiguity wins and nothing is guessed.
+    """
+
+    segments = [(1, "同一句話。"), (2, "同一句話。")]
+    spans, unplaced = place_fragments(_repeated_package("SHA-OLD"), segments, "SHA-NOW")
+    assert spans == []
+    assert unplaced == ["FR-1"]
+
+
+def test_a_repeated_phrase_stays_unplaced_when_the_fragment_records_no_source():
+    segments = [(1, "同一句話。"), (2, "同一句話。")]
+    spans, unplaced = place_fragments(_repeated_package(None), segments, "SHA-NOW")
+    assert spans == []
+    assert unplaced == ["FR-1"]
+
+
+def test_an_unambiguous_fragment_never_consults_the_key():
+    """A key that disagrees with the only place the text occurs changes nothing."""
+
+    spans, _ = place_fragments(
+        _repeated_package("SHA-NOW", paragraph_key="S0099"),
+        [(1, "同一句話。")],
+        "SHA-NOW",
+    )
+    assert [span.segment_index for span in spans] == [1]

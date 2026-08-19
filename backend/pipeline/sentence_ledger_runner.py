@@ -17,6 +17,7 @@ the silent loss this tool exists to find.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -53,7 +54,9 @@ def load_segments(source_path: Path) -> list[tuple[int, str]]:
 
 
 def place_fragments(
-    package: dict[str, Any], segments: list[tuple[int, str]]
+    package: dict[str, Any],
+    segments: list[tuple[int, str]],
+    source_sha256: str | None = None,
 ) -> tuple[list[AnchoredSpan], list[str]]:
     """Locate each cited fragment in the source. Returns spans and the unplaceable.
 
@@ -83,13 +86,17 @@ def place_fragments(
             for index, text in segments
             if excerpt in text
         ]
-        if len(hits) > 1:
+        if len(hits) > 1 and _key_still_binds(fragment, source_sha256):
             # A phrase the manuscript genuinely repeats -- the 太16 母本 states
             # the 該撒利亞腓立比 geography under both 釋經 and 附錄. Choosing
             # between occurrences by similarity is exactly the guess this tool
-            # refuses, but `paragraph_key` is not a guess: extraction validated
-            # that the excerpt is verbatim in that segment before writing the
-            # fragment. Use it, and stay unplaced when it does not resolve.
+            # refuses. `paragraph_key` is not a guess *only while the source it
+            # was validated against is still the source being read*: extraction
+            # checked the excerpt was verbatim in that segment, but across the
+            # 24 staged packages only 20% of claimed indices still resolve,
+            # because the sources were re-segmented afterwards. So the key is
+            # trusted exactly when the fragment's own `source_sha256` matches
+            # the file in hand, and never otherwise.
             #
             # Markdown sources only. Transcript segments are keyed by their own
             # `index`, which is not the positional locator anchors use, so the
@@ -107,12 +114,20 @@ def place_fragments(
     return spans, unplaced
 
 
+def _key_still_binds(fragment: dict[str, Any], source_sha256: str | None) -> bool:
+    """Whether this fragment's `paragraph_key` was validated against this source."""
+
+    recorded = str(fragment.get("source_sha256") or "")
+    return bool(source_sha256) and recorded == source_sha256
+
+
 def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
     package = json.loads(package_path.read_text(encoding="utf-8"))
     source_id = str(package["source_documents"][0]["source_id"])
     segments = load_segments(source_path)
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
     inventory = build_inventory(segments, source_id=source_id)
-    spans, unplaced = place_fragments(package, segments)
+    spans, unplaced = place_fragments(package, segments, source_sha256)
 
     target = None
     if passage:
