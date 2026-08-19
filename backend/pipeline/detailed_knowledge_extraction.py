@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Sequence
 
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 
 # v2 closes `observation_type` to the six categories the prompt already names.
-# v3 changes the unit of extraction from the document to an overlapping window
-# (#88): the response shape is untouched, but a v3 response answers for a slice
-# and only becomes a document once merged, so it must not be confused with a v2
-# one taken over the whole source.  The schema hash feeds
+# v3 moved the unit of extraction from the document to an overlapping window.
+# v4 (#88) replaces the window with the `##` section the source was composed in,
+# and adds `sentence_audit`: the response now has to account for every sentence
+# of its section, not merely produce records from it.  Measured, that closed
+# question is what lifts substantive-prose coverage from 50% to 100% -- the
+# small chunk was never the lever.  The schema hash feeds
 # `response_schema_sha256`, so every extraction keeps its own fingerprint and
 # stays valid as the record of what that run was actually asked for.
-EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v3"
+EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v4"
 
 CLAIM_KINDS = [
     "explicit_claim",
@@ -193,10 +196,24 @@ DETAILED_RESPONSE_SCHEMA: dict[str, Any] = {
                     "required": ["claim_relation_id", "from_id", "to_id", "relation_type", "reason"],
                 },
             },
+            "sentence_audit": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "sentence_id": {"type": "string"},
+                        "status": {"type": "string", "enum": ["extracted", "not_extracted"]},
+                        "covered_by": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["sentence_id", "status", "covered_by", "reason"],
+                },
+            },
         },
         "required": [
             "questions", "positions", "observations", "evidence_steps", "claims",
-            "evidence_relations", "claim_relations"
+            "evidence_relations", "claim_relations", "sentence_audit"
         ],
     },
 }
@@ -204,6 +221,99 @@ DETAILED_RESPONSE_SCHEMA: dict[str, Any] = {
 
 class DetailedExtractionValidationError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class AuditedSentence:
+    """One sentence the response has to give a verdict on."""
+
+    sentence_id: str
+    segment_index: str
+    text: str
+
+
+def anchor_spans(response: dict[str, Any], transcript: dict[str, Any]) -> dict[str, list[tuple[int, int]]]:
+    """Where the response's anchors land, keyed by segment locator.
+
+    Excerpts are verified verbatim elsewhere in this module, so a plain find is
+    exact here; a missing excerpt simply contributes no span.
+    """
+
+    segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
+                for index, segment in enumerate(transcript.get("script", []))}
+    spans: dict[str, list[tuple[int, int]]] = {}
+    for collection in ("questions", "positions", "observations", "evidence_steps"):
+        for row in response.get(collection, []) or []:
+            for anchor in row.get("anchors") or []:
+                locator = str(anchor.get("segment_index") or "")
+                excerpt = str(anchor.get("verbatim_excerpt") or "")
+                text = segments.get(locator)
+                if not excerpt or text is None:
+                    continue
+                start = text.find(excerpt)
+                if start >= 0:
+                    spans.setdefault(locator, []).append((start, start + len(excerpt)))
+    return spans
+
+
+def validate_sentence_audit(
+    response: dict[str, Any],
+    transcript: dict[str, Any],
+    sentences: Sequence[AuditedSentence],
+) -> None:
+    """Check the response accounted for every sentence, and told the truth about it.
+
+    Two pressures are designed against, and both were observed in real runs:
+
+      * silence. Every sentence must carry exactly one verdict, so "I did not
+        mention it" is not available.
+      * the semantic dodge. Opus reported four sentences `extracted` whose
+        reasons read "已由 O7/E4 涵蓋" and "與 E5 同義" -- it was answering
+        "is this material present somewhere" while the ledger asks "does an
+        anchor land on this sentence". Only the latter counts here, because
+        only the latter is what every downstream gate can see.
+    """
+
+    segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
+                for index, segment in enumerate(transcript.get("script", []))}
+    spans = anchor_spans(response, transcript)
+    rows = response.get("sentence_audit") or []
+    by_id: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for row in rows:
+        sentence_id = str(row.get("sentence_id") or "")
+        if sentence_id in by_id:
+            errors.append(f"{sentence_id}: audited more than once")
+            continue
+        by_id[sentence_id] = row
+    expected = {sentence.sentence_id for sentence in sentences}
+    for extra in sorted(set(by_id) - expected):
+        errors.append(f"{extra}: audit names a sentence that is not in this section")
+    for sentence in sentences:
+        row = by_id.get(sentence.sentence_id)
+        if row is None:
+            errors.append(f"{sentence.sentence_id}: no verdict for this sentence")
+            continue
+        text = segments.get(sentence.segment_index, "")
+        start = text.find(sentence.text)
+        covered = False
+        if start >= 0:
+            end = start + len(sentence.text)
+            covered = any(
+                left < end and start < right
+                for left, right in spans.get(sentence.segment_index, [])
+            )
+        if row.get("status") == "extracted" and not covered:
+            errors.append(
+                f"{sentence.sentence_id}: reported extracted, but no anchor lands on it; "
+                f"either anchor a record to this sentence or report it not_extracted"
+            )
+        if row.get("status") == "not_extracted" and not str(row.get("reason") or "").strip():
+            errors.append(f"{sentence.sentence_id}: not_extracted without a reason")
+    if errors:
+        raise DetailedExtractionValidationError(
+            "sentence audit failed: " + " | ".join(errors)
+        )
 
 
 def _require(condition: bool, message: str) -> None:
@@ -218,7 +328,7 @@ def extraction_identity(
     model_id: str,
     reasoning_effort: str,
     max_output_tokens: int,
-    window_plan: dict[str, Any] | None = None,
+    section_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generation = {
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
@@ -231,11 +341,11 @@ def extraction_identity(
         ).hexdigest(),
     }
     # How the source was cut is part of what the run was asked for.  Left out,
-    # a rerun at a different window size matches the stored fingerprint and is
-    # skipped, leaving a package in staging that answers a question nobody is
-    # asking any more.
-    if window_plan is not None:
-        generation["window_plan"] = json.loads(json.dumps(window_plan, sort_keys=True))
+    # a source resegmented by a later generator run matches the stored
+    # fingerprint and is skipped, leaving a package in staging that answers a
+    # question nobody is asking any more.
+    if section_plan is not None:
+        generation["section_plan"] = json.loads(json.dumps(section_plan, sort_keys=True))
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

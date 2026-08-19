@@ -10,28 +10,30 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug
+from backend.pipeline.base_contract_coverage import sentence_spans
 from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
+    AuditedSentence,
     DetailedExtractionValidationError,
     extraction_identity,
     validate_response,
+    validate_sentence_audit,
 )
-from backend.pipeline.extraction_windows import (
-    DEFAULT_BARRIER_LEVEL,
-    DEFAULT_CONTEXT,
-    DEFAULT_FETCH,
-    DEFAULT_SNAP,
-    ExtractionWindow,
-    merge_window_responses,
-    plan_windows,
-    segment_locator,
-    window_plan_identity,
+from backend.pipeline.extraction_sections import (
+    DEFAULT_SECTION_LEVEL,
+    Section,
+    SectionPlan,
+    breadcrumb_for,
+    combine_sections,
+    load_cached_plan,
+    plan_sections,
+    save_plan,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
 from backend.pipeline.stage1 import Stage1OpenAIClient
@@ -135,96 +137,143 @@ def _segment_texts(source: dict[str, Any]) -> list[str]:
     return [str(segment.get("text") or "") for segment in source.get("script") or []]
 
 
-def _window_prompt_body(source: dict[str, Any], window: ExtractionWindow) -> str:
-    """Render one window: what it may read, and what it answers for.
+def segment_locator(position: int) -> str:
+    """The anchor locator for a segment, by its position in the whole source.
 
-    The two zones are labelled rather than merely ordered, because the whole
-    change rests on the model knowing the difference: it summarises when handed
-    an undifferentiated wall of text, and enumerates when told exactly which
-    sentences it is accountable for.
+    Deliberately global. A section is a slice of the document but must never
+    renumber it: anchors have to stay resolvable against the full source, or the
+    ledger cannot place them and every downstream reader breaks.
+    """
+
+    return f"S{position + 1:04d}"
+
+
+def section_sentences(source: dict[str, Any], section: Section) -> list[AuditedSentence]:
+    """Every sentence the section has to be answered for, with a stable id."""
+
+    script = source.get("script") or []
+    rows: list[AuditedSentence] = []
+    for position in range(section.start, section.end):
+        text = str(script[position].get("text") or "")
+        for start, end in sentence_spans(text):
+            locator = segment_locator(position)
+            rows.append(AuditedSentence(
+                sentence_id=f"{locator}#{len(rows) + 1:03d}",
+                segment_index=locator,
+                text=text[start:end],
+            ))
+    return rows
+
+
+def _section_prompt_body(
+    source: dict[str, Any], section: Section, sentences: Sequence[AuditedSentence]
+) -> str:
+    """Render one section: its text, then the sentences it must account for.
+
+    The listing is the whole change. Given the text alone the model produces
+    records and stops when it feels done; given the text and "here are your 42
+    sentences, one verdict each" it enumerates. That is measured, not assumed --
+    50% coverage against 100% on the same material.
     """
 
     script = source.get("script") or []
-
-    def rows(start: int, end: int) -> str:
-        return "\n\n".join(
-            "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
-                locator=segment_locator(position),
-                index=script[position].get("index"),
-                begin=script[position].get("start_time"),
-                finish=script[position].get("end_time"),
-                text=script[position].get("text", ""),
-            )
-            for position in range(start, end)
+    body = "\n\n".join(
+        "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
+            locator=segment_locator(position),
+            index=script[position].get("index"),
+            begin=script[position].get("start_time"),
+            finish=script[position].get("end_time"),
+            text=script[position].get("text", ""),
         )
-
-    parts = [
-        f"本窗口可见范围：{segment_locator(window.see_start)}–{segment_locator(window.see_end - 1)}",
-        f"本窗口负责范围：{segment_locator(window.fetch_start)}–{segment_locator(window.fetch_end - 1)}",
-    ]
-    if window.breadcrumb:
-        parts.append(f"所在标题层级：{window.breadcrumb}")
-    if window.see_start < window.fetch_start:
-        parts.append(
-            "\n===== 上文（只读，供理解论证依赖）=====\n"
-            + rows(window.see_start, window.fetch_start)
-        )
-    parts.append(
-        "\n===== 负责范围（必须逐句穷举）=====\n" + rows(window.fetch_start, window.fetch_end)
+        for position in range(section.start, section.end)
     )
-    if window.fetch_end < window.see_end:
-        parts.append(
-            "\n===== 下文（只读，供理解论证依赖）=====\n" + rows(window.fetch_end, window.see_end)
-        )
-    return "\n".join(parts)
-
-
-def _window_cache_path(output_dir: Path, source_id: str, fingerprint: str, window: ExtractionWindow) -> Path:
+    listing = "\n".join(f"[{row.sentence_id}] {row.text}" for row in sentences)
+    header = f"本章节：{section.title}" if section.title else "本章节"
+    breadcrumb = breadcrumb_for(_segment_texts(source), section.start)
+    if breadcrumb and breadcrumb != section.title:
+        header += f"\n所在标题层级：{breadcrumb}"
     return (
-        output_dir / "window-cache" / _slug(source_id) / fingerprint[:16]
-        / f"w{window.index:03d}-{window.fetch_start:04d}-{window.fetch_end:04d}.json"
+        f"{header}\n"
+        f"范围：{segment_locator(section.start)}–{segment_locator(section.end - 1)}"
+        f"（{section.length} 段）\n\n"
+        f"{body}\n\n"
+        f"===== 本章节全部句子（{len(sentences)} 句），每一句都必须在 sentence_audit 中出现一次 =====\n\n"
+        f"{listing}"
     )
 
 
-def _extract_windows(
+def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, section: Section) -> Path:
+    return (
+        output_dir / "section-cache" / _slug(source_id) / fingerprint[:16]
+        / f"p{section.index:03d}-{section.start:04d}-{section.end:04d}.json"
+    )
+
+
+def _subtitle_provider():
+    """The sermon editor's own subtitle generator, for sources with no headings.
+
+    Imported lazily: `backend.api` pulls in the web app, and nothing in this
+    module should need a running server to be importable.
+    """
+
+    from backend.api.gemini_client import GeminiClient
+
+    return GeminiClient().generate_subtitles
+
+
+def resolve_section_plan(
+    *, source: dict[str, Any], source_id: str, source_sha256: str, output_dir: Path,
+    level: int = DEFAULT_SECTION_LEVEL, allow_generated: bool = True,
+) -> SectionPlan:
+    """The plan for this source, generated at most once and then reused.
+
+    Generating boundaries is a model call, so an uncached rerun could resegment
+    the source and quietly make two extractions incomparable. The cache is keyed
+    on the source hash, so editing the source correctly invalidates it.
+    """
+
+    path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
+    cached = load_cached_plan(path, source_sha256)
+    if cached is not None:
+        return cached
+    provider = _subtitle_provider() if allow_generated else None
+    plan = plan_sections(_segment_texts(source), level=level, provider=provider)
+    save_plan(path, plan, source_sha256)
+    return plan
+
+
+def _extract_sections(
     *,
     source_id: str,
     source: dict[str, Any],
     header: str,
-    windows: list[ExtractionWindow],
+    plan: SectionPlan,
     output_dir: Path,
     client: Stage1OpenAIClient,
     prompt: str,
     fingerprint: str,
     force: bool,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-    """Run every window, then reassemble one document-level response.
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Run every section, then concatenate.
 
-    Each window's accepted response is cached under the run's fingerprint. A
-    source is now tens of calls rather than one, and without the cache a
-    failure in the last window throws away every window before it.
+    Sections do not overlap, so there is no merge step and nothing to
+    deduplicate -- the combining is `combine_sections` and that is all of it.
     """
 
-    visible_by_window: list[tuple[ExtractionWindow, dict[str, Any]]] = []
+    answered: list[tuple[Section, dict[str, Any]]] = []
     usage_rows: list[dict[str, Any]] = []
-    window_rows: list[dict[str, Any]] = []
-    for window in windows:
-        cache_path = _window_cache_path(output_dir, source_id, fingerprint, window)
+    section_rows: list[dict[str, Any]] = []
+    for section in plan.sections:
+        cache_path = _section_cache_path(output_dir, source_id, fingerprint, section)
         if cache_path.is_file() and not force:
-            response = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
-            visible_by_window.append((window, response))
-            window_rows.append({
-                "window_index": window.index, "fetch_start": window.fetch_start,
-                "fetch_end": window.fetch_end, "see_start": window.see_start,
-                "see_end": window.see_end, "attempts": 0, "cached": True,
-            })
+            answered.append((section, json.loads(cache_path.read_text(encoding="utf-8"))["response"]))
+            section_rows.append({**vars(section), "attempts": 0, "cached": True})
             continue
-        visible = {segment_locator(position) for position in range(window.see_start, window.see_end)}
-        user_input = header + _window_prompt_body(source, window)
+        sentences = section_sentences(source, section)
+        user_input = header + _section_prompt_body(source, section, sentences)
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
-        response = None
-        attempts = 0
+        response, attempts = None, 0
         for attempt in range(1, VALIDATION_ATTEMPTS + 1):
             attempts = attempt
             feedback = ""
@@ -238,43 +287,34 @@ def _extract_windows(
             candidate = client.generate_json(
                 prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
             )
-            usage_rows.append({**_usage_row(client.last_usage, attempt), "window_index": window.index})
+            usage_rows.append({**_usage_row(client.last_usage, attempt), "section_index": section.index})
             try:
-                validate_response(
-                    candidate, source,
-                    visible_locators=visible,
-                    require_load_bearing_relations=False,
-                )
+                # A section is a composition unit, so the full contract is
+                # answerable inside it: measured, 0 of 264 relations cross a
+                # `##`, and the step a load_bearing observation reasons to is
+                # in the same section as the observation.
+                validate_response(candidate, source)
+                validate_sentence_audit(candidate, source, sentences)
                 response = candidate
                 break
             except DetailedExtractionValidationError as exc:
-                last_error = exc
-                last_candidate = candidate
+                last_error, last_candidate = exc, candidate
                 _archive_rejected_candidate(
-                    output_dir=output_dir, transcript_id=f"{source_id}#w{window.index:03d}",
+                    output_dir=output_dir, transcript_id=f"{source_id}#p{section.index:03d}",
                     attempt=attempt, candidate=candidate, error=exc,
                 )
         if response is None:
             raise last_error or DetailedExtractionValidationError(
-                f"window {window.index} validation failed"
+                f"section {section.index} validation failed"
             )
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(
-            json.dumps({"window": window.__dict__, "response": response}, ensure_ascii=False) + "\n",
+            json.dumps({"section": vars(section), "response": response}, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        visible_by_window.append((window, response))
-        window_rows.append({
-            "window_index": window.index, "fetch_start": window.fetch_start,
-            "fetch_end": window.fetch_end, "see_start": window.see_start,
-            "see_end": window.see_end, "attempts": attempts, "cached": False,
-        })
-    merged = merge_window_responses(visible_by_window, _segment_texts(source))
-    merge_summary = merged.pop("merge_summary", {})
-    # The full contract, including the load_bearing rule each window was
-    # excused from, is answerable now and is applied here.
-    validate_response(merged, source)
-    return merged, usage_rows, window_rows, merge_summary
+        answered.append((section, response))
+        section_rows.append({**vars(section), "attempts": attempts, "cached": False})
+    return combine_sections(answered), usage_rows, section_rows
 
 
 def _anchored_fragment(
@@ -310,8 +350,7 @@ def compile_package(
     response: dict[str, Any], extraction: dict[str, Any],
     source_descriptor: dict[str, Any] | None = None,
     usage_rows: list[dict[str, Any]] | None = None,
-    window_rows: list[dict[str, Any]] | None = None,
-    merge_summary: dict[str, Any] | None = None,
+    section_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
@@ -474,23 +513,23 @@ def compile_package(
         # that needed three tries cost three calls, and the summary counts alone
         # never showed that.
         "usage": list(usage_rows or []),
-        # Which slice of the source each call answered for.  Coverage is now a
-        # property of the window plan, so a package that cannot say how it was
+        # Which section of the source each call answered for.  Coverage is a
+        # property of the section plan, so a package that cannot say how it was
         # cut cannot be compared with the ledger run taken against it.
-        "windows": list(window_rows or []),
-        "merge": dict(merge_summary or {}),
+        "sections": list(section_rows or []),
     }
     return package
 
 
 @dataclass(frozen=True)
-class WindowSettings:
-    """How the source is cut. Carried together because all three enter the fingerprint."""
+class SectionSettings:
+    """How the source is cut into the units it was composed in."""
 
-    fetch: int = DEFAULT_FETCH
-    context: int = DEFAULT_CONTEXT
-    snap: int = DEFAULT_SNAP
-    barrier_level: int | None = DEFAULT_BARRIER_LEVEL
+    level: int = DEFAULT_SECTION_LEVEL
+    #: Whether a source with no headings may have boundaries generated for it.
+    #: Off makes the run offline and deterministic; on covers the 90 published
+    #: transcripts that carry no headings at all.
+    allow_generated: bool = True
 
 
 def _run(
@@ -504,7 +543,7 @@ def _run(
     client: Stage1OpenAIClient,
     prompt: str,
     reasoning_effort: str,
-    windows: WindowSettings,
+    sections: SectionSettings,
     force: bool,
     source_descriptor: dict[str, Any] | None = None,
 ) -> tuple[str, Path]:
@@ -512,38 +551,36 @@ def _run(
 
     Transcripts and notes manuscripts differ only in how they are loaded and
     how the prompt introduces them; they were two near-identical bodies before
-    windowing, and keeping them so would have meant maintaining the window loop
-    twice.
+    sectioning, and keeping them so would have meant maintaining the section
+    loop twice.
     """
 
-    plan = plan_windows(
-        _segment_texts(source), fetch=windows.fetch, context=windows.context,
-        snap=windows.snap, barrier_level=windows.barrier_level,
+    source_sha256 = hashlib.sha256(raw).hexdigest()
+    plan = resolve_section_plan(
+        source=source, source_id=source_id, source_sha256=source_sha256,
+        output_dir=output_dir, level=sections.level,
+        allow_generated=sections.allow_generated,
     )
     identity = extraction_identity(
-        source_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
+        source_sha256=source_sha256, prompt=prompt,
         model_id=client.model, reasoning_effort=reasoning_effort,
         max_output_tokens=client.max_output_tokens,
-        window_plan=window_plan_identity(
-            plan, fetch=windows.fetch, context=windows.context, snap=windows.snap,
-            barrier_level=windows.barrier_level,
-        ),
+        section_plan=plan.identity(),
     )
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
     if output_path.is_file() and not force:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
-    response, usage_rows, window_rows, merge_summary = _extract_windows(
-        source_id=source_id, source=source, header=header, windows=plan,
+    response, usage_rows, section_rows = _extract_sections(
+        source_id=source_id, source=source, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
     )
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
-        source_descriptor=source_descriptor, usage_rows=usage_rows, window_rows=window_rows,
-        merge_summary=merge_summary,
+        source_descriptor=source_descriptor, usage_rows=usage_rows, section_rows=section_rows,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
@@ -555,39 +592,39 @@ def _run(
 def run_source(
     source_descriptor: dict[str, Any], *, output_dir: Path, client: Stage1OpenAIClient,
     prompt: str, reasoning_effort: str, force: bool,
-    windows: WindowSettings | None = None,
+    sections: SectionSettings | None = None,
 ) -> tuple[str, Path]:
     source, raw, source_path = markdown_source_document(source_descriptor)
     source_id = str(source_descriptor["source_id"])
     header = (
         f"来源 ID：{source_id}\n标题：{source.get('metadata', {}).get('title', source_id)}\n"
         f"来源类型：{source_descriptor.get('source_type', 'notes_manuscript')}\n\n"
-        "以下是该 Markdown 讲稿的一个窗口。S 编号是全文唯一定位码，不因窗口而改变。"
+        "以下是该 Markdown 讲稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
         "请只输出符合 schema 的完整 JSON。\n\n"
     )
     return _run(
         source_id=source_id, source=source, raw=raw, source_path=source_path, header=header,
         output_dir=output_dir, client=client, prompt=prompt, reasoning_effort=reasoning_effort,
-        windows=windows or WindowSettings(), force=force, source_descriptor=source_descriptor,
+        sections=sections or SectionSettings(), force=force, source_descriptor=source_descriptor,
     )
 
 
 def run_one(
     transcript_path: Path, *, output_dir: Path, client: Stage1OpenAIClient,
     prompt: str, reasoning_effort: str, force: bool,
-    windows: WindowSettings | None = None,
+    sections: SectionSettings | None = None,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
     header = (
         f"逐字稿 ID：{transcript_id}\n标题：{transcript.get('metadata', {}).get('title', transcript_id)}\n\n"
-        "以下是该逐字稿的一个窗口。S 编号是全文唯一定位码，不因窗口而改变。"
+        "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
         "请只输出符合 schema 的完整 JSON。\n\n"
     )
     return _run(
         source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
         header=header, output_dir=output_dir, client=client, prompt=prompt,
-        reasoning_effort=reasoning_effort, windows=windows or WindowSettings(), force=force,
+        reasoning_effort=reasoning_effort, sections=sections or SectionSettings(), force=force,
     )
 
 
@@ -601,23 +638,16 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     parser.add_argument("--max-output-tokens", type=int, default=32000)
-    # The window plan is deliberately on the command line, not hard-coded: the
-    # ticket's own rule is that no wording or sizing is changed without a ledger
-    # score, and that requires running the same source at two settings.
-    parser.add_argument("--window-fetch", type=int, default=DEFAULT_FETCH,
-                        help="segments each window is answerable for")
-    parser.add_argument("--window-context", type=int, default=DEFAULT_CONTEXT,
-                        help="read-only segments shown on each side of the fetch zone")
-    parser.add_argument("--window-snap", type=int, default=DEFAULT_SNAP,
-                        help="how far a window boundary may move to land on a heading")
-    parser.add_argument("--window-barrier-level", type=int, default=DEFAULT_BARRIER_LEVEL,
-                        help="headings at or above this level close a window; 0 disables")
+    parser.add_argument("--section-level", type=int, default=DEFAULT_SECTION_LEVEL,
+                        help="headings at or above this level start a section")
+    parser.add_argument("--no-generated-sections", action="store_true",
+                        help="never ask the subtitle generator for boundaries; "
+                             "a source with no headings is then one section")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    windows = WindowSettings(
-        fetch=args.window_fetch, context=args.window_context, snap=args.window_snap,
-        barrier_level=args.window_barrier_level or None,
+    sections = SectionSettings(
+        level=args.section_level, allow_generated=not args.no_generated_sections,
     )
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
     paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]
@@ -625,15 +655,14 @@ def main() -> int:
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
-        def window_count(source: dict[str, Any]) -> int:
-            return len(plan_windows(
-                _segment_texts(source), fetch=windows.fetch, context=windows.context,
-                snap=windows.snap, barrier_level=windows.barrier_level,
-            ))
+        def section_count(source: dict[str, Any]) -> int:
+            # Dry run never calls the generator; a source with no headings
+            # reports one section, which is what an offline run would do.
+            return len(plan_sections(_segment_texts(source), level=sections.level).sections)
 
-        plans = {path.stem: window_count(_load(path)[0]) for path in paths}
+        plans = {path.stem: section_count(_load(path)[0]) for path in paths}
         plans.update({
-            str(row["source_id"]): window_count(markdown_source_document(row)[0])
+            str(row["source_id"]): section_count(markdown_source_document(row)[0])
             for row in source_rows
         })
         print(json.dumps({
@@ -641,9 +670,9 @@ def main() -> int:
             "sources": [row["source_id"] for row in source_rows], "model": args.model,
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
-            "window_fetch": windows.fetch, "window_context": windows.context,
-            "window_snap": windows.snap, "window_barrier_level": windows.barrier_level,
-            "windows_per_source": plans,
+            "section_level": sections.level,
+            "allow_generated_sections": sections.allow_generated,
+            "sections_per_source": plans,
             "would_call_openai": False,
         }, ensure_ascii=False))
         return 0
@@ -659,7 +688,7 @@ def main() -> int:
         try:
             status, output = run_one(
                 path, output_dir=args.output_dir, client=client, prompt=prompt,
-                reasoning_effort=args.reasoning_effort, force=args.force, windows=windows,
+                reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")
@@ -670,7 +699,7 @@ def main() -> int:
         try:
             status, output = run_source(
                 source_row, output_dir=args.output_dir, client=client, prompt=prompt,
-                reasoning_effort=args.reasoning_effort, force=args.force, windows=windows,
+                reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
             )
             counts[status] += 1
             print(f"{status}: {source_row['source_id']} -> {output}")
