@@ -489,6 +489,13 @@ class Stage1OpenAIClient:
         self.max_output_tokens = max_output_tokens
         self.reasoning_effort = reasoning_effort
         self.client = OpenAI(api_key=api_key, max_retries=0, timeout=timeout_seconds)
+        # The Anthropic client above has kept `last_usage` since it was written;
+        # this one never did, so an OpenAI run reported nothing about what it
+        # cost.  That matters most for the cached prefix: `generate_json` puts
+        # the stable source text first precisely so a validation retry re-reads
+        # it instead of paying for it again, and `cached_tokens` is the only
+        # evidence that the arrangement works.
+        self.last_usage: Any = None
 
     def generate_json(
         self,
@@ -529,6 +536,7 @@ class Stage1OpenAIClient:
                 else:
                     kwargs["temperature"] = temperature
                 response = client.chat.completions.create(**kwargs)
+                self.last_usage = getattr(response, "usage", None)
                 content = response.choices[0].message.content or ""
                 if not content.strip():
                     raise RuntimeError(f"OpenAI response missing text content: {response}")

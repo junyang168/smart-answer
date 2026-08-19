@@ -302,24 +302,40 @@ def split_segments(markdown_text: str) -> list[Segment]:
 _SENTENCE_END_RE = re.compile(r"[。！？!?]+[」』）\)”\"’']*")
 
 
+def _append_trimmed(
+    spans: list[tuple[int, int]], line: str, offset: int, start: int, end: int
+) -> None:
+    piece = line[start:end]
+    lead = len(piece) - len(piece.lstrip())
+    trail = len(piece) - len(piece.rstrip())
+    if end - start > lead + trail:
+        spans.append((offset + start + lead, offset + end - trail))
+
+
+def sentence_spans(text: str) -> list[tuple[int, int]]:
+    """同樣的斷句，但回報每一句在 ``text`` 裡的 ``[start, end)``。
+
+    只回傳句子文字，就無法判斷某個 verbatim span 蓋到了哪一句；而斷句規則有兩
+    份就等於有兩種句子。因此帶偏移量的版本是本體，``split_sentences`` 由它導出。
+    """
+
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        position = 0
+        for match in _SENTENCE_END_RE.finditer(bare):
+            _append_trimmed(spans, bare, offset, position, match.end())
+            position = match.end()
+        _append_trimmed(spans, bare, offset, position, len(bare))
+        offset += len(line)
+    return spans
+
+
 def split_sentences(text: str) -> list[str]:
     """中文句子切分：以 。！？ 斷句，收尾的引號跟著上一句。"""
 
-    result: list[str] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        position = 0
-        for match in _SENTENCE_END_RE.finditer(line):
-            piece = line[position : match.end()].strip()
-            if piece:
-                result.append(piece)
-            position = match.end()
-        tail = line[position:].strip()
-        if tail:
-            result.append(tail)
-    return result
+    return [text[start:end] for start, end in sentence_spans(text)]
 
 
 # --------------------------------------------------------------------------

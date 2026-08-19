@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,17 +15,22 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
-from backend.pipeline.corpus_survey_runner import (
-    PROJECT_ROOT,
-    _load,
-    _slug,
-    _transcript_for_prompt,
-)
+from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug
 from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
     DetailedExtractionValidationError,
     extraction_identity,
     validate_response,
+)
+from backend.pipeline.extraction_windows import (
+    DEFAULT_CONTEXT,
+    DEFAULT_FETCH,
+    DEFAULT_SNAP,
+    ExtractionWindow,
+    merge_window_responses,
+    plan_windows,
+    segment_locator,
+    window_plan_identity,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
 from backend.pipeline.stage1 import Stage1OpenAIClient
@@ -73,6 +79,38 @@ def _validation_feedback(
     )
 
 
+def _usage_row(usage: Any, attempt: int) -> dict[str, Any]:
+    """Flatten one call's token usage, tolerating the SDK's optional fields.
+
+    `cached_tokens` is the number worth watching: the source text is sent as a
+    cached prefix precisely so a validation retry re-reads it instead of paying
+    for it again, and this is the only evidence that it happens.
+    """
+
+    details = getattr(usage, "prompt_tokens_details", None)
+    return {
+        "attempt": attempt,
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "cached_tokens": getattr(details, "cached_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+    }
+
+
+def _print_usage(source_id: str, usage_rows: list[dict[str, Any]]) -> None:
+    if not usage_rows:
+        return
+    total = sum(r["total_tokens"] or 0 for r in usage_rows)
+    cached = sum(r["cached_tokens"] or 0 for r in usage_rows)
+    prompt = sum(r["prompt_tokens"] or 0 for r in usage_rows)
+    hit = f"{100 * cached / prompt:.0f}%" if prompt else "n/a"
+    print(json.dumps({
+        "usage": source_id, "calls": len(usage_rows), "total_tokens": total,
+        "prompt_tokens": prompt, "cached_tokens": cached, "cache_hit": hit,
+        "completion_tokens": sum(r["completion_tokens"] or 0 for r in usage_rows),
+    }, ensure_ascii=False))
+
+
 def _archive_rejected_candidate(
     *, output_dir: Path, transcript_id: str, attempt: int, candidate: dict[str, Any],
     error: DetailedExtractionValidationError,
@@ -90,6 +128,152 @@ def _archive_rejected_candidate(
         ) + "\n",
         encoding="utf-8",
     )
+
+
+def _segment_texts(source: dict[str, Any]) -> list[str]:
+    return [str(segment.get("text") or "") for segment in source.get("script") or []]
+
+
+def _window_prompt_body(source: dict[str, Any], window: ExtractionWindow) -> str:
+    """Render one window: what it may read, and what it answers for.
+
+    The two zones are labelled rather than merely ordered, because the whole
+    change rests on the model knowing the difference: it summarises when handed
+    an undifferentiated wall of text, and enumerates when told exactly which
+    sentences it is accountable for.
+    """
+
+    script = source.get("script") or []
+
+    def rows(start: int, end: int) -> str:
+        return "\n\n".join(
+            "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
+                locator=segment_locator(position),
+                index=script[position].get("index"),
+                begin=script[position].get("start_time"),
+                finish=script[position].get("end_time"),
+                text=script[position].get("text", ""),
+            )
+            for position in range(start, end)
+        )
+
+    parts = [
+        f"本窗口可见范围：{segment_locator(window.see_start)}–{segment_locator(window.see_end - 1)}",
+        f"本窗口负责范围：{segment_locator(window.fetch_start)}–{segment_locator(window.fetch_end - 1)}",
+    ]
+    if window.breadcrumb:
+        parts.append(f"所在标题层级：{window.breadcrumb}")
+    if window.see_start < window.fetch_start:
+        parts.append(
+            "\n===== 上文（只读，供理解论证依赖）=====\n"
+            + rows(window.see_start, window.fetch_start)
+        )
+    parts.append(
+        "\n===== 负责范围（必须逐句穷举）=====\n" + rows(window.fetch_start, window.fetch_end)
+    )
+    if window.fetch_end < window.see_end:
+        parts.append(
+            "\n===== 下文（只读，供理解论证依赖）=====\n" + rows(window.fetch_end, window.see_end)
+        )
+    return "\n".join(parts)
+
+
+def _window_cache_path(output_dir: Path, source_id: str, fingerprint: str, window: ExtractionWindow) -> Path:
+    return (
+        output_dir / "window-cache" / _slug(source_id) / fingerprint[:16]
+        / f"w{window.index:03d}-{window.fetch_start:04d}-{window.fetch_end:04d}.json"
+    )
+
+
+def _extract_windows(
+    *,
+    source_id: str,
+    source: dict[str, Any],
+    header: str,
+    windows: list[ExtractionWindow],
+    output_dir: Path,
+    client: Stage1OpenAIClient,
+    prompt: str,
+    fingerprint: str,
+    force: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Run every window, then reassemble one document-level response.
+
+    Each window's accepted response is cached under the run's fingerprint. A
+    source is now tens of calls rather than one, and without the cache a
+    failure in the last window throws away every window before it.
+    """
+
+    visible_by_window: list[tuple[ExtractionWindow, dict[str, Any]]] = []
+    usage_rows: list[dict[str, Any]] = []
+    window_rows: list[dict[str, Any]] = []
+    for window in windows:
+        cache_path = _window_cache_path(output_dir, source_id, fingerprint, window)
+        if cache_path.is_file() and not force:
+            response = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
+            visible_by_window.append((window, response))
+            window_rows.append({
+                "window_index": window.index, "fetch_start": window.fetch_start,
+                "fetch_end": window.fetch_end, "see_start": window.see_start,
+                "see_end": window.see_end, "attempts": 0, "cached": True,
+            })
+            continue
+        visible = {segment_locator(position) for position in range(window.see_start, window.see_end)}
+        user_input = header + _window_prompt_body(source, window)
+        last_error: DetailedExtractionValidationError | None = None
+        last_candidate: dict[str, Any] | None = None
+        response = None
+        attempts = 0
+        for attempt in range(1, VALIDATION_ATTEMPTS + 1):
+            attempts = attempt
+            feedback = ""
+            if last_error and last_candidate:
+                feedback = (
+                    "\n\n===== 上一版 JSON（必须以此为基础修复）=====\n"
+                    + json.dumps(last_candidate, ensure_ascii=False)
+                    + "\n\n===== 机械验证反馈 =====\n"
+                    + _validation_feedback(last_error, source)
+                )
+            candidate = client.generate_json(
+                prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
+            )
+            usage_rows.append({**_usage_row(client.last_usage, attempt), "window_index": window.index})
+            try:
+                validate_response(
+                    candidate, source,
+                    visible_locators=visible,
+                    require_load_bearing_relations=False,
+                )
+                response = candidate
+                break
+            except DetailedExtractionValidationError as exc:
+                last_error = exc
+                last_candidate = candidate
+                _archive_rejected_candidate(
+                    output_dir=output_dir, transcript_id=f"{source_id}#w{window.index:03d}",
+                    attempt=attempt, candidate=candidate, error=exc,
+                )
+        if response is None:
+            raise last_error or DetailedExtractionValidationError(
+                f"window {window.index} validation failed"
+            )
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps({"window": window.__dict__, "response": response}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        visible_by_window.append((window, response))
+        window_rows.append({
+            "window_index": window.index, "fetch_start": window.fetch_start,
+            "fetch_end": window.fetch_end, "see_start": window.see_start,
+            "see_end": window.see_end, "attempts": attempts, "cached": False,
+        })
+    merged = merge_window_responses(visible_by_window, _segment_texts(source))
+    merge_summary = merged.pop("merge_summary", {})
+    # The full contract, including the load_bearing rule each window was
+    # excused from, is answerable now and is applied here.
+    validate_response(merged, source)
+    return merged, usage_rows, window_rows, merge_summary
 
 
 def _anchored_fragment(
@@ -124,6 +308,9 @@ def compile_package(
     *, transcript_id: str, transcript_path: Path, transcript: dict[str, Any], raw: bytes,
     response: dict[str, Any], extraction: dict[str, Any],
     source_descriptor: dict[str, Any] | None = None,
+    usage_rows: list[dict[str, Any]] | None = None,
+    window_rows: list[dict[str, Any]] | None = None,
+    merge_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
@@ -282,133 +469,122 @@ def compile_package(
             "evidence_relation_count": len(response["evidence_relations"]),
             "claim_relation_count": len(response["claim_relations"]),
         },
+        # Per-attempt token usage, including the rejected attempts: a package
+        # that needed three tries cost three calls, and the summary counts alone
+        # never showed that.
+        "usage": list(usage_rows or []),
+        # Which slice of the source each call answered for.  Coverage is now a
+        # property of the window plan, so a package that cannot say how it was
+        # cut cannot be compared with the ledger run taken against it.
+        "windows": list(window_rows or []),
+        "merge": dict(merge_summary or {}),
     }
     return package
 
 
-def run_source(
-    source_descriptor: dict[str, Any], *, output_dir: Path, client: Stage1OpenAIClient,
-    prompt: str, reasoning_effort: str, force: bool,
+@dataclass(frozen=True)
+class WindowSettings:
+    """How the source is cut. Carried together because all three enter the fingerprint."""
+
+    fetch: int = DEFAULT_FETCH
+    context: int = DEFAULT_CONTEXT
+    snap: int = DEFAULT_SNAP
+
+
+def _run(
+    *,
+    source_id: str,
+    source: dict[str, Any],
+    raw: bytes,
+    source_path: Path,
+    header: str,
+    output_dir: Path,
+    client: Stage1OpenAIClient,
+    prompt: str,
+    reasoning_effort: str,
+    windows: WindowSettings,
+    force: bool,
+    source_descriptor: dict[str, Any] | None = None,
 ) -> tuple[str, Path]:
-    source, raw, source_path = markdown_source_document(source_descriptor)
-    source_id = str(source_descriptor["source_id"])
+    """Extract one source, whatever kind of source it is.
+
+    Transcripts and notes manuscripts differ only in how they are loaded and
+    how the prompt introduces them; they were two near-identical bodies before
+    windowing, and keeping them so would have meant maintaining the window loop
+    twice.
+    """
+
+    plan = plan_windows(
+        _segment_texts(source), fetch=windows.fetch, context=windows.context, snap=windows.snap
+    )
     identity = extraction_identity(
         source_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
         model_id=client.model, reasoning_effort=reasoning_effort,
         max_output_tokens=client.max_output_tokens,
+        window_plan=window_plan_identity(
+            plan, fetch=windows.fetch, context=windows.context, snap=windows.snap
+        ),
     )
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
     if output_path.is_file() and not force:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
-    user_input = (
-        f"来源 ID：{source_id}\n标题：{source.get('metadata', {}).get('title', source_id)}\n"
-        f"来源类型：{source_descriptor.get('source_type', 'notes_manuscript')}\n\n"
-        "以下是完整 Markdown 讲稿。S 编号是唯一定位码。请输出完整 JSON。\n\n"
-        + _transcript_for_prompt(source)
+    response, usage_rows, window_rows, merge_summary = _extract_windows(
+        source_id=source_id, source=source, header=header, windows=plan,
+        output_dir=output_dir, client=client, prompt=prompt,
+        fingerprint=identity["generation_fingerprint_sha256"], force=force,
     )
-    last_error: DetailedExtractionValidationError | None = None
-    last_candidate: dict[str, Any] | None = None
-    response = None
-    for attempt in range(1, VALIDATION_ATTEMPTS + 1):
-        feedback = ""
-        if last_error and last_candidate:
-            feedback = (
-                "\n\n===== 上一版 JSON（必须以此为基础修复）=====\n"
-                + json.dumps(last_candidate, ensure_ascii=False)
-                + "\n\n===== 机械验证反馈 =====\n"
-                + _validation_feedback(last_error, source)
-            )
-        # The source text is identical on every attempt — send it as its own cached
-        # block so retries read it instead of paying for it again.
-        candidate = client.generate_json(
-            prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
-        )
-        try:
-            validate_response(candidate, source)
-            response = candidate
-            break
-        except DetailedExtractionValidationError as exc:
-            last_error = exc
-            last_candidate = candidate
-            _archive_rejected_candidate(
-                output_dir=output_dir, transcript_id=source_id, attempt=attempt,
-                candidate=candidate, error=exc,
-            )
-    if response is None:
-        raise last_error or DetailedExtractionValidationError("detailed extraction validation failed")
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
-        source_descriptor=source_descriptor,
+        source_descriptor=source_descriptor, usage_rows=usage_rows, window_rows=window_rows,
+        merge_summary=merge_summary,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
     output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _print_usage(source_id, usage_rows)
     return "created", output_path
+
+
+def run_source(
+    source_descriptor: dict[str, Any], *, output_dir: Path, client: Stage1OpenAIClient,
+    prompt: str, reasoning_effort: str, force: bool,
+    windows: WindowSettings | None = None,
+) -> tuple[str, Path]:
+    source, raw, source_path = markdown_source_document(source_descriptor)
+    source_id = str(source_descriptor["source_id"])
+    header = (
+        f"来源 ID：{source_id}\n标题：{source.get('metadata', {}).get('title', source_id)}\n"
+        f"来源类型：{source_descriptor.get('source_type', 'notes_manuscript')}\n\n"
+        "以下是该 Markdown 讲稿的一个窗口。S 编号是全文唯一定位码，不因窗口而改变。"
+        "请只输出符合 schema 的完整 JSON。\n\n"
+    )
+    return _run(
+        source_id=source_id, source=source, raw=raw, source_path=source_path, header=header,
+        output_dir=output_dir, client=client, prompt=prompt, reasoning_effort=reasoning_effort,
+        windows=windows or WindowSettings(), force=force, source_descriptor=source_descriptor,
+    )
 
 
 def run_one(
     transcript_path: Path, *, output_dir: Path, client: Stage1OpenAIClient,
     prompt: str, reasoning_effort: str, force: bool,
+    windows: WindowSettings | None = None,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
-    identity = extraction_identity(
-        source_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
-        model_id=client.model, reasoning_effort=reasoning_effort,
-        max_output_tokens=client.max_output_tokens,
-    )
-    output_path = output_dir / f"{_slug(transcript_id)}.detailed-knowledge.json"
-    if output_path.is_file() and not force:
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
-        if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
-            return "skipped", output_path
-    user_input = (
+    header = (
         f"逐字稿 ID：{transcript_id}\n标题：{transcript.get('metadata', {}).get('title', transcript_id)}\n\n"
-        "以下是完整逐字稿。S 编号是唯一定位码。请输出完整 JSON。\n\n"
-        + _transcript_for_prompt(transcript)
+        "以下是该逐字稿的一个窗口。S 编号是全文唯一定位码，不因窗口而改变。"
+        "请只输出符合 schema 的完整 JSON。\n\n"
     )
-    last_error: DetailedExtractionValidationError | None = None
-    last_candidate: dict[str, Any] | None = None
-    response = None
-    for attempt in range(1, VALIDATION_ATTEMPTS + 1):
-        feedback = ""
-        if last_error and last_candidate:
-            feedback = (
-                "\n\n===== 上一版 JSON（必须以此为基础修复）=====\n"
-                + json.dumps(last_candidate, ensure_ascii=False)
-                + "\n\n===== 机械验证反馈 =====\n"
-                + _validation_feedback(last_error, transcript)
-            )
-        candidate = client.generate_json(
-            prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
-        )
-        try:
-            validate_response(candidate, transcript)
-            response = candidate
-            break
-        except DetailedExtractionValidationError as exc:
-            last_error = exc
-            last_candidate = candidate
-            _archive_rejected_candidate(
-                output_dir=output_dir,
-                transcript_id=transcript_id,
-                attempt=attempt,
-                candidate=candidate,
-                error=exc,
-            )
-    if response is None:
-        raise last_error or DetailedExtractionValidationError("detailed extraction validation failed")
-    package = compile_package(
-        transcript_id=transcript_id, transcript_path=transcript_path,
-        transcript=transcript, raw=raw, response=response, extraction=identity,
+    return _run(
+        source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
+        header=header, output_dir=output_dir, client=client, prompt=prompt,
+        reasoning_effort=reasoning_effort, windows=windows or WindowSettings(), force=force,
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _archive(output_path)
-    output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return "created", output_path
 
 
 def main() -> int:
@@ -421,20 +597,45 @@ def main() -> int:
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     parser.add_argument("--max-output-tokens", type=int, default=32000)
+    # The window plan is deliberately on the command line, not hard-coded: the
+    # ticket's own rule is that no wording or sizing is changed without a ledger
+    # score, and that requires running the same source at two settings.
+    parser.add_argument("--window-fetch", type=int, default=DEFAULT_FETCH,
+                        help="segments each window is answerable for")
+    parser.add_argument("--window-context", type=int, default=DEFAULT_CONTEXT,
+                        help="read-only segments shown on each side of the fetch zone")
+    parser.add_argument("--window-snap", type=int, default=DEFAULT_SNAP,
+                        help="how far a window boundary may move to land on a heading")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    windows = WindowSettings(
+        fetch=args.window_fetch, context=args.window_context, snap=args.window_snap
+    )
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
     paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
+        def window_count(source: dict[str, Any]) -> int:
+            return len(plan_windows(
+                _segment_texts(source), fetch=windows.fetch,
+                context=windows.context, snap=windows.snap,
+            ))
+
+        plans = {path.stem: window_count(_load(path)[0]) for path in paths}
+        plans.update({
+            str(row["source_id"]): window_count(markdown_source_document(row)[0])
+            for row in source_rows
+        })
         print(json.dumps({
             "transcripts": args.ids or [],
             "sources": [row["source_id"] for row in source_rows], "model": args.model,
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
+            "window_fetch": windows.fetch, "window_context": windows.context,
+            "window_snap": windows.snap, "windows_per_source": plans,
             "would_call_openai": False,
         }, ensure_ascii=False))
         return 0
@@ -450,7 +651,7 @@ def main() -> int:
         try:
             status, output = run_one(
                 path, output_dir=args.output_dir, client=client, prompt=prompt,
-                reasoning_effort=args.reasoning_effort, force=args.force,
+                reasoning_effort=args.reasoning_effort, force=args.force, windows=windows,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")
@@ -461,7 +662,7 @@ def main() -> int:
         try:
             status, output = run_source(
                 source_row, output_dir=args.output_dir, client=client, prompt=prompt,
-                reasoning_effort=args.reasoning_effort, force=args.force,
+                reasoning_effort=args.reasoning_effort, force=args.force, windows=windows,
             )
             counts[status] += 1
             print(f"{status}: {source_row['source_id']} -> {output}")

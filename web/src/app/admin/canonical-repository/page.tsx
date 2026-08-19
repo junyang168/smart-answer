@@ -71,7 +71,7 @@ export default function CanonicalRepositoryPage() {
   const reviewCount = units.filter((unit) => unit.status === "candidate").length;
 
   return <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
-    <Link href="/admin/wang" className="text-sm font-black text-indigo-700">← 返回 Wang 文庫總覽</Link>
+    <Link href="/admin/wang" className="text-sm font-black text-indigo-700">← 返回 王教授文庫總覽</Link>
     <header className="mt-4 overflow-hidden rounded-3xl bg-slate-950 p-6 text-white sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="max-w-3xl"><p className="text-sm font-black tracking-wide text-amber-300">CANONICAL REPOSITORY</p><h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">出版單元</h1><p className="mt-3 leading-7 text-slate-300">審閱舊式 canonical units、來源引用與公開索引。這裡的「發布」與馬太福音文章 runner 的 repository publication 是不同管線。</p></div>

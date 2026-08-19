@@ -149,6 +149,53 @@ def test_load_bearing_flags():
     assert FLAG_INFERENCE_BRIDGE in load_bearing_flags(bridge, [], target)
 
 
+def test_load_bearing_flags_do_not_gate_exclusion():
+    """The flags rank candidates for a reader; they must never authorise retirement.
+
+    Recorded because the opposite is an appealing design and will be proposed
+    again: tier exclusion terminality on these flags, so a flagged sentence
+    needs human approval and an unflagged one may rest at candidate. It fails
+    on the sentences that caused the real incidents. Both 母本 sentences the
+    grounding gate deleted from DRAFT-M16-002-V1 on 2026-08-18 (#64), and the
+    teaching-principle sentence #53 records as load-bearing but uncovered,
+    carry no flag at all -- they hold no original-language vocabulary, no
+    outside scripture reference, and no inference connective. Under such a
+    tier the model that missed them would retire them unreviewed, which is
+    the defect the ledger exists to close.
+
+    `load_bearing_flags` is three keyword lists and a Greek/Hebrew character
+    class. It has the recall to propose, not to gate. Exclusion terminality is
+    tiered on the reason code instead: `duplicate_of` is machine-checkable,
+    `background_only` is never delegated.
+    """
+
+    target = ScriptureRef("太", 16, 13, 20)
+
+    unflagged = (
+        # #64 -- deleted by the grounding gate as unsupported; present verbatim
+        # in notes_manuscript:16章釋經 at lines 91 and 113.
+        "值得注意的是，猶太人的君王不可兼任祭司，這兩個職分在制度上是分開的。",
+        "猶太制度中，君王與祭司的職分是嚴格分開的，不可集於一身。",
+        # The neighbouring premise, which did become a step.
+        "受膏者涵蓋先知、祭司、君王三種職分。",
+        # #53 -- in contract scope, load-bearing, never covered by a step.
+        "教師需要先將自己的程度降低到與學生相近的位置，再逐步引導提升。",
+    )
+    for sentence in unflagged:
+        assert load_bearing_flags(sentence, parse_scripture_refs(sentence), target) == [], (
+            "a sentence from a recorded incident became flag-positive; if the flags "
+            "were widened deliberately, re-check that nothing now treats them as an "
+            "authorisation boundary"
+        )
+
+    # The phroneo case does flag -- which is exactly why flag-based tiering
+    # looks like it works when tested on #45 alone.
+    phroneo = "太16:23的φρονέω被說明為關心、重視。"
+    assert FLAG_ORIGINAL_LANGUAGE in load_bearing_flags(
+        phroneo, parse_scripture_refs(phroneo), target
+    )
+
+
 # ---------------------------------------------------------------------------
 # end-to-end on a synthetic corpus
 # ---------------------------------------------------------------------------
