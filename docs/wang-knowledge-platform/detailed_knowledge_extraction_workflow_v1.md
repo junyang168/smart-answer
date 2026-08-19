@@ -55,6 +55,69 @@ flowchart LR
 
 所有模型输出默认是 `candidate`。AI 共识修正后的结果仍是 `not_human_approved`，不能因此自动公开出版。
 
+## 三点五、第一遍抽取的单位是窗口，不是整篇
+
+### 为什么改
+
+整篇一次读完，模型做的是**取舍**，不是**穷举**。太16:21–23 母本在 #86 修复之后，134 句实质散文只有 66 句进入论证层（49%）；输出用了 32,000 上限中的约 18,000，所以不是被截断，是它自己选的。同一个模型、同一份文字，逐句提问时（ledger second pass）判定第一遍漏掉的句子里有 **45%** 是真材料。
+
+差别只在提问方式：
+
+| | 整篇模式 | 窗口模式 |
+|---|---|---|
+| 范围 | 整份文件 | 约 5 段 |
+| 上下文 | 全文 | 该段前后各 5 段（只读） |
+| 指示 | 「整理出论证层」（开放） | 「这几段里每一句承载论证的都要产出」（穷举） |
+
+### 怎么切
+
+两条规则撑起整个设计：
+
+- **看得宽，只答窄**：一个窗口看见 `fetch + 2 × context` 段，但只为中间 `fetch` 段负责，并且在那几段里必须穷举。
+- **每段只有一个归属窗口**：任何一段都恰好落在一个窗口的负责范围内，所以**重复不可能产生**——去重是归属问题，不是相似度问题。
+
+重叠买到的不是更多记录，是模型看得懂手上这条记录**为什么**重要。窗口每次前进 `fetch` 段、宽 `fetch + 2 × context` 段，因此两段被同一窗口同时看见的**保证距离是 `2 × context`**。默认 `fetch=5, context=5`：15 段的视野，10 段的保证，对应全库 380 条可定位 observation → evidence_step 关系的 ≤10 段一行——講道 97.1%、母本 98.6%。
+
+### 为什么不用 `##` 小标题切
+
+试过，量过，不行：
+
+| 切法 | 太16:21–23 母本 | 16章釋經 | 段数分布 |
+|---|---:|---:|---|
+| H2 | 6% 关系被切断 | 0% | 4 段落，11–52 段，最大的一块占全文 44% |
+| H3 | **31%** | **24%** | 17 段落，1–30 段 |
+| H4 | **38%** | **32%** | 51 段落，1–9 段，其中约 20 个只有标题没有正文 |
+| 机械窗口 | 1–3% | 1–3% | 均匀 |
+
+而且这不是这两份文件的巧合。`釋經 / 神學意義 / 生活應用 / 附錄` 是**编辑骨架**，它系统性地把事实放在一个标题下、把由它推出的一步放在下一个标题下——本流程的 prompt 早就写着这件事：
+
+> 这是编辑整理稿，事实与由它推出的一步可能被编辑分置在不同标题或相隔较远的段落，也可能次序颠倒。
+
+按标题切，切的正是 `load_bearing` 观察与它所支撑的那一步之间的那条缝。
+
+另外，115 份已发布逐字稿中有 **90 份完全没有 markdown 标题**。按标题切只能覆盖母本，机械窗口两种来源都要用。
+
+标题仍然有用，只是用在别处：窗口 prompt 里带上所在的标题链（`二、從馬可福音現象回應Wrede的錯誤解經 > 附錄`），以及边界落在标题附近时把边界吸附过去，避免窗口从论证中间切开。
+
+### 合并
+
+- **ID**：每个窗口都答 `OBS001`、`E001`，合并前加窗口前缀（`W03-OBS001`），再加来源命名空间。
+- **归属**：记录属于**第一个锚点所在段落的归属窗口**；其他窗口对同一段产出的记录是冗余的，丢弃。
+- **关系改写**：指向被丢弃记录的关系，改写到覆盖同一段文字的存活记录上。
+- **无法改写时保留记录**，不是丢掉关系。近似重复的记录看得见、代价小；被切断的 observation → evidence_step 边会让一条 `load_bearing` 观察变成孤儿，而那正是这条工作线要消灭的失败。
+
+### `load_bearing` 校验移到合并之后
+
+`argument_role=load_bearing` 却没有对应关系即整次失败——这条规则**在单个窗口内无法回答**：它所推出的那一步可能在下一个窗口的负责范围里。在窗口层强制它，不会让模型更努力，只会让最省事的过关方式变成把观察改标 `background`，也就是 #86 刚堵上的那个漏洞。
+
+所以窗口层只校验机械事项（锚点逐字、ID、枚举、窗口内引用完整）；`load_bearing` 与「主张必须有证据」等整体规则在合并后的完整包上执行。
+
+### 可复现性
+
+窗口计划（`fetch`、`context`、`snap`、窗口边界）进入抽取指纹。不进指纹的话，换一个窗口大小重跑会匹配到旧指纹而被跳过，staging 里就留下一个回答着没人再问的问题的包。
+
+每个窗口的通过结果按指纹缓存。一份来源现在是几十次调用，没有缓存的话第 20 个窗口失败就等于前 19 个白跑。
+
 ## 四、程序机械闸门
 
 在任何 AI 复审之前，程序先拒绝：
@@ -132,6 +195,16 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_
   --ids 011WSR01
 ```
 
+窗口大小可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
+
+```bash
+PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
+  --ids 011WSR01 --window-fetch 5 --window-context 5 --dry-run
+
+PYTHONPATH=. .venv/bin/python -m backend.pipeline.sentence_ledger_runner \
+  --source <来源文件> --package <抽取包>
+```
+
 用 Claude 审阅指定候选包：
 
 ```bash
@@ -198,7 +271,9 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
 
 - 抽取 schema 与验证：`backend/pipeline/detailed_knowledge_extraction.py`
 - 抽取 runner：`backend/pipeline/detailed_knowledge_extraction_runner.py`
-- 抽取 prompt：`backend/pipeline/prompts/detailed_knowledge_extraction.md`
+- 窗口切分与合并：`backend/pipeline/extraction_windows.py`
+- 抽取 prompt：`backend/pipeline/prompts/detailed_knowledge_extraction.md`、`detailed_notes_knowledge_extraction.md`
+- 窗口测试：`backend/tests/test_extraction_windows.py`、`test_windowed_extraction_runner.py`
 - Claude 复审：`backend/pipeline/corpus_ai_review.py`、`corpus_ai_review_runner.py`
 - OpenAI 仲裁：`backend/pipeline/corpus_ai_adjudication.py`、`corpus_ai_adjudication_runner.py`
 - 共识补丁应用：`backend/pipeline/knowledge_consensus_applier.py`

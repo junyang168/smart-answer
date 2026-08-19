@@ -7,10 +7,13 @@ from typing import Any
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 
 # v2 closes `observation_type` to the six categories the prompt already names.
-# The schema hash feeds `response_schema_sha256`, so every extraction taken
-# under v1 keeps its own fingerprint and stays valid as the record of what
-# that run was actually asked for.
-EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v2"
+# v3 changes the unit of extraction from the document to an overlapping window
+# (#88): the response shape is untouched, but a v3 response answers for a slice
+# and only becomes a document once merged, so it must not be confused with a v2
+# one taken over the whole source.  The schema hash feeds
+# `response_schema_sha256`, so every extraction keeps its own fingerprint and
+# stays valid as the record of what that run was actually asked for.
+EXTRACTION_VERSION = "wang_detailed_knowledge_extraction_v3"
 
 CLAIM_KINDS = [
     "explicit_claim",
@@ -215,6 +218,7 @@ def extraction_identity(
     model_id: str,
     reasoning_effort: str,
     max_output_tokens: int,
+    window_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     generation = {
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
@@ -226,6 +230,12 @@ def extraction_identity(
             json.dumps(DETAILED_RESPONSE_SCHEMA, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest(),
     }
+    # How the source was cut is part of what the run was asked for.  Left out,
+    # a rerun at a different window size matches the stored fingerprint and is
+    # skipped, leaving a package in staging that answers a question nobody is
+    # asking any more.
+    if window_plan is not None:
+        generation["window_plan"] = json.loads(json.dumps(window_plan, sort_keys=True))
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -236,7 +246,30 @@ def extraction_identity(
     return full
 
 
-def validate_response(response: dict[str, Any], transcript: dict[str, Any]) -> None:
+def validate_response(
+    response: dict[str, Any],
+    transcript: dict[str, Any],
+    *,
+    visible_locators: set[str] | None = None,
+    require_load_bearing_relations: bool = True,
+) -> None:
+    """Check one response against the source it claims to come from.
+
+    Two knobs exist for windowed extraction (#88), and both default to the
+    whole-document behaviour so the merged package is still held to the full
+    contract.
+
+    `visible_locators` restricts anchors to the slice a window was shown, which
+    is the only way to catch a locator invented outside the frame.
+
+    `require_load_bearing_relations` is switched off *per window* because the
+    rule is unanswerable there: the step a load_bearing observation reasons to
+    may sit in the next window's fetch zone.  Enforced per window it does not
+    make the model try harder -- it makes the cheapest passing move relabelling
+    the observation `background`, which is exactly the loss #86 closed.  So the
+    rule moves to where it can be answered: the merged package.
+    """
+
     segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(transcript.get("script", []))}
     collections = {
         "question": (response.get("questions", []), "question_id"),
@@ -264,6 +297,9 @@ def validate_response(response: dict[str, Any], transcript: dict[str, Any]) -> N
             locator = str(anchor.get("segment_index") or "")
             if locator not in segments:
                 anchor_errors.append(f"{owner}: missing segment {locator}")
+                continue
+            if visible_locators is not None and locator not in visible_locators:
+                anchor_errors.append(f"{owner}: {locator} is outside this window")
                 continue
             segment = segments[locator]
             excerpt = str(anchor.get("verbatim_excerpt") or "")
@@ -347,7 +383,7 @@ def validate_response(response: dict[str, Any], transcript: dict[str, Any]) -> N
     # happened to Matt 16:23's phroneo: nine drafts could not use an
     # observation that had never become part of any argument.
     for row in response.get("observations", []):
-        if row.get("argument_role") != "load_bearing":
+        if not require_load_bearing_relations or row.get("argument_role") != "load_bearing":
             continue
         collect(
             row["observation_id"] in supported_by_observation,

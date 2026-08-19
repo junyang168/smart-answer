@@ -30,6 +30,7 @@ and approving an exclusion is a person's decision.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
@@ -224,6 +225,74 @@ class LedgerSummary:
     @property
     def blocks(self) -> bool:
         return self.unprocessed > 0
+
+
+#: What kind of sentence this is, structurally. The categories exist because a
+#: single coverage number is not a target anyone can act on: markdown headings
+#: are 51 of the 208 sentences in the 太16:21–23 母本 and are represented 0% of
+#: the time by design, so they drag the total down while telling nobody
+#: anything. `prose` is the denominator that matters, and #88's acceptance is
+#: written against it -- which it could not be while the split was recomputed
+#: by hand for each report.
+HEADING = "heading"
+SCRIPTURE_QUOTATION = "scripture_quotation"
+LIST_ITEM = "list_item"
+FRAGMENT = "fragment"
+PROSE = "prose"
+SENTENCE_CATEGORIES = (PROSE, HEADING, SCRIPTURE_QUOTATION, LIST_ITEM, FRAGMENT)
+
+#: Below this many characters a prose sentence is a lead-in, not a claim about
+#: anything -- "太 16:21 記載：" and its kin. Structural, not a quality judgement.
+FRAGMENT_MAX_LENGTH = 12
+
+_HEADING_PATTERN = re.compile(r"^#{1,6}\s")
+_LIST_PATTERN = re.compile(r"^([-*+]|\d+[.)])\s")
+
+
+def classify_sentence(segment_text: str, sentence_text: str) -> str:
+    """Categorise one sentence by the block it came from, then by its own shape.
+
+    Block first: a scripture quotation split across two sentences is still a
+    quotation in both halves, and a heading is a heading however it punctuates.
+    """
+
+    head = str(segment_text).lstrip()
+    if _HEADING_PATTERN.match(head):
+        return HEADING
+    if head.startswith(">"):
+        return SCRIPTURE_QUOTATION
+    if _LIST_PATTERN.match(head):
+        return LIST_ITEM
+    if len(str(sentence_text).strip()) < FRAGMENT_MAX_LENGTH:
+        return FRAGMENT
+    return PROSE
+
+
+def summarise_by_category(
+    inventory: Sequence[SentenceInventoryRecord],
+    rows: Sequence[SentenceReconciliationRecord],
+    segments: dict[int, str],
+) -> dict[str, LedgerSummary]:
+    """Per-category counts, so a coverage change can be read where it happened."""
+
+    by_sentence = {row.sentence_id: row for row in rows}
+    summaries = {category: LedgerSummary() for category in SENTENCE_CATEGORIES}
+    for sentence in inventory:
+        row = by_sentence.get(sentence.sentence_id)
+        if row is None:
+            continue
+        category = classify_sentence(segments.get(sentence.segment_index, ""), sentence.text)
+        summary = summaries[category]
+        if row.status == REPRESENTED:
+            summary.represented += 1
+        elif row.status == EXCLUDED:
+            summary.excluded += 1
+        else:
+            summary.unprocessed += 1
+            summary.unprocessed_ids.append(sentence.sentence_id)
+            if row.triage_flags:
+                summary.unprocessed_flagged += 1
+    return summaries
 
 
 def summarise(rows: Sequence[SentenceReconciliationRecord]) -> LedgerSummary:

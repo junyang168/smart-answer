@@ -32,6 +32,7 @@ from backend.pipeline.sentence_ledger import (
     build_inventory,
     reconcile,
     summarise,
+    summarise_by_category,
 )
 
 #: Collections whose records can be placed on the source text. `claims` is not
@@ -108,6 +109,7 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
 
     rows = reconcile(inventory, spans, target=target, reconciled_against=package_path.name)
     summary = summarise(rows)
+    categories = summarise_by_category(inventory, rows, dict(segments))
     return {
         "source_id": source_id,
         "segments": len(segments),
@@ -119,6 +121,21 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
         "unprocessed": summary.unprocessed,
         "unprocessed_flagged": summary.unprocessed_flagged,
         "blocks": summary.blocks,
+        # The total is not the score. Headings are represented 0% of the time
+        # by design and are a quarter of the sentences, so a change in prose
+        # coverage is invisible in the total it is averaged into.
+        "by_category": {
+            name: {
+                "total": category.total,
+                "represented": category.represented,
+                "excluded": category.excluded,
+                "unprocessed": category.unprocessed,
+                "represented_pct": (
+                    round(100 * category.represented / category.total, 1) if category.total else None
+                ),
+            }
+            for name, category in categories.items()
+        },
     }
 
 
