@@ -32,3 +32,33 @@ produces a release that builds cleanly and then cannot start.
 Every pull request declares its tickets with `Closes #N` before it merges.
 GitHub will not create that link afterwards, and `scripts/deployed-issues.sh`
 reports only real links, so a ticket connected after the fact is invisible.
+
+# Tracking work
+
+Open the ticket before you start, not after the code exists.
+
+```bash
+scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md
+scripts/ticket.sh --ops --title "OPS-12 — ..." --body-file card.md
+```
+
+Use the script rather than `gh issue create`. A card is three things — a repo
+issue, a row on the **Wang Knowledge Platform** board, and a sub-issue link to
+its epic — and `gh issue create` writes only the first. Five existing cards
+(#81, #83, #84, #85, #88) sat off the board because someone stopped after step
+one; the board is where this work is read, so a card that is missing from it
+does not exist to the person tracking it.
+
+Epics are E01–E10, issues #3–#12. `--ops` is deliberately different: operations
+tickets carry the `infrastructure` label, stay off the board, and belong to no
+epic.
+
+When the work is done: commit, open a pull request declaring `Closes #N`
+**before** it merges, and set the card to Done on the board once it lands. The
+`Closes` line has to exist before the merge — see the rule above — and the board
+status is not updated by anything automatic.
+
+`.claude/settings.json` carries two hooks that put these rules in front of an
+agent at the start of a task and warn when one stops with work uncommitted.
+They are reminders, not gates: choosing the epic and writing the card are
+judgements, and no hook can make them.

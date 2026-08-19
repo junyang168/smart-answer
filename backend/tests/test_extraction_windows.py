@@ -97,9 +97,11 @@ def test_narrow_context_leaves_distant_pairs_uncovered() -> None:
     assert not any(window.sees(24) and window.sees(35) for window in windows)
 
 
-def test_boundary_snaps_onto_a_nearby_heading() -> None:
+def test_boundary_snaps_onto_a_nearby_subheading() -> None:
+    """A `###` moves a boundary; it does not close a unit. `##` does the latter."""
+
     segments = _segments(20)
-    segments[6] = "## 二、从马可福音现象回应"
+    segments[6] = "### 神學意義"
     windows = plan_windows(segments, fetch=5, context=5, snap=2)
     assert [window.fetch_start for window in windows][:3] == [0, 6, 11]
 
@@ -111,6 +113,46 @@ def test_snapping_never_drops_or_duplicates_a_segment() -> None:
     windows = plan_windows(segments, fetch=5, context=5, snap=2)
     owned = [position for window in windows for position in range(window.fetch_start, window.fetch_end)]
     assert owned == list(range(30))
+
+
+def test_a_window_never_spans_a_composition_unit() -> None:
+    """`##` is where the manuscript was generated in separate passes.
+
+    `stage1_units.json` for the 太16 母本 names four units and they are its four
+    `##` sections. Text from the neighbouring unit is not context for this one:
+    it is a different argument written from different source lines.
+    """
+
+    segments = _segments(24)
+    segments[0] = "## 一、彌賽亞秘密理論"
+    segments[9] = "## 二、從馬可福音現象回應"
+    segments[18] = "## 三、捨己與背十字架"
+    windows = plan_windows(segments, fetch=5, context=5, snap=0, barrier_level=2)
+    for window in windows:
+        for boundary in (9, 18):
+            assert not (window.see_start < boundary < window.see_end), (
+                f"window {window.index} reads across the unit boundary at {boundary}"
+            )
+    owned = [p for w in windows for p in range(w.fetch_start, w.fetch_end)]
+    assert owned == list(range(24)), "units must still tile the whole source"
+
+
+def test_subheadings_are_not_barriers() -> None:
+    """Long-range arguments cross ### 100% of the time; only ## holds."""
+
+    segments = _segments(20)
+    segments[0] = "## 一、大标题"
+    segments[7] = "### 神學意義"
+    windows = plan_windows(segments, fetch=5, context=5, snap=0, barrier_level=2)
+    assert any(window.see_start < 7 < window.see_end for window in windows)
+
+
+def test_barrier_is_inert_on_a_source_without_headings() -> None:
+    """90 of 115 published transcripts have none; they must window as before."""
+
+    segments = _segments(30)
+    assert plan_windows(segments, fetch=5, context=5, snap=0, barrier_level=2) == \
+        plan_windows(segments, fetch=5, context=5, snap=0, barrier_level=None)
 
 
 def test_breadcrumb_reports_the_enclosing_heading_chain() -> None:

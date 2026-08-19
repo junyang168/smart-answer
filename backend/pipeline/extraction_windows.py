@@ -28,14 +28,26 @@ Dropping context to 3 narrows the frame to 11 and the guarantee to 6, and costs
 roughly ten points of relation coverage for a saving of nothing -- the frame is
 read once and the source text is the cheap part of the call.
 
-Markdown headings are deliberately *not* the cut. Placing the existing v2
-relations back onto the source shows that splitting at `###` severs 24–31% of
-them and at `####` 32–38%, against 1–3% for mechanical windows -- the editorial
-skeleton (釋經 / 神學意義 / 生活應用 / 附錄) systematically files the fact under
-one heading and the inference drawn from it under the next, which the notes
-prompt already says in so many words. Headings are used here for what they are
-good for: labelling a window with where it sits, and snapping a boundary that
-lands near one so windows do not open mid-argument.
+Headings do two different jobs, and only one of them is a boundary.
+
+`##` is a *composition unit*. `stage1_units.json` for the 太16 母本 names four
+units and they are exactly its four `##` sections, each generated in its own
+pass over its own `start_line`/`end_line` range. Measured on the windowed
+package, 0 of 264 in-window relations and 1 of 20 long-distance relations cross
+one. So a window never spans a `##`, and its context clips to the unit: text
+from the neighbouring unit is not background for this argument, it is a
+different argument that happens to sit next to it.
+
+`###` and below are editorial structure *inside* a unit -- 釋經 / 神學意義 /
+生活應用 / 附錄 -- and they are not boundaries at all. Every one of those 20
+long-distance relations crosses a `###`, because the skeleton files the fact
+under 釋經 and the inference drawn from it under 神學意義, which the notes
+prompt already says in so many words. Cutting there would sever exactly the
+edges this work exists to keep. They are used instead to label a window with
+where it sits, and to pull a boundary that lands near one onto it.
+
+Sources with no headings -- 90 of 115 published transcripts -- have one unit and
+window purely mechanically.
 """
 
 from __future__ import annotations
@@ -55,6 +67,14 @@ DEFAULT_FETCH = 5
 DEFAULT_CONTEXT = 5
 #: How far a fetch boundary may move to land on a heading instead of mid-prose.
 DEFAULT_SNAP = 2
+#: Headings at or above this level are hard barriers: a window never spans one.
+#: `##` is not a formatting choice in these manuscripts -- `stage1_units.json`
+#: shows the 太16 母本's four `##` sections are its four generation units, each
+#: composed independently from its own source lines. Measured on the windowed
+#: package, 0 of 264 in-window relations and 1 of 20 long-distance relations
+#: cross a `##`, while every long-distance relation crosses a `###`. So the unit
+#: is a real edge and the editorial subheadings inside it are not.
+DEFAULT_BARRIER_LEVEL = 2
 
 
 @dataclass(frozen=True)
@@ -122,6 +142,27 @@ def breadcrumb_for(segments: Sequence[str], position: int) -> str:
     return " > ".join(chain[depth] for depth in sorted(chain))
 
 
+def unit_spans(segments: Sequence[str], barrier_level: int | None) -> list[tuple[int, int]]:
+    """Split the source at its composition units, or return it whole.
+
+    Sources with no headings -- 90 of 115 published transcripts -- yield one
+    span, so windowing behaves exactly as it does without barriers.
+    """
+
+    if not barrier_level:
+        return [(0, len(segments))]
+    starts = [0]
+    for position, text in enumerate(segments):
+        level = heading_level(text)
+        if level is not None and level <= barrier_level and position > starts[-1]:
+            starts.append(position)
+    return [
+        (start, end)
+        for start, end in zip(starts, starts[1:] + [len(segments)])
+        if end > start
+    ]
+
+
 def _snapped_boundaries(
     segments: Sequence[str], *, fetch: int, snap: int
 ) -> list[int]:
@@ -159,8 +200,16 @@ def plan_windows(
     fetch: int = DEFAULT_FETCH,
     context: int = DEFAULT_CONTEXT,
     snap: int = DEFAULT_SNAP,
+    barrier_level: int | None = DEFAULT_BARRIER_LEVEL,
 ) -> list[ExtractionWindow]:
-    """Partition the source into fetch zones and give each one its reading frame."""
+    """Partition the source into fetch zones and give each one its reading frame.
+
+    Fetch zones tile each composition unit separately and context clips to the
+    unit, so a window is never shown text that was written by a different pass
+    over different source lines. Material from the neighbouring unit is not
+    background for this one; it is a different argument that happens to sit
+    next to it.
+    """
 
     if fetch < 1:
         raise ValueError("fetch must be at least 1")
@@ -168,25 +217,29 @@ def plan_windows(
         raise ValueError("context cannot be negative")
     if not segments:
         return []
-    boundaries = _snapped_boundaries(segments, fetch=fetch, snap=snap)
     windows: list[ExtractionWindow] = []
-    for index in range(len(boundaries) - 1):
-        fetch_start, fetch_end = boundaries[index], boundaries[index + 1]
-        windows.append(
-            ExtractionWindow(
-                index=index + 1,
-                see_start=max(fetch_start - context, 0),
-                see_end=min(fetch_end + context, len(segments)),
-                fetch_start=fetch_start,
-                fetch_end=fetch_end,
-                breadcrumb=breadcrumb_for(segments, fetch_start),
+    for unit_start, unit_end in unit_spans(segments, barrier_level):
+        unit = segments[unit_start:unit_end]
+        boundaries = _snapped_boundaries(unit, fetch=fetch, snap=snap)
+        for index in range(len(boundaries) - 1):
+            fetch_start = unit_start + boundaries[index]
+            fetch_end = unit_start + boundaries[index + 1]
+            windows.append(
+                ExtractionWindow(
+                    index=len(windows) + 1,
+                    see_start=max(fetch_start - context, unit_start),
+                    see_end=min(fetch_end + context, unit_end),
+                    fetch_start=fetch_start,
+                    fetch_end=fetch_end,
+                    breadcrumb=breadcrumb_for(segments, fetch_start),
+                )
             )
-        )
     return windows
 
 
 def window_plan_identity(
-    windows: Sequence[ExtractionWindow], *, fetch: int, context: int, snap: int
+    windows: Sequence[ExtractionWindow], *, fetch: int, context: int, snap: int,
+    barrier_level: int | None = DEFAULT_BARRIER_LEVEL,
 ) -> dict[str, Any]:
     """The part of the window plan that has to enter the extraction fingerprint.
 
@@ -199,6 +252,7 @@ def window_plan_identity(
         "fetch": fetch,
         "context": context,
         "snap": snap,
+        "barrier_level": barrier_level,
         "window_count": len(windows),
         "fetch_boundaries": [window.fetch_start for window in windows],
     }
