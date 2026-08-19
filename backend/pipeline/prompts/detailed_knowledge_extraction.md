@@ -58,6 +58,14 @@
 - 不得创造跨讲道重复、延伸或思想发展关系；本阶段只处理当前一篇。
 - 所有 claim 都是 `candidate`，AI 无权批准。
 
+关系表的边界（机械校验，写错即整次失败）：
+
+- `evidence_relations` 的 `to_id` **必须**是 evidence_step。`from_id` 可以是 observation 或 evidence_step。
+- **证据与主张的连接不用关系表达**：用 claim 的 `evidence_step_ids` 和 evidence_step 的 `produced_claim_ids`。不得建立 evidence_step → claim 的 evidence_relation。
+- **反驳某个 position 也不用关系表达**：用 claim 的 `opposed_position_ids`。
+- 主张之间的关系放在 `claim_relations`，两端都必须是 claim。
+- `support_eligibility=eligible_candidate` 只能出现在 `speaker=professor` 且 `stance=asserted` 的 evidence_step 上；其余一律 `context_only` 或 `withheld_unreviewed`。
+
 锚点规则：
 
 - 每个 question、position、observation、evidence_step 至少一个 anchor。

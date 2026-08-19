@@ -112,11 +112,48 @@ flowchart LR
 
 所以窗口层只校验机械事项（锚点逐字、ID、枚举、窗口内引用完整）；`load_bearing` 与「主张必须有证据」等整体规则在合并后的完整包上执行。
 
+### 跨窗口关系：把窗口看不见的那几条买回来
+
+窗口保证 10 段。太16:21–23 母本的整篇模式产出过 7 条跨度 11–21 段的关系，每一条都是编辑骨架的那道缝：事实在「釋經」，由它推出的一步在「神學意義」，中间隔着「附錄」。
+
+```
+span 16  可8:27-33 彼得宣认后耶稣立刻预告受苦  →  门徒缺少的是对弥赛亚性质的认识
+span 21  马可反复呈现的四项现象              →  太16:20 保密命令要放在事工处境中解释
+```
+
+所以合并之后再跑一次 `cross_window_relation_runner`。它**不重读原文**：此时每条记录都已经是「一句话 + 一个段号」，问题的宽度是 374 条短陈述，不是一份讲稿。两条约束让它不会变成第二次抽取：
+
+- 只能在**清单里已有的对象之间**建立关系。它看不到原文，所以无从引用，也无从新增材料。
+- 只能提出**跨度大于窗口保证**的关系。窗口能看见的那些是抽取的职责；在这里重提，等于让一个没有锚点的模型去翻案一个有锚点的判断。
+
+最小跨度**从包里的 window_plan 推出**（`2 × context + 1`），不另外配置：窗口调宽，这一阶段自动收窄，没有第二个地方需要记得改。
+
+实测在太16:21–23 母本上补回 11 条证据关系与 9 条主张关系，整篇模式那 7 条的内容全部涵盖。
+
 ### 可复现性
 
 窗口计划（`fetch`、`context`、`snap`、窗口边界）进入抽取指纹。不进指纹的话，换一个窗口大小重跑会匹配到旧指纹而被跳过，staging 里就留下一个回答着没人再问的问题的包。
 
 每个窗口的通过结果按指纹缓存。一份来源现在是几十次调用，没有缓存的话第 20 个窗口失败就等于前 19 个白跑。
+
+### 实测：太16:21–23 母本
+
+```
+                        整篇模式(v2)      窗口模式(v3)
+实质散文                 66/132  50.0%    130/132  98.5%
+经文引用区块              9/19   47.4%     16/19   84.2%
+全部句子                 75/208  36.1%    148/208  71.2%
+
+observation                 24                125
+evidence_step               29                142
+claim                       23                107
+evidence relation           32                208   (含跨窗口补回 11)
+claim relation              16                 76   (含跨窗口补回  9)
+```
+
+markdown 标题 51 句维持 0%，这是设计使然，不是缺口——它们本来就不该进入分母。
+
+代价：24 个窗口、38 次调用、358k tokens（prompt cache 命中 47%），约 25 分钟。整篇模式是 1 次调用。这是本改动的真实成本，不要在别处假装它不存在。
 
 ## 四、程序机械闸门
 
@@ -205,6 +242,13 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.sentence_ledger_runner \
   --source <来源文件> --package <抽取包>
 ```
 
+合并之后补回跨窗口关系（最小跨度从包里的 window_plan 推出，通常不必指定）：
+
+```bash
+PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_window_relation_runner \
+  --package <抽取包> --output <补关系后的包>
+```
+
 用 Claude 审阅指定候选包：
 
 ```bash
@@ -272,8 +316,10 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
 - 抽取 schema 与验证：`backend/pipeline/detailed_knowledge_extraction.py`
 - 抽取 runner：`backend/pipeline/detailed_knowledge_extraction_runner.py`
 - 窗口切分与合并：`backend/pipeline/extraction_windows.py`
+- 跨窗口关系：`backend/pipeline/cross_window_relation.py`、`cross_window_relation_runner.py`
+- 跨窗口关系 prompt：`backend/pipeline/prompts/cross_window_relation_discovery.md`
 - 抽取 prompt：`backend/pipeline/prompts/detailed_knowledge_extraction.md`、`detailed_notes_knowledge_extraction.md`
-- 窗口测试：`backend/tests/test_extraction_windows.py`、`test_windowed_extraction_runner.py`
+- 窗口测试：`backend/tests/test_extraction_windows.py`、`test_windowed_extraction_runner.py`、`test_cross_window_relation.py`
 - Claude 复审：`backend/pipeline/corpus_ai_review.py`、`corpus_ai_review_runner.py`
 - OpenAI 仲裁：`backend/pipeline/corpus_ai_adjudication.py`、`corpus_ai_adjudication_runner.py`
 - 共识补丁应用：`backend/pipeline/knowledge_consensus_applier.py`

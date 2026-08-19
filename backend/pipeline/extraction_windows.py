@@ -57,10 +57,6 @@ DEFAULT_CONTEXT = 5
 DEFAULT_SNAP = 2
 
 
-class WindowMergeError(ValueError):
-    """Raised when window responses cannot be reassembled without losing structure."""
-
-
 @dataclass(frozen=True)
 class ExtractionWindow:
     """One unit of extraction: what it may read, and what it is answerable for.
@@ -75,10 +71,6 @@ class ExtractionWindow:
     fetch_start: int
     fetch_end: int
     breadcrumb: str
-
-    @property
-    def fetch_locators(self) -> list[str]:
-        return [segment_locator(position) for position in range(self.fetch_start, self.fetch_end)]
 
     def sees(self, position: int) -> bool:
         return self.see_start <= position < self.see_end
@@ -440,6 +432,19 @@ def merge_window_responses(
         collection: [kept[record_id] for record_id in kept_by_collection[collection]]
         for collection in ANCHORED_COLLECTIONS
     }
+    # What the merge decided, in the package rather than in nobody's head. A
+    # rise in `promoted` means windows are disagreeing about the same text; a
+    # rise in `dropped_unreferenced` means the overlap is producing work that is
+    # thrown away. Neither is visible from the record counts alone.
+    promoted = sum(1 for row in kept.values() if row.get("window_promoted"))
+    merge_summary = {
+        "windows": len(window_responses),
+        "records_kept": len(kept),
+        "records_promoted": promoted,
+        "records_dropped_as_duplicate": len(orphaned) - promoted,
+        "claims_dropped_as_duplicate": len(orphan_claims),
+        "relations_rewritten": sum(1 for source, target in remap.items() if source != target),
+    }
     for collection in ANCHORED_COLLECTIONS:
         for row in merged[collection]:
             row.pop("window_index", None)
@@ -457,4 +462,5 @@ def merge_window_responses(
     merged["claims"] = surviving_claims
     merged["evidence_relations"] = merged_relations["evidence_relations"]
     merged["claim_relations"] = merged_relations["claim_relations"]
+    merged["merge_summary"] = merge_summary
     return merged

@@ -196,7 +196,7 @@ def _extract_windows(
     prompt: str,
     fingerprint: str,
     force: bool,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Run every window, then reassemble one document-level response.
 
     Each window's accepted response is cached under the run's fingerprint. A
@@ -269,10 +269,11 @@ def _extract_windows(
             "see_end": window.see_end, "attempts": attempts, "cached": False,
         })
     merged = merge_window_responses(visible_by_window, _segment_texts(source))
+    merge_summary = merged.pop("merge_summary", {})
     # The full contract, including the load_bearing rule each window was
     # excused from, is answerable now and is applied here.
     validate_response(merged, source)
-    return merged, usage_rows, window_rows
+    return merged, usage_rows, window_rows, merge_summary
 
 
 def _anchored_fragment(
@@ -309,6 +310,7 @@ def compile_package(
     source_descriptor: dict[str, Any] | None = None,
     usage_rows: list[dict[str, Any]] | None = None,
     window_rows: list[dict[str, Any]] | None = None,
+    merge_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
@@ -475,6 +477,7 @@ def compile_package(
         # property of the window plan, so a package that cannot say how it was
         # cut cannot be compared with the ledger run taken against it.
         "windows": list(window_rows or []),
+        "merge": dict(merge_summary or {}),
     }
     return package
 
@@ -527,7 +530,7 @@ def _run(
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
-    response, usage_rows, window_rows = _extract_windows(
+    response, usage_rows, window_rows, merge_summary = _extract_windows(
         source_id=source_id, source=source, header=header, windows=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
@@ -536,6 +539,7 @@ def _run(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
         source_descriptor=source_descriptor, usage_rows=usage_rows, window_rows=window_rows,
+        merge_summary=merge_summary,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)

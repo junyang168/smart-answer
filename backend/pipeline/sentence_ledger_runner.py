@@ -83,6 +83,20 @@ def place_fragments(
             for index, text in segments
             if excerpt in text
         ]
+        if len(hits) > 1:
+            # A phrase the manuscript genuinely repeats -- the 太16 母本 states
+            # the 該撒利亞腓立比 geography under both 釋經 and 附錄. Choosing
+            # between occurrences by similarity is exactly the guess this tool
+            # refuses, but `paragraph_key` is not a guess: extraction validated
+            # that the excerpt is verbatim in that segment before writing the
+            # fragment. Use it, and stay unplaced when it does not resolve.
+            #
+            # Markdown sources only. Transcript segments are keyed by their own
+            # `index`, which is not the positional locator anchors use, so the
+            # filter finds nothing there and the fragment stays unplaced.
+            claimed = str(fragment.get("paragraph_key") or "")
+            wanted = int(claimed[1:]) if claimed[1:].isdigit() else None
+            hits = [hit for hit in hits if wanted is not None and hit[0] == wanted] or hits
         if len(hits) != 1:
             unplaced.append(fragment_id)
             continue

@@ -196,6 +196,23 @@ def test_relation_into_the_context_zone_is_rewritten_onto_the_surviving_record()
     assert merged["evidence_relations"][0]["to_id"] == "W02-E001"
 
 
+def test_merge_reports_what_it_threw_away() -> None:
+    """A silent merge is a merge nobody can audit."""
+
+    segments = _segments(20)
+    first = ExtractionWindow(index=1, see_start=0, see_end=15, fetch_start=0, fetch_end=5, breadcrumb="")
+    second = ExtractionWindow(index=2, see_start=0, see_end=20, fetch_start=5, fetch_end=10, breadcrumb="")
+    left, right = _empty_response(), _empty_response()
+    left["observations"] = [_observation("OBS001", "S0006", "第5段")]
+    right["observations"] = [_observation("OBS001", "S0006", "第5段的正文")]
+    merged = merge_window_responses([(first, left), (second, right)], segments)
+    summary = merged["merge_summary"]
+    assert summary["windows"] == 2
+    assert summary["records_kept"] == 1
+    assert summary["records_dropped_as_duplicate"] == 1
+    assert summary["records_promoted"] == 0
+
+
 def test_unmatched_relation_endpoint_is_promoted_rather_than_severed() -> None:
     """A near-duplicate record is cheap; an orphaned load_bearing observation is not."""
 
