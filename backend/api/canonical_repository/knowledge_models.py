@@ -288,6 +288,79 @@ class TensionRecord(EvolvingKnowledgeRecord):
     description: str = Field(default="", validation_alias=AliasChoices("description", "note"))
 
 
+class SentenceInventoryRecord(EvolvingKnowledgeRecord):
+    """One sentence of a source, addressable and stable across revisions.
+
+    The ledger's denominator. It is derived from the source text alone -- no
+    model, no claim layer -- because a count taken from what extraction
+    produced can never show what extraction missed.
+
+    `sentence_sha256` rather than an ordinal is what makes the ledger survive
+    editing: revise the manuscript and only the sentences whose text actually
+    changed lose their identity, while an ordinal key would shift on any
+    insertion and orphan every downstream verdict after it. `ordinal` only
+    disambiguates a sentence repeated verbatim inside one segment.
+    """
+
+    sentence_id: str
+    source_id: str
+    segment_index: int
+    ordinal: int = 0
+    text: str
+    sentence_sha256: str
+    char_start: int
+    char_end: int
+    source_sha256: Optional[str] = None
+
+
+class SentenceReconciliationRecord(EvolvingKnowledgeRecord):
+    """Whether one source sentence reached the argument layer, and how.
+
+    `match_kind` is separate from `status` on purpose. Only `exact_span` may
+    conclude `represented`: a similarity score that says a claim "mostly
+    resembles" this sentence is the same silent loss the ledger exists to
+    close, rebuilt inside the instrument. `proposed_link` records a candidate
+    for a human or the second pass, and never settles anything.
+
+    `triage_flags` carries the `load_bearing_flags()` signals for ranking a
+    review queue. They rank; they do not authorise -- both sentences the
+    grounding gate deleted in #64 are flag-negative.
+    """
+
+    reconciliation_id: str
+    sentence_id: str
+    source_id: str
+    status: str = "unprocessed"
+    match_kind: str = "none"
+    represented_by: list[str] = Field(default_factory=list)
+    exclusion_id: Optional[str] = None
+    triage_flags: list[str] = Field(default_factory=list)
+    reconciled_against: Optional[str] = None
+
+
+class ExclusionRecord(EvolvingKnowledgeRecord):
+    """A recorded decision that one sentence carries no argument.
+
+    This is a record and not an array element in some payload because #68's
+    `RequiredArgumentStep` was the latter: a plain model with no review status,
+    no revision and no id, which therefore could not be reviewed, revised or
+    retired, and rotted for want of an owner.
+
+    Terminality depends on `reason_code`, not on how important the sentence
+    looks. `duplicate_of` is checkable without judgement, so it needs no
+    human. `background_only` is the interpretive call that failed in #64 and
+    #53 and is never delegated, however unremarkable the sentence appears.
+    """
+
+    exclusion_id: str
+    sentence_id: str
+    source_id: str
+    reason_code: str
+    rationale: str = ""
+    duplicate_of_record_id: Optional[str] = None
+    decided_by: Optional[str] = None
+
+
 class KnowledgePackageManifest(BaseModel):
     schema_version: str = "canonical_knowledge_package_manifest_v1"
     package_id: str
