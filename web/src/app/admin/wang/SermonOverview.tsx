@@ -53,9 +53,13 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
   const n = (key: string) => (typeof quality[key] === "number" ? (quality[key] as number) : null);
   if (stage === "extraction") {
     const pct = n("prose_pct");
-    const unprocessed = n("unprocessed");
     if (pct === null) return null;
-    return unprocessed ? `${pct}% · ${unprocessed} 未答` : `${pct}%`;
+    // Only prose carries argument, and only prose shares the percentage's
+    // denominator. The whole-source count belongs in the tooltip: pairing
+    // "97.7%" (129 of 132 prose) with "64" (of all 208 sentences, 51 of them
+    // headings) read as a contradiction and made the good number look bad.
+    const proseLeft = n("prose_unprocessed");
+    return proseLeft ? `${pct}% · 正文 ${proseLeft} 未交代` : `${pct}%`;
   }
   if (stage === "review") {
     const reviewed = n("ai_reviewed");
@@ -81,9 +85,39 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
   return null;
 }
 
+/** The whole-source picture, for the tooltip: which categories are unaccounted for. */
+function coverageDetail(stage: StageId, quality: Record<string, unknown> | null): string | null {
+  if (stage !== "extraction" || !quality) return null;
+  const byCategory = quality.unprocessed_by_category as Record<string, number> | undefined;
+  if (!byCategory || !Object.keys(byCategory).length) return null;
+  const labels: Record<string, string> = {
+    prose: "正文",
+    heading: "標題",
+    scripture_quotation: "經文引用",
+    list_item: "條列",
+    fragment: "片段",
+  };
+  const parts = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `${labels[name] ?? name} ${count}`);
+  const total = quality.unprocessed as number | undefined;
+  const recorded = quality.exclusions_recorded as number | undefined;
+  const approved = quality.exclusions_terminal as number | undefined;
+  const lines = [`全篇 ${total} 句沒有進入論證：${parts.join("、")}`];
+  if (recorded) {
+    lines.push(
+      approved
+        ? `其中 ${recorded} 句有理由，${approved} 句已經人工核可`
+        : `其中 ${recorded} 句模型都寫了理由，但還沒有人核可`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const quality = qualityLabel(stage, cell.quality);
   const tip = [
+    coverageDetail(stage, cell.quality),
     cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
     cell.store?.updated_at ? `主庫更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
     cell.run?.started_at ? `最後一次：${new Date(cell.run.started_at).toLocaleString("zh-TW")}` : null,

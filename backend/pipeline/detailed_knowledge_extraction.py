@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -535,6 +536,16 @@ def validate_response(
         )
 
 
+#: A heading carries its own `##` and a bullet its own marker, so the sentence
+#: text alone settles it -- `AuditedSentence` does not carry the block it came
+#: from, and for these two categories it does not need to.
+_STRUCTURAL_MARKUP = re.compile(r"^\s*(#{1,6}\s|([-*+]|\d+[.)])\s)")
+
+
+def _is_structural_markup(text: str) -> bool:
+    return bool(_STRUCTURAL_MARKUP.match(str(text or "")))
+
+
 def exclusions_from_audit(
     response: dict[str, Any],
     sentences: Sequence[AuditedSentence],
@@ -549,11 +560,16 @@ def exclusions_from_audit(
     母本 reached no reader, and the ledger showed those sentences as
     `unprocessed` -- "nobody answered" -- when in fact somebody had.
 
-    Nothing here is approved. `decided_by` stays empty precisely because the
-    model that produced the verdict is not a person, and `is_terminal` will
-    keep every code but `duplicate_of` out of the terminal column until one
+    Nothing interpretive is approved here. `decided_by` stays empty precisely
+    because the model that produced the verdict is not a person, and
+    `is_terminal` keeps the judgement codes out of the terminal column until one
     looks. The point is to separate "answered, awaiting review" from "not
     answered at all", which are the same colour today.
+
+    The exception is the source's own markup. A heading or a list bullet is
+    identified by the same regex the ledger categorises with, so calling it
+    structural is a check rather than an opinion, and it does not go in a queue
+    for a person to confirm.
     """
 
     by_id = {row.sentence_id: row for row in sentences}
@@ -578,6 +594,12 @@ def exclusions_from_audit(
         if sentence is None:
             continue
         ordinal = ordinals[sentence.sentence_id]
+        # The model reaches for `not_exegesis` on section titles, which is true
+        # but files them for human approval alongside real prose. Structure is
+        # decided mechanically, so name it as such.
+        reason_code = entry.get("reason_code")
+        if _is_structural_markup(sentence.text):
+            reason_code = "structural_markup"
         identifier = ledger_sentence_id(
             source_id, int(sentence.segment_index[1:]), sentence.text, ordinal
         )
@@ -587,7 +609,7 @@ def exclusions_from_audit(
             "source_id": source_id,
             "segment_index": sentence.segment_index,
             "text": sentence.text,
-            "reason_code": entry.get("reason_code"),
+            "reason_code": reason_code,
             "rationale": str(entry.get("reason") or ""),
             "duplicate_of_record_id": None,
             "decided_by": None,

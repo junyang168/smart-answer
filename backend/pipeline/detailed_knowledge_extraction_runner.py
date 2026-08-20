@@ -700,7 +700,8 @@ def _coverage_quality(coverage: dict[str, Any]) -> dict[str, Any]:
 
     if not coverage.get("available"):
         return {"available": False, "reason": coverage.get("reason")}
-    prose = (coverage.get("by_category") or {}).get("prose") or {}
+    categories = coverage.get("by_category") or {}
+    prose = categories.get("prose") or {}
     return {
         "available": True,
         "sentences": coverage.get("sentences"),
@@ -710,6 +711,21 @@ def _coverage_quality(coverage: dict[str, Any]) -> dict[str, Any]:
         "prose_represented": prose.get("represented"),
         "prose_total": prose.get("total"),
         "prose_pct": prose.get("represented_pct"),
+        # The prose figure and the whole-source count are different
+        # populations: 51 of one manuscript's 64 unaccounted sentences were
+        # headings. Shown side by side without this breakdown they read as a
+        # contradiction -- 97.7% covered, 64 missing.
+        "prose_unprocessed": prose.get("unprocessed"),
+        "unprocessed_by_category": {
+            name: values.get("unprocessed")
+            for name, values in categories.items()
+            if values.get("unprocessed")
+        },
+        # Every unaccounted sentence here has a model-written reason that no
+        # person has approved. "Nobody looked" and "answered, awaiting review"
+        # are different states and the ledger keeps them apart.
+        "exclusions_recorded": coverage.get("exclusions_recorded"),
+        "exclusions_terminal": coverage.get("exclusions_terminal"),
     }
 
 

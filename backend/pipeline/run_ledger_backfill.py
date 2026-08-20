@@ -187,25 +187,43 @@ def _package_subject(
     return key
 
 
-def _quality(stage: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _recomputed_coverage(payload: dict[str, Any], path: Path) -> Optional[dict[str, Any]]:
+    """Re-run the sentence ledger against the source, rather than trusting the
+    coverage block frozen into the package.
+
+    The stored block was computed under whatever rules applied the day the
+    package was written -- before `structural_markup`, every section title
+    counted as an unanswered sentence. Re-deriving gives the same package its
+    current, correct reading without editing an audit record.
+    """
+
+    documents = payload.get("source_documents") or []
+    if not documents:
+        return None
+    source_path = Path(str(documents[0].get("source_path") or ""))
+    if not source_path.is_file():
+        return None
+    try:
+        from backend.pipeline.sentence_ledger_runner import run as run_sentence_ledger
+
+        return {"available": True, **run_sentence_ledger(source_path, path)}
+    except Exception:
+        # A scoreboard that can take the import down with it is worse than one
+        # that falls back to what the package already said.
+        return None
+
+
+def _quality(stage: str, payload: dict[str, Any], path: Path) -> dict[str, Any]:
     if stage == "extraction":
-        coverage = payload.get("coverage") or {}
+        coverage = _recomputed_coverage(payload, path) or payload.get("coverage") or {}
         if not coverage.get("available"):
             # Packages written before the sentence ledger ran carry no coverage.
             # Absent, not zero: the page must not draw a 0% bar for a package
             # nobody measured.
             return {"available": False, "reason": "not_measured_at_the_time"}
-        prose = (coverage.get("by_category") or {}).get("prose") or {}
-        return {
-            "available": True,
-            "sentences": coverage.get("sentences"),
-            "represented": coverage.get("represented"),
-            "excluded": coverage.get("excluded"),
-            "unprocessed": coverage.get("unprocessed"),
-            "prose_represented": prose.get("represented"),
-            "prose_total": prose.get("total"),
-            "prose_pct": prose.get("represented_pct"),
-        }
+        from backend.pipeline.detailed_knowledge_extraction_runner import _coverage_quality
+
+        return _coverage_quality(coverage)
     if stage == "review":
         return dict(payload.get("routing_summary") or {})
     if stage == "adjudication":
@@ -263,7 +281,7 @@ def collect(staging: Path) -> tuple[list[dict[str, Any]], list[str]]:
             "time_source": time_source,
             "usage": usage,
             "cost": cost if usage else None,
-            "quality": _quality(stage, payload),
+            "quality": _quality(stage, payload, path),
             "inputs": _fingerprint(stage, payload),
             "model_id": (payload.get("extraction") or payload.get("reviewer") or {}).get("model_id"),
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.detailed_knowledge_extraction import _is_structural_markup
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
     ScriptureRef,
@@ -139,19 +140,29 @@ def _key_still_binds(fragment: dict[str, Any], source_sha256: str | None) -> boo
 def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
     """The package's exclusions that count without a human having looked.
 
-    Which is, deliberately, almost none of them: `is_terminal` clears
-    `duplicate_of` because a machine can check it, and holds everything else
-    until somebody approves. An unapproved exclusion still leaves its sentence
-    `unprocessed` — the point is that the reasoning is now on the record and
-    reviewable, not that it counts.
+    Which is, deliberately, almost none of them: `is_terminal` clears the codes
+    a machine can check and holds everything else until somebody approves. An
+    unapproved exclusion still leaves its sentence `unprocessed` — the point is
+    that the reasoning is now on the record and reviewable, not that it counts.
+
+    The source's own markup is re-checked here rather than trusted from the
+    stored code. Packages written before `structural_markup` existed labelled
+    section titles `not_exegesis`, which is an interpretive code and so waits on
+    a person; one 母本 carried 51 headings in that queue against 3 sentences of
+    prose. Re-deriving it costs a regex and needs no rewrite of artifacts that
+    are meant to be immutable audit records.
     """
 
-    return {
-        str(row["sentence_id"]): str(row["exclusion_id"])
-        for row in package.get("sentence_exclusions") or []
-        if row.get("reason_code")
-        and is_terminal(str(row["reason_code"]), approved=bool(row.get("decided_by")))
-    }
+    terminal: dict[str, str] = {}
+    for row in package.get("sentence_exclusions") or []:
+        reason_code = str(row.get("reason_code") or "")
+        if not reason_code:
+            continue
+        if _is_structural_markup(str(row.get("text") or "")):
+            reason_code = "structural_markup"
+        if is_terminal(reason_code, approved=bool(row.get("decided_by"))):
+            terminal[str(row["sentence_id"])] = str(row["exclusion_id"])
+    return terminal
 
 
 def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
