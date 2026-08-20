@@ -30,6 +30,7 @@ from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug, _transcript_for_prompt
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
+from backend.pipeline.run_ledger import run_record
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -268,45 +269,59 @@ def run_one(
         ):
             return "skipped", output_path
 
-    response, usage_rows = _generate_valid_review(
-        client=client,
-        prompt=prompt,
-        user_input=_review_input(survey, transcript),
-        survey=survey,
-    )
-    routed = apply_risk_routing(
-        response,
-        reviewer_fingerprint_sha256=identity["fingerprint_sha256"],
-        spot_check_percent=spot_check_percent,
-    )
-    artifact = {
-        "schema_version": AI_REVIEW_VERSION,
-        "source": {
-            "transcript_id": transcript_id,
-            "survey_path": str(survey_path),
-            "transcript_path": str(transcript_path),
+    with run_record(subject=transcript_id, stage="review") as record:
+        record.model(client.model)
+        record.inputs({
+            "fingerprint_sha256": identity["fingerprint_sha256"],
             "source_extraction_fingerprint": extraction_fingerprint,
-        },
-        "reviewer": {
-            **identity,
-            "provider": "anthropic",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
-        "spot_check_percent": spot_check_percent,
-        "usage": usage_rows,
-        # Preserve the exact ordered anchor snapshot seen by the reviewer.
-        # Ordinal anchor indexes are otherwise unsafe once a derived package is
-        # rebuilt or an earlier override changes an occurrence.
-        "reviewed_claims": survey["candidate_claims"],
-        **routed,
-    }
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _archive_existing_review(output_path)
-    output_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return "created", output_path
+        })
+        response, usage_rows = _generate_valid_review(
+            client=client,
+            prompt=prompt,
+            user_input=_review_input(survey, transcript),
+            survey=survey,
+        )
+        record.usage(usage_rows)
+        routed = apply_risk_routing(
+            response,
+            reviewer_fingerprint_sha256=identity["fingerprint_sha256"],
+            spot_check_percent=spot_check_percent,
+        )
+        # How many claims the reviewer cleared, how many it sent on, and how
+        # many it wants a person to look at. "Sent to adjudication" is not a
+        # defect count -- it is the reviewer doing its job -- but it has to be
+        # visible, because a review that routes everything onward has not
+        # reduced anyone's work.
+        record.quality(dict(routed.get("routing_summary") or {}))
+        artifact = {
+            "schema_version": AI_REVIEW_VERSION,
+            "source": {
+                "transcript_id": transcript_id,
+                "survey_path": str(survey_path),
+                "transcript_path": str(transcript_path),
+                "source_extraction_fingerprint": extraction_fingerprint,
+            },
+            "reviewer": {
+                **identity,
+                "provider": "anthropic",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "spot_check_percent": spot_check_percent,
+            "usage": usage_rows,
+            # Preserve the exact ordered anchor snapshot seen by the reviewer.
+            # Ordinal anchor indexes are otherwise unsafe once a derived package is
+            # rebuilt or an earlier override changes an occurrence.
+            "reviewed_claims": survey["candidate_claims"],
+            **routed,
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _archive_existing_review(output_path)
+        output_path.write_text(
+            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        record.outputs(output_path)
+        return "created", output_path
 
 
 def run_claim_layer(
