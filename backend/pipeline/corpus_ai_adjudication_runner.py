@@ -34,6 +34,8 @@ from backend.pipeline.corpus_ai_review_runner import (
     _normalize_claim_layer,
     _sha256_bytes,
 )
+from backend.pipeline.llm_usage import usage_row
+from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
@@ -222,8 +224,52 @@ def _write_overrides(
     path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _adjudication_subject(review_path: Path, package_path: Path) -> str:
+    """Which source this adjudication is about.
+
+    The review artifact names its transcript, so use that; a package whose
+    review predates the field falls back to the package's own stem rather than
+    filing the run against nothing.
+    """
+
+    try:
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        transcript_id = str((review.get("source") or {}).get("transcript_id") or "")
+    except (OSError, json.JSONDecodeError):
+        transcript_id = ""
+    return transcript_id or package_path.stem
+
+
 def run(
     *,
+    package_path: Path,
+    review_path: Path,
+    output_path: Path,
+    overrides_path: Path,
+    transcript_dirs: list[Path],
+    openai_client: Stage1OpenAIClient,
+    claude_client: Stage1AnthropicClient,
+    openai_prompt: str,
+    claude_prompt: str,
+) -> dict[str, Any]:
+    with run_record(
+        subject=_adjudication_subject(review_path, package_path), stage="adjudication"
+    ) as record:
+        # Two models at two prices; the run's `model_id` is the one that made
+        # the primary call, and each usage row carries its own.
+        record.model(openai_client.model)
+        return _run_adjudication(
+            record=record, package_path=package_path, review_path=review_path,
+            output_path=output_path, overrides_path=overrides_path,
+            transcript_dirs=transcript_dirs, openai_client=openai_client,
+            claude_client=claude_client, openai_prompt=openai_prompt,
+            claude_prompt=claude_prompt,
+        )
+
+
+def _run_adjudication(
+    *,
+    record: "RunRecord",
     package_path: Path,
     review_path: Path,
     output_path: Path,
@@ -264,6 +310,11 @@ def run(
     openai_response: dict[str, Any] | None = None
     previous_response: dict[str, Any] | None = None
     last_validation_error: AIAdjudicationValidationError | None = None
+    # Adjudication called two models and measured neither, so it was the one
+    # stage whose price could not be stated even after `llm_usage` unified the
+    # shape. Collected here for the same reason extraction collects it: the
+    # rejected attempts cost money too.
+    usage_rows: list[dict[str, Any]] = []
     for attempt in range(1, ADJUDICATION_VALIDATION_ATTEMPTS + 1):
         current_feedback = ""
         if previous_response is not None and last_validation_error is not None:
@@ -281,6 +332,10 @@ def run(
             OPENAI_ADJUDICATION_SCHEMA,
             cache_prefix=openai_input,
         )
+        usage_rows.append({
+            **usage_row(getattr(openai_client, "last_usage", None), attempt),
+            "model_id": openai_client.model, "role": "openai_adjudication",
+        })
         try:
             validate_openai_adjudication(
                 candidate,
@@ -316,6 +371,12 @@ def run(
             ),
             CLAUDE_RECONSIDERATION_SCHEMA,
         )
+        # The two adjudicators are different families at different prices, so
+        # each row carries its own `model_id` rather than inheriting the run's.
+        usage_rows.append({
+            **usage_row(getattr(claude_client, "last_usage", None), 1),
+            "model_id": claude_client.model, "role": "claude_reconsideration",
+        })
         validate_claude_reconsideration(
             reconsideration,
             rejected_claim_ids={item["claim_id"] for item in rejected},
@@ -331,6 +392,13 @@ def run(
         claude_model=claude_client.model,
     )
     outcome = compile_outcome(openai_response, reconsideration, reviews=reviews)
+    record.inputs({"fingerprint_sha256": fingerprint.get("fingerprint_sha256")})
+    record.usage(usage_rows)
+    # `human_disagreement_required` is the number that matters here: the two
+    # models could not settle it and a person has to. It is not a failure, but a
+    # source whose adjudication routes everything to a person has not been
+    # adjudicated in any useful sense, and the overview has to show that.
+    record.quality(dict(outcome.get("summary") or {}))
     artifact = {
         "schema_version": ADJUDICATION_VERSION,
         "source": {
@@ -354,6 +422,7 @@ def run(
         claims_by_id=claims_by_id,
         fingerprint=fingerprint,
     )
+    record.outputs(output_path, overrides_path)
     return artifact
 
 

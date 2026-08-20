@@ -39,6 +39,7 @@ from backend.pipeline.extraction_sections import (
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
+from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -269,6 +270,7 @@ def _extract_sections(
     fingerprint: str,
     force: bool,
     only: tuple[int, ...] | None = None,
+    record: RunRecord | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run every section, then concatenate.
 
@@ -310,7 +312,14 @@ def _extract_sections(
             candidate = client.generate_json(
                 prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
             )
-            usage_rows.append({**usage_row(client.last_usage, attempt), "section_index": section.index})
+            call_usage = {**usage_row(client.last_usage, attempt), "section_index": section.index}
+            usage_rows.append(call_usage)
+            # Reported per call rather than handed over at the end: a run that
+            # dies in section three spent three sections' worth of money, and a
+            # ledger that only learns the total on success prices that failure
+            # at nothing.
+            if record is not None:
+                record.usage([call_usage])
             try:
                 # A section is a composition unit, so the full contract is
                 # answerable inside it: measured, 0 of 264 relations cross a
@@ -617,13 +626,45 @@ def _run(
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
+    # Opened after the skip check so a no-op re-run does not file a row. At 240
+    # sources a nightly "nothing changed" pass would otherwise bury the runs
+    # that did something.
+    with run_record(subject=source_id, stage="extraction") as record:
+        record.model(client.model)
+        # `fingerprint_sha256` is the staleness key, not one input among
+        # several: it already composes the source, the prompt, the model, the
+        # schema and the section plan, and it is what the skip check above
+        # compares. The other two are recorded so a reader can see *which* input
+        # moved when the fingerprint stops matching.
+        record.inputs({
+            "fingerprint_sha256": identity.get("fingerprint_sha256"),
+            "source_sha256": source_sha256,
+            "prompt_sha256": identity.get("prompt_sha256"),
+        })
+        return _run_extraction(
+            record=record, source_id=source_id, source=source, raw=raw,
+            source_path=source_path, header=header, plan=plan, identity=identity,
+            output_path=output_path, output_dir=output_dir, client=client,
+            prompt=prompt, sections=sections, force=force,
+            source_descriptor=source_descriptor,
+        )
+
+
+def _run_extraction(
+    *, record: RunRecord, source_id: str, source: dict[str, Any], raw: bytes,
+    source_path: Path, header: str, plan: SectionPlan, identity: dict[str, Any],
+    output_path: Path, output_dir: Path, client: Stage1OpenAIClient, prompt: str,
+    sections: "SectionSettings", force: bool, source_descriptor: dict[str, Any] | None,
+) -> tuple[str, Path]:
+    """The part of an extraction that is worth recording, once a row exists."""
+
     response, usage_rows, section_rows, exclusions = _extract_sections(
         source_id=source_id,
         exclusion_source_id=published_source_id(source_id, source_descriptor),
         source=source, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
-        only=sections.only,
+        only=sections.only, record=record,
     )
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
@@ -642,9 +683,50 @@ def _run(
     # decision to make.
     package["coverage"] = _coverage(source_path, output_path)
     output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    record.quality(_coverage_quality(package["coverage"]))
+    record.outputs(output_path)
     _print_usage(source_id, usage_rows)
     _print_coverage(source_id, package["coverage"])
     return "created", output_path
+
+
+def _coverage_quality(coverage: dict[str, Any]) -> dict[str, Any]:
+    """The overview's number for this run, taken from the ledger's own count.
+
+    The denominator is the source's sentences, never the package's output --
+    extraction grading what extraction produced scores full marks every time,
+    including on the material it never looked at.
+    """
+
+    if not coverage.get("available"):
+        return {"available": False, "reason": coverage.get("reason")}
+    categories = coverage.get("by_category") or {}
+    prose = categories.get("prose") or {}
+    return {
+        "available": True,
+        "sentences": coverage.get("sentences"),
+        "represented": coverage.get("represented"),
+        "excluded": coverage.get("excluded"),
+        "unprocessed": coverage.get("unprocessed"),
+        "prose_represented": prose.get("represented"),
+        "prose_total": prose.get("total"),
+        "prose_pct": prose.get("represented_pct"),
+        # The prose figure and the whole-source count are different
+        # populations: 51 of one manuscript's 64 unaccounted sentences were
+        # headings. Shown side by side without this breakdown they read as a
+        # contradiction -- 97.7% covered, 64 missing.
+        "prose_unprocessed": prose.get("unprocessed"),
+        "unprocessed_by_category": {
+            name: values.get("unprocessed")
+            for name, values in categories.items()
+            if values.get("unprocessed")
+        },
+        # Every unaccounted sentence here has a model-written reason that no
+        # person has approved. "Nobody looked" and "answered, awaiting review"
+        # are different states and the ledger keeps them apart.
+        "exclusions_recorded": coverage.get("exclusions_recorded"),
+        "exclusions_terminal": coverage.get("exclusions_terminal"),
+    }
 
 
 def _coverage(source_path: Path, package_path: Path) -> dict[str, Any]:

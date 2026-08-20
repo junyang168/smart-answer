@@ -14,6 +14,8 @@ from backend.pipeline.sentence_ledger import (
     classify_sentence,
     summarise_by_category,
     AUTO_TERMINAL_REASONS,
+    BULK_APPROVABLE_REASONS,
+    HUMAN_ONLY_REASONS,
     EXACT_SPAN,
     EXCLUDED,
     REPRESENTED,
@@ -138,7 +140,13 @@ def test_terminality_follows_the_reason_code_not_the_sentence():
     # The interpretive call that failed in #64 and #53 is never delegated.
     assert is_terminal("background_only", approved=False) is False
     assert is_terminal("deferred", approved=False) is False
-    assert AUTO_TERMINAL_REASONS == {"duplicate_of"}
+    # Auto-terminal is for codes a machine can check, and only those: a
+    # duplicate names a record that either covers the content or does not, and
+    # markup is matched by the same regex the ledger categorises with. Every
+    # code that asks what a sentence *means* stays with a person.
+    assert AUTO_TERMINAL_REASONS == {"duplicate_of", "structural_markup"}
+    assert not (AUTO_TERMINAL_REASONS & HUMAN_ONLY_REASONS)
+    assert not (AUTO_TERMINAL_REASONS & BULK_APPROVABLE_REASONS)
 
 
 def test_an_unknown_reason_code_is_refused():
@@ -404,3 +412,46 @@ def test_a_repeated_sentence_is_excluded_where_it_was_repeated(tmp_path: Path) -
     )
     inventory = build_inventory(load_segments(path), source_id=source_id)
     assert [row["sentence_id"] for row in exclusions] == [inventory[-1].sentence_id]
+
+
+def test_the_source_own_markup_is_terminal_without_a_person():
+    """A heading is decided by a regex, not by judgement.
+
+    51 of one manuscript's 64 unaccounted sentences were section titles. Sent
+    through `not_exegesis` they joined the human review queue alongside prose
+    someone had actually read and set aside, and buried the three sentences
+    that deserved the look.
+    """
+    assert is_terminal("structural_markup", approved=False) is True
+    assert "structural_markup" in AUTO_TERMINAL_REASONS
+    # The interpretive codes are untouched: still a person's call.
+    assert is_terminal("not_exegesis", approved=False) is False
+    assert is_terminal("background_only", approved=False) is False
+
+
+def test_a_heading_exclusion_is_named_structural_not_interpretive():
+    from backend.pipeline.detailed_knowledge_extraction import (
+        AuditedSentence,
+        exclusions_from_audit,
+    )
+    from backend.pipeline.sentence_ledger import sentence_id as ledger_sentence_id
+
+    sentences = [
+        AuditedSentence(sentence_id="s1", segment_index="S0001", text="## 一、彌賽亞秘密"),
+        AuditedSentence(sentence_id="s2", segment_index="S0002", text="彼得的認信是正確的。"),
+    ]
+    response = {
+        "sentence_audit": [
+            {"sentence_id": "s1", "status": "not_extracted",
+             "reason_code": "not_exegesis", "reason": "Markdown 章節標題"},
+            {"sentence_id": "s2", "status": "not_extracted",
+             "reason_code": "not_exegesis", "reason": "背景說明"},
+        ]
+    }
+    rows = exclusions_from_audit(
+        response, sentences, source_id="SRC", ledger_sentence_id=ledger_sentence_id
+    )
+    by_text = {row["text"]: row["reason_code"] for row in rows}
+    assert by_text["## 一、彌賽亞秘密"] == "structural_markup"
+    # A prose sentence the model set aside still needs a person.
+    assert by_text["彼得的認信是正確的。"] == "not_exegesis"

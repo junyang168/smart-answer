@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     canonical_json,
 )
+from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import document_row_key as _document_key
 from backend.pipeline.source_anchor_binding import bind_source_versions
 from backend.pipeline.reviewed_relation_integration import (
     build_reviewed_relation_integration,
@@ -28,6 +31,26 @@ def _load(path: Path) -> dict[str, Any]:
 def _write(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _package_subject(package: dict[str, Any], package_path: Path) -> str:
+    """Which source this package is about.
+
+    A merged or research-batch package covers several sermons, so it has no
+    single subject; it is filed under its own package id and reaches the sermon
+    rows through `source_ids` instead.
+    """
+
+    documents = package.get("source_documents") or []
+    if len(documents) == 1:
+        key = _document_key(documents[0])
+        if key:
+            return key
+    return str(package.get("package_id") or package_path.stem)
 
 
 def main() -> None:
@@ -114,12 +137,44 @@ def main() -> None:
         result = store.status()
     elif args.command == "ingest-package":
         package = _load(args.package)
-        result = store.ingest_package(
-            package,
-            source_kind=args.source_kind,
-            apply=args.apply,
-            metadata={"input_path": str(args.package)},
-        )
+        # Only an --apply writes to the store; a preview changes nothing and
+        # does not belong in a table of work that happened.
+        if not args.apply:
+            result = store.ingest_package(
+                package, source_kind=args.source_kind, apply=False,
+                metadata={"input_path": str(args.package)},
+            )
+        else:
+            with run_record(
+                subject=_package_subject(package, args.package), stage="ingest"
+            ) as record:
+                record.inputs({"package_sha256": _sha256_file(args.package)})
+                result = store.ingest_package(
+                    package,
+                    source_kind=args.source_kind,
+                    apply=args.apply,
+                    metadata={"input_path": str(args.package)},
+                )
+                # `already_applied` is a real outcome, not a no-op worth hiding:
+                # it is the evidence that re-running an ingest is safe, and the
+                # overview shows it as "no change" rather than as a fresh write.
+                record.quality({
+                    "status": result.get("status"),
+                    **{k: v for k, v in (result.get("summary") or {}).items()},
+                })
+                record.metadata({"change_set_id": result.get("change_set_id")})
+                # A merged package covers several sermons at once. Declaring
+                # them all is what puts this one ingest on every one of their
+                # rows in the overview.
+                record.sources(
+                    key
+                    for key in (
+                        _document_key(doc)
+                        for doc in (package.get("source_documents") or [])
+                    )
+                    if key
+                )
+                record.outputs(args.package)
     elif args.command == "ingest-reviewed-relations":
         artifact = _load(args.artifact)
         base = _load(args.base_package) if args.base_package else store.compile_package()

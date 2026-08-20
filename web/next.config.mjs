@@ -20,7 +20,12 @@ export default (phase, { defaultConfig }) => {
     },
     async rewrites() {
       const isProd = process.env.NODE_ENV === 'production';
-      const backendOrigin = isProd ? 'http://127.0.0.1:8555' : 'http://127.0.0.1:8222';
+      // Development only: a git worktree runs its own backend on its own port,
+      // and this rewrite -- which takes precedence over the app's own route
+      // handlers -- would otherwise send every /api call to whichever checkout
+      // happens to hold 8222. Production is left hardcoded on purpose.
+      const devBackendOrigin = process.env.DEV_BACKEND_ORIGIN ?? 'http://127.0.0.1:8222';
+      const backendOrigin = isProd ? 'http://127.0.0.1:8555' : devBackendOrigin;
       const destination = `${backendOrigin}/:path*`;
       return [
         {

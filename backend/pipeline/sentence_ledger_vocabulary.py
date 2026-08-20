@@ -12,7 +12,14 @@ The tiers follow what can be *checked*, not what the sentence looks like:
 from __future__ import annotations
 
 #: Terminal without a human, because a machine can verify them.
-AUTO_TERMINAL_REASONS = frozenset({"duplicate_of"})
+#:
+#: `structural_markup` is the source's own scaffolding -- a Markdown heading, a
+#: list bullet. Whether a line is `## 一、Wrede彌賽亞秘密理論` is decided by a
+#: regex, not by judgement, and 51 of one manuscript's 64 unaccounted sentences
+#: were section titles. Routing them through `not_exegesis` put the professor's
+#: table of contents in the same review queue as prose somebody had actually
+#: read and set aside, which buried the three sentences that deserved the look.
+AUTO_TERMINAL_REASONS = frozenset({"duplicate_of", "structural_markup"})
 #: A person may approve these in bulk; they are not terminal on their own.
 BULK_APPROVABLE_REASONS = frozenset({"not_exegesis"})
 #: Never terminal without a person, however unremarkable the sentence looks.

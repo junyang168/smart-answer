@@ -120,6 +120,15 @@ function SourceCoverageView() {
     [pathname, router],
   );
 
+  // Deep link from the operations overview: `?source=<id>` opens straight into
+  // that source instead of landing on the catalog and asking the reader to find
+  // a sermon they had already picked. Read from `location` rather than
+  // `useSearchParams` so this client page needs no Suspense boundary.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("source");
+    if (requested) void openSource(requested);
+  }, [openSource]);
+
   const scrollToOrdinal = useCallback((ordinal: number | null) => {
     if (ordinal === null) return;
     nonce.current += 1;
