@@ -12,6 +12,8 @@ import uuid
 from collections import Counter, defaultdict
 from typing import Any, Mapping
 
+from backend.pipeline.knowledge_package import live_claims
+
 
 SCHEMA_VERSION = "wang_topic_structure_discovery_v1"
 SCOPE = "topic_hierarchy_and_composition_no_theological_critique"
@@ -201,7 +203,7 @@ def discovery_input(knowledge: dict[str, Any]) -> dict[str, Any]:
             "topic_terms": row.get("topic_terms") or [],
             "source_transcript_ids": _claim_sources(row),
         }
-        for row in knowledge.get("claims") or []
+        for row in live_claims(knowledge)
     ]
     relations = []
     claim_ids = {row["claim_id"] for row in claims}

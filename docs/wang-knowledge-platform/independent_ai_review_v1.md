@@ -64,6 +64,8 @@ Claude 逐条检查：
 | `human_spot_check` | Claude 判定 pass，但被随机抽样 | 进人工队列，核对 AI 复审本身是否可靠 |
 | `auto_applied` | OpenAI 重新核对来源后接受 Claude 意见 | 写入版本化 override，并重建共享知识包 |
 | `superseded` | 两个模型都认定本条与另一条重复 | 锚点并入留下的那条，本条标记 `superseded_by` 留在包内，不删除 |
+
+读取知识包的模块一律经 `knowledge_package.live_claims()` 取 claim，`superseded_by` 的那几条不参与覆盖率裁决、主题分组与跨章节关系。它们留在档案里只作为合并发生过的纪录；`summary.active_claim_count` 是活跃数，`claim_count` 仍是档案总行数。
 | `withdrawn` | OpenAI 拒绝，Claude 看过反驳后撤回 | 不修改原候选，不转人工 |
 | `human_confirmation_required` | Claude 判定来源本身无法裁定（`human_review_required`），即使 OpenAI 接受该意见 | 补丁写入 `pending_patches` 等待人工，不自动应用 |
 | `human_disagreement_required` | OpenAI 拒绝，Claude 再审后仍坚持 | 人工只裁决这一条明确分歧 |

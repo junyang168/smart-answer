@@ -35,6 +35,8 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+from backend.pipeline.knowledge_package import live_claim_ids, live_claims
+
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
 SCHEMA_VERSION = "wang_cross_section_relation_v1"
@@ -121,7 +123,7 @@ def record_positions(package: dict[str, Any]) -> dict[str, int]:
         for step in package.get("evidence_steps") or []
         if str(step.get("evidence_step_id")) in positions
     }
-    for claim in package.get("claims") or []:
+    for claim in live_claims(package):
         spots = [step_position[value] for value in claim.get("evidence_step_ids") or [] if value in step_position]
         if spots:
             positions[str(claim.get("claim_id"))] = min(spots)
@@ -183,7 +185,7 @@ def validate_proposals(
 
     evidence_ids = {str(row.get("evidence_step_id")) for row in package.get("evidence_steps") or []}
     observation_ids = {str(row.get("observation_id")) for row in package.get("observations") or []}
-    claim_ids = {str(row.get("claim_id")) for row in package.get("claims") or []}
+    claim_ids = live_claim_ids(package)
     edges = existing_edges(package)
     errors: list[str] = []
     seen: set[tuple[str, str, str]] = set()
