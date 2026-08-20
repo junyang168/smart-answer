@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from dotenv import load_dotenv
 
@@ -25,37 +25,57 @@ from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
 
-#: Records that are written *from* the claim layer rather than into it. They
-#: are not part of a withdrawal's closure -- a composition plan is an editorial
-#: artifact and deciding its fate is not an extraction's business -- but a
-#: withdrawal that leaves one of them citing a retired record has moved the
-#: dangling reference up a layer instead of removing it.
-DEPENDENT_COLLECTIONS = (
-    "knowledge_routes",
-    "composition_decisions",
-    "composition_plans",
-    "product_dependencies",
-    "editorial_syntheses",
-)
+#: A composition plan that has produced a manuscript. Plans without one are
+#: candidates, and a candidate plan is rebuilt from whatever the claim layer
+#: holds when somebody writes from it -- there is nothing to tell anyone about.
+ARTICLE_COLLECTION = "composition_plans"
 
 
-def dependents_on(cursor: Any, object_ids: set[str]) -> dict[str, list[str]]:
-    """Downstream artifacts naming any of these records.
+def articles_to_regenerate(
+    object_ids: set[str],
+    *,
+    routes: Mapping[str, Mapping[str, Any]],
+    decisions: Mapping[str, Mapping[str, Any]],
+    plans: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """The written articles this withdrawal invalidates.
 
-    Deliberately broad: a match anywhere in the payload counts, because these
-    artifacts cite claims from several differently shaped fields and a
-    withdrawal must not turn on having enumerated all of them correctly.
+    Not a reason to refuse. New material means the article that drew on the
+    old material is rewritten, and the plan, its decisions and its routes are
+    all products of that rewrite -- so a decision citing a retired claim is
+    the expected state between ingesting and regenerating, not a fault to
+    repair. The one thing nobody can work out for themselves is which
+    manuscripts just went stale.
+
+    Traced through the actual citation paths rather than by searching the
+    payload text, so an id mentioned in prose does not read as a dependency.
     """
 
-    found: dict[str, list[str]] = {}
     if not object_ids:
-        return found
-    for collection in DEPENDENT_COLLECTIONS:
-        for object_id, payload in _live(cursor, collection).items():
-            blob = json.dumps(payload, ensure_ascii=False)
-            if any(name in blob for name in object_ids):
-                found.setdefault(collection, []).append(object_id)
-    return found
+        return []
+    by_plan: dict[str, set[str]] = {}
+    for payload in routes.values():
+        if str(payload.get("claim_id") or "") in object_ids:
+            by_plan.setdefault(str(payload.get("target_id") or ""), set()).add(
+                str(payload.get("claim_id"))
+            )
+    for payload in decisions.values():
+        cited = {str(value) for value in (payload.get("claim_ids") or [])} & object_ids
+        if cited:
+            by_plan.setdefault(str(payload.get("plan_id") or ""), set()).update(cited)
+
+    articles: list[dict[str, Any]] = []
+    for plan_id, payload in plans.items():
+        if not payload.get("manuscript_sha256"):
+            continue
+        cited = by_plan.get(plan_id, set())
+        if cited:
+            articles.append({
+                "plan_id": plan_id,
+                "description": str(payload.get("description") or "")[:80],
+                "claims_withdrawn": len(cited),
+            })
+    return sorted(articles, key=lambda row: -row["claims_withdrawn"])
 
 
 def _live(cursor: Any, collection: str) -> dict[str, dict[str, Any]]:
@@ -70,8 +90,7 @@ def _live(cursor: Any, collection: str) -> dict[str, dict[str, Any]]:
 def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind: str):
     """The one change set that lands `package` and withdraws its predecessor.
 
-    Returns the plan, the withdrawal, and whatever downstream artifact still
-    cites something in it.
+    Returns the plan, the withdrawal, and the written articles it invalidates.
     """
 
     with store.connect() as conn, conn.cursor() as cursor:
@@ -82,7 +101,12 @@ def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind:
             claims=_live(cursor, "claims"),
             relations={name: _live(cursor, name) for name in RELATION_COLLECTIONS},
         )
-        dependents = dependents_on(cursor, {o for _, o in withdrawal.closure()})
+        articles = articles_to_regenerate(
+            {o for _, o in withdrawal.closure()},
+            routes=_live(cursor, "knowledge_routes"),
+            decisions=_live(cursor, "composition_decisions"),
+            plans=_live(cursor, ARTICLE_COLLECTION),
+        )
     arrival = store.plan_package(package, source_kind=source_kind)
     keys = withdrawal.closure()
     retirement = store.plan_retirement(
@@ -93,7 +117,7 @@ def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind:
     ) if keys else build_retirement_plan(
         [], {}, reason="none", package_id=str(package.get("package_id") or "PACKAGE"),
     )
-    return combined_plan(arrival, retirement), withdrawal, dependents
+    return combined_plan(arrival, retirement), withdrawal, articles
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,34 +127,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database-url")
     parser.add_argument("--source-kind", default="knowledge_package")
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument(
-        "--allow-dependent-artifacts", action="store_true",
-        help="proceed even though downstream artifacts cite records being retired",
-    )
     args = parser.parse_args(argv)
 
     package = json.loads(args.package.read_text(encoding="utf-8"))
     store = PostgresKnowledgeStore(args.database_url)
-    change_set, withdrawal, dependents = plan(store, package, source_kind=args.source_kind)
+    change_set, withdrawal, articles = plan(store, package, source_kind=args.source_kind)
     output: dict[str, Any] = {
         "package": str(args.package),
         "sources": sorted(package_source_ids(package)),
         "supersedes": withdrawal.as_dict(),
         "change_set_id": change_set.change_set_id,
         "summary": change_set.as_dict()["summary"],
-        "dependent_artifacts": {name: len(rows) for name, rows in dependents.items()},
+        # The only thing a person has to act on: new material means the
+        # articles written from the old material get regenerated.
+        "articles_to_regenerate": articles,
     }
-    if dependents and not args.allow_dependent_artifacts:
-        # Retiring anyway would move the dangling reference up a layer rather
-        # than remove it, and what should happen to an editorial artifact whose
-        # source material was re-extracted is an editorial decision.
-        output["refused"] = (
-            "records in this withdrawal are cited by downstream artifacts; "
-            "decide what happens to those first, or pass --allow-dependent-artifacts"
-        )
-        output["dependent_ids"] = {name: sorted(rows) for name, rows in dependents.items()}
-        print(json.dumps(output, ensure_ascii=False, indent=2))
-        return 1
     if args.apply:
         output["result"] = store.apply_plan(
             change_set,

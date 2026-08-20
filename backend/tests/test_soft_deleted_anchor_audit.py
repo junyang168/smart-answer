@@ -231,3 +231,58 @@ def test_arrival_and_withdrawal_plan_as_one_change_set() -> None:
     assert merged.as_dict()["summary"]["created"] == arrival.as_dict()["summary"]["created"]
     assert [item.operation for item in merged.operations][-1] == "retire"
     assert merged.change_set_id not in {arrival.change_set_id, withdrawal.change_set_id}
+
+
+# ---------------------------------------------------------------------------
+# which written articles a withdrawal invalidates
+# ---------------------------------------------------------------------------
+
+from backend.pipeline.extraction_supersede_runner import articles_to_regenerate  # noqa: E402
+
+PLANS = {
+    "CP-written": {"manuscript_sha256": "abc", "description": "太16:13–20"},
+    "CP-candidate": {"description": "還沒寫成稿"},
+}
+
+
+def test_only_a_plan_that_produced_a_manuscript_is_reported() -> None:
+    """A candidate plan is rebuilt from whatever the claim layer holds when
+    somebody writes from it, so there is nothing to tell anyone about."""
+
+    articles = articles_to_regenerate(
+        {"CL-old"},
+        routes={"R1": {"claim_id": "CL-old", "target_id": "CP-candidate"}},
+        decisions={},
+        plans=PLANS,
+    )
+    assert articles == []
+
+
+def test_a_written_article_is_reported_through_either_citation_path() -> None:
+    by_route = articles_to_regenerate(
+        {"CL-old"},
+        routes={"R1": {"claim_id": "CL-old", "target_id": "CP-written"}},
+        decisions={},
+        plans=PLANS,
+    )
+    by_decision = articles_to_regenerate(
+        {"CL-old"},
+        routes={},
+        decisions={"CD-1": {"plan_id": "CP-written", "claim_ids": ["CL-old", "CL-kept"]}},
+        plans=PLANS,
+    )
+    assert [row["plan_id"] for row in by_route] == ["CP-written"]
+    assert [row["plan_id"] for row in by_decision] == ["CP-written"]
+    assert by_decision[0]["claims_withdrawn"] == 1
+
+
+def test_an_id_appearing_only_in_prose_is_not_a_dependency() -> None:
+    """Traced through the citation fields, not by searching the payload text."""
+
+    articles = articles_to_regenerate(
+        {"CL-old"},
+        routes={},
+        decisions={"CD-1": {"plan_id": "CP-written", "decision": "參見 CL-old 的討論", "claim_ids": []}},
+        plans=PLANS,
+    )
+    assert articles == []
