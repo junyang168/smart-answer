@@ -286,7 +286,22 @@ function Row({ row, stages }: { row: OverviewRow; stages: StageId[] }) {
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 py-1.5 pl-10 pr-4 text-[12.5px] last:border-b-0 hover:bg-indigo-50/40">
       <span className="min-w-0 flex-1">
         <span className="block truncate text-slate-900">
-          {row.title}
+          {row.coverage_source_id ? (
+            // New tab on purpose: reading one sermon's coverage is a detour
+            // from working down the queue, and losing your place in 242 rows
+            // to come back is the whole cost of the trip.
+            <a
+              href={`/admin/wang/source-coverage?source=${encodeURIComponent(row.coverage_source_id)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-indigo-700 hover:underline"
+              title="在新分頁開啟來源覆蓋"
+            >
+              {row.title}
+            </a>
+          ) : (
+            row.title
+          )}
           {row.kind === "notes_manuscript" ? (
             <i className="ml-2 font-mono text-[10.5px] not-italic text-slate-400">母本</i>
           ) : null}

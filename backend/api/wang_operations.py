@@ -559,9 +559,16 @@ def overview() -> dict[str, Any]:
                 if run["effective_status"] == "succeeded" and run.get("finished_at"):
                     if upstream_finished is None or run["finished_at"] > upstream_finished:
                         upstream_finished = run["finished_at"]
+        held = ingested.get(row["source_id"])
         payload_rows.append({
             **row,
             "source_available": source_path is not None,
+            # The id `/admin/wang/source-coverage` knows this source by, which
+            # is the knowledge package's own (`SRC-<slug>-<hash>`, or
+            # `notes_manuscript:<project>`) and not the catalog id these rows
+            # are keyed on. Null until a source has a claim layer, because that
+            # page has nothing to show for one that does not.
+            "coverage_source_id": held["source_id"] if held else None,
             "stages": stages,
             "articles": citations.get(row["source_id"], []),
         })

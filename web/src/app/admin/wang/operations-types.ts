@@ -44,6 +44,8 @@ export type OverviewRow = {
   topics: string[];
   manuscript_file?: string;
   source_available: boolean;
+  /** How `/admin/wang/source-coverage` identifies this source; null if it has no claim layer. */
+  coverage_source_id: string | null;
   stages: Record<StageId, StageCell>;
   articles: string[];
 };
