@@ -151,9 +151,9 @@ export default function SourceCoveragePage() {
               {stats.heading_segments ? <span className="ml-1 text-slate-400">（{stats.heading_segments} 個是標題）</span> : null}
             </span>
             <span>
-              句子 <b className="text-slate-900">{stats.sentences_covered}</b>/{stats.sentences}
-              <span className={percent(stats.sentences_covered, stats.sentences) < 50 ? "ml-1 text-rose-600" : "ml-1"}>
-                {percent(stats.sentences_covered, stats.sentences)}%
+              句子 <b className="text-slate-900">{stats.prose_sentences_covered}</b>/{stats.prose_sentences}
+              <span className={percent(stats.prose_sentences_covered, stats.prose_sentences) < 50 ? "ml-1 text-rose-600" : "ml-1"}>
+                {percent(stats.prose_sentences_covered, stats.prose_sentences)}%
               </span>
             </span>
             <span>
@@ -267,9 +267,9 @@ export default function SourceCoveragePage() {
                   <td className="px-2 py-2 font-sans font-bold text-slate-900">全庫 {totals.sources} 個 source</td>
                   <td className="px-2 py-2 text-right">{totals.segments}</td>
                   <td className="px-2 py-2 text-right">{totals.segments_covered}</td>
-                  <td className="px-2 py-2 text-right">{totals.sentences}</td>
-                  <td className="px-2 py-2 text-right">{totals.sentences_covered}</td>
-                  <td className="px-2 py-2 text-right text-rose-600">{percent(totals.sentences_covered, totals.sentences)}%</td>
+                  <td className="px-2 py-2 text-right">{totals.prose_sentences}</td>
+                  <td className="px-2 py-2 text-right">{totals.prose_sentences_covered}</td>
+                  <td className="px-2 py-2 text-right text-rose-600">{percent(totals.prose_sentences_covered, totals.prose_sentences)}%</td>
                   <td className="px-2 py-2 text-right">{totals.fragments}</td>
                   <td className="px-2 py-2 text-right">{totals.fragments_placed}</td>
                   <td className="px-2 py-2 text-right">{totals.steps}</td>

@@ -29,6 +29,7 @@ from typing import Any, Iterable, Optional
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.base_contract_coverage import sentence_spans
+from backend.pipeline.sentence_ledger import PROSE, classify_sentence
 from backend.pipeline.knowledge_source import live_script, markdown_blocks
 
 # Collections that can carry a `source_fragment_id`, i.e. that can be placed on
@@ -272,7 +273,15 @@ def _sentence_rows(text: str, runs: list[dict[str, Any]]) -> list[dict[str, Any]
     rows = []
     for start, end in sentence_spans(text):
         covered = any(run["start"] < end and run["end"] > start for run in runs)
-        rows.append({"start": start, "end": end, "covered": covered})
+        rows.append({
+            "start": start,
+            "end": end,
+            "covered": covered,
+            # Classified by the ledger's own function rather than a second
+            # rule: two answers to "is this sentence a heading" is two
+            # coverage numbers for the same source.
+            "category": classify_sentence(text, text[start:end]),
+        })
     return rows
 
 
@@ -463,6 +472,8 @@ def _empty_stats() -> dict[str, int]:
         "heading_segments": 0,
         "sentences": 0,
         "sentences_covered": 0,
+        "prose_sentences": 0,
+        "prose_sentences_covered": 0,
         "chars": 0,
         "chars_covered": 0,
         "fragments": 0,
@@ -491,6 +502,14 @@ def _stats(
         "heading_segments": sum(1 for segment in segments if segment["is_heading"]),
         "sentences": len(sentences),
         "sentences_covered": sum(1 for row in sentences if row["covered"]),
+        # The denominator that means something. A markdown heading is
+        # structure, not material, and is represented 0% of the time by
+        # design -- 51 of the 208 sentences in the 太16 母本, which drags a
+        # 97.7% down to 69% while telling nobody anything.
+        "prose_sentences": sum(1 for row in sentences if row["category"] == PROSE),
+        "prose_sentences_covered": sum(
+            1 for row in sentences if row["category"] == PROSE and row["covered"]
+        ),
         "chars": sum(len(segment["text"]) for segment in segments),
         "chars_covered": sum(segment["covered_chars"] for segment in segments),
         "fragments": len(fragments),

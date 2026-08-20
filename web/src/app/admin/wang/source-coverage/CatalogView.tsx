@@ -221,9 +221,9 @@ function SermonRow({
           <span>
             句子{" "}
             <b className="text-slate-800">
-              {stats.stats.sentences_covered}/{stats.stats.sentences}
+              {stats.stats.prose_sentences_covered}/{stats.stats.prose_sentences}
             </b>{" "}
-            {percent(stats.stats.sentences_covered, stats.stats.sentences)}%
+            {percent(stats.stats.prose_sentences_covered, stats.stats.prose_sentences)}%
           </span>
           <span>claims {stats.stats.claims}</span>
         </span>
