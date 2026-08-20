@@ -524,6 +524,30 @@ def build_retirement_plan(
     )
 
 
+def conflict_for(
+    collection: str, object_id: str, *, expected: Optional[str], found: Optional[str],
+    retired_at: Optional[datetime],
+) -> ChangeSetConflict:
+    """Name the reason the store refused this write.
+
+    A retired object arrives here looking exactly like a concurrent one: the
+    planner reads only live rows, so it plans a `create` with no
+    `before_sha256`, while the row is still there with a hash. Reporting that
+    as "concurrent change" sends whoever hit it looking for another writer
+    instead of for the retirement, which is the answer.
+    """
+
+    if retired_at is not None:
+        return ChangeSetConflict(
+            f"{collection}/{object_id} was retired at {retired_at:%Y-%m-%d %H:%M:%S%z}; "
+            "re-ingesting the package that produced it would bring it back. Withdraw the "
+            "retirement deliberately, or take this record out of the package."
+        )
+    return ChangeSetConflict(
+        f"Concurrent change for {collection}/{object_id}: expected {expected}, found {found}"
+    )
+
+
 def reviewed_relations_package(artifact: Mapping[str, Any]) -> dict[str, Any]:
     """Convert accepted cross-sermon judgments to an incremental package.
 
@@ -718,16 +742,17 @@ class PostgresKnowledgeStore:
                 changed_claims: list[tuple[str, int, int]] = []
                 for index, operation in enumerate(plan.operations):
                     cursor.execute(
-                        """SELECT revision, content_sha256 FROM wang_knowledge.objects
+                        """SELECT revision, content_sha256, retired_at FROM wang_knowledge.objects
                            WHERE collection=%s AND object_id=%s FOR UPDATE""",
                         (operation.collection, operation.object_id),
                     )
                     locked = cursor.fetchone()
                     actual_sha = locked[1] if locked else None
                     if actual_sha != operation.before_sha256:
-                        raise ChangeSetConflict(
-                            f"Concurrent change for {operation.collection}/{operation.object_id}: "
-                            f"expected {operation.before_sha256}, found {actual_sha}"
+                        raise conflict_for(
+                            operation.collection, operation.object_id,
+                            expected=operation.before_sha256, found=actual_sha,
+                            retired_at=locked[2] if locked else None,
                         )
                     if operation.operation == "retire":
                         self._retire_one(cursor, plan, index, operation)

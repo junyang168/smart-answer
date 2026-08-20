@@ -134,3 +134,31 @@ def test_the_same_retirement_plans_to_the_same_change_set() -> None:
     other = build_retirement_plan(
         [("claims", "CL-1")], EXISTING, reason="別的理由", package_id="RETIRE-TEST")
     assert other.change_set_id != first.change_set_id
+
+
+# ---------------------------------------------------------------------------
+# what the store says when a package would revive something withdrawn
+# ---------------------------------------------------------------------------
+
+
+def test_a_retired_object_is_not_reported_as_a_concurrent_write() -> None:
+    """It reaches the conflict check looking exactly like one.
+
+    The planner reads only live rows, so a retired object is planned as a
+    `create` with no `before_sha256` while its row is still there with a hash.
+    "Concurrent change" would send the reader hunting for another writer.
+    """
+
+    from datetime import datetime, timezone
+
+    from backend.api.canonical_repository.postgres_store import conflict_for
+
+    retired = conflict_for(
+        "claims", "CL-1", expected=None, found="sha-1",
+        retired_at=datetime(2026, 8, 20, 9, 30, tzinfo=timezone.utc),
+    )
+    assert "was retired at 2026-08-20 09:30:00+0000" in str(retired)
+    assert "concurrent" not in str(retired).lower()
+
+    concurrent = conflict_for("claims", "CL-1", expected="sha-0", found="sha-1", retired_at=None)
+    assert "Concurrent change" in str(concurrent)
