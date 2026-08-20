@@ -42,11 +42,39 @@ def test_every_attempt_is_priced_including_the_rejected_ones():
 
 
 def test_unknown_model_costs_none_not_zero():
-    """Zero would look like a free run and sum into totals as one."""
-    cost = price_usage([{"prompt_tokens": 1_000, "completion_tokens": 1_000}], "gpt-5.6-sol")
+    """Zero would look like a free run and sum into totals as one.
+
+    A new model id appears every few months, and the table will not know it on
+    the day someone first runs it.
+    """
+    cost = price_usage(
+        [{"prompt_tokens": 1_000, "completion_tokens": 1_000}], "gpt-6-not-yet-priced"
+    )
     assert cost.cost_usd is None
-    assert cost.unpriced == ("gpt-5.6-sol",)
+    assert cost.unpriced == ("gpt-6-not-yet-priced",)
     assert not cost.complete
+
+
+def test_openai_cached_input_uses_the_published_rate():
+    """OpenAI publishes a cached rate outright; it is not a ratio we chose.
+
+    Writing to an OpenAI cache is not billed at all, unlike Anthropic's
+    explicit cache writes, so a run whose input is entirely cached costs a tenth
+    of the fresh price rather than a tenth plus a write fee.
+    """
+    rows = [{"prompt_tokens": 1_000_000, "cached_tokens": 1_000_000, "completion_tokens": 0}]
+    assert price_usage(rows, "gpt-5.6-sol").cost_usd == pytest.approx(0.50)
+
+
+def test_the_models_this_pipeline_actually_runs_on_are_all_priced():
+    """Extraction runs on gpt-5.6-sol and review on claude-sonnet-5.
+
+    An unpriced default is not a neutral gap: it is a blank in the column the
+    whole dashboard exists to fill.
+    """
+    table = price_table_for()
+    for model_id in ("gpt-5.6-sol", "gpt-5.6-terra", "claude-sonnet-5", "claude-opus-5"):
+        assert model_id in table.rates, model_id
 
 
 def test_a_stage_that_calls_no_model_costs_zero():

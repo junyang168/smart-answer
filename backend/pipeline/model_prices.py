@@ -71,15 +71,28 @@ class PriceTable:
         return self.until is None or when <= self.until
 
 
+#: OpenAI publishes a cached-input rate outright rather than as a ratio, so
+#: these are given explicitly instead of derived.  Writing to an OpenAI cache is
+#: not billed at all -- caching is automatic there -- which is why `cache_write`
+#: is zero rather than the 1.25x that applies to Anthropic's explicit writes.
+#: Named once and shared by both tables below: these rates did not move across
+#: the Anthropic introductory boundary, and duplicating them would have invited
+#: the two copies to drift.
+_OPENAI_RATES = {
+    "gpt-5.6-sol": ModelRate(input=5.00, output=30.00, cache_read=0.50, cache_write=0.0),
+    "gpt-5.6-terra": ModelRate(input=2.00, output=12.00, cache_read=0.20, cache_write=0.0),
+    "gpt-5.6-luna": ModelRate(input=0.20, output=1.20, cache_read=0.02, cache_write=0.0),
+}
+
+
 #: Append-only.  Newest last; `price_table_for` picks by date, not by position.
 #:
-#: Anthropic rates are first-party API list prices.  The OpenAI models this
-#: pipeline defaults to (`gpt-5.6-sol`, `gpt-5.6-terra`) are deliberately absent
-#: rather than estimated -- extraction runs on `gpt-5.6-sol`, so this is the
-#: expensive gap, and an invented number there would be worse than a blank:
-#: it would be the headline figure on the overview and nobody would know it was
-#: a guess.  Add them with their published rates and the tables become complete;
-#: until then those runs record NULL and say so.
+#: Anthropic rates are first-party API list prices; OpenAI rates are the
+#: published API list prices.  Both are list prices, not invoices -- a
+#: negotiated rate, a batch discount or a change to how cached tokens are billed
+#: makes these drift from what is actually charged, quietly.  That is why the
+#: overview shows the `price_version` in force rather than presenting the total
+#: as an amount owed.
 PRICE_TABLES: tuple[PriceTable, ...] = (
     PriceTable(
         version="2026-08-20.intro",
@@ -88,31 +101,33 @@ PRICE_TABLES: tuple[PriceTable, ...] = (
         # on Sonnet 5, so a table that ignored the window would misprice every
         # review taken this month by 50%.
         until=date(2026, 8, 31),
-        source="Anthropic first-party API list prices; Sonnet 5 introductory rate",
+        source=(
+            "Anthropic first-party API list prices (Sonnet 5 introductory rate); "
+            "OpenAI API list prices"
+        ),
         rates={
             "claude-opus-5": ModelRate(input=5.00, output=25.00),
             "claude-sonnet-5": ModelRate(input=2.00, output=10.00),
             "claude-haiku-4-5": ModelRate(input=1.00, output=5.00),
+            **_OPENAI_RATES,
         },
     ),
     PriceTable(
         version="2026-09-01.standard",
         effective=date(2026, 9, 1),
         until=None,
-        source="Anthropic first-party API list prices; Sonnet 5 standard rate",
+        source=(
+            "Anthropic first-party API list prices (Sonnet 5 standard rate); "
+            "OpenAI API list prices"
+        ),
         rates={
             "claude-opus-5": ModelRate(input=5.00, output=25.00),
             "claude-sonnet-5": ModelRate(input=3.00, output=15.00),
             "claude-haiku-4-5": ModelRate(input=1.00, output=5.00),
+            **_OPENAI_RATES,
         },
     ),
 )
-
-#: Model ids this pipeline runs on that no table prices yet.  Named explicitly
-#: so "we have not entered this price" reads differently from "this model id is
-#: a typo" -- the first is a known gap, the second is a bug.
-UNPRICED_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra")
-
 
 def price_table_for(when: Optional[datetime] = None) -> PriceTable:
     """The table in force on a date, defaulting to the newest one."""
