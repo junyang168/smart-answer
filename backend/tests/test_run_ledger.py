@@ -211,3 +211,50 @@ def test_unknown_stage_is_rejected():
     with pytest.raises(ValueError):
         with run_record(subject="S", stage="transcribe"):
             pass
+
+
+# -- naming a source -------------------------------------------------------
+
+
+def test_a_notes_manuscript_is_keyed_by_its_project_not_its_filename():
+    """Every notes project's manuscript is called final.md.
+
+    Taking the stem filed five different projects' reviews under one source
+    named "final", which surfaced as a sermon holding an adjudication but no
+    review -- impossible on its face, and the only reason it was noticed.
+    """
+    from backend.pipeline.source_keys import key_from_source_path
+
+    assert key_from_source_path(
+        "/data/notes_to_surmon/16_章_-_彌賽亞，捨己/final.md"
+    ) == "16_章_-_彌賽亞，捨己"
+    assert key_from_source_path(
+        "/data/notes_to_surmon/16章釋經/unified_source.md"
+    ) == "16章釋經"
+
+
+def test_a_published_transcript_is_keyed_by_its_filename():
+    """It is stored under the catalog id, so the stem is the key."""
+    from backend.pipeline.source_keys import key_from_source_path
+
+    assert key_from_source_path(
+        "/data/script_published/2016 NYSC 專題：馬太福音釋經（四）3.json"
+    ) == "2016 NYSC 專題：馬太福音釋經（四）3"
+
+
+def test_the_synthetic_notes_transcript_id_resolves_to_the_project():
+    from backend.pipeline.source_keys import document_row_key, normalize_source_key
+
+    assert normalize_source_key("notes_manuscript:16_章_-_生命") == "16_章_-_生命"
+    assert document_row_key({
+        "source_id": "notes_manuscript:16_章_-_生命",
+        "transcript_id": "notes_manuscript:16_章_-_生命",
+        "source_type": "notes_manuscript",
+    }) == "16_章_-_生命"
+
+
+def test_a_slug_is_never_rewritten_into_another_source():
+    """A key that cannot be resolved stays visibly wrong rather than guessed."""
+    from backend.pipeline.source_keys import normalize_source_key
+
+    assert normalize_source_key("SRC-2016_NYSC_3-3d012c24a542") == "SRC-2016_NYSC_3-3d012c24a542"

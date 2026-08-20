@@ -40,7 +40,7 @@ from typing import Any, Iterable, Optional
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.model_prices import price_usage
 from backend.pipeline.run_ledger import new_run_id
-from backend.pipeline.source_keys import document_row_key
+from backend.pipeline.source_keys import document_row_key, key_from_source_path
 
 
 #: Filename suffix -> the stage that produces it.
@@ -127,9 +127,9 @@ def _subject(payload: dict[str, Any], path: Path, cache: dict[Path, Optional[str
     transcript_paths = source.get("transcript_paths") or {}
     if isinstance(transcript_paths, dict) and transcript_paths:
         first = sorted(str(value) for value in transcript_paths.values())[0]
-        stem = Path(first).stem
-        if stem:
-            return stem
+        key = key_from_source_path(first)
+        if key:
+            return key
 
     package_path = source.get("package_path")
     if package_path:

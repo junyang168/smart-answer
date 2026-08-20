@@ -492,6 +492,27 @@ def overview() -> dict[str, Any]:
             "articles": citations.get(row["source_id"], []),
         })
 
+    # A later stage recorded without the one before it. Not a contradiction the
+    # page invented: only 3 adjudication artifacts survive against 20 merges,
+    # because that output was not always kept. Saying so is the difference
+    # between a table with a visible gap and a table that looks wrong.
+    out_of_order: list[str] = []
+    for row in payload_rows:
+        for earlier, later in zip(SERMON_STAGES, SERMON_STAGES[1:]):
+            if row["stages"][later]["state"] in {"current", "stale"} and row["stages"][earlier][
+                "state"
+            ] in {"never", "no_source"}:
+                out_of_order.append(f"{row['source_id']}: {later} without {earlier}")
+    if out_of_order:
+        warnings.append({
+            "code": "stage_recorded_without_the_one_before_it",
+            "message": (
+                f"{len(out_of_order)} 個階段有紀錄，但它的上一階段沒有——通常是那一步的產出當時沒有留檔，"
+                "不表示它沒有跑過。"
+            ),
+            "detail": out_of_order[:20],
+        })
+
     table = price_table_for(now)
     return {
         "schema_version": SCHEMA_VERSION,
