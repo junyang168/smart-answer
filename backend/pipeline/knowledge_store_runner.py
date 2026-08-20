@@ -17,6 +17,7 @@ from backend.api.canonical_repository.postgres_store import (
     canonical_json,
 )
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import document_row_key as _document_key
 from backend.pipeline.source_anchor_binding import bind_source_versions
 from backend.pipeline.reviewed_relation_integration import (
     build_reviewed_relation_integration,
@@ -34,32 +35,6 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def _document_key(document: dict[str, Any]) -> str:
-    """The key the overview lists this source under.
-
-    `transcript_id` -- the catalog's own id, which for a sermon is a title-like
-    string such as `2016 NYSC 專題：馬太福音釋經（四）3`. Not `source_id`
-    (`SRC-2016_NYSC_3-3d012c24a542`) and not the package filename's slug
-    (`2016_NYSC_3`): both are derived, and a run filed under either joins to no
-    row in `sermon_catalog.json`, so the ingest would silently not appear on the
-    sermon it ingested. A notes manuscript has no transcript, so it keeps its
-    own `source_id`.
-    """
-
-    project_id = str(document.get("project_id") or "").strip()
-    transcript_id = str(document.get("transcript_id") or "").strip()
-    # A notes manuscript has no transcript. Its `transcript_id` is a synthetic
-    # `notes_manuscript:<project>`, and the overview lists it under the project
-    # directory, so the project id is the joining key -- preferring the
-    # synthetic one filed the run against a row that does not exist.
-    if project_id and (
-        document.get("source_type") == "notes_manuscript"
-        or transcript_id.startswith("notes_manuscript:")
-    ):
-        return project_id
-    return (transcript_id or str(document.get("source_id") or "")).strip()
 
 
 def _package_subject(package: dict[str, Any], package_path: Path) -> str:

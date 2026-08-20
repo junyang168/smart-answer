@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional, Sequence
 
 from backend.pipeline.model_prices import RunCost, price_usage
+from backend.pipeline.source_keys import normalize_source_key
 
 
 STAGES = ("extraction", "review", "adjudication", "merge", "ingest", "article")
@@ -151,7 +152,7 @@ class RunRecord:
         their rows through this array.
         """
         for value in ids or []:
-            text = str(value)
+            text = normalize_source_key(value)
             if text and text not in self._source_ids:
                 self._source_ids.append(text)
 
@@ -305,9 +306,13 @@ def run_record(
     if trigger not in ("cli", "panel"):
         raise ValueError(f"unknown trigger {trigger!r}")
 
+    # Normalized here rather than at each call site. Three runners passed a
+    # different spelling of the same source and each filed a run against a row
+    # that does not exist; a chokepoint is the only version of this that stays
+    # fixed.
     record = RunRecord(
         run_id=run_id or new_run_id(),
-        subject_id=str(subject),
+        subject_id=normalize_source_key(subject) if subject_kind == "source" else str(subject),
         stage=stage,
         subject_kind=subject_kind,
         conn=_connect(),

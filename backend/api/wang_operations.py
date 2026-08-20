@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.model_prices import price_table_for
+from backend.pipeline.source_keys import document_row_key
 
 
 router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
@@ -210,15 +211,7 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
     held: dict[str, dict[str, Any]] = {}
     for object_id, payload, revision, updated_at in rows:
         document = dict(payload or {})
-        project_id = str(document.get("project_id") or "").strip()
-        transcript_id = str(document.get("transcript_id") or "").strip()
-        if project_id and (
-            document.get("source_type") == "notes_manuscript"
-            or transcript_id.startswith("notes_manuscript:")
-        ):
-            key = project_id
-        else:
-            key = transcript_id or str(object_id)
+        key = document_row_key(document) or str(object_id)
         held[key] = {
             "source_id": str(object_id),
             "revision": revision,
@@ -344,12 +337,7 @@ def _snapshot_source_keys(snapshot: dict[str, Any]) -> dict[str, str]:
         match = re.search(r"-([0-9a-f]{12})$", source_id)
         if not match:
             continue
-        transcript_id = str(document.get("transcript_id") or "")
-        project_id = str(document.get("project_id") or "")
-        # A notes manuscript's `transcript_id` is a synthetic
-        # `notes_manuscript:<project>`; the overview lists it under the project
-        # directory, so prefer that.
-        keys[match.group(1)] = project_id or transcript_id or source_id
+        keys[match.group(1)] = document_row_key(document) or source_id
     return keys
 
 
