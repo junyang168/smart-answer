@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.knowledge_package import live_claims
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = wang_platform_paths().claim_layer_staging
@@ -602,7 +603,10 @@ def _merge_detailed_package(
         observations.append(item)
     position_nodes.extend(dict(item) for item in package.get("position_nodes", []))
 
-    for claim in package.get("claims", []):
+    # A claim an accepted merge retired keeps its row as the record that the
+    # merge happened; publishing it would put the duplicate the pipeline just
+    # resolved back into the shared store under a second id.
+    for claim in live_claims(package):
         item = dict(claim)
         evidence_ids = list(item.get("evidence_step_ids") or [])
         item["eligible_evidence_step_ids"] = [

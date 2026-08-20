@@ -376,3 +376,37 @@ def test_composition_evidence_scope_rejects_a_foreign_step() -> None:
 
     with pytest.raises(ValueError, match="cites foreign steps"):
         _validate_product_plan_evidence_scopes(plans, claims)
+
+
+def test_a_claim_a_merge_retired_is_not_published() -> None:
+    """The merge's whole point is that one of the two stops being asserted.
+
+    The retired row stays in the detailed package as the record that the merge
+    happened; projecting it into the shared store would put the duplicate back
+    under a second id, with its anchors now counted twice.
+    """
+    source = FIXTURE_ROOT
+    detailed = json.loads(
+        (
+            source
+            / "detailed-extractions"
+            / "011WSR01-f0eac41a4244.reviewed-candidate.json"
+        ).read_text(encoding="utf-8")
+    )
+    retired = next(
+        item for item in detailed["claims"] if item["claim_id"] == "DK-f0eac41a4244-CL003"
+    )
+    retired["superseded_by"] = "DK-f0eac41a4244-CL001"
+    retired["review_status"] = "superseded"
+
+    package = build_shared_knowledge_package(
+        json.loads((source / "claims.json").read_text(encoding="utf-8")),
+        json.loads((source / "argument_graph.json").read_text(encoding="utf-8")),
+        json.loads((source / "composition_plan_matthew_17.json").read_text(encoding="utf-8")),
+        json.loads((source / "evidence_attribution_overrides_v1.json").read_text(encoding="utf-8")),
+        detailed_packages=[detailed],
+    )
+
+    published = {item["claim_id"] for item in package["claims"]}
+    assert "DK-f0eac41a4244-CL003" not in published
+    assert "DK-f0eac41a4244-CL001" in published

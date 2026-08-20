@@ -28,6 +28,7 @@ from backend.pipeline.corpus_ai_review import (
 )
 from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug, _transcript_for_prompt
+from backend.pipeline.knowledge_package import live_claims
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.stage1 import Stage1AnthropicClient
@@ -44,7 +45,9 @@ PROMPT_PATH = Path("backend/pipeline/prompts/corpus_independent_ai_review.md")
 DEFAULT_CLAIM_LAYER_OUTPUT = (
     wang_platform_paths().claim_layer_staging / "independent_ai_review_v1.json"
 )
-CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v2"
+# v3 drops claims an accepted merge retired and carries the ids the other
+# batches hold, so what the reviewer saw is no longer the same projection.
+CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v3"
 
 
 def _find_transcript(transcript_id: str, transcript_dirs: list[Path]) -> Path:
@@ -110,7 +113,13 @@ def _archive_existing_review(output_path: Path) -> Path | None:
 
 
 def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
-    """Project the curated shared-knowledge package into reviewer input."""
+    """Project the curated shared-knowledge package into reviewer input.
+
+    Claims an accepted merge retired are left out.  Handing them back as live
+    candidates asks the reviewer to re-litigate a duplicate the pipeline has
+    already resolved, and the second round can name the retired claim as the
+    survivor -- which the applier then refuses, taking the whole run with it.
+    """
     outgoing: dict[str, list[dict[str, str]]] = {}
     for relation in package.get("claim_relations", []):
         source_id = str(relation.get("from_id") or relation.get("source_id") or "")
@@ -126,7 +135,7 @@ def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
             normalized_relation["relation_id"] = relation_id
         outgoing.setdefault(source_id, []).append(normalized_relation)
     claims: list[dict[str, Any]] = []
-    for claim in package.get("claims", []):
+    for claim in live_claims(package):
         anchors: list[dict[str, Any]] = []
         for occurrence in claim.get("occurrences", []):
             for anchor in occurrence.get("anchors", []):
@@ -162,7 +171,16 @@ def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
                 "opposes": claim.get("opposes"),
             }
         )
-    return {"candidate_claims": claims}
+    # Claims of this package that a batch partition put in someone else's call.
+    # Section extraction states one conclusion once per section, so the twin of
+    # a duplicate is as likely to be in another batch as in this one; without
+    # this list the reviewer has no id to name and the finding cannot be made.
+    other_batch_claims = [
+        {"claim_id": str(row.get("claim_id") or ""), "statement": str(row.get("statement") or "")}
+        for row in (package.get("review_batch") or {}).get("other_batch_claims") or []
+        if row.get("claim_id")
+    ]
+    return {"candidate_claims": claims, "other_batch_claims": other_batch_claims}
 
 
 def _claim_layer_input(
@@ -174,10 +192,19 @@ def _claim_layer_input(
         sections.append(
             f"===== 完整来源：{source_id} =====\n{_transcript_for_prompt(source_document)}"
         )
+    other_batch_claims = survey.get("other_batch_claims") or []
+    duplicate_scope = ""
+    if other_batch_claims:
+        duplicate_scope = (
+            "\n\n本包的其余主张（在另一批次复审，不要为它们出具意见；"
+            "只有判定重复时，`duplicate_of_claim_id` 可以指名其中一条）：\n"
+            + json.dumps(other_batch_claims, ensure_ascii=False, indent=2)
+        )
     return (
         "以下是已经精编的跨讲 claim layer。现有人工标签和状态只是待复核资料，"
         "不得因此默认正确。\n\n候选主张：\n"
         + json.dumps(survey["candidate_claims"], ensure_ascii=False, indent=2)
+        + duplicate_scope
         + "\n\n"
         + "\n\n".join(sections)
     )

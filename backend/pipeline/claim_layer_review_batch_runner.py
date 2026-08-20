@@ -19,6 +19,8 @@ from backend.pipeline.corpus_ai_review_runner import (
     PROJECT_ROOT,
     run_claim_layer,
 )
+from backend.pipeline.knowledge_package import live_claims
+from backend.pipeline.llm_usage import usage_summary
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -67,7 +69,7 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "source_claims": len(package.get("claims") or []),
+                    "source_claims": len(live_claims(package)),
                     "batch_count": len(batches),
                     "batch_claim_counts": [len(batch["claims"]) for batch in batches],
                     "all_source_counts": [len(batch.get("source_documents") or []) for batch in batches],
@@ -128,6 +130,11 @@ def main() -> int:
         encoding="utf-8",
     )
     print(json.dumps({"status": "created", "output": str(args.output)}, ensure_ascii=False))
+    if combined.get("usage"):
+        print(json.dumps(
+            usage_summary(str(args.package.name), combined["usage"]),
+            ensure_ascii=False,
+        ))
     return 0
 
 

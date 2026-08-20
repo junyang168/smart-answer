@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.knowledge_package import live_claims
+
 
 class ClaimLayerReviewBatchError(ValueError):
     pass
@@ -36,7 +38,7 @@ def split_claim_layer_package(
     """Split only claims while preserving all sources and relation context."""
     if batch_size <= 0:
         raise ClaimLayerReviewBatchError("batch_size must be positive")
-    claims = list(package.get("claims") or [])
+    claims = live_claims(package)
     if not claims:
         raise ClaimLayerReviewBatchError("claim-layer package has no claims")
     claim_ids = [str(item.get("claim_id") or "") for item in claims]
@@ -49,11 +51,25 @@ def split_claim_layer_package(
         batch = copy.deepcopy(package)
         batch_claims = claims[start : start + batch_size]
         batch["claims"] = copy.deepcopy(batch_claims)
+        in_batch = {str(item["claim_id"]) for item in batch_claims}
         batch["review_batch"] = {
             "batch_index": index,
             "batch_count": total,
             "claim_count": len(batch_claims),
             "claim_ids": [item["claim_id"] for item in batch_claims],
+            # Id and statement of every other claim in the package.  Duplicate
+            # detection is the one check whose answer lies outside the batch:
+            # section extraction states a conclusion once per section, and an
+            # arbitrary partition puts the twin wherever it falls.  The reviewer
+            # reviews only `claims`; it may point at these.
+            "other_batch_claims": [
+                {
+                    "claim_id": str(row["claim_id"]),
+                    "statement": str(row.get("title") or row.get("statement") or ""),
+                }
+                for row in claims
+                if str(row["claim_id"]) not in in_batch
+            ],
             "source_package_id": package.get("package_id"),
             "source_package_sha256": _sha256_json(package),
             "partition_policy": "claims_only_all_sources_and_relations_retained",
@@ -73,7 +89,7 @@ def split_claim_layer_package_by_source(
     to solve cross-source grouping in the same call.
     """
     source_documents = list(package.get("source_documents") or [])
-    claims = list(package.get("claims") or [])
+    claims = live_claims(package)
     source_ids = [str(row.get("source_id") or "") for row in source_documents]
     if not source_ids or not all(source_ids) or len(source_ids) != len(set(source_ids)):
         raise ClaimLayerReviewBatchError("source documents have missing or duplicate IDs")
@@ -131,16 +147,23 @@ def merge_review_artifacts(
     """Combine batch reviews and prove exact one-time claim coverage."""
     if not artifacts:
         raise ClaimLayerReviewBatchError("no review artifacts to merge")
-    expected_ids = [str(row.get("claim_id") or "") for row in source_package.get("claims", [])]
+    expected_ids = [str(row.get("claim_id") or "") for row in live_claims(source_package)]
     reviews: list[dict[str, Any]] = []
     reviewed_claims: list[dict[str, Any]] = []
     assessments: list[dict[str, Any]] = []
     reviewer_batches: list[dict[str, Any]] = []
     routing_summary: dict[str, int] = {}
     partition_policies: set[str] = set()
+    usage_rows: list[dict[str, Any]] = []
     for index, artifact in enumerate(artifacts, start=1):
         reviews.extend(artifact.get("claim_reviews") or [])
         reviewed_claims.extend(artifact.get("reviewed_claims") or [])
+        # Every batch was billed.  Dropping these left the batched path -- the
+        # only one a package this size can take -- with no answer to what the
+        # review cost, which is the number the per-call rows exist to produce.
+        usage_rows.extend(
+            {**row, "batch_index": index} for row in artifact.get("usage") or []
+        )
         assessments.append(
             {
                 "batch_index": index,
@@ -220,6 +243,7 @@ def merge_review_artifacts(
             "fingerprint_sha256": aggregate_reviewer_fingerprint,
         },
         "sermon_assessments": assessments,
+        "usage": usage_rows,
         "reviewed_claims": ordered_claims,
         "claim_reviews": ordered_reviews,
         "routing_summary": routing_summary,
