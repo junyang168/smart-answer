@@ -143,7 +143,6 @@ export function SermonOverview() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [series, setSeries] = useState("all");
   const [state, setState] = useState("all");
   const [tab, setTab] = useState<"scripture" | "topic">("scripture");
 
@@ -164,22 +163,16 @@ export function SermonOverview() {
 
   useEffect(() => { load(); }, []);
 
-  const allSeries = useMemo(() => {
-    if (!data) return [];
-    return Array.from(new Set(data.rows.map((row) => row.series).filter(Boolean) as string[])).sort();
-  }, [data]);
-
   const rows = useMemo(() => {
     if (!data) return [];
     return data.rows.filter((row) => {
-      if (series !== "all" && row.series !== series) return false;
       const states = Object.values(row.stages).map((cell) => cell.state);
       if (state === "problem") return states.some((s) => s === "failed" || s === "stale");
       if (state === "untouched") return states.every((s) => s === "never" || s === "no_source");
       if (state === "started") return states.some((s) => s === "current" || s === "stale");
       return true;
     });
-  }, [data, series, state]);
+  }, [data, state]);
 
   const renderRow = (row: OverviewRow) => <Row row={row} stages={data?.stages ?? []} />;
 
@@ -246,13 +239,6 @@ export function SermonOverview() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <label className="text-sm font-semibold text-slate-600">系列
-          <select value={series} onChange={(event) => setSeries(event.target.value)}
-            className="ml-2 rounded-lg border border-slate-300 px-2 py-1 text-sm font-normal">
-            <option value="all">全部</option>
-            {allSeries.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        </label>
         <label className="text-sm font-semibold text-slate-600">狀態
           <select value={state} onChange={(event) => setState(event.target.value)}
             className="ml-2 rounded-lg border border-slate-300 px-2 py-1 text-sm font-normal">
