@@ -44,31 +44,37 @@ def segment_texts(transcript_path: Path) -> list[str]:
 
 
 def excerpt_is_deleted(excerpt: str, segments: Sequence[str], paragraph_key: str) -> bool:
-    """Whether this excerpt sits inside a struck span of its segment.
+    """Whether every place this excerpt occurs is inside a struck span.
 
-    The claimed segment is tried first and the whole transcript second: an
-    anchor whose `paragraph_key` no longer resolves is still an anchor, and
-    the question is whether the text it quotes was deleted, not whether the
-    record remembers where it was.
+    Every place, not the first one. `str.find` returns an arbitrary occurrence,
+    and the professor's short interjections recur many times in one segment --
+    「為什麼？」 alone appears three times in a single paragraph of 太16. If one
+    of those sits in a deleted span the anchor may still mean any of the
+    others, and retiring a record on that is a wrong verdict reached by
+    guessing which occurrence was meant. Six records were flagged this way,
+    all of them `不是。` and `對不對？` and their kin, and one was retired.
+
+    So the question is narrowed to one that can be answered without guessing:
+    is there anywhere left in the source where this text survives? If not, the
+    anchor quotes deleted text whichever occurrence it meant.
+
+    `paragraph_key` is not consulted. Across the staged packages only 20% of
+    claimed indices still resolve, and the answer does not depend on it.
     """
 
     if not excerpt:
         return False
-    claimed = int(paragraph_key[1:]) - 1 if paragraph_key[1:].isdigit() else None
-    ordinals: Iterable[int] = (
-        [claimed, *range(len(segments))] if claimed is not None else range(len(segments))
-    )
-    for ordinal in ordinals:
-        if not 0 <= ordinal < len(segments):
-            continue
-        text = segments[ordinal]
-        start = text.find(excerpt)
-        if start < 0:
-            continue
-        end = start + len(excerpt)
-        if any(start < stop and begin < end for begin, stop in struck_spans(text)):
-            return True
-    return False
+    occurrences = surviving = 0
+    for text in segments:
+        spans = struck_spans(text)
+        position = text.find(excerpt)
+        while position >= 0:
+            occurrences += 1
+            end = position + len(excerpt)
+            if not any(position < stop and begin < end for begin, stop in spans):
+                surviving += 1
+            position = text.find(excerpt, position + 1)
+    return occurrences > 0 and surviving == 0
 
 
 def audit(

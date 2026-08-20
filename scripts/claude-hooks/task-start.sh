@@ -16,5 +16,6 @@ Work tracking for this repo (see AGENTS.md § Tracking work):
 - Finishing: commit, then `scripts/wrap-up.sh` opens the PR with `Closes #N` derived from the
   branch. GitHub cannot backfill that link. The board sets Done by itself when the merge
   closes the issue.
-- Only OPS/infrastructure tickets stay off the board.
+- Every card goes on the board. `--ops` means epic E10 plus the `infrastructure`
+  label, which is how operations cards are filtered -- not by being left off.
 CONTEXT

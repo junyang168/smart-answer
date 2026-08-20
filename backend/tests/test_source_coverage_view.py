@@ -321,3 +321,30 @@ def test_build_reports_a_source_whose_file_is_gone(tmp_path: Path, transcript: P
 def test_build_rejects_an_unknown_source(tmp_path: Path, transcript: Path) -> None:
     with pytest.raises(KeyError):
         SourceCoverageReader(FakeStore(_corpus_rows(transcript)), tmp_path).build("SRC-absent")
+
+
+def test_headings_are_out_of_the_denominator_but_still_in_the_list() -> None:
+    """A heading is structure, not material, and is represented 0% by design.
+
+    51 of the 208 sentences in the 太16 母本 are headings, which drags a 97.7%
+    prose coverage down to the 69% the page was showing. They stay in the
+    sentence list -- not counting them is different from hiding them.
+    """
+
+    from backend.pipeline.source_coverage_view import _sentence_rows, _stats
+
+    heading = _sentence_rows("## 一、標題", [])
+    body = "教會建立在彼得所表達的信仰告白上面。這一句沒有任何記錄指著它。"
+    prose = _sentence_rows(body, [{"start": 0, "end": 18}])
+    assert [row["category"] for row in heading] == ["heading"]
+    assert [row["category"] for row in prose] == ["prose", "prose"]
+
+    segments = [
+        {"text": "## 一、標題", "sentences": heading, "fragment_ids": [], "is_heading": True,
+         "covered_chars": 0},
+        {"text": body, "sentences": prose, "fragment_ids": ["FR-1"],
+         "is_heading": False, "covered_chars": 18},
+    ]
+    stats = _stats(segments, {}, {}, {})
+    assert (stats["sentences"], stats["sentences_covered"]) == (3, 1)
+    assert (stats["prose_sentences"], stats["prose_sentences_covered"]) == (2, 1)
