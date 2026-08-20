@@ -14,5 +14,5 @@ ahead="$(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo 0)"
 note="工作尚未收尾："
 [[ "$dirty" -gt 0 ]] && note="$note ${dirty} 個檔案未提交。"
 [[ "$ahead" -gt 0 ]] && note="$note ${ahead} 個 commit 未推送。"
-note="$note 收工要 commit、開 PR 並在合併前宣告 Closes #N、把看板卡改成 Done。"
+note="$note 收工用 scripts/wrap-up.sh：它推分支並從分支名寫出 Closes #N。看板自己會轉 Done。"
 jq -n --arg m "$note" '{systemMessage:$m}'
