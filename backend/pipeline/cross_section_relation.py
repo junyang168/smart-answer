@@ -39,7 +39,11 @@ from backend.pipeline.knowledge_package import live_claim_ids, live_claims
 
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
-SCHEMA_VERSION = "wang_cross_section_relation_v1"
+# v2: retired duplicates are no longer relatable records. The version is part
+# of `discovery_identity`, so a package processed under v1 is re-proposed
+# instead of served from a cache built when a merged-away claim was a valid
+# endpoint.
+SCHEMA_VERSION = "wang_cross_section_relation_v2"
 
 #: The same vocabulary the extraction uses. This stage adds edges to an existing
 #: graph; it does not get its own dialect.

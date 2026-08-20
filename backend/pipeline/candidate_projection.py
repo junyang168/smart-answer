@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from backend.api.sermon_search.bible_refs import normalize_ref
+from backend.pipeline.knowledge_package import live_claims
 
 
 SCHEMA_VERSION = "wang_candidate_projection_v1"
@@ -176,7 +177,7 @@ def projection_input(
                 }
             ),
         }
-        for row in knowledge.get("claims") or []
+        for row in live_claims(knowledge)
     ]
     result = reviewed_relations.get("result") or reviewed_relations
     return {

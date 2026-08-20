@@ -12,7 +12,8 @@ from backend.pipeline.cross_section_relation import (
 )
 from backend.pipeline.knowledge_package import live_claim_ids, live_claims
 from backend.pipeline.observation_coverage_adjudication import build_packet
-from backend.pipeline.topic_structure_discovery import discovery_input
+from backend.pipeline.passage_knowledge_slice import Passage, build_passage_slice
+from backend.pipeline.topic_structure_discovery import discovery_input, graph_profile
 
 
 def _merged_package() -> dict:
@@ -100,3 +101,47 @@ def test_adjudication_summary_reports_how_much_it_accepted() -> None:
     assert summary["adjudicated"] == 2
     assert summary["accepted"] == 1
     assert summary["acceptance_rate"] == 0.5
+
+
+def test_topic_profile_does_not_offer_the_retired_claim_to_the_model() -> None:
+    """The profile and the claim list go into the same payload.
+
+    Naming a claim the model may not use would have it assigned to a subtopic
+    and then rejected by this stage's own validation.
+    """
+    package = _merged_package()
+    package["claims"][1]["topic_terms"] = ["彌賽亞"]
+    package["claims"][0]["topic_terms"] = ["彌賽亞"]
+
+    profile = graph_profile(package)
+
+    assert profile["claim_count"] == 1
+    named = {
+        claim_id
+        for row in profile.get("recurring_topic_terms") or []
+        for claim_id in row.get("claim_ids") or []
+    }
+    assert "CL-2" not in named
+
+
+def test_passage_slice_does_not_hand_the_retired_claim_to_the_author() -> None:
+    package = _merged_package()
+    for claim in package["claims"]:
+        claim["scripture_refs"] = ["太 16:21"]
+
+    slice_ = build_passage_slice(package, Passage(book="太", chapter=16, start_verse=21, end_verse=21))
+
+    seen = {row["claim_id"] for row in slice_["claims"] + slice_.get("contextual_claims", [])}
+    assert "CL-2" not in seen
+
+
+def test_the_pilot_refuses_a_merge_it_cannot_execute() -> None:
+    """A silent no-op here would leave the duplicate live with no trace."""
+    # Imported here: the pilot resolves platform paths at import time.
+    from backend.pipeline.shared_knowledge_pilot import _apply_claim_overrides
+
+    claims = {"claims": [{"claim_id": "CL-2", "title": "被併掉的那條"}]}
+    overrides = {"claims": {"CL-2": {"status": "ai_consensus_applied", "superseded_by": "CL-1"}}}
+
+    with pytest.raises(ValueError, match="knowledge_consensus_applier"):
+        _apply_claim_overrides(claims, overrides)

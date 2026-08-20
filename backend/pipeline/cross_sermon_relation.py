@@ -11,6 +11,7 @@ import hashlib
 import json
 from copy import deepcopy
 from typing import Any
+from backend.pipeline.knowledge_package import live_claims
 
 
 SCHEMA_VERSION = "wang_cross_sermon_relation_v1"
@@ -228,7 +229,7 @@ def normalize_discovery(response: dict[str, Any]) -> dict[str, Any]:
 
 def validate_discovery(response: dict[str, Any], knowledge: dict[str, Any]) -> None:
     _require(response.get("scope_confirmation") == SCOPE, "discovery scope not confirmed")
-    claims = {str(row["claim_id"]): row for row in knowledge.get("claims", [])}
+    claims = {str(row["claim_id"]): row for row in live_claims(knowledge)}
     evidence = {
         str(row["evidence_step_id"]): row for row in knowledge.get("evidence_steps", [])
     }

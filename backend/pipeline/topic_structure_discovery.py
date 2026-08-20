@@ -150,7 +150,10 @@ def _claim_sources(claim: dict[str, Any]) -> list[str]:
 
 def graph_profile(knowledge: dict[str, Any]) -> dict[str, Any]:
     """Produce deterministic graph landmarks without deciding the taxonomy."""
-    claims = knowledge.get("claims") or []
+    # Same claims `discovery_input` sends. A profile counting the retired row
+    # would name it in `recurring_topic_terms`, the model would assign it to a
+    # subtopic, and validation would then reject its own input.
+    claims = live_claims(knowledge)
     claim_ids = {str(row.get("claim_id")) for row in claims}
     degree: Counter[str] = Counter()
     relation_types: Counter[str] = Counter()
