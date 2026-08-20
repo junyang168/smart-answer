@@ -167,7 +167,7 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 
 ## 6. 畫面三：選擇執行（總表上的動作，第五步才做）
 
-勾選 → 選「跑到哪一階段為止」→ **先看試算，再決定**。每一篇從它缺的第一個階段接著跑，到指定的終點為止；已經是 ✓ 的階段預設跳過，要重跑得另外勾「連 ✓ 也重跑」。順序固定（抽取→複審→仲裁→合併→入庫），這不是工作流引擎，只是把固定的鏈條一次按完——兩百多篇一輪五個階段，逐階段手按是分批數乘五次，鏈起來是一次。文章不在鏈裡：它以 draft 為單位，第一版仍由 CLI 觸發（記錄照寫）。
+勾選 → 選「跑到哪一階段為止」→ **先看試算，再決定**。每一篇從它缺的第一個階段接著跑，到指定的終點為止；已經是 ✓ 的階段預設跳過，要重跑得另外勾「連 ✓ 也重跑」。順序固定（抽取→複審→仲裁→合併→入庫），這不是工作流引擎，只是把固定的鏈條一次按完——兩百多篇一輪五個階段，逐階段手按是分批數乘五次，鏈起來是一次。文章不在鏈裡：它以編排計劃為單位，用自己的啟動器（本節後半）。
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -192,6 +192,24 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 **上限**（後端擋，不是前端）。上限是防呆，不是產能：全庫 240 篇跑一輪抽取按今天的兩次實測估 $80–120，這是這個面板要支撐的**正常工作**，上限不能把它變成不可能。所以不設「單一 batch 最多 N 篇」——全庫一次是合法的 batch。防呆用確認的力度分級：估計花費超過 $20，確認框要求輸入篇數；超過 $100，要求輸入估計金額本身；當日累計超過 $150 拒絕新 batch 並顯示為什麼。三個門檻都是後端 config，改門檻不用改程式。同時執行上限見第 8 節。勾錯一次不該直接開跑，但按一次該能跑完全庫。
 
 確認後，API 只為每篇寫下**第一個缺的階段**的 `queued` 一列（batch 的 metadata 記著終點階段），就回應。後續階段由 worker 在前一階段成功後接著排——佇列裡不該出現一列「複審還沒跑就排好的仲裁」；前一階段失敗，這一篇的鏈就停在那裡，錯誤顯示在執行記錄。
+
+### 生成文章
+
+文章的單位是編排計劃，不是講道，所以它不進勾選的鏈，有自己的啟動器：總表旁一個「生成文章…」入口，列出 PostgreSQL 裡的 CompositionPlan（今天 44 個），每個計劃顯示經文範圍、已有的 draft（如果有）、最後一次文章執行的結果與花費。挑一個計劃 → 同一種試算確認框 → worker 以固定的命令模板啟動：
+
+```
+matthew_exposition_authoring_runner --plan-id <計劃>   --publication-profile <config> --quality-profile <config>   --program-audit-manifest … --max-revision-rounds 2 --max-grounding-attempts 4
+```
+
+profile 路徑與固定參數放後端 config；面板只能挑計劃，**不能組參數**——能改參數的面板遲早會被用來繞掉 quality profile。
+
+三件面板管不了、也不該管的事：
+
+1. **寫作迴圈是 runner 的，不是面板的。** 一次初審、每輪修訂恰好一次 Delta Review、Program Audit、自動出版決定——這條不變量在 runner 裡（AGENTS.md 是它的權威）。面板只負責啟動和記錄，記錄裡的自動出版決定**永遠不標成人工批准**。寫入文庫也不是部署。
+2. **「這個計劃可以寫了嗎」是人的判斷。** 現行流程要求先在計劃上確認 authoring contract。啟動器不計算 readiness、不擋「還沒準備好」的計劃——它算不準，算不準的門檻只會教人繞過它。它顯示計劃有什麼，按下去的責任在按的人。
+3. **文章執行第一版不能取消。** 迴圈的每一階段都綁著前一階段的 SHA，中途殺掉留下的是半份 draft 加一堆對不上的審核記錄。`cancel_requested` 對 `article` 列不生效，UI 直說。
+
+文章執行寫進同一張記錄表：`subject_kind='draft'`、`source_ids` 列全部引用來源、費用照價目表算。試算在有歷史之前會說「僅有 N 次紀錄，估計不可靠」——文章是最貴的階段，這句話在前幾次會一直在。
 
 ## 7. 畫面四：單篇詳情（`/admin/wang/operations/sources/<source_id>`）
 
@@ -230,17 +248,22 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 | 2. 記錄表 | migration 上線；六個 runner 都寫；用 CLI 跑一次抽取，不做任何額外動作，它出現在表裡並帶花費 |
 | 3. 總表（只讀） | 列出全部來源，六格狀態全部來自記錄表，不掃目錄；對不上的掛 warning |
 | 4. 執行記錄 / 單篇詳情 | 失敗訊息看得到；`command` 複製得出來 |
-| 5. 觸發執行 | 扣錢前看得到篇數／花費／時間；執行中部署一次，那次執行要嘛跑完要嘛被記成中斷；未登入的請求打不開執行 API |
+| 5. 觸發執行 | 扣錢前看得到篇數／花費／時間；執行中部署一次，那次執行要嘛跑完要嘛被記成中斷；未登入的請求打不開執行 API；從面板挑一個編排計劃生成一次文章，它帶著花費出現在執行記錄裡 |
 
 只讀的部分先上線，是為了在按鈕出現之前，先確認表上的字是真的。
 
-## 11. 權限
+## 11. 權限（本卡內做，第五步之前落地）
 
-後端目前**沒有任何一個 route 要求管理員**。角色檢查只在 `web/src/app/admin/layout.tsx` 裡，是前端的，繞過它只要直接打後端。現在唯讀的頁面這樣還過得去；有了會花錢的按鈕就不行。
+後端目前**沒有任何一個 route 要求管理員**。角色檢查只在 `web/src/app/admin/layout.tsx`，是前端的；Next.js 的 proxy route 已經把 cookie 轉給後端，後端只是不看。唯讀頁面這樣還過得去，會花錢的按鈕不行。
 
-第五步之前必須落地：後端接受並驗證 session（cookie 已經由 Next.js 的 proxy route 轉過去了，後端現在只是不看），`/admin/wang/operations/*` 的所有寫入端點要求 `editor` 或 `admin`，未登入回 401、角色不足回 403。只讀端點同樣要求登入。
+不讓 Python 去解 next-auth 的 cookie。session 是 next-auth 的 JWT（JWE 加密），在後端重實作解密等於把 FastAPI 綁死在 next-auth 的版本內部。改用一層短命的簽名 header：
 
-這件事的範圍超出本卡（後端從零開始做認證），但驗收第 6 條掛在這裡，所以要嘛在本卡做，要嘛拆一張卡並在本卡的 PR 裡指名它。
+1. `/api/admin/wang/operations/*` 的 Next proxy route 先 `getServerSession()`。沒登入回 401，角色不是 `editor` / `admin` 回 403，**請求根本不轉發**。
+2. 通過的請求，proxy 簽一個 `X-Wang-Operator` header：`{email, role, exp}`，HMAC-SHA256，密鑰 `WANG_OPERATIONS_SECRET`（`.env`，前後端共用），`exp` 60 秒。
+3. 後端一個 FastAPI dependency 掛在全部 `/admin/wang/operations/*` route 上：驗簽、驗 `exp`，寫入端點另驗 `role`。沒有 header 或驗不過 → 401/403。直接打 8555 而不知道密鑰的請求，讀寫都進不來。
+4. `triggered_by` 取自驗過簽的 email，不收 request body 裡自報的身分。
+
+範圍界線：這層只保護 operations API，不回頭給既有的其他後端 route 補權限——那是另一張卡。但 dependency 寫成可以被其他 router 直接掛用的形狀。
 
 ## 12. 行的全集：240（已定）
 
