@@ -39,7 +39,7 @@ Open the ticket before you start, not after the code exists.
 
 ```bash
 scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md
-scripts/ticket.sh --ops --title "OPS-12 — ..." --body-file card.md
+scripts/ticket.sh --ops --title "OPS-13 — ..." --body-file card.md
 ```
 
 Use the script rather than `gh issue create`. A card is three things — a repo
@@ -49,9 +49,14 @@ its epic — and `gh issue create` writes only the first. Five existing cards
 one; the board is where this work is read, so a card that is missing from it
 does not exist to the person tracking it.
 
-Epics are E01–E10, issues #3–#12. `--ops` is deliberately different: operations
-tickets carry the `infrastructure` label, stay off the board, and belong to no
-epic.
+Epics are E01–E10, issues #3–#12. `--ops` is shorthand for E10 plus the
+`infrastructure` label — a different kind of card, not a card kept off the
+board. Operations tickets used to be repo-only, and the twelve of them were
+invisible in the one place this work is read: what OPS covered could not be
+answered without opening the issue list, and three of the twelve turned out
+not to be operations at all. Filtering them out belongs in a saved board view,
+which the label is there for. Filtered out at the moment of writing, a card
+can only be found again by someone who already remembers it exists.
 
 When the work is done: commit, open a pull request declaring `Closes #N`
 **before** it merges, and set the card to Done on the board once it lands. The
