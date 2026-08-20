@@ -257,6 +257,10 @@ def validate_openai_adjudication(
             _require(superseded_by != claim_id, f"{claim_id}: cannot supersede itself")
             # A merge is the whole patch.  Editing a claim and then retiring it
             # leaves an override whose effect nobody can read off the artifact.
+            # `excluded_claim_relation_ids` is deliberately not on this list:
+            # one review routinely finds both that two claims duplicate and
+            # that the edge between them is wrong, and the applier accepts an
+            # exclusion the merge's own dedupe already carried out.
             _require(
                 not any([
                     str(patch.get("statement") or "").strip(),

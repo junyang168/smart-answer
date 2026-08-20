@@ -252,6 +252,15 @@ def apply_consensus_overrides(
             raise ConsensusApplicationError(
                 f"merge target is itself merged away: {claim_id} -> {survivor_id}"
             )
+        # A package can arrive already merged.  Retiring into a claim that an
+        # earlier round retired takes both out of the live set at once, and the
+        # coverage guard below would then report it as lost source coverage --
+        # true, but it names the symptom instead of the override that caused it.
+        if survivor.get("superseded_by"):
+            raise ConsensusApplicationError(
+                f"merge target was already superseded by "
+                f"{survivor['superseded_by']}: {claim_id} -> {survivor_id}"
+            )
         _merge_into_survivor(
             loser=claims[claim_id],
             survivor=survivor,
@@ -259,6 +268,11 @@ def apply_consensus_overrides(
         )
         claims[claim_id]["superseded_by"] = survivor_id
         claims[claim_id]["review_status"] = "superseded"
+    # Relations the merge itself removed.  An override may name one of these in
+    # `excluded_claim_relation_ids` -- Claude flags a wrong edge between two
+    # claims and their duplication in the same review -- and "already gone" has
+    # to satisfy "remove this", not fail the whole application as unknown.
+    dissolved_relation_ids: set[str] = set()
     if merges:
         # Retargeting can turn an edge between the two merged claims into a
         # self-loop, and can make two edges identical.
@@ -269,6 +283,9 @@ def apply_consensus_overrides(
             target = str(relation.get("to_id") or relation.get("target_id") or "")
             signature = (source, target, str(relation.get("relation_type") or ""))
             if source == target or signature in seen:
+                dissolved_relation_ids.add(
+                    str(relation.get("claim_relation_id") or relation.get("relation_id") or "")
+                )
                 continue
             seen.add(signature)
             deduped.append(relation)
@@ -282,7 +299,7 @@ def apply_consensus_overrides(
     known_relations = {
         str(row.get("claim_relation_id") or row.get("relation_id") or "")
         for row in result.get("claim_relations", [])
-    }
+    } | dissolved_relation_ids
     unknown = relations_to_remove - known_relations
     if unknown:
         raise ConsensusApplicationError("unknown relations in overrides: " + ", ".join(sorted(unknown)))
@@ -302,6 +319,10 @@ def apply_consensus_overrides(
         "adjudication_fingerprint": adjudication_fingerprint,
         "applied_claim_ids": sorted((overrides.get("claims") or {}).keys()),
         "removed_claim_relation_ids": sorted(relations_to_remove),
+        # Edges the merge itself dissolved -- a self-loop or a now-identical
+        # twin.  Recorded separately so a relation that vanished without an
+        # override asking for it is still answerable from the artifact.
+        "dissolved_claim_relation_ids": sorted(item for item in dissolved_relation_ids if item),
         "merged_claim_ids": {claim_id: merges[claim_id] for claim_id in sorted(merges)},
         "approval_status": "not_human_approved",
     }

@@ -327,3 +327,58 @@ def test_merge_into_a_claim_that_does_not_exist_is_refused(tmp_path: Path) -> No
 
     with pytest.raises(ConsensusApplicationError, match="merge target does not exist"):
         apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+
+
+def test_a_merge_may_also_exclude_the_relation_it_dissolves(tmp_path: Path) -> None:
+    """One review finds both the duplicate and the wrong edge between the pair.
+
+    The merge's own dedupe removes CR001 as a self-loop, so by the time the
+    exclusion list is checked the id is gone from `claim_relations`.  "Already
+    removed" has to satisfy "remove this" -- treating it as an unknown relation
+    failed the entire application over a request that had been carried out.
+    """
+    package, overrides = _two_claim_package(tmp_path)
+    retired_id = next(iter(overrides["claims"]))
+    relation_id = package["claim_relations"][0]["claim_relation_id"]
+    overrides["claims"][retired_id]["excluded_claim_relation_ids"] = [relation_id]
+
+    result = apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+
+    assert result["claim_relations"] == []
+    assert result["consensus_application"]["dissolved_claim_relation_ids"] == [relation_id]
+    assert result["consensus_application"]["removed_claim_relation_ids"] == [relation_id]
+
+
+def test_an_exclusion_naming_no_relation_at_all_is_still_refused(tmp_path: Path) -> None:
+    """Tolerating what the merge dissolved must not tolerate a typo."""
+    package, overrides = _two_claim_package(tmp_path)
+    retired_id = next(iter(overrides["claims"]))
+    overrides["claims"][retired_id]["excluded_claim_relation_ids"] = ["CR-NOPE"]
+
+    with pytest.raises(ConsensusApplicationError, match="unknown relations"):
+        apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+
+
+def test_merging_into_an_already_retired_claim_is_refused(tmp_path: Path) -> None:
+    """Round two must not name round one's loser as the survivor.
+
+    Both claims leave the live set at once, and the coverage guard then reports
+    lost evidence -- true, but it names the symptom instead of the override.
+    """
+    package, overrides = _two_claim_package(tmp_path)
+    merged = apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+    survivor_id, retired_id = (row["claim_id"] for row in merged["claims"])
+    second_round = {
+        "adjudication_fingerprint": {"fingerprint_sha256": "fp2"},
+        "claims": {
+            survivor_id: {
+                "status": "ai_consensus_applied", "approval_status": "not_human_approved",
+                "excluded_anchors": [], "excluded_claim_relation_ids": [],
+                "anchor_additions": [], "structural_notes": [],
+                "superseded_by": retired_id, "adjudication_fingerprint": "fp2",
+            }
+        },
+    }
+
+    with pytest.raises(ConsensusApplicationError, match="already superseded"):
+        apply_consensus_overrides(merged, second_round, {"011WSR01": _transcript()})
