@@ -176,7 +176,7 @@ def test_invalid_model_review_is_retried_with_validation_feedback() -> None:
             return review
 
     client = FakeClient()
-    result = _generate_valid_review(
+    result, usage = _generate_valid_review(
         client=client,
         prompt="review",
         user_input="source",
@@ -186,6 +186,9 @@ def test_invalid_model_review_is_retried_with_validation_feedback() -> None:
     assert len(result["claim_reviews"]) == 2
     assert len(client.calls) == 2
     assert "未通过程序验证" in client.calls[1]
+    # The rejected attempt was billed; a cost that counts only the accepted
+    # call is the one number this review was run to produce.
+    assert [row["attempt"] for row in usage] == [1, 2]
 
 
 def test_curated_claim_layer_is_normalized_without_reextracting() -> None:
@@ -240,5 +243,25 @@ def test_existing_ai_review_is_archived_by_reviewer_generation(tmp_path) -> None
 
     archive = _archive_existing_review(output)
 
-    assert archive == tmp_path / "review-generations" / "review.abcdef123456.json"
+    assert archive.parent == tmp_path / "review-generations"
+    assert archive.name.startswith("review.abcdef123456.")
     assert archive.read_text(encoding="utf-8") == output.read_text(encoding="utf-8")
+
+
+def test_rerunning_one_reviewer_does_not_overwrite_the_earlier_generation(tmp_path) -> None:
+    """Two runs of the same reviewer are the comparison; keep both."""
+    output = tmp_path / "review.json"
+    output.write_text(
+        '{"reviewer":{"fingerprint_sha256":"abcdef1234567890"},"run":1}',
+        encoding="utf-8",
+    )
+    first = _archive_existing_review(output)
+    output.write_text(
+        '{"reviewer":{"fingerprint_sha256":"abcdef1234567890"},"run":2}',
+        encoding="utf-8",
+    )
+
+    second = _archive_existing_review(output)
+
+    assert first != second
+    assert first.is_file() and second.is_file()

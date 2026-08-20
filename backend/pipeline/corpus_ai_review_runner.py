@@ -29,6 +29,7 @@ from backend.pipeline.corpus_ai_review import (
 from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug, _transcript_for_prompt
 from backend.pipeline.knowledge_source import load_knowledge_source_document
+from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -81,10 +82,18 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _archive_existing_review(output_path: Path) -> Path | None:
+    """Keep every previous review, including a rerun of the same reviewer.
+
+    The name carries the content hash as well as the reviewer fingerprint: two
+    runs of one reviewer over one package share a fingerprint, and naming by
+    fingerprint alone silently dropped the earlier of the two — which is
+    precisely the pair you need when measuring how stable a review is.
+    """
     if not output_path.is_file():
         return None
+    raw = output_path.read_bytes()
     try:
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
+        existing = json.loads(raw)
         fingerprint = str(
             (existing.get("reviewer") or {}).get("fingerprint_sha256") or "legacy"
         )[:12]
@@ -92,7 +101,9 @@ def _archive_existing_review(output_path: Path) -> Path | None:
         fingerprint = "unreadable"
     archive_dir = output_path.parent / "review-generations"
     archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / f"{output_path.stem}.{fingerprint}.json"
+    archive_path = (
+        archive_dir / f"{output_path.stem}.{fingerprint}.{_sha256_bytes(raw)[:8]}.json"
+    )
     if not archive_path.exists():
         shutil.copy2(output_path, archive_path)
     return archive_path
@@ -179,10 +190,16 @@ def _generate_valid_review(
     user_input: str,
     survey: dict[str, Any],
     validation_attempts: int = 2,
-) -> dict[str, Any]:
-    """Retry a structurally invalid review without hiding the failed attempt."""
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Retry a structurally invalid review without hiding the failed attempt.
+
+    The usage rows come back alongside the review because a rejected attempt is
+    billed too: counting only the accepted call would understate what a review
+    of this size actually costs.
+    """
     last_error: AIReviewValidationError | None = None
     feedback = ""
+    usage_rows: list[dict[str, Any]] = []
     for attempt in range(1, validation_attempts + 1):
         response = client.generate_json(
             prompt,
@@ -190,9 +207,10 @@ def _generate_valid_review(
             AI_REVIEW_RESPONSE_SCHEMA,
             cache_prefix=user_input,
         )
+        usage_rows.append(usage_row(getattr(client, "last_usage", None), attempt))
         try:
             validate_review_response(response, survey)
-            return response
+            return response, usage_rows
         except AIReviewValidationError as exc:
             last_error = exc
             if attempt == validation_attempts:
@@ -250,7 +268,7 @@ def run_one(
         ):
             return "skipped", output_path
 
-    response = _generate_valid_review(
+    response, usage_rows = _generate_valid_review(
         client=client,
         prompt=prompt,
         user_input=_review_input(survey, transcript),
@@ -275,6 +293,7 @@ def run_one(
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
         "spot_check_percent": spot_check_percent,
+        "usage": usage_rows,
         # Preserve the exact ordered anchor snapshot seen by the reviewer.
         # Ordinal anchor indexes are otherwise unsafe once a derived package is
         # rebuilt or an earlier override changes an occurrence.
@@ -352,7 +371,7 @@ def run_claim_layer(
         ):
             return "skipped", output_path
 
-    response = _generate_valid_review(
+    response, usage_rows = _generate_valid_review(
         client=client,
         prompt=prompt,
         user_input=_claim_layer_input(survey, transcripts),
@@ -378,6 +397,7 @@ def run_claim_layer(
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
         "spot_check_percent": spot_check_percent,
+        "usage": usage_rows,
         "reviewed_claims": survey["candidate_claims"],
         **routed,
     }
@@ -469,6 +489,12 @@ def main() -> int:
             force=args.force,
         )
         print(json.dumps({"status": status, "output": str(output)}, ensure_ascii=False))
+        if status == "created":
+            review = json.loads(output.read_text(encoding="utf-8"))
+            print(json.dumps(
+                usage_summary(str(args.claim_layer_package.name), review.get("usage") or []),
+                ensure_ascii=False,
+            ))
         return 0
 
     paths = sorted(args.survey_dir.glob("*.first-pass.json"))
