@@ -325,6 +325,7 @@ def test_a_revival_leaves_the_record_saying_what_it_said() -> None:
     assert plan.as_dict()["summary"] == {
         "created": 0, "updated": 0, "retired": 0, "revived": 1,
         "unchanged": 0, "operations": 1,
+        "fields_removed": 0, "removals": [],
     }
 
 

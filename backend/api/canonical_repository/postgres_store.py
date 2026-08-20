@@ -340,10 +340,22 @@ def _record_id(collection: str, payload: Mapping[str, Any]) -> str:
     return str(payload[id_field])
 
 
-def normalize_package(payload: Mapping[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
-    """Validate record shapes and flatten a package into collection/id records."""
+def _normalize_records(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[tuple[str, str], frozenset[str]]]:
+    """Flatten a package, keeping which fields each record actually stated.
+
+    The dumped row cannot answer that on its own: every declared field appears
+    in it, so a package that never mentioned `project_id` is byte for byte a
+    package that set it to null. Pydantic keeps the difference in
+    `model_fields_set` -- extras included, aliases resolved to the field name
+    the dump uses -- and it is the only place the difference survives, so it is
+    read here and carried alongside the row.
+    """
+
     records = KnowledgePackageImporter._model_records(dict(payload))
     normalized: dict[str, dict[str, dict[str, Any]]] = {}
+    stated: dict[tuple[str, str], frozenset[str]] = {}
     for collection, values in records.items():
         normalized[collection] = {}
         for value in values:
@@ -354,7 +366,13 @@ def normalize_package(payload: Mapping[str, Any]) -> dict[str, dict[str, dict[st
                     f"Duplicate record {collection}/{record_id} in package"
                 )
             normalized[collection][record_id] = row
-    return normalized
+            stated[(collection, record_id)] = frozenset(value.model_fields_set)
+    return normalized, stated
+
+
+def normalize_package(payload: Mapping[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
+    """Validate record shapes and flatten a package into collection/id records."""
+    return _normalize_records(payload)[0]
 
 
 def preserve_human_review(
@@ -369,6 +387,66 @@ def preserve_human_review(
     return result
 
 
+def _is_empty(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def merge_over_existing(
+    incoming: Mapping[str, Any],
+    existing: Optional[Mapping[str, Any]],
+    stated: frozenset[str],
+) -> dict[str, Any]:
+    """Apply the fields a package stated; leave every field it did not alone.
+
+    An update used to be a replacement, so any field the incoming package
+    omitted was overwritten to whatever the schema says when nobody speaks --
+    null, or the declared default. Nobody ever asked for that: across the whole
+    of `object_versions` it took out 511 field values on 194 objects, and
+    the only two change sets that ever reversed one are named
+    `AUTHORING-CONTRACT-MIGRATION-RESTORE` and `RESTORE-NOTES-PROVENANCE` --
+    repairs, applied 98 seconds and 15 minutes after the damage. There is no
+    change set anywhere in the store whose purpose was to clear a field by
+    leaving it out, so nothing depends on omission meaning erasure.
+
+    It could not have been asked for, either: what an extraction omits is
+    decided by what extraction knows, not by what should stop being true. One
+    re-extraction erased `source_id` and `target_id` from nine claim relations
+    -- both endpoints of the edge -- and `source_fragment_id` from thirty-nine
+    evidence steps, because a re-extraction of one lecture has no opinion about
+    a cross-lecture edge and never claimed to.
+
+    So omission means "unchanged" and deletion has to be written down: state
+    the field as null. That is still a removal, and `fields_removed` names it.
+    """
+
+    if not existing:
+        return dict(incoming)
+    merged = dict(existing)
+    merged.update({field: incoming[field] for field in stated if field in incoming})
+    return merged
+
+
+def fields_removed(
+    existing: Optional[Mapping[str, Any]], final: Mapping[str, Any]
+) -> tuple[str, ...]:
+    """Name the fields this update takes away, once the payload is settled.
+
+    Read after review preservation rather than before it: a package that
+    blanks `review_note` on an approved record has it put back, and reporting
+    a removal that did not happen teaches whoever reads these to ignore them.
+    """
+
+    if not existing:
+        return ()
+    return tuple(
+        sorted(
+            field
+            for field, value in existing.items()
+            if not _is_empty(value) and _is_empty(final.get(field))
+        )
+    )
+
+
 @dataclass(frozen=True)
 class ChangeOperation:
     operation: str
@@ -379,6 +457,11 @@ class ChangeOperation:
     before_revision: Optional[int]
     after_revision: int
     payload: dict[str, Any]
+    # Which fields this update takes away. `before_sha256`/`after_sha256` say
+    # that something changed and nothing more, which is why 511 field values
+    # went out of the store unnoticed until a manuscript vanished from every
+    # scripture-grouped view and someone spotted it by eye.
+    removed_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -392,8 +475,29 @@ class ChangeSetPlan:
     unchanged: int
     ignored_keys: tuple[str, ...]
 
+    @property
+    def removals(self) -> tuple[dict[str, Any], ...]:
+        """Every field this change set takes away, named, before it is applied.
+
+        A caller that plans without applying can read this and refuse; the same
+        list goes into the change set summary and into each operation's
+        `details`, so the answer to "what did that ingest remove" exists in the
+        store afterwards instead of only in whatever scrollback is still open.
+        """
+
+        return tuple(
+            {
+                "collection": item.collection,
+                "object_id": item.object_id,
+                "fields": list(item.removed_fields),
+            }
+            for item in self.operations
+            if item.removed_fields
+        )
+
     def as_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        removals = self.removals
         value["summary"] = {
             "created": sum(item.operation == "create" for item in self.operations),
             "updated": sum(item.operation == "update" for item in self.operations),
@@ -401,6 +505,8 @@ class ChangeSetPlan:
             "revived": sum(item.operation == "revive" for item in self.operations),
             "unchanged": self.unchanged,
             "operations": len(self.operations),
+            "fields_removed": sum(len(item["fields"]) for item in removals),
+            "removals": [dict(item) for item in removals],
         }
         return value
 
@@ -411,14 +517,20 @@ def build_change_set_plan(
     *,
     source_kind: str = "knowledge_package",
 ) -> ChangeSetPlan:
-    normalized = normalize_package(package)
+    normalized, stated = _normalize_records(package)
     operations: list[ChangeOperation] = []
     unchanged = 0
     for collection in sorted(normalized):
         for object_id in sorted(normalized[collection]):
             current = existing.get((collection, object_id))
             current_payload = (current or {}).get("payload")
-            incoming = preserve_human_review(normalized[collection][object_id], current_payload)
+            merged = merge_over_existing(
+                normalized[collection][object_id],
+                current_payload,
+                stated[(collection, object_id)],
+            )
+            incoming = preserve_human_review(merged, current_payload)
+            removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
             before_sha = str((current or {}).get("content_sha256") or "") or None
             if before_sha == after_sha:
@@ -435,6 +547,7 @@ def build_change_set_plan(
                     before_revision=before_revision,
                     after_revision=(before_revision or 0) + 1,
                     payload=incoming,
+                    removed_fields=removed_fields,
                 )
             )
 
@@ -887,12 +1000,18 @@ class PostgresKnowledgeStore:
                     cursor.execute(
                         """INSERT INTO wang_knowledge.change_operations
                            (change_set_id, operation_index, operation, collection, object_id,
-                            before_sha256, after_sha256, before_revision, after_revision)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            before_sha256, after_sha256, before_revision, after_revision,
+                            details)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
                         (
                             plan.change_set_id, index, operation.operation, operation.collection,
                             operation.object_id, operation.before_sha256, content_sha,
                             operation.before_revision, operation.after_revision,
+                            canonical_json(
+                                {"removed_fields": list(operation.removed_fields)}
+                                if operation.removed_fields
+                                else {}
+                            ),
                         ),
                     )
                     if operation.collection in EDGE_COLLECTIONS:
