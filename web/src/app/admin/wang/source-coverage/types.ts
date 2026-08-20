@@ -4,6 +4,11 @@ export type Stats = {
   heading_segments: number;
   sentences: number;
   sentences_covered: number;
+  // Coverage is read against the prose. A heading is structure rather than
+  // material and is represented 0% of the time by design -- 51 of the 208
+  // sentences in the 太16 母本 -- so the total says less than this pair does.
+  prose_sentences: number;
+  prose_sentences_covered: number;
   chars: number;
   chars_covered: number;
   fragments: number;
