@@ -16,12 +16,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-from backend.pipeline.soft_deleted_anchor_audit import (
-    ANCHORED_COLLECTIONS,
-    AnchorAudit,
-    audit,
-    segment_texts,
-)
+from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS, Withdrawal
+from backend.pipeline.soft_deleted_anchor_audit import audit, segment_texts
 from backend.pipeline.source_coverage_view import transcript_dirs
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
@@ -59,7 +55,7 @@ def _sources(cursor: Any, search_dirs: list[Path]) -> dict[str, list[str]]:
     return segments
 
 
-def run(store: PostgresKnowledgeStore, *, data_base_path: Path) -> AnchorAudit:
+def run(store: PostgresKnowledgeStore, *, data_base_path: Path) -> Withdrawal:
     with store.connect() as conn, conn.cursor() as cursor:
         return audit(
             fragments=_live(cursor, "source_fragments"),
@@ -88,9 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     report = run(store, data_base_path=args.data_base_path)
     output: dict[str, Any] = {"audit": report.as_dict()}
     if args.list:
-        output["closure"] = [list(key) for key in report.retirement_closure()]
+        output["closure"] = [list(key) for key in report.closure()]
 
-    closure = report.retirement_closure()
+    closure = report.closure()
     if closure:
         result = store.retire_objects(
             closure,

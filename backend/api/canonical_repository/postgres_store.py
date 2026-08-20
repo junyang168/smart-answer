@@ -524,6 +524,35 @@ def build_retirement_plan(
     )
 
 
+def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSetPlan:
+    """One change set that lands a package and retires what it replaces.
+
+    Two change sets would leave a window in which the store holds both
+    extractions, or neither, and nothing to say which state it is in. The
+    fingerprint covers both halves, so re-running the same arrival against the
+    same predecessor plans the same change set and applies once.
+
+    Arrivals come first. The withdrawal is built to exclude every id the
+    package carries, so the two halves never touch the same row.
+    """
+
+    fingerprint = sha256_json({
+        "planner_schema": "wang_postgres_arrival_with_withdrawal_v1",
+        "arrival": arrival.fingerprint_sha256,
+        "withdrawal": withdrawal.fingerprint_sha256,
+    })
+    return ChangeSetPlan(
+        change_set_id=f"KCS-{fingerprint[:20]}",
+        fingerprint_sha256=fingerprint,
+        package_id=arrival.package_id,
+        source_kind=arrival.source_kind,
+        source_sha256=arrival.source_sha256,
+        operations=arrival.operations + withdrawal.operations,
+        unchanged=arrival.unchanged + withdrawal.unchanged,
+        ignored_keys=arrival.ignored_keys,
+    )
+
+
 def conflict_for(
     collection: str, object_id: str, *, expected: Optional[str], found: Optional[str],
     retired_at: Optional[datetime],

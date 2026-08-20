@@ -69,11 +69,11 @@ def test_an_edge_to_a_retired_endpoint_joins_the_closure() -> None:
     """An edge whose endpoint is gone is not a weaker edge, it is an edge to nothing."""
 
     result = _audit()
-    assert ("claim_relations", "REL-1") in result.retirement_closure()
+    assert ("claim_relations", "REL-1") in result.closure()
 
 
 def test_the_closure_is_fragments_then_owners_then_claims_then_edges() -> None:
-    assert _audit().retirement_closure() == [
+    assert _audit().closure() == [
         ("source_fragments", "FR-dead"),
         ("evidence_steps", "E-gone"),
         ("claims", "CL-gone"),
@@ -86,7 +86,7 @@ def test_a_fragment_whose_source_cannot_be_read_is_counted_not_judged() -> None:
 
     result = _audit(segments_by_source={})
     assert result.unresolved_fragments == 2
-    assert result.deleted_fragments == {}
+    assert result.withdrawn_fragments == {}
 
 
 # ---------------------------------------------------------------------------
@@ -162,3 +162,72 @@ def test_a_retired_object_is_not_reported_as_a_concurrent_write() -> None:
 
     concurrent = conflict_for("claims", "CL-1", expected="sha-0", found="sha-1", retired_at=None)
     assert "Concurrent change" in str(concurrent)
+
+
+# ---------------------------------------------------------------------------
+# what a re-extraction replaces
+# ---------------------------------------------------------------------------
+
+from backend.pipeline.extraction_supersede import package_source_ids, superseded  # noqa: E402
+
+
+def _package():
+    return {
+        "schema_version": "wang_shared_knowledge_v1.3",
+        "package_id": "PKG-NEW",
+        "source_documents": [
+            {"source_id": "SRC-1", "source_type": "sermon_transcript", "title": "讲道"}
+        ],
+        "source_fragments": [
+            {"fragment_id": "FR-new", "source_id": "SRC-1", "verbatim_excerpt": "新的原话"}
+        ],
+    }
+
+
+LIVE = {
+    "FR-old": {"source_id": "SRC-1"},
+    "FR-kept": {"source_id": "SRC-1"},
+    "FR-elsewhere": {"source_id": "SRC-2"},
+}
+
+
+def test_a_re_extraction_supersedes_only_its_own_sources() -> None:
+    """A package that carries no document for a source is not claiming to
+    replace that source's records."""
+
+    result = superseded(_package(), live_fragments=LIVE, owners={}, claims={})
+    assert set(result.withdrawn_fragments) == {"FR-old", "FR-kept"}
+    assert "FR-elsewhere" not in result.withdrawn_fragments
+
+
+def test_a_fragment_the_new_extraction_reproduces_is_an_update_not_a_casualty() -> None:
+    package = _package()
+    package["source_fragments"].append({"fragment_id": "FR-kept", "source_id": "SRC-1"})
+    result = superseded(package, live_fragments=LIVE, owners={}, claims={})
+    assert set(result.withdrawn_fragments) == {"FR-old"}
+
+
+def test_the_sources_come_from_the_documents_not_the_fragments() -> None:
+    assert package_source_ids(_package()) == {"SRC-1"}
+    assert package_source_ids({"source_fragments": [{"source_id": "SRC-9"}]}) == set()
+
+
+def test_arrival_and_withdrawal_plan_as_one_change_set() -> None:
+    """Two change sets would leave a window in which the store holds both
+    extractions, or neither, and nothing to say which state it is in."""
+
+    from backend.api.canonical_repository.postgres_store import (
+        build_change_set_plan,
+        build_retirement_plan,
+        combined_plan,
+    )
+
+    arrival = build_change_set_plan(_package(), {})
+    withdrawal = build_retirement_plan(
+        [("claims", "CL-1")], EXISTING, reason="superseded by PKG-NEW", package_id="PKG-NEW",
+    )
+    merged = combined_plan(arrival, withdrawal)
+    assert merged.as_dict()["summary"]["retired"] == 1
+    assert merged.as_dict()["summary"]["created"] == arrival.as_dict()["summary"]["created"]
+    assert [item.operation for item in merged.operations][-1] == "retire"
+    assert merged.change_set_id not in {arrival.change_set_id, withdrawal.change_set_id}
