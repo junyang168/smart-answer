@@ -175,15 +175,28 @@ live until closed.
 **Logs are in `/tmp` with no rotation** (#77). `/tmp` is cleared, so the error
 from last week is probably gone. Do not plan a diagnosis around log history.
 
-**Disk fills.** A release is about 1.5 GB, and cleanup is manual. The volume
-reached 98% with four releases retained. PostgreSQL is on the same volume.
+**Disk fills.** A release is about 1.25 GB and the deploy now keeps two: the
+active one and its rollback target. It reached 98% with four releases retained
+and 94% with three, which is what made the retention rule. PostgreSQL is on the
+same volume, so a full disk is not only a failed deploy.
 
 ---
 
 ## Cleaning up releases
 
-Keep the active release and the rollback target. `active-release` names the
-current one; the previous line of `deployments.log` names what it replaced.
+`scripts/deploy.sh` prunes after the new release has served healthy traffic,
+keeping the active release and its rollback target. Run the same rule by hand
+when the disk needs space between deploys:
+
+```bash
+scripts/prune-releases.sh --dry-run   # what would go
+scripts/prune-releases.sh
+```
+
+It refuses when `active-release` is missing or names a tree that is not there,
+which is the state a half-finished deploy leaves — in that case decide by hand.
+`active-release` names the current release and the last `previous=` field in
+`deployments.log` names what it replaced:
 
 ```bash
 cat /opt/homebrew/var/www/smart-answer-deploy/active-release
@@ -191,8 +204,14 @@ tail -2 /opt/homebrew/var/www/smart-answer-deploy/deployments.log
 ```
 
 Removing anything else is safe — a release is fully derived from one immutable
-commit and can be rebuilt. There is no pruning script yet; this is judgement,
-which is exactly why it should become one.
+commit and can be rebuilt.
+
+A release used to be 1.5 GB. The build still needs that much room, but 244 MB
+of it is build-only and is removed before the release is retained: the
+Turbopack cache under `web/.next/cache` (134 MB), the devDependencies `npm ci`
+had to install for the build (111 MB), and `pip` in the release venv (13 MB).
+Nothing installs into a release after it is built — an unverified one is
+discarded and rebuilt — so none of it comes back.
 
 ---
 
