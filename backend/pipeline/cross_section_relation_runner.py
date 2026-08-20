@@ -41,6 +41,23 @@ def _section_boundaries(package: dict[str, Any]) -> list[int]:
     return [int(value) for value in plan.get("boundaries") or [0]]
 
 
+def _write_through(
+    package: dict[str, Any], output_path: Path, *, identity: dict[str, Any]
+) -> dict[str, Any]:
+    """Emit the package unchanged, saying so, when there is nothing to relate."""
+
+    updated = apply_proposals(package, {}, identity=identity)
+    updated["cross_section_relations"]["skipped"] = "single_section"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({
+        "package": str(output_path.name), "sections": 1,
+        "skipped": "single_section",
+        "evidence_relations_added": 0, "claim_relations_added": 0,
+    }, ensure_ascii=False))
+    return updated
+
+
 def run(
     *,
     package_path: Path,
@@ -61,6 +78,17 @@ def run(
         stored = (existing.get("cross_section_relations") or {}).get("fingerprint_sha256")
         if stored == identity["fingerprint_sha256"]:
             return existing
+
+    # One section means there is no cross-section relation to find, and asking
+    # anyway is not merely wasteful: every proposal would be same-section, the
+    # validator rejects those, and the stage fails after burning three model
+    # calls. Writing the package through unchanged lets an orchestrator run
+    # this stage for every source instead of having to know which ones were
+    # sectioned -- and that knowledge is exactly what got skipped once already,
+    # leaving （四）3 without cross-section relations while the 母本 beside it
+    # had them.
+    if len(boundaries) < 2:
+        return _write_through(package, output_path, identity=identity)
 
     positions = record_positions(package)
     catalogue = build_catalogue(package, positions)

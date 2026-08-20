@@ -84,10 +84,11 @@ def test_command_plan_keeps_each_transcript_independent(tmp_path: Path) -> None:
         batch, transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
         force=False,
     )
-    assert len(plan) == 8
-    assert [row["stage"] for row in plan[:4]] == ["extract", "review", "adjudicate", "apply"]
+    stages = ["extract", "cross_section", "review", "adjudicate", "apply", "ingest"]
+    assert len(plan) == 2 * len(stages)
+    assert [row["stage"] for row in plan[: len(stages)]] == stages
     assert plan[0]["transcript_id"] == "讲道甲"
-    assert plan[4]["transcript_id"] == "讲道乙"
+    assert plan[len(stages)]["transcript_id"] == "讲道乙"
     assert "讲道甲" in plan[0]["command"]
     assert "讲道乙" not in plan[0]["command"]
     assert artifact_paths(tmp_path / "output", "讲道甲")["reviewed"].name.endswith(
@@ -102,7 +103,7 @@ def test_command_plan_reuses_explicit_reviewed_package(tmp_path: Path) -> None:
         batch, transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
         force=False,
     )
-    assert len(plan) == 4
+    assert len(plan) == 6
     assert {row["transcript_id"] for row in plan} == {"讲道乙"}
     paths = reviewed_package_paths(batch, output_root=tmp_path / "output")
     assert paths[0].as_posix().endswith("/output/prior/甲.json")
@@ -169,3 +170,114 @@ def test_merge_rejects_fidelity_correction_without_verbatim_support(tmp_path: Pa
 
     with pytest.raises(ResearchBatchValidationError, match="not supported by a claim fragment"):
         merge_reviewed_packages(batch, [first, second])
+
+
+def _notes_batch(manuscript: Path) -> dict:
+    batch = _batch()
+    batch["transcript_ids"] = ["讲道甲"]
+    batch["sources"] = [
+        {
+            "source_id": "notes_manuscript:16章釋經",
+            "source_path": str(manuscript),
+            "source_type": "notes_manuscript",
+            "title": "16章 - 彼得的認信",
+        }
+    ]
+    return batch
+
+
+def test_notes_manuscript_is_a_batch_member(tmp_path: Path) -> None:
+    """A 母本 has no transcript directory, so it is addressed by path.
+
+    Before this it could not be batched at all: the plan was built from
+    `transcript_ids` and always passed `--ids`, so all three chapter-16 母本
+    had to be driven stage by stage from a terminal.
+    """
+
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text("# 一\n\n正文\n", encoding="utf-8")
+    batch = _notes_batch(manuscript)
+    validate_research_batch(batch)
+    plan = build_command_plan(
+        batch, transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
+        force=False,
+    )
+    notes = [row for row in plan if row["transcript_id"] == "notes_manuscript:16章釋經"]
+    extract = next(row for row in notes if row["stage"] == "extract")["command"]
+    assert "--source-manifest" in extract
+    assert "--ids" not in extract
+
+    sermon = next(row for row in plan if row["transcript_id"] == "讲道甲" and row["stage"] == "extract")
+    assert "--ids" in sermon["command"]
+    assert "--source-manifest" not in sermon["command"]
+
+
+def test_every_member_gets_a_cross_section_stage(tmp_path: Path) -> None:
+    """Sectioned extraction splits a source; something has to put it back.
+
+    `cross_section` was not a stage, and the consequence is on disk: the 母本
+    extracted on 08-19 has its cross-section relations and the sermon extracted
+    two hours later does not.
+    """
+
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text("# 一\n\n正文\n", encoding="utf-8")
+    plan = build_command_plan(
+        _notes_batch(manuscript), transcript_dir=tmp_path / "transcripts",
+        output_root=tmp_path / "output", force=False,
+    )
+    by_member: dict[str, list[str]] = {}
+    for row in plan:
+        by_member.setdefault(row["transcript_id"], []).append(row["stage"])
+    assert by_member and all("cross_section" in stages for stages in by_member.values())
+
+    # Downstream reads the cross-section package, never the raw extraction, so
+    # a skipped cross-section cannot silently become the published material.
+    for member, stages in by_member.items():
+        paths = artifact_paths(tmp_path / "output", member)
+        review = next(
+            row for row in plan
+            if row["transcript_id"] == member and row["stage"] == "review"
+        )
+        assert str(paths["cross_section"]) in review["command"]
+        assert str(paths["package"]) not in review["command"]
+
+
+def test_ingest_supersedes_and_only_applies_when_asked(tmp_path: Path) -> None:
+    """Ingest is a stage, and writing to the store stays opt-in.
+
+    One source reached PostgreSQL from its raw extraction package, having
+    skipped adjudication and consensus, because ingest lived outside the
+    orchestrator and was typed by hand.
+    """
+
+    plan = build_command_plan(
+        _batch(), transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
+        force=False,
+    )
+    ingest = next(row for row in plan if row["stage"] == "ingest")["command"]
+    assert "backend.pipeline.extraction_supersede_runner" in ingest
+    assert str(artifact_paths(tmp_path / "output", "讲道甲")["reviewed"]) in ingest
+    assert "--apply" not in ingest
+
+    applied = build_command_plan(
+        _batch(), transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
+        force=False, apply_ingest=True,
+    )
+    assert "--apply" in next(row for row in applied if row["stage"] == "ingest")["command"]
+
+
+def test_batch_rejects_a_source_id_that_shadows_a_transcript(tmp_path: Path) -> None:
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text("正文\n", encoding="utf-8")
+    batch = _notes_batch(manuscript)
+    batch["sources"][0]["source_id"] = "讲道甲"
+    with pytest.raises(ResearchBatchValidationError, match="cannot repeat"):
+        validate_research_batch(batch)
+
+
+def test_batch_still_needs_at_least_one_member() -> None:
+    batch = _batch()
+    batch["transcript_ids"] = []
+    with pytest.raises(ResearchBatchValidationError, match="at least one"):
+        validate_research_batch(batch)
