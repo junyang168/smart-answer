@@ -440,3 +440,89 @@ def test_matching_adjudication_generation_requires_output_and_overrides(tmp_path
         overrides_path=overrides_path,
         expected_fingerprint="same",
     )
+
+
+def _merge_context() -> tuple[dict[str, dict], list[dict]]:
+    claims = _claims()
+    claims["CL-2"] = {"claim_id": "CL-2", "statement": "留下的那条", "anchors": [], "relations": []}
+    reviews = [{
+        "claim_id": "CL-1",
+        "decision": "changes_suggested",
+        "issues": [{
+            "issue_type": "duplicate_claim",
+            "duplicate_of_claim_id": "CL-2",
+            "affected_anchor_indexes": [],
+        }],
+    }]
+    return claims, reviews
+
+
+def _merge_response(**patch_updates) -> dict:
+    patch = _patch(statement="", claim_kind="", scripture_refs=[], superseded_by_claim_id="CL-2")
+    patch.update(patch_updates)
+    return {
+        "scope_confirmation": "source_fidelity_only_no_theological_critique",
+        "adjudications": [{
+            "claim_id": "CL-1",
+            "decision": "accept",
+            "rationale": "两条说的是同一件事",
+            "source_anchor_indexes": [],
+            "patch": patch,
+        }],
+    }
+
+
+def test_merge_is_an_executable_patch_on_its_own() -> None:
+    claims, reviews = _merge_context()
+
+    validate_openai_adjudication(
+        _merge_response(), reviews=reviews, claims_by_id=claims, transcript_segments={},
+    )
+
+
+def test_openai_cannot_invent_a_merge_claude_did_not_name() -> None:
+    claims, reviews = _merge_context()
+    reviews[0]["issues"][0]["duplicate_of_claim_id"] = "CL-3"
+
+    with pytest.raises(AIAdjudicationValidationError, match="did not name"):
+        validate_openai_adjudication(
+            _merge_response(), reviews=reviews, claims_by_id=claims, transcript_segments={},
+        )
+
+
+def test_a_merge_cannot_also_rewrite_the_claim_it_retires() -> None:
+    claims, reviews = _merge_context()
+
+    with pytest.raises(AIAdjudicationValidationError, match="cannot also rewrite"):
+        validate_openai_adjudication(
+            _merge_response(statement="顺手改一句"),
+            reviews=reviews, claims_by_id=claims, transcript_segments={},
+        )
+
+
+def test_merge_target_cannot_itself_be_merged_away() -> None:
+    """A chain would make the survivor depend on override ordering."""
+    claims, reviews = _merge_context()
+    claims["CL-3"] = {"claim_id": "CL-3", "statement": "第三条", "anchors": [], "relations": []}
+    reviews.append({
+        "claim_id": "CL-2",
+        "decision": "changes_suggested",
+        "issues": [{
+            "issue_type": "duplicate_claim",
+            "duplicate_of_claim_id": "CL-3",
+            "affected_anchor_indexes": [],
+        }],
+    })
+    response = _merge_response()
+    response["adjudications"].append({
+        "claim_id": "CL-2",
+        "decision": "accept",
+        "rationale": "也重复",
+        "source_anchor_indexes": [],
+        "patch": _patch(statement="", claim_kind="", scripture_refs=[], superseded_by_claim_id="CL-3"),
+    })
+
+    with pytest.raises(AIAdjudicationValidationError, match="itself being merged"):
+        validate_openai_adjudication(
+            response, reviews=reviews, claims_by_id=claims, transcript_segments={},
+        )

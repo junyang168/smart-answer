@@ -265,3 +265,59 @@ def test_rerunning_one_reviewer_does_not_overwrite_the_earlier_generation(tmp_pa
 
     assert first != second
     assert first.is_file() and second.is_file()
+
+
+def test_duplicate_finding_must_name_another_claim_in_this_input() -> None:
+    """The merge downstream reads the field, so prose alone is not a finding."""
+    review = _review()
+    review["claim_reviews"][1]["issues"] = [
+        {
+            "issue_type": "duplicate_claim",
+            "severity": "medium",
+            "explanation": "与另一条重复",
+            "affected_anchor_indexes": [],
+            "duplicate_of_claim_id": "",
+        }
+    ]
+
+    with pytest.raises(AIReviewValidationError):
+        validate_review_response(review, _survey())
+
+
+def test_a_claim_cannot_duplicate_itself() -> None:
+    review = _review()
+    review["claim_reviews"][1]["issues"] = [
+        {
+            "issue_type": "duplicate_claim",
+            "severity": "medium",
+            "explanation": "与自己重复",
+            "affected_anchor_indexes": [],
+            "duplicate_of_claim_id": "C002",
+        }
+    ]
+
+    with pytest.raises(AIReviewValidationError):
+        validate_review_response(review, _survey())
+
+
+def test_duplicate_target_is_accepted_when_it_names_a_sibling() -> None:
+    review = _review()
+    review["claim_reviews"][1]["issues"] = [
+        {
+            "issue_type": "duplicate_claim",
+            "severity": "medium",
+            "explanation": "与 C001 说的是同一件事",
+            "affected_anchor_indexes": [],
+            "duplicate_of_claim_id": "C001",
+        }
+    ]
+
+    validate_review_response(review, _survey())
+
+
+def test_only_a_duplicate_issue_may_carry_a_duplicate_target() -> None:
+    review = _review()
+    review["claim_reviews"][1]["issues"][0]["duplicate_of_claim_id"] = "C001"
+
+    with pytest.raises(AIReviewValidationError):
+        validate_review_response(review, _survey())

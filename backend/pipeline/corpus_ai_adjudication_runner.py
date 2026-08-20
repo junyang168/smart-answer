@@ -203,6 +203,7 @@ def _write_overrides(
             "scripture_refs": patch.get("scripture_refs") or None,
             "excluded_anchors": excluded,
             "excluded_claim_relation_ids": patch.get("excluded_claim_relation_ids", []),
+            "superseded_by": patch.get("superseded_by_claim_id") or None,
             "anchor_additions": patch.get("anchor_additions", []),
             "structural_notes": patch.get("structural_notes", []),
             "adjudication_fingerprint": fingerprint["fingerprint_sha256"],
