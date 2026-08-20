@@ -63,10 +63,32 @@ else
   git -C "$SOURCE_REPO" worktree add --quiet -b "$BRANCH" "$TARGET" origin/main
 fi
 
-# `.env` is gitignored, so a fresh worktree has none and every runner dies with
-# `RuntimeError: DATA_BASE_DIR is required`. Linked, not copied: one file to
-# keep current.
-[[ -f "$SOURCE_REPO/.env" ]] && ln -sf "$SOURCE_REPO/.env" "$TARGET/.env"
+# None of these are in git, so a fresh worktree has none of them and cannot run
+# anything -- not the app, not even pytest. Installing per worktree would cost
+# 2.3 GB each, so they are linked: the code under test is the worktree's, the
+# interpreter and the packages are shared.
+#
+#   backend/.venv      the interpreter `.python-version` pins, and the one
+#                      production runs; the root `.venv` is an older 3.11 that
+#                      failed a test production passes
+#   web/node_modules   491 MB
+#   node_modules        25 MB
+#
+# `.env` is here too: without it every runner dies on `DATA_BASE_DIR is
+# required`.
+#
+# Two limits come with sharing them, and AGENTS.md says so rather than
+# pretending otherwise: only one worktree can hold ports 3000/3003/8555 at a
+# time, and a branch that changes `requirements.txt` or `package.json` is
+# running against the wrong install until it makes its own.
+for shared in .env backend/.venv .venv node_modules web/node_modules; do
+  if [[ -e "$SOURCE_REPO/$shared" ]]; then
+    mkdir -p "$(dirname "$TARGET/$shared")"
+    ln -sfn "$SOURCE_REPO/$shared" "$TARGET/$shared"
+  else
+    printf 'work-on: note — %s does not exist in %s, not linked\n' "$shared" "$SOURCE_REPO" >&2
+  fi
+done
 
 printf '%s\n' "$TARGET"
 printf 'branch %s · cd %s\n' "$BRANCH" "$TARGET" >&2
