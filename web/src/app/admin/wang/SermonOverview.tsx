@@ -21,7 +21,7 @@ const stateLabels: Record<CellState, string> = {
   failed: "失敗",
   running: "執行中",
   queued: "排隊中",
-  no_source: "無原文",
+  no_source: "未校核",
 };
 
 const stateStyles: Record<CellState, string> = {
@@ -41,6 +41,9 @@ const cellReasons: Record<string, string> = {
   source_changed: "來源原文在這次執行之後改過",
   upstream_rerun: "上游階段在這次執行之後又跑過",
   from_store_not_ledger: "這一格來自主庫本身：物件在庫裡。這次入庫發生在記錄表上線之前，所以沒有時間與花費",
+  // Every one of these has a transcript in script_review; what is missing is a
+  // proofread, published one, which is what extraction reads.
+  no_source: "逐字稿還在校核，抽取讀的是已發布的稿",
 };
 
 function money(value: number | null | undefined) {
@@ -119,6 +122,7 @@ function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const quality = qualityLabel(stage, cell.quality);
   const tip = [
     coverageDetail(stage, cell.quality),
+    cell.state === "no_source" ? cellReasons.no_source : null,
     cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
     cell.store?.updated_at ? `主庫更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
     cell.run?.started_at ? `最後一次：${new Date(cell.run.started_at).toLocaleString("zh-TW")}` : null,
@@ -200,12 +204,10 @@ export function SermonOverview() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="來源" value={String(summary.rows)}
           detail={`講道 ${summary.sermons} · 母本 ${summary.notes_manuscripts}`} />
-        <Metric label="還沒有原文" value={String(summary.without_source)}
-          detail="抽取之前要先有逐字稿或母本" />
-        <Metric label="已記錄的執行" value={String(summary.runs_recorded)}
-          detail={summary.succeeded_runs_without_a_price
-            ? `${summary.succeeded_runs_without_a_price} 次沒有價格`
-            : "記錄表上線後的執行"} />
+        <Metric label="未校核" value={String(summary.unproofread)}
+          detail="逐字稿還在校核，抽取讀已發布的稿" />
+        <Metric label="已入庫" value={`${summary.ingested} 篇`}
+          detail={`已記錄 ${summary.runs_recorded} 次執行`} />
         <Metric label="已記錄的花費" value={money(summary.spend_usd)}
           detail={`價目表 ${data.price_version}`} />
       </div>

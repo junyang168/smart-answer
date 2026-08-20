@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, FileCheck2, Highlighter, LayoutDashboard, Network } from "lucide-react";
+import { Activity, FileCheck2, FileText, Highlighter, LayoutDashboard, Network } from "lucide-react";
 
 const sections = [
   { href: "/admin/wang", label: "總覽", icon: LayoutDashboard, exact: true },
+  { href: "/admin/wang/operations/articles", label: "寫文章", icon: FileText },
   { href: "/admin/wang/matthew-progress", label: "馬太進度", icon: Activity },
   { href: "/admin/wang/argument-layer", label: "論證層", icon: Network },
   { href: "/admin/wang/source-coverage", label: "來源覆蓋", icon: Highlighter },

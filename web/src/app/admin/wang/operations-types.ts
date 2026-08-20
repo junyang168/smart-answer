@@ -63,7 +63,8 @@ export type Overview = {
     rows: number;
     sermons: number;
     notes_manuscripts: number;
-    without_source: number;
+    unproofread: number;
+    ingested: number;
     by_stage: Record<StageId, Record<string, number>>;
     runs_recorded: number;
     spend_usd: number;

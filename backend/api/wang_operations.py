@@ -659,7 +659,13 @@ def _summary(rows: list[dict[str, Any]], runs: Iterable[dict[str, Any]]) -> dict
         "rows": len(rows),
         "sermons": sum(1 for row in rows if row["kind"] == "sermon"),
         "notes_manuscripts": sum(1 for row in rows if row["kind"] == "notes_manuscript"),
-        "without_source": sum(1 for row in rows if not row["source_available"]),
+        # Not "no source text": every one of these has a transcript sitting in
+        # script_review. What they lack is a proofread, published one, which is
+        # what extraction reads.
+        "unproofread": sum(1 for row in rows if not row["source_available"]),
+        "ingested": sum(
+            1 for row in rows if row["stages"]["ingest"]["state"] in {"current", "stale"}
+        ),
         "by_stage": counts,
         "runs_recorded": len(recorded),
         "spend_usd": round(spend, 4),
