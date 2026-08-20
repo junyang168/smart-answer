@@ -608,6 +608,9 @@ def _run(
         model_id=client.model, reasoning_effort=reasoning_effort,
         max_output_tokens=client.max_output_tokens,
         section_plan=plan.identity(),
+        source_text_sha256=hashlib.sha256(
+            "\n".join(_segment_texts(source)).encode("utf-8")
+        ).hexdigest(),
     )
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
     if output_path.is_file() and not force:

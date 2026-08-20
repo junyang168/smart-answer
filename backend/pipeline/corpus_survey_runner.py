@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import SurveyValidationError, validate_survey
+from backend.pipeline.knowledge_source import live_script
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
@@ -140,6 +141,15 @@ def _slug(transcript_id: str) -> str:
 
 
 def _load(path: Path) -> tuple[dict[str, Any], bytes]:
+    """One transcript, as the proofreader left it.
+
+    Soft-deleted spans are dropped here rather than by each caller, because
+    the text has ten readers and a filter applied in one of them is nine
+    readers still quoting deleted material. `raw` stays the bytes on disk:
+    it is the provenance of the file, and a hash that did not match the file
+    would break every anchor that records one.
+    """
+
     raw = path.read_bytes()
     parsed = json.loads(raw)
     if isinstance(parsed, list):
@@ -148,11 +158,11 @@ def _load(path: Path) -> tuple[dict[str, Any], bytes]:
                 "title": path.stem,
                 "status": "reviewed",
             },
-            "script": parsed,
+            "script": live_script(parsed),
         }, raw
     if not isinstance(parsed, dict):
         raise ValueError(f"{path}: transcript JSON must be an object or an array")
-    return parsed, raw
+    return {**parsed, "script": live_script(parsed.get("script"))}, raw
 
 
 def _segment_locator(position: int) -> str:

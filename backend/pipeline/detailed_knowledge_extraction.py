@@ -343,6 +343,7 @@ def extraction_identity(
     reasoning_effort: str,
     max_output_tokens: int,
     section_plan: dict[str, Any] | None = None,
+    source_text_sha256: str | None = None,
 ) -> dict[str, Any]:
     generation = {
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
@@ -360,6 +361,14 @@ def extraction_identity(
     # question nobody is asking any more.
     if section_plan is not None:
         generation["section_plan"] = json.loads(json.dumps(section_plan, sort_keys=True))
+    # The text the model was actually shown, which is not the file on disk: a
+    # transcript's soft-deleted spans are filtered out before it is rendered.
+    # `source_sha256` is outside `generation` and so does not key the section
+    # cache, which meant a source whose readable text changed while its plan
+    # and prompt did not would have its cached sections replayed -- the exact
+    # failure the `section_plan` note above describes, one level down.
+    if source_text_sha256 is not None:
+        generation["source_text_sha256"] = source_text_sha256
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

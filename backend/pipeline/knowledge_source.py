@@ -17,6 +17,57 @@ PUBLICATION_READINESS_DECISIONS = {
 }
 
 
+#: A proofreader deletes from a transcript by striking the text through rather
+#: than removing it, so the cut stays reversible. Everything between the two
+#: markers is to be read as absent.
+#:
+#: The pattern is `SurmonEditor`'s own (`FALLBACK_STRIKETHROUGH_PATTERN`),
+#: deliberately, because what the proofreader saw struck through on screen is
+#: the definition of what was deleted. Two consequences follow from copying it
+#: rather than inventing a looser one, and both were measured on the 115
+#: published transcripts:
+#:
+#: * The editor renders each segment as its own Markdown document, so a marker
+#:   opened in one segment and closed in another strikes nothing and shows as
+#:   literal tildes. Matching across segments would have deleted 39,282
+#:   characters nobody deleted.
+#: * `[^~]+?` means an unpaired marker deletes nothing at all. 11 segments in
+#:   the corpus carry one; under a greedier rule each would swallow the rest of
+#:   its segment.
+SOFT_DELETION = re.compile(r"~~([^~]+?)~~", re.S)
+
+
+def live_text(text: str) -> str:
+    """One segment with its soft-deleted spans removed.
+
+    The span becomes a newline, never nothing. Deleting from the middle of
+    `甲~~乙~~丙` and closing the gap yields `甲丙` -- a string the professor
+    never said, which `verbatim_excerpt` validation would then happily accept
+    as contiguous source text. A newline is also where `sentence_spans` breaks,
+    so the two survivors cannot be read as one sentence either.
+    """
+
+    return SOFT_DELETION.sub("\n", str(text or ""))
+
+
+def live_script(script: Any) -> list[dict[str, Any]]:
+    """A transcript's segments with the deleted text gone, positions intact.
+
+    A segment struck in full stays in the list as an empty one. Dropping it
+    would renumber every segment after it, and `S0007` is a position -- every
+    anchor, every exclusion id and every section boundary in the claim layer
+    resolves through it. An empty segment contributes no sentences and no
+    anchors, which is the whole of what "deleted" has to mean here.
+    """
+
+    rows: list[dict[str, Any]] = []
+    for segment in script or []:
+        row = dict(segment) if isinstance(segment, dict) else {"text": str(segment or "")}
+        row["text"] = live_text(row.get("text"))
+        rows.append(row)
+    return rows
+
+
 def markdown_blocks(markdown: str) -> list[str]:
     """Return deterministic Markdown blocks without rewriting source text."""
     normalized = markdown.replace("\r\n", "\n").replace("\r", "\n")

@@ -27,7 +27,7 @@ from backend.pipeline.base_contract_coverage import (
     ScriptureRef,
     parse_passage_range,
 )
-from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.knowledge_source import live_script, markdown_blocks
 from backend.pipeline.sentence_ledger import (
     AnchoredSpan,
     build_inventory,
@@ -62,9 +62,11 @@ def load_segments(source_path: Path) -> list[tuple[int, str]]:
     if source_path.suffix == ".json":
         payload = json.loads(source_path.read_text(encoding="utf-8"))
         script = payload.get("script") if isinstance(payload, dict) else payload
+        # Soft-deleted text is not in the denominator. It is not material the
+        # claim layer failed to take; it is material a proofreader removed.
         return [
-            (position, str((row or {}).get("text") or ""))
-            for position, row in enumerate(script or [], start=1)
+            (position, str(row.get("text") or ""))
+            for position, row in enumerate(live_script(script), start=1)
         ]
     text = source_path.read_text(encoding="utf-8")
     return list(enumerate(markdown_blocks(text), start=1))

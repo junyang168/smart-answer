@@ -29,7 +29,7 @@ from typing import Any, Iterable, Optional
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.base_contract_coverage import sentence_spans
-from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.knowledge_source import live_script, markdown_blocks
 
 # Collections that can carry a `source_fragment_id`, i.e. that can be placed on
 # the source text.  `claims` deliberately is not one of them: a claim reaches
@@ -129,6 +129,9 @@ def load_segments(document: dict[str, Any], path: Path) -> tuple[list[dict[str, 
         script = parsed.get("script", []) if isinstance(parsed, dict) else parsed
         if not isinstance(script, list):
             raise ValueError(f"{path}: transcript has no script list")
+        # A struck-through span was deleted by a proofreader, so it is not a
+        # gap in coverage and must not be shown to a reviewer as one.
+        script = live_script(script)
 
     segments = []
     for position, item in enumerate(script):
