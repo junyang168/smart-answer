@@ -176,6 +176,57 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return rows, []
 
 
+def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Which sources the authoring store actually holds, keyed as the rows are.
+
+    入庫 is the one stage that already had a trustworthy history before this
+    ledger existed: the store either holds a live `source_documents` record for
+    a sermon or it does not, and that is what "ingested" means. Reading only the
+    ledger made 25 already-ingested sources report "never run", which is not a
+    cautious answer -- it is a wrong one, contradicted by the same database the
+    page is connected to.
+    """
+
+    url = _database_url()
+    if not url:
+        return {}, []
+    try:
+        import psycopg
+    except ImportError:
+        return {}, []
+    try:
+        with psycopg.connect(url) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT object_id, payload, revision, updated_at
+                     FROM wang_knowledge.objects
+                    WHERE collection='source_documents' AND retired_at IS NULL"""
+            )
+            rows = cursor.fetchall()
+    except Exception as exc:  # pragma: no cover - depends on deployment
+        return {}, [{
+            "code": "store_unreadable",
+            "message": f"Could not read the authoring store, so 入庫 is unknown: {exc}",
+        }]
+    held: dict[str, dict[str, Any]] = {}
+    for object_id, payload, revision, updated_at in rows:
+        document = dict(payload or {})
+        project_id = str(document.get("project_id") or "").strip()
+        transcript_id = str(document.get("transcript_id") or "").strip()
+        if project_id and (
+            document.get("source_type") == "notes_manuscript"
+            or transcript_id.startswith("notes_manuscript:")
+        ):
+            key = project_id
+        else:
+            key = transcript_id or str(object_id)
+        held[key] = {
+            "source_id": str(object_id),
+            "revision": revision,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+        }
+    return held, []
+
+
 def _effective_status(run: dict[str, Any], now: datetime) -> str:
     """`interrupted` is inferred here, never written by the run itself.
 
@@ -392,6 +443,9 @@ def overview() -> dict[str, Any]:
         for source_id in run.get("source_ids") or []:
             by_source.setdefault(str(source_id), {}).setdefault(str(run["stage"]), []).append(run)
 
+    ingested, store_warnings = _ingested_sources()
+    warnings.extend(store_warnings)
+
     citations, citation_warnings = _article_citations(paths)
     warnings.extend(citation_warnings)
 
@@ -426,6 +480,18 @@ def overview() -> dict[str, Any]:
                 current_source_sha=source_sha,
                 upstream_finished=upstream_finished,
             )
+            if stage == "ingest" and cell["state"] == "never":
+                # The store outranks an empty ledger here: it is the authority
+                # for this stage, and it is answering about the same sources.
+                held = ingested.get(row["source_id"])
+                if held:
+                    cell = {
+                        "state": "current",
+                        "reason": "from_store_not_ledger",
+                        "quality": {"revision": held["revision"]},
+                        "run": None,
+                        "store": held,
+                    }
             stages[stage] = cell
             for run in stage_runs.get(stage) or []:
                 if run["effective_status"] == "succeeded" and run.get("finished_at"):

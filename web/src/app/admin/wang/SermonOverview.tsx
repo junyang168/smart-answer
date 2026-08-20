@@ -35,10 +35,11 @@ const stateStyles: Record<CellState, string> = {
   no_source: "bg-slate-50 text-slate-300 ring-slate-100",
 };
 
-const staleReasons: Record<string, string> = {
+const cellReasons: Record<string, string> = {
   no_recorded_input: "這次執行沒有記下它讀了什麼，無法證明還是最新的",
   source_changed: "來源原文在這次執行之後改過",
   upstream_rerun: "上游階段在這次執行之後又跑過",
+  from_store_not_ledger: "這一格來自主庫本身：物件在庫裡。這次入庫發生在記錄表上線之前，所以沒有時間與花費",
 };
 
 function money(value: number | null | undefined) {
@@ -68,6 +69,10 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
     return human ? `${applied} 修正 · ${human} 人工` : `${applied} 修正`;
   }
   if (stage === "ingest") {
+    // Read from the store rather than a run: say so, instead of showing a
+    // count this row has no run to have produced.
+    const revision = n("revision");
+    if (revision !== null && quality.status === undefined) return `rev ${revision}`;
     if (quality.status === "already_applied") return "無變化";
     const created = n("created") ?? 0;
     const updated = n("updated") ?? 0;
@@ -79,7 +84,8 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
 function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const quality = qualityLabel(stage, cell.quality);
   const tip = [
-    cell.reason ? staleReasons[cell.reason] ?? cell.reason : null,
+    cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
+    cell.store?.updated_at ? `主庫更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
     cell.run?.started_at ? `最後一次：${new Date(cell.run.started_at).toLocaleString("zh-TW")}` : null,
     cell.run?.trigger ? `觸發：${cell.run.trigger}${cell.run.triggered_by ? ` (${cell.run.triggered_by})` : ""}` : null,
     cell.run && cell.run.cost_usd !== null ? `花費：${money(cell.run.cost_usd)}` : null,
@@ -89,9 +95,9 @@ function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
     <td className="px-2 py-1.5 align-middle">
       <span
         title={tip || undefined}
-        className={`inline-flex min-w-[3.5rem] flex-col items-center rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-inset ${stateStyles[cell.state]}`}
+        className={`inline-flex min-w-[3.5rem] flex-col items-center rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-inset ${stateStyles[cell.state]} ${cell.store ? "ring-dashed" : ""}`}
       >
-        <span>{stateLabels[cell.state]}</span>
+        <span>{stateLabels[cell.state]}{cell.store ? "*" : ""}</span>
         {quality && <span className="mt-0.5 font-normal opacity-80">{quality}</span>}
       </span>
     </td>
@@ -228,8 +234,9 @@ export function SermonOverview() {
       </div>
 
       <p className="text-xs leading-6 text-slate-500">
-        每一格都來自執行記錄表，不掃描 staging 目錄。記錄表上線之前的執行不在裡面，所以磁碟上已有產出的來源在這裡仍然顯示「✗ 沒跑過」——
-        這是實話，不是漏抓。價目表 <code>{data.price_version}</code>（{data.price_effective} 起）：{data.price_source}。
+        每一格都來自執行記錄表，不掃描 staging 目錄。<strong>入庫是例外</strong>：那一格直接讀主庫——物件在不在庫裡，主庫自己知道，
+        而且記錄表上線之前就知道。標成 <code>✓*</code> 的入庫格就是這種：確實在庫裡，但那次入庫早於記錄表，所以沒有時間與花費。
+        其他四個階段只認記錄表，所以磁碟上已有產出的來源在這裡仍然顯示「✗ 沒跑過」——這是實話，不是漏抓。價目表 <code>{data.price_version}</code>（{data.price_effective} 起）：{data.price_source}。
       </p>
     </section>
   );

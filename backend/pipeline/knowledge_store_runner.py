@@ -48,9 +48,18 @@ def _document_key(document: dict[str, Any]) -> str:
     own `source_id`.
     """
 
-    return str(
-        document.get("transcript_id") or document.get("source_id") or ""
-    ).strip()
+    project_id = str(document.get("project_id") or "").strip()
+    transcript_id = str(document.get("transcript_id") or "").strip()
+    # A notes manuscript has no transcript. Its `transcript_id` is a synthetic
+    # `notes_manuscript:<project>`, and the overview lists it under the project
+    # directory, so the project id is the joining key -- preferring the
+    # synthetic one filed the run against a row that does not exist.
+    if project_id and (
+        document.get("source_type") == "notes_manuscript"
+        or transcript_id.startswith("notes_manuscript:")
+    ):
+        return project_id
+    return (transcript_id or str(document.get("source_id") or "")).strip()
 
 
 def _package_subject(package: dict[str, Any], package_path: Path) -> str:

@@ -28,6 +28,8 @@ export type StageCell = {
   quality: Record<string, unknown> | null;
   run: RunSummary | null;
   had_earlier_success?: boolean;
+  /** Present when the authoring store, not the ledger, is what says this is done. */
+  store?: { source_id: string; revision: number; updated_at: string | null };
 };
 
 export type OverviewRow = {
