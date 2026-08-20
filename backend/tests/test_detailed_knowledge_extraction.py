@@ -14,7 +14,10 @@ from backend.pipeline.detailed_knowledge_extraction import (
 )
 from backend.pipeline.detailed_knowledge_extraction_runner import _validation_feedback
 from backend.pipeline.detailed_knowledge_extraction_runner import compile_package
-from backend.pipeline.knowledge_consensus_applier import apply_consensus_overrides
+from backend.pipeline.knowledge_consensus_applier import (
+    ConsensusApplicationError,
+    apply_consensus_overrides,
+)
 
 
 def _transcript() -> dict:
@@ -236,3 +239,91 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
         {"011WSR01": transcript},
     )
     assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
+
+
+def _two_claim_package(tmp_path: Path) -> tuple[dict, dict]:
+    """A package whose two claims say the same thing from different evidence."""
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    response = _response()
+    response["evidence_steps"].append({
+        "evidence_step_id": "E003", "statement": "同一结论的另一处证据", "step_type": "reasoning",
+        "speaker": "professor", "stance": "asserted", "discourse_role": "restatement",
+        "support_eligibility": "eligible_candidate", "scripture_refs": [], "produced_claim_ids": ["CL002"],
+        "anchors": [{
+            "segment_index": "S0002", "start_time": 8.0, "end_time": 16.0,
+            "verbatim_excerpt": "但以理书所说的那一位人子",
+        }],
+    })
+    response["claims"].append({
+        "claim_id": "CL002", "statement": "人子具有神性身份（第二章节重复）",
+        "claim_kind": "reasoning_conclusion", "attribution": "professor",
+        "scripture_refs": ["但以理书7:13-14"], "topic_terms": ["人子"],
+        "evidence_step_ids": ["E003"], "opposed_position_ids": [], "review_status": "candidate",
+    })
+    response["claim_relations"] = [{
+        "claim_relation_id": "CR001", "from_id": "CL002", "to_id": "CL001",
+        "relation_type": "supports", "reason": "test",
+    }]
+    package = compile_package(
+        transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript, raw=raw, response=response,
+        extraction=extraction_identity(
+            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt", model_id="gpt-5.6-sol",
+            reasoning_effort="medium", max_output_tokens=32000,
+        ),
+    )
+    survivor_id, retired_id = (row["claim_id"] for row in package["claims"])
+    overrides = {
+        "adjudication_fingerprint": {"fingerprint_sha256": "fp"},
+        "claims": {
+            retired_id: {
+                "status": "ai_consensus_applied", "approval_status": "not_human_approved",
+                "excluded_anchors": [], "excluded_claim_relation_ids": [],
+                "anchor_additions": [], "structural_notes": [],
+                "superseded_by": survivor_id, "adjudication_fingerprint": "fp",
+            }
+        },
+    }
+    return package, overrides
+
+
+def test_merging_a_duplicate_keeps_its_grip_on_the_source(tmp_path: Path) -> None:
+    package, overrides = _two_claim_package(tmp_path)
+
+    result = apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+
+    survivor, retired = result["claims"]
+    assert retired["superseded_by"] == survivor["claim_id"]
+    assert retired["review_status"] == "superseded"
+    # The retired claim is still in the file, but its evidence now hangs off
+    # the claim that stays -- filtering superseded claims must not cost anchors.
+    retired_evidence = set(retired["evidence_step_ids"])
+    assert retired_evidence <= set(survivor["evidence_step_ids"])
+    assert retired_evidence <= {
+        str(anchor["evidence_id"])
+        for occurrence in survivor["occurrences"] for anchor in occurrence["anchors"]
+    }
+    assert result["summary"]["active_claim_count"] == 1
+    assert result["summary"]["superseded_claim_count"] == 1
+    assert result["consensus_application"]["merged_claim_ids"] == {
+        retired["claim_id"]: survivor["claim_id"]
+    }
+
+
+def test_merging_drops_the_relation_between_the_two_merged_claims(tmp_path: Path) -> None:
+    package, overrides = _two_claim_package(tmp_path)
+
+    result = apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})
+
+    # CL002 supports CL001; retargeting would otherwise leave CL001 supporting itself.
+    assert result["claim_relations"] == []
+
+
+def test_merge_into_a_claim_that_does_not_exist_is_refused(tmp_path: Path) -> None:
+    package, overrides = _two_claim_package(tmp_path)
+    retired_id = next(iter(overrides["claims"]))
+    overrides["claims"][retired_id]["superseded_by"] = "CL999"
+
+    with pytest.raises(ConsensusApplicationError, match="merge target does not exist"):
+        apply_consensus_overrides(package, overrides, {"011WSR01": _transcript()})

@@ -48,6 +48,10 @@ PATCH_SCHEMA: dict[str, Any] = {
                 ],
             },
         },
+        # The one executable answer to "these two say the same thing".  The
+        # loser is not deleted: it is marked superseded and its anchors move to
+        # the survivor, so merging can never cost source coverage.
+        "superseded_by_claim_id": {"type": "string"},
         "structural_notes": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
@@ -58,6 +62,7 @@ PATCH_SCHEMA: dict[str, Any] = {
         "excluded_anchor_indexes",
         "excluded_claim_relation_ids",
         "anchor_additions",
+        "superseded_by_claim_id",
         "structural_notes",
     ],
 }
@@ -170,6 +175,7 @@ def _empty_patch(patch: dict[str, Any]) -> bool:
             patch.get("excluded_anchor_indexes"),
             patch.get("excluded_claim_relation_ids"),
             patch.get("anchor_additions"),
+            str(patch.get("superseded_by_claim_id") or "").strip(),
         ]
     )
 
@@ -236,10 +242,48 @@ def validate_openai_adjudication(
                 relation_id in outgoing_relation_ids,
                 f"{claim_id}: cannot exclude relation outside this claim: {relation_id}",
             )
+        superseded_by = str(patch.get("superseded_by_claim_id") or "").strip()
+        if superseded_by:
+            duplicate_targets = {
+                str(issue.get("duplicate_of_claim_id") or "").strip()
+                for issue in reviews_by_id[claim_id].get("issues", [])
+                if issue.get("issue_type") == "duplicate_claim"
+            }
+            _require(
+                superseded_by in duplicate_targets,
+                f"{claim_id}: cannot merge into a claim Claude did not name as the duplicate",
+            )
+            _require(superseded_by in claims_by_id, f"{claim_id}: unknown merge target {superseded_by}")
+            _require(superseded_by != claim_id, f"{claim_id}: cannot supersede itself")
+            # A merge is the whole patch.  Editing a claim and then retiring it
+            # leaves an override whose effect nobody can read off the artifact.
+            _require(
+                not any([
+                    str(patch.get("statement") or "").strip(),
+                    str(patch.get("claim_kind") or "").strip(),
+                    patch.get("route_type") not in {None, "", "unchanged"},
+                    patch.get("scripture_refs"),
+                    patch.get("excluded_anchor_indexes"),
+                    patch.get("anchor_additions"),
+                ]),
+                f"{claim_id}: a merge patch cannot also rewrite the claim it retires",
+            )
         if row.get("decision") == "accept":
             _require(not _empty_patch(patch), f"{claim_id}: accepted review requires executable patch")
         else:
             _require(_empty_patch(patch), f"{claim_id}: rejected review cannot carry patch")
+    merged = {
+        str(row["claim_id"]): str(row["patch"].get("superseded_by_claim_id") or "").strip()
+        for row in rows
+        if str((row.get("patch") or {}).get("superseded_by_claim_id") or "").strip()
+    }
+    for claim_id, target in merged.items():
+        # One hop only.  A chain would make the surviving claim depend on the
+        # order the overrides happen to be applied in.
+        _require(
+            target not in merged,
+            f"{claim_id}: merge target {target} is itself being merged away",
+        )
 
 
 def validate_claude_reconsideration(
