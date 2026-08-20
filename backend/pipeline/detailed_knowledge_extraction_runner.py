@@ -42,19 +42,27 @@ from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
-#: What each supported model needs to be reached. Opus 5 is the default: on the
-#: same section under the same production rules it and DeepSeek v4 pro both pass
-#: validation, but Opus marks 13 load_bearing observations to DeepSeek's 3 and
-#: keeps the source's Traditional characters, and that observation layer is what
-#: #86 / #62 / the ledger are built on. DeepSeek stays wired up as the cheap
-#: fallback (about a third of the cost) for runs where that layer matters less.
+#: What each supported model needs to be reached. `gpt-5.6-sol` is the default,
+#: measured on the whole 太16:21–23 母本 under the production rules: against
+#: Claude Opus 5 it covers 129 of 132 substantive-prose sentences to Opus's 128,
+#: produces 29% more observations and 56% more claims with the same zero
+#: load_bearing orphans, keeps Traditional characters at least as reliably, and
+#: costs about a quarter as much. It also restores the review stage's premise --
+#: `corpus_ai_review` is a Claude model reading another family's output, which
+#: is the point of it.
+#:
+#: An earlier reading of this comparison favoured Opus. It was taken with a
+#: cut-down prompt that omitted the load_bearing rule, the relation-table
+#: boundaries and the script requirement, where a stronger model supplies what
+#: the instructions leave out. Once the rules were written down the ordering
+#: reversed. Compare models on the prompt you will actually ship.
 MODEL_BACKENDS = {
     "claude": {"kind": "anthropic"},
     "gpt": {"kind": "openai"},
     "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com",
                  "api_key_env": "DEEPSEEK_API_KEY"},
 }
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "gpt-5.6-sol"
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
 DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extractions"
