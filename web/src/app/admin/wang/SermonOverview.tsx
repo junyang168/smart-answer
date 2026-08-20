@@ -8,6 +8,7 @@ import { ScriptureGroups, TopicGroups } from "./OverviewGroups";
 
 const stageLabels: Record<StageId, string> = {
   extraction: "抽取",
+  cross_section: "跨段關係",
   review: "複審",
   adjudication: "仲裁",
   merge: "合併",
@@ -64,6 +65,16 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
     // headings) read as a contradiction and made the good number look bad.
     const proseLeft = n("prose_unprocessed");
     return proseLeft ? `${pct}% · 正文 ${proseLeft}` : `${pct}%`;
+  }
+  if (stage === "cross_section") {
+    // A single-section source has no cross-section relation to find, and the
+    // runner writes the package through saying so. "—" rather than "0",
+    // because nothing was missed.
+    if (quality.skipped === "single_section") return "單段";
+    const evidence = n("evidence_relations_added");
+    const claims = n("claim_relations_added");
+    if (evidence === null && claims === null) return null;
+    return `+${evidence ?? 0} 證據 · +${claims ?? 0} 主張`;
   }
   if (stage === "review") {
     const reviewed = n("ai_reviewed");

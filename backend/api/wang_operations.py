@@ -35,7 +35,13 @@ router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
 SCHEMA_VERSION = "wang-operations-overview.v1"
 
 #: The order the columns appear in, and the order work happens in.
-SERMON_STAGES = ("extraction", "review", "adjudication", "merge", "ingest")
+# `cross_section` sits between extraction and review because that is where it
+# runs and what it reads. It had no column until now, which is how it came to be
+# run for one 母本 and skipped for the sermon extracted two hours later without
+# anybody noticing: a stage with no cell cannot be seen to be missing.
+SERMON_STAGES = (
+    "extraction", "cross_section", "review", "adjudication", "merge", "ingest",
+)
 
 #: A run still marked `running` whose heartbeat stopped this long ago is treated
 #: as interrupted.  A deploy is `launchctl unload` on the API job, so a run
@@ -208,6 +214,18 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "message": f"Could not read the run ledger: {exc}",
         }]
     return rows, []
+
+
+def _as_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse a stored ISO timestamp, or None if it is missing or unreadable."""
+
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
@@ -547,9 +565,21 @@ def overview() -> dict[str, Any]:
                 # for this stage, and it is answering about the same sources.
                 held = ingested.get(row["source_id"])
                 if held:
+                    # But holding the source is not the same as holding what
+                    # the pipeline has since produced. A source re-extracted
+                    # and re-reviewed today, whose store record is from a run
+                    # two weeks ago, is the exact case this column exists to
+                    # surface -- and reading it green said the work was live
+                    # when the claim layer was still the old one.
+                    written = _as_datetime(held.get("updated_at"))
+                    behind = (
+                        upstream_finished is not None
+                        and written is not None
+                        and upstream_finished > written
+                    )
                     cell = {
-                        "state": "current",
-                        "reason": "from_store_not_ledger",
+                        "state": "stale" if behind else "current",
+                        "reason": "upstream_rerun" if behind else "from_store_not_ledger",
                         "quality": {"revision": held["revision"]},
                         "run": None,
                         "store": held,

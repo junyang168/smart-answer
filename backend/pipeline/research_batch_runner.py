@@ -253,6 +253,68 @@ def _write_manifest(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+#: The batch runner's stage name -> the name that stage files in the ledger,
+#: which is the name the overview has a column for. They differ because the
+#: plan reads as a verb list and the overview reads as a noun list; where they
+#: differ, the overview wins, because that is where "done" is decided.
+LEDGER_STAGE = {
+    "extract": "extraction",
+    "cross_section": "cross_section",
+    "review": "review",
+    "adjudicate": "adjudication",
+    "apply": "merge",
+}
+
+
+def unrecorded_stages(
+    members: list[dict[str, Any]], *, since: datetime, database_url: str | None = None,
+) -> dict[str, list[str]]:
+    """Stages that ran in this batch and left no row the overview can read.
+
+    A stage runner writes its own ledger row, and nothing checked that it did.
+    Two of them did not: the claim-layer review path filed nothing at all, and
+    the adjudicator filed against the package filename instead of the source.
+    Both were invisible until somebody looked at the dashboard and saw a source
+    whose work was done reading as not done -- which is the only place "done"
+    is actually decided, and the last place anybody wants to discover a lie.
+
+    Reporting, never blocking: `run_ledger` degrades to a warning when the
+    database is unreachable, and a check built on it must not be able to fail a
+    batch that produced correct artifacts.
+    """
+
+    url = database_url or os.getenv("KNOWLEDGE_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not url:
+        return {}
+    try:
+        import psycopg
+        from backend.pipeline.source_keys import normalize_source_key
+    except ImportError:  # pragma: no cover - depends on local environment
+        return {}
+    try:
+        with psycopg.connect(url, autocommit=True) as conn, conn.cursor() as cursor:
+            missing: dict[str, list[str]] = {}
+            for key, stages in members.items():
+                subject = normalize_source_key(key)
+                for stage in stages:
+                    ledger_stage = LEDGER_STAGE.get(stage)
+                    if ledger_stage is None:
+                        continue
+                    cursor.execute(
+                        """SELECT 1 FROM wang_knowledge.pipeline_runs
+                           WHERE stage = %s AND started_at >= %s
+                             AND (subject_id = %s OR %s = ANY(source_ids))
+                           LIMIT 1""",
+                        (ledger_stage, since, subject, subject),
+                    )
+                    if cursor.fetchone() is None:
+                        missing.setdefault(key, []).append(ledger_stage)
+            return missing
+    except Exception as exc:  # pragma: no cover - depends on local environment
+        print(f"research_batch_runner: could not verify the ledger ({exc})", file=sys.stderr)
+        return {}
+
+
 def _member_status(plan: list[dict[str, Any]], results: dict[str, Any]) -> list[dict[str, Any]]:
     """Where each member stands, in the order the batch names them."""
 
@@ -367,9 +429,10 @@ def main() -> int:
                 member, artifact_paths(output_root, member["key"])["source_manifest"]
             )
 
+    started_at = datetime.now(timezone.utc)
     manifest = {
         **preview,
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": started_at.isoformat(),
         "status": "running",
         "completed_commands": [],
     }
@@ -442,7 +505,20 @@ def main() -> int:
                 json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
 
+    # What ran, per member, so the check asks only about stages this batch
+    # actually executed.
+    ran: dict[str, list[str]] = {}
+    for row in selected:
+        if results.get(row["transcript_id"], {}).get("status") in {"completed", "running"}:
+            ran.setdefault(row["transcript_id"], []).append(row["stage"])
+    unrecorded = unrecorded_stages(ran, since=started_at)
+
     members_status = _member_status(selected, results)
+    for row in members_status:
+        if row["source"] in unrecorded:
+            # The work is on disk and the overview cannot see it. Said here
+            # because this is the last moment anyone is looking.
+            row["unrecorded_stages"] = unrecorded[row["source"]]
     failed = [row for row in members_status if row.get("status") != "completed"]
     manifest["members"] = members_status
     if interrupted:
@@ -457,6 +533,13 @@ def main() -> int:
     manifest["completed_at"] = datetime.now(timezone.utc).isoformat()
     _write_manifest(manifest_path, manifest)
 
+    if unrecorded:
+        print(
+            "research_batch_runner: these stages ran but filed no ledger row, so the "
+            "overview will show them as never run: "
+            + "; ".join(f"{key} -> {', '.join(stages)}" for key, stages in unrecorded.items()),
+            file=sys.stderr,
+        )
     print(json.dumps({
         "status": manifest["status"],
         "output_root": str(output_root),

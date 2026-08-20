@@ -367,7 +367,13 @@ def main() -> int:
     # overview could not: whether the adjudicator's overrides were ever applied.
     # One source reached the store from its raw extraction package because
     # nobody could see that this stage had not run for it.
-    with run_record(subject=subject, stage="apply") as record:
+    # `merge` and not `apply`: this artifact is what the overview's 合併 column
+    # has always meant -- `run_ledger_backfill` maps both `.reviewed-candidate`
+    # and `.consensus-applied` to it. Filing a stage name the dashboard has no
+    # column for meant the work was done, the row was written, and the cell
+    # still read ✗. A stage name is part of the user-facing contract, not an
+    # internal label.
+    with run_record(subject=subject, stage="merge") as record:
         record.inputs({"overrides_path": str(args.overrides)})
         result = apply_consensus_overrides(package, overrides, transcripts)
         args.output.parent.mkdir(parents=True, exist_ok=True)

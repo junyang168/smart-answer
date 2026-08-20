@@ -1,4 +1,10 @@
-export type StageId = "extraction" | "review" | "adjudication" | "merge" | "ingest";
+export type StageId =
+  | "extraction"
+  | "cross_section"
+  | "review"
+  | "adjudication"
+  | "merge"
+  | "ingest";
 
 /** `stale` is the load-bearing one: it succeeded, but not against what is here now. */
 export type CellState =

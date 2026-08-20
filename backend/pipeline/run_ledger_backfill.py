@@ -57,6 +57,7 @@ from backend.pipeline.source_keys import document_row_key, key_from_source_path
 #: adjudication.
 ARTIFACTS = {
     ".detailed-knowledge.json": "extraction",
+    ".cross-section.json": "cross_section",
     ".independent-review.json": "review",
     ".adjudication.json": "adjudication",
     ".ai-adjudication.json": "adjudication",
