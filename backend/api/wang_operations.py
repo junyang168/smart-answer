@@ -220,6 +220,45 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
     return held, []
 
 
+def _ingest_inputs() -> dict[str, str]:
+    """Which file each applied ingest actually read, keyed by extraction hash.
+
+    `change_sets` records the path, and the path is the whole point: applying a
+    knowledge package is only as good as the package handed to it. An ingest
+    pointed at `.detailed-knowledge.json` loads the pre-adjudication claims even
+    when a `.consensus-applied.json` sits beside it, and the store ends up
+    holding text two models already agreed to correct.
+    """
+
+    url = _database_url()
+    if not url:
+        return {}
+    try:
+        import psycopg
+    except ImportError:
+        return {}
+    try:
+        with psycopg.connect(url) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT package_id, metadata->>'input_path'
+                     FROM wang_knowledge.change_sets
+                    WHERE status='applied' AND metadata->>'input_path' IS NOT NULL"""
+            )
+            rows = cursor.fetchall()
+    except Exception:  # pragma: no cover - depends on deployment
+        return {}
+    inputs: dict[str, str] = {}
+    for package_id, input_path in rows:
+        match = re.search(r"([0-9a-f]{12})$", str(package_id or ""))
+        if match:
+            inputs[match.group(1)] = str(input_path)
+    return inputs
+
+
+#: Suffixes that mean "the consensus has been applied to this package".
+MERGED_SUFFIXES = (".reviewed-candidate.json", ".consensus-applied.json")
+
+
 def _effective_status(run: dict[str, Any], now: datetime) -> str:
     """`interrupted` is inferred here, never written by the run itself.
 
@@ -310,6 +349,7 @@ def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
         "seconds": int((finished - started).total_seconds()) if started and finished else None,
         "model_id": run.get("model_id"),
         "cost_usd": float(run["cost_usd"]) if run.get("cost_usd") is not None else None,
+        "output_paths": list(run.get("output_paths") or []),
         "error_message": (str(run["error_message"]).splitlines() or [None])[0]
         if run.get("error_message") else None,
     }
@@ -433,6 +473,7 @@ def overview() -> dict[str, Any]:
 
     ingested, store_warnings = _ingested_sources()
     warnings.extend(store_warnings)
+    ingest_inputs = _ingest_inputs()
 
     citations, citation_warnings = _article_citations(paths)
     warnings.extend(citation_warnings)
@@ -496,6 +537,37 @@ def overview() -> dict[str, Any]:
     # page invented: only 3 adjudication artifacts survive against 20 merges,
     # because that output was not always kept. Saying so is the difference
     # between a table with a visible gap and a table that looks wrong.
+    # An ingest that read the un-merged package. The chain reads ✓ 合併 then
+    # ✓ 入庫, which says the merged version is in the library -- so this has to
+    # be called out or the row is worse than a blank.
+    ingested_before_merge: list[str] = []
+    for row in payload_rows:
+        merge_cell = row["stages"]["merge"]
+        if merge_cell["state"] not in {"current", "stale"}:
+            continue
+        merged_paths = [
+            path for path in ((merge_cell.get("run") or {}).get("output_paths") or [])
+        ]
+        digests = {
+            match.group(1)
+            for path in merged_paths
+            for match in [re.search(r"-([0-9a-f]{12})\.", path)]
+            if match
+        }
+        for digest in digests:
+            read = ingest_inputs.get(digest)
+            if read and not read.endswith(MERGED_SUFFIXES):
+                ingested_before_merge.append(f"{row['source_id']}: {Path(read).name}")
+    if ingested_before_merge:
+        warnings.append({
+            "code": "ingested_before_the_consensus_was_applied",
+            "message": (
+                f"{len(ingested_before_merge)} 篇的入庫讀的是合併前的包，"
+                "所以雙模型已同意的修正沒有進到主庫。合併那一格是 ✓，但主庫拿到的不是它。"
+            ),
+            "detail": ingested_before_merge[:20],
+        })
+
     out_of_order: list[str] = []
     for row in payload_rows:
         for earlier, later in zip(SERMON_STAGES, SERMON_STAGES[1:]):

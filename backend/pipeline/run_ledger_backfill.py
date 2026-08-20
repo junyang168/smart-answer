@@ -44,11 +44,25 @@ from backend.pipeline.source_keys import document_row_key, key_from_source_path
 
 
 #: Filename suffix -> the stage that produces it.
+#:
+#: One stage, several spellings. Adjudication has been written as
+#: `.adjudication.json`, `.ai-adjudication.json` and `.adjudication-v2.json`;
+#: applying the consensus has been written as `.reviewed-candidate.json` and
+#: `.consensus-applied.json`. Matching only the first name of each found 3
+#: adjudications where 21 exist, and missed the merge for the very notes
+#: manuscript that prompted the question.
+#:
+#: `.consensus-overrides.json` is deliberately absent: the adjudication runner
+#: writes it *alongside* its result, so counting it would file two runs for one
+#: adjudication.
 ARTIFACTS = {
     ".detailed-knowledge.json": "extraction",
     ".independent-review.json": "review",
     ".adjudication.json": "adjudication",
+    ".ai-adjudication.json": "adjudication",
+    ".adjudication-v2.json": "adjudication",
     ".reviewed-candidate.json": "merge",
+    ".consensus-applied.json": "merge",
 }
 
 
