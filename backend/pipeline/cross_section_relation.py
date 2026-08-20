@@ -1,20 +1,19 @@
 """Recover the argument links that no single extraction window could see.
 
-Windowed extraction (#88) reads 15 segments at a time, which guarantees any two
-segments within 10 of each other are read together -- 97.1% of 講道 and 98.6% of
-母本 observation→evidence_step relations. The remainder is not noise. Measured on
-the 太16:21–23 母本, the whole-document pass produced 7 relations spanning 11–21
-segments, and every one of them is the editorial pattern the notes prompt warns
-about: the fact filed under 釋經, the inference drawn from it under 神學意義,
-with an 附錄 between them.
+Section extraction (#88) asks about one `##` section at a time, so a relation
+whose two ends sit in different sections is one no call could see. Measured on
+the 太16:21–23 母本, that is a small but real set: 0 of 264 relations extraction
+produced cross a `##`, while the whole-document pass produced 7 that span 11–21
+segments -- every one of them the editorial pattern the notes prompt warns
+about, the fact filed under 釋經 and the inference under 神學意義.
 
     span 16  可8:27-33 彼得宣认后耶稣立刻预告受苦
           →  门徒缺少的是对弥赛亚性质的认识
     span 21  马可反复呈现的四项现象
           →  太16:20 的保密命令要放在事工处境中解释
 
-Windowing trades those for a sixfold rise in local coverage. This stage buys
-them back, and it can be cheap because it does not re-read the source: by the
+Sectioning trades those for a rise in local coverage from 50% to 100%. This
+stage buys them back, and it can be cheap because it does not re-read the source: by the
 time it runs, every record is a statement with a known position, so the question
 is 289 short statements wide instead of a whole manuscript.
 
@@ -23,10 +22,10 @@ Two properties keep it from becoming a second extraction:
   * It may only propose relations between records already in the package. It
     cannot invent a record, and it is never shown the source text, so it has
     nothing to quote and no way to add material.
-  * It may only propose relations wider than the window guarantee already
-    covers. A relation the extraction could see is the extraction's to make;
-    re-proposing it here would let a model with no anchors relitigate one that
-    has them.
+  * It may only relate records in *different* sections. A relation inside one
+    section is the extraction's to make -- it had both ends in front of it and
+    the anchors to prove them -- and re-proposing it here would let a model
+    holding no anchors relitigate one that does.
 """
 
 from __future__ import annotations
@@ -36,16 +35,16 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_window_relation_discovery.md"
+PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
-SCHEMA_VERSION = "wang_cross_window_relation_v1"
+SCHEMA_VERSION = "wang_cross_section_relation_v1"
 
 #: The same vocabulary the extraction uses. This stage adds edges to an existing
 #: graph; it does not get its own dialect.
 RELATION_TYPES = ["supports", "answers", "qualifies", "applies", "refutes", "contextualizes"]
 
 
-class CrossWindowValidationError(ValueError):
+class CrossSectionValidationError(ValueError):
     """Raised when a proposal cannot be accepted without weakening the graph."""
 
 
@@ -170,9 +169,13 @@ def validate_proposals(
     package: dict[str, Any],
     *,
     positions: dict[str, int],
-    minimum_span: int,
+    boundaries: Sequence[int],
 ) -> None:
-    """Reject anything that adds material, restates an edge, or is too near.
+    """Reject anything that adds material, restates an edge, or stays in one section.
+
+    `boundaries` is the start position of each `##` section, from the package's
+    own `section_plan` -- so widening or narrowing the sections automatically
+    changes what this stage may propose, with no second place to remember.
 
     Errors are collected rather than raised one at a time so a retry can fix
     the whole batch, matching how extraction validation reports.
@@ -204,11 +207,12 @@ def validate_proposals(
             errors.append(f"{label}: duplicate proposal")
             return
         seen.add(signature)
-        span = abs(positions.get(from_id, 0) - positions.get(to_id, 0))
-        if span < minimum_span:
+        if _section_of(positions.get(from_id, 0), boundaries) == _section_of(
+            positions.get(to_id, 0), boundaries
+        ):
             errors.append(
-                f"{label}: spans {span} segments, which extraction could already see "
-                f"(minimum {minimum_span})"
+                f"{label}: both ends are in the same section, which extraction "
+                f"could already see"
             )
         if not str(row.get("reason") or "").strip():
             errors.append(f"{label}: no reason given")
@@ -220,7 +224,11 @@ def validate_proposals(
     for row in response.get("claim_relations") or []:
         check(row, str(row.get("claim_relation_id") or "?"), claim_ids, claim_ids)
     if errors:
-        raise CrossWindowValidationError("cross-window validation failed: " + " | ".join(errors))
+        raise CrossSectionValidationError("cross-window validation failed: " + " | ".join(errors))
+
+
+def _section_of(position: int, boundaries: Sequence[int]) -> int:
+    return sum(1 for start in boundaries if start <= position)
 
 
 def apply_proposals(
@@ -244,7 +252,7 @@ def apply_proposals(
     summary = updated.setdefault("summary", {})
     summary["evidence_relation_count"] = len(updated.get("knowledge_relations") or [])
     summary["claim_relation_count"] = len(updated.get("claim_relations") or [])
-    updated["cross_window_relations"] = {
+    updated["cross_section_relations"] = {
         **identity,
         "evidence_relations_added": len(response.get("evidence_relations") or []),
         "claim_relations_added": len(response.get("claim_relations") or []),
@@ -253,13 +261,13 @@ def apply_proposals(
 
 
 def discovery_identity(
-    *, package_sha256: str, prompt: str, model_id: str, minimum_span: int
+    *, package_sha256: str, prompt: str, model_id: str, section_count: int
 ) -> dict[str, Any]:
     generation = {
         "package_sha256": package_sha256,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model_id": model_id,
-        "minimum_span": minimum_span,
+        "section_count": section_count,
         "schema_version": SCHEMA_VERSION,
     }
     generation["fingerprint_sha256"] = hashlib.sha256(
@@ -268,8 +276,19 @@ def discovery_identity(
     return generation
 
 
-def render_catalogue(rows: Sequence[dict[str, Any]]) -> str:
+def render_catalogue(
+    rows: Sequence[dict[str, Any]], section_of: dict[str, int] | None = None
+) -> str:
+    """The catalogue, each row labelled with the section it belongs to.
+
+    The section number is what the proposer has to reason about -- it may only
+    relate across one -- so it is shown rather than left to be inferred from
+    段号.
+    """
+
+    sections = section_of or {}
     return "\n".join(
-        f"[{row['id']}] 段{row['segment']:04d} {row['kind']}：{row['statement']}"
+        f"[{row['id']}] 第{sections.get(row['id'], 0)}节 段{row['segment']:04d} "
+        f"{row['kind']}：{row['statement']}"
         for row in rows
     )

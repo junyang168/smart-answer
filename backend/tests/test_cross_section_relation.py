@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from backend.pipeline.cross_window_relation import (
-    CrossWindowValidationError,
+from backend.pipeline.cross_section_relation import (
+    CrossSectionValidationError,
     apply_proposals,
     build_catalogue,
     existing_edges,
     record_positions,
     validate_proposals,
 )
-from backend.pipeline.cross_window_relation_runner import _minimum_span
+from backend.pipeline.cross_section_relation_runner import _section_boundaries
 
 
 def _package() -> dict:
     return {
         "source_documents": [{"source_id": "notes_manuscript:test"}],
-        "extraction": {"window_plan": {"fetch": 5, "context": 5}},
+        "extraction": {"section_plan": {"boundaries": [0, 25]}},
         "source_fragments": [
             {"fragment_id": "FR-1", "paragraph_key": "S0018", "verbatim_excerpt": "甲"},
             {"fragment_id": "FR-2", "paragraph_key": "S0034", "verbatim_excerpt": "乙"},
@@ -71,27 +71,27 @@ def test_catalogue_carries_statements_and_positions_but_never_source_text() -> N
 def test_accepts_a_genuinely_long_relation() -> None:
     package = _package()
     validate_proposals(
-        _proposal(), package, positions=record_positions(package), minimum_span=11
+        _proposal(), package, positions=record_positions(package), boundaries=[0, 25]
     )
 
 
 def test_rejects_a_relation_extraction_could_already_see() -> None:
-    """The near ones belong to the stage that holds the anchors."""
+    """Same-section relations belong to the stage that holds the anchors."""
 
     package = _package()
-    with pytest.raises(CrossWindowValidationError, match="spans 2 segments"):
+    with pytest.raises(CrossSectionValidationError, match="same section"):
         validate_proposals(
             _proposal(to_id="E2"), package,
-            positions=record_positions(package), minimum_span=11,
+            positions=record_positions(package), boundaries=[0, 25],
         )
 
 
 def test_rejects_an_invented_record() -> None:
     package = _package()
-    with pytest.raises(CrossWindowValidationError, match="not a record this stage may relate"):
+    with pytest.raises(CrossSectionValidationError, match="not a record this stage may relate"):
         validate_proposals(
             _proposal(to_id="E404"), package,
-            positions=record_positions(package), minimum_span=11,
+            positions=record_positions(package), boundaries=[0, 25],
         )
 
 
@@ -101,9 +101,9 @@ def test_rejects_an_edge_that_already_exists() -> None:
         "relation_id": "ER001", "from_id": "OBS1", "to_id": "E1",
         "relation_type": "supports", "reason": "r",
     }]
-    with pytest.raises(CrossWindowValidationError, match="already related"):
+    with pytest.raises(CrossSectionValidationError, match="already related"):
         validate_proposals(
-            _proposal(), package, positions=record_positions(package), minimum_span=11
+            _proposal(), package, positions=record_positions(package), boundaries=[0, 25]
         )
     assert ("E1", "OBS1") in existing_edges(package), "edges must be undirected"
 
@@ -113,9 +113,9 @@ def test_rejects_a_relation_pointing_at_an_observation() -> None:
 
     package = _package()
     proposal = _proposal(from_id="E1", to_id="OBS1")
-    with pytest.raises(CrossWindowValidationError, match="not a record this stage may relate to"):
+    with pytest.raises(CrossSectionValidationError, match="not a record this stage may relate to"):
         validate_proposals(
-            proposal, package, positions=record_positions(package), minimum_span=11
+            proposal, package, positions=record_positions(package), boundaries=[0, 25]
         )
 
 
@@ -123,19 +123,20 @@ def test_added_relations_say_where_they_came_from() -> None:
     package = _package()
     updated = apply_proposals(package, _proposal(), identity={"fingerprint_sha256": "fp"})
     added = updated["knowledge_relations"][0]
-    assert added["discovered_by"] == "wang_cross_window_relation_v1"
+    assert added["discovered_by"] == "wang_cross_section_relation_v1"
     assert added["review_status"] == "candidate"
     assert updated["summary"]["evidence_relation_count"] == 1
-    assert updated["cross_window_relations"]["evidence_relations_added"] == 1
+    assert updated["cross_section_relations"]["evidence_relations_added"] == 1
     # The source package is not mutated.
     assert package["knowledge_relations"] == []
 
 
-def test_minimum_span_follows_the_window_plan() -> None:
-    """Widen the windows and this stage narrows to match, with nothing to remember."""
+def test_boundaries_follow_the_package_section_plan() -> None:
+    """Resection the source and this stage follows, with nothing to remember."""
 
-    assert _minimum_span(_package(), None) == 11
-    wide = _package()
-    wide["extraction"]["window_plan"]["context"] = 10
-    assert _minimum_span(wide, None) == 21
-    assert _minimum_span(_package(), 5) == 5
+    assert _section_boundaries(_package()) == [0, 25]
+    resectioned = _package()
+    resectioned["extraction"]["section_plan"]["boundaries"] = [0, 10, 40]
+    assert _section_boundaries(resectioned) == [0, 10, 40]
+    # No plan means one section, so every proposal is same-section and rejected.
+    assert _section_boundaries({"extraction": {}}) == [0]
