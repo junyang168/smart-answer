@@ -398,6 +398,7 @@ class ChangeSetPlan:
             "created": sum(item.operation == "create" for item in self.operations),
             "updated": sum(item.operation == "update" for item in self.operations),
             "retired": sum(item.operation == "retire" for item in self.operations),
+            "revived": sum(item.operation == "revive" for item in self.operations),
             "unchanged": self.unchanged,
             "operations": len(self.operations),
         }
@@ -508,6 +509,66 @@ def build_retirement_plan(
         )
     fingerprint = sha256_json({
         "planner_schema": "wang_postgres_retirement_v1",
+        "source_kind": source_kind,
+        "reason": reason,
+        "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+    })
+    return ChangeSetPlan(
+        change_set_id=f"KCS-{fingerprint[:20]}",
+        fingerprint_sha256=fingerprint,
+        package_id=package_id,
+        source_kind=source_kind,
+        source_sha256=fingerprint,
+        operations=tuple(operations),
+        unchanged=skipped,
+        ignored_keys=(),
+    )
+
+
+def build_revival_plan(
+    keys: Sequence[tuple[str, str]],
+    retired: Mapping[tuple[str, str], Mapping[str, Any]],
+    *,
+    reason: str,
+    package_id: str,
+    source_kind: str = "revival",
+) -> ChangeSetPlan:
+    """Put back records that were withdrawn on evidence that did not hold.
+
+    Retirement is a judgement and judgements are sometimes wrong: one fragment
+    was retired because a short excerpt happened to occur inside a deleted span
+    somewhere in its source, while the occurrence its anchor meant survived.
+    Without a way back the only remedies are editing rows behind the history
+    tables' back, or leaving a true record withdrawn -- so there is a way back,
+    and it is recorded like everything else.
+
+    Like a retirement it leaves the payload untouched; what changes is the
+    store's assertion about the record, not the record.
+    """
+
+    operations: list[ChangeOperation] = []
+    skipped = 0
+    for collection, object_id in keys:
+        current = retired.get((collection, object_id))
+        if not current:
+            skipped += 1
+            continue
+        before_sha = str(current.get("content_sha256") or "")
+        before_revision = int(current["revision"])
+        operations.append(
+            ChangeOperation(
+                operation="revive",
+                collection=collection,
+                object_id=object_id,
+                before_sha256=before_sha,
+                after_sha256=before_sha,
+                before_revision=before_revision,
+                after_revision=before_revision + 1,
+                payload=dict(current.get("payload") or {}),
+            )
+        )
+    fingerprint = sha256_json({
+        "planner_schema": "wang_postgres_revival_v1",
         "source_kind": source_kind,
         "reason": reason,
         "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
@@ -783,8 +844,8 @@ class PostgresKnowledgeStore:
                             expected=operation.before_sha256, found=actual_sha,
                             retired_at=locked[2] if locked else None,
                         )
-                    if operation.operation == "retire":
-                        self._retire_one(cursor, plan, index, operation)
+                    if operation.operation in {"retire", "revive"}:
+                        self._set_retirement(cursor, plan, index, operation)
                         continue
                     payload = dict(operation.payload)
                     payload["revision"] = operation.after_revision
@@ -868,10 +929,10 @@ class PostgresKnowledgeStore:
                 )
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
 
-    def _retire_one(
+    def _set_retirement(
         self, cursor: Any, plan: ChangeSetPlan, index: int, operation: ChangeOperation
     ) -> None:
-        """Withdraw one record, leaving what it says untouched.
+        """Withdraw one record or put it back, leaving what it says untouched.
 
         The row keeps its payload and gains `retired_at`; the new revision is
         written to `object_versions` so the withdrawal is a point in the
@@ -883,11 +944,13 @@ class PostgresKnowledgeStore:
 
         payload = dict(operation.payload)
         payload["revision"] = operation.after_revision
+        retiring = operation.operation == "retire"
         cursor.execute(
             """UPDATE wang_knowledge.objects
-               SET revision=%s, updated_at=now(), retired_at=now()
+               SET revision=%s, updated_at=now(),
+                   retired_at = CASE WHEN %s THEN now() ELSE NULL END
                WHERE collection=%s AND object_id=%s""",
-            (operation.after_revision, operation.collection, operation.object_id),
+            (operation.after_revision, retiring, operation.collection, operation.object_id),
         )
         cursor.execute(
             """INSERT INTO wang_knowledge.object_versions
@@ -902,9 +965,10 @@ class PostgresKnowledgeStore:
             """INSERT INTO wang_knowledge.change_operations
                (change_set_id, operation_index, operation, collection, object_id,
                 before_sha256, after_sha256, before_revision, after_revision)
-               VALUES (%s,%s,'retire',%s,%s,%s,%s,%s,%s)""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
-                plan.change_set_id, index, operation.collection, operation.object_id,
+                plan.change_set_id, index, operation.operation,
+                operation.collection, operation.object_id,
                 operation.before_sha256, operation.after_sha256,
                 operation.before_revision, operation.after_revision,
             ),
@@ -915,9 +979,10 @@ class PostgresKnowledgeStore:
             # rather than `objects`.
             cursor.execute(
                 """UPDATE wang_knowledge.edges
-                   SET revision=%s, updated_at=now(), retired_at=now()
+                   SET revision=%s, updated_at=now(),
+                       retired_at = CASE WHEN %s THEN now() ELSE NULL END
                    WHERE edge_collection=%s AND edge_id=%s""",
-                (operation.after_revision, operation.collection, operation.object_id),
+                (operation.after_revision, retiring, operation.collection, operation.object_id),
             )
 
     def _invalidate_dependencies(

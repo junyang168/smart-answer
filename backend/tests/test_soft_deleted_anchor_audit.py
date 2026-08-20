@@ -27,6 +27,17 @@ def test_an_anchor_whose_key_no_longer_resolves_is_still_checked() -> None:
     assert excerpt_is_deleted("我昨天講過這個", SEGMENTS, "S0099")
 
 
+def test_text_that_survives_anywhere_is_not_deleted() -> None:
+    """`str.find` returns an arbitrary occurrence, and the professor repeats
+    himself: 「為什麼？」 appears three times in one paragraph of 太16. Flagging
+    on the first hit retires a record by guessing which occurrence the anchor
+    meant -- it flagged six, and one of them was retired."""
+
+    segments = ["~~為什麼？我昨天講過。~~所以我問你，為什麼？"]
+    assert not excerpt_is_deleted("為什麼？", segments, "S0001")
+    assert excerpt_is_deleted("我昨天講過", segments, "S0001")
+
+
 def _audit(**overrides):
     base = dict(
         fragments={
@@ -286,3 +297,43 @@ def test_an_id_appearing_only_in_prose_is_not_a_dependency() -> None:
         plans=PLANS,
     )
     assert articles == []
+
+
+# ---------------------------------------------------------------------------
+# putting back what should not have gone
+# ---------------------------------------------------------------------------
+
+RETIRED = {
+    ("questions", "Q-1"): {"revision": 5, "content_sha256": "sha-q", "payload": {"question_id": "Q-1"}},
+}
+
+
+def test_a_revival_leaves_the_record_saying_what_it_said() -> None:
+    """Retirement is a judgement and judgements are sometimes wrong. What
+    changes on the way back is the store's assertion, not the record."""
+
+    from backend.api.canonical_repository.postgres_store import build_revival_plan
+
+    plan = build_revival_plan(
+        [("questions", "Q-1")], RETIRED, reason="錯判", package_id="REVIVE-TEST",
+    )
+    operation = plan.operations[0]
+    assert operation.operation == "revive"
+    assert operation.payload == {"question_id": "Q-1"}
+    assert operation.before_sha256 == operation.after_sha256 == "sha-q"
+    assert (operation.before_revision, operation.after_revision) == (5, 6)
+    assert plan.as_dict()["summary"] == {
+        "created": 0, "updated": 0, "retired": 0, "revived": 1,
+        "unchanged": 0, "operations": 1,
+    }
+
+
+def test_reviving_something_that_is_not_retired_is_not_an_error() -> None:
+    from backend.api.canonical_repository.postgres_store import build_revival_plan
+
+    plan = build_revival_plan(
+        [("questions", "Q-1"), ("questions", "Q-live")], RETIRED,
+        reason="錯判", package_id="REVIVE-TEST",
+    )
+    assert [item.object_id for item in plan.operations] == ["Q-1"]
+    assert plan.unchanged == 1
