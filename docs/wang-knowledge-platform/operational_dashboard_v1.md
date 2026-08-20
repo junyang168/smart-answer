@@ -25,11 +25,15 @@
 | 抽取 | `detailed_knowledge_extraction_runner` | `<source_id>-<sha>.detailed-knowledge.json` | 檔案 |
 | 複審 | `corpus_ai_review_runner` | `*.independent-review.json` | 檔案 |
 | 仲裁 | `corpus_ai_adjudication_runner` | `*.adjudication.json` | 檔案 |
-| 合併 | `knowledge_package_merge_runner` | 合併包 JSON | 檔案 |
+| 合併 | `knowledge_consensus_applier` | `*.reviewed-candidate.json` | 檔案 |
 | 入庫 | `knowledge_store_runner ingest-package --apply` | `wang_knowledge.change_sets` 一列 | **資料庫**（已經是可信的） |
 | 文章 | `matthew_exposition_authoring_runner` | `repository/editorial_drafts/<draft_id>/` | 檔案 + publication decision |
 
 入庫這一格今天就有真權威可讀：`change_sets` 記著 `package_id`（形如 `DETAILED-2016_NYSC_3-3d012c24a542`）、`status`、`applied_at`。其餘五格沒有。記錄表要補的就是這五格。
+
+`knowledge_package_merge_runner` 不在六格之列：它做的是 research batch 的中立合併，單位是批次，不是來源。合併這一格指的是把仲裁共識套回單篇候選包（`knowledge_consensus_applier`），產出 `*.reviewed-candidate.json`——這才是之後入庫的東西。
+
+**單位不齊，這是設計必須直說的一點。** 前五格的單位是一篇來源；文章的單位是一個 draft——太 16:13–20 那一篇文章引用了兩份筆記講稿加六篇講道。所以記錄表以「執行的對象」記錄（見第 3 節 `subject_kind`），總表再把 draft 級的執行投影回它引用的每一個來源列。
 
 **記錄表不取代這些產出物。** 它記的是「誰在什麼時候跑了什麼、結果如何、花了多少」，產出物本身仍然是內容的權威。兩者對不上的時候，總表要說出來（見第 9 節）。
 
@@ -41,7 +45,10 @@
 CREATE TABLE wang_knowledge.pipeline_runs (
     run_id            text PRIMARY KEY,          -- RUN-<26 碼>
     batch_id          text,                      -- 同一次勾選的多篇共用；CLI 為 NULL
-    source_id         text NOT NULL,             -- 講道／母本，例：2016_NYSC_3
+    subject_kind      text NOT NULL DEFAULT 'source'
+                        CHECK (subject_kind IN ('source','draft','batch')),
+    subject_id        text NOT NULL,             -- 來源 id；文章的 draft id；批次 id
+    source_ids        text[] NOT NULL DEFAULT '{}',  -- 這次執行涉及的全部來源
     stage             text NOT NULL              -- extraction | review | adjudication
                         CHECK (stage IN ('extraction','review','adjudication',
                                          'merge','ingest','article')),
@@ -65,8 +72,10 @@ CREATE TABLE wang_knowledge.pipeline_runs (
     metadata          jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX pipeline_runs_source_stage_idx
-    ON wang_knowledge.pipeline_runs (source_id, stage, started_at DESC);
+CREATE INDEX pipeline_runs_subject_stage_idx
+    ON wang_knowledge.pipeline_runs (subject_id, stage, started_at DESC);
+CREATE INDEX pipeline_runs_source_ids_idx
+    ON wang_knowledge.pipeline_runs USING gin (source_ids);
 CREATE INDEX pipeline_runs_live_idx
     ON wang_knowledge.pipeline_runs (status, heartbeat_at)
     WHERE status IN ('queued','running');
@@ -77,13 +86,15 @@ CREATE INDEX pipeline_runs_live_idx
 作法是一個共用的 context manager，六個 runner 各加三行：
 
 ```python
-with run_record(source_id="2016_NYSC_3", stage="extraction", trigger="cli") as run:
+with run_record(subject="2016_NYSC_3", stage="extraction", trigger="cli") as run:
     ...
     run.usage(usage_rows)
     run.outputs(package_path)
 ```
 
 `KNOWLEDGE_DATABASE_URL` 沒設或資料庫連不上時，`run_record` 印一行警告就放行，不讓記帳擋住幹活；那次執行不會出現在總表，這是**已知的說謊來源之一**，第 9 節列著。
+
+抽取這類單來源階段，`subject_id` 就是來源 id，`source_ids` 是單元素陣列。文章生成一列的 `subject_id` 是 draft id，`source_ids` 列出它引用的全部來源——這一列在總表上會出現在八個來源的列裡，在執行記錄裡只有一列。合併與入庫不叫模型，`cost_usd` 記 0，不留 NULL——「沒花錢」和「沒記到」必須是兩個不同的值。
 
 **花費怎麼算。** 新增 `backend/pipeline/model_prices.py`：一份有日期的價目表，每個 model 三個數字（input / cached input / output，每百萬 token）。`cost_usd` 在寫入時算好並連同 `price_version` 存下來，之後改價不回頭改歷史。今天實測的兩次抽取，是價目表上線後第一批有錢的數字：
 
@@ -96,10 +107,12 @@ with run_record(source_id="2016_NYSC_3", stage="extraction", trigger="cli") as r
 
 現在的首頁是四張連結卡，導覽列已經叫「總覽」卻沒有總覽的內容。改成表。四張卡縮成頁尾一行連結。
 
+行的全集是 **240**：`sermon_catalog.json` 的 205 篇講道，加上 `notes_to_surmon/` 裡 35 個帶 `unified_source.md` 的筆記母本。其中約 90 篇講道還沒有已發布逐字稿，沒有可抽取的穩定原文——這些列**照樣在表上**，抽取格顯示「無原文」。藏掉它們，表就從「全庫的工作佇列」退化成「已經動過的那部分的進度條」，而還沒動的那部分正是要 ingest 兩百多篇時最需要看的。
+
 ```
 王教授文庫  [總覽] 馬太進度  論證層  來源覆蓋  出版單元
 ─────────────────────────────────────────────────────────────
-系列 [全部 ▾]   狀態 [全部 ▾]   [ ] 只看有問題的        131 篇
+系列 [全部 ▾]   狀態 [全部 ▾]   [ ] 只看有問題的        240 篇
 ─────────────────────────────────────────────────────────────
       來源                     抽取 複審 仲裁 合併 入庫 文章
  [ ]  011WSR01 馬太福音書釋經(1)  舊   舊   舊   ✗    ✗    ✗
@@ -120,8 +133,11 @@ with run_record(source_id="2016_NYSC_3", stage="extraction", trigger="cli") as r
 | 舊 | 有成功結果，但輸入或流程已經變了 | 最後一列是 `succeeded`，但 `input_sha256` 對不上：來源改過、prompt 改過，或那次執行根本沒有記指紋 |
 | ✗ | 沒跑過 | 這一篇這一階段沒有任何 `succeeded` 的列 |
 | 失敗 | 最後一次跑壞了 | 最後一列是 `failed` / `interrupted` / `cancelled`，不論之前有沒有成功過 |
+| 無原文 | 還不能跑 | 只出現在抽取格：講道沒有已發布逐字稿，或母本專案沒有 `unified_source.md` |
 
 「舊」不是灰色地帶，是**明確的待辦**：上面草圖裡 26 個舊包會全部落在這一格，因為它們沒有 `sections`，重跑一定得到不同的產出。
+
+**文章欄的判定跟其他五欄不同**，因為文章不是這一篇自己的執行：✓＝這一篇被至少一篇已發布文章引用且 SHA 校驗通過；舊＝引用它的文章綁的來源 SHA 已經對不上；✗＝沒有文章引用它。✗ 在這一欄是常態不是欠帳——文章按經文段落寫，一輪全庫抽取不會讓 205 篇各得一篇文章。文章生成失敗顯示在執行記錄的 draft 列上，不折進來源格。
 
 滑鼠移到一格上，浮出最後一次執行的時間、觸發方式與花費。點一格，進單篇詳情頁並捲到該階段。點來源名稱，進單篇詳情頁頂端。
 
@@ -151,30 +167,31 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 
 ## 6. 畫面三：選擇執行（總表上的動作，第五步才做）
 
-勾選 → 選階段 → **先看試算，再決定**：
+勾選 → 選「跑到哪一階段為止」→ **先看試算，再決定**。每一篇從它缺的第一個階段接著跑，到指定的終點為止；已經是 ✓ 的階段預設跳過，要重跑得另外勾「連 ✓ 也重跑」。順序固定（抽取→複審→仲裁→合併→入庫），這不是工作流引擎，只是把固定的鏈條一次按完——兩百多篇一輪五個階段，逐階段手按是分批數乘五次，鏈起來是一次。文章不在鏈裡：它以 draft 為單位，第一版仍由 CLI 觸發（記錄照寫）。
 
 ```
 ┌──────────────────────────────────────────────┐
-│ 執行「複審」                                  │
+│ 執行到「入庫」為止                            │
 │                                              │
-│ 12 篇                                        │
-│ 估計花費   $5.8 – $7.1                       │
-│ 估計時間   約 50 分鐘（同時跑 2 篇）          │
+│ 12 篇 · 缺的階段合計 31 個                    │
+│   抽取 3 · 複審 12 · 仲裁 12 · 合併 2 · 入庫 2│
+│ 估計花費   $7.4 – $9.0（合併、入庫 $0）       │
+│ 估計時間   約 2 小時（同時跑 2 篇）           │
 │                                              │
-│ 依據：最近 9 次複審，中位數 $0.53／篇，        │
-│       依來源字數調整                          │
+│ 依據：抽取 11 次中位數 $0.42／篇、複審 9 次    │
+│       中位數 $0.53／篇，依來源字數調整         │
 │                                              │
-│ 其中 3 篇已經有最新結果，會被重跑。            │
+│ 已是 ✓ 的階段跳過；要重跑得回去另外勾。        │
 │                                              │
 │              [ 取消 ]  [ 確認開始 ]           │
 └──────────────────────────────────────────────┘
 ```
 
-試算取記錄表裡同一階段最近 20 次 `succeeded` 的 `cost_usd`，按來源字數線性調整，取中位數與四分位距當區間。歷史少於 3 次時，直接說「僅有 N 次紀錄，估計不可靠」，區間照給，確認照樣要按。
+試算按階段分開：抽取、複審、仲裁取記錄表裡同階段最近 20 次 `succeeded` 的 `cost_usd`，按來源字數線性調整，取中位數與四分位距當區間；合併、入庫不叫模型，直接顯示 $0，不外推。歷史少於 3 次時，直接說「僅有 N 次紀錄，估計不可靠」，區間照給，確認照樣要按。
 
-**上限**（後端擋，不是前端）：單一 batch 上限 20 篇；估計花費超過 $20 要在確認框輸入篇數才能送出；同時執行上限 2 個 run；當日累計花費超過 $50 拒絕新的 batch 並顯示為什麼。131 篇跑一輪複審約 $65，勾錯一次不該直接開跑。
+**上限**（後端擋，不是前端）。上限是防呆，不是產能：全庫 240 篇跑一輪抽取按今天的兩次實測估 $80–120，這是這個面板要支撐的**正常工作**，上限不能把它變成不可能。所以不設「單一 batch 最多 N 篇」——全庫一次是合法的 batch。防呆用確認的力度分級：估計花費超過 $20，確認框要求輸入篇數；超過 $100，要求輸入估計金額本身；當日累計超過 $150 拒絕新 batch 並顯示為什麼。三個門檻都是後端 config，改門檻不用改程式。同時執行上限見第 8 節。勾錯一次不該直接開跑，但按一次該能跑完全庫。
 
-確認後，API 為每篇寫一列 `queued` 就回應，不等執行。
+確認後，API 只為每篇寫下**第一個缺的階段**的 `queued` 一列（batch 的 metadata 記著終點階段），就回應。後續階段由 worker 在前一階段成功後接著排——佇列裡不該出現一列「複審還沒跑就排好的仲裁」；前一階段失敗，這一篇的鏈就停在那裡，錯誤顯示在執行記錄。
 
 ## 7. 畫面四：單篇詳情（`/admin/wang/operations/sources/<source_id>`）
 
@@ -189,7 +206,7 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 作法：
 
 1. API 只寫 `queued` 一列，然後回應。
-2. 一個獨立的 worker 行程輪詢 `pipeline_runs` 裡的 `queued`，自己的 launchd plist（`com.smart_answer.wangworker`），**`deploy.sh` 不碰它**。部署時 worker 繼續跑手上那一篇，用的是舊 release 的程式碼——這是刻意的：中途換程式比跑完舊的更糟。
+2. 一個獨立的 worker 行程輪詢 `pipeline_runs` 裡的 `queued`，自己的 launchd plist（`com.smart_answer.wangworker`），**`deploy.sh` 不碰它**。部署時 worker 繼續跑手上那一篇，用的是舊 release 的程式碼——這是刻意的：中途換程式比跑完舊的更糟。同時跑的篇數預設 2、是 config；全庫一輪抽取在併發 2 下約 10–17 小時，worker 要能跨夜、跨多次部署把佇列吃完。真正的天花板是供應商的 rate limit：撞到 429 就退避重試，不記成失敗。
 3. worker 每 30 秒更新 `heartbeat_at`。
 4. 取消＝把 `cancel_requested` 設 true；worker 在段落之間檢查，收到就停在下一個段落邊界並寫 `cancelled`。不做強殺。
 5. **中斷偵測**：任何一列 `running` 且 `heartbeat_at` 超過 10 分鐘，由 worker 啟動時與 overview API 讀取時判定為 `interrupted`，寫進 `error_message`。這樣「部署殺掉了一次執行」會變成表上看得見的一列，而不是永遠停在 `running`。
@@ -225,20 +242,10 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 
 這件事的範圍超出本卡（後端從零開始做認證），但驗收第 6 條掛在這裡，所以要嘛在本卡做，要嘛拆一張卡並在本卡的 PR 裡指名它。
 
-## 12. 未定：131 是哪 131 篇
+## 12. 行的全集：240（已定）
 
-卡上說總表 131 行，我今天量不出 131：
+卡上寫 131 行。量不出來：`sermon_catalog.json` 有 205 筆、`source_coverage_catalog.py` 說語料 203 篇、`script_published/` 有 115 個逐字稿、`notes_to_surmon/` 有 35 個帶 `unified_source.md` 的母本、PostgreSQL 裡有 25 個 `source_documents`——沒有一個組合等於 131。
 
-- `sermon_catalog.json` 有 **205** 筆 records；
-- `source_coverage_catalog.py` 的註解說語料是 **203** 篇講道；
-- `script_published/` 有 **115** 個已發布逐字稿；
-- `notes_to_surmon/` 有 **35** 個帶 `unified_source.md` 的筆記專案；
-- PostgreSQL 裡有 **25** 個 `source_documents`。
-
-沒有哪一個組合等於 131。總表的行從哪裡來，是這一頁最根本的定義，也是驗收第 2 條的內容，所以在動程式之前要定下來。三個候選：
-
-- **A**：`sermon_catalog.json` 全部 205 筆 + 35 個筆記母本＝240 行。最完整，也最多噪音。
-- **B**：115 個已發布逐字稿 + 35 個筆記母本＝150 行。「有穩定可抽取原文」的才進表。
-- **C**：另一個既有的名單——如果 131 是從某個地方數出來的，指給我看，照它做。
+負責人已定案：**全庫兩百多篇都要 ingest，之後還要生成文章。** 所以全集取最完整的一份——205 篇講道加 35 個母本，共 240 行，讀 `sermon_catalog.json` 與 `notes_to_surmon/*/meta.json`，兩者都是既有的可重跑 read model，不新造名單。90 篇還沒有逐字稿的講道以「無原文」留在表上（第 4 節），因為「要先把原文弄出來」也是這張表要排的工作。
 
 不做的事（照卡）：不做通用工作流引擎；不把編輯審核、改主張、改文章搬進來；不做自動排程，第一版全部由人按下去；不重做既有三頁。
