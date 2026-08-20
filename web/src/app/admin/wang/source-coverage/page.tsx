@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { CatalogView } from "./CatalogView";
 import { ClaimPanel } from "./ClaimPanel";
@@ -8,9 +9,28 @@ import { SourceText } from "./SourceText";
 import type { Claim, Overview, SourceDetail, SourceMeta } from "./types";
 import { percent } from "./types";
 
+/**
+ * Which source is open is part of the address, not of this component.
+ *
+ * `useSearchParams` makes the route ask for the request's query string, and a
+ * prerendered route may only do that inside a boundary — without this one the
+ * production build refuses to build the page at all.
+ */
 export default function SourceCoveragePage() {
+  return (
+    <Suspense fallback={<p className="px-6 py-5 text-sm text-slate-400">載入中…</p>}>
+      <SourceCoverageView />
+    </Suspense>
+  );
+}
+
+function SourceCoverageView() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const requestedSourceId = useSearchParams().get("source");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [detail, setDetail] = useState<SourceDetail | null>(null);
+  const [detailError, setDetailError] = useState<{ sourceId: string; message: string } | null>(null);
   const [selectedFragmentId, setSelectedFragmentId] = useState<string | null>(null);
   const [claimFragmentIds, setClaimFragmentIds] = useState<Set<string>>(new Set());
   const [selectedClaimId, setSelectedClaimId] = useState<string | null>(null);
@@ -25,6 +45,12 @@ export default function SourceCoveragePage() {
   const shell = useRef<HTMLDivElement>(null);
   const [shellHeight, setShellHeight] = useState<number | null>(null);
 
+  // What is loaded counts as open only while it is the source the address asks
+  // for, so neither a stale detail nor a stale failure outlives the navigation
+  // away from it.
+  const activeDetail = detail && detail.source.source_id === requestedSourceId ? detail : null;
+  const failure = requestedSourceId ? (detailError?.sourceId === requestedSourceId ? detailError.message : "") : error;
+
   // The two panes fill whatever the admin chrome leaves, measured rather than
   // guessed: a change to the header or the Wang sub-nav must not clip them.
   useEffect(() => {
@@ -34,7 +60,7 @@ export default function SourceCoveragePage() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [detail]);
+  }, [activeDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,26 +81,44 @@ export default function SourceCoveragePage() {
     };
   }, []);
 
-  const openSource = useCallback(async (sourceId: string) => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/admin/source-coverage/sources/${encodeURIComponent(sourceId)}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`來源服務回傳 ${response.status}`);
-      setDetail((await response.json()) as SourceDetail);
-      setSelectedFragmentId(null);
-      setClaimFragmentIds(new Set());
-      setSelectedClaimId(null);
-      setFilter("");
-      setOnlyUncovered(false);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "無法讀取這個來源");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // The address decides which source is loaded, so opening a pasted link, a
+  // refresh and the back button all take the same path as clicking a row.
+  useEffect(() => {
+    if (!requestedSourceId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`/api/admin/source-coverage/sources/${encodeURIComponent(requestedSourceId)}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error(`來源服務回傳 ${response.status}`);
+        const data = (await response.json()) as SourceDetail;
+        if (cancelled) return;
+        setDetail(data);
+        // A source opens on itself: nothing selected, and no filter carried
+        // over from whichever source was read before it.
+        setSelectedFragmentId(null);
+        setClaimFragmentIds(new Set());
+        setSelectedClaimId(null);
+        setFilter("");
+        setOnlyUncovered(false);
+      } catch (reason) {
+        if (!cancelled)
+          setDetailError({
+            sourceId: requestedSourceId,
+            message: reason instanceof Error ? reason.message : "無法讀取這個來源",
+          });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedSourceId]);
+
+  const openSource = useCallback(
+    (sourceId: string) => router.push(`${pathname}?source=${encodeURIComponent(sourceId)}`),
+    [pathname, router],
+  );
 
   const scrollToOrdinal = useCallback((ordinal: number | null) => {
     if (ordinal === null) return;
@@ -87,9 +131,9 @@ export default function SourceCoveragePage() {
       setSelectedFragmentId(fragmentId);
       setClaimFragmentIds(new Set());
       setSelectedClaimId(null);
-      if (fragmentId && detail) scrollToOrdinal(detail.fragments[fragmentId]?.segment_ordinal ?? null);
+      if (fragmentId && activeDetail) scrollToOrdinal(activeDetail.fragments[fragmentId]?.segment_ordinal ?? null);
     },
-    [detail, scrollToOrdinal],
+    [activeDetail, scrollToOrdinal],
   );
 
   const selectClaim = useCallback(
@@ -108,28 +152,39 @@ export default function SourceCoveragePage() {
     [claimFragmentIds, selectedFragmentId],
   );
 
-  if (error && !detail)
+  if (failure && !activeDetail)
     return (
       <div className="rounded-xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">
-        {error}
+        {failure}
         <p className="mt-2 text-xs text-rose-600">來源覆蓋需要 KNOWLEDGE_DATABASE_URL 指向 authoring store，且來源檔案可讀。</p>
+        {/* A link can now name a source that the store does not have; that
+            reader needs a way out other than editing the address. */}
+        {requestedSourceId ? (
+          <button
+            type="button"
+            onClick={() => router.push(pathname)}
+            className="mt-3 inline-flex items-center gap-1 rounded-full border border-rose-300 px-2.5 py-1 text-xs text-rose-700 hover:bg-rose-100"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />全庫總覽
+          </button>
+        ) : null}
       </div>
     );
 
-  if (detail) {
-    const stats = detail.source.stats;
+  if (activeDetail) {
+    const stats = activeDetail.source.stats;
     return (
       <div ref={shell} style={{ height: shellHeight ?? undefined }} className="-mx-2 -my-6 flex flex-col overflow-hidden bg-white">
         <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
           <button
             type="button"
-            onClick={() => setDetail(null)}
+            onClick={() => router.push(pathname)}
             className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100"
           >
             <ArrowLeft className="h-3.5 w-3.5" />全庫總覽
           </button>
-          <span className="text-sm font-semibold text-slate-800">{detail.source.title}</span>
-          <span className="font-mono text-[11px] text-slate-400">{detail.source.source_type}</span>
+          <span className="text-sm font-semibold text-slate-800">{activeDetail.source.title}</span>
+          <span className="font-mono text-[11px] text-slate-400">{activeDetail.source.source_type}</span>
           <input
             type="search"
             value={filter}
@@ -162,17 +217,17 @@ export default function SourceCoveragePage() {
             <span>claims <b className="text-slate-900">{stats.claims}</b></span>
           </div>
         </header>
-        {detail.source.file_state !== "current" ? (
+        {activeDetail.source.file_state !== "current" ? (
           <p className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-[12px] text-amber-900">
             <AlertTriangle className="h-4 w-4" />
-            {detail.source.file_state === "missing"
-              ? `讀不到來源檔案：${detail.source.source_path || "（store 沒有記下路徑）"}`
+            {activeDetail.source.file_state === "missing"
+              ? `讀不到來源檔案：${activeDetail.source.source_path || "（store 沒有記下路徑）"}`
               : "來源檔案的 SHA256 與 source_document 記錄的不同——這份文字在抽取之後被改過，下面的每一個位置都只是近似。"}
           </p>
         ) : null}
         <div className="flex min-h-0 min-w-0 flex-1">
           <SourceText
-            detail={detail}
+            detail={activeDetail}
             selectedFragmentIds={highlighted}
             onSelectFragment={selectFragment}
             markUncovered={markUncovered}
@@ -181,7 +236,7 @@ export default function SourceCoveragePage() {
             scrollTo={scrollTo}
           />
           <ClaimPanel
-            detail={detail}
+            detail={activeDetail}
             selectedFragmentId={selectedFragmentId}
             selectedClaimId={selectedClaimId}
             onSelectFragment={selectFragment}
@@ -195,6 +250,11 @@ export default function SourceCoveragePage() {
       </div>
     );
   }
+
+  // A source was asked for by name: wait for it rather than showing the
+  // catalog, which would flash a list the reader never asked to see.
+  if (requestedSourceId)
+    return <p className="px-6 py-5 text-sm text-slate-400">載入 {requestedSourceId} …</p>;
 
   const totals = overview?.totals;
 
@@ -240,7 +300,7 @@ export default function SourceCoveragePage() {
         </div>
         {loading && !overview ? <p className="text-sm text-slate-400">載入中…</p> : null}
         {overview && overviewTab === "catalog" ? (
-          <CatalogView catalog={overview.catalog} sources={overview.sources} onOpen={(id) => void openSource(id)} />
+          <CatalogView catalog={overview.catalog} sources={overview.sources} onOpen={openSource} />
         ) : null}
         {overview && overviewTab === "table" ? (
           <table className="w-full border-collapse text-[12.5px]">
@@ -258,7 +318,7 @@ export default function SourceCoveragePage() {
             </thead>
             <tbody>
               {overview.sources.map((source) => (
-                <SourceRow key={source.source_id} source={source} onOpen={() => void openSource(source.source_id)} />
+                <SourceRow key={source.source_id} source={source} onOpen={() => openSource(source.source_id)} />
               ))}
             </tbody>
             {totals ? (
