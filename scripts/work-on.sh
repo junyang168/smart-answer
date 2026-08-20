@@ -68,15 +68,20 @@ fi
 # 2.3 GB each, so they are linked: the code under test is the worktree's, the
 # interpreter and the packages are shared.
 #
-#   .venv              1.8 GB    `DATA_BASE_DIR is required` without .env
+#   backend/.venv      the interpreter `.python-version` pins, and the one
+#                      production runs; the root `.venv` is an older 3.11 that
+#                      failed a test production passes
 #   web/node_modules   491 MB
 #   node_modules        25 MB
+#
+# `.env` is here too: without it every runner dies on `DATA_BASE_DIR is
+# required`.
 #
 # Two limits come with sharing them, and AGENTS.md says so rather than
 # pretending otherwise: only one worktree can hold ports 3000/3003/8555 at a
 # time, and a branch that changes `requirements.txt` or `package.json` is
 # running against the wrong install until it makes its own.
-for shared in .env .venv node_modules web/node_modules; do
+for shared in .env backend/.venv .venv node_modules web/node_modules; do
   if [[ -e "$SOURCE_REPO/$shared" ]]; then
     mkdir -p "$(dirname "$TARGET/$shared")"
     ln -sfn "$SOURCE_REPO/$shared" "$TARGET/$shared"

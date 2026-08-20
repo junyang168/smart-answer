@@ -30,7 +30,7 @@ scripts/wrap-up.sh                            # opens the PR from inside it
 scripts/wrap-up.sh --cleanup                  # after it merges
 ```
 
-`work-on.sh` links `.env`, `.venv` and both `node_modules` into the worktree,
+`work-on.sh` links `.env`, both venvs and both `node_modules` into the worktree,
 because none of them are in git and installing 2.3 GB per card is not a plan.
 The code under test is the worktree's; the interpreter and the packages are
 shared. Two limits follow from sharing them:
@@ -44,6 +44,12 @@ or waiting to see it deployed.
 **A branch that changes its dependencies is running against the wrong ones.**
 `requirements.txt` or `package.json` edits are not picked up by a linked
 install; that branch needs its own.
+
+Run tests with `backend/.venv`, which is the version `.python-version` pins and
+the one production runs. The root `.venv` is an older 3.11 that survives for
+whatever still points at it, and it does not agree with production: a
+fellowship-documents test fails there and passes on 3.13, so a suite run
+against it can report a failure production does not have.
 
 Git enforces the part that matters — one branch cannot be checked out in two
 worktrees — so parallel sessions cannot take each other's floor away. Two
