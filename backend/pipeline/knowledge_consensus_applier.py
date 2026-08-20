@@ -30,6 +30,79 @@ def _matches_signature(anchor: dict[str, Any], signature: dict[str, Any], transc
     )
 
 
+def _anchored_evidence_ids(claims: list[dict[str, Any]]) -> set[str]:
+    """Every evidence id the live claims still hold an anchor for."""
+    return {
+        str(anchor.get("evidence_id"))
+        for claim in claims
+        if not claim.get("superseded_by")
+        for occurrence in claim.get("occurrences", [])
+        for anchor in occurrence.get("anchors", [])
+        if anchor.get("evidence_id")
+    }
+
+
+def _merge_into_survivor(
+    *, loser: dict[str, Any], survivor: dict[str, Any], relations: list[dict[str, Any]],
+) -> None:
+    """Move what the retired claim carried onto the one that stays.
+
+    The loser keeps its own record and is marked superseded rather than
+    removed: it is the evidence that a merge happened.  What must not stay
+    behind is its grip on the source -- an anchor only the retired claim held
+    would drop out of coverage the moment a reader filters superseded claims.
+    """
+
+    held = {
+        str(anchor.get("evidence_id"))
+        for occurrence in survivor.get("occurrences", [])
+        for anchor in occurrence.get("anchors", [])
+        if anchor.get("evidence_id")
+    }
+    for occurrence in loser.get("occurrences", []):
+        transcript_id = str(occurrence.get("transcript_id") or "")
+        target = next(
+            (
+                item for item in survivor.setdefault("occurrences", [])
+                if str(item.get("transcript_id") or "") == transcript_id
+            ),
+            None,
+        )
+        if target is None:
+            target = {
+                "transcript_id": transcript_id,
+                "source_id": occurrence.get("source_id"),
+                "lecture": occurrence.get("lecture"),
+                "anchors": [],
+            }
+            survivor["occurrences"].append(target)
+        for anchor in occurrence.get("anchors", []):
+            evidence_id = str(anchor.get("evidence_id") or "")
+            if evidence_id and evidence_id in held:
+                continue
+            if evidence_id:
+                held.add(evidence_id)
+            target.setdefault("anchors", []).append(deepcopy(anchor))
+    survivor_evidence = list(survivor.get("evidence_step_ids") or [])
+    for evidence_id in loser.get("evidence_step_ids") or []:
+        if evidence_id not in survivor_evidence:
+            survivor_evidence.append(evidence_id)
+    survivor["evidence_step_ids"] = survivor_evidence
+    for name in ("scripture_refs", "topic_terms", "opposed_position_ids"):
+        merged = list(survivor.get(name) or [])
+        for value in loser.get(name) or []:
+            if value not in merged:
+                merged.append(value)
+        if merged:
+            survivor[name] = merged
+    survivor_id = survivor["claim_id"]
+    loser_id = loser["claim_id"]
+    for relation in relations:
+        for endpoint in ("from_id", "to_id", "source_id", "target_id"):
+            if str(relation.get(endpoint) or "") == loser_id:
+                relation[endpoint] = survivor_id
+
+
 def apply_consensus_overrides(
     package: dict[str, Any], overrides: dict[str, Any], transcripts: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
@@ -165,6 +238,47 @@ def apply_consensus_overrides(
             "structural_notes": patch.get("structural_notes") or [],
         }
 
+    anchored_before = _anchored_evidence_ids(result.get("claims", []))
+    merges = {
+        claim_id: str(patch.get("superseded_by") or "")
+        for claim_id, patch in (overrides.get("claims") or {}).items()
+        if patch.get("status") == "ai_consensus_applied" and patch.get("superseded_by")
+    }
+    for claim_id, survivor_id in merges.items():
+        survivor = claims.get(survivor_id)
+        if survivor is None:
+            raise ConsensusApplicationError(f"merge target does not exist: {claim_id} -> {survivor_id}")
+        if survivor_id in merges:
+            raise ConsensusApplicationError(
+                f"merge target is itself merged away: {claim_id} -> {survivor_id}"
+            )
+        _merge_into_survivor(
+            loser=claims[claim_id],
+            survivor=survivor,
+            relations=result.get("claim_relations", []),
+        )
+        claims[claim_id]["superseded_by"] = survivor_id
+        claims[claim_id]["review_status"] = "superseded"
+    if merges:
+        # Retargeting can turn an edge between the two merged claims into a
+        # self-loop, and can make two edges identical.
+        seen: set[tuple[str, str, str]] = set()
+        deduped = []
+        for relation in result.get("claim_relations", []):
+            source = str(relation.get("from_id") or relation.get("source_id") or "")
+            target = str(relation.get("to_id") or relation.get("target_id") or "")
+            signature = (source, target, str(relation.get("relation_type") or ""))
+            if source == target or signature in seen:
+                continue
+            seen.add(signature)
+            deduped.append(relation)
+        result["claim_relations"] = deduped
+        lost = anchored_before - _anchored_evidence_ids(result.get("claims", []))
+        if lost:
+            raise ConsensusApplicationError(
+                "merge dropped source coverage for evidence: " + ", ".join(sorted(lost))
+            )
+
     known_relations = {
         str(row.get("claim_relation_id") or row.get("relation_id") or "")
         for row in result.get("claim_relations", [])
@@ -188,13 +302,19 @@ def apply_consensus_overrides(
         "adjudication_fingerprint": adjudication_fingerprint,
         "applied_claim_ids": sorted((overrides.get("claims") or {}).keys()),
         "removed_claim_relation_ids": sorted(relations_to_remove),
+        "merged_claim_ids": {claim_id: merges[claim_id] for claim_id in sorted(merges)},
         "approval_status": "not_human_approved",
     }
+    superseded = [claim for claim in result.get("claims", []) if claim.get("superseded_by")]
     result["summary"] = {
         **result.get("summary", {}),
         "source_fragments_count": len(result.get("source_fragments", [])),
         "evidence_steps_count": len(result.get("evidence_steps", [])),
         "claim_relations_count": len(result.get("claim_relations", [])),
+        # `claim_count` still counts every row in the file; a reader asking how
+        # many distinct claims survived needs the live number, not the ledger.
+        "active_claim_count": len(result.get("claims", [])) - len(superseded),
+        "superseded_claim_count": len(superseded),
     }
     return result
 

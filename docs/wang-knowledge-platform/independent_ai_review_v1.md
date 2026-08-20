@@ -49,8 +49,8 @@ Claude 逐条检查：
 1. 教授、听众、反方、引用对象和戏剧化代言是否混淆；
 2. anchors 是否足以支持主张；
 3. 是否遗漏必要限定、经文、答案或反驳转折；
-4. 主张是否过宽、重复或混合不同结论；
-5. supports、answers、opposes、qualifies、applies 是否与来源一致；
+4. 主张是否过宽、混合不同结论，或与输入中任何一条主张实质重复（按章节分段抽取时，同一结论会在各章节重复出现，因此比对必须跨章节）。重复必须在 `duplicate_of_claim_id` 中指名对方，这是仲裁与合并唯一会读的字段；
+5. 关系的方向与含义是否与来源一致——关系类型的取值由程序按 schema 验证，复审不判断词汇表；
 6. 产品路由是否存在明确错误；
 7. 来源内部是否有未解决的张力或编辑推论。
 
@@ -63,6 +63,7 @@ Claude 逐条检查：
 | `ai_reviewed` | Claude 未发现来源忠实度问题 | 保持 candidate，可进入内部综合 |
 | `human_spot_check` | Claude 判定 pass，但被随机抽样 | 进人工队列，核对 AI 复审本身是否可靠 |
 | `auto_applied` | OpenAI 重新核对来源后接受 Claude 意见 | 写入版本化 override，并重建共享知识包 |
+| `superseded` | 两个模型都认定本条与另一条重复 | 锚点并入留下的那条，本条标记 `superseded_by` 留在包内，不删除 |
 | `withdrawn` | OpenAI 拒绝，Claude 看过反驳后撤回 | 不修改原候选，不转人工 |
 | `human_confirmation_required` | Claude 判定来源本身无法裁定（`human_review_required`），即使 OpenAI 接受该意见 | 补丁写入 `pending_patches` 等待人工，不自动应用 |
 | `human_disagreement_required` | OpenAI 拒绝，Claude 再审后仍坚持 | 人工只裁决这一条明确分歧 |

@@ -38,6 +38,7 @@ from backend.pipeline.extraction_sections import (
     save_plan,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
+from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -107,49 +108,10 @@ def _validation_feedback(
     )
 
 
-def _usage_row(usage: Any, attempt: int) -> dict[str, Any]:
-    """Flatten one call's token usage, tolerating the SDK's optional fields.
-
-    `cached_tokens` is the number worth watching: the source text is sent as a
-    cached prefix precisely so a validation retry re-reads it instead of paying
-    for it again, and this is the only evidence that it happens.
-    """
-
-    # The two SDKs name these differently, and reading only OpenAI's names left
-    # every Anthropic run reporting zero — which hid the cost of the model this
-    # pipeline now defaults to.
-    details = getattr(usage, "prompt_tokens_details", None)
-    prompt_tokens = getattr(usage, "prompt_tokens", None)
-    completion_tokens = getattr(usage, "completion_tokens", None)
-    cached = getattr(details, "cached_tokens", None)
-    if prompt_tokens is None:
-        prompt_tokens = getattr(usage, "input_tokens", None)
-        completion_tokens = getattr(usage, "output_tokens", None)
-        cached = getattr(usage, "cache_read_input_tokens", None)
-    total = getattr(usage, "total_tokens", None)
-    if total is None and prompt_tokens is not None and completion_tokens is not None:
-        total = prompt_tokens + completion_tokens
-    return {
-        "attempt": attempt,
-        "prompt_tokens": prompt_tokens,
-        "cached_tokens": cached,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total,
-    }
-
-
 def _print_usage(source_id: str, usage_rows: list[dict[str, Any]]) -> None:
     if not usage_rows:
         return
-    total = sum(r["total_tokens"] or 0 for r in usage_rows)
-    cached = sum(r["cached_tokens"] or 0 for r in usage_rows)
-    prompt = sum(r["prompt_tokens"] or 0 for r in usage_rows)
-    hit = f"{100 * cached / prompt:.0f}%" if prompt else "n/a"
-    print(json.dumps({
-        "usage": source_id, "calls": len(usage_rows), "total_tokens": total,
-        "prompt_tokens": prompt, "cached_tokens": cached, "cache_hit": hit,
-        "completion_tokens": sum(r["completion_tokens"] or 0 for r in usage_rows),
-    }, ensure_ascii=False))
+    print(json.dumps(usage_summary(source_id, usage_rows), ensure_ascii=False))
 
 
 def _archive_rejected_candidate(
@@ -332,7 +294,7 @@ def _extract_sections(
             candidate = client.generate_json(
                 prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
             )
-            usage_rows.append({**_usage_row(client.last_usage, attempt), "section_index": section.index})
+            usage_rows.append({**usage_row(client.last_usage, attempt), "section_index": section.index})
             try:
                 # A section is a composition unit, so the full contract is
                 # answerable inside it: measured, 0 of 264 relations cross a

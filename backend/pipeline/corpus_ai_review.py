@@ -75,12 +75,17 @@ AI_REVIEW_RESPONSE_SCHEMA: dict[str, Any] = {
                                         "type": "array",
                                         "items": {"type": "integer"},
                                     },
+                                    # Which claim this one duplicates.  Named in
+                                    # a field rather than in prose because every
+                                    # stage after this one has to act on it.
+                                    "duplicate_of_claim_id": {"type": "string"},
                                 },
                                 "required": [
                                     "issue_type",
                                     "severity",
                                     "explanation",
                                     "affected_anchor_indexes",
+                                    "duplicate_of_claim_id",
                                 ],
                             },
                         },
@@ -191,6 +196,21 @@ def validate_review_response(
                 _require(
                     isinstance(index, int) and 0 <= index < anchor_count,
                     f"{claim_id}: invalid anchor index {index}",
+                )
+            duplicate_of = str(issue.get("duplicate_of_claim_id") or "").strip()
+            if issue.get("issue_type") == "duplicate_claim":
+                _require(
+                    duplicate_of in claims,
+                    f"{claim_id}: duplicate_claim must name a claim in this input, got {duplicate_of!r}",
+                )
+                _require(
+                    duplicate_of != claim_id,
+                    f"{claim_id}: a claim cannot duplicate itself",
+                )
+            else:
+                _require(
+                    not duplicate_of,
+                    f"{claim_id}: only duplicate_claim may name a duplicate target",
                 )
 
 
