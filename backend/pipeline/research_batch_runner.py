@@ -152,6 +152,12 @@ def build_command_plan(
     adjudicator_model = str(models.get("adjudicator") or "gpt-5.6-sol")
     reconsideration_model = str(models.get("reconsideration") or review_model)
     relation_model = str(models.get("cross_section") or extraction_model)
+    # A source big enough to need a bigger budget must be able to say so from
+    # the batch config. Otherwise the only way to raise it is to bypass the
+    # orchestrator and run the stage by hand, which is the habit this module
+    # exists to end.
+    review_budget = models.get("review_max_output_tokens")
+    adjudicator_budget = models.get("adjudicator_max_output_tokens")
     plan: list[dict[str, Any]] = []
     reused = set((batch.get("reviewed_package_reuse") or {}).keys())
     transcript_dirs = (
@@ -192,6 +198,8 @@ def build_command_plan(
             "--claim-layer-output", str(paths["review"]),
             "--transcript-dir", str(member_dir), "--model", review_model,
         ]
+        if review_budget:
+            review += ["--max-output-tokens", str(int(review_budget))]
         if force:
             extract.append("--force")
             cross_section.append("--force")
@@ -219,6 +227,8 @@ def build_command_plan(
                         "--openai-model", adjudicator_model,
                         "--openai-reasoning-effort", extraction_effort,
                         "--claude-model", reconsideration_model,
+                        *(["--max-output-tokens", str(int(adjudicator_budget))]
+                          if adjudicator_budget else []),
                     ],
                 },
                 {

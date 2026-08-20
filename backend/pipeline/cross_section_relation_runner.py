@@ -23,6 +23,7 @@ from backend.pipeline.cross_section_relation import (
     render_catalogue,
     validate_proposals,
 )
+from backend.pipeline.llm_usage import usage_row
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
@@ -66,6 +67,7 @@ def run(
     client: Stage1OpenAIClient,
     prompt: str,
     force: bool = False,
+    usage_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     raw = package_path.read_bytes()
     package = json.loads(raw.decode("utf-8"))
@@ -120,6 +122,11 @@ def run(
         candidate = client.generate_json(
             prompt, feedback, DISCOVERY_SCHEMA, cache_prefix=user_input
         )
+        # Every attempt is billed, including the ones validation rejects, so
+        # the row has to carry all of them. Recording only the accepted call
+        # would price a three-attempt run as though it were a one-attempt run.
+        if usage_sink is not None:
+            usage_sink.append(usage_row(getattr(client, "last_usage", None), attempt))
         try:
             validate_proposals(candidate, package, positions=positions, boundaries=boundaries)
             response = candidate
@@ -167,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     # asking about this stage: it was skipped once already, silently.
     with run_record(subject=subject, stage="cross_section") as record:
         record.model(args.model)
+        usage_rows: list[dict[str, Any]] = []
         updated = run(
             package_path=args.package,
             output_path=args.output,
@@ -176,7 +184,12 @@ def main(argv: list[str] | None = None) -> int:
             ),
             prompt=PROMPT_PATH.read_text(encoding="utf-8"),
             force=args.force,
+            usage_sink=usage_rows,
         )
+        # Without this the row prices a real model call at $0.00, which reads
+        # as "this stage is free" rather than "nobody measured it" -- the same
+        # false-free the ledger already guards against on failed runs.
+        record.usage(usage_rows)
         relations = updated.get("cross_section_relations") or {}
         record.quality({
             "evidence_relations_added": relations.get("evidence_relations_added"),
