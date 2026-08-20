@@ -35,6 +35,8 @@
 23. [釋經初稿的程序化審計流程 v1](./editorial_draft_audit_workflow_v1.md)
 24. [篇章釋經快速路徑 v1](./fast_passage_editorial_workflow_v1.md)
 25. [來源逐句對帳與 claim 層完整性 v1](./source_to_claim_layer_ledger_v1.md)
+26. [文庫生成與更新 Functional Specification](./library_generation_and_update_functional_spec.md)
+27. [管線運維面板 Functional Specification](./pipeline_operations_console_functional_spec.md)
 
 共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 仍是 legacy 候选交换包，不等于 PostgreSQL authoring authority，也不会直接进入公开文库。
 
