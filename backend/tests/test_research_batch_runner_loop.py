@@ -274,3 +274,48 @@ def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatc
             ["--batch", str(batch), "--transcript-dir", str(transcripts),
              "--output-root", str(tmp_path / "out"), "--stage", "extract"],
         )
+
+
+def _reviewed_package(path: Path, transcript_id: str, suffix: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "wang_shared_knowledge_v1.2",
+        "source_documents": [{"source_id": f"SRC-{suffix}", "transcript_id": transcript_id}],
+        "source_fragments": [{"fragment_id": f"FR-{suffix}", "source_id": f"SRC-{suffix}"}],
+        "questions": [], "position_nodes": [], "observations": [],
+        "evidence_steps": [{"evidence_step_id": f"E-{suffix}"}],
+        "claims": [{"claim_id": f"CL-{suffix}", "evidence_step_ids": [f"E-{suffix}"]}],
+        "knowledge_relations": [], "claim_relations": [],
+        "extraction": {"fingerprint_sha256": suffix},
+        "consensus_application": {"approval_status": "not_human_approved"},
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def test_only_does_not_overwrite_a_whole_batch_merge(tmp_path, monkeypatch, capsys) -> None:
+    """The merged package describes the batch, so a narrowed run must not write one.
+
+    Merging what `--only` selected replaced a full merge with a one-member
+    file and reported `completed` -- silently wrong in exactly the way this
+    orchestration exists to stop.
+    """
+
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    output = tmp_path / "out"
+    merged = output / "merged" / "research-batch-knowledge.json"
+    merged.parent.mkdir(parents=True)
+    merged.write_text('{"note": "full merge"}', encoding="utf-8")
+    _reviewed_package(runner.artifact_paths(output, "甲")["reviewed"], "甲", "A")
+
+    code, _ = _run(
+        monkeypatch,
+        ["--batch", str(batch), "--transcript-dir", str(transcripts),
+         "--output-root", str(output), "--only", "甲"],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert json.loads(merged.read_text(encoding="utf-8")) == {"note": "full merge"}
+    assert report["status"] == "partial_selection"
+    assert "merge skipped" in report["merge_error"]
+    # Narrowing the run on purpose is not a failure.
+    assert code == 0

@@ -23,6 +23,7 @@ from backend.pipeline.cross_section_relation import (
     render_catalogue,
     validate_proposals,
 )
+from backend.pipeline.run_ledger import run_record
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 VALIDATION_ATTEMPTS = 3
@@ -156,16 +157,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     load_dotenv(PROJECT_ROOT / ".env")
-    run(
-        package_path=args.package,
-        output_path=args.output,
-        client=Stage1OpenAIClient(
-            model=args.model, reasoning_effort=args.reasoning_effort,
-            timeout_seconds=600, max_retries=3, max_output_tokens=16000,
-        ),
-        prompt=PROMPT_PATH.read_text(encoding="utf-8"),
-        force=args.force,
+    package = json.loads(args.package.read_text(encoding="utf-8"))
+    documents = package.get("source_documents") or []
+    subject = str(
+        (documents[0].get("source_id") if documents else None) or args.package.name
     )
+    # The stage had no name in the ledger until now, so the overview could not
+    # say whether a source had been through it. That is the one question worth
+    # asking about this stage: it was skipped once already, silently.
+    with run_record(subject=subject, stage="cross_section") as record:
+        record.model(args.model)
+        updated = run(
+            package_path=args.package,
+            output_path=args.output,
+            client=Stage1OpenAIClient(
+                model=args.model, reasoning_effort=args.reasoning_effort,
+                timeout_seconds=600, max_retries=3, max_output_tokens=16000,
+            ),
+            prompt=PROMPT_PATH.read_text(encoding="utf-8"),
+            force=args.force,
+        )
+        relations = updated.get("cross_section_relations") or {}
+        record.quality({
+            "evidence_relations_added": relations.get("evidence_relations_added"),
+            "claim_relations_added": relations.get("claim_relations_added"),
+            "skipped": relations.get("skipped"),
+        })
+        record.outputs(args.output)
     return 0
 
 

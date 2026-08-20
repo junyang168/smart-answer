@@ -406,7 +406,18 @@ def main() -> int:
             result["status"] = "completed"
 
     merge_error: str | None = None
-    if "merge" in wanted and not interrupted:
+    # The merged package describes the whole batch, so a run that covered part
+    # of it must not write one. Merging what `--only` selected would replace a
+    # full merge with a one-member file and report success -- silently wrong in
+    # exactly the way this orchestration exists to stop.
+    partial_selection = bool(args.only) and len(members) < len(batch_members(batch))
+    if partial_selection and "merge" in wanted:
+        merge_error = (
+            "merge skipped: --only selected "
+            f"{len(members)} of {len(batch_members(batch))} members, and the "
+            "merged package describes the whole batch"
+        )
+    elif "merge" in wanted and not interrupted:
         reviewed_paths = reviewed_package_paths(selected_batch, output_root=output_root)
         absent = [str(path) for path in reviewed_paths if not path.is_file()]
         if absent:
@@ -426,6 +437,9 @@ def main() -> int:
     manifest["members"] = members_status
     if interrupted:
         manifest["status"] = "interrupted"
+    elif partial_selection:
+        # Nothing went wrong; the run was deliberately narrowed.
+        manifest["status"] = "partial_selection" if not failed else "partial"
     else:
         manifest["status"] = "completed" if not failed and not merge_error else "partial"
     if merge_error:
@@ -439,7 +453,7 @@ def main() -> int:
         "members": members_status,
         **({"merge_error": merge_error} if merge_error else {}),
     }, ensure_ascii=False, indent=2))
-    return 1 if failed or merge_error else 0
+    return 1 if failed or (merge_error and not partial_selection) else 0
 
 
 if __name__ == "__main__":
