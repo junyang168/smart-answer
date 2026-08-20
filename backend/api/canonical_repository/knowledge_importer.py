@@ -87,11 +87,22 @@ class KnowledgePackageImporter:
 
         for plan_index, raw_plan in enumerate(payload.get("product_plans", [])):
             plan_payload = dict(raw_plan)
+            # A plan sent without its `decisions` is a plan nobody said anything
+            # about the decisions of. Deriving `decision_ids` unconditionally
+            # made it say "this plan has none": the contract migration of
+            # 2026-08-17 emptied `decision_ids` on all three Matthew 16 plans
+            # that way, and was undone 98 seconds later by
+            # AUTHORING-CONTRACT-MIGRATION-RESTORE. Deriving it only from a
+            # `decisions` key that is actually there also stops the derived
+            # value from overwriting a `decision_ids` the package stated
+            # directly, which is how such a package had to be written.
+            has_decisions = "decisions" in plan_payload
             raw_decisions = plan_payload.pop("decisions", [])
             plan_payload.setdefault("product_type", "unspecified")
-            plan_payload["decision_ids"] = [
-                item.get("decision_id") for item in raw_decisions if item.get("decision_id")
-            ]
+            if has_decisions:
+                plan_payload["decision_ids"] = [
+                    item.get("decision_id") for item in raw_decisions if item.get("decision_id")
+                ]
             try:
                 plan = CompositionPlanRecord.model_validate(plan_payload)
                 records["composition_plans"].append(plan)
