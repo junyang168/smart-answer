@@ -89,12 +89,19 @@ def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
         if not source_id:
             continue
         source_path = transcripts / f"{source_id}.json"
+        # Where this sermon sits in scripture, from the same field the sermon
+        # centre and the coverage page read, so the three cannot disagree.
+        passage = record.get("catalog_primary_passage") or {}
         rows.append({
             "source_id": source_id,
             "kind": "sermon",
             "title": record.get("title") or source_id,
             "series": record.get("series_title"),
             "year": record.get("year"),
+            "book": passage.get("book"),
+            "chapter": passage.get("chapter"),
+            "verse_start": passage.get("verse_start"),
+            "topics": list(record.get("topics") or []),
             "source_path": source_path if source_path.is_file() else None,
         })
     return rows
@@ -129,16 +136,42 @@ def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
             # stage, not sources waiting on the pipeline.
             continue
         meta = _load_json(project / "meta.json") or {}
+        placement = _notes_placement(str(meta.get("bible_verse") or ""))
         rows.append({
             "source_id": project.name,
             "kind": "notes_manuscript",
             "title": meta.get("title") or project.name,
             "series": meta.get("bible_verse"),
             "year": None,
+            "book": placement["book"],
+            "chapter": placement["chapter"],
+            "verse_start": None,
+            "topics": [],
             "manuscript_file": manuscript.name,
             "source_path": manuscript,
         })
     return rows
+
+
+def _notes_placement(verse: str) -> dict[str, Any]:
+    """Where a manuscript sits in scripture, from its own metadata.
+
+    A manuscript is not a sermon and is not in the catalog, so `bible_verse` is
+    the only statement anyone has made about its passage. `太 16` resolves to a
+    chapter; a bare `太` resolves to a book and stays there -- guessing the
+    chapter would make a judgement nobody made.
+    """
+
+    from backend.api.sermon_search.bible_refs import ALIAS_TO_BOOK, normalize_ref
+
+    text = (verse or "").strip()
+    if not text:
+        return {"book": None, "chapter": None}
+    reference = normalize_ref(text)
+    if reference is not None:
+        return {"book": reference.book_zh, "chapter": reference.chapter_start}
+    alias = ALIAS_TO_BOOK.get(text.lower())
+    return {"book": alias[1] if alias else None, "chapter": None}
 
 
 # -- the ledger ------------------------------------------------------------

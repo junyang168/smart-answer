@@ -38,6 +38,10 @@ export type OverviewRow = {
   title: string;
   series: string | null;
   year: number | null;
+  book: string | null;
+  chapter: number | null;
+  verse_start: number | null;
+  topics: string[];
   manuscript_file?: string;
   source_available: boolean;
   stages: Record<StageId, StageCell>;

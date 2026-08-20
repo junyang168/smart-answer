@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import type { CellState, Overview, OverviewRow, StageCell, StageId } from "./operations-types";
+import { ScriptureGroups, TopicGroups } from "./OverviewGroups";
 
 const stageLabels: Record<StageId, string> = {
   extraction: "抽取",
@@ -59,13 +60,13 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
     // "97.7%" (129 of 132 prose) with "64" (of all 208 sentences, 51 of them
     // headings) read as a contradiction and made the good number look bad.
     const proseLeft = n("prose_unprocessed");
-    return proseLeft ? `${pct}% · 正文 ${proseLeft} 未交代` : `${pct}%`;
+    return proseLeft ? `${pct}% · 正文 ${proseLeft}` : `${pct}%`;
   }
   if (stage === "review") {
     const reviewed = n("ai_reviewed");
     const onward = n("awaiting_openai_adjudication");
     if (reviewed === null) return null;
-    return onward ? `${reviewed} 過 · ${onward} 送仲裁` : `${reviewed} 過`;
+    return onward ? `${reviewed} 過 · ${onward} 仲` : `${reviewed} 過`;
   }
   if (stage === "adjudication") {
     const applied = n("auto_applied") ?? 0;
@@ -126,15 +127,15 @@ function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
     cell.run?.error_message ?? null,
   ].filter(Boolean).join("\n");
   return (
-    <td className="px-2 py-1.5 align-middle">
-      <span
-        title={tip || undefined}
-        className={`inline-flex min-w-[3.5rem] flex-col items-center rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-inset ${stateStyles[cell.state]} ${cell.store ? "ring-dashed" : ""}`}
-      >
-        <span>{stateLabels[cell.state]}{cell.store ? "*" : ""}</span>
-        {quality && <span className="mt-0.5 font-normal opacity-80">{quality}</span>}
-      </span>
-    </td>
+    <span
+      title={tip || undefined}
+      className={`inline-flex w-[6.25rem] shrink-0 flex-col items-center overflow-hidden rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight ring-1 ring-inset ${stateStyles[cell.state]}`}
+    >
+      <span>{stateLabels[cell.state]}{cell.store ? "*" : ""}</span>
+      {quality && (
+        <span className="mt-0.5 w-full truncate text-center font-normal opacity-80">{quality}</span>
+      )}
+    </span>
   );
 }
 
@@ -144,6 +145,7 @@ export function SermonOverview() {
   const [loading, setLoading] = useState(true);
   const [series, setSeries] = useState("all");
   const [state, setState] = useState("all");
+  const [tab, setTab] = useState<"scripture" | "topic">("scripture");
 
   async function load() {
     setLoading(true);
@@ -178,6 +180,8 @@ export function SermonOverview() {
       return true;
     });
   }, [data, series, state]);
+
+  const renderRow = (row: OverviewRow) => <Row row={row} stages={data?.stages ?? []} />;
 
   if (loading && !data) {
     return (
@@ -226,6 +230,21 @@ export function SermonOverview() {
         </div>
       )}
 
+      <div className="flex flex-wrap gap-2">
+        {([["scripture", "聖經目錄"], ["topic", "講道主題"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`rounded-xl px-4 py-2 text-[13px] font-bold ${
+              tab === key ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
         <label className="text-sm font-semibold text-slate-600">系列
           <select value={series} onChange={(event) => setSeries(event.target.value)}
@@ -250,21 +269,21 @@ export function SermonOverview() {
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold text-slate-600">
-            <tr>
-              <th className="px-4 py-2.5">來源</th>
-              {data.stages.map((stage) => (
-                <th key={stage} className="px-2 py-2.5 text-center">{stageLabels[stage]}</th>
-              ))}
-              <th className="px-3 py-2.5 text-center">文章</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.map((row) => <Row key={`${row.kind}:${row.source_id}`} row={row} stages={data.stages} />)}
-          </tbody>
-        </table>
+      <div className="overflow-x-auto">
+        <div className="min-w-[68rem]">
+          <div className="flex items-center gap-2 px-4 pb-1 pl-10 text-[11px] font-bold text-slate-500">
+            <span className="min-w-0 flex-1">來源</span>
+            {data.stages.map((stage) => (
+              <span key={stage} className="w-[6.25rem] shrink-0 text-center">{stageLabels[stage]}</span>
+            ))}
+            <span className="w-14 shrink-0 text-center">文章</span>
+          </div>
+          {tab === "scripture" ? (
+            <ScriptureGroups rows={rows} render={renderRow} />
+          ) : (
+            <TopicGroups rows={rows} render={renderRow} />
+          )}
+        </div>
       </div>
 
       <p className="text-xs leading-6 text-slate-500">
@@ -278,21 +297,23 @@ export function SermonOverview() {
 
 function Row({ row, stages }: { row: OverviewRow; stages: StageId[] }) {
   return (
-    <tr className="hover:bg-slate-50/60">
-      <td className="px-4 py-2">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-slate-900">{row.title}</span>
-          {row.kind === "notes_manuscript" && (
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">母本</span>
-          )}
-        </div>
-        <div className="mt-0.5 text-xs text-slate-500">
-          {row.source_id}{row.series ? ` · ${row.series}` : ""}
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 py-1.5 pl-10 pr-4 text-[12.5px] last:border-b-0 hover:bg-indigo-50/40">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-slate-900">
+          {row.title}
+          {row.kind === "notes_manuscript" ? (
+            <i className="ml-2 font-mono text-[10.5px] not-italic text-slate-400">母本</i>
+          ) : null}
+        </span>
+        <span className="block truncate font-mono text-[10.5px] text-slate-400">
+          {row.source_id}
           {row.manuscript_file ? ` · ${row.manuscript_file}` : ""}
-        </div>
-      </td>
-      {stages.map((stage) => <Cell key={stage} stage={stage} cell={row.stages[stage]} />)}
-      <td className="px-3 py-2 text-center text-xs">
+        </span>
+      </span>
+      {stages.map((stage) => (
+        <Cell key={stage} stage={stage} cell={row.stages[stage]} />
+      ))}
+      <span className="w-14 shrink-0 text-center font-mono text-[11px]">
         {row.articles.length ? (
           <span title={row.articles.join("\n")} className="font-semibold text-indigo-700">
             {row.articles.length} 篇
@@ -300,8 +321,8 @@ function Row({ row, stages }: { row: OverviewRow; stages: StageId[] }) {
         ) : (
           <span className="text-slate-300">—</span>
         )}
-      </td>
-    </tr>
+      </span>
+    </div>
   );
 }
 
