@@ -548,6 +548,19 @@ def exclusions_from_audit(
     """
 
     by_id = {row.sentence_id: row for row in sentences}
+    # Which occurrence of its own text this sentence is, counted over *every*
+    # sentence in the section, because that is how the ledger's inventory
+    # counts. Counting only the excluded ones renumbers them: a transcript
+    # repeats "為什麼緣故？" twice in one segment, and excluding the second
+    # alone addressed the first -- which a fragment had already represented,
+    # so one sentence came back both excluded and represented and its twin
+    # came back unanswered.
+    ordinals: dict[str, int] = {}
+    seen: dict[tuple[str, str], int] = {}
+    for row in sentences:
+        key = (row.segment_index, row.text)
+        ordinals[row.sentence_id] = seen.get(key, 0)
+        seen[key] = ordinals[row.sentence_id] + 1
     rows: list[dict[str, Any]] = []
     for entry in response.get("sentence_audit") or []:
         if entry.get("status") != "not_extracted":
@@ -555,11 +568,7 @@ def exclusions_from_audit(
         sentence = by_id.get(str(entry.get("sentence_id") or ""))
         if sentence is None:
             continue
-        ordinal = sum(
-            1 for earlier in rows
-            if earlier["segment_index"] == sentence.segment_index
-            and earlier["text"] == sentence.text
-        )
+        ordinal = ordinals[sentence.sentence_id]
         identifier = ledger_sentence_id(
             source_id, int(sentence.segment_index[1:]), sentence.text, ordinal
         )

@@ -311,3 +311,96 @@ def test_an_unambiguous_fragment_never_consults_the_key():
         "SHA-NOW",
     )
     assert [span.segment_index for span in spans] == [1]
+
+
+# ---------------------------------------------------------------------------
+# the one number extraction and the ledger have to agree on
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from backend.pipeline.detailed_knowledge_extraction import exclusions_from_audit  # noqa: E402
+from backend.pipeline.detailed_knowledge_extraction_runner import (  # noqa: E402
+    published_source_id,
+    section_sentences,
+)
+from backend.pipeline.extraction_sections import Section  # noqa: E402
+from backend.pipeline.sentence_ledger_runner import load_segments  # noqa: E402
+
+
+def _published_transcript(tmp_path: Path, texts: list[str]) -> tuple[Path, dict]:
+    """A transcript shaped like the published ones, headings included.
+
+    The editor stamps an inserted `##` row with `subtitle-<epoch>-<n>` and a
+    spoken row with the subtitle line it starts at, so `index` is neither a
+    position nor reliably a number. 24 of the 115 published transcripts carry
+    such rows -- and they are 24 of the 25 that can be sectioned without
+    asking a model where the boundaries are.
+    """
+
+    script = [
+        {"index": f"subtitle-1778084124190-{position}" if text.startswith("##") else str(1 + 37 * position),
+         "text": text}
+        for position, text in enumerate(texts)
+    ]
+    path = tmp_path / "sermon.json"
+    path.write_text(json.dumps({"metadata": {}, "script": script}, ensure_ascii=False), encoding="utf-8")
+    return path, {"metadata": {}, "script": script}
+
+
+def test_a_transcript_is_inventoried_by_position_like_its_anchors(tmp_path: Path) -> None:
+    """`S0002` means the second segment, and nothing else means anything.
+
+    Keying the inventory on the transcript's own `index` addressed sentences
+    no anchor could name, and on a transcript with an editor-inserted heading
+    it raised `ValueError` and took the whole coverage report down with it.
+    """
+
+    path, _ = _published_transcript(tmp_path, ["## 標題", "第一句。", "第二句。"])
+    assert [index for index, _ in load_segments(path)] == [1, 2, 3]
+
+
+def test_an_exclusion_addresses_the_sentence_the_ledger_inventoried(tmp_path: Path) -> None:
+    """Otherwise `not_extracted` is a verdict nobody can ever apply.
+
+    The audit answered the sentence; the ledger has to be able to find the
+    sentence that was answered, or it reports "nobody looked" for exactly the
+    material somebody did look at.
+    """
+
+    path, source = _published_transcript(tmp_path, ["## 標題", "第一句。第二句。"])
+    sentences = section_sentences(source, Section(index=1, start=0, end=2, title="標題"))
+    source_id = published_source_id("sermon", None)
+    exclusions = exclusions_from_audit(
+        {"sentence_audit": [
+            {"sentence_id": row.sentence_id, "status": "not_extracted", "reason_code": "background_only"}
+            for row in sentences
+        ]},
+        sentences, source_id=source_id, ledger_sentence_id=sentence_id,
+    )
+    inventory = build_inventory(load_segments(path), source_id=source_id)
+    assert {row["sentence_id"] for row in exclusions} == {row.sentence_id for row in inventory}
+
+
+def test_a_repeated_sentence_is_excluded_where_it_was_repeated(tmp_path: Path) -> None:
+    """Numbering the duplicates by how many were excluded renumbers them.
+
+    A transcript says 「為什麼緣故？」 twice in one segment. Excluding only the
+    second one addressed the first, which a fragment had already represented
+    -- one sentence came back both excluded and represented, and its twin came
+    back unanswered.
+    """
+
+    path, source = _published_transcript(tmp_path, ["為什麼緣故？中間一句。為什麼緣故？"])
+    sentences = section_sentences(source, Section(index=1, start=0, end=1, title=""))
+    source_id = published_source_id("sermon", None)
+    exclusions = exclusions_from_audit(
+        {"sentence_audit": [
+            {"sentence_id": sentences[-1].sentence_id, "status": "not_extracted",
+             "reason_code": "background_only"}
+        ]},
+        sentences, source_id=source_id, ledger_sentence_id=sentence_id,
+    )
+    inventory = build_inventory(load_segments(path), source_id=source_id)
+    assert [row["sentence_id"] for row in exclusions] == [inventory[-1].sentence_id]

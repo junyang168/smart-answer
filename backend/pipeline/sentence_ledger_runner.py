@@ -44,12 +44,28 @@ ANCHORED_COLLECTIONS = ("evidence_steps", "observations", "questions", "position
 
 
 def load_segments(source_path: Path) -> list[tuple[int, str]]:
-    """Segment the source the way extraction did, so spans are comparable."""
+    """Segment the source the way extraction did, so spans are comparable.
+
+    Numbered by position, 1-based, on both branches, because that is the only
+    number extraction ever writes down: `segment_locator` stamps `S0007` into
+    every anchor and every exclusion id from the segment's position in the
+    file. A transcript's own `index` field is a different quantity -- the
+    subtitle line the segment starts at (`1, 38, 51, ...`) -- so keying the
+    inventory on it addressed sentences no exclusion could ever name, and on
+    the 24 published transcripts carrying editor-inserted `##` headings it is
+    not even a number (`subtitle-1778084124190-0`) and `int()` raised. Those
+    24 are, unhelpfully, 24 of the 25 transcripts that can be sectioned
+    without asking a model for boundaries. `source_coverage_view` already
+    keys on position; this is the same scheme, not a new one.
+    """
 
     if source_path.suffix == ".json":
         payload = json.loads(source_path.read_text(encoding="utf-8"))
         script = payload.get("script") if isinstance(payload, dict) else payload
-        return [(int(row["index"]), str(row.get("text") or "")) for row in (script or [])]
+        return [
+            (position, str((row or {}).get("text") or ""))
+            for position, row in enumerate(script or [], start=1)
+        ]
     text = source_path.read_text(encoding="utf-8")
     return list(enumerate(markdown_blocks(text), start=1))
 
@@ -98,10 +114,6 @@ def place_fragments(
             # because the sources were re-segmented afterwards. So the key is
             # trusted exactly when the fragment's own `source_sha256` matches
             # the file in hand, and never otherwise.
-            #
-            # Markdown sources only. Transcript segments are keyed by their own
-            # `index`, which is not the positional locator anchors use, so the
-            # filter finds nothing there and the fragment stays unplaced.
             claimed = str(fragment.get("paragraph_key") or "")
             wanted = int(claimed[1:]) if claimed[1:].isdigit() else None
             hits = [hit for hit in hits if wanted is not None and hit[0] == wanted] or hits

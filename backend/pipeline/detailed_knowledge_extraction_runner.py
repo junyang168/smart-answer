@@ -242,9 +242,24 @@ def resolve_section_plan(
     return plan
 
 
+def published_source_id(source_id: str, source_descriptor: dict[str, Any] | None) -> str:
+    """The id the package publishes for this source, and the only one to cite.
+
+    A manifest source names itself, so its descriptor id is the id everywhere.
+    A transcript names nothing, so the package coins `SRC-<slug>` for it -- and
+    an exclusion written against the bare transcript id then addressed a source
+    the package does not contain, which the ledger reads as "nobody answered
+    this sentence" for every sentence the audit did answer. Both sides call
+    this.
+    """
+
+    return str((source_descriptor or {}).get("source_id") or f"SRC-{_slug(source_id)}")
+
+
 def _extract_sections(
     *,
     source_id: str,
+    exclusion_source_id: str,
     source: dict[str, Any],
     header: str,
     plan: SectionPlan,
@@ -274,7 +289,8 @@ def _extract_sections(
             cached = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
             answered.append((section, cached))
             exclusions.extend(exclusions_from_audit(
-                cached, sentences, source_id=source_id, ledger_sentence_id=ledger_sentence_id))
+                cached, sentences, source_id=exclusion_source_id,
+                ledger_sentence_id=ledger_sentence_id))
             section_rows.append({**vars(section), "attempts": 0, "cached": True})
             continue
         user_input = header + _section_prompt_body(source, section, sentences)
@@ -321,7 +337,8 @@ def _extract_sections(
         )
         answered.append((section, response))
         exclusions.extend(exclusions_from_audit(
-            response, sentences, source_id=source_id, ledger_sentence_id=ledger_sentence_id))
+            response, sentences, source_id=exclusion_source_id,
+            ledger_sentence_id=ledger_sentence_id))
         section_rows.append({**vars(section), "attempts": attempts, "cached": False})
     return combine_sections(answered), usage_rows, section_rows, exclusions
 
@@ -405,7 +422,7 @@ def compile_package(
         row["from_id"] = id_maps["claim"][row["from_id"]]
         row["to_id"] = id_maps["claim"][row["to_id"]]
 
-    source_id = str((source_descriptor or {}).get("source_id") or f"SRC-{_slug(transcript_id)}")
+    source_id = published_source_id(transcript_id, source_descriptor)
     source_sha256 = hashlib.sha256(raw).hexdigest()
     fragments: list[dict[str, Any]] = []
     fragment_by_anchor: dict[tuple[str, str], str] = {}
@@ -598,7 +615,9 @@ def _run(
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
     response, usage_rows, section_rows, exclusions = _extract_sections(
-        source_id=source_id, source=source, header=header, plan=plan,
+        source_id=source_id,
+        exclusion_source_id=published_source_id(source_id, source_descriptor),
+        source=source, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
         only=sections.only,
