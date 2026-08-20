@@ -77,11 +77,17 @@ fi
 # `.env` is here too: without it every runner dies on `DATA_BASE_DIR is
 # required`.
 #
+# `web/.env.local` and `web/next-env.d.ts` are here for the same reason and are
+# equally invisible: without the first, anything that renders a page dies on
+# `FULL_ARTICLE_SERVICE_URL is not configured`; without the second, the very
+# first `tsc --noEmit` in a new worktree invents a missing-module error that
+# disappears the moment a build has run.
+#
 # Two limits come with sharing them, and AGENTS.md says so rather than
 # pretending otherwise: only one worktree can hold ports 3000/3003/8555 at a
 # time, and a branch that changes `requirements.txt` or `package.json` is
 # running against the wrong install until it makes its own.
-for shared in .env backend/.venv .venv node_modules web/node_modules; do
+for shared in .env web/.env.local backend/.venv .venv node_modules web/node_modules web/next-env.d.ts; do
   if [[ -e "$SOURCE_REPO/$shared" ]]; then
     mkdir -p "$(dirname "$TARGET/$shared")"
     ln -sfn "$SOURCE_REPO/$shared" "$TARGET/$shared"
