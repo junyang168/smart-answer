@@ -51,6 +51,7 @@ def test_plan_is_stable_and_revision_is_not_semantic_content() -> None:
     assert first.as_dict()["summary"] == {
         "created": 4,
         "updated": 0,
+        "retired": 0,
         "unchanged": 0,
         "operations": 4,
     }

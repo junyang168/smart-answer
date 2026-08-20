@@ -16,7 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .knowledge_importer import KnowledgePackageImporter
 from .knowledge_models import KNOWLEDGE_COLLECTIONS
@@ -397,6 +397,7 @@ class ChangeSetPlan:
         value["summary"] = {
             "created": sum(item.operation == "create" for item in self.operations),
             "updated": sum(item.operation == "update" for item in self.operations),
+            "retired": sum(item.operation == "retire" for item in self.operations),
             "unchanged": self.unchanged,
             "operations": len(self.operations),
         }
@@ -459,6 +460,67 @@ def build_change_set_plan(
         operations=tuple(operations),
         unchanged=unchanged,
         ignored_keys=ignored,
+    )
+
+
+def build_retirement_plan(
+    keys: Sequence[tuple[str, str]],
+    existing: Mapping[tuple[str, str], Mapping[str, Any]],
+    *,
+    reason: str,
+    package_id: str,
+    source_kind: str = "retirement",
+) -> ChangeSetPlan:
+    """Plan the withdrawal of records that should no longer stand.
+
+    A retirement leaves the payload byte for byte as it was. What is being
+    withdrawn is the store's assertion that this record is current, not the
+    record of what was once extracted -- rewriting the payload to say
+    "retired" would edit the evidence to record a decision about it. So
+    `after_sha256` equals `before_sha256` here, deliberately, and the reason
+    lives on the change set where the rest of the provenance already lives.
+
+    Keys already absent or already retired are skipped rather than refused:
+    running a retirement twice must not be an error, or nobody will dare run
+    it once.
+    """
+
+    operations: list[ChangeOperation] = []
+    skipped = 0
+    for collection, object_id in keys:
+        current = existing.get((collection, object_id))
+        if not current or current.get("retired_at") is not None:
+            skipped += 1
+            continue
+        before_sha = str(current.get("content_sha256") or "")
+        before_revision = int(current["revision"])
+        operations.append(
+            ChangeOperation(
+                operation="retire",
+                collection=collection,
+                object_id=object_id,
+                before_sha256=before_sha,
+                after_sha256=before_sha,
+                before_revision=before_revision,
+                after_revision=before_revision + 1,
+                payload=dict(current.get("payload") or {}),
+            )
+        )
+    fingerprint = sha256_json({
+        "planner_schema": "wang_postgres_retirement_v1",
+        "source_kind": source_kind,
+        "reason": reason,
+        "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+    })
+    return ChangeSetPlan(
+        change_set_id=f"KCS-{fingerprint[:20]}",
+        fingerprint_sha256=fingerprint,
+        package_id=package_id,
+        source_kind=source_kind,
+        source_sha256=fingerprint,
+        operations=tuple(operations),
+        unchanged=skipped,
+        ignored_keys=(),
     )
 
 
@@ -598,6 +660,28 @@ class PostgresKnowledgeStore:
             existing = self._existing(conn, keys)
         return build_change_set_plan(package, existing, source_kind=source_kind)
 
+    def plan_retirement(
+        self, keys: Sequence[tuple[str, str]], *, reason: str, package_id: str,
+        source_kind: str = "retirement",
+    ) -> ChangeSetPlan:
+        with self.connect() as conn:
+            existing = self._existing(conn, keys)
+        return build_retirement_plan(
+            keys, existing, reason=reason, package_id=package_id, source_kind=source_kind
+        )
+
+    def retire_objects(
+        self, keys: Sequence[tuple[str, str]], *, reason: str, package_id: str,
+        source_kind: str = "retirement", apply: bool = False,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        plan = self.plan_retirement(
+            keys, reason=reason, package_id=package_id, source_kind=source_kind
+        )
+        if not apply:
+            return {"status": "planned", **plan.as_dict()}
+        return self.apply_plan(plan, metadata={**(metadata or {}), "reason": reason})
+
     @staticmethod
     def _edge_values(collection: str, payload: Mapping[str, Any]) -> tuple[str, str, str]:
         if collection == "claim_relation_constraints":
@@ -645,6 +729,9 @@ class PostgresKnowledgeStore:
                             f"Concurrent change for {operation.collection}/{operation.object_id}: "
                             f"expected {operation.before_sha256}, found {actual_sha}"
                         )
+                    if operation.operation == "retire":
+                        self._retire_one(cursor, plan, index, operation)
+                        continue
                     payload = dict(operation.payload)
                     payload["revision"] = operation.after_revision
                     content_sha = record_content_sha(payload)
@@ -726,6 +813,58 @@ class PostgresKnowledgeStore:
                     (canonical_json(summary), plan.change_set_id),
                 )
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
+
+    def _retire_one(
+        self, cursor: Any, plan: ChangeSetPlan, index: int, operation: ChangeOperation
+    ) -> None:
+        """Withdraw one record, leaving what it says untouched.
+
+        The row keeps its payload and gains `retired_at`; the new revision is
+        written to `object_versions` so the withdrawal is a point in the
+        record's history rather than an absence, and `change_operations` gets
+        a `retire` row like every other change. Nothing is deleted: three
+        tables exist to say what happened to this store, and a row removed
+        behind their back makes all three lie.
+        """
+
+        payload = dict(operation.payload)
+        payload["revision"] = operation.after_revision
+        cursor.execute(
+            """UPDATE wang_knowledge.objects
+               SET revision=%s, updated_at=now(), retired_at=now()
+               WHERE collection=%s AND object_id=%s""",
+            (operation.after_revision, operation.collection, operation.object_id),
+        )
+        cursor.execute(
+            """INSERT INTO wang_knowledge.object_versions
+               (collection, object_id, revision, content_sha256, payload, change_set_id)
+               VALUES (%s,%s,%s,%s,%s::jsonb,%s)""",
+            (
+                operation.collection, operation.object_id, operation.after_revision,
+                operation.after_sha256, canonical_json(payload), plan.change_set_id,
+            ),
+        )
+        cursor.execute(
+            """INSERT INTO wang_knowledge.change_operations
+               (change_set_id, operation_index, operation, collection, object_id,
+                before_sha256, after_sha256, before_revision, after_revision)
+               VALUES (%s,%s,'retire',%s,%s,%s,%s,%s,%s)""",
+            (
+                plan.change_set_id, index, operation.collection, operation.object_id,
+                operation.before_sha256, operation.after_sha256,
+                operation.before_revision, operation.after_revision,
+            ),
+        )
+        if operation.collection in EDGE_COLLECTIONS:
+            # An edge outlives its object otherwise: `edges` is a separate
+            # table with its own `retired_at`, and every traversal reads it
+            # rather than `objects`.
+            cursor.execute(
+                """UPDATE wang_knowledge.edges
+                   SET revision=%s, updated_at=now(), retired_at=now()
+                   WHERE edge_collection=%s AND edge_id=%s""",
+                (operation.after_revision, operation.collection, operation.object_id),
+            )
 
     def _invalidate_dependencies(
         self,
