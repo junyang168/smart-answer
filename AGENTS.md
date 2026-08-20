@@ -14,6 +14,34 @@ Reviewer-call invariant: run one Independent Editorial Review for the initial dr
 
 For Matthew exposition articles, a programmatically verified editorial review in which every applicable dimension reaches its own minimum in the quality profile (currently 80% of each dimension's weight) and no hard failure is declared, followed by a passing Program Audit with zero errors, triggers automatic Wang repository publication. There is no total-score threshold: `total_score` is reported for a reader and decides nothing, because one number let a weak dimension be carried by the others. The quality profile is the authority for the bars; do not restate a number here that the profile can change. The runner must create an `automated-publication-decision.v1` bound to the manuscript, editorial review, and audit SHAs; it must never label this as human approval. Publishing to the Wang repository is not deploying: do not deploy as part of this workflow.
 
+# Where the work happens
+
+Every session shares this checkout, and git keeps HEAD, the index and the stash
+per directory — so two agents in one directory collide. It has happened twice:
+a session switched HEAD and two commits landed on another card's branch, and a
+`git stash` on a clean tree saved nothing, returned 0, and the `pop` after it
+restored a three-day-old stash belonging to someone else over twenty files.
+
+So the primary checkout is for reading. Work happens in a worktree of its own:
+
+```bash
+scripts/work-on.sh 116 worktree-per-session   # prints the path to cd into
+scripts/wrap-up.sh                            # opens the PR from inside it
+scripts/wrap-up.sh --cleanup                  # after it merges
+```
+
+Git enforces the part that matters — one branch cannot be checked out in two
+worktrees — so parallel sessions cannot take each other's floor away. Two
+things it does not enforce, and which have each cost a recovery here:
+
+**Never `git stash` in this repo.** The stack is shared, `stash` on a clean
+tree saves nothing while still reporting success, and `pop` takes whatever is
+on top regardless of who put it there. To read a file from another branch use
+`git show <ref>:<path>`; to test another branch use another worktree.
+
+**Never switch branches in the primary checkout.** It yanks the floor from
+whatever session is working there.
+
 # Operating the production machine
 
 `docs/operations-runbook.md` is authoritative for deploying and for anything
@@ -58,10 +86,11 @@ not to be operations at all. Filtering them out belongs in a saved board view,
 which the label is there for. Filtered out at the moment of writing, a card
 can only be found again by someone who already remembers it exists.
 
-When the work is done: commit, open a pull request declaring `Closes #N`
-**before** it merges, and set the card to Done on the board once it lands. The
-`Closes` line has to exist before the merge — see the rule above — and the board
-status is not updated by anything automatic.
+When the work is done: commit, then open the pull request with
+`scripts/wrap-up.sh`, which pushes the branch and derives `Closes #N` from its
+name. That line has to exist before the merge — GitHub will not create the link
+afterwards and `deployed-issues.sh` reports only real links. The board moves the
+card to Done by itself once the merge closes the issue; nobody sets it by hand.
 
 `.claude/settings.json` carries two hooks that put these rules in front of an
 agent at the start of a task and warn when one stops with work uncommitted.
