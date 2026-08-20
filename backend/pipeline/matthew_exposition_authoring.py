@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from backend.pipeline.knowledge_source import live_script
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
     FLAG_CROSS_REFERENCE,
@@ -1773,6 +1774,9 @@ def _sermon_transcript_slices(
             segments = transcript
         else:
             segments = transcript.get("script") or transcript.get("segments") or []
+        # An article must never quote text a proofreader struck through: this
+        # is the one reader whose output is prose a person will publish.
+        segments = live_script(segments)
         segments_by_index = {segment.get("index"): segment for segment in segments}
 
         segment_texts: dict[str, str] = {}

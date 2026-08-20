@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.knowledge_source import live_script
 from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     sha256_json,
@@ -43,6 +44,9 @@ def build_anchor_binding_package(
         if transcript_id not in transcript_cache:
             raw = path.read_bytes()
             transcript = json.loads(raw)
+            # An excerpt that survives only in struck-through text is not
+            # bound to this source any more; the proofreader deleted it.
+            transcript["script"] = live_script(transcript.get("script"))
             paragraphs = {
                 str(item.get("index")): item
                 for item in transcript.get("script", [])

@@ -19,6 +19,7 @@ import git
 import google.auth
 from googleapiclient.discovery import build
 
+from backend.pipeline.knowledge_source import live_script
 from backend.api.config import DATA_BASE_PATH, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, GOOGLE_DRIVE_FOLDER_ID, FULL_ARTICLE_ROOT, OCR_MODEL, OPENAI_GENERATION_MODEL
 
 # Define the source directory for notes
@@ -677,8 +678,11 @@ def _load_sermon_transcript_content(path: Path) -> str:
     if not isinstance(paragraphs, list):
         raise ValueError("Sermon transcript has an unsupported format")
     text_parts = []
-    for paragraph in paragraphs:
-        if not isinstance(paragraph, dict) or paragraph.get("type") == "comment":
+    # A manuscript built from a transcript must not carry back the text a
+    # proofreader struck through. The editor keeps the markers so the cut
+    # stays reversible; everything downstream of the editor reads without them.
+    for paragraph in live_script(paragraphs):
+        if paragraph.get("type") == "comment":
             continue
         text = str(paragraph.get("text") or "").strip()
         if text:
