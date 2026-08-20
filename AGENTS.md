@@ -41,6 +41,14 @@ and pipeline changes do not need the server — run the scripts and the tests in
 the worktree. A front-end change means stopping the primary checkout's server,
 or waiting to see it deployed.
 
+**`npm run build` does not run in a worktree**, and is not meant to. Next 16
+builds with Turbopack, which takes the working directory as its root and
+refuses a `node_modules` that symlinks out of it. Type-check with
+`cd web && ./node_modules/.bin/tsc --noEmit` instead -- it is what catches the
+class of error that reaches a deploy, it costs seconds, and it works here. The
+build itself is production's job, and a build that fails there costs minutes
+and touches nothing: the deploy builds before it switches.
+
 **A branch that changes its dependencies is running against the wrong ones.**
 `requirements.txt` or `package.json` edits are not picked up by a linked
 install; that branch needs its own.
