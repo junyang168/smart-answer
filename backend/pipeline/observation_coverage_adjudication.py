@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.pipeline.knowledge_package import live_claims
 from backend.pipeline.observation_argument_coverage import (
     REACHED,
     measure_coverage,
@@ -96,7 +97,7 @@ def build_packet(
         for row in package.get("evidence_steps", [])
     }
     claims = []
-    for row in package.get("claims", []):
+    for row in live_claims(package):
         claims.append({
             "claim_id": str(row.get("claim_id")),
             "statement": str(row.get("statement") or row.get("title") or ""),
@@ -232,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         package = {
             **package,
             "observations": observations_for_passage(package, passage),
-            "claims": [row for row in package.get("claims", []) if in_scope(row)],
+            "claims": [row for row in live_claims(package) if in_scope(row)],
         }
 
     observations = pending_observations(package)

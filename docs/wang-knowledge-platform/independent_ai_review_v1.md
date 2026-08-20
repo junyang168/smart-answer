@@ -68,6 +68,8 @@ Claude 逐条检查：
 | `human_confirmation_required` | Claude 判定来源本身无法裁定（`human_review_required`），即使 OpenAI 接受该意见 | 补丁写入 `pending_patches` 等待人工，不自动应用 |
 | `human_disagreement_required` | OpenAI 拒绝，Claude 再审后仍坚持 | 人工只裁决这一条明确分歧 |
 
+读取知识包的模块一律经 `knowledge_package.live_claims()` 取 claim，`superseded_by` 的那几条不参与覆盖率裁决、主题分组、跨章节与跨讲关系、产品候选，也不进入交给撰写者的经文切片。它们留在档案里只作为合并发生过的纪录；`summary.active_claim_count` 是活跃数，`claim_count` 仍是档案总行数。
+
 两个模型一致只能解决“来源怎么读”的问题。当第一轮明确说明来源本身不足以裁定（归属高风险、编辑判断、无法从逐字稿解决），第二模型同意并不能消除当初要求人工的理由，因此这类补丁一律等待人工确认，不进入 `claim_statement_overrides_v1.json`。
 
 OpenAI 不得盲目接受 Claude。它看到完整逐字稿、候选主张、锚点和 Claude 理由，逐条给出 `accept/reject`。`accept` 必须给出可执行的有界补丁；`reject` 不得夹带修改。忠实度仲裁不得借机改变“释经／专题／方法”等产品路由，除非原问题明确是 `route_error`。

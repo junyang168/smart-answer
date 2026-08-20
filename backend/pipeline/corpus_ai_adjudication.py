@@ -382,9 +382,21 @@ def compile_outcome(
                 "approval_status": "not_human_approved",
             }
         )
+    # The second model exists to push back.  A run where it accepts everything
+    # is not proof that it rubber-stamped, but it is the only number that would
+    # ever show that, and nothing was reporting it.
+    adjudicated = len(openai_response["adjudications"])
+    accepted = sum(
+        1 for row in openai_response["adjudications"] if row["decision"] == "accept"
+    )
     return {
         "results": results,
         "claim_overrides": overrides,
         "pending_patches": pending,
-        "summary": counts,
+        "summary": {
+            **counts,
+            "adjudicated": adjudicated,
+            "accepted": accepted,
+            "acceptance_rate": round(accepted / adjudicated, 2) if adjudicated else None,
+        },
     }

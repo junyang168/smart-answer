@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from backend.pipeline.knowledge_package import live_claims
 
 
 MATTHEW_BOOK_PATTERN = r"(?:太|马太(?:福音)?|馬太(?:福音)?|Matt(?:hew)?\.?|Mt\.?)"
@@ -128,7 +129,7 @@ def _claim_reference_diagnostics(package: dict[str, Any]) -> dict[str, int]:
 def build_passage_slice(package: dict[str, Any], passage: Passage) -> dict[str, Any]:
     reference_diagnostics = _claim_reference_diagnostics(package)
     overlapping_claims = [
-        row for row in package.get("claims", []) if _record_overlaps(row, passage)
+        row for row in live_claims(package) if _record_overlaps(row, passage)
     ]
     claims = [row for row in overlapping_claims if _directly_scoped(row, passage)]
     claim_ids = {str(row.get("claim_id")) for row in claims}

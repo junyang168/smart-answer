@@ -414,6 +414,17 @@ def _apply_claim_overrides(
         override = overrides.get(claim.get("claim_id"))
         if not override or override.get("status") != "ai_consensus_applied":
             continue
+        if override.get("superseded_by"):
+            # This path applies field-level corrections; a merge also has to
+            # move anchors and retarget relations, which only
+            # `knowledge_consensus_applier` does. Ignoring it silently would
+            # leave the duplicate live in the shared package with nothing to
+            # show a merge was ever accepted.
+            raise ValueError(
+                f"{claim.get('claim_id')}: override merges into "
+                f"{override['superseded_by']}; build this package with "
+                "knowledge_consensus_applier, which can execute a merge"
+            )
         if override.get("title"):
             claim["title"] = override["title"]
         if override.get("claim_type"):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.pipeline.cross_section_relation import (
+    SCHEMA_VERSION,
     CrossSectionValidationError,
     apply_proposals,
     build_catalogue,
@@ -123,7 +124,7 @@ def test_added_relations_say_where_they_came_from() -> None:
     package = _package()
     updated = apply_proposals(package, _proposal(), identity={"fingerprint_sha256": "fp"})
     added = updated["knowledge_relations"][0]
-    assert added["discovered_by"] == "wang_cross_section_relation_v1"
+    assert added["discovered_by"] == SCHEMA_VERSION
     assert added["review_status"] == "candidate"
     assert updated["summary"]["evidence_relation_count"] == 1
     assert updated["cross_section_relations"]["evidence_relations_added"] == 1

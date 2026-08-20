@@ -244,6 +244,9 @@ def test_reject_then_claude_withdraw_needs_no_human() -> None:
         "withdrawn": 1,
         "human_confirmation_required": 0,
         "human_disagreement_required": 0,
+        "adjudicated": 1,
+        "accepted": 0,
+        "acceptance_rate": 0.0,
     }
 
 
