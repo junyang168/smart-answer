@@ -21,10 +21,12 @@ from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
     AuditedSentence,
     DetailedExtractionValidationError,
+    exclusions_from_audit,
     extraction_identity,
     validate_response,
     validate_sentence_audit,
 )
+from backend.pipeline.sentence_ledger import sentence_id as ledger_sentence_id
 from backend.pipeline.extraction_sections import (
     DEFAULT_SECTION_LEVEL,
     Section,
@@ -105,13 +107,26 @@ def _usage_row(usage: Any, attempt: int) -> dict[str, Any]:
     for it again, and this is the only evidence that it happens.
     """
 
+    # The two SDKs name these differently, and reading only OpenAI's names left
+    # every Anthropic run reporting zero — which hid the cost of the model this
+    # pipeline now defaults to.
     details = getattr(usage, "prompt_tokens_details", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+    cached = getattr(details, "cached_tokens", None)
+    if prompt_tokens is None:
+        prompt_tokens = getattr(usage, "input_tokens", None)
+        completion_tokens = getattr(usage, "output_tokens", None)
+        cached = getattr(usage, "cache_read_input_tokens", None)
+    total = getattr(usage, "total_tokens", None)
+    if total is None and prompt_tokens is not None and completion_tokens is not None:
+        total = prompt_tokens + completion_tokens
     return {
         "attempt": attempt,
-        "prompt_tokens": getattr(usage, "prompt_tokens", None),
-        "cached_tokens": getattr(details, "cached_tokens", None),
-        "completion_tokens": getattr(usage, "completion_tokens", None),
-        "total_tokens": getattr(usage, "total_tokens", None),
+        "prompt_tokens": prompt_tokens,
+        "cached_tokens": cached,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total,
     }
 
 
@@ -268,7 +283,8 @@ def _extract_sections(
     prompt: str,
     fingerprint: str,
     force: bool,
-) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    only: tuple[int, ...] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run every section, then concatenate.
 
     Sections do not overlap, so there is no merge step and nothing to
@@ -278,13 +294,19 @@ def _extract_sections(
     answered: list[tuple[Section, dict[str, Any]]] = []
     usage_rows: list[dict[str, Any]] = []
     section_rows: list[dict[str, Any]] = []
+    exclusions: list[dict[str, Any]] = []
     for section in plan.sections:
+        if only is not None and section.index not in only:
+            continue
         cache_path = _section_cache_path(output_dir, source_id, fingerprint, section)
+        sentences = section_sentences(source, section)
         if cache_path.is_file() and not force:
-            answered.append((section, json.loads(cache_path.read_text(encoding="utf-8"))["response"]))
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
+            answered.append((section, cached))
+            exclusions.extend(exclusions_from_audit(
+                cached, sentences, source_id=source_id, ledger_sentence_id=ledger_sentence_id))
             section_rows.append({**vars(section), "attempts": 0, "cached": True})
             continue
-        sentences = section_sentences(source, section)
         user_input = header + _section_prompt_body(source, section, sentences)
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
@@ -328,8 +350,10 @@ def _extract_sections(
             encoding="utf-8",
         )
         answered.append((section, response))
+        exclusions.extend(exclusions_from_audit(
+            response, sentences, source_id=source_id, ledger_sentence_id=ledger_sentence_id))
         section_rows.append({**vars(section), "attempts": attempts, "cached": False})
-    return combine_sections(answered), usage_rows, section_rows
+    return combine_sections(answered), usage_rows, section_rows, exclusions
 
 
 def _anchored_fragment(
@@ -366,6 +390,8 @@ def compile_package(
     source_descriptor: dict[str, Any] | None = None,
     usage_rows: list[dict[str, Any]] | None = None,
     section_rows: list[dict[str, Any]] | None = None,
+    exclusions: list[dict[str, Any]] | None = None,
+    complete: bool = True,
 ) -> dict[str, Any]:
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
@@ -532,6 +558,16 @@ def compile_package(
         # property of the section plan, so a package that cannot say how it was
         # cut cannot be compared with the ledger run taken against it.
         "sections": list(section_rows or []),
+        # Every `not_extracted` verdict, as a candidate exclusion. None of them
+        # is approved: the model that made the call is not a person, so the
+        # ledger keeps them out of the terminal column until one looks. They
+        # exist so "answered, awaiting review" stops being indistinguishable
+        # from "nobody answered".
+        "sentence_exclusions": list(exclusions or []),
+        # False when only some sections were run. A partial package is a probe,
+        # not a result: its coverage is measured against the whole source and
+        # will read low for the sections nobody asked about.
+        "complete": complete,
     }
     return package
 
@@ -545,6 +581,10 @@ class SectionSettings:
     #: Off makes the run offline and deterministic; on covers the 90 published
     #: transcripts that carry no headings at all.
     allow_generated: bool = True
+    #: Section numbers to run, or None for all of them. Checking a prompt or
+    #: schema change costs one call this way instead of one per section, which
+    #: is the difference between trying an idea and deciding not to.
+    only: tuple[int, ...] | None = None
 
 
 def _run(
@@ -587,15 +627,17 @@ def _run(
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
             return "skipped", output_path
-    response, usage_rows, section_rows = _extract_sections(
+    response, usage_rows, section_rows, exclusions = _extract_sections(
         source_id=source_id, source=source, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
+        only=sections.only,
     )
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
         source_descriptor=source_descriptor, usage_rows=usage_rows, section_rows=section_rows,
+        exclusions=exclusions, complete=sections.only is None,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     _archive(output_path)
@@ -716,9 +758,16 @@ def main() -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help="claude-* (default), gpt-*, or deepseek-*")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
-    parser.add_argument("--max-output-tokens", type=int, default=32000)
+    # 32,000 was sized for a model that did not think from the same budget.
+    # Claude Opus 5 spends adaptive thinking out of `max_tokens`, and a single
+    # 1,391-character section spent 21,967 output tokens; the first run at the
+    # old default failed mid-answer on the smallest section of the 母本.
+    parser.add_argument("--max-output-tokens", type=int, default=64000)
     parser.add_argument("--section-level", type=int, default=DEFAULT_SECTION_LEVEL,
                         help="headings at or above this level start a section")
+    parser.add_argument("--only-sections", type=int, nargs="+", metavar="N",
+                        help="run only these section numbers (1-based); the package "
+                             "is then marked incomplete")
     parser.add_argument("--no-generated-sections", action="store_true",
                         help="never ask the subtitle generator for boundaries; "
                              "a source with no headings is then one section")
@@ -727,6 +776,7 @@ def main() -> int:
     args = parser.parse_args()
     sections = SectionSettings(
         level=args.section_level, allow_generated=not args.no_generated_sections,
+        only=tuple(args.only_sections) if args.only_sections else None,
     )
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
     paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]

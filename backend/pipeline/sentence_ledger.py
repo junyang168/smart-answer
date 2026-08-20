@@ -38,6 +38,13 @@ from backend.api.canonical_repository.knowledge_models import (
     SentenceInventoryRecord,
     SentenceReconciliationRecord,
 )
+from backend.pipeline.sentence_ledger_vocabulary import (  # noqa: F401  (re-exported)
+    AUTO_TERMINAL_REASONS,
+    BULK_APPROVABLE_REASONS,
+    HUMAN_ONLY_REASONS,
+    REASON_CODES,
+    is_terminal,
+)
 from backend.pipeline.base_contract_coverage import (
     ScriptureRef,
     load_bearing_flags,
@@ -55,14 +62,8 @@ EXACT_SPAN = "exact_span"
 PROPOSED_LINK = "proposed_link"
 NO_MATCH = "none"
 
-#: Reason codes, and whether a candidate exclusion is terminal without a human.
-#: The split follows what can be *checked*, not what the sentence looks like:
-#: `duplicate_of` names a record that either covers the content or does not,
-#: while `background_only` is the interpretive call that failed in #64 and #53.
-AUTO_TERMINAL_REASONS = frozenset({"duplicate_of"})
-BULK_APPROVABLE_REASONS = frozenset({"not_exegesis"})
-HUMAN_ONLY_REASONS = frozenset({"background_only", "deferred"})
-REASON_CODES = AUTO_TERMINAL_REASONS | BULK_APPROVABLE_REASONS | HUMAN_ONLY_REASONS
+#: Reason codes live in their own module so extraction can name them without
+#: importing the canonical-repository models. See `sentence_ledger_vocabulary`.
 
 
 def sentence_id(source_id: str, segment_index: int, text: str, ordinal: int = 0) -> str:
@@ -188,26 +189,6 @@ def reconcile(
             )
         )
     return rows
-
-
-def is_terminal(reason_code: str, *, approved: bool) -> bool:
-    """Whether a candidate exclusion counts without a human looking at it.
-
-    Left untiered the design deadlocks: every sentence needs a terminal state,
-    every exclusion needs approval, and there is one editor -- so either the
-    gate starves, or candidate exclusions count and the model that missed the
-    material becomes the authority that declares it immaterial.
-
-    The tier is drawn on what can be checked. It is deliberately not drawn on
-    `triage_flags`: both sentences the grounding gate deleted in #64 carry no
-    flag, so that tier would have let the model retire exactly what it missed.
-    """
-
-    if reason_code not in REASON_CODES:
-        raise ValueError(f"unknown reason_code: {reason_code!r}")
-    if approved:
-        return True
-    return reason_code in AUTO_TERMINAL_REASONS
 
 
 @dataclass

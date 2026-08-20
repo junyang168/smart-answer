@@ -170,9 +170,9 @@ def _response(audit: list[dict], excerpt: str = "彼得宣認耶穌是基督") -
 def test_audit_accepts_a_truthful_report() -> None:
     response = _response([
         {"sentence_id": "S0001#001", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": ""},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": ""},
         {"sentence_id": "S0001#002", "status": "not_extracted",
-         "covered_by": [], "reason": "純過渡句"},
+         "covered_by": [], "reason_code": "not_exegesis", "reason": "純過渡句"},
     ])
     validate_sentence_audit(response, _transcript(), _sentences())
 
@@ -182,9 +182,9 @@ def test_audit_rejects_the_semantic_dodge() -> None:
 
     response = _response([
         {"sentence_id": "S0001#001", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": ""},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": ""},
         {"sentence_id": "S0001#002", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": "與前句同義，已被涵蓋"},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": "與前句同義，已被涵蓋"},
     ])
     with pytest.raises(DetailedExtractionValidationError, match="no anchor lands on it"):
         validate_sentence_audit(response, _transcript(), _sentences())
@@ -193,7 +193,7 @@ def test_audit_rejects_the_semantic_dodge() -> None:
 def test_audit_rejects_silence() -> None:
     response = _response([
         {"sentence_id": "S0001#001", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": ""},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": ""},
     ])
     with pytest.raises(DetailedExtractionValidationError, match="no verdict"):
         validate_sentence_audit(response, _transcript(), _sentences())
@@ -202,9 +202,9 @@ def test_audit_rejects_silence() -> None:
 def test_audit_rejects_an_unexplained_omission() -> None:
     response = _response([
         {"sentence_id": "S0001#001", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": ""},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": ""},
         {"sentence_id": "S0001#002", "status": "not_extracted",
-         "covered_by": [], "reason": "   "},
+         "covered_by": [], "reason_code": "not_exegesis", "reason": "   "},
     ])
     with pytest.raises(DetailedExtractionValidationError, match="without a reason"):
         validate_sentence_audit(response, _transcript(), _sentences())
@@ -213,11 +213,11 @@ def test_audit_rejects_an_unexplained_omission() -> None:
 def test_audit_rejects_a_sentence_from_outside_the_section() -> None:
     response = _response([
         {"sentence_id": "S0001#001", "status": "extracted",
-         "covered_by": ["OBS001"], "reason": ""},
+         "covered_by": ["OBS001"], "reason_code": None, "reason": ""},
         {"sentence_id": "S0001#002", "status": "not_extracted",
-         "covered_by": [], "reason": "純過渡句"},
+         "covered_by": [], "reason_code": "not_exegesis", "reason": "純過渡句"},
         {"sentence_id": "S0099#001", "status": "not_extracted",
-         "covered_by": [], "reason": "不存在"},
+         "covered_by": [], "reason_code": "not_exegesis", "reason": "不存在"},
     ])
     with pytest.raises(DetailedExtractionValidationError, match="not in this section"):
         validate_sentence_audit(response, _transcript(), _sentences())

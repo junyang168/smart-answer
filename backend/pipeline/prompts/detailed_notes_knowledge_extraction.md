@@ -50,8 +50,14 @@
 逐句自检（机械校验，漏一句即整次失败）：
 
 - 输入末尾列出本章节的**每一句**，各带一个 ID。你必须为**每一句**给出恰好一条 `sentence_audit`。
-- `status=extracted`：`covered_by` 填**锚点确实落在这一句上**的记录 ID。
-- `status=not_extracted`：`covered_by` 留空，`reason` 写明原因（纯标题、纯过渡、引文前导句等）。
+- `status=extracted`：`covered_by` 填**锚点确实落在这一句上**的记录 ID，`reason_code` 留 null。
+- `status=not_extracted`：`covered_by` 留空，`reason` 写明原因，并填 `reason_code`。
+- `reason_code` 必须从以下四个中选一个，**选哪一个决定了这条排除要不要人工复核**，不是措辞问题：
+  - `not_exegesis`：这句根本不是释经内容 —— markdown 标题、小标题、书目、推荐资源、经文出处标注。**编辑加的结构一律用这个。**
+  - `background_only`：是正文，也是材料，但讲稿只是提了一下、没有据以推出任何东西。
+  - `duplicate_of`：这句的内容已经被本章节另一条记录完整涵盖；`duplicate_of_record_id` 填那条记录的 ID。
+  - `deferred`：以上都不是，需要留待人工判断。
+- 判准是「这是什么」，不是「这重不重要」。「### 釋經」是标题，用 `not_exegesis`；把它写成 `background_only` 会让一句一眼可批的标题进入必须逐条人工审核的队列。
 - **「意思相近、已被别处涵盖」不算 `extracted`。** 程序按锚点逐句核对，只认落在这一句上的锚点；报了却查不到会被判失败。
 - 也不许为省事全报 `not_extracted`。这是已经人工审核过的材料，大部分正文句子有内容。
 - 先抽取，再自检。自检时发现漏了承载论证的句子，**回去补记录**，不要写成 `not_extracted`。

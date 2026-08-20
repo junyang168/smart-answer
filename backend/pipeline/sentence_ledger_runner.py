@@ -31,6 +31,7 @@ from backend.pipeline.knowledge_source import markdown_blocks
 from backend.pipeline.sentence_ledger import (
     AnchoredSpan,
     build_inventory,
+    is_terminal,
     reconcile,
     summarise,
     summarise_by_category,
@@ -121,6 +122,24 @@ def _key_still_binds(fragment: dict[str, Any], source_sha256: str | None) -> boo
     return bool(source_sha256) and recorded == source_sha256
 
 
+def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
+    """The package's exclusions that count without a human having looked.
+
+    Which is, deliberately, almost none of them: `is_terminal` clears
+    `duplicate_of` because a machine can check it, and holds everything else
+    until somebody approves. An unapproved exclusion still leaves its sentence
+    `unprocessed` — the point is that the reasoning is now on the record and
+    reviewable, not that it counts.
+    """
+
+    return {
+        str(row["sentence_id"]): str(row["exclusion_id"])
+        for row in package.get("sentence_exclusions") or []
+        if row.get("reason_code")
+        and is_terminal(str(row["reason_code"]), approved=bool(row.get("decided_by")))
+    }
+
+
 def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
     package = json.loads(package_path.read_text(encoding="utf-8"))
     source_id = str(package["source_documents"][0]["source_id"])
@@ -136,7 +155,11 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
             BOOK_CODE_TO_CHINESE.get(raw.book, raw.book), raw.chapter, raw.start_verse, raw.end_verse
         )
 
-    rows = reconcile(inventory, spans, target=target, reconciled_against=package_path.name)
+    rows = reconcile(
+        inventory, spans,
+        exclusions_by_sentence=terminal_exclusions(package),
+        target=target, reconciled_against=package_path.name,
+    )
     summary = summarise(rows)
     categories = summarise_by_category(inventory, rows, dict(segments))
     return {
@@ -149,6 +172,8 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
         "excluded": summary.excluded,
         "unprocessed": summary.unprocessed,
         "unprocessed_flagged": summary.unprocessed_flagged,
+        "exclusions_recorded": len(package.get("sentence_exclusions") or []),
+        "exclusions_terminal": len(terminal_exclusions(package)),
         "blocks": summary.blocks,
         # The total is not the score. Headings are represented 0% of the time
         # by design and are a quarter of the sentences, so a change in prose

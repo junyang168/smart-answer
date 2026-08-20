@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
+from backend.pipeline.sentence_ledger_vocabulary import REASON_CODES
 
 # v2 closes `observation_type` to the six categories the prompt already names.
 # v3 moved the unit of extraction from the document to an overlapping window.
@@ -205,9 +206,16 @@ DETAILED_RESPONSE_SCHEMA: dict[str, Any] = {
                         "sentence_id": {"type": "string"},
                         "status": {"type": "string", "enum": ["extracted", "not_extracted"]},
                         "covered_by": {"type": "array", "items": {"type": "string"}},
+                        # The vocabulary the ledger already uses for exclusions,
+                        # so a `not_extracted` verdict becomes an ExclusionRecord
+                        # instead of free text nobody can act on.  Terminality
+                        # depends on which code it is, which is why the model
+                        # picks from a closed set rather than describing itself.
+                        "reason_code": {"anyOf": [{"type": "null"},
+                                                  {"type": "string", "enum": sorted(REASON_CODES)}]},
                         "reason": {"type": "string"},
                     },
-                    "required": ["sentence_id", "status", "covered_by", "reason"],
+                    "required": ["sentence_id", "status", "covered_by", "reason_code", "reason"],
                 },
             },
         },
@@ -308,8 +316,14 @@ def validate_sentence_audit(
                 f"{sentence.sentence_id}: reported extracted, but no anchor lands on it; "
                 f"either anchor a record to this sentence or report it not_extracted"
             )
-        if row.get("status") == "not_extracted" and not str(row.get("reason") or "").strip():
-            errors.append(f"{sentence.sentence_id}: not_extracted without a reason")
+        if row.get("status") == "not_extracted":
+            if not str(row.get("reason") or "").strip():
+                errors.append(f"{sentence.sentence_id}: not_extracted without a reason")
+            if row.get("reason_code") not in REASON_CODES:
+                errors.append(
+                    f"{sentence.sentence_id}: not_extracted needs a reason_code from "
+                    f"{sorted(REASON_CODES)}, got {row.get('reason_code')!r}"
+                )
     if errors:
         raise DetailedExtractionValidationError(
             "sentence audit failed: " + " | ".join(errors)
@@ -510,3 +524,55 @@ def validate_response(
         raise DetailedExtractionValidationError(
             "mechanical validation failed: " + " | ".join(validation_errors)
         )
+
+
+def exclusions_from_audit(
+    response: dict[str, Any],
+    sentences: Sequence[AuditedSentence],
+    *,
+    source_id: str,
+    ledger_sentence_id: Any,
+) -> list[dict[str, Any]]:
+    """Turn `not_extracted` verdicts into candidate exclusions.
+
+    Without this the audit's judgements die with the response: `combine_sections`
+    carries only the record collections, so 81 reasoned decisions on the 太16
+    母本 reached no reader, and the ledger showed those sentences as
+    `unprocessed` -- "nobody answered" -- when in fact somebody had.
+
+    Nothing here is approved. `decided_by` stays empty precisely because the
+    model that produced the verdict is not a person, and `is_terminal` will
+    keep every code but `duplicate_of` out of the terminal column until one
+    looks. The point is to separate "answered, awaiting review" from "not
+    answered at all", which are the same colour today.
+    """
+
+    by_id = {row.sentence_id: row for row in sentences}
+    rows: list[dict[str, Any]] = []
+    for entry in response.get("sentence_audit") or []:
+        if entry.get("status") != "not_extracted":
+            continue
+        sentence = by_id.get(str(entry.get("sentence_id") or ""))
+        if sentence is None:
+            continue
+        ordinal = sum(
+            1 for earlier in rows
+            if earlier["segment_index"] == sentence.segment_index
+            and earlier["text"] == sentence.text
+        )
+        identifier = ledger_sentence_id(
+            source_id, int(sentence.segment_index[1:]), sentence.text, ordinal
+        )
+        rows.append({
+            "exclusion_id": f"EXC-{identifier}",
+            "sentence_id": identifier,
+            "source_id": source_id,
+            "segment_index": sentence.segment_index,
+            "text": sentence.text,
+            "reason_code": entry.get("reason_code"),
+            "rationale": str(entry.get("reason") or ""),
+            "duplicate_of_record_id": None,
+            "decided_by": None,
+            "review_status": "candidate",
+        })
+    return rows
