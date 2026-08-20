@@ -34,6 +34,7 @@ from .argument_layer import router as argument_layer_router
 from .source_coverage import router as source_coverage_router
 from .public_wang_articles import router as public_wang_articles_router
 from .matthew_exposition_progress import router as matthew_exposition_progress_router
+from .wang_operations import router as wang_operations_router
 
 app = FastAPI()
 
@@ -72,6 +73,7 @@ app.include_router(argument_layer_router)
 app.include_router(source_coverage_router)
 app.include_router(public_wang_articles_router)
 app.include_router(matthew_exposition_progress_router)
+app.include_router(wang_operations_router)
 
 
 def _release_identity() -> dict[str, str]:
