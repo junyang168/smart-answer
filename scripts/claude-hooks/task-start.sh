@@ -12,5 +12,6 @@ Work tracking for this repo (see AGENTS.md § Tracking work):
   it to the epic -- doing those by hand has dropped steps 2 and 3 before.
 - Finishing: commit, then open a PR declaring `Closes #N` BEFORE it merges (GitHub cannot
   backfill the link), then set the card to Done on the board.
-- Only OPS/infrastructure tickets stay off the board.
+- Every card goes on the board. `--ops` means epic E10 plus the `infrastructure`
+  label, which is how operations cards are filtered -- not by being left off.
 CONTEXT

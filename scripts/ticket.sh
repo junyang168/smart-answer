@@ -8,11 +8,16 @@
 # of; it is a missing entry point.
 #
 #   scripts/ticket.sh --epic E01 --title "WKP-F01.10 — ..." --body-file card.md
-#   scripts/ticket.sh --ops --title "OPS-12 — ..." --body-file card.md
+#   scripts/ticket.sh --ops --title "OPS-13 — ..." --body-file card.md
 #   scripts/ticket.sh --epic E02 --title ... --body-file ... --dry-run
 #
-# OPS cards are deliberately repo-only: operations work is not tracked on the
-# platform board and belongs to no epic.
+# `--ops` is shorthand for "E10 plus the infrastructure label", not an escape
+# from the board. Operations cards used to be repo-only, and the twelve of them
+# were invisible in the one place the work is read: nobody could answer what
+# OPS covered without opening the issue list, and three of the twelve were not
+# operations at all. Excluding something belongs in a saved view, which the
+# board already supports through that label; excluded at write time it can only
+# be found again by someone who remembers it exists.
 set -Eeuo pipefail
 
 OWNER="junyang168"
@@ -21,6 +26,10 @@ PROJECT=3
 # Epic issue numbers. An epic is an issue like any other; a card is linked to
 # one through GitHub's sub-issue relation, which is what the board's
 # "Parent issue" column reads.
+#
+# E10 is where `--ops` lands. Its own scope statement already names this work:
+# "GitHub Project、issue hierarchy、WIP control" and "branch／commit／PR 邊界與
+# dirty-worktree recovery".
 epic_issue() {
   case "$1" in
     E01) echo 3  ;;  # Source Corpus & Provenance
@@ -58,29 +67,24 @@ done
 [[ -f "$BODY_FILE" ]] || fail "body file not found: $BODY_FILE"
 
 if (( OPS )); then
-  [[ -z "$EPIC" ]] || fail "--ops and --epic are mutually exclusive: OPS cards belong to no epic"
-else
-  [[ -n "$EPIC" ]] || fail "--epic is required (E01..E10), or pass --ops for an operations ticket"
-  EPIC_ISSUE="$(epic_issue "$EPIC")" || fail "unknown epic: $EPIC (expected E01..E10)"
+  [[ -z "$EPIC" ]] || fail "--ops already means --epic E10; pass one or the other"
+  EPIC="E10"
 fi
+[[ -n "$EPIC" ]] || fail "--epic is required (E01..E10), or pass --ops for an operations ticket"
+EPIC_ISSUE="$(epic_issue "$EPIC")" || fail "unknown epic: $EPIC (expected E01..E10)"
 
 if (( DRY )); then
   printf 'would create: %s\n' "$TITLE"
-  if (( OPS )); then
-    printf '  repo issue with label "infrastructure"; no board, no epic\n'
-  else
-    printf '  repo issue, board %s, sub-issue of #%s (%s)\n' "$PROJECT" "$EPIC_ISSUE" "$EPIC"
-  fi
+  printf '  repo issue, board %s, sub-issue of #%s (%s)%s\n' \
+    "$PROJECT" "$EPIC_ISSUE" "$EPIC" "$( ((OPS)) && printf ', label "infrastructure"')"
   exit 0
 fi
 
 if (( OPS )); then
   url="$(gh issue create --title "$TITLE" --label infrastructure --body-file "$BODY_FILE")"
-  printf '%s\n' "$url"
-  exit 0
+else
+  url="$(gh issue create --title "$TITLE" --body-file "$BODY_FILE")"
 fi
-
-url="$(gh issue create --title "$TITLE" --body-file "$BODY_FILE")"
 number="${url##*/}"
 
 gh project item-add "$PROJECT" --owner "$OWNER" --url "$url" >/dev/null
@@ -92,4 +96,5 @@ node_id() {
 gh api graphql -f query="mutation{addSubIssue(input:{issueId:\"$(node_id "$EPIC_ISSUE")\",subIssueId:\"$(node_id "$number")\"}){subIssue{number}}}" >/dev/null
 
 printf '%s\n' "$url"
-printf 'board: %s (Todo) · epic: %s (#%s)\n' "$PROJECT" "$EPIC" "$EPIC_ISSUE"
+printf 'board: %s (Todo) · epic: %s (#%s)%s\n' \
+  "$PROJECT" "$EPIC" "$EPIC_ISSUE" "$( ((OPS)) && printf ' · label: infrastructure')"
