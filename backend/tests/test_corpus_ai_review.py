@@ -321,3 +321,71 @@ def test_only_a_duplicate_issue_may_carry_a_duplicate_target() -> None:
 
     with pytest.raises(AIReviewValidationError):
         validate_review_response(review, _survey())
+
+
+def test_a_duplicate_may_name_a_claim_another_batch_is_reviewing() -> None:
+    """Which batch the twin fell into is a partition decision, not evidence."""
+    survey = _survey()
+    survey["other_batch_claims"] = [{"claim_id": "C099", "statement": "另一批次的同一结论"}]
+    review = _review()
+    review["claim_reviews"][1]["issues"] = [
+        {
+            "issue_type": "duplicate_claim",
+            "severity": "medium",
+            "explanation": "与 C099 说的是同一件事",
+            "affected_anchor_indexes": [],
+            "duplicate_of_claim_id": "C099",
+        }
+    ]
+
+    validate_review_response(review, survey)
+
+
+def test_a_duplicate_target_outside_the_package_is_still_refused() -> None:
+    """Widening what may be pointed at must not accept an invented id."""
+    survey = _survey()
+    survey["other_batch_claims"] = [{"claim_id": "C099", "statement": "另一批次的同一结论"}]
+    review = _review()
+    review["claim_reviews"][1]["issues"] = [
+        {
+            "issue_type": "duplicate_claim",
+            "severity": "medium",
+            "explanation": "与某条重复",
+            "affected_anchor_indexes": [],
+            "duplicate_of_claim_id": "C404",
+        }
+    ]
+
+    with pytest.raises(AIReviewValidationError):
+        validate_review_response(review, survey)
+
+
+def test_the_reviewer_is_not_shown_a_claim_a_merge_retired() -> None:
+    """Re-reviewing a merged package must not re-open the resolved duplicate."""
+    package = {
+        "claim_relations": [],
+        "claims": [
+            {"claim_id": "CL-1", "title": "留下的那条", "occurrences": []},
+            {"claim_id": "CL-2", "title": "被合并的那条", "occurrences": [], "superseded_by": "CL-1"},
+        ],
+    }
+
+    normalized = _normalize_claim_layer(package)
+
+    assert [row["claim_id"] for row in normalized["candidate_claims"]] == ["CL-1"]
+
+
+def test_the_other_batches_claims_reach_the_reviewer_input() -> None:
+    package = {
+        "claim_relations": [],
+        "claims": [{"claim_id": "CL-1", "title": "本批次", "occurrences": []}],
+        "review_batch": {
+            "other_batch_claims": [{"claim_id": "CL-9", "statement": "另一批次"}],
+        },
+    }
+
+    normalized = _normalize_claim_layer(package)
+
+    assert normalized["other_batch_claims"] == [
+        {"claim_id": "CL-9", "statement": "另一批次"}
+    ]

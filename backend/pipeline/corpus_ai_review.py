@@ -163,6 +163,16 @@ def validate_review_response(
     survey: dict[str, Any],
 ) -> None:
     claims = {item["claim_id"]: item for item in survey.get("candidate_claims", [])}
+    # A duplicate may be named outside this call's claims: a batched claim-layer
+    # review splits one package across several calls, and the twin of a
+    # section-extracted duplicate lands wherever the partition put it.  The
+    # reviewer still only writes one review per candidate claim -- this widens
+    # what it may point *at*, not what it must cover.
+    nameable = set(claims) | {
+        str(item.get("claim_id") or "")
+        for item in survey.get("other_batch_claims") or []
+        if item.get("claim_id")
+    }
     reviews = response.get("claim_reviews")
     _require(isinstance(reviews, list), "claim_reviews must be a list")
     review_ids = [item.get("claim_id") for item in reviews]
@@ -200,8 +210,8 @@ def validate_review_response(
             duplicate_of = str(issue.get("duplicate_of_claim_id") or "").strip()
             if issue.get("issue_type") == "duplicate_claim":
                 _require(
-                    duplicate_of in claims,
-                    f"{claim_id}: duplicate_claim must name a claim in this input, got {duplicate_of!r}",
+                    duplicate_of in nameable,
+                    f"{claim_id}: duplicate_claim must name a claim in this package, got {duplicate_of!r}",
                 )
                 _require(
                     duplicate_of != claim_id,
