@@ -68,3 +68,23 @@ def test_as_datetime_reads_a_stored_timestamp_and_survives_a_bad_one() -> None:
     assert naive is not None and naive.tzinfo is not None
     assert _as_datetime(None) is None
     assert _as_datetime("not a date") is None
+
+
+def test_the_store_cell_reports_material_not_the_document_record() -> None:
+    """`rev N` counted writes to the metadata row, which barely ever moves.
+
+    生命's `source_documents` record sat at revision 1 from 13 Aug while its
+    material was rewritten twice afterwards -- an additive reconciliation on
+    the 16th and a vocabulary migration on the 17th. The cell showed `rev 1`
+    throughout, so the number answered "how often was this row rewritten"
+    rather than "what does the store hold for this source".
+    """
+
+    from backend.api.wang_operations import _as_datetime
+
+    document_written = _as_datetime("2026-08-13T22:17:32+00:00")
+    material_written = _as_datetime("2026-08-16T12:09:50+00:00")
+    assert document_written is not None and material_written is not None
+    # The material is the newer of the two, so staleness judged against the
+    # document record would call a source current that is three days behind.
+    assert material_written > document_written

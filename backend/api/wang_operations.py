@@ -254,6 +254,25 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
                     WHERE collection='source_documents' AND retired_at IS NULL"""
             )
             rows = cursor.fetchall()
+            # The document record is metadata -- title, path, sha -- and it
+            # stays at revision 1 through every re-ingest that does not change
+            # them. Reporting its revision answered "how often was this row
+            # rewritten", which is not what 入庫 is asking. The material is
+            # what moves: 生命 sat at rev 1 from 13 Aug while its fragments
+            # were rewritten twice afterwards.
+            cursor.execute(
+                """SELECT payload->>'source_id' AS source_id,
+                          COUNT(*) AS fragments,
+                          MAX(updated_at) AS last_written
+                     FROM wang_knowledge.objects
+                    WHERE collection='source_fragments' AND retired_at IS NULL
+                      AND payload->>'source_id' IS NOT NULL
+                 GROUP BY 1"""
+            )
+            material = {
+                str(source_id): {"fragments": fragments, "last_written": last_written}
+                for source_id, fragments, last_written in cursor.fetchall()
+            }
     except Exception as exc:  # pragma: no cover - depends on deployment
         return {}, [{
             "code": "store_unreadable",
@@ -263,10 +282,16 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
     for object_id, payload, revision, updated_at in rows:
         document = dict(payload or {})
         key = document_row_key(document) or str(object_id)
+        found = material.get(str(object_id)) or {}
+        # Fall back to the document's own timestamp only when the store holds
+        # no material for it: then the document really is all there is.
+        written = found.get("last_written") or updated_at
         held[key] = {
             "source_id": str(object_id),
             "revision": revision,
-            "updated_at": updated_at.isoformat() if updated_at else None,
+            "fragments": found.get("fragments") or 0,
+            "updated_at": written.isoformat() if written else None,
+            "document_updated_at": updated_at.isoformat() if updated_at else None,
         }
     return held, []
 
@@ -580,7 +605,10 @@ def overview() -> dict[str, Any]:
                     cell = {
                         "state": "stale" if behind else "current",
                         "reason": "upstream_rerun" if behind else "from_store_not_ledger",
-                        "quality": {"revision": held["revision"]},
+                        "quality": {
+                            "revision": held["revision"],
+                            "fragments": held.get("fragments") or 0,
+                        },
                         "run": None,
                         "store": held,
                     }

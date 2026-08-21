@@ -35,7 +35,15 @@ export type StageCell = {
   run: RunSummary | null;
   had_earlier_success?: boolean;
   /** Present when the authoring store, not the ledger, is what says this is done. */
-  store?: { source_id: string; revision: number; updated_at: string | null };
+  store?: {
+    source_id: string;
+    revision: number;
+    /** Live source fragments the store holds for this source. */
+    fragments?: number;
+    /** When the store's *material* last changed, not the document record. */
+    updated_at: string | null;
+    document_updated_at?: string | null;
+  };
 };
 
 export type OverviewRow = {

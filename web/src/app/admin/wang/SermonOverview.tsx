@@ -89,7 +89,14 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
   }
   if (stage === "ingest") {
     // Read from the store rather than a run: say so, instead of showing a
-    // count this row has no run to have produced.
+    // count this row has no run to have produced. The count is the material
+    // the store holds, not the document record's revision -- that record is
+    // metadata and sits at rev 1 through every re-ingest that does not touch
+    // the title or the path, so it moved for none of the work done here.
+    const fragments = n("fragments");
+    if (fragments !== null && quality.status === undefined) {
+      return fragments ? `庫內 ${fragments} 片段` : "庫內無材料";
+    }
     const revision = n("revision");
     if (revision !== null && quality.status === undefined) return `rev ${revision}`;
     if (quality.status === "already_applied") return "無變化";
@@ -135,7 +142,8 @@ function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
     coverageDetail(stage, cell.quality),
     cell.state === "no_source" ? cellReasons.no_source : null,
     cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
-    cell.store?.updated_at ? `主庫更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
+    cell.store?.updated_at ? `主庫材料更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
+    cell.store ? `來源記錄 rev ${cell.store.revision}` : null,
     cell.run?.started_at ? `最後一次：${new Date(cell.run.started_at).toLocaleString("zh-TW")}` : null,
     cell.run?.trigger ? `觸發：${cell.run.trigger}${cell.run.triggered_by ? ` (${cell.run.triggered_by})` : ""}` : null,
     cell.run && cell.run.cost_usd !== null ? `花費：${money(cell.run.cost_usd)}` : null,
