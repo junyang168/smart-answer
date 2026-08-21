@@ -7,6 +7,12 @@
 -- source stuck -- was unanswerable for the stage most likely to have been
 -- skipped, and which had in fact already been skipped once unnoticed.
 --
+-- `sectioning` is #146's: the section plan is computed before the extraction
+-- run exists and is an input to its fingerprint, so it is its own stage. Both
+-- names are listed here because #141 and #146 each added a file at this path
+-- from a main that did not yet have the other's, and a CHECK that admits one
+-- stage silently stops the other's runs from recording at all.
+--
 -- Idempotent like the rest: DROP IF EXISTS then ADD always ends on the current
 -- constraint, whatever the table started with. `migrate()` replays every file
 -- in this directory on every run, and 004 sorts after 003, so the inline CHECK
@@ -25,5 +31,5 @@ ALTER TABLE wang_knowledge.pipeline_runs
 
 ALTER TABLE wang_knowledge.pipeline_runs
     ADD CONSTRAINT pipeline_runs_stage_check
-    CHECK (stage IN ('extraction', 'cross_section', 'review', 'adjudication',
-                     'merge', 'ingest', 'article'));
+    CHECK (stage IN ('sectioning', 'extraction', 'cross_section', 'review',
+                     'adjudication', 'merge', 'ingest', 'article'));

@@ -39,14 +39,16 @@ from backend.pipeline.source_keys import normalize_source_key
 
 #: Must stay in step with the CHECK constraint in migration 004.
 STAGES = (
-    "extraction", "cross_section", "review", "adjudication",
+    "sectioning", "extraction", "cross_section", "review", "adjudication",
     "merge", "ingest", "article",
 )
 
 #: Stages that call a model, and so can cost money.  `merge` and `ingest` are
 #: arithmetic and a database write; their cost is zero, and zero is a fact
 #: about them rather than an absence of measurement.
-MODEL_STAGES = ("extraction", "cross_section", "review", "adjudication", "article")
+MODEL_STAGES = (
+    "sectioning", "extraction", "cross_section", "review", "adjudication", "article",
+)
 SUBJECT_KINDS = ("source", "draft", "batch")
 
 #: The worker refreshes this while it works; a row whose heartbeat is older than
