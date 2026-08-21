@@ -59,11 +59,22 @@ from backend.pipeline.subtitle_generation import generate_subtitles
 #: boundaries and the script requirement, where a stronger model supplies what
 #: the instructions leave out. Once the rules were written down the ordering
 #: reversed. Compare models on the prompt you will actually ship.
+#: Whether a backend is sent `reasoning_effort` is declared here, not guessed
+#: from the model id. `sends_reasoning_effort` absent means "undeclared", and
+#: `Stage1OpenAIClient` then falls back to the old `gpt-5.6` prefix test, so an
+#: entry that says nothing behaves exactly as it did.
+#:
+#: `gpt` deliberately declares nothing: the family spans models that take the
+#: parameter (`gpt-5.6*`) and models that do not, so the answer belongs to a
+#: model rather than to the family, and inventing a family-wide answer here
+#: would be the same guess wearing a different hat.
 MODEL_BACKENDS = {
     "claude": {"kind": "anthropic"},
     "gpt": {"kind": "openai"},
+    # DeepSeek does not accept the parameter at all -- stated, where it used to
+    # be inferred from not being named `gpt-5.6`.
     "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com",
-                 "api_key_env": "DEEPSEEK_API_KEY"},
+                 "api_key_env": "DEEPSEEK_API_KEY", "sends_reasoning_effort": False},
 }
 DEFAULT_MODEL = "gpt-5.6-sol"
 
@@ -825,6 +836,8 @@ def build_client(
         model=model, reasoning_effort=reasoning_effort, timeout_seconds=900,
         max_retries=3, max_output_tokens=max_output_tokens,
         base_url=backend.get("base_url"), api_key_env=backend.get("api_key_env", "OPENAI_API_KEY"),
+        sends_reasoning_effort=backend.get("sends_reasoning_effort"),
+        sends_temperature=backend.get("sends_temperature"),
     )
 
 

@@ -492,6 +492,8 @@ class Stage1OpenAIClient:
         reasoning_effort: str = "medium",
         base_url: Optional[str] = None,
         api_key_env: str = "OPENAI_API_KEY",
+        sends_reasoning_effort: Optional[bool] = None,
+        sends_temperature: Optional[bool] = None,
     ) -> None:
         # `base_url` / `api_key_env` exist so an OpenAI-compatible provider --
         # DeepSeek is the one in use -- reaches the same structured-output path
@@ -504,6 +506,11 @@ class Stage1OpenAIClient:
         self.max_retries = max_retries
         self.max_output_tokens = max_output_tokens
         self.reasoning_effort = reasoning_effort
+        # Declared by the backend registry rather than guessed from the model
+        # id; `None` keeps the guess, so a model that declares nothing behaves
+        # exactly as it did. See `_wants_reasoning_effort`.
+        self.sends_reasoning_effort = sends_reasoning_effort
+        self.sends_temperature = sends_temperature
         self.client = OpenAI(
             api_key=api_key, max_retries=0, timeout=timeout_seconds,
             **({"base_url": base_url} if base_url else {}),
@@ -515,6 +522,51 @@ class Stage1OpenAIClient:
         # it instead of paying for it again, and `cached_tokens` is the only
         # evidence that the arrangement works.
         self.last_usage: Any = None
+
+    def _wants_reasoning_effort(self) -> bool:
+        """Whether this model is sent `reasoning_effort` at all.
+
+        This used to be `self.model.startswith("gpt-5.6")`, and every other
+        model that accepts the parameter silently ran on its provider's
+        default -- no error, no warning. Measured on `kimi-k3`, one "hello",
+        varying only this parameter:
+
+            not sent (the old behaviour)   56 reasoning tokens
+            low                             8
+            high                           10
+            max                           124
+
+        Not sending it is not "off". It is an unnamed middle value, about seven
+        times more reasoning than `low`, and on a real extraction that is the
+        difference between a section finishing and a section timing out.
+        Gemini's OpenAI-compatible endpoint maps the same parameter onto
+        `thinking_level` and defaults to `medium` when it is absent.
+
+        Nothing is broken in production today: only `gpt-5.6-sol` runs here and
+        it does get the parameter. This is a trap rather than a fault -- the
+        next model adopted that accepts it would run on a default with nothing
+        anywhere saying so. So the answer comes from the backend registry, and
+        the prefix guess survives only for a backend that declares nothing,
+        which keeps every model's behaviour today byte-identical.
+        """
+
+        if self.sends_reasoning_effort is not None:
+            return self.sends_reasoning_effort
+        return self.model.startswith("gpt-5.6")
+
+    def _wants_temperature(self) -> bool:
+        """Whether this model is sent `temperature`.
+
+        The two used to be an `if/else`, which made them mutually exclusive by
+        accident rather than by anyone's decision. `kimi-k3` wants both: it
+        needs `reasoning_effort`, and it rejects any temperature except 1. An
+        undeclared backend keeps the old pairing exactly -- temperature when
+        reasoning effort is not sent, and not when it is.
+        """
+
+        if self.sends_temperature is not None:
+            return self.sends_temperature
+        return not self._wants_reasoning_effort()
 
     def generate_json(
         self,
@@ -550,9 +602,9 @@ class Stage1OpenAIClient:
                     },
                     "max_completion_tokens": self.max_output_tokens,
                 }
-                if self.model.startswith("gpt-5.6"):
+                if self._wants_reasoning_effort():
                     kwargs["reasoning_effort"] = self.reasoning_effort
-                else:
+                if self._wants_temperature():
                     kwargs["temperature"] = temperature
                 response = client.chat.completions.create(**kwargs)
                 self.last_usage = getattr(response, "usage", None)
