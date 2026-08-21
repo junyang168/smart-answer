@@ -6,15 +6,40 @@ from backend.pipeline import transcript_pipeline
 from backend.api import sermon_converter_service as service
 
 
+class _FakeStream:
+    def __init__(self, kwargs):
+        self.kwargs = kwargs
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_completion(self):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"ok"}'))],
+            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+
 class _FakeCompletions:
     def __init__(self):
         self.kwargs = None
+        self.stream_kwargs = None
 
     def create(self, **kwargs):
         self.kwargs = kwargs
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content='{"answer":"ok"}'))]
         )
+
+    def stream(self, **kwargs):
+        self.stream_kwargs = kwargs
+        return _FakeStream(kwargs)
 
 
 class _FakeOpenAI:
@@ -54,7 +79,11 @@ def test_transcript_prompt_bundle_is_runtime_specific():
 def test_stage1_openai_client_uses_gpt56_structured_output(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(stage1, "OpenAI", _FakeOpenAI)
-    client = stage1.Stage1OpenAIClient(model="gpt-5.6-sol", max_retries=1)
+    # Below STREAMING_OUTPUT_THRESHOLD so this stays a test of the request
+    # shape rather than of which transport carries it.
+    client = stage1.Stage1OpenAIClient(
+        model="gpt-5.6-sol", max_retries=1, max_output_tokens=8000
+    )
     schema = {
         "name": "answer_schema",
         "strict": True,
@@ -74,6 +103,37 @@ def test_stage1_openai_client_uses_gpt56_structured_output(monkeypatch):
     assert request["reasoning_effort"] == "medium"
     assert request["response_format"] == {"type": "json_schema", "json_schema": schema}
     assert "temperature" not in request
+    assert client.client.completions.stream_kwargs is None
+
+
+def test_stage1_openai_client_streams_a_budget_it_cannot_deliver_in_one_response(monkeypatch):
+    """A budget over the threshold has to stream, and streaming has to ask for usage.
+
+    The SDK timeout is httpx's idle timeout, so a non-streaming call survives
+    only while the server keeps the socket busy; a reasoning model spending its
+    budget on thinking sends nothing for minutes. And `stream()` without
+    `stream_options` returns `usage = None`, which would cost every streamed
+    call its token counts -- the ledger this pipeline prices runs from.
+    """
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(stage1, "OpenAI", _FakeOpenAI)
+    client = stage1.Stage1OpenAIClient(
+        model="kimi-k3", max_retries=1,
+        max_output_tokens=stage1.STREAMING_OUTPUT_THRESHOLD + 1,
+        temperature=1.0,
+    )
+    schema = {"name": "answer_schema", "strict": True, "schema": {"type": "object"}}
+
+    result = client.generate_json("system", "user", schema)
+
+    assert result == {"answer": "ok"}
+    assert client.client.completions.kwargs is None, "must not use the blocking path"
+    streamed = client.client.completions.stream_kwargs
+    assert streamed["stream_options"] == {"include_usage": True}
+    assert streamed["max_completion_tokens"] == stage1.STREAMING_OUTPUT_THRESHOLD + 1
+    assert streamed["temperature"] == 1.0, "kimi-k3 rejects every temperature but 1"
+    assert client.last_usage is not None
 
 
 class _FakeTranscriptClient:

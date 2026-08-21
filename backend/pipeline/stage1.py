@@ -492,6 +492,8 @@ class Stage1OpenAIClient:
         reasoning_effort: str = "medium",
         base_url: Optional[str] = None,
         api_key_env: str = "OPENAI_API_KEY",
+        temperature: Optional[float] = None,
+        send_reasoning_effort: Optional[bool] = None,
     ) -> None:
         # `base_url` / `api_key_env` exist so an OpenAI-compatible provider --
         # DeepSeek is the one in use -- reaches the same structured-output path
@@ -504,6 +506,17 @@ class Stage1OpenAIClient:
         self.max_retries = max_retries
         self.max_output_tokens = max_output_tokens
         self.reasoning_effort = reasoning_effort
+        # Set only by a provider that refuses the caller's value. Moonshot's
+        # `kimi-k3` allows temperature 1 and nothing else, and rejects the
+        # request rather than clamping, so the constraint has to be expressed
+        # where the model is chosen instead of at each call site.
+        self.temperature = temperature
+        # None keeps the original rule -- only gpt-5.6 takes the parameter.
+        # A backend that knows better says so, because guessing from the model
+        # id is how `kimi-k3` silently ran at its own default: it accepts
+        # `reasoning_effort`, nobody sent one, and the default reasons far
+        # harder than anything this pipeline needs.
+        self.send_reasoning_effort = send_reasoning_effort
         self.client = OpenAI(
             api_key=api_key, max_retries=0, timeout=timeout_seconds,
             **({"base_url": base_url} if base_url else {}),
@@ -550,11 +563,38 @@ class Stage1OpenAIClient:
                     },
                     "max_completion_tokens": self.max_output_tokens,
                 }
-                if self.model.startswith("gpt-5.6"):
+                wants_effort = (
+                    self.model.startswith("gpt-5.6")
+                    if self.send_reasoning_effort is None
+                    else self.send_reasoning_effort
+                )
+                if wants_effort:
                     kwargs["reasoning_effort"] = self.reasoning_effort
+                # Not an either/or: gpt-5.6 rejects `temperature`, but kimi-k3
+                # requires one (and only 1) alongside its reasoning effort.
+                if not self.model.startswith("gpt-5.6"):
+                    kwargs["temperature"] = (
+                        self.temperature if self.temperature is not None else temperature
+                    )
+                # The same rule the Anthropic client above follows, and for the
+                # same reason: the SDK's timeout is httpx's *idle* timeout, so a
+                # non-streaming call survives only while the server keeps the
+                # socket busy, and a reasoning model that spends its budget
+                # thinking sends nothing for minutes at a time. `kimi-k3` held
+                # one connection for 16 minutes and returned an overload error
+                # with no partial result and no usage row to price it.
+                #
+                # `stream_options` is not optional: without it the final
+                # completion arrives with `usage = None`, which would silently
+                # cost every streamed call its token counts -- measured against
+                # both Moonshot and OpenAI.
+                if self.max_output_tokens > STREAMING_OUTPUT_THRESHOLD:
+                    with client.chat.completions.stream(
+                        stream_options={"include_usage": True}, **kwargs
+                    ) as stream:
+                        response = stream.get_final_completion()
                 else:
-                    kwargs["temperature"] = temperature
-                response = client.chat.completions.create(**kwargs)
+                    response = client.chat.completions.create(**kwargs)
                 self.last_usage = getattr(response, "usage", None)
                 content = response.choices[0].message.content or ""
                 if not content.strip():

@@ -63,8 +63,40 @@ MODEL_BACKENDS = {
     "gpt": {"kind": "openai"},
     "deepseek": {"kind": "openai", "base_url": "https://api.deepseek.com",
                  "api_key_env": "DEEPSEEK_API_KEY"},
+    # Moonshot runs two platforms with separate accounts, balances and keys:
+    # api.moonshot.cn and api.moonshot.ai. A key for one is rejected by the
+    # other as "Invalid Authentication", which reads like a bad key rather
+    # than the wrong host. The .ai host is the closer one from here (0.34s to
+    # first byte against 2.84s) but not the faster one: kimi-k3 measured 36.3
+    # tok/s there and 37.9 on .cn, so the route buys seconds and the model
+    # costs minutes. At that rate the 900s call ceiling below is worth about
+    # 34k output tokens, which is why this pipeline cannot hand it the same
+    # 64000-token budget the other models get.
+    #
+    # `kimi-k3` accepts strict `json_schema` and `max_completion_tokens`, but
+    # refuses any temperature except 1: it is a reasoning model and prices its
+    # own sampling. Every other model here runs at 0, so this is the first
+    # entry whose output is not reproducible from its fingerprint -- a re-run
+    # with --force can differ while `model_id`, prompt and schema all match.
+    # `max_output_tokens` is a throttle here, not a safety margin. kimi-k3
+    # spends thinking from the budget it is given and scales that thinking to
+    # whatever it is allowed: asked to say "hello" it thought 198 tokens at a
+    # 2000 budget and 500 at 8000. At the 64000 default a ten-paragraph source
+    # ran past ten minutes without finishing; at 12000 the same work took 4m46
+    # and used 10,695 completion tokens. 20000 leaves a real section room to
+    # answer without inviting the model to fill the gap with reasoning.
+    # kimi-k3 takes `reasoning_effort` and reasons hard without one. Measured
+    # on "hello": 8 reasoning tokens at low, 10 at high, 124 at max, and 56
+    # with the parameter absent -- so the unset default is neither `low` nor
+    # the `max` the docs name. Its documented enum is low/high/max; `medium`
+    # is accepted anyway, which is what this pipeline's CLI offers.
+    "kimi": {"kind": "openai", "base_url": "https://api.moonshot.ai/v1",
+             "api_key_env": "MOONSHOT_API_KEY", "temperature": 1.0,
+             "max_output_tokens": 20000, "reasoning_effort": True},
 }
 DEFAULT_MODEL = "gpt-5.6-sol"
+#: What a model gets when neither the caller nor its registry entry says.
+DEFAULT_MAX_OUTPUT_TOKENS = 64000
 
 DEFAULT_TRANSCRIPT_DIR = Path("/opt/homebrew/var/www/church/web/data/script_published")
 DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extractions"
@@ -799,6 +831,18 @@ def run_one(
     )
 
 
+def model_output_budget(model: str) -> int:
+    """The output budget for a model when the caller did not name one.
+
+    An explicit `--max-output-tokens` always wins; this only decides what
+    happens in its absence, so that a model whose registry entry knows it needs
+    a different budget is not handed the default sized for another one.
+    """
+
+    backend = MODEL_BACKENDS.get(model.split("-", 1)[0]) or {}
+    return int(backend.get("max_output_tokens") or DEFAULT_MAX_OUTPUT_TOKENS)
+
+
 def build_client(
     model: str, *, reasoning_effort: str, max_output_tokens: int
 ) -> Stage1OpenAIClient | Stage1AnthropicClient:
@@ -819,6 +863,8 @@ def build_client(
         model=model, reasoning_effort=reasoning_effort, timeout_seconds=900,
         max_retries=3, max_output_tokens=max_output_tokens,
         base_url=backend.get("base_url"), api_key_env=backend.get("api_key_env", "OPENAI_API_KEY"),
+        temperature=backend.get("temperature"),
+        send_reasoning_effort=backend.get("reasoning_effort"),
     )
 
 
@@ -830,13 +876,15 @@ def main() -> int:
     group.add_argument("--ids", nargs="+")
     group.add_argument("--source-manifest", type=Path)
     parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help="claude-* (default), gpt-*, or deepseek-*")
+                        help="gpt-* (default), claude-*, deepseek-*, or kimi-*")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     # 32,000 was sized for a model that did not think from the same budget.
     # Claude Opus 5 spends adaptive thinking out of `max_tokens`, and a single
     # 1,391-character section spent 21,967 output tokens; the first run at the
     # old default failed mid-answer on the smallest section of the 母本.
-    parser.add_argument("--max-output-tokens", type=int, default=64000)
+    parser.add_argument("--max-output-tokens", type=int, default=None,
+                        help="defaults to the model's registry budget, else "
+                             f"{DEFAULT_MAX_OUTPUT_TOKENS}")
     parser.add_argument("--section-level", type=int, default=DEFAULT_SECTION_LEVEL,
                         help="headings at or above this level start a section")
     parser.add_argument("--only-sections", type=int, nargs="+", metavar="N",
@@ -848,6 +896,8 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.max_output_tokens is None:
+        args.max_output_tokens = model_output_budget(args.model)
     sections = SectionSettings(
         level=args.section_level, allow_generated=not args.no_generated_sections,
         only=tuple(args.only_sections) if args.only_sections else None,

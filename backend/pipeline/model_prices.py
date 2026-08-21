@@ -85,7 +85,29 @@ _OPENAI_RATES = {
 }
 
 
+#: Moonshot publishes in CNY, not dollars, so unlike every other rate here
+#: these are converted: 20/2/100 CNY per million become the figures below at
+#: 7.2 CNY/USD, read 2026-08-20.  The exchange rate is the part that rots --
+#: the vendor's own number has not changed when this drifts -- so a run priced
+#: with this table records the rate it used, and a materially different
+#: exchange rate is a new table version, not an edit here.
+#:
+#: Moonshot's cached-input rate is exactly a tenth of fresh input, which is the
+#: ratio `CACHE_READ_MULTIPLIER` already assumes; it is given explicitly anyway
+#: so a change on their side does not have to be inferred.  Cache writes are
+#: not billed -- caching is automatic, as it is at OpenAI -- so `cache_write`
+#: is zero rather than Anthropic's 1.25x.
+_MOONSHOT_RATES = {
+    "kimi-k3": ModelRate(input=2.78, output=13.89, cache_read=0.28, cache_write=0.0),
+}
+
+
 #: Append-only.  Newest last; `price_table_for` picks by date, not by position.
+#:
+#: Adding a model to a table that already shipped is not the edit this rule
+#: forbids: `kimi-k3` priced nothing before today, so no run's recorded cost
+#: can change underneath it.  What the rule forbids is moving a rate a run was
+#: already priced with.
 #:
 #: Anthropic rates are first-party API list prices; OpenAI rates are the
 #: published API list prices.  Both are list prices, not invoices -- a
@@ -103,13 +125,14 @@ PRICE_TABLES: tuple[PriceTable, ...] = (
         until=date(2026, 8, 31),
         source=(
             "Anthropic first-party API list prices (Sonnet 5 introductory rate); "
-            "OpenAI API list prices"
+            "OpenAI API list prices; Moonshot CNY list prices at 7.2 CNY/USD"
         ),
         rates={
             "claude-opus-5": ModelRate(input=5.00, output=25.00),
             "claude-sonnet-5": ModelRate(input=2.00, output=10.00),
             "claude-haiku-4-5": ModelRate(input=1.00, output=5.00),
             **_OPENAI_RATES,
+            **_MOONSHOT_RATES,
         },
     ),
     PriceTable(
@@ -118,13 +141,14 @@ PRICE_TABLES: tuple[PriceTable, ...] = (
         until=None,
         source=(
             "Anthropic first-party API list prices (Sonnet 5 standard rate); "
-            "OpenAI API list prices"
+            "OpenAI API list prices; Moonshot CNY list prices at 7.2 CNY/USD"
         ),
         rates={
             "claude-opus-5": ModelRate(input=5.00, output=25.00),
             "claude-sonnet-5": ModelRate(input=3.00, output=15.00),
             "claude-haiku-4-5": ModelRate(input=1.00, output=5.00),
             **_OPENAI_RATES,
+            **_MOONSHOT_RATES,
         },
     ),
 )
