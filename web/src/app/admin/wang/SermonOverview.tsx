@@ -98,18 +98,36 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
     // the store holds, not the document record's revision -- that record is
     // metadata and sits at rev 1 through every re-ingest that does not touch
     // the title or the path, so it moved for none of the work done here.
+    // What the store holds, every time. `+1365 ~0` was the change set's delta
+    // and it answered a question nobody was asking, while hiding the half that
+    // mattered: the same ingest retired 209 objects, the claim layer it
+    // replaced. The deltas moved to the tooltip.
     const fragments = n("fragments");
-    if (fragments !== null && quality.status === undefined) {
-      return fragments ? `庫內 ${fragments} 片段` : "庫內無材料";
-    }
-    const revision = n("revision");
-    if (revision !== null && quality.status === undefined) return `rev ${revision}`;
+    if (fragments !== null) return fragments ? `庫內 ${fragments} 片段` : "庫內無材料";
     if (quality.status === "already_applied") return "無變化";
-    const created = n("created") ?? 0;
-    const updated = n("updated") ?? 0;
-    return created || updated ? `+${created} ~${updated}` : "無變化";
+    const revision = n("revision");
+    if (revision !== null) return `rev ${revision}`;
+    return null;
   }
   return null;
+}
+
+/** What one ingest actually moved, for the tooltip. */
+function ingestDetail(stage: StageId, quality: Record<string, unknown> | null): string | null {
+  if (stage !== "ingest" || !quality) return null;
+  const n = (key: string) => (typeof quality[key] === "number" ? (quality[key] as number) : null);
+  const created = n("created");
+  const retired = n("retired");
+  const updated = n("updated");
+  if (created === null && retired === null && updated === null) return null;
+  const parts = [
+    created ? `新增 ${created}` : null,
+    updated ? `更新 ${updated}` : null,
+    // The half `+1365 ~0` left out. A re-extraction retires the claim layer it
+    // replaces, in the same change set, and that is the number to check.
+    retired ? `退役 ${retired}` : null,
+  ].filter(Boolean);
+  return parts.length ? `這次入庫：${parts.join("、")}` : "這次入庫沒有變動";
 }
 
 /** The whole-source picture, for the tooltip: which categories are unaccounted for. */
@@ -149,6 +167,7 @@ function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const supersededLabel =
     cell.superseded ? qualityLabel(stage, cell.superseded.quality) : null;
   const tip = [
+    ingestDetail(stage, cell.quality),
     coverageDetail(stage, cell.quality),
     supersededLabel ? `重跑前：${stateLabels[cell.superseded!.state]} ${supersededLabel}` : null,
     cell.state === "no_source" ? cellReasons.no_source : null,

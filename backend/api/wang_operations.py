@@ -202,7 +202,10 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                 """SELECT run_id, subject_kind, subject_id, source_ids, stage, trigger,
                           triggered_by, status, started_at, finished_at, heartbeat_at,
                           model_id, cost_usd, price_version, quality, input_sha256,
-                          output_paths, error_message
+                          output_paths, error_message,
+                          -- `command` is what a run that died before recording
+                          -- an output still says about where it was writing.
+                          command
                      FROM wang_knowledge.pipeline_runs
                     ORDER BY started_at"""
             )
@@ -214,6 +217,37 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "message": f"Could not read the run ledger: {exc}",
         }]
     return rows, []
+
+
+def is_scratch_run(run: dict[str, Any], staging_root: Path) -> bool:
+    """A run whose output never reached the canonical staging tree.
+
+    Someone comparing extraction models writes to a scratch directory on
+    purpose: the point is to look at the result, not to feed it downstream. But
+    the run is still filed against the real source, so it lands as that
+    source's newest extraction -- and every later stage reads `stale`, because
+    the thing they consumed has apparently moved. It has not. Nothing consumed
+    this.
+
+    A finished, ingested 母本 was pushed to 舊 across four stages this way, by
+    a model comparison in another session's scratchpad that produced a file the
+    pipeline has never read. The run stays in the runs list, because it happened
+    and it cost money; it just stops speaking for the source's state.
+
+    A run with no recorded outputs is not scratch. Absence of evidence is the
+    normal state for every row written before outputs were recorded, and
+    treating those as experiments would erase most of the history.
+    """
+
+    root = str(staging_root)
+    outputs = [str(path) for path in (run.get("output_paths") or []) if path]
+    if outputs:
+        return all(not output.startswith(root) for output in outputs)
+    # Died before it could record an output. The command still says where it
+    # was going to write, which is the same evidence one step earlier.
+    command = str(run.get("command") or "")
+    match = re.search(r"--output-dir[= ]+(\S+)", command)
+    return bool(match) and not match.group(1).startswith(root)
 
 
 def _as_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -374,9 +408,20 @@ def _cell(
 
     if not runs:
         return {"state": "never", "quality": None, "run": None}
-    latest = runs[-1]
     last_success = next(
         (run for run in reversed(runs) if run["effective_status"] == "succeeded"), None
+    )
+    # An interrupted run never reported anything: the process was killed and
+    # the status was inferred from a stale heartbeat. That is an absence of a
+    # verdict, not a verdict, so it must not overwrite one. A `failed` run is
+    # different -- the runner lived long enough to say so, and that is worth
+    # showing over an older success.
+    latest = next(
+        (
+            run for run in reversed(runs)
+            if run["effective_status"] != "interrupted" or last_success is None
+        ),
+        runs[-1],
     )
     summary = _run_summary(latest)
     if latest["effective_status"] in {"failed", "interrupted", "cancelled"}:
@@ -568,8 +613,13 @@ def overview() -> dict[str, Any]:
     for run in runs:
         run["effective_status"] = _effective_status(run, now)
 
+    staging_root = paths.claim_layer_staging
     by_source: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for run in runs:
+        run["scratch"] = is_scratch_run(run, staging_root)
+        if run["scratch"]:
+            # Visible in the runs list, silent in the stage cells.
+            continue
         for source_id in run.get("source_ids") or []:
             by_source.setdefault(str(source_id), {}).setdefault(str(run["stage"]), []).append(run)
 
@@ -648,6 +698,16 @@ def overview() -> dict[str, Any]:
                 cell = _pending(cell)
             if cell["state"] in {"running", "queued"}:
                 upstream_in_flight = True
+            if stage == "ingest":
+                # What the store holds now, whether or not a run wrote it. The
+                # cell's job is to answer "what is in the store for this
+                # source"; the change set's deltas answer "what moved", which
+                # is a tooltip question.
+                held = ingested.get(row["source_id"])
+                if held and cell.get("quality") is not None:
+                    cell["quality"] = {
+                        **cell["quality"], "fragments": held.get("fragments") or 0,
+                    }
             stages[stage] = cell
             for run in stage_runs.get(stage) or []:
                 if run["effective_status"] == "succeeded" and run.get("finished_at"):
