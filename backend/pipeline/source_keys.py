@@ -105,3 +105,24 @@ def key_from_source_path(path: Any) -> str:
         if index + 1 < len(parts):
             return parts[index + 1]
     return candidate.stem
+
+
+def package_row_key(package: Mapping[str, Any]) -> str:
+    """The subject a single-source package's runs should be filed under.
+
+    Every stage has to name the source the same way or the overview scatters
+    one source's work across several rows. Extraction files under the
+    transcript id; the stages after it read `source_documents` and were filing
+    under `source_id`, which for a sermon is `SRC-2016_NYSC_3-3d012c24a542`
+    while extraction said `2016 NYSC 專題：馬太福音釋經（四）3`. A 母本 hides the
+    bug: both fields hold the same string there, so the first two sources run
+    through the chain looked correct and every sermon would not have.
+
+    Returns "" for a package covering several sources, which has no single
+    subject and is filed as a batch.
+    """
+
+    documents = package.get("source_documents") or []
+    if len(documents) != 1:
+        return ""
+    return document_row_key(documents[0])

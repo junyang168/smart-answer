@@ -100,3 +100,42 @@ def test_the_first_sectioned_re_extraction_still_behaves_as_it_did() -> None:
         ).closure()
     )
     assert ("evidence_steps", "E012") in retired
+
+
+def test_every_stage_names_a_sermon_the_way_extraction_does() -> None:
+    """One source, one row -- whichever stage is filing.
+
+    Extraction files under the transcript id. The stages after it read
+    `source_documents` and filed under `source_id`, which for a sermon is
+    `SRC-2016_NYSC_3-3d012c24a542` against extraction's
+    `2016 NYSC 專題：馬太福音釋經（四）3`. Five stages landed on a row nothing
+    else used, so a sermon whose whole chain had just succeeded showed
+    cross_section 未跑 and everything after it 舊.
+
+    A 母本 hides it: both fields hold the same string there, which is why the
+    first two sources through the chain looked right.
+    """
+
+    from backend.pipeline.source_keys import package_row_key
+
+    sermon = {
+        "source_documents": [{
+            "source_id": "SRC-2016_NYSC_3-3d012c24a542",
+            "source_type": "sermon_transcript",
+            "transcript_id": "2016 NYSC 專題：馬太福音釋經（四）3",
+        }]
+    }
+    assert package_row_key(sermon) == "2016 NYSC 專題：馬太福音釋經（四）3"
+
+    notes = {
+        "source_documents": [{
+            "source_id": "notes_manuscript:16_章_-_生命",
+            "source_type": "notes_manuscript",
+            "transcript_id": "notes_manuscript:16_章_-_生命",
+            "project_id": "16_章_-_生命",
+        }]
+    }
+    assert package_row_key(notes) == "16_章_-_生命"
+
+    # A merged package covers several sources and has no single subject.
+    assert package_row_key({"source_documents": [{"source_id": "A"}, {"source_id": "B"}]}) == ""

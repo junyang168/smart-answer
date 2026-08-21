@@ -32,6 +32,7 @@ from backend.pipeline.knowledge_package import live_claims
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -393,8 +394,9 @@ def run_claim_layer(
     # back to the package filename, and files its run against a subject no
     # other stage uses -- so the source's own row in the overview shows an
     # extraction and a review with the adjudication sitting somewhere else.
-    if len(transcripts) == 1:
-        source_identity["transcript_id"] = transcripts[0][0]
+    row_key = package_row_key(package)
+    if row_key:
+        source_identity["transcript_id"] = row_key
     if package.get("review_batch"):
         source_identity["review_batch"] = copy.deepcopy(package["review_batch"])
     source_fingerprint = _sha256_bytes(
@@ -425,10 +427,10 @@ def run_claim_layer(
     # the survey path recorded, so every claim-layer review -- which is what
     # the batch runner runs -- was invisible to the overview.
     with run_record(
-        subject=transcripts[0][0] if len(transcripts) == 1 else str(package_path.name),
+        subject=row_key or str(package_path.name),
         stage="review",
-        subject_kind="source" if len(transcripts) == 1 else "batch",
-        sources=[source_id for source_id, _ in transcripts],
+        subject_kind="source" if row_key else "batch",
+        sources=[row_key] if row_key else [],
     ) as record:
         record.model(client.model)
         record.inputs({"package_sha256": source_identity["package_sha256"]})

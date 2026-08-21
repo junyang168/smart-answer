@@ -21,6 +21,7 @@ from backend.api.canonical_repository.postgres_store import (
     combined_plan,
 )
 from backend.pipeline.extraction_supersede import package_source_ids, superseded
+from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
 
@@ -149,13 +150,14 @@ def main(argv: list[str] | None = None) -> int:
         # row matters more since this became the batch runner's ingest stage:
         # without it a re-extracted source reaches the store with nothing in
         # the ledger saying so, which is the state the overview exists to stop.
-        sources = sorted(package_source_ids(package))
-        single = len(sources) == 1
+        # The row key, not the package's `source_id`: for a sermon those are
+        # different strings, and extraction files under the row key.
+        row_key = package_row_key(package)
         with run_record(
-            subject=sources[0] if single else str(args.package.name),
+            subject=row_key or str(args.package.name),
             stage="ingest",
-            subject_kind="source" if single else "batch",
-            sources=sources,
+            subject_kind="source" if row_key else "batch",
+            sources=[row_key] if row_key else sorted(package_source_ids(package)),
         ) as record:
             output["result"] = store.apply_plan(
                 change_set,

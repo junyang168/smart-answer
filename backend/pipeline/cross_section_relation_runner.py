@@ -25,6 +25,7 @@ from backend.pipeline.cross_section_relation import (
 )
 from backend.pipeline.llm_usage import usage_row
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 VALIDATION_ATTEMPTS = 3
@@ -165,10 +166,7 @@ def main(argv: list[str] | None = None) -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     package = json.loads(args.package.read_text(encoding="utf-8"))
-    documents = package.get("source_documents") or []
-    subject = str(
-        (documents[0].get("source_id") if documents else None) or args.package.name
-    )
+    subject = package_row_key(package) or args.package.name
     # The stage had no name in the ledger until now, so the overview could not
     # say whether a source had been through it. That is the one question worth
     # asking about this stage: it was skipped once already, silently.

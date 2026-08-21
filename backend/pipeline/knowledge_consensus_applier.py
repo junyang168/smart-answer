@@ -15,6 +15,7 @@ from typing import Any
 
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 
 
 class ConsensusApplicationError(ValueError):
@@ -359,10 +360,7 @@ def main() -> int:
         transcript_id = str(source.get("transcript_id") or "")
         transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
         transcripts[transcript_id] = transcript
-    documents = package.get("source_documents") or []
-    subject = str(
-        (documents[0].get("source_id") if documents else None) or args.package.name
-    )
+    subject = package_row_key(package) or args.package.name
     # No model call here, so the row costs nothing and says the one thing the
     # overview could not: whether the adjudicator's overrides were ever applied.
     # One source reached the store from its raw extraction package because
