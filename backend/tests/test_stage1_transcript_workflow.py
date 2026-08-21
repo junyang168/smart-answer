@@ -122,6 +122,7 @@ def test_stage1_openai_client_streams_a_budget_it_cannot_deliver_in_one_response
         model="kimi-k3", max_retries=1,
         max_output_tokens=stage1.STREAMING_OUTPUT_THRESHOLD + 1,
         temperature=1.0,
+        stream_large_output=True,
     )
     schema = {"name": "answer_schema", "strict": True, "schema": {"type": "object"}}
 
@@ -698,3 +699,24 @@ def test_generated_units_do_not_overwrite_existing_human_draft_chunks(monkeypatc
     monkeypatch.setattr(service, "NOTES_TO_SERMON_DIR", tmp_path)
 
     assert service._should_sync_draft_chunks_from_generated_units(project_id) is False
+
+
+def test_streaming_is_opt_in_so_adding_a_model_cannot_change_an_existing_one(monkeypatch):
+    """gpt-5.6-sol runs at a 64000 budget, above the streaming threshold.
+
+    Streaming it would change how production extracts, as a side effect of
+    reaching a new vendor. The client therefore streams only when the backend
+    entry asks for it.
+    """
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(stage1, "OpenAI", _FakeOpenAI)
+    client = stage1.Stage1OpenAIClient(
+        model="gpt-5.6-sol", max_retries=1,
+        max_output_tokens=stage1.STREAMING_OUTPUT_THRESHOLD * 4,
+    )
+
+    client.generate_json("system", "user", {"name": "s", "schema": {"type": "object"}})
+
+    assert client.client.completions.stream_kwargs is None, "must not stream by default"
+    assert client.client.completions.kwargs is not None

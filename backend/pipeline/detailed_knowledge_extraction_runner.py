@@ -92,7 +92,8 @@ MODEL_BACKENDS = {
     # is accepted anyway, which is what this pipeline's CLI offers.
     "kimi": {"kind": "openai", "base_url": "https://api.moonshot.ai/v1",
              "api_key_env": "MOONSHOT_API_KEY", "temperature": 1.0,
-             "max_output_tokens": 20000, "reasoning_effort": True},
+             "max_output_tokens": 20000, "reasoning_effort": True,
+             "stream": True},
 }
 DEFAULT_MODEL = "gpt-5.6-sol"
 #: What a model gets when neither the caller nor its registry entry says.
@@ -865,6 +866,7 @@ def build_client(
         base_url=backend.get("base_url"), api_key_env=backend.get("api_key_env", "OPENAI_API_KEY"),
         temperature=backend.get("temperature"),
         send_reasoning_effort=backend.get("reasoning_effort"),
+        stream_large_output=bool(backend.get("stream")),
     )
 
 

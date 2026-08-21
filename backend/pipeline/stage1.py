@@ -494,6 +494,7 @@ class Stage1OpenAIClient:
         api_key_env: str = "OPENAI_API_KEY",
         temperature: Optional[float] = None,
         send_reasoning_effort: Optional[bool] = None,
+        stream_large_output: bool = False,
     ) -> None:
         # `base_url` / `api_key_env` exist so an OpenAI-compatible provider --
         # DeepSeek is the one in use -- reaches the same structured-output path
@@ -517,6 +518,12 @@ class Stage1OpenAIClient:
         # `reasoning_effort`, nobody sent one, and the default reasons far
         # harder than anything this pipeline needs.
         self.send_reasoning_effort = send_reasoning_effort
+        # Off by default, so adding a model cannot change how an existing one
+        # is called. The Anthropic client streams above the same threshold on
+        # its own judgement; doing that here for gpt-5.6 would alter the
+        # production extraction path, which is a separate change needing its
+        # own verification rather than a side effect of reaching a new vendor.
+        self.stream_large_output = stream_large_output
         self.client = OpenAI(
             api_key=api_key, max_retries=0, timeout=timeout_seconds,
             **({"base_url": base_url} if base_url else {}),
@@ -588,7 +595,7 @@ class Stage1OpenAIClient:
                 # completion arrives with `usage = None`, which would silently
                 # cost every streamed call its token counts -- measured against
                 # both Moonshot and OpenAI.
-                if self.max_output_tokens > STREAMING_OUTPUT_THRESHOLD:
+                if self.stream_large_output and self.max_output_tokens > STREAMING_OUTPUT_THRESHOLD:
                     with client.chat.completions.stream(
                         stream_options={"include_usage": True}, **kwargs
                     ) as stream:
