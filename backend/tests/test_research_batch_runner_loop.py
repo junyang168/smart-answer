@@ -167,36 +167,45 @@ def test_only_runs_the_named_members(tmp_path, monkeypatch, capsys) -> None:
     assert "丙" in calls[0]
 
 
-def test_ingest_is_not_in_stage_all_unless_asked(tmp_path, monkeypatch, capsys) -> None:
+def test_stage_all_carries_a_source_all_the_way_to_ingest(tmp_path, monkeypatch, capsys) -> None:
+    """One command, source file to authoring store.
+
+    Ingest sat behind a second `--ingest` flag at first. Getting one 母本 from
+    its file into the store then took five invocations, and it sat finished but
+    unrecorded in between, because the last step waited to be asked for. A
+    chain that cannot be run in one command has not been shown to run end to
+    end, which was the point of building it.
+    """
+
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
-
-    _run(
-        monkeypatch,
-        ["--batch", str(batch), "--transcript-dir", str(transcripts),
-         "--output-root", str(tmp_path / "out"), "--only", "甲"],
-    )
-    default_out = capsys.readouterr().out
-    assert "extraction_supersede_runner" not in default_out
 
     _, calls = _run(
         monkeypatch,
         ["--batch", str(batch), "--transcript-dir", str(transcripts),
-         "--output-root", str(tmp_path / "out"), "--only", "甲", "--ingest"],
+         "--output-root", str(tmp_path / "out"), "--only", "甲"],
     )
     capsys.readouterr()
-    assert any("backend.pipeline.extraction_supersede_runner" in command for command in calls)
+    assert any("backend.pipeline.extraction_supersede_runner" in c for c in calls)
 
 
-def test_apply_without_ingest_is_refused(tmp_path, monkeypatch) -> None:
+def test_ingest_plans_the_change_set_unless_apply_is_given(tmp_path, monkeypatch, capsys) -> None:
+    """`--apply` is the one safety left, and it guards the one write."""
+
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
-    with pytest.raises(SystemExit):
-        _run(
-            monkeypatch,
-            ["--batch", str(batch), "--transcript-dir", str(transcripts),
-             "--output-root", str(tmp_path / "out"), "--apply"],
-        )
+    argv = ["--batch", str(batch), "--transcript-dir", str(transcripts),
+            "--output-root", str(tmp_path / "out"), "--only", "甲"]
+
+    _, planned = _run(monkeypatch, argv)
+    capsys.readouterr()
+    ingest = next(c for c in planned if "extraction_supersede_runner" in " ".join(c))
+    assert "--apply" not in ingest
+
+    _, applied = _run(monkeypatch, [*argv, "--apply"])
+    capsys.readouterr()
+    ingest = next(c for c in applied if "extraction_supersede_runner" in " ".join(c))
+    assert "--apply" in ingest
 
 
 def test_an_interrupt_still_leaves_a_terminal_status(tmp_path, monkeypatch, capsys) -> None:

@@ -57,10 +57,18 @@ MEMBER_STAGES = ("extract", "cross_section", "review", "adjudicate", "apply", "i
 BATCH_STAGES = ("merge",)
 STAGES = MEMBER_STAGES + BATCH_STAGES
 
-#: `ingest` writes to the authoring authority, so it is opt-in twice over: it
-#: is excluded from `--stage all` unless `--ingest` is passed, and the command
-#: it builds only carries `--apply` when `--apply` is.
-DEFAULT_STAGES = tuple(stage for stage in STAGES if stage != "ingest")
+#: `--stage all` means all of them, ingest included. It excluded ingest at
+#: first, behind a second `--ingest` flag, and the cost of that was the whole
+#: point of the exercise: getting one 母本 from its file to the store took five
+#: invocations, and the source sat finished-but-unrecorded in between because
+#: the last step needed someone to ask for it. A chain that cannot be run in
+#: one command has not been shown to run end to end.
+#:
+#: The safety that remains is `--apply`, and it is the right one: without it
+#: the ingest stage plans the change set and prints it, which is a question
+#: anybody may ask; with it, the run writes. One flag, one decision, at the
+#: only step that touches the authoring authority.
+DEFAULT_STAGES = STAGES
 
 
 def artifact_paths(output_root: Path, member_key: str) -> dict[str, Path]:
@@ -339,20 +347,13 @@ def main() -> int:
         help="run only these members (transcript id or source_id)",
     )
     parser.add_argument(
-        "--ingest", action="store_true",
-        help="include the ingest stage in --stage all; plans the change set only "
-             "unless --apply is also given",
-    )
-    parser.add_argument(
         "--apply", action="store_true",
-        help="let the ingest stage write to the knowledge store",
+        help="let the ingest stage write to the knowledge store; without it the "
+             "stage plans the change set and prints it",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-
-    if args.apply and not (args.ingest or args.stage == "ingest"):
-        parser.error("--apply only means something with --ingest or --stage ingest")
 
     batch = load_research_batch(args.batch)
     output_root = args.output_root or (
@@ -392,10 +393,7 @@ def main() -> int:
         selected_batch, transcript_dir=transcript_dirs, output_root=output_root,
         force=args.force, apply_ingest=args.apply,
     )
-    if args.stage == "all":
-        wanted = set(DEFAULT_STAGES) | ({"ingest"} if args.ingest else set())
-    else:
-        wanted = {args.stage}
+    wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     selected = [row for row in plan if row["stage"] in wanted]
     merged_output = output_root / "merged" / "research-batch-knowledge.json"
     preview = {
