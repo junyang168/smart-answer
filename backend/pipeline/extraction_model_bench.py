@@ -37,7 +37,7 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (
     run_source,
 )
 from backend.pipeline.knowledge_source import load_source_manifest
-from backend.pipeline.extraction_quality import GOLD_DIR, GoldSet, render_scores, score_package
+from backend.pipeline.extraction_quality import combined_list, render, score
 from backend.pipeline.model_prices import price_usage
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -508,9 +508,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--reuse-cache", action="store_true",
                         help="replay cached sections; cost columns then cover "
                              "only the sections that actually ran")
-    parser.add_argument("--gold", type=Path,
-                        help="a gold proposition set; adds the recall columns "
-                             f"that claim count cannot give (see {GOLD_DIR})")
+    parser.add_argument("--compare", action="store_true",
+                        help="merge every model's findings into one list and "
+                             "score each against it; needs two or more models")
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args(argv)
 
@@ -532,22 +532,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         print(f"\n## {source_row.get('source_id')}\n")
         print(render_markdown(rows))
-        if args.gold:
-            gold = GoldSet.load(args.gold)
-            scored = []
+        if args.compare:
+            # The list is built from the runs just made, so it needs no gold
+            # file and no human curation -- and it ranks only those runs.
+            runs = {}
             for row in rows:
                 if row.error:
                     continue
                 package_path = next(
                     (args.output_dir / row.model.replace("/", "_")).glob(
                         "*.detailed-knowledge.json"), None)
-                if package_path is None:
-                    continue
-                package = json.loads(package_path.read_text(encoding="utf-8"))
-                scored.append((row.model, score_package(package, gold)))
-            if scored:
-                print(f"\n### proposition recall against {gold.gold_id}\n")
-                print(render_scores(scored))
+                if package_path is not None:
+                    runs[row.model] = json.loads(package_path.read_text(encoding="utf-8"))
+            if len(runs) > 1:
+                findings = combined_list(runs)
+                print()
+                print(render(findings, [score(label, findings) for label in runs]))
         all_rows.extend(rows)
 
     if args.json_out:

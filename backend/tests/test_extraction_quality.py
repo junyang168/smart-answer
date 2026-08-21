@@ -1,144 +1,187 @@
-"""Proposition recall: the column that survived when the others could not rank.
+"""The measurement, without calling a model.
 
-Prose coverage was 24-25/132 for four different models and orphans were 0 for
-all of them, so neither could separate them. Claim count could, but it was
-separating granularity: 15 atomic claims and 6 compound ones can carry the
-same argument.
+Every number here was previously produced by a person reading a package. These
+tests are what makes the measurement reproducible; the models are not.
 """
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from backend.pipeline.extraction_quality import (
-    GOLD_DIR, GoldSet, Proposition, score_package,
+    CLAIM, LINKED_STEP, OBSERVATION, ORPHAN_STEP,
+    agreement, combined_list, records, review_pass_rate, same_finding, score,
 )
 
-
-def gold(*propositions: Proposition) -> GoldSet:
-    return GoldSet(gold_id="t", source_id="s", section=1, propositions=propositions)
-
-
-P_SECRECY = Proposition(
-    id="P01", text="保密命令有合理原因",
-    match=(("保密",), ("合理",), ("原因",)),
-)
+SECRECY = "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"
+SECRECY_REPHRASED = "耶穌在事工期間確曾命令某些人保密，但皆有合理且合乎邏輯的原因。"
+PARALLEL = "可1:43-45 亦見於太 8:1-4 及路 5:12-16，證明並非馬可的發明。"
 
 
-def test_a_proposition_needs_one_term_from_every_group():
-    """AND of ORs. 可4:11 說明 and 可4:11 平行記載 must not match each other."""
-
-    explain = Proposition(id="P09", text="可4:11 是啟示說明而非保密請求",
-                          match=(("4:11",), ("啟示",), ("請求", "並非保密")))
-
-    assert explain.matches("可4:11 並非保密的請求，而是神聖啟示的說明。")
-    assert not explain.matches("可4:11 此段亦見於太13:11-17，並非馬可獨有。")
+def package(claims=(), steps=(), observations=()):
+    return {"claims": list(claims), "evidence_steps": list(steps),
+            "observations": list(observations)}
 
 
-def test_a_compound_claim_scores_the_same_as_several_atomic_ones():
-    """The whole reason this exists.
+# ---------------------------------------------------------------- matching
 
-    gpt-5.6-sol states 可1:43-45's practical reason and its synoptic parallels
-    as two claims; gemini-3.7-flash joins them with 且. Counting objects makes
-    that a 2:1 difference; counting propositions makes it a tie.
-    """
-
-    reason = Proposition(id="A", text="有實際原因", match=(("1:43",), ("實際原因",)))
-    parallel = Proposition(id="B", text="非馬可發明", match=(("平行", "太"), ("發明", "虛構")))
-    g = gold(reason, parallel)
-
-    atomic = {"claims": [{"title": "可1:43-45 的保密命令有明確的實際原因。"},
-                         {"title": "可1:43-45 亦見於太 8:1-4，並非馬可的發明。"}]}
-    compound = {"claims": [{"title": "可1:43-45 的保密命令有明確的實際原因，"
-                                     "且共觀平行記載證明其非馬可虛構。"}]}
-
-    assert score_package(atomic, g).claim_recall == 1.0
-    assert score_package(compound, g).claim_recall == 1.0
+def test_a_rephrasing_is_the_same_finding():
+    assert same_finding(SECRECY, SECRECY_REPHRASED)
 
 
-def test_a_step_a_claim_links_to_counts_as_delivered():
-    """Authoring starts at a claim and walks `evidence_step_ids` to the steps.
+def test_two_points_about_the_same_verse_are_not_the_same_finding():
+    """可4:11 是啟示說明 and 可4:11 也見於太13:11-17 share a verse, not a point."""
 
-    So a proposition in a linked step is reachable, not lost. Scoring by which
-    array it landed in instead reported one model at 5 of 18 when 16 of 18 were
-    reachable -- a filing decision read as a capability gap.
-    """
+    assert not same_finding(
+        "可4:11 並非保密的請求，而是神聖啟示的說明。",
+        "可4:11 此段亦見於太 13:11-17，並非馬可獨有。",
+    )
 
-    package = {
-        "claims": [{"title": "與此無關的結論。", "evidence_step_ids": ["E1"]}],
-        "evidence_steps": [
-            {"evidence_step_id": "E1",
-             "statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}],
+
+# ------------------------------------------------------------- reachability
+
+def test_a_step_a_claim_links_to_is_reachable():
+    """Authoring starts at a claim and walks `evidence_step_ids`."""
+
+    pkg = package(
+        claims=[{"title": "某個結論。", "evidence_step_ids": ["E1"]}],
+        steps=[{"evidence_step_id": "E1", "statement": SECRECY}],
+    )
+    tiers = {r.text: r.tier for r in records(pkg)}
+
+    assert tiers[SECRECY] == LINKED_STEP
+    assert all(r.reachable for r in records(pkg))
+
+
+def test_a_step_no_claim_points_at_is_not_reachable():
+    pkg = package(steps=[{"evidence_step_id": "E1", "statement": SECRECY}])
+    step = next(r for r in records(pkg) if r.text == SECRECY)
+
+    assert step.tier == ORPHAN_STEP and not step.reachable
+
+
+def test_a_step_that_names_its_claim_is_reachable_too():
+    """Either direction of the link counts; the runner writes both."""
+
+    pkg = package(
+        claims=[{"title": "某個結論。"}],
+        steps=[{"evidence_step_id": "E1", "statement": SECRECY,
+                "produced_claim_ids": ["CL1"]}],
+    )
+    step = next(r for r in records(pkg) if r.text == SECRECY)
+
+    assert step.tier == LINKED_STEP
+
+
+def test_an_observation_is_never_reachable():
+    """The authoring walk never visits observations."""
+
+    pkg = package(observations=[{"statement": SECRECY}])
+    observation = records(pkg)[0]
+
+    assert observation.tier == OBSERVATION and not observation.reachable
+
+
+# ------------------------------------------------------------ combined list
+
+def test_the_list_merges_the_same_finding_across_runs():
+    runs = {
+        "a": package(claims=[{"title": SECRECY}]),
+        "b": package(steps=[{"evidence_step_id": "E1", "statement": SECRECY_REPHRASED}]),
     }
-    score = score_package(package, gold(P_SECRECY))
+    findings = combined_list(runs)
 
-    assert score.in_claims == ()
-    assert score.in_linked_steps == ("P01",)
-    assert score.recall == 1.0, "reachable from a claim is delivered"
-    assert score.stranded == ()
+    assert len(findings) == 1
+    assert findings[0].found_by == 2
+    assert findings[0].seen_in["a"] == CLAIM
+    assert findings[0].seen_in["b"] == ORPHAN_STEP
 
 
-def test_a_step_no_claim_points_at_is_stranded():
-    """The loss this column exists to catch: in the package, out of reach."""
+def test_the_list_keeps_the_best_tier_a_run_gave_a_finding():
+    """A run that files the same point twice is credited with the better one."""
 
-    package = {
-        "claims": [],
-        "evidence_steps": [
-            {"evidence_step_id": "E1",
-             "statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}],
+    runs = {"a": package(
+        claims=[{"title": SECRECY, "evidence_step_ids": ["E1"]}],
+        steps=[{"evidence_step_id": "E1", "statement": SECRECY_REPHRASED}],
+    )}
+    findings = combined_list(runs)
+
+    assert len(findings) == 1 and findings[0].seen_in["a"] == CLAIM
+
+
+def test_findings_only_one_run_produced_stay_in_the_list():
+    runs = {
+        "a": package(claims=[{"title": SECRECY}, {"title": PARALLEL}]),
+        "b": package(claims=[{"title": SECRECY}]),
     }
-    score = score_package(package, gold(P_SECRECY))
+    findings = combined_list(runs)
 
-    assert score.stranded == ("P01",)
-    assert score.recall == 0.0
-
-
-def test_an_observation_is_stranded_because_the_walk_never_visits_it():
-    package = {"claims": [], "observations": [
-        {"statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}]}
-    score = score_package(package, gold(P_SECRECY))
-
-    assert score.stranded == ("P01",)
-    assert score.recall == 0.0
+    assert len(findings) == 2
+    assert [f.found_by for f in findings] == [2, 1]
 
 
-def test_a_claim_is_preferred_over_a_step_for_the_same_proposition():
-    package = {
-        "claims": [{"title": "耶穌的保密命令都有合理的原因。",
-                    "evidence_step_ids": ["E1"]}],
-        "evidence_steps": [{"evidence_step_id": "E1",
-                            "statement": "耶穌命令保密，有合理的原因。"}],
+# ------------------------------------------------------------------ scoring
+
+def test_scoring_partitions_every_finding():
+    """reachable + stranded + missing accounts for the whole list, always."""
+
+    runs = {
+        "a": package(
+            claims=[{"title": SECRECY, "evidence_step_ids": ["E1"]}],
+            steps=[{"evidence_step_id": "E1", "statement": PARALLEL}],
+            observations=[{"statement": "太 16:20 記載耶穌囑咐門徒不可對人說祂是基督。"}],
+        ),
+        "b": package(claims=[{"title": "一個只有 b 找到的結論：門徒尚未明白受苦的使命。"}]),
     }
-    score = score_package(package, gold(P_SECRECY))
+    findings = combined_list(runs)
+    s = score("a", findings)
 
-    assert score.in_claims == ("P01",) and score.in_linked_steps == ()
-
-
-def test_a_missing_proposition_is_named_not_just_counted():
-    """A score you cannot audit is a score you cannot fix."""
-
-    package = {"claims": [{"title": "與此無關的一句話。"}]}
-    score = score_package(package, gold(P_SECRECY))
-
-    assert score.missing == ("P01",)
-    assert score.recall == 0.0
+    assert len(s.reachable) + len(s.stranded) + len(s.missing) == s.total
+    assert len(s.asserted) <= len(s.reachable), "asserted is a subset of reachable"
 
 
-def test_evidence_records_the_text_that_satisfied_each_match():
-    package = {"claims": [{"title": "耶穌的保密命令都有合理的原因。"}]}
-    score = score_package(package, gold(P_SECRECY))
+def test_a_package_that_files_everything_as_observations_delivers_nothing():
+    """The failure the tier split exists to name: read, and out of reach."""
 
-    assert "合理" in score.evidence["P01"]
+    runs = {"a": package(observations=[{"statement": SECRECY}, {"statement": PARALLEL}])}
+    s = score("a", combined_list(runs))
+
+    assert s.recall == 0.0
+    assert len(s.stranded) == 2 and s.missing == ()
 
 
-def test_the_shipped_gold_set_loads_and_is_marked_unreviewed():
-    """It was built from model output, so it ranks; it does not yet standardise."""
+# ---------------------------------------------------------------- agreement
 
-    g = GoldSet.load(GOLD_DIR / "matthew16_notes_s1.json")
+def test_agreement_counts_what_both_runs_produced():
+    runs = {
+        "a": package(claims=[{"title": SECRECY}, {"title": PARALLEL}]),
+        "b": package(claims=[{"title": SECRECY}]),
+    }
+    findings = combined_list(runs)
+    ag = agreement(findings, "a", "b")
 
-    assert len(g.propositions) == 18
-    assert g.source_id == "16_章_-_彌賽亞，捨己"
-    assert g.human_reviewed is False, "flip this only after a person reads the list"
-    assert len({p.id for p in g.propositions}) == 18
+    assert (ag.shared, ag.total) == (1, 2)
+    assert ag.ratio == 0.5
+    assert len(ag.disputed) == 1, "the worklist is the findings only one run had"
+
+
+def test_two_identical_runs_agree_completely():
+    pkg = package(claims=[{"title": SECRECY}])
+    ag = agreement(combined_list({"a": pkg, "b": pkg}), "a", "b")
+
+    assert ag.ratio == 1.0 and ag.disputed == ()
+
+
+# ------------------------------------------------------------------- review
+
+def test_review_verdicts_sum_to_a_pass_rate():
+    """The verdicts exist per claim; nothing in the pipeline totals them."""
+
+    review = {"claim_reviews": [
+        {"decision": "pass"}, {"decision": "pass"}, {"decision": "changes_suggested"}]}
+
+    assert review_pass_rate(review) == (2, 3)
+
+
+def test_a_package_nobody_reviewed_reports_zero_of_zero():
+    assert review_pass_rate({}) == (0, 0)

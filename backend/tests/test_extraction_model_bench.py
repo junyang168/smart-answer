@@ -207,6 +207,26 @@ def test_a_candidate_needs_no_production_registry_entry():
     assert "gemini" not in MODEL_BACKENDS
 
 
+def test_comparing_models_needs_no_curated_reference():
+    """The bench builds its reference from the runs it just made.
+
+    A hand-written list of what a document says does not scale past one
+    section, and one built only from claim objects is biased toward whatever
+    the contributing models chose to phrase as a claim.
+    """
+
+    from backend.pipeline.extraction_quality import combined_list
+
+    runs = {
+        "a": {"claims": [{"title": "耶穌的保密命令都有合理的原因。"}]},
+        "b": {"evidence_steps": [{"evidence_step_id": "E1",
+                                  "statement": "耶穌的保密命令皆有合理且合乎邏輯的原因。"}]},
+    }
+    findings = combined_list(runs)
+
+    assert len(findings) == 1 and findings[0].found_by == 2
+
+
 def test_json_object_client_sends_the_token_cap_deepseek_actually_reads():
     """`max_completion_tokens` is accepted and ignored; `max_tokens` is obeyed.
 
