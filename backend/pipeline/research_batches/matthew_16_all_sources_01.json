@@ -2,7 +2,7 @@
   "schema_version": "wang_research_batch_v1",
   "batch_id": "RB-MATTHEW-16-ALL-SOURCES-01",
   "purpose": "把馬太十六章的十二份來源全部帶到現行分段抽取管線上。selection 依經文範圍，不是主題。",
-  "transcript_dir_note": "十二份來源分屬兩個逐字稿目錄，且兩邊內容不同：（四）4、（五）2 在 script_review 與 script_published 下 SHA 不一致，S 220206 只在 script_review。跑之前必須先確定哪一份是準的——RB-MATTHEW-16-13-20-SOURCES-01 當初六篇全用 script_review，所以 --transcript-dir 先給 script_review 是沿用前例，不是查證過的結論。",
+  "transcript_dir_note": "先給 script_published，不是 script_review。這不是偏好：`_sermon_rows` 用 script_published 算每篇講道的 source_sha，抽取格拿它比對，所以從 script_review 抽出來的 row 永遠是「舊」，green 不了。（四）3 兩次抽取正好各讀一邊——08-14 讀 script_review (4a9070d1)，08-19 讀 script_published (a5dbb830)，只有後者現在顯示 current。S 220206 只在 script_review，沒有已發布的稿，面板會標成 no_source（逐字稿還在校核），那是平台自己的規則，不要繞過它。",
   "semantic_assumption": "none",
   "candidate_generation_policy": {
     "derive_after_independent_extraction": true,
