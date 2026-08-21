@@ -83,11 +83,11 @@ fi
 # first `tsc --noEmit` in a new worktree invents a missing-module error that
 # disappears the moment a build has run.
 #
-# Two limits come with sharing them, and AGENTS.md says so rather than
-# pretending otherwise: only one worktree can hold ports 3000/3003/8555 at a
-# time, and a branch that changes `requirements.txt` or `package.json` is
-# running against the wrong install until it makes its own.
-for shared in .env web/.env.local backend/.venv .venv node_modules web/node_modules web/next-env.d.ts; do
+# One limit comes with sharing them, and AGENTS.md says so rather than
+# pretending otherwise: a branch that changes `requirements.txt` or
+# `package.json` is running against the wrong install until it makes its own.
+# (Ports are no longer a limit -- `dev.sh` derives them from the card number.)
+for shared in .env web/.env.local backend/.venv .venv node_modules web/next-env.d.ts; do
   if [[ -e "$SOURCE_REPO/$shared" ]]; then
     mkdir -p "$(dirname "$TARGET/$shared")"
     ln -sfn "$SOURCE_REPO/$shared" "$TARGET/$shared"
@@ -95,6 +95,24 @@ for shared in .env web/.env.local backend/.venv .venv node_modules web/node_modu
     printf 'work-on: note — %s does not exist in %s, not linked\n' "$shared" "$SOURCE_REPO" >&2
   fi
 done
+
+# `web/node_modules` is the exception, and has to be. Turbopack takes the
+# working directory as its root and rejects a node_modules that symlinks out of
+# it -- "Symlink [project]/node_modules is invalid, it points out of the
+# filesystem root" -- so with a link neither `npm run dev` nor `npm run build`
+# starts at all. A hardlink clone costs about ten seconds and no meaningful
+# disk: every file is the same inode as the source until something rewrites it.
+#
+# Which is also the one caveat. `npm install` here replaces files rather than
+# editing them, so it breaks the sharing safely for what it touches -- but a
+# branch that changes `package.json` should still run its own install rather
+# than trust this copy.
+if [[ -d "$SOURCE_REPO/web/node_modules" && ! -e "$TARGET/web/node_modules" ]]; then
+  printf 'work-on: cloning web/node_modules (hardlinks, ~10s)…\n' >&2
+  cp -al "$SOURCE_REPO/web/node_modules" "$TARGET/web/node_modules"
+elif [[ ! -d "$SOURCE_REPO/web/node_modules" ]]; then
+  printf 'work-on: note — web/node_modules does not exist in %s, not cloned\n' "$SOURCE_REPO" >&2
+fi
 
 printf '%s\n' "$TARGET"
 printf 'branch %s · cd %s\n' "$BRANCH" "$TARGET" >&2

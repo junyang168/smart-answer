@@ -43,6 +43,13 @@ if (( CLEANUP )); then
   common="$(git rev-parse --path-format=absolute --git-common-dir)"
   primary="$(cd "$(dirname "$common")" && pwd)"
   [[ "$root" != "$primary" ]] || fail "this is the primary checkout, not a worktree"
+  # Stop this card's dev servers before the directory they are running out of
+  # disappears. `wkp-141` was left running for 43 hours after its own merge,
+  # serving a branch that no longer existed on the one port nginx publishes,
+  # because removing the worktree never touched the processes inside it.
+  if [[ -x "$root/scripts/dev.sh" ]]; then
+    "$root/scripts/dev.sh" stop || true
+  fi
   cd "$primary"
   git worktree remove "$root"
   git branch -d "$BRANCH" >/dev/null 2>&1 || true
