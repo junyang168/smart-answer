@@ -35,7 +35,13 @@ router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
 SCHEMA_VERSION = "wang-operations-overview.v1"
 
 #: The order the columns appear in, and the order work happens in.
-SERMON_STAGES = ("extraction", "review", "adjudication", "merge", "ingest")
+# `cross_section` sits between extraction and review because that is where it
+# runs and what it reads. It had no column until now, which is how it came to be
+# run for one 母本 and skipped for the sermon extracted two hours later without
+# anybody noticing: a stage with no cell cannot be seen to be missing.
+SERMON_STAGES = (
+    "extraction", "cross_section", "review", "adjudication", "merge", "ingest",
+)
 
 #: A run still marked `running` whose heartbeat stopped this long ago is treated
 #: as interrupted.  A deploy is `launchctl unload` on the API job, so a run
@@ -196,7 +202,10 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                 """SELECT run_id, subject_kind, subject_id, source_ids, stage, trigger,
                           triggered_by, status, started_at, finished_at, heartbeat_at,
                           model_id, cost_usd, price_version, quality, input_sha256,
-                          output_paths, error_message
+                          output_paths, error_message,
+                          -- `command` is what a run that died before recording
+                          -- an output still says about where it was writing.
+                          command
                      FROM wang_knowledge.pipeline_runs
                     ORDER BY started_at"""
             )
@@ -208,6 +217,60 @@ def _load_runs() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             "message": f"Could not read the run ledger: {exc}",
         }]
     return rows, []
+
+
+def is_scratch_run(run: dict[str, Any], staging_root: Path) -> bool:
+    """A run whose output never reached the canonical staging tree.
+
+    Someone comparing extraction models writes to a scratch directory on
+    purpose: the point is to look at the result, not to feed it downstream. But
+    the run is still filed against the real source, so it lands as that
+    source's newest extraction -- and every later stage reads `stale`, because
+    the thing they consumed has apparently moved. It has not. Nothing consumed
+    this.
+
+    A finished, ingested 母本 was pushed to 舊 across four stages this way, by
+    a model comparison in another session's scratchpad that produced a file the
+    pipeline has never read. The run stays in the runs list, because it happened
+    and it cost money; it just stops speaking for the source's state.
+
+    A run with no recorded outputs is not scratch. Absence of evidence is the
+    normal state for every row written before outputs were recorded, and
+    treating those as experiments would erase most of the history.
+    """
+
+    root = str(staging_root)
+    outputs = [str(path) for path in (run.get("output_paths") or []) if path]
+    if outputs:
+        return all(not output.startswith(root) for output in outputs)
+    # Died before it could record an output. The command still says where it
+    # was going to write, which is the same evidence one step earlier.
+    command = str(run.get("command") or "")
+    match = re.search(r"--output-dir[= ]+(\S+)", command)
+    if match:
+        return not match.group(1).startswith(root)
+    # No output, and no command either. `run_ledger.current_command` records
+    # `shlex.join(sys.argv)`, so a pipeline run always names the module it was
+    # started with -- `-m backend.pipeline.…`. A bare `-` is what argv holds
+    # when the code was piped in on stdin: somebody driving the internals from
+    # a heredoc, which is how the model comparisons in the neighbouring
+    # worktree are run. Such a run produced nothing in the canonical tree and
+    # cannot say where it was going, so it is not evidence about this source's
+    # pipeline. One of them, a failed benchmark on a fourth model, was showing
+    # 抽取 as 失敗 on a 母本 whose extraction has succeeded three times.
+    return command.strip() in {"", "-"}
+
+
+def _as_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse a stored ISO timestamp, or None if it is missing or unreadable."""
+
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
@@ -236,6 +299,25 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
                     WHERE collection='source_documents' AND retired_at IS NULL"""
             )
             rows = cursor.fetchall()
+            # The document record is metadata -- title, path, sha -- and it
+            # stays at revision 1 through every re-ingest that does not change
+            # them. Reporting its revision answered "how often was this row
+            # rewritten", which is not what 入庫 is asking. The material is
+            # what moves: 生命 sat at rev 1 from 13 Aug while its fragments
+            # were rewritten twice afterwards.
+            cursor.execute(
+                """SELECT payload->>'source_id' AS source_id,
+                          COUNT(*) AS fragments,
+                          MAX(updated_at) AS last_written
+                     FROM wang_knowledge.objects
+                    WHERE collection='source_fragments' AND retired_at IS NULL
+                      AND payload->>'source_id' IS NOT NULL
+                 GROUP BY 1"""
+            )
+            material = {
+                str(source_id): {"fragments": fragments, "last_written": last_written}
+                for source_id, fragments, last_written in cursor.fetchall()
+            }
     except Exception as exc:  # pragma: no cover - depends on deployment
         return {}, [{
             "code": "store_unreadable",
@@ -245,10 +327,16 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
     for object_id, payload, revision, updated_at in rows:
         document = dict(payload or {})
         key = document_row_key(document) or str(object_id)
+        found = material.get(str(object_id)) or {}
+        # Fall back to the document's own timestamp only when the store holds
+        # no material for it: then the document really is all there is.
+        written = found.get("last_written") or updated_at
         held[key] = {
             "source_id": str(object_id),
             "revision": revision,
-            "updated_at": updated_at.isoformat() if updated_at else None,
+            "fragments": found.get("fragments") or 0,
+            "updated_at": written.isoformat() if written else None,
+            "document_updated_at": updated_at.isoformat() if updated_at else None,
         }
     return held, []
 
@@ -314,6 +402,7 @@ def _cell(
     stage: str,
     current_source_sha: Optional[str],
     upstream_finished: Optional[datetime],
+    upstream_in_flight: bool = False,
 ) -> dict[str, Any]:
     """One stage's cell for one source: a state, a quality, and the last run.
 
@@ -330,9 +419,20 @@ def _cell(
 
     if not runs:
         return {"state": "never", "quality": None, "run": None}
-    latest = runs[-1]
     last_success = next(
         (run for run in reversed(runs) if run["effective_status"] == "succeeded"), None
+    )
+    # An interrupted run never reported anything: the process was killed and
+    # the status was inferred from a stale heartbeat. That is an absence of a
+    # verdict, not a verdict, so it must not overwrite one. A `failed` run is
+    # different -- the runner lived long enough to say so, and that is worth
+    # showing over an older success.
+    latest = next(
+        (
+            run for run in reversed(runs)
+            if run["effective_status"] != "interrupted" or last_success is None
+        ),
+        runs[-1],
     )
     summary = _run_summary(latest)
     if latest["effective_status"] in {"failed", "interrupted", "cancelled"}:
@@ -351,6 +451,8 @@ def _cell(
     quality = last_success.get("quality") or None
 
     def stale(reason: str) -> dict[str, Any]:
+        if upstream_in_flight:
+            return _pending({"state": "stale", "quality": quality, "run": success})
         return {"state": "stale", "reason": reason, "quality": quality, "run": success}
 
     if stage == "extraction":
@@ -367,7 +469,30 @@ def _cell(
     finished = last_success.get("finished_at")
     if upstream_finished and finished and upstream_finished > finished:
         return stale("upstream_rerun")
+    if upstream_in_flight:
+        return _pending({"state": "current", "quality": quality, "run": success})
     return {"state": "current", "quality": quality, "run": success}
+
+
+def _pending(cell: dict[str, Any]) -> dict[str, Any]:
+    """A result that an in-flight upstream run is in the middle of replacing.
+
+    Showing the last run's verdict while the stage it read from is re-running
+    invites the reading that cost the most here: a row with `執行中` on
+    extraction and four green cells behind it looks done, and every one of
+    those cells is about to be superseded. The number is not wrong yet -- it is
+    about to stop being about anything -- so it moves to the tooltip and the
+    cell goes grey.
+    """
+
+    return {
+        "state": "pending",
+        "reason": "upstream_running",
+        "quality": None,
+        "run": cell.get("run"),
+        "superseded": {"state": cell["state"], "quality": cell.get("quality")},
+        **({"store": cell["store"]} if cell.get("store") else {}),
+    }
 
 
 def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
@@ -407,10 +532,24 @@ def _snapshot_source_keys(snapshot: dict[str, Any]) -> dict[str, str]:
     keys: dict[str, str] = {}
     for document in snapshot.get("source_documents") or []:
         source_id = str(document.get("source_id") or "")
-        match = re.search(r"-([0-9a-f]{12})$", source_id)
-        if not match:
+        if not source_id:
             continue
-        keys[match.group(1)] = document_row_key(document) or source_id
+        row_key = document_row_key(document) or source_id
+        # A sermon's `SRC-…-3d012c24a542` carries the digest in its id, and
+        # parsing it was the whole of this lookup. A notes manuscript's id is
+        # `notes_manuscript:16_章_-_生命`, which carries none, so all three 母本
+        # fell out -- and they are the sources the published articles are
+        # actually written from, so every one of them showed no articles at all.
+        #
+        # The digest is `sha256(source_id)[:12]`, the same expression the
+        # extractor uses to mint `DK-…`, so it can be derived rather than
+        # scraped. Both routes are registered: derived for the ids that have no
+        # digest in them, parsed for the ids whose digest was minted from
+        # something else.
+        keys[hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:12]] = row_key
+        match = re.search(r"-([0-9a-f]{12})$", source_id)
+        if match:
+            keys[match.group(1)] = row_key
     return keys
 
 
@@ -499,8 +638,13 @@ def overview() -> dict[str, Any]:
     for run in runs:
         run["effective_status"] = _effective_status(run, now)
 
+    staging_root = paths.claim_layer_staging
     by_source: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for run in runs:
+        run["scratch"] = is_scratch_run(run, staging_root)
+        if run["scratch"]:
+            # Visible in the runs list, silent in the stage cells.
+            continue
         for source_id in run.get("source_ids") or []:
             by_source.setdefault(str(source_id), {}).setdefault(str(run["stage"]), []).append(run)
 
@@ -532,6 +676,9 @@ def overview() -> dict[str, Any]:
         # The most recent upstream success, carried forward down the chain so
         # each stage can tell whether the thing it consumed has moved since.
         upstream_finished: Optional[datetime] = None
+        # Set the moment any stage is found running or queued, and never
+        # cleared: everything downstream of a live run is waiting on it.
+        upstream_in_flight = False
         for stage in SERMON_STAGES:
             if stage == "extraction" and source_path is None:
                 stages[stage] = {"state": "no_source", "quality": None, "run": None}
@@ -541,18 +688,50 @@ def overview() -> dict[str, Any]:
                 stage=stage,
                 current_source_sha=source_sha,
                 upstream_finished=upstream_finished,
+                upstream_in_flight=upstream_in_flight,
             )
             if stage == "ingest" and cell["state"] == "never":
                 # The store outranks an empty ledger here: it is the authority
                 # for this stage, and it is answering about the same sources.
                 held = ingested.get(row["source_id"])
                 if held:
+                    # But holding the source is not the same as holding what
+                    # the pipeline has since produced. A source re-extracted
+                    # and re-reviewed today, whose store record is from a run
+                    # two weeks ago, is the exact case this column exists to
+                    # surface -- and reading it green said the work was live
+                    # when the claim layer was still the old one.
+                    written = _as_datetime(held.get("updated_at"))
+                    behind = (
+                        upstream_finished is not None
+                        and written is not None
+                        and upstream_finished > written
+                    )
                     cell = {
-                        "state": "current",
-                        "reason": "from_store_not_ledger",
-                        "quality": {"revision": held["revision"]},
+                        "state": "stale" if behind else "current",
+                        "reason": "upstream_rerun" if behind else "from_store_not_ledger",
+                        "quality": {
+                            "revision": held["revision"],
+                            "fragments": held.get("fragments") or 0,
+                        },
                         "run": None,
                         "store": held,
+                    }
+            # `_cell` greys its own verdicts; only the store fallback happens
+            # out here, so only that one needs greying at this level.
+            if upstream_in_flight and cell["state"] in {"current", "stale"}:
+                cell = _pending(cell)
+            if cell["state"] in {"running", "queued"}:
+                upstream_in_flight = True
+            if stage == "ingest":
+                # What the store holds now, whether or not a run wrote it. The
+                # cell's job is to answer "what is in the store for this
+                # source"; the change set's deltas answer "what moved", which
+                # is a tooltip question.
+                held = ingested.get(row["source_id"])
+                if held and cell.get("quality") is not None:
+                    cell["quality"] = {
+                        **cell["quality"], "fragments": held.get("fragments") or 0,
                     }
             stages[stage] = cell
             for run in stage_runs.get(stage) or []:
@@ -642,7 +821,7 @@ def overview() -> dict[str, Any]:
 def _summary(rows: list[dict[str, Any]], runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     counts: dict[str, dict[str, int]] = {
         stage: {"current": 0, "stale": 0, "never": 0, "failed": 0,
-                "running": 0, "queued": 0, "no_source": 0}
+                "running": 0, "queued": 0, "pending": 0, "no_source": 0}
         for stage in SERMON_STAGES
     }
     for row in rows:

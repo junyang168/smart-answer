@@ -42,6 +42,7 @@ from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
+from backend.pipeline.subtitle_generation import generate_subtitles
 
 
 #: What each supported model needs to be reached. `gpt-5.6-sol` is the default,
@@ -210,16 +211,21 @@ def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, sect
     )
 
 
-def _subtitle_provider():
+def _subtitle_provider(source_id: str):
     """The sermon editor's own subtitle generator, for sources with no headings.
 
-    Imported lazily: `backend.api` pulls in the web app, and nothing in this
-    module should need a running server to be importable.
+    It raises on failure and this runner does not catch it, so a source whose
+    boundaries could not be generated fails instead of quietly becoming one
+    section -- which is whole-document extraction, the behaviour sectioning
+    exists to replace.
     """
 
-    from backend.api.gemini_client import GeminiClient
+    def provider(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return generate_subtitles(
+            paragraphs, subject=source_id, consumer="extraction_sections"
+        )
 
-    return GeminiClient().generate_subtitles
+    return provider
 
 
 def resolve_section_plan(
@@ -237,7 +243,7 @@ def resolve_section_plan(
     cached = load_cached_plan(path, source_sha256)
     if cached is not None:
         return cached
-    provider = _subtitle_provider() if allow_generated else None
+    provider = _subtitle_provider(source_id) if allow_generated else None
     plan = plan_sections(_segment_texts(source), level=level, provider=provider)
     save_plan(path, plan, source_sha256)
     return plan

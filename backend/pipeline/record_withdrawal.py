@@ -61,6 +61,33 @@ class Withdrawal:
         keys += sorted(self.dangling_relations)
         return keys
 
+    def excluding(self, keys: "set[tuple[str, str]]") -> "Withdrawal":
+        """This withdrawal without the records named in `keys`.
+
+        Used to keep anything the incoming package carries out of the closure.
+        Such a record is not a casualty of the withdrawal -- it is being
+        rewritten by the same change set, and listing it in both halves makes
+        that change set abort on its own work.
+
+        The fragments are left alone: they are filtered before the closure is
+        built, by id, and a fragment reaching here is one the package does not
+        carry.
+        """
+
+        if not keys:
+            return self
+        return Withdrawal(
+            withdrawn_fragments=dict(self.withdrawn_fragments),
+            owners={key: value for key, value in self.owners.items() if key not in keys},
+            orphaned_claims=[
+                claim for claim in self.orphaned_claims if ("claims", claim) not in keys
+            ],
+            dangling_relations=[
+                key for key in self.dangling_relations if key not in keys
+            ],
+            unresolved_fragments=self.unresolved_fragments,
+        )
+
     def as_dict(self) -> dict[str, Any]:
         by_source: dict[str, int] = {}
         for source in self.withdrawn_fragments.values():

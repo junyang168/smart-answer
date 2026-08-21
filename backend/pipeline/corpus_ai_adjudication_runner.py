@@ -436,7 +436,12 @@ def main() -> int:
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--openai-reasoning-effort", default="medium")
     parser.add_argument("--claude-model", default="claude-sonnet-5")
-    parser.add_argument("--max-output-tokens", type=int, default=16000)
+    # Raised with the reviewer's for the same reason, before it bites rather
+    # than after: adjudication answers the reviewer's findings, and a package
+    # with five times the claims produces more of them. 16,000 is also exactly
+    # the streaming threshold, so the old default was the one value that could
+    # fill the budget without streaming.
+    parser.add_argument("--max-output-tokens", type=int, default=32000)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     transcript_dirs = args.transcript_dirs or DEFAULT_TRANSCRIPT_DIRS

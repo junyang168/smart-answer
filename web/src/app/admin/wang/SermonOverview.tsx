@@ -8,6 +8,7 @@ import { ScriptureGroups, TopicGroups } from "./OverviewGroups";
 
 const stageLabels: Record<StageId, string> = {
   extraction: "抽取",
+  cross_section: "跨段關係",
   review: "複審",
   adjudication: "仲裁",
   merge: "合併",
@@ -17,6 +18,7 @@ const stageLabels: Record<StageId, string> = {
 const stateLabels: Record<CellState, string> = {
   current: "✓",
   stale: "舊",
+  pending: "待重跑",
   never: "✗",
   failed: "失敗",
   running: "執行中",
@@ -29,6 +31,9 @@ const stateStyles: Record<CellState, string> = {
   // Amber, not green: a stale cell is a to-do. Re-running it would not
   // reproduce what is on disk, so it must not read as a pass.
   stale: "bg-amber-50 text-amber-900 ring-amber-200",
+  // Grey, and carrying no number: whatever this stage last concluded is about
+  // to be replaced by the run happening upstream of it right now.
+  pending: "bg-slate-50 text-slate-400 ring-slate-200",
   never: "bg-slate-50 text-slate-400 ring-slate-200",
   failed: "bg-rose-50 text-rose-800 ring-rose-200",
   running: "bg-indigo-50 text-indigo-800 ring-indigo-200",
@@ -40,6 +45,7 @@ const cellReasons: Record<string, string> = {
   no_recorded_input: "這次執行沒有記下它讀了什麼，無法證明還是最新的",
   source_changed: "來源原文在這次執行之後改過",
   upstream_rerun: "上游階段在這次執行之後又跑過",
+  upstream_running: "上游階段正在重跑，這一格的結果即將被取代",
   from_store_not_ledger: "這一格來自主庫本身：物件在庫裡。這次入庫發生在記錄表上線之前，所以沒有時間與花費",
   // Every one of these has a transcript in script_review; what is missing is a
   // proofread, published one, which is what extraction reads.
@@ -65,6 +71,16 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
     const proseLeft = n("prose_unprocessed");
     return proseLeft ? `${pct}% · 正文 ${proseLeft}` : `${pct}%`;
   }
+  if (stage === "cross_section") {
+    // A single-section source has no cross-section relation to find, and the
+    // runner writes the package through saying so. "—" rather than "0",
+    // because nothing was missed.
+    if (quality.skipped === "single_section") return "單段";
+    const evidence = n("evidence_relations_added");
+    const claims = n("claim_relations_added");
+    if (evidence === null && claims === null) return null;
+    return `+${evidence ?? 0} 證據 · +${claims ?? 0} 主張`;
+  }
   if (stage === "review") {
     const reviewed = n("ai_reviewed");
     const onward = n("awaiting_openai_adjudication");
@@ -78,15 +94,40 @@ function qualityLabel(stage: StageId, quality: Record<string, unknown> | null): 
   }
   if (stage === "ingest") {
     // Read from the store rather than a run: say so, instead of showing a
-    // count this row has no run to have produced.
-    const revision = n("revision");
-    if (revision !== null && quality.status === undefined) return `rev ${revision}`;
+    // count this row has no run to have produced. The count is the material
+    // the store holds, not the document record's revision -- that record is
+    // metadata and sits at rev 1 through every re-ingest that does not touch
+    // the title or the path, so it moved for none of the work done here.
+    // What the store holds, every time. `+1365 ~0` was the change set's delta
+    // and it answered a question nobody was asking, while hiding the half that
+    // mattered: the same ingest retired 209 objects, the claim layer it
+    // replaced. The deltas moved to the tooltip.
+    const fragments = n("fragments");
+    if (fragments !== null) return fragments ? `庫內 ${fragments} 片段` : "庫內無材料";
     if (quality.status === "already_applied") return "無變化";
-    const created = n("created") ?? 0;
-    const updated = n("updated") ?? 0;
-    return created || updated ? `+${created} ~${updated}` : "無變化";
+    const revision = n("revision");
+    if (revision !== null) return `rev ${revision}`;
+    return null;
   }
   return null;
+}
+
+/** What one ingest actually moved, for the tooltip. */
+function ingestDetail(stage: StageId, quality: Record<string, unknown> | null): string | null {
+  if (stage !== "ingest" || !quality) return null;
+  const n = (key: string) => (typeof quality[key] === "number" ? (quality[key] as number) : null);
+  const created = n("created");
+  const retired = n("retired");
+  const updated = n("updated");
+  if (created === null && retired === null && updated === null) return null;
+  const parts = [
+    created ? `新增 ${created}` : null,
+    updated ? `更新 ${updated}` : null,
+    // The half `+1365 ~0` left out. A re-extraction retires the claim layer it
+    // replaces, in the same change set, and that is the number to check.
+    retired ? `退役 ${retired}` : null,
+  ].filter(Boolean);
+  return parts.length ? `這次入庫：${parts.join("、")}` : "這次入庫沒有變動";
 }
 
 /** The whole-source picture, for the tooltip: which categories are unaccounted for. */
@@ -120,11 +161,19 @@ function coverageDetail(stage: StageId, quality: Record<string, unknown> | null)
 
 function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const quality = qualityLabel(stage, cell.quality);
+  // The superseded verdict is worth keeping, just not on the face of the cell:
+  // it answers "what did it say before this re-run started" without letting a
+  // stale green number stand in for a live one.
+  const supersededLabel =
+    cell.superseded ? qualityLabel(stage, cell.superseded.quality) : null;
   const tip = [
+    ingestDetail(stage, cell.quality),
     coverageDetail(stage, cell.quality),
+    supersededLabel ? `重跑前：${stateLabels[cell.superseded!.state]} ${supersededLabel}` : null,
     cell.state === "no_source" ? cellReasons.no_source : null,
     cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
-    cell.store?.updated_at ? `主庫更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
+    cell.store?.updated_at ? `主庫材料更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,
+    cell.store ? `來源記錄 rev ${cell.store.revision}` : null,
     cell.run?.started_at ? `最後一次：${new Date(cell.run.started_at).toLocaleString("zh-TW")}` : null,
     cell.run?.trigger ? `觸發：${cell.run.trigger}${cell.run.triggered_by ? ` (${cell.run.triggered_by})` : ""}` : null,
     cell.run && cell.run.cost_usd !== null ? `花費：${money(cell.run.cost_usd)}` : null,

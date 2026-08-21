@@ -1,9 +1,17 @@
-export type StageId = "extraction" | "review" | "adjudication" | "merge" | "ingest";
+export type StageId =
+  | "extraction"
+  | "cross_section"
+  | "review"
+  | "adjudication"
+  | "merge"
+  | "ingest";
 
 /** `stale` is the load-bearing one: it succeeded, but not against what is here now. */
 export type CellState =
   | "current"
   | "stale"
+  /** An upstream stage is running right now; this result is being replaced. */
+  | "pending"
   | "never"
   | "failed"
   | "running"
@@ -28,8 +36,18 @@ export type StageCell = {
   quality: Record<string, unknown> | null;
   run: RunSummary | null;
   had_earlier_success?: boolean;
+  /** What this cell said before an upstream re-run started superseding it. */
+  superseded?: { state: CellState; quality: Record<string, unknown> | null };
   /** Present when the authoring store, not the ledger, is what says this is done. */
-  store?: { source_id: string; revision: number; updated_at: string | null };
+  store?: {
+    source_id: string;
+    revision: number;
+    /** Live source fragments the store holds for this source. */
+    fragments?: number;
+    /** When the store's *material* last changed, not the document record. */
+    updated_at: string | null;
+    document_updated_at?: string | null;
+  };
 };
 
 export type OverviewRow = {

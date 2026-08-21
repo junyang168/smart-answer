@@ -21,6 +21,8 @@ from backend.api.canonical_repository.postgres_store import (
     combined_plan,
 )
 from backend.pipeline.extraction_supersede import package_source_ids, superseded
+from backend.pipeline.source_keys import package_row_key
+from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
@@ -143,10 +145,35 @@ def main(argv: list[str] | None = None) -> int:
         "articles_to_regenerate": articles,
     }
     if args.apply:
-        output["result"] = store.apply_plan(
-            change_set,
-            metadata={"input_path": str(args.package), "supersedes": withdrawal.as_dict()},
-        )
+        # Only a run that writes files a row. Planning is a question anybody may
+        # ask and one row per question would bury the writes among them. The
+        # row matters more since this became the batch runner's ingest stage:
+        # without it a re-extracted source reaches the store with nothing in
+        # the ledger saying so, which is the state the overview exists to stop.
+        # The row key, not the package's `source_id`: for a sermon those are
+        # different strings, and extraction files under the row key.
+        row_key = package_row_key(package)
+        with run_record(
+            subject=row_key or str(args.package.name),
+            stage="ingest",
+            subject_kind="source" if row_key else "batch",
+            sources=[row_key] if row_key else sorted(package_source_ids(package)),
+        ) as record:
+            output["result"] = store.apply_plan(
+                change_set,
+                metadata={"input_path": str(args.package), "supersedes": withdrawal.as_dict()},
+            )
+            record.quality({
+                "status": (output["result"] or {}).get("status"),
+                **{key: value for key, value in (output.get("summary") or {}).items()},
+            })
+            record.metadata({
+                "change_set_id": output.get("change_set_id"),
+                # The one thing a person has to act on afterwards: new material
+                # means the articles written from the old material go stale.
+                "articles_to_regenerate": articles,
+            })
+            record.outputs(args.package)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
 

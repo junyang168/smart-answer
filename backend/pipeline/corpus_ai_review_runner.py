@@ -32,6 +32,7 @@ from backend.pipeline.knowledge_package import live_claims
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
@@ -388,6 +389,14 @@ def run_claim_layer(
         "package_sha256": _sha256_bytes(package_bytes),
         "transcript_sha256": transcript_hashes,
     }
+    # Name the source the way every other stage names it. Without this the
+    # adjudicator's `_adjudication_subject` finds no `transcript_id`, falls
+    # back to the package filename, and files its run against a subject no
+    # other stage uses -- so the source's own row in the overview shows an
+    # extraction and a review with the adjudication sitting somewhere else.
+    row_key = package_row_key(package)
+    if row_key:
+        source_identity["transcript_id"] = row_key
     if package.get("review_batch"):
         source_identity["review_batch"] = copy.deepcopy(package["review_batch"])
     source_fingerprint = _sha256_bytes(
@@ -413,12 +422,41 @@ def run_claim_layer(
         ):
             return "skipped", output_path
 
+    # Opened after the skip check, like the extraction runner's, so a no-op
+    # re-run does not file a row. Until now this path filed none at all: only
+    # the survey path recorded, so every claim-layer review -- which is what
+    # the batch runner runs -- was invisible to the overview.
+    with run_record(
+        subject=row_key or str(package_path.name),
+        stage="review",
+        subject_kind="source" if row_key else "batch",
+        sources=[row_key] if row_key else [],
+    ) as record:
+        record.model(client.model)
+        record.inputs({"package_sha256": source_identity["package_sha256"]})
+        return _write_claim_layer_review(
+            record=record, client=client, prompt=prompt, survey=survey,
+            transcripts=transcripts, transcript_paths=transcript_paths,
+            source_identity=source_identity, source_fingerprint=source_fingerprint,
+            identity=identity, package_path=package_path, output_path=output_path,
+            spot_check_percent=spot_check_percent,
+        )
+
+
+def _write_claim_layer_review(
+    *, record, client, prompt, survey, transcripts, transcript_paths,
+    source_identity, source_fingerprint, identity, package_path, output_path,
+    spot_check_percent,
+) -> tuple[str, Path]:
+    """The part of a claim-layer review worth recording, once a row exists."""
+
     response, usage_rows = _generate_valid_review(
         client=client,
         prompt=prompt,
         user_input=_claim_layer_input(survey, transcripts),
         survey=survey,
     )
+    record.usage(usage_rows)
     routed = apply_risk_routing(
         response,
         reviewer_fingerprint_sha256=identity["fingerprint_sha256"],
@@ -449,6 +487,10 @@ def run_claim_layer(
         json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    record.quality({
+        key: value for key, value in (routed.get("routing_summary") or {}).items()
+    })
+    record.outputs(output_path)
     return "created", output_path
 
 
@@ -461,7 +503,14 @@ def main() -> int:
     # Sonnet 5 counts adaptive-thinking tokens inside max_tokens.  The two-
     # lecture claim-layer review consumed the old 10k ceiling before emitting
     # JSON, so the default must leave room for both reasoning and the schema.
-    parser.add_argument("--max-output-tokens", type=int, default=32000)
+    # 32,000 was sized when a package was one whole-document extraction: the
+    # 母本 for Matt 16 held 26 claims. Sectioned extraction (#88) put 132 in
+    # the same manuscript, and the reviewer emits a verdict per claim, so the
+    # first sectioned source to reach this stage died with `stop_reason:
+    # max_tokens` mid-answer. Sonnet 5 accepts up to 128K; the client streams
+    # anything over 16K, so this costs no extra HTTP timeout risk. Matches the
+    # extraction runner, which was raised to 64,000 for the same reason.
+    parser.add_argument("--max-output-tokens", type=int, default=64000)
     parser.add_argument("--spot-check-percent", type=int, default=10)
     parser.add_argument("--ids", nargs="*")
     parser.add_argument("--limit", type=int)

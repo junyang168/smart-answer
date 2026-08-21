@@ -37,12 +37,25 @@ from backend.pipeline.model_prices import RunCost, price_usage
 from backend.pipeline.source_keys import normalize_source_key
 
 
-STAGES = ("extraction", "review", "adjudication", "merge", "ingest", "article")
+#: `sectioning` decides where a source with no headings breaks, and so how many
+#: times extraction runs on it.  It is a model call of its own, made before the
+#: extraction run exists -- the plan is an input to that run's fingerprint -- and
+#: cached per source hash, so it cannot be a usage row on the extraction it feeds.
+#: `cross_section` puts back the relations that sectioning necessarily splits.
+#: Adding a name here also needs `004_pipeline_run_stages.sql`, which is where
+#: the database's own CHECK on this column lives -- a name in one and not the
+#: other is a stage whose runs cannot record at all.
+STAGES = (
+    "sectioning", "extraction", "cross_section", "review", "adjudication",
+    "merge", "ingest", "article",
+)
 
 #: Stages that call a model, and so can cost money.  `merge` and `ingest` are
-#: arithmetic and a database write; their cost is zero, and zero is a fact about
-#: them rather than an absence of measurement.
-MODEL_STAGES = ("extraction", "review", "adjudication", "article")
+#: arithmetic and a database write; their cost is zero, and zero is a fact
+#: about them rather than an absence of measurement.
+MODEL_STAGES = (
+    "sectioning", "extraction", "cross_section", "review", "adjudication", "article",
+)
 SUBJECT_KINDS = ("source", "draft", "batch")
 
 #: The worker refreshes this while it works; a row whose heartbeat is older than

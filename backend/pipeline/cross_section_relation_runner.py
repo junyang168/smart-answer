@@ -23,6 +23,9 @@ from backend.pipeline.cross_section_relation import (
     render_catalogue,
     validate_proposals,
 )
+from backend.pipeline.llm_usage import usage_row
+from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 VALIDATION_ATTEMPTS = 3
@@ -41,6 +44,52 @@ def _section_boundaries(package: dict[str, Any]) -> list[int]:
     return [int(value) for value in plan.get("boundaries") or [0]]
 
 
+def _write_through(
+    package: dict[str, Any], output_path: Path, *, identity: dict[str, Any]
+) -> dict[str, Any]:
+    """Emit the package unchanged, saying so, when there is nothing to relate."""
+
+    updated = apply_proposals(package, {}, identity=identity)
+    updated["cross_section_relations"]["skipped"] = "single_section"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({
+        "package": str(output_path.name), "sections": 1,
+        "skipped": "single_section",
+        "evidence_relations_added": 0, "claim_relations_added": 0,
+    }, ensure_ascii=False))
+    return updated
+
+
+def already_current(
+    *, package_path: Path, output_path: Path, prompt: str, model_id: str
+) -> bool:
+    """Whether the output on disk already answers this exact question.
+
+    The same comparison `run` makes, lifted out so `main` can ask it *before*
+    opening a ledger row. A run that recomputes nothing must not file one: the
+    extraction runner opens its record after its own skip check for this
+    reason, and this runner did not, so a re-run that did no work still wrote a
+    fresh `cross_section` row -- newer than the review that had read the very
+    same package, which pushed that review to 舊 for work nobody did.
+    """
+
+    if not output_path.is_file():
+        return False
+    raw = package_path.read_bytes()
+    package = json.loads(raw.decode("utf-8"))
+    identity = discovery_identity(
+        package_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
+        model_id=model_id, section_count=len(_section_boundaries(package)),
+    )
+    try:
+        existing = json.loads(output_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    stored = (existing.get("cross_section_relations") or {}).get("fingerprint_sha256")
+    return stored == identity["fingerprint_sha256"]
+
+
 def run(
     *,
     package_path: Path,
@@ -48,6 +97,7 @@ def run(
     client: Stage1OpenAIClient,
     prompt: str,
     force: bool = False,
+    usage_sink: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     raw = package_path.read_bytes()
     package = json.loads(raw.decode("utf-8"))
@@ -61,6 +111,17 @@ def run(
         stored = (existing.get("cross_section_relations") or {}).get("fingerprint_sha256")
         if stored == identity["fingerprint_sha256"]:
             return existing
+
+    # One section means there is no cross-section relation to find, and asking
+    # anyway is not merely wasteful: every proposal would be same-section, the
+    # validator rejects those, and the stage fails after burning three model
+    # calls. Writing the package through unchanged lets an orchestrator run
+    # this stage for every source instead of having to know which ones were
+    # sectioned -- and that knowledge is exactly what got skipped once already,
+    # leaving （四）3 without cross-section relations while the 母本 beside it
+    # had them.
+    if len(boundaries) < 2:
+        return _write_through(package, output_path, identity=identity)
 
     positions = record_positions(package)
     catalogue = build_catalogue(package, positions)
@@ -91,6 +152,11 @@ def run(
         candidate = client.generate_json(
             prompt, feedback, DISCOVERY_SCHEMA, cache_prefix=user_input
         )
+        # Every attempt is billed, including the ones validation rejects, so
+        # the row has to carry all of them. Recording only the accepted call
+        # would price a three-attempt run as though it were a one-attempt run.
+        if usage_sink is not None:
+            usage_sink.append(usage_row(getattr(client, "last_usage", None), attempt))
         try:
             validate_proposals(candidate, package, positions=positions, boundaries=boundaries)
             response = candidate
@@ -128,16 +194,48 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     load_dotenv(PROJECT_ROOT / ".env")
-    run(
-        package_path=args.package,
-        output_path=args.output,
-        client=Stage1OpenAIClient(
-            model=args.model, reasoning_effort=args.reasoning_effort,
-            timeout_seconds=600, max_retries=3, max_output_tokens=16000,
-        ),
-        prompt=PROMPT_PATH.read_text(encoding="utf-8"),
-        force=args.force,
-    )
+    package = json.loads(args.package.read_text(encoding="utf-8"))
+    subject = package_row_key(package) or args.package.name
+    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+
+    if not args.force and already_current(
+        package_path=args.package, output_path=args.output,
+        prompt=prompt, model_id=args.model,
+    ):
+        print(json.dumps({
+            "package": str(args.output.name), "status": "skipped",
+            "reason": "matching cross-section fingerprint",
+        }, ensure_ascii=False))
+        return 0
+
+    # The stage had no name in the ledger until now, so the overview could not
+    # say whether a source had been through it. That is the one question worth
+    # asking about this stage: it was skipped once already, silently.
+    with run_record(subject=subject, stage="cross_section") as record:
+        record.model(args.model)
+        usage_rows: list[dict[str, Any]] = []
+        updated = run(
+            package_path=args.package,
+            output_path=args.output,
+            client=Stage1OpenAIClient(
+                model=args.model, reasoning_effort=args.reasoning_effort,
+                timeout_seconds=600, max_retries=3, max_output_tokens=16000,
+            ),
+            prompt=prompt,
+            force=args.force,
+            usage_sink=usage_rows,
+        )
+        # Without this the row prices a real model call at $0.00, which reads
+        # as "this stage is free" rather than "nobody measured it" -- the same
+        # false-free the ledger already guards against on failed runs.
+        record.usage(usage_rows)
+        relations = updated.get("cross_section_relations") or {}
+        record.quality({
+            "evidence_relations_added": relations.get("evidence_relations_added"),
+            "claim_relations_added": relations.get("claim_relations_added"),
+            "skipped": relations.get("skipped"),
+        })
+        record.outputs(args.output)
     return 0
 
 

@@ -49,12 +49,70 @@ ID_FIELDS = {
 }
 
 
+#: What a batch member can be. `transcript_ids` names sermon transcripts by id
+#: and resolves them against a transcript directory; `sources` carries the
+#: notes manuscripts, which have no such directory and are addressed by path.
+#: Both end up as members, and a member is what every stage runs against.
+SOURCE_TYPES = ("sermon_transcript", "notes_manuscript")
+
+
 class ResearchBatchValidationError(ValueError):
     """Raised when a batch smuggles in a topic assumption or is malformed."""
 
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _validate_sources(sources: Any) -> None:
+    """Check the `sources` rows a batch carries for non-transcript members.
+
+    The row is the extraction runner's source-manifest row, deliberately: the
+    runner writes the manifest out of these and `load_source_manifest` checks
+    them again against the file on disk. Validating a different shape here
+    would mean two schemas for one thing.
+    """
+
+    if not isinstance(sources, list):
+        raise ResearchBatchValidationError("sources must be a list")
+    seen: set[str] = set()
+    for index, row in enumerate(sources):
+        if not isinstance(row, dict):
+            raise ResearchBatchValidationError(f"source row {index} is not an object")
+        source_id = str(row.get("source_id") or "").strip()
+        source_path = str(row.get("source_path") or "").strip()
+        source_type = str(row.get("source_type") or "").strip()
+        if not source_id or not source_path or not source_type:
+            raise ResearchBatchValidationError(
+                f"source row {index} requires source_id, source_path and source_type"
+            )
+        if source_type not in SOURCE_TYPES:
+            raise ResearchBatchValidationError(
+                f"source row {index} has unknown source_type {source_type!r}; "
+                f"expected one of {SOURCE_TYPES}"
+            )
+        if source_id in seen:
+            raise ResearchBatchValidationError(f"duplicate source_id: {source_id}")
+        seen.add(source_id)
+
+
+def batch_members(batch: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every source this batch processes, transcripts first, in batch order.
+
+    Ordering is load-bearing rather than cosmetic: `merge_reviewed_packages`
+    requires the reviewed packages to arrive in batch order, and that check is
+    what catches a package silently pointing at the wrong source.
+    """
+
+    members = [
+        {"key": transcript_id, "source_type": "sermon_transcript", "transcript_id": transcript_id}
+        for transcript_id in batch.get("transcript_ids") or []
+    ]
+    members.extend(
+        {**row, "key": str(row["source_id"]), "transcript_id": str(row["source_id"])}
+        for row in batch.get("sources") or []
+    )
+    return members
 
 
 def validate_research_batch(payload: dict[str, Any]) -> None:
@@ -70,20 +128,31 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "research batch cannot pre-assign topics: " + ", ".join(forbidden)
         )
-    transcript_ids = payload.get("transcript_ids")
-    if not isinstance(transcript_ids, list) or not transcript_ids:
-        raise ResearchBatchValidationError("transcript_ids must be a non-empty list")
+    transcript_ids = payload.get("transcript_ids") or []
+    if not isinstance(transcript_ids, list):
+        raise ResearchBatchValidationError("transcript_ids must be a list")
     if any(not isinstance(value, str) or not value.strip() for value in transcript_ids):
         raise ResearchBatchValidationError("every transcript_id must be a non-empty string")
     if len(set(transcript_ids)) != len(transcript_ids):
         raise ResearchBatchValidationError("transcript_ids cannot contain duplicates")
+    sources = payload.get("sources") or []
+    _validate_sources(sources)
+    if not transcript_ids and not sources:
+        raise ResearchBatchValidationError(
+            "a batch needs at least one transcript_id or one source"
+        )
+    keys = list(transcript_ids) + [str(row["source_id"]) for row in sources]
+    if len(set(keys)) != len(keys):
+        raise ResearchBatchValidationError(
+            "a source_id cannot repeat a transcript_id or another source_id"
+        )
     reuse = payload.get("reviewed_package_reuse") or {}
     if not isinstance(reuse, dict):
         raise ResearchBatchValidationError("reviewed_package_reuse must be an object")
-    unknown_reuse = sorted(set(reuse).difference(transcript_ids))
+    unknown_reuse = sorted(set(reuse).difference(keys))
     if unknown_reuse:
         raise ResearchBatchValidationError(
-            "reviewed_package_reuse contains transcripts outside the batch: "
+            "reviewed_package_reuse contains members outside the batch: "
             + ", ".join(unknown_reuse)
         )
     if any(not isinstance(value, str) or not value.strip() for value in reuse.values()):
@@ -158,9 +227,9 @@ def merge_reviewed_packages(
     """Merge reviewed packages without inventing topics or product routes."""
 
     validate_research_batch(batch)
-    expected = list(batch["transcript_ids"])
+    expected = [member["key"] for member in batch_members(batch)]
     if len(package_paths) != len(expected):
-        raise ResearchBatchValidationError("one reviewed package is required per transcript")
+        raise ResearchBatchValidationError("one reviewed package is required per batch member")
 
     merged: dict[str, list[dict[str, Any]]] = {name: [] for name in COLLECTIONS}
     seen: dict[str, set[str]] = {name: set() for name in COLLECTIONS}
@@ -175,7 +244,9 @@ def merge_reviewed_packages(
             raise ResearchBatchValidationError(
                 f"reviewed package must contain exactly one source: {path}"
             )
-        transcript_id = str(sources[0].get("transcript_id") or "")
+        # A notes manuscript carries the same value under both keys; falling
+        # back keeps a manifest row that never set `transcript_id` readable.
+        transcript_id = str(sources[0].get("transcript_id") or sources[0].get("source_id") or "")
         actual.append(transcript_id)
         consensus = package.get("consensus_application") or {}
         if consensus.get("approval_status") not in {None, "not_human_approved"}:

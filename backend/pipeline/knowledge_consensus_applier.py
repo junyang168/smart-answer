@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from backend.pipeline.knowledge_source import load_knowledge_source_document
+from backend.pipeline.run_ledger import run_record
+from backend.pipeline.source_keys import package_row_key
 
 
 class ConsensusApplicationError(ValueError):
@@ -358,9 +360,26 @@ def main() -> int:
         transcript_id = str(source.get("transcript_id") or "")
         transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
         transcripts[transcript_id] = transcript
-    result = apply_consensus_overrides(package, overrides, transcripts)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    subject = package_row_key(package) or args.package.name
+    # No model call here, so the row costs nothing and says the one thing the
+    # overview could not: whether the adjudicator's overrides were ever applied.
+    # One source reached the store from its raw extraction package because
+    # nobody could see that this stage had not run for it.
+    # `merge` and not `apply`: this artifact is what the overview's 合併 column
+    # has always meant -- `run_ledger_backfill` maps both `.reviewed-candidate`
+    # and `.consensus-applied` to it. Filing a stage name the dashboard has no
+    # column for meant the work was done, the row was written, and the cell
+    # still read ✗. A stage name is part of the user-facing contract, not an
+    # internal label.
+    with run_record(subject=subject, stage="merge") as record:
+        record.inputs({"overrides_path": str(args.overrides)})
+        result = apply_consensus_overrides(package, overrides, transcripts)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        record.quality(result["consensus_application"])
+        record.outputs(args.output)
     print(json.dumps(result["consensus_application"], ensure_ascii=False))
     return 0
 
