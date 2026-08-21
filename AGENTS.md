@@ -30,28 +30,44 @@ scripts/wrap-up.sh                            # opens the PR from inside it
 scripts/wrap-up.sh --cleanup                  # after it merges
 ```
 
-`work-on.sh` links `.env`, both venvs and both `node_modules` into the worktree,
-because none of them are in git and installing 2.3 GB per card is not a plan.
-The code under test is the worktree's; the interpreter and the packages are
-shared. Two limits follow from sharing them:
+`work-on.sh` links `.env`, both venvs and the root `node_modules` into the
+worktree, because none of them are in git and installing 2.3 GB per card is not
+a plan. `web/node_modules` is hardlink-cloned rather than linked -- Turbopack
+takes the working directory as its root and rejects a `node_modules` pointing
+out of it, so with a link neither `npm run dev` nor `npm run build` starts at
+all. The clone takes about ten seconds and no meaningful disk: same inodes
+until something rewrites them.
 
-**One worktree at a time can run the app.** Ports 3000, 3003 and 8555 are held
-by whoever started first, and the primary checkout holds them today. Backend
-and pipeline changes do not need the server — run the scripts and the tests in
-the worktree. A front-end change means stopping the primary checkout's server,
-or waiting to see it deployed.
+**To see your change, run the app in your own worktree.**
 
-**`npm run build` does not run in a worktree**, and is not meant to. Next 16
-builds with Turbopack, which takes the working directory as its root and
-refuses a `node_modules` that symlinks out of it. Type-check with
-`cd web && ./node_modules/.bin/tsc --noEmit` instead -- it is what catches the
-class of error that reaches a deploy, it costs seconds, and it works here. The
-build itself is production's job, and a build that fails there costs minutes
-and touches nothing: the deploy builds before it switches.
+```bash
+scripts/dev.sh            # this card's ports; ops-124-… → web 3124, api 9124
+scripts/dev.sh status     # every dev server on the machine, with its branch
+scripts/dev.sh stop       # this card's pair
+```
+
+The port is the card number, so worktrees cannot collide and the URL says which
+card you are looking at. Several can run at once. `wrap-up.sh --cleanup` stops
+them when it removes the worktree.
+
+**`main` is staging, on 3003/8222, and nginx `:8888` publishes it.** Run it with
+`scripts/dev.sh --staging` from the primary checkout; `--staging` refuses any
+branch but main, because that URL is public and should show what is merged
+rather than whoever started first. This is not theoretical: a merged branch held
+that port for 43 hours in August 2026 and nothing on the page said so.
 
 **A branch that changes its dependencies is running against the wrong ones.**
-`requirements.txt` or `package.json` edits are not picked up by a linked
-install; that branch needs its own.
+`requirements.txt` or `package.json` edits are not picked up by a shared or
+cloned install; that branch needs its own `npm install`.
+
+Type-check the front end with `cd web && ./node_modules/.bin/tsc --noEmit`. It
+catches the class of error that reaches a deploy and costs seconds, so it stays
+the check to run before a PR. `npm run build` does now work in a worktree, but
+it prerenders pages that call `FULL_ARTICLE_SERVICE_URL` — 8222, staging's
+backend, whatever port your own card uses — so it fails with `ECONNREFUSED`
+unless staging is up. The build itself is production's job either way: a build
+that fails there costs minutes and touches nothing, because the deploy builds
+before it switches.
 
 Run tests with `backend/.venv`, which is the version `.python-version` pins and
 the one production runs. The root `.venv` is an older 3.11 that survives for
