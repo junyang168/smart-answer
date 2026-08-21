@@ -90,12 +90,17 @@ flowchart LR
 
 ### 没有 `##` 的来源
 
-115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能（`GeminiClient.generate_subtitles`）取得边界。
+115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
 
-两个设计约束：
+已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--persist-generated-subtitles` 时则走正式写入阶段：保存全部一级、二级 insertion，经 `SermonManager` 做 ACL 与旧 SHA 检查，写入后重新加载，再从带标题的新来源开始抽取。
 
-- **生成的小标题不写回来源档**。插入会让其后所有 S 编号位移，锚点、ledger inventory、`source_sha256` 全跟着变；而这里只需要边界，标题文字放进 prompt 当 breadcrumb 就够了。
-- **计画按来源雜湊快取，其指纹进 `extraction_identity`**。它是模型调用，不快取的话重跑可能重新分段，两次抽取就不可比。
+三个设计约束：
+
+- **不绕过讲道权限。** 写入模式必须提供 `--subtitle-save-user-id`；没有写权限就于抽取前失败，不自动认领、不冒充管理员、不直接改档。
+- **正文逐列不变。** 写入前后比较所有非标题 row，保存正文旧／新 SHA 与完整 insertion artifact；任何正文差异都在抽取前失败。
+- **抽取只认写入后的来源。** 保存后重新读取档案，新的 `source_sha256`、S 编号、section plan 与 extraction fingerprint 全部从带标题版本重算。旧来源的 section cache 不会被误用。
+
+未开启写入模式时，内部 section plan 仍按来源雜湊快取，其指纹进入 `extraction_identity`；这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
 
 ### 每次抽取自带计分板
 
@@ -231,6 +236,18 @@ schema、model、generation fingerprint 與輸出 SHA 的既有審計鏈。
 這個選項只替換本次 detailed extraction workflow 的 OpenAI 角色。後續明確執行的
 Claude 獨立複審仍使用 Anthropic provider，仍可能產生 Anthropic API 費用；它不會因
 `--backend codex-subscription` 改走 Codex。
+
+对仍在 `script_review` 的无标题讲道，先由 pipeline 通过正式服务写入标题，再抽取：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
+  --ids "S 220206" \
+  --persist-generated-subtitles \
+  --subtitle-save-user-id <具备该讲道写权限的服务或编辑帐号>
+```
+
+这个命令不会自动认领讲道；帐号没有现成写权限时会保存失败审计并停止，知识抽取不会开始。
 
 切分层级可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
 

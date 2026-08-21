@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import copy
+import hashlib
 import json
 import re
 import requests
@@ -185,6 +186,68 @@ class SermonManager:
 
         sd = ScriptDelta(self.base_folder, item)
         return sd.save_script(user_id, type, item,data)
+
+    def persist_generated_subtitles(
+        self,
+        user_id: str,
+        item: str,
+        *,
+        expected_source_sha256: str,
+        insertions: List[dict],
+    ) -> dict:
+        """Persist pipeline-generated headings through the governed save layer.
+
+        This is intentionally not a direct-write helper in the extraction
+        runner. The same ACL that guards the editor guards this method, and an
+        optimistic SHA check prevents a model response generated for an older
+        transcript from being applied over a proofreader's newer work.
+        """
+
+        permissions = self.get_sermon_permissions(user_id, item)
+        if not permissions.canWrite:
+            raise PermissionError("You don't have permission to update this item")
+
+        from backend.pipeline.sermon_subtitle_persistence import (
+            apply_insertions,
+            body_rows,
+            payload_sha256,
+            verify_saved_result,
+        )
+
+        source_path = Path(self.base_folder) / "script_review" / f"{item}.json"
+        before_raw = source_path.read_bytes()
+        before_sha256 = hashlib.sha256(before_raw).hexdigest()
+        if before_sha256 != expected_source_sha256:
+            raise RuntimeError(
+                f"sermon changed before subtitle save: expected {expected_source_sha256}, "
+                f"found {before_sha256}"
+            )
+        before = json.loads(before_raw)
+        if not isinstance(before, list):
+            raise ValueError("script_review sermon must be a JSON array")
+        updated = apply_insertions(
+            before,
+            insertions,
+            source_sha256=before_sha256,
+            user_id=user_id,
+        )
+
+        # Metadata and transcript writes remain inside SermonManager. The row
+        # writer is atomic and preserves the complete canonical mappings.
+        self._sm.update_sermon_metadata(user_id, item)
+        ScriptDelta.save_rows(self.base_folder, item, "script_review", updated)
+
+        after_raw = source_path.read_bytes()
+        after = json.loads(after_raw)
+        verify_saved_result(before, after, expected_insertions=len(insertions))
+        return {
+            "source_path": str(source_path),
+            "before_source_sha256": before_sha256,
+            "after_source_sha256": hashlib.sha256(after_raw).hexdigest(),
+            "before_body_sha256": payload_sha256(body_rows(before)),
+            "after_body_sha256": payload_sha256(body_rows(after)),
+            "insertions": len(insertions),
+        }
 
     def update_sermon_header(
         self,

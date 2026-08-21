@@ -34,6 +34,7 @@ from backend.pipeline.extraction_sections import (
     SectionPlan,
     breadcrumb_for,
     combine_sections,
+    heading_level,
     load_cached_plan,
     plan_sections,
     save_plan,
@@ -44,6 +45,11 @@ from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 from backend.pipeline.subtitle_generation import generate_subtitles
+from backend.pipeline.sermon_subtitle_persistence import (
+    SubtitleBodyMutationError,
+    SubtitlePersistenceError,
+    body_rows,
+)
 
 
 #: What each supported model needs to be reached. `gpt-5.6-sol` is the default,
@@ -140,6 +146,13 @@ def _segment_texts(source: dict[str, Any]) -> list[str]:
     return [str(segment.get("text") or "") for segment in source.get("script") or []]
 
 
+def _has_section_headings(source: dict[str, Any], *, level: int) -> bool:
+    return any(
+        (depth := heading_level(text)) is not None and depth <= level
+        for text in _segment_texts(source)
+    )
+
+
 def segment_locator(position: int) -> str:
     """The anchor locator for a segment, by its position in the whole source.
 
@@ -229,6 +242,100 @@ def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = 
     return provider
 
 
+def _persist_generated_subtitles(
+    *,
+    source_id: str,
+    source: dict[str, Any],
+    raw: bytes,
+    source_path: Path,
+    output_dir: Path,
+    user_id: str,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Generate all subtitle levels, save them through ACL, and audit the write."""
+
+    if source_path.parent.name != "script_review":
+        raise SubtitlePersistenceError(
+            "generated subtitles can only be persisted to a script_review source"
+        )
+    source_sha256 = hashlib.sha256(raw).hexdigest()
+    paragraphs = [
+        {"index": segment.get("index"), "text": segment.get("text")}
+        for segment in source.get("script") or []
+    ]
+    indexes = [str(row.get("index")) for row in paragraphs]
+    if len(indexes) != len(set(indexes)):
+        raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
+
+    print(json.dumps({
+        "phase": "subtitle_generation", "source": source_id,
+        "paragraphs": len(paragraphs), "status": "started",
+    }, ensure_ascii=False), flush=True)
+    insertions = generate_subtitles(
+        paragraphs,
+        subject=source_id,
+        consumer="extraction_persisted_subtitles",
+    )
+    if not insertions:
+        raise SubtitlePersistenceError(
+            f"{source_id}: subtitle generator returned no insertions; extraction not started"
+        )
+
+    audit_dir = (
+        output_dir / "subtitle-applications" / _slug(source_id)
+        / source_sha256[:16]
+    )
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_path = audit_dir / "application.json"
+    (audit_dir / "before-source.json").write_bytes(raw)
+    audit: dict[str, Any] = {
+        "schema_version": "wang_sermon_subtitle_application_v1",
+        "source_id": source_id,
+        "source_path": str(source_path),
+        "before_source_sha256": source_sha256,
+        "save_user_id": user_id,
+        "insertions": insertions,
+        "status": "generated",
+    }
+    audit_path.write_text(
+        json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+    print(json.dumps({
+        "phase": "subtitle_persistence", "source": source_id,
+        "insertions": len(insertions), "status": "started",
+    }, ensure_ascii=False), flush=True)
+    try:
+        if manager is None:
+            from backend.api.sc_api.sermon_manager import sermonManager
+
+            manager = sermonManager
+        report = manager.persist_generated_subtitles(
+            user_id,
+            source_id,
+            expected_source_sha256=source_sha256,
+            insertions=insertions,
+        )
+    except Exception as exc:
+        audit.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        audit_path.write_text(
+            json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        raise
+    if Path(str(report.get("source_path") or "")).resolve() != source_path.resolve():
+        raise SubtitlePersistenceError("sermon save service wrote a different source path")
+    audit.update({"status": "persisted", "save_report": report})
+    audit_path.write_text(
+        json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(json.dumps({
+        "phase": "subtitle_persistence", "source": source_id,
+        "insertions": len(insertions), "status": "persisted",
+        "after_source_sha256": report.get("after_source_sha256"),
+    }, ensure_ascii=False), flush=True)
+    return report
+
+
 def resolve_section_plan(
     *, source: dict[str, Any], source_id: str, source_sha256: str, output_dir: Path,
     level: int = DEFAULT_SECTION_LEVEL, allow_generated: bool = True,
@@ -296,6 +403,11 @@ def _extract_sections(
         cache_path = _section_cache_path(output_dir, source_id, fingerprint, section)
         sentences = section_sentences(source, section)
         if cache_path.is_file() and not force:
+            print(json.dumps({
+                "phase": "extraction", "source": source_id,
+                "section": section.index, "sections": len(plan.sections),
+                "status": "cached",
+            }, ensure_ascii=False), flush=True)
             cached = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
             answered.append((section, cached))
             exclusions.extend(exclusions_from_audit(
@@ -303,12 +415,22 @@ def _extract_sections(
                 ledger_sentence_id=ledger_sentence_id))
             section_rows.append({**vars(section), "attempts": 0, "cached": True})
             continue
+        print(json.dumps({
+            "phase": "extraction", "source": source_id,
+            "section": section.index, "sections": len(plan.sections),
+            "title": section.title, "sentences": len(sentences), "status": "started",
+        }, ensure_ascii=False), flush=True)
         user_input = header + _section_prompt_body(source, section, sentences)
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
         response, attempts = None, 0
         for attempt in range(1, VALIDATION_ATTEMPTS + 1):
             attempts = attempt
+            print(json.dumps({
+                "phase": "extraction", "source": source_id,
+                "section": section.index, "sections": len(plan.sections),
+                "attempt": attempt, "status": "model_call",
+            }, ensure_ascii=False), flush=True)
             feedback = ""
             if last_error and last_candidate:
                 feedback = (
@@ -814,9 +936,62 @@ def run_one(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
+    persist_subtitles: bool = False,
+    subtitle_save_user_id: str | None = None,
+    subtitle_manager: Any | None = None,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
+    section_settings = sections or SectionSettings()
+    if persist_subtitles and not section_settings.allow_generated:
+        raise SubtitlePersistenceError(
+            "subtitle persistence cannot be combined with generated sections disabled"
+        )
+    if (
+        persist_subtitles
+        and section_settings.allow_generated
+        and not _has_section_headings(transcript, level=section_settings.level)
+    ):
+        if not subtitle_save_user_id:
+            raise SubtitlePersistenceError(
+                "subtitle persistence requires an authorized save user id"
+            )
+        before_payload = json.loads(raw)
+        report = _persist_generated_subtitles(
+            source_id=transcript_id,
+            source=transcript,
+            raw=raw,
+            source_path=transcript_path,
+            output_dir=output_dir,
+            user_id=subtitle_save_user_id,
+            manager=subtitle_manager,
+        )
+        transcript, raw = _load(transcript_path)
+        after_payload = json.loads(raw)
+        if not isinstance(before_payload, list) or not isinstance(after_payload, list):
+            raise SubtitlePersistenceError(
+                "persisted script_review sermon must remain a JSON array"
+            )
+        if body_rows(before_payload) != body_rows(after_payload):
+            raise SubtitleBodyMutationError(
+                "authorized subtitle save changed existing sermon body rows"
+            )
+        reloaded_sha256 = hashlib.sha256(raw).hexdigest()
+        if reloaded_sha256 != report.get("after_source_sha256"):
+            raise SubtitlePersistenceError(
+                "reloaded sermon SHA does not match the authorized save result"
+            )
+        if not _has_section_headings(transcript, level=section_settings.level):
+            raise SubtitlePersistenceError(
+                "saved sermon still has no usable section headings; extraction not started"
+            )
+        # The generator has completed its job. From here onward headings are
+        # canonical source rows, and no internal-only fallback may replace them.
+        section_settings = SectionSettings(
+            level=section_settings.level,
+            allow_generated=False,
+            only=section_settings.only,
+        )
     header = (
         f"逐字稿 ID：{transcript_id}\n标题：{transcript.get('metadata', {}).get('title', transcript_id)}\n\n"
         "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
@@ -825,7 +1000,7 @@ def run_one(
     return _run(
         source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
         header=header, output_dir=output_dir, client=client, prompt=prompt,
-        reasoning_effort=reasoning_effort, sections=sections or SectionSettings(), force=force,
+        reasoning_effort=reasoning_effort, sections=section_settings, force=force,
     )
 
 
@@ -887,9 +1062,26 @@ def main() -> int:
     parser.add_argument("--no-generated-sections", action="store_true",
                         help="never ask the subtitle generator for boundaries; "
                              "a source with no headings is then one section")
+    parser.add_argument(
+        "--persist-generated-subtitles",
+        action="store_true",
+        help="for headingless script_review sermons, save generated subtitles through "
+             "the authorized sermon service and reload before extraction",
+    )
+    parser.add_argument(
+        "--subtitle-save-user-id",
+        help="authorized sermon editor/service identity used only with "
+             "--persist-generated-subtitles",
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.persist_generated_subtitles and not args.subtitle_save_user_id:
+        parser.error("--persist-generated-subtitles requires --subtitle-save-user-id")
+    if args.subtitle_save_user_id and not args.persist_generated_subtitles:
+        parser.error("--subtitle-save-user-id requires --persist-generated-subtitles")
+    if args.persist_generated_subtitles and args.no_generated_sections:
+        parser.error("--persist-generated-subtitles cannot be combined with --no-generated-sections")
     sections = SectionSettings(
         level=args.section_level, allow_generated=not args.no_generated_sections,
         only=tuple(args.only_sections) if args.only_sections else None,
@@ -918,6 +1110,7 @@ def main() -> int:
             "max_output_tokens": args.max_output_tokens,
             "section_level": sections.level,
             "allow_generated_sections": sections.allow_generated,
+            "persist_generated_subtitles": args.persist_generated_subtitles,
             "sections_per_source": plans,
             # Retained for scripts that read the old dry-run shape. Dry runs
             # never call either backend.
@@ -938,10 +1131,15 @@ def main() -> int:
             status, output = run_one(
                 path, output_dir=args.output_dir, client=client, prompt=prompt,
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
+                persist_subtitles=args.persist_generated_subtitles,
+                subtitle_save_user_id=args.subtitle_save_user_id,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")
-        except (DetailedExtractionValidationError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        except (
+            DetailedExtractionValidationError, RuntimeError, ValueError,
+            json.JSONDecodeError, OSError,
+        ) as exc:
             counts["failed"] += 1
             print(f"FAILED: {path.name}: {exc}")
     for source_row in source_rows:
@@ -952,7 +1150,10 @@ def main() -> int:
             )
             counts[status] += 1
             print(f"{status}: {source_row['source_id']} -> {output}")
-        except (DetailedExtractionValidationError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        except (
+            DetailedExtractionValidationError, RuntimeError, ValueError,
+            json.JSONDecodeError, OSError,
+        ) as exc:
             counts["failed"] += 1
             print(f"FAILED: {source_row['source_id']}: {exc}")
     print(json.dumps(counts, ensure_ascii=False))
