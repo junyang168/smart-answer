@@ -521,10 +521,24 @@ def _snapshot_source_keys(snapshot: dict[str, Any]) -> dict[str, str]:
     keys: dict[str, str] = {}
     for document in snapshot.get("source_documents") or []:
         source_id = str(document.get("source_id") or "")
-        match = re.search(r"-([0-9a-f]{12})$", source_id)
-        if not match:
+        if not source_id:
             continue
-        keys[match.group(1)] = document_row_key(document) or source_id
+        row_key = document_row_key(document) or source_id
+        # A sermon's `SRC-…-3d012c24a542` carries the digest in its id, and
+        # parsing it was the whole of this lookup. A notes manuscript's id is
+        # `notes_manuscript:16_章_-_生命`, which carries none, so all three 母本
+        # fell out -- and they are the sources the published articles are
+        # actually written from, so every one of them showed no articles at all.
+        #
+        # The digest is `sha256(source_id)[:12]`, the same expression the
+        # extractor uses to mint `DK-…`, so it can be derived rather than
+        # scraped. Both routes are registered: derived for the ids that have no
+        # digest in them, parsed for the ids whose digest was minted from
+        # something else.
+        keys[hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:12]] = row_key
+        match = re.search(r"-([0-9a-f]{12})$", source_id)
+        if match:
+            keys[match.group(1)] = row_key
     return keys
 
 
