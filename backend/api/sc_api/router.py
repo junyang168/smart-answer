@@ -25,7 +25,6 @@ from .copilot import ChatMessage
 from .qaManager import QAItem, qaManager
 from .sermon_manager import Permission, sermonManager
 from backend.api.models import GenerateSubtitlesRequest, SubtitleInsertion
-from backend.api.gemini_client import gemini_client
 
 
 sermon_manager = sermonManager
@@ -313,30 +312,56 @@ def generate_series_metadata(request: GenerateSeriesMetadataRequest):
 
 @router.post("/generate_subtitles")
 def generate_subtitles(payload: GenerateSubtitlesRequest):
+    """Suggest 小標題 for one sermon, or say plainly that it could not.
+
+    The same call decides how a headingless transcript is cut for extraction, so
+    it lives in `backend.pipeline.subtitle_generation` and is imported here
+    rather than reimplemented. Two things it no longer does: swallow an
+    exception into an empty list -- which arrived here as "no suggestions" and
+    told the editor's user nothing had gone wrong -- and drop an insertion whose
+    `after_index` does not parse.
+    """
+
+    # Imported here because `backend.pipeline.stage1` imports back into
+    # `backend.api`, and this module is part of what that import builds.
+    from backend.pipeline.subtitle_generation import (
+        SubtitleGenerationError,
+        generate_subtitles as generate,
+    )
+    from .script_delta import ScriptDelta
+
+    for p in payload.paragraphs:
+        text = p.get('text')
+        if text is not None:
+            if not isinstance(text, str):
+                text = str(text)
+            p['text'] = ScriptDelta.remove_format(text)
     try:
-        from .script_delta import ScriptDelta
-        for p in payload.paragraphs:
-            text = p.get('text')
-            if text is not None:
-                if not isinstance(text, str):
-                    text = str(text)
-                p['text'] = ScriptDelta.remove_format(text)
-        insertions = gemini_client.generate_subtitles(payload.paragraphs)
-        print(f"DEBUG: Gemini insertions raw: {insertions}")
-        valid_insertions = []
-        for i in insertions:
-            try:
-                valid_insertions.append(SubtitleInsertion(**i))
-            except Exception as e:
-                print(f"Skipping invalid subtitle insertion: {i}, error: {e}")
-                continue
-        print(f"DEBUG: Returning {len(valid_insertions)} valid insertions.")
-        return JSONResponse(content=jsonable_encoder(valid_insertions, by_alias=True))
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        print(f"CRITICAL ERROR in generate_subtitles: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        insertions = generate(
+            payload.paragraphs,
+            subject=payload.item or "unnamed-sermon",
+            consumer="sermon_editor",
+            trigger="panel",
+        )
+    except SubtitleGenerationError as exc:
+        logging.error(f"generate_subtitles failed for {payload.item!r}: {exc}")
+        # 502, and a message of its own: an empty list here would be
+        # indistinguishable from a sermon the model found nothing to say about.
+        raise HTTPException(
+            status_code=502, detail=f"AI 產生小標題時發生錯誤：{exc}"
+        ) from exc
+    except Exception as exc:
+        logging.error(
+            f"generate_subtitles failed for {payload.item!r}: {exc}\n{traceback.format_exc()}"
+        )
+        raise HTTPException(
+            status_code=502, detail=f"AI 產生小標題時發生錯誤：{type(exc).__name__}: {exc}"
+        ) from exc
+    return JSONResponse(
+        content=jsonable_encoder(
+            [SubtitleInsertion(**row) for row in insertions], by_alias=True
+        )
+    )
 
 
 @router.get("/sermon/{user_id}/{item}/{changes}")

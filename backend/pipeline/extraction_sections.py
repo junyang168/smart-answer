@@ -141,8 +141,17 @@ def sections_from_headings(
 
 #: A callable that takes `[{"index": ..., "text": ...}]` and returns
 #: `[{"after_index": ..., "text": "## …", "level": 1}]` -- the shape
-#: `GeminiClient.generate_subtitles` already returns.
+#: `backend.pipeline.subtitle_generation.generate_subtitles` returns.
+#:
+#: It raises rather than returning `[]` when it fails, and this module lets that
+#: through: an empty list here is one section, which is whole-document
+#: extraction, which is what sectioning exists to replace. A failure that looks
+#: like a short sermon is worse than a failure.
 SubtitleProvider = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
+
+
+class SectionBoundaryError(ValueError):
+    """A generated boundary does not land on a segment of this source."""
 
 
 def sections_from_generator(
@@ -167,7 +176,13 @@ def sections_from_generator(
         # segment following the one named.
         position = 0 if after.upper() == "START" else _position_after(after, len(segments))
         if position is None:
-            continue
+            # Not skipped. A boundary nobody can place is a section this source
+            # will never be asked about, and dropping it quietly leaves the
+            # package looking like the model simply proposed fewer breaks.
+            raise SectionBoundaryError(
+                f"generated boundary after_index {after!r} does not name a segment of "
+                f"this source (it has {len(segments)})"
+            )
         boundaries[position] = heading_text(str(row.get("text") or ""))
     starts = sorted(boundaries)
     return [
@@ -178,10 +193,18 @@ def sections_from_generator(
 
 
 def _position_after(after_index: str, total: int) -> int | None:
+    """The segment a section opens at, or None if the index names no segment.
+
+    `total` is allowed as a result: a heading proposed after the last segment
+    opens a section with nothing in it, which the caller's `end > start` filter
+    drops. That is a heading with no content, not a heading with no home, and
+    only the second one is a fault worth failing the source over.
+    """
+
     if not after_index.lstrip("-").isdigit():
         return None
     position = int(after_index) + 1
-    return position if 0 < position < total else None
+    return position if 0 < position <= total else None
 
 
 def plan_sections(
@@ -195,6 +218,12 @@ def plan_sections(
     A source that already carries `##` is never sent to the generator: those
     headings are where the text was actually composed, and a model's guess does
     not improve on that.
+
+    Once the generator has been asked, the plan says so even if it came back
+    with nothing to mark. A one-section plan recorded as `source_headings` is
+    the report that hid this whole problem: it reads as a source that happens to
+    have one section, when what happened is that the boundaries were generated
+    and the generation had nothing in it.
     """
 
     if not segments:
@@ -203,8 +232,9 @@ def plan_sections(
     origin = FROM_SOURCE
     if len(sections) <= 1 and provider is not None:
         generated = sections_from_generator(segments, provider)
+        origin = FROM_GENERATOR
         if len(generated) > 1:
-            sections, origin = generated, FROM_GENERATOR
+            sections = generated
     return SectionPlan(sections=tuple(sections), origin=origin)
 
 

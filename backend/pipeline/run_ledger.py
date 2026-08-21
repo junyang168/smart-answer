@@ -37,7 +37,14 @@ from backend.pipeline.model_prices import RunCost, price_usage
 from backend.pipeline.source_keys import normalize_source_key
 
 
-#: Must stay in step with the CHECK constraint in migration 004.
+#: `sectioning` decides where a source with no headings breaks, and so how many
+#: times extraction runs on it.  It is a model call of its own, made before the
+#: extraction run exists -- the plan is an input to that run's fingerprint -- and
+#: cached per source hash, so it cannot be a usage row on the extraction it feeds.
+#: `cross_section` puts back the relations that sectioning necessarily splits.
+#: Adding a name here also needs `004_pipeline_run_stages.sql`, which is where
+#: the database's own CHECK on this column lives -- a name in one and not the
+#: other is a stage whose runs cannot record at all.
 STAGES = (
     "sectioning", "extraction", "cross_section", "review", "adjudication",
     "merge", "ingest", "article",
