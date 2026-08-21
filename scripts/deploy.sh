@@ -314,10 +314,11 @@ chmod 600 "$BACKEND_PLIST"
 
 mkdir -p "$RELEASES_DIR"
 
-# A release is about 1.5 GB of venv, node_modules and .next build. Running the
-# disk out mid-build leaves a half-written tree and takes down everything else
-# sharing the volume, PostgreSQL included, so refuse before starting rather
-# than fail somewhere inside npm.
+# A release is about 1.25 GB of venv, node_modules and .next build, and the
+# build needs room for the devDependencies and build cache that get trimmed
+# afterwards. Running the disk out mid-build leaves a half-written tree and
+# takes down everything else sharing the volume, PostgreSQL included, so refuse
+# before starting rather than fail somewhere inside npm.
 REQUIRED_FREE_MB="${SMART_ANSWER_MIN_FREE_MB:-6144}"
 available_mb="$(df -m "$DEPLOY_ROOT" | awk 'NR==2 {print $4}')"
 if [[ -z "$available_mb" ]]; then
@@ -367,6 +368,12 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
     -r "$RELEASE_DIR/backend/requirements.txt"
   "$RELEASE_DIR/backend/.venv/bin/python3" -m compileall -q "$RELEASE_DIR/backend"
 
+  # Nothing installs into a release after this line -- an unverified release is
+  # discarded and rebuilt rather than repaired in place -- so pip is 13 MB of
+  # tooling that only exists to be shipped three times over.
+  "$RELEASE_DIR/backend/.venv/bin/pip" uninstall --yes --disable-pip-version-check pip \
+    || log "Could not remove pip from the release venv; continuing"
+
   # The running service reads this to answer /healthz with its own commit.
   printf '{"release": "%s", "deployed_at": "%s"}\n' \
     "$TARGET_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RELEASE_DIR/release.json"
@@ -374,6 +381,15 @@ if [[ ! -d "$RELEASE_DIR" ]]; then
   log "Installing and building frontend"
   npm --prefix "$RELEASE_DIR/web" ci
   npm --prefix "$RELEASE_DIR/web" run build
+
+  # `npm ci` has to install devDependencies because the build needs them, but
+  # `next start` does not: typescript, eslint and @babel were 110 MB of every
+  # release. The Turbopack build cache is another 134 MB that only the build
+  # reads. Both are removed here so the retained releases stay small; the
+  # runtime tree is untouched.
+  log "Trimming build-only artifacts"
+  rm -rf "$RELEASE_DIR/web/.next/cache"
+  npm --prefix "$RELEASE_DIR/web" prune --omit=dev
 else
   log "Reusing previously built immutable release"
 fi
@@ -401,4 +417,9 @@ printf '%s %s previous=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET_SHA" "${P
   >> "$DEPLOY_ROOT/deployments.log"
 
 log "Deploy complete: $TARGET_SHA"
-log "Old releases were retained for rollback; cleanup is intentionally manual"
+
+# Only now: until the new release is recorded active, the tree this would keep
+# is the one we might still have to roll back to.
+log "Pruning releases past the rollback target"
+SMART_ANSWER_DEPLOY_ROOT="$DEPLOY_ROOT" "$SOURCE_REPO/scripts/prune-releases.sh" \
+  || printf 'deploy: prune failed; %s still holds every release\n' "$RELEASES_DIR" >&2
