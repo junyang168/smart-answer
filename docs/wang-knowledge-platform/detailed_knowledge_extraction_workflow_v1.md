@@ -210,6 +210,28 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_
   --ids 011WSR01
 ```
 
+預設的 `--backend api` 保持既有行為，按 `--model` 的 family 使用 OpenAI、Anthropic
+或 DeepSeek API。從 Codex 中發出 `Extract <source>`，若要讓本次 runner 原由 OpenAI
+承擔的抽取與必要的段落標題生成改用本機 ChatGPT subscription，必須明確加入：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
+  --ids 011WSR01 \
+  --backend codex-subscription \
+  --model gpt-5.6-sol
+```
+
+subscription 模式在第一個真正的模型 call 前執行 `codex login status`，只接受
+`Logged in using ChatGPT`。傳給 `codex` 子程序的環境會移除 `OPENAI_API_KEY` 等可切換
+到 API 計費的憑據；登入失效、額度不足、transport 或結構化輸出失敗都會停止該來源，
+不會 fallback 到 OpenAI API。完整 generation fingerprint 或 section cache 命中時不啟動
+Codex。產物的 `extraction.backend` 為 `codex_subscription`，並繼續保存 source、prompt、
+schema、model、generation fingerprint 與輸出 SHA 的既有審計鏈。
+
+這個選項只替換本次 detailed extraction workflow 的 OpenAI 角色。後續明確執行的
+Claude 獨立複審仍使用 Anthropic provider，仍可能產生 Anthropic API 費用；它不會因
+`--backend codex-subscription` 改走 Codex。
+
 切分层级可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
 
 ```bash
