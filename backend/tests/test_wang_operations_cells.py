@@ -133,3 +133,43 @@ def test_a_failed_stage_keeps_saying_failed_while_upstream_reruns() -> None:
         upstream_in_flight=True,
     )
     assert cell["state"] == "failed"
+
+
+def test_a_run_that_names_no_module_and_wrote_nothing_is_not_evidence() -> None:
+    """A 母本 whose extraction has succeeded three times was reading 失敗.
+
+    The failure came from a fourth-model benchmark in a neighbouring worktree.
+    It died before writing anything, so there was no output path to place it
+    outside the canonical tree, and `run_ledger` had recorded its command as
+    `-` -- what `sys.argv` holds when the code arrives on stdin, which is how
+    that comparison is driven. Nothing tied it to a pipeline entry point and
+    nothing tied it to a directory, yet it was the newest extraction and so it
+    spoke for the source.
+    """
+
+    from pathlib import Path
+
+    from backend.api.wang_operations import is_scratch_run
+
+    root = Path("/data/staging/claim-layer")
+
+    heredoc = {"output_paths": [], "command": "-"}
+    assert is_scratch_run(heredoc, root)
+
+    # A real run always names the module it was started with.
+    real = {
+        "output_paths": [],
+        "command": "detailed_knowledge_extraction_runner.py --output-dir /data/staging/claim-layer/x",
+    }
+    assert not is_scratch_run(real, root)
+
+    # And one writing outside the tree stays scratch however it was started.
+    elsewhere = {
+        "output_paths": [],
+        "command": "detailed_knowledge_extraction_runner.py --output-dir /tmp/bench/out",
+    }
+    assert is_scratch_run(elsewhere, root)
+
+    # An output inside the tree is the strongest evidence and wins outright.
+    produced = {"output_paths": ["/data/staging/claim-layer/pkg.json"], "command": "-"}
+    assert not is_scratch_run(produced, root)

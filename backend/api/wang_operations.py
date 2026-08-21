@@ -247,7 +247,18 @@ def is_scratch_run(run: dict[str, Any], staging_root: Path) -> bool:
     # was going to write, which is the same evidence one step earlier.
     command = str(run.get("command") or "")
     match = re.search(r"--output-dir[= ]+(\S+)", command)
-    return bool(match) and not match.group(1).startswith(root)
+    if match:
+        return not match.group(1).startswith(root)
+    # No output, and no command either. `run_ledger.current_command` records
+    # `shlex.join(sys.argv)`, so a pipeline run always names the module it was
+    # started with -- `-m backend.pipeline.…`. A bare `-` is what argv holds
+    # when the code was piped in on stdin: somebody driving the internals from
+    # a heredoc, which is how the model comparisons in the neighbouring
+    # worktree are run. Such a run produced nothing in the canonical tree and
+    # cannot say where it was going, so it is not evidence about this source's
+    # pipeline. One of them, a failed benchmark on a fourth model, was showing
+    # 抽取 as 失敗 on a 母本 whose extraction has succeeded three times.
+    return command.strip() in {"", "-"}
 
 
 def _as_datetime(value: Optional[str]) -> Optional[datetime]:
