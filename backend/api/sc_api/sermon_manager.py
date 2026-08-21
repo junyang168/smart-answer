@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import copy
-import hashlib
 import json
 import re
 import requests
@@ -179,7 +178,7 @@ class SermonManager:
     def update_sermon(self, user_id:str, type:str,  item:str, data:dict):
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canWrite:
-            return {"message": "You don't have permission to update this item"}
+            raise PermissionError("You don't have permission to update this item")
         
         #update last updated and author
         self._sm.update_sermon_metadata(user_id, item)
@@ -208,46 +207,18 @@ class SermonManager:
             raise PermissionError("You don't have permission to update this item")
 
         from backend.pipeline.sermon_subtitle_persistence import (
-            apply_insertions,
-            body_rows,
-            payload_sha256,
-            verify_saved_result,
+            write_back_generated_subtitles,
         )
 
         source_path = Path(self.base_folder) / "script_review" / f"{item}.json"
-        before_raw = source_path.read_bytes()
-        before_sha256 = hashlib.sha256(before_raw).hexdigest()
-        if before_sha256 != expected_source_sha256:
-            raise RuntimeError(
-                f"sermon changed before subtitle save: expected {expected_source_sha256}, "
-                f"found {before_sha256}"
-            )
-        before = json.loads(before_raw)
-        if not isinstance(before, list):
-            raise ValueError("script_review sermon must be a JSON array")
-        updated = apply_insertions(
-            before,
-            insertions,
-            source_sha256=before_sha256,
-            user_id=user_id,
+        report = write_back_generated_subtitles(
+            source_path,
+            expected_source_sha256=expected_source_sha256,
+            insertions=insertions,
+            actor_id=user_id,
         )
-
-        # Metadata and transcript writes remain inside SermonManager. The row
-        # writer is atomic and preserves the complete canonical mappings.
         self._sm.update_sermon_metadata(user_id, item)
-        ScriptDelta.save_rows(self.base_folder, item, "script_review", updated)
-
-        after_raw = source_path.read_bytes()
-        after = json.loads(after_raw)
-        verify_saved_result(before, after, expected_insertions=len(insertions))
-        return {
-            "source_path": str(source_path),
-            "before_source_sha256": before_sha256,
-            "after_source_sha256": hashlib.sha256(after_raw).hexdigest(),
-            "before_body_sha256": payload_sha256(body_rows(before)),
-            "after_body_sha256": payload_sha256(body_rows(after)),
-            "insertions": len(insertions),
-        }
+        return report
 
     def update_sermon_header(
         self,

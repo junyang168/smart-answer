@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from backend.pipeline.extraction_sections import heading_level
@@ -123,3 +124,61 @@ def verify_saved_result(
         raise SubtitlePersistenceError(
             "saved sermon did not contain exactly the generated subtitle insertions"
         )
+
+
+def write_back_generated_subtitles(
+    source_path: Path,
+    *,
+    expected_source_sha256: str,
+    insertions: Sequence[Mapping[str, Any]],
+    actor_id: str,
+) -> dict[str, Any]:
+    """Write generated headings to one review transcript and verify the result.
+
+    This is the shared write operation. Interactive callers enforce sermon ACL
+    before entering it; the local extraction CLI requires its explicit
+    ``--write-back-generated-subtitles`` operator flag. Neither caller gets a
+    separate insertion implementation.
+    """
+
+    if source_path.parent.name != "script_review":
+        raise SubtitlePersistenceError(
+            "generated subtitles can only be written back to a script_review source"
+        )
+    before_raw = source_path.read_bytes()
+    before_sha256 = hashlib.sha256(before_raw).hexdigest()
+    if before_sha256 != expected_source_sha256:
+        raise SubtitlePersistenceError(
+            f"sermon changed before subtitle write-back: expected {expected_source_sha256}, "
+            f"found {before_sha256}"
+        )
+    before = json.loads(before_raw)
+    if not isinstance(before, list):
+        raise SubtitlePersistenceError("script_review sermon must be a JSON array")
+    updated = apply_insertions(
+        before,
+        insertions,
+        source_sha256=before_sha256,
+        user_id=actor_id,
+    )
+
+    # Imported lazily so deterministic insertion tests do not initialize the
+    # web application. This writer preserves every mapping field and replaces
+    # the file atomically.
+    from backend.api.sc_api.script_delta import ScriptDelta
+
+    ScriptDelta.save_rows(
+        str(source_path.parent.parent), source_path.stem, "script_review", updated
+    )
+    after_raw = source_path.read_bytes()
+    after = json.loads(after_raw)
+    verify_saved_result(before, after, expected_insertions=len(insertions))
+    return {
+        "source_path": str(source_path),
+        "before_source_sha256": before_sha256,
+        "after_source_sha256": hashlib.sha256(after_raw).hexdigest(),
+        "before_body_sha256": payload_sha256(body_rows(before)),
+        "after_body_sha256": payload_sha256(body_rows(after)),
+        "insertions": len(insertions),
+        "actor_id": actor_id,
+    }

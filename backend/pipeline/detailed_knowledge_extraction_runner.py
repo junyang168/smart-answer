@@ -10,7 +10,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from dotenv import load_dotenv
 
@@ -49,6 +49,7 @@ from backend.pipeline.sermon_subtitle_persistence import (
     SubtitleBodyMutationError,
     SubtitlePersistenceError,
     body_rows,
+    write_back_generated_subtitles,
 )
 
 
@@ -249,10 +250,10 @@ def _persist_generated_subtitles(
     raw: bytes,
     source_path: Path,
     output_dir: Path,
-    user_id: str,
-    manager: Any | None = None,
+    client: CodexSubscriptionClient | None = None,
+    writer: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Generate all subtitle levels, save them through ACL, and audit the write."""
+    """Generate all subtitle levels, write them back, and audit the mutation."""
 
     if source_path.parent.name != "script_review":
         raise SubtitlePersistenceError(
@@ -275,6 +276,7 @@ def _persist_generated_subtitles(
         paragraphs,
         subject=source_id,
         consumer="extraction_persisted_subtitles",
+        client=client,
     )
     if not insertions:
         raise SubtitlePersistenceError(
@@ -293,7 +295,7 @@ def _persist_generated_subtitles(
         "source_id": source_id,
         "source_path": str(source_path),
         "before_source_sha256": source_sha256,
-        "save_user_id": user_id,
+        "actor_id": "pipeline:detailed-knowledge-extraction",
         "insertions": insertions,
         "status": "generated",
     }
@@ -306,15 +308,12 @@ def _persist_generated_subtitles(
         "insertions": len(insertions), "status": "started",
     }, ensure_ascii=False), flush=True)
     try:
-        if manager is None:
-            from backend.api.sc_api.sermon_manager import sermonManager
-
-            manager = sermonManager
-        report = manager.persist_generated_subtitles(
-            user_id,
-            source_id,
+        save = writer or write_back_generated_subtitles
+        report = save(
+            source_path,
             expected_source_sha256=source_sha256,
             insertions=insertions,
+            actor_id="pipeline:detailed-knowledge-extraction",
         )
     except Exception as exc:
         audit.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
@@ -936,26 +935,21 @@ def run_one(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
-    persist_subtitles: bool = False,
-    subtitle_save_user_id: str | None = None,
-    subtitle_manager: Any | None = None,
+    write_back_subtitles: bool = False,
+    subtitle_writer: Callable[..., dict[str, Any]] | None = None,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
     section_settings = sections or SectionSettings()
-    if persist_subtitles and not section_settings.allow_generated:
+    if write_back_subtitles and not section_settings.allow_generated:
         raise SubtitlePersistenceError(
             "subtitle persistence cannot be combined with generated sections disabled"
         )
     if (
-        persist_subtitles
+        write_back_subtitles
         and section_settings.allow_generated
         and not _has_section_headings(transcript, level=section_settings.level)
     ):
-        if not subtitle_save_user_id:
-            raise SubtitlePersistenceError(
-                "subtitle persistence requires an authorized save user id"
-            )
         before_payload = json.loads(raw)
         report = _persist_generated_subtitles(
             source_id=transcript_id,
@@ -963,8 +957,8 @@ def run_one(
             raw=raw,
             source_path=transcript_path,
             output_dir=output_dir,
-            user_id=subtitle_save_user_id,
-            manager=subtitle_manager,
+            client=client if isinstance(client, CodexSubscriptionClient) else None,
+            writer=subtitle_writer,
         )
         transcript, raw = _load(transcript_path)
         after_payload = json.loads(raw)
@@ -1063,25 +1057,16 @@ def main() -> int:
                         help="never ask the subtitle generator for boundaries; "
                              "a source with no headings is then one section")
     parser.add_argument(
-        "--persist-generated-subtitles",
+        "--write-back-generated-subtitles",
         action="store_true",
-        help="for headingless script_review sermons, save generated subtitles through "
-             "the authorized sermon service and reload before extraction",
-    )
-    parser.add_argument(
-        "--subtitle-save-user-id",
-        help="authorized sermon editor/service identity used only with "
-             "--persist-generated-subtitles",
+        help="for headingless script_review sermons, write generated subtitles to the "
+             "review transcript, verify body preservation, and reload before extraction",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.persist_generated_subtitles and not args.subtitle_save_user_id:
-        parser.error("--persist-generated-subtitles requires --subtitle-save-user-id")
-    if args.subtitle_save_user_id and not args.persist_generated_subtitles:
-        parser.error("--subtitle-save-user-id requires --persist-generated-subtitles")
-    if args.persist_generated_subtitles and args.no_generated_sections:
-        parser.error("--persist-generated-subtitles cannot be combined with --no-generated-sections")
+    if args.write_back_generated_subtitles and args.no_generated_sections:
+        parser.error("--write-back-generated-subtitles cannot be combined with --no-generated-sections")
     sections = SectionSettings(
         level=args.section_level, allow_generated=not args.no_generated_sections,
         only=tuple(args.only_sections) if args.only_sections else None,
@@ -1110,7 +1095,7 @@ def main() -> int:
             "max_output_tokens": args.max_output_tokens,
             "section_level": sections.level,
             "allow_generated_sections": sections.allow_generated,
-            "persist_generated_subtitles": args.persist_generated_subtitles,
+            "write_back_generated_subtitles": args.write_back_generated_subtitles,
             "sections_per_source": plans,
             # Retained for scripts that read the old dry-run shape. Dry runs
             # never call either backend.
@@ -1131,8 +1116,7 @@ def main() -> int:
             status, output = run_one(
                 path, output_dir=args.output_dir, client=client, prompt=prompt,
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
-                persist_subtitles=args.persist_generated_subtitles,
-                subtitle_save_user_id=args.subtitle_save_user_id,
+                write_back_subtitles=args.write_back_generated_subtitles,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")

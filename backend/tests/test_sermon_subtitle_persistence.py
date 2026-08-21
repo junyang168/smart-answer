@@ -67,25 +67,26 @@ def test_saved_result_rejects_body_text_mutation() -> None:
         verify_saved_result(before, after, expected_insertions=2)
 
 
-class _SavingManager:
-    def __init__(self, path: Path, *, permission_error: bool = False, mutate_body: bool = False):
+class _SavingWriter:
+    def __init__(self, path: Path, *, save_error: bool = False, mutate_body: bool = False):
         self.path = path
-        self.permission_error = permission_error
+        self.save_error = save_error
         self.mutate_body = mutate_body
         self.calls = 0
 
-    def persist_generated_subtitles(
-        self, user_id: str, item: str, *, expected_source_sha256: str,
-        insertions: list[dict[str, Any]],
+    def __call__(
+        self, source_path: Path, *, expected_source_sha256: str,
+        insertions: list[dict[str, Any]], actor_id: str,
     ) -> dict[str, Any]:
         self.calls += 1
-        if self.permission_error:
-            raise PermissionError("not authorized")
+        assert source_path == self.path
+        if self.save_error:
+            raise RuntimeError("write failed")
         raw = self.path.read_bytes()
         assert hashlib.sha256(raw).hexdigest() == expected_source_sha256
         rows = json.loads(raw)
         updated = apply_insertions(
-            rows, insertions, source_sha256=expected_source_sha256, user_id=user_id
+            rows, insertions, source_sha256=expected_source_sha256, user_id=actor_id
         )
         if self.mutate_body:
             updated[-1]["text"] = "正文被保存层改坏。"
@@ -124,7 +125,7 @@ def test_run_one_reloads_persisted_source_before_extraction(
 ) -> None:
     source_path = _source(tmp_path)
     output_dir = tmp_path / "out"
-    manager = _SavingManager(source_path)
+    writer = _SavingWriter(source_path)
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
 
@@ -136,12 +137,11 @@ def test_run_one_reloads_persisted_source_before_extraction(
         reasoning_effort="medium",
         force=False,
         sections=SectionSettings(),
-        persist_subtitles=True,
-        subtitle_save_user_id="pipeline@example.org",
-        subtitle_manager=manager,
+        write_back_subtitles=True,
+        subtitle_writer=writer,
     )
 
-    assert manager.calls == 1
+    assert writer.calls == 1
     assert hashlib.sha256(captured["raw"]).hexdigest() == hashlib.sha256(
         source_path.read_bytes()
     ).hexdigest()
@@ -152,16 +152,48 @@ def test_run_one_reloads_persisted_source_before_extraction(
     assert len(audit["insertions"]) == 2
 
 
-def test_permission_failure_stops_before_extraction_and_is_audited(
+def test_write_back_subtitle_generation_uses_the_subscription_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    writer = _SavingWriter(source_path)
+    _capture_run(monkeypatch)
+    seen: dict[str, Any] = {}
+
+    class FakeSubscriptionClient:
+        pass
+
+    client = FakeSubscriptionClient()
+    monkeypatch.setattr(runner, "CodexSubscriptionClient", FakeSubscriptionClient)
+
+    def fake_generate(*_args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        seen.update(kwargs)
+        return _insertions()
+
+    monkeypatch.setattr(runner, "generate_subtitles", fake_generate)
+    runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=client,
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_writer=writer,
+    )
+    assert seen["client"] is client
+
+
+def test_write_failure_stops_before_extraction_and_is_audited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source_path = _source(tmp_path)
     output_dir = tmp_path / "out"
-    manager = _SavingManager(source_path, permission_error=True)
+    writer = _SavingWriter(source_path, save_error=True)
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
 
-    with pytest.raises(PermissionError, match="not authorized"):
+    with pytest.raises(RuntimeError, match="write failed"):
         runner.run_one(
             source_path,
             output_dir=output_dir,
@@ -169,22 +201,21 @@ def test_permission_failure_stops_before_extraction_and_is_audited(
             prompt="prompt",
             reasoning_effort="medium",
             force=False,
-            persist_subtitles=True,
-            subtitle_save_user_id="pipeline@example.org",
-            subtitle_manager=manager,
+            write_back_subtitles=True,
+            subtitle_writer=writer,
         )
 
     assert captured == {}
     audit = json.loads(next((output_dir / "subtitle-applications").rglob("application.json")).read_text())
     assert audit["status"] == "failed"
-    assert "PermissionError" in audit["error"]
+    assert "RuntimeError" in audit["error"]
 
 
 def test_post_save_body_mutation_stops_before_extraction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source_path = _source(tmp_path)
-    manager = _SavingManager(source_path, mutate_body=True)
+    writer = _SavingWriter(source_path, mutate_body=True)
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
 
@@ -196,9 +227,8 @@ def test_post_save_body_mutation_stops_before_extraction(
             prompt="prompt",
             reasoning_effort="medium",
             force=False,
-            persist_subtitles=True,
-            subtitle_save_user_id="pipeline@example.org",
-            subtitle_manager=manager,
+            write_back_subtitles=True,
+            subtitle_writer=writer,
         )
     assert captured == {}
 
@@ -207,7 +237,7 @@ def test_existing_headings_are_a_noop_for_persistence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source_path = _source(tmp_path, heading=True)
-    manager = _SavingManager(source_path)
+    writer = _SavingWriter(source_path)
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr(
         runner, "generate_subtitles",
@@ -221,11 +251,10 @@ def test_existing_headings_are_a_noop_for_persistence(
         prompt="prompt",
         reasoning_effort="medium",
         force=False,
-        persist_subtitles=True,
-        subtitle_save_user_id="pipeline@example.org",
-        subtitle_manager=manager,
+        write_back_subtitles=True,
+        subtitle_writer=writer,
     )
-    assert manager.calls == 0
+    assert writer.calls == 0
     assert captured["raw"] == source_path.read_bytes()
 
 
@@ -250,7 +279,7 @@ def test_sermon_manager_save_service_enforces_acl_and_expected_sha(tmp_path: Pat
     assert json.loads(source_path.read_text()) == _rows()
 
     manager.get_sermon_permissions = lambda *_args: SimpleNamespace(canWrite=True)
-    with pytest.raises(RuntimeError, match="changed before subtitle save"):
+    with pytest.raises(SubtitlePersistenceError, match="changed before subtitle write-back"):
         manager.persist_generated_subtitles(
             "editor@example.org", "S governed",
             expected_source_sha256="0" * 64,

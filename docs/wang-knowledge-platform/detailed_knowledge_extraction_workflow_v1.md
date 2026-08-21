@@ -92,11 +92,11 @@ flowchart LR
 
 115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
 
-已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--persist-generated-subtitles` 时则走正式写入阶段：保存全部一级、二级 insertion，经 `SermonManager` 做 ACL 与旧 SHA 检查，写入后重新加载，再从带标题的新来源开始抽取。
+已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：保存全部一级、二级 insertion，核对旧 SHA，写入后重新加载，再从带标题的新来源开始抽取。
 
 三个设计约束：
 
-- **不绕过讲道权限。** 写入模式必须提供 `--subtitle-save-user-id`；没有写权限就于抽取前失败，不自动认领、不冒充管理员、不直接改档。
+- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有显式传入 `--write-back-generated-subtitles` 才可修改 `script_review`，其他来源拒绝写回。
 - **正文逐列不变。** 写入前后比较所有非标题 row，保存正文旧／新 SHA 与完整 insertion artifact；任何正文差异都在抽取前失败。
 - **抽取只认写入后的来源。** 保存后重新读取档案，新的 `source_sha256`、S 编号、section plan 与 extraction fingerprint 全部从带标题版本重算。旧来源的 section cache 不会被误用。
 
@@ -243,11 +243,12 @@ Claude 獨立複審仍使用 Anthropic provider，仍可能產生 Anthropic API 
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
   --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
   --ids "S 220206" \
-  --persist-generated-subtitles \
-  --subtitle-save-user-id <具备该讲道写权限的服务或编辑帐号>
+  --write-back-generated-subtitles \
+  --backend codex-subscription \
+  --model gpt-5.6-sol
 ```
 
-这个命令不会自动认领讲道；帐号没有现成写权限时会保存失败审计并停止，知识抽取不会开始。
+这个命令不会自动认领讲道。它先在 audit 目录备份写回前原稿，正文逐列不变且保存后 SHA 可重载验证时才开始知识抽取。
 
 切分层级可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
 

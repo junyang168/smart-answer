@@ -358,6 +358,56 @@ def test_the_endpoint_says_it_failed_instead_of_suggesting_nothing(monkeypatch) 
     assert "upstream connect error" in caught.value.detail
 
 
+def test_editor_permission_is_checked_before_subtitle_model_call(monkeypatch) -> None:
+    import backend.pipeline.subtitle_generation as module
+    from backend.api.models import GenerateSubtitlesRequest
+    from fastapi import HTTPException
+    from types import SimpleNamespace
+
+    endpoint = _endpoint()
+    monkeypatch.setattr(
+        endpoint.sermon_manager,
+        "get_sermon_permissions",
+        lambda *_args: SimpleNamespace(canWrite=False),
+    )
+    monkeypatch.setattr(
+        module,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("model must not run without write permission"),
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        endpoint.generate_subtitles(
+            GenerateSubtitlesRequest(
+                paragraphs=[{"index": "2", "text": "x"}],
+                item="S 220206",
+                user_id="reader@example.org",
+            )
+        )
+    assert caught.value.status_code == 403
+
+
+def test_update_script_turns_permission_failure_into_http_403(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    endpoint = _endpoint()
+
+    def deny(*_args, **_kwargs):
+        raise PermissionError("not allowed")
+
+    monkeypatch.setattr(endpoint.sermon_manager, "update_sermon", deny)
+    request = endpoint.UpdateRequest(
+        user_id="reader@example.org",
+        item="S 220206",
+        type="scripts",
+        data=[endpoint.Paragraph(index=1, text="正文")],
+    )
+    with pytest.raises(HTTPException) as caught:
+        endpoint.update_script(request)
+    assert caught.value.status_code == 403
+    assert caught.value.detail == "not allowed"
+
+
 def test_a_failed_generation_does_not_become_one_section(ledger) -> None:
     """One section is whole-document extraction: the behaviour #88 replaced."""
 
