@@ -2855,6 +2855,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       const contentParagraphs = state.paragraphs.filter((p) => p.type !== "subtitle");
       const payload: GenerateSubtitlesPayload = {
         paragraphs: contentParagraphs,
+        item,
       };
 
       const insertions = await fetchJSON<SubtitleInsertion[]>(`${API_PREFIX}/generate_subtitles`, {
@@ -2864,7 +2865,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       });
 
       if (insertions.length === 0) {
-        window.alert("AI 未能產生任何小標題建議。");
+        // Only ever shown when the call succeeded and the model proposed
+        // nothing. A failed call raises, and says so in its own words.
+        window.alert("AI 讀完這篇講道，沒有提出任何小標題建議。（這不是錯誤）");
         return;
       }
 
@@ -2926,12 +2929,26 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       });
 
     } catch (error) {
-      const message = error instanceof Error ? error.message : "產生小標題失敗";
+      // The backend explains itself in `detail`; unwrap it so the user reads
+      // that instead of `502 Bad Gateway: {"detail":"…"}`.
+      const raw = error instanceof Error ? error.message : String(error);
+      const brace = raw.indexOf("{");
+      let message = raw || "產生小標題失敗";
+      if (brace >= 0) {
+        try {
+          const detail = (JSON.parse(raw.slice(brace)) as { detail?: unknown }).detail;
+          if (typeof detail === "string" && detail) {
+            message = detail;
+          }
+        } catch {
+          // Not JSON after all; the raw message is still the better of the two.
+        }
+      }
       window.alert(`產生小標題失敗：${message}`);
     } finally {
       setIsGeneratingSubtitles(false);
     }
-  }, [canEdit, isGeneratingSubtitles, fetchJSON, resolvedUserEmail, requestSave, state.paragraphs]);
+  }, [canEdit, isGeneratingSubtitles, fetchJSON, item, resolvedUserEmail, requestSave, state.paragraphs]);
 
   useEffect(() => {
     return () => {

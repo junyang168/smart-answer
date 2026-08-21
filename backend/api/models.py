@@ -566,6 +566,11 @@ class SubtitleInsertion(BaseModel):
 
 class GenerateSubtitlesRequest(BaseModel):
     paragraphs: List[dict]
+    #: Which sermon these paragraphs belong to, so the model call this triggers
+    #: files a `pipeline_runs` row under the same key the pipeline uses for it.
+    #: Optional because the response contract is what callers depend on; a
+    #: request without it still works and is recorded as unnamed.
+    item: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 
