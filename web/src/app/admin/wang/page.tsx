@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { FileCheck2, Highlighter, Network, ShieldCheck } from "lucide-react";
+import { FileCheck2, HeartPulse, Highlighter, Network, ShieldCheck } from "lucide-react";
 import { SermonOverview } from "./SermonOverview";
 
 // The three existing views stay where they are and are not rebuilt; they move
 // off the home page because the nav already calls this tab 總覽 and it had no
 // overview on it -- only four links to the places an overview would summarise.
 const areas = [
+  { href: "/admin/wang/health", title: "健康視圖", description: "有沒有該管的事：整個語料的品質分佈", icon: HeartPulse },
   { href: "/admin/wang/matthew-progress", title: "馬太進度", description: "文章從篇章計畫到 production 的每一步", icon: Network },
   { href: "/admin/wang/argument-layer", title: "論證層", description: "一個來源一張圖：從問題到結論", icon: Network },
   { href: "/admin/wang/source-coverage", title: "來源覆蓋", description: "原文逐句對照 claim 層", icon: Highlighter },

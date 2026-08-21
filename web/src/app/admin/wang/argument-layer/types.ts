@@ -131,6 +131,15 @@ export const KIND_NAME: Record<Kind, string> = {
   claim: "claim",
 };
 
+/**
+ * A set of records another page sent the reader here to look at.
+ *
+ * The ids come from whoever decided them -- the health view decides which
+ * records are stranded -- so this page never has to make the same judgement a
+ * second time and reach a different answer.
+ */
+export type Focus = { ids: Set<string>; label: string };
+
 /** Steps whose anchor does not qualify them as evidence for a claim. */
 export const isWithheld = (eligibility: string) =>
   !!eligibility &&

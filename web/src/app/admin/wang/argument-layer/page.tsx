@@ -1,18 +1,49 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { ArgumentCanvas } from "./ArgumentCanvas";
 import { NodeDetail } from "./NodeDetail";
-import type { SearchHit, Source, SourceSummary, Stats } from "./types";
+import type { Focus, SearchHit, Source, SourceSummary, Stats } from "./types";
 
 type Overview = { lanes: string[]; totals: Stats; sources: SourceSummary[] };
+
+/** What `?only=` asks the canvas to keep, and what the chip is called. */
+const FOCUS_MODES: Record<string, { label: string; pick: (findings: DocumentFindings) => string[] }> = {
+  stranded: {
+    label: "只看走不到的",
+    pick: (findings) => [...findings.stranded.evidence_step_ids, ...findings.stranded.observation_ids],
+  },
+  unsound: { label: "只看沒過複審的", pick: (findings) => findings.unsound.claim_ids },
+};
+
+type DocumentFindings = {
+  label: string;
+  stranded: { count: number; evidence_step_ids: string[]; observation_ids: string[] };
+  unsound: { count: number; claim_ids: string[] };
+};
+
+/**
+ * Which source is open, and which records the health view sent the reader
+ * here to look at, are part of the address rather than of this component --
+ * an exception on `/admin/wang/health` is a link, not an instruction to go
+ * and find something.  `useSearchParams` makes the route ask for the query
+ * string, and a prerendered route may only do that inside a boundary.
+ */
+export default function ArgumentLayerRoute() {
+  return (
+    <Suspense fallback={<p className="px-6 py-5 text-sm text-slate-400">載入中…</p>}>
+      <ArgumentLayerPage />
+    </Suspense>
+  );
+}
 
 const numberCell = (value: number, gap = false) => (
   <td className={`px-2 py-1.5 text-right font-mono ${gap && value ? "text-rose-600" : "text-slate-700"}`}>{value}</td>
 );
 
-export default function ArgumentLayerPage() {
+function ArgumentLayerPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [source, setSource] = useState<Source | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -21,6 +52,10 @@ export default function ArgumentLayerPage() {
   const [hits, setHits] = useState<{ total: number; hits: SearchHit[] } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const params = useSearchParams();
+  const requestedSource = params.get("source");
+  const requestedOnly = params.get("only");
   const nonce = useRef(0);
   const shell = useRef<HTMLDivElement>(null);
   const [shellHeight, setShellHeight] = useState<number | null>(null);
@@ -121,6 +156,41 @@ export default function ArgumentLayerPage() {
     nonce.current += 1;
     setScrollTarget({ id, nonce: nonce.current });
   }, []);
+
+  // The health view decides which records are stranded or unsound; this page
+  // draws them.  Asking it for the ids -- rather than re-deriving them from
+  // the graph -- is what keeps the two pages from naming different records
+  // for the same document.
+  useEffect(() => {
+    if (!requestedSource) return;
+    let cancelled = false;
+    void openSource(requestedSource);
+    const mode = requestedOnly ? FOCUS_MODES[requestedOnly] : undefined;
+    if (!mode) return;
+    (async () => {
+      try {
+        const response = await fetch(`/api/admin/extraction-health/documents/${encodeURIComponent(requestedSource)}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const findings = (await response.json()) as DocumentFindings;
+        const ids = mode.pick(findings);
+        if (cancelled || !ids.length) return;
+        setFocus({ ids: new Set(ids), label: `${mode.label}（${ids.length}）` });
+        // A claim sits at the column of its last piece of evidence, which on a
+        // canvas several thousand pixels wide is usually not the part in view.
+        // Arriving on a link and seeing empty space is the same as the link
+        // not working.
+        goto(ids[0]);
+      } catch {
+        // A health service that is down must not take the argument layer with
+        // it: the graph itself is still worth looking at unfiltered.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedSource, requestedOnly, openSource, goto]);
 
   const header = (
     <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
@@ -223,6 +293,7 @@ export default function ArgumentLayerPage() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             scrollTarget={scrollTarget}
+            spotlight={focus}
           />
           <NodeDetail placed={selectedPlaced} source={source} onGoto={goto} />
         </div>

@@ -31,6 +31,7 @@ from .canonical_repository.router import (
     admin_router as canonical_repository_admin_router,
 )
 from .argument_layer import router as argument_layer_router
+from .extraction_health import router as extraction_health_router
 from .source_coverage import router as source_coverage_router
 from .public_wang_articles import router as public_wang_articles_router
 from .matthew_exposition_progress import router as matthew_exposition_progress_router
@@ -71,6 +72,7 @@ app.include_router(sermon_search_compat_router)
 app.include_router(canonical_repository_router)
 app.include_router(canonical_repository_admin_router)
 app.include_router(argument_layer_router)
+app.include_router(extraction_health_router)
 app.include_router(source_coverage_router)
 app.include_router(public_wang_articles_router)
 app.include_router(matthew_exposition_progress_router)
