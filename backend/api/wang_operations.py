@@ -159,6 +159,18 @@ def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def corpus_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
+    """Every source this platform knows about, extracted or not.
+
+    Sermons and notes manuscripts are discovered differently -- one from the
+    catalog, one from a directory -- and any page that needs "how many
+    documents are there" needs both. Naming the pair once keeps a second page
+    from answering that question with a different number.
+    """
+
+    return _sermon_rows(paths, data_base) + _notes_rows(data_base)
+
+
 def _notes_placement(verse: str) -> dict[str, Any]:
     """Where a manuscript sits in scripture, from its own metadata.
 
@@ -633,7 +645,7 @@ def overview() -> dict[str, Any]:
     paths = wang_platform_paths(data_base)
     now = datetime.now(timezone.utc)
 
-    rows = _sermon_rows(paths, data_base) + _notes_rows(data_base)
+    rows = corpus_rows(paths, data_base)
     runs, warnings = _load_runs()
     for run in runs:
         run["effective_status"] = _effective_status(run, now)

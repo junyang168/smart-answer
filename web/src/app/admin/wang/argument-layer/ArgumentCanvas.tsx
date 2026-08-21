@@ -19,6 +19,7 @@ import {
   REL_COLOR,
   isWithheld,
   type Claim,
+  type Focus,
   type Observation,
   type Question,
   type Source,
@@ -33,14 +34,17 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   scrollTarget: { id: string; nonce: number } | null;
+  /** Records another page linked to; shown alone until the reader turns it off. */
+  spotlight?: Focus | null;
 };
 
-export function ArgumentCanvas({ source, lanes, selectedId, onSelect, scrollTarget }: Props) {
+export function ArgumentCanvas({ source, lanes, selectedId, onSelect, scrollTarget, spotlight }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(0.72);
   const [hovered, setHovered] = useState<string | null>(null);
   const [rels, setRels] = useState<Set<string>>(new Set(RELATIONS));
   const [onlyIsolated, setOnlyIsolated] = useState(false);
+  const [onlySpotlight, setOnlySpotlight] = useState(true);
   const [onlyWithheld, setOnlyWithheld] = useState(false);
   const [showObs, setShowObs] = useState(true);
   const [showClaims, setShowClaims] = useState(true);
@@ -50,21 +54,35 @@ export function ArgumentCanvas({ source, lanes, selectedId, onSelect, scrollTarg
 
   const obsLane = lanes.length;
   const filtersOn = onlyIsolated || onlyWithheld;
+  // Arriving on a link means arriving with a question already asked, so the
+  // filter starts on -- and stays a chip, because the next question is
+  // usually "and where does this sit in the rest of the argument".
+  const spotlightOn = !!spotlight && onlySpotlight;
+  // A spotlight on stranded records contains no claims by definition, and an
+  // empty claims zone still labelled "claims 17" reads as if seventeen of them
+  // were in the answer.
+  const spotlightHasClaim = !!spotlight && source.claims.some((claim) => spotlight.ids.has(claim.id));
 
   const layout = useMemo(
-    () => buildLayout(source, { laneCount: lanes.length, showObs, showClaims: showClaims && !filtersOn }),
-    [source, lanes.length, showObs, showClaims, filtersOn],
+    () =>
+      buildLayout(source, {
+        laneCount: lanes.length,
+        showObs,
+        showClaims: showClaims && !filtersOn && (!spotlightOn || spotlightHasClaim),
+      }),
+    [source, lanes.length, showObs, showClaims, filtersOn, spotlightOn, spotlightHasClaim],
   );
 
   const visible = useMemo(() => {
     const kept = layout.placed.filter((item) => {
       if (item.kind === "observation" && !showObs) return false;
+      if (spotlightOn && !spotlight.ids.has(item.id)) return false;
       if (onlyIsolated && item.linked) return false;
       if (onlyWithheld && !(item.kind === "step" && isWithheld((item.node as Step).eligibility))) return false;
       return true;
     });
     return new Map(kept.map((item) => [item.id, item]));
-  }, [layout, showObs, onlyIsolated, onlyWithheld]);
+  }, [layout, showObs, onlyIsolated, onlyWithheld, spotlightOn, spotlight]);
 
   const focus = hovered ?? selectedId;
   const near = useMemo(() => {
@@ -163,6 +181,7 @@ export function ArgumentCanvas({ source, lanes, selectedId, onSelect, scrollTarg
           ),
         )}
         <span className="mx-1 h-4 w-px bg-slate-200" />
+        {spotlight ? chip(onlySpotlight, spotlight.label, () => setOnlySpotlight((value) => !value), "#be123c") : null}
         {chip(onlyIsolated, "只看孤立節點", () => setOnlyIsolated((value) => !value))}
         {chip(onlyWithheld, "只看不合格證據", () => setOnlyWithheld((value) => !value))}
         {chip(showObs, "observations", () => setShowObs((value) => !value))}
