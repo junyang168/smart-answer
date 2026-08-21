@@ -18,6 +18,7 @@ const stageLabels: Record<StageId, string> = {
 const stateLabels: Record<CellState, string> = {
   current: "✓",
   stale: "舊",
+  pending: "待重跑",
   never: "✗",
   failed: "失敗",
   running: "執行中",
@@ -30,6 +31,9 @@ const stateStyles: Record<CellState, string> = {
   // Amber, not green: a stale cell is a to-do. Re-running it would not
   // reproduce what is on disk, so it must not read as a pass.
   stale: "bg-amber-50 text-amber-900 ring-amber-200",
+  // Grey, and carrying no number: whatever this stage last concluded is about
+  // to be replaced by the run happening upstream of it right now.
+  pending: "bg-slate-50 text-slate-400 ring-slate-200",
   never: "bg-slate-50 text-slate-400 ring-slate-200",
   failed: "bg-rose-50 text-rose-800 ring-rose-200",
   running: "bg-indigo-50 text-indigo-800 ring-indigo-200",
@@ -41,6 +45,7 @@ const cellReasons: Record<string, string> = {
   no_recorded_input: "這次執行沒有記下它讀了什麼，無法證明還是最新的",
   source_changed: "來源原文在這次執行之後改過",
   upstream_rerun: "上游階段在這次執行之後又跑過",
+  upstream_running: "上游階段正在重跑，這一格的結果即將被取代",
   from_store_not_ledger: "這一格來自主庫本身：物件在庫裡。這次入庫發生在記錄表上線之前，所以沒有時間與花費",
   // Every one of these has a transcript in script_review; what is missing is a
   // proofread, published one, which is what extraction reads.
@@ -138,8 +143,14 @@ function coverageDetail(stage: StageId, quality: Record<string, unknown> | null)
 
 function Cell({ stage, cell }: { stage: StageId; cell: StageCell }) {
   const quality = qualityLabel(stage, cell.quality);
+  // The superseded verdict is worth keeping, just not on the face of the cell:
+  // it answers "what did it say before this re-run started" without letting a
+  // stale green number stand in for a live one.
+  const supersededLabel =
+    cell.superseded ? qualityLabel(stage, cell.superseded.quality) : null;
   const tip = [
     coverageDetail(stage, cell.quality),
+    supersededLabel ? `重跑前：${stateLabels[cell.superseded!.state]} ${supersededLabel}` : null,
     cell.state === "no_source" ? cellReasons.no_source : null,
     cell.reason ? cellReasons[cell.reason] ?? cell.reason : null,
     cell.store?.updated_at ? `主庫材料更新於：${new Date(cell.store.updated_at).toLocaleString("zh-TW")}` : null,

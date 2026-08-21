@@ -88,3 +88,48 @@ def test_the_store_cell_reports_material_not_the_document_record() -> None:
     # The material is the newer of the two, so staleness judged against the
     # document record would call a source current that is three days behind.
     assert material_written > document_written
+
+
+def test_a_live_upstream_run_greys_out_what_it_is_replacing() -> None:
+    """A row reading `執行中` with green cells behind it looks done, and is not.
+
+    Every one of those results was read from the stage now being re-run, so
+    each is about to be superseded. Leaving them green is the same invitation
+    to misread that the whole staleness scheme exists to remove.
+    """
+
+    cell = _cell(
+        [_run("review", finished=NOW - timedelta(hours=1), ai_reviewed=54)],
+        stage="review",
+        current_source_sha=None,
+        upstream_finished=NOW - timedelta(hours=2),
+        upstream_in_flight=True,
+    )
+    assert cell["state"] == "pending"
+    assert cell["reason"] == "upstream_running"
+    # No number on the face of the cell...
+    assert cell["quality"] is None
+    # ...but the verdict it replaces is kept for the tooltip.
+    assert cell["superseded"]["state"] == "current"
+    assert cell["superseded"]["quality"]["ai_reviewed"] == 54
+
+
+def test_a_stage_that_never_ran_is_not_dressed_up_as_pending() -> None:
+    cell = _cell(
+        [], stage="review", current_source_sha=None,
+        upstream_finished=None, upstream_in_flight=True,
+    )
+    assert cell["state"] == "never"
+
+
+def test_a_failed_stage_keeps_saying_failed_while_upstream_reruns() -> None:
+    """Greying a failure would hide the reason somebody started the re-run."""
+
+    cell = _cell(
+        [_run("review", finished=NOW, status="failed")],
+        stage="review",
+        current_source_sha=None,
+        upstream_finished=None,
+        upstream_in_flight=True,
+    )
+    assert cell["state"] == "failed"

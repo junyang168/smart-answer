@@ -357,6 +357,7 @@ def _cell(
     stage: str,
     current_source_sha: Optional[str],
     upstream_finished: Optional[datetime],
+    upstream_in_flight: bool = False,
 ) -> dict[str, Any]:
     """One stage's cell for one source: a state, a quality, and the last run.
 
@@ -394,6 +395,8 @@ def _cell(
     quality = last_success.get("quality") or None
 
     def stale(reason: str) -> dict[str, Any]:
+        if upstream_in_flight:
+            return _pending({"state": "stale", "quality": quality, "run": success})
         return {"state": "stale", "reason": reason, "quality": quality, "run": success}
 
     if stage == "extraction":
@@ -410,7 +413,30 @@ def _cell(
     finished = last_success.get("finished_at")
     if upstream_finished and finished and upstream_finished > finished:
         return stale("upstream_rerun")
+    if upstream_in_flight:
+        return _pending({"state": "current", "quality": quality, "run": success})
     return {"state": "current", "quality": quality, "run": success}
+
+
+def _pending(cell: dict[str, Any]) -> dict[str, Any]:
+    """A result that an in-flight upstream run is in the middle of replacing.
+
+    Showing the last run's verdict while the stage it read from is re-running
+    invites the reading that cost the most here: a row with `執行中` on
+    extraction and four green cells behind it looks done, and every one of
+    those cells is about to be superseded. The number is not wrong yet -- it is
+    about to stop being about anything -- so it moves to the tooltip and the
+    cell goes grey.
+    """
+
+    return {
+        "state": "pending",
+        "reason": "upstream_running",
+        "quality": None,
+        "run": cell.get("run"),
+        "superseded": {"state": cell["state"], "quality": cell.get("quality")},
+        **({"store": cell["store"]} if cell.get("store") else {}),
+    }
 
 
 def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
@@ -575,6 +601,9 @@ def overview() -> dict[str, Any]:
         # The most recent upstream success, carried forward down the chain so
         # each stage can tell whether the thing it consumed has moved since.
         upstream_finished: Optional[datetime] = None
+        # Set the moment any stage is found running or queued, and never
+        # cleared: everything downstream of a live run is waiting on it.
+        upstream_in_flight = False
         for stage in SERMON_STAGES:
             if stage == "extraction" and source_path is None:
                 stages[stage] = {"state": "no_source", "quality": None, "run": None}
@@ -584,6 +613,7 @@ def overview() -> dict[str, Any]:
                 stage=stage,
                 current_source_sha=source_sha,
                 upstream_finished=upstream_finished,
+                upstream_in_flight=upstream_in_flight,
             )
             if stage == "ingest" and cell["state"] == "never":
                 # The store outranks an empty ledger here: it is the authority
@@ -612,6 +642,12 @@ def overview() -> dict[str, Any]:
                         "run": None,
                         "store": held,
                     }
+            # `_cell` greys its own verdicts; only the store fallback happens
+            # out here, so only that one needs greying at this level.
+            if upstream_in_flight and cell["state"] in {"current", "stale"}:
+                cell = _pending(cell)
+            if cell["state"] in {"running", "queued"}:
+                upstream_in_flight = True
             stages[stage] = cell
             for run in stage_runs.get(stage) or []:
                 if run["effective_status"] == "succeeded" and run.get("finished_at"):
@@ -700,7 +736,7 @@ def overview() -> dict[str, Any]:
 def _summary(rows: list[dict[str, Any]], runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
     counts: dict[str, dict[str, int]] = {
         stage: {"current": 0, "stale": 0, "never": 0, "failed": 0,
-                "running": 0, "queued": 0, "no_source": 0}
+                "running": 0, "queued": 0, "pending": 0, "no_source": 0}
         for stage in SERMON_STAGES
     }
     for row in rows:
