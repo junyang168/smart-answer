@@ -58,32 +58,62 @@ def test_a_compound_claim_scores_the_same_as_several_atomic_ones():
     assert score_package(compound, g).claim_recall == 1.0
 
 
-def test_a_proposition_filed_as_a_step_is_found_but_counted_apart():
-    """kimi-k3 expressed all 18 propositions and promoted 5 to claims.
+def test_a_step_a_claim_links_to_counts_as_delivered():
+    """Authoring starts at a claim and walks `evidence_step_ids` to the steps.
 
-    Reporting one number would have called that either a total success or a
-    28% failure. It is neither: the argument was read and left one level down,
-    which is a different defect with a different fix.
+    So a proposition in a linked step is reachable, not lost. Scoring by which
+    array it landed in instead reported one model at 5 of 18 when 16 of 18 were
+    reachable -- a filing decision read as a capability gap.
     """
 
-    package = {"claims": [], "evidence_steps": [
-        {"statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}]}
+    package = {
+        "claims": [{"title": "與此無關的結論。", "evidence_step_ids": ["E1"]}],
+        "evidence_steps": [
+            {"evidence_step_id": "E1",
+             "statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}],
+    }
     score = score_package(package, gold(P_SECRECY))
 
     assert score.in_claims == ()
-    assert score.in_steps_only == ("P01",)
-    assert score.claim_recall == 0.0
-    assert score.recall == 1.0
+    assert score.in_linked_steps == ("P01",)
+    assert score.recall == 1.0, "reachable from a claim is delivered"
+    assert score.stranded == ()
+
+
+def test_a_step_no_claim_points_at_is_stranded():
+    """The loss this column exists to catch: in the package, out of reach."""
+
+    package = {
+        "claims": [],
+        "evidence_steps": [
+            {"evidence_step_id": "E1",
+             "statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}],
+    }
+    score = score_package(package, gold(P_SECRECY))
+
+    assert score.stranded == ("P01",)
+    assert score.recall == 0.0
+
+
+def test_an_observation_is_stranded_because_the_walk_never_visits_it():
+    package = {"claims": [], "observations": [
+        {"statement": "耶穌確曾命令人保密，但皆有合理且合乎邏輯的原因。"}]}
+    score = score_package(package, gold(P_SECRECY))
+
+    assert score.stranded == ("P01",)
+    assert score.recall == 0.0
 
 
 def test_a_claim_is_preferred_over_a_step_for_the_same_proposition():
     package = {
-        "claims": [{"title": "耶穌的保密命令都有合理的原因。"}],
-        "evidence_steps": [{"statement": "耶穌命令保密，有合理的原因。"}],
+        "claims": [{"title": "耶穌的保密命令都有合理的原因。",
+                    "evidence_step_ids": ["E1"]}],
+        "evidence_steps": [{"evidence_step_id": "E1",
+                            "statement": "耶穌命令保密，有合理的原因。"}],
     }
     score = score_package(package, gold(P_SECRECY))
 
-    assert score.in_claims == ("P01",) and score.in_steps_only == ()
+    assert score.in_claims == ("P01",) and score.in_linked_steps == ()
 
 
 def test_a_missing_proposition_is_named_not_just_counted():

@@ -13,6 +13,17 @@ built once from the union of what several models found, decomposed so each
 entry can be checked on its own, and then every model is scored on how much of
 it the package expresses -- however many claim objects it used to do so.
 
+**Reachability, not tier.** The first version of this scored by which array a
+proposition landed in and reported that one model delivered 5 of 18 while
+another delivered 15. That was wrong, and wrong in the direction that makes a
+model look bad for a filing decision. Authoring starts at a claim and walks
+`evidence_step_ids` to the steps and their source fragments
+(`manuscript_grounding_check.py:172`), so a step a claim links to is read. What
+is genuinely lost is a step no claim points at, and an observation, which that
+walk never visits. Scored that way the same four packages run 14 to 17 of 18
+rather than 5 to 15 -- the models were close all along, and the number worth
+watching is the small one: propositions stranded where the walk cannot reach.
+
 What this deliberately does not do is ask a model to judge. Matching is term
 based and every decision is reported with the text that satisfied it, so a
 wrong score is auditable rather than authoritative. `corpus_ai_review` already
@@ -73,21 +84,27 @@ class GoldScore:
     gold_id: str
     total: int
     in_claims: tuple[str, ...] = ()
-    #: Found only once evidence_steps are searched too. A package that carries
-    #: the proposition but never promotes it to a claim has done part of the
-    #: work, and the gap between these two numbers is worth seeing.
-    in_steps_only: tuple[str, ...] = ()
+    #: In a step some claim links to. Authoring reaches these, so they count as
+    #: delivered even though they are not themselves asserted as conclusions.
+    in_linked_steps: tuple[str, ...] = ()
+    #: In an orphaned step or an observation -- present in the package and not
+    #: reachable from any claim. This is the column that measures real loss.
+    stranded: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     evidence: dict[str, str] = field(default_factory=dict)
     human_reviewed: bool = False
 
     @property
     def claim_recall(self) -> float:
+        """Asserted as a conclusion. Not the delivery number -- see `recall`."""
+
         return len(self.in_claims) / self.total if self.total else 0.0
 
     @property
     def recall(self) -> float:
-        found = len(self.in_claims) + len(self.in_steps_only)
+        """Reachable from a claim, which is what authoring can actually use."""
+
+        found = len(self.in_claims) + len(self.in_linked_steps)
         return found / self.total if self.total else 0.0
 
 
@@ -98,15 +115,38 @@ def _claim_texts(package: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _step_texts(package: Mapping[str, Any]) -> list[str]:
-    return [str(s.get("statement") or "") for s in (package.get("evidence_steps") or [])]
+def _split_steps(package: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """Step statements, split by whether any claim can reach them.
+
+    A claim names its steps in `evidence_step_ids` and a step may name the
+    claims it produced; either direction makes the step reachable, because the
+    authoring walk starts from claims and resolves that list.
+    """
+
+    steps = package.get("evidence_steps") or []
+    by_id = {str(s.get("evidence_step_id") or s.get("id") or ""): s for s in steps}
+    linked = {
+        str(step_id)
+        for claim in (package.get("claims") or [])
+        for step_id in (claim.get("evidence_step_ids") or [])
+    }
+    linked |= {sid for sid, s in by_id.items() if s.get("produced_claim_ids")}
+    reachable = [str(s.get("statement") or "") for sid, s in by_id.items() if sid in linked]
+    orphaned = [str(s.get("statement") or "") for sid, s in by_id.items() if sid not in linked]
+    return reachable, orphaned
 
 
 def score_package(package: Mapping[str, Any], gold: GoldSet) -> GoldScore:
     claims = _claim_texts(package)
-    steps = _step_texts(package)
+    linked_steps, orphan_steps = _split_steps(package)
+    # Observations sit outside the authoring walk entirely, so a proposition
+    # found only there is stranded in the same way an orphaned step is.
+    stranded_texts = orphan_steps + [
+        str(o.get("statement") or "") for o in (package.get("observations") or [])
+    ]
     in_claims: list[str] = []
-    in_steps: list[str] = []
+    in_linked: list[str] = []
+    stranded: list[str] = []
     missing: list[str] = []
     evidence: dict[str, str] = {}
     for prop in gold.propositions:
@@ -115,27 +155,34 @@ def score_package(package: Mapping[str, Any], gold: GoldSet) -> GoldScore:
             in_claims.append(prop.id)
             evidence[prop.id] = f"claim: {hit[:90]}"
             continue
-        hit = next((t for t in steps if prop.matches(t)), None)
+        hit = next((t for t in linked_steps if prop.matches(t)), None)
         if hit is not None:
-            in_steps.append(prop.id)
-            evidence[prop.id] = f"step: {hit[:90]}"
+            in_linked.append(prop.id)
+            evidence[prop.id] = f"step (linked to a claim): {hit[:90]}"
+            continue
+        hit = next((t for t in stranded_texts if prop.matches(t)), None)
+        if hit is not None:
+            stranded.append(prop.id)
+            evidence[prop.id] = f"STRANDED, no claim reaches it: {hit[:90]}"
             continue
         missing.append(prop.id)
     return GoldScore(
         gold_id=gold.gold_id, total=len(gold.propositions),
-        in_claims=tuple(in_claims), in_steps_only=tuple(in_steps),
-        missing=tuple(missing), evidence=evidence,
+        in_claims=tuple(in_claims), in_linked_steps=tuple(in_linked),
+        stranded=tuple(stranded), missing=tuple(missing), evidence=evidence,
         human_reviewed=gold.human_reviewed,
     )
 
 
 def render_scores(rows: Sequence[tuple[str, GoldScore]]) -> str:
-    lines = ["| model | claim recall | +steps | missing |", "|---|---:|---:|---|"]
+    lines = ["| model | reachable from a claim | asserted as a claim | stranded | missing |",
+             "|---|---:|---:|---:|---|"]
     for label, score in rows:
         lines.append(
-            f"| `{label}` | {len(score.in_claims)}/{score.total} "
-            f"({score.claim_recall:.0%}) | {len(score.in_claims) + len(score.in_steps_only)}"
+            f"| `{label}` | {len(score.in_claims) + len(score.in_linked_steps)}"
             f"/{score.total} ({score.recall:.0%}) | "
+            f"{len(score.in_claims)}/{score.total} | "
+            f"{len(score.stranded)} | "
             f"{', '.join(score.missing) if score.missing else '—'} |"
         )
     if rows and not rows[0][1].human_reviewed:
