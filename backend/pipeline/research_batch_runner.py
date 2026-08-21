@@ -275,7 +275,7 @@ LEDGER_STAGE = {
 
 
 def unrecorded_stages(
-    members: list[dict[str, Any]], *, since: datetime, database_url: str | None = None,
+    members: dict[str, list[str]], *, database_url: str | None = None,
 ) -> dict[str, list[str]]:
     """Stages that ran in this batch and left no row the overview can read.
 
@@ -308,12 +308,19 @@ def unrecorded_stages(
                     ledger_stage = LEDGER_STAGE.get(stage)
                     if ledger_stage is None:
                         continue
+                    # Not "since this batch started": a stage that recognised
+                    # its own output and skipped did no work and files no row,
+                    # and its row from the run that *did* the work is older
+                    # than this batch. Asking only about this window reported
+                    # two correctly-skipped stages as unrecorded. What the
+                    # overview needs is a successful row at all -- that is what
+                    # makes the cell readable.
                     cursor.execute(
                         """SELECT 1 FROM wang_knowledge.pipeline_runs
-                           WHERE stage = %s AND started_at >= %s
+                           WHERE stage = %s AND status = 'succeeded'
                              AND (subject_id = %s OR %s = ANY(source_ids))
                            LIMIT 1""",
-                        (ledger_stage, since, subject, subject),
+                        (ledger_stage, subject, subject),
                     )
                     if cursor.fetchone() is None:
                         missing.setdefault(key, []).append(ledger_stage)
@@ -509,7 +516,7 @@ def main() -> int:
     for row in selected:
         if results.get(row["transcript_id"], {}).get("status") in {"completed", "running"}:
             ran.setdefault(row["transcript_id"], []).append(row["stage"])
-    unrecorded = unrecorded_stages(ran, since=started_at)
+    unrecorded = unrecorded_stages(ran)
 
     members_status = _member_status(selected, results)
     for row in members_status:

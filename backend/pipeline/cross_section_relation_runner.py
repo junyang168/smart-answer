@@ -61,6 +61,35 @@ def _write_through(
     return updated
 
 
+def already_current(
+    *, package_path: Path, output_path: Path, prompt: str, model_id: str
+) -> bool:
+    """Whether the output on disk already answers this exact question.
+
+    The same comparison `run` makes, lifted out so `main` can ask it *before*
+    opening a ledger row. A run that recomputes nothing must not file one: the
+    extraction runner opens its record after its own skip check for this
+    reason, and this runner did not, so a re-run that did no work still wrote a
+    fresh `cross_section` row -- newer than the review that had read the very
+    same package, which pushed that review to 舊 for work nobody did.
+    """
+
+    if not output_path.is_file():
+        return False
+    raw = package_path.read_bytes()
+    package = json.loads(raw.decode("utf-8"))
+    identity = discovery_identity(
+        package_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
+        model_id=model_id, section_count=len(_section_boundaries(package)),
+    )
+    try:
+        existing = json.loads(output_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    stored = (existing.get("cross_section_relations") or {}).get("fingerprint_sha256")
+    return stored == identity["fingerprint_sha256"]
+
+
 def run(
     *,
     package_path: Path,
@@ -167,6 +196,18 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     package = json.loads(args.package.read_text(encoding="utf-8"))
     subject = package_row_key(package) or args.package.name
+    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+
+    if not args.force and already_current(
+        package_path=args.package, output_path=args.output,
+        prompt=prompt, model_id=args.model,
+    ):
+        print(json.dumps({
+            "package": str(args.output.name), "status": "skipped",
+            "reason": "matching cross-section fingerprint",
+        }, ensure_ascii=False))
+        return 0
+
     # The stage had no name in the ledger until now, so the overview could not
     # say whether a source had been through it. That is the one question worth
     # asking about this stage: it was skipped once already, silently.
@@ -180,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
                 model=args.model, reasoning_effort=args.reasoning_effort,
                 timeout_seconds=600, max_retries=3, max_output_tokens=16000,
             ),
-            prompt=PROMPT_PATH.read_text(encoding="utf-8"),
+            prompt=prompt,
             force=args.force,
             usage_sink=usage_rows,
         )
