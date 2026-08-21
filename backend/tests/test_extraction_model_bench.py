@@ -205,3 +205,28 @@ def test_a_candidate_needs_no_production_registry_entry():
 
     assert "gemini" in bench.CANDIDATES
     assert "gemini" not in MODEL_BACKENDS
+
+
+def test_json_object_client_sends_the_token_cap_deepseek_actually_reads():
+    """`max_completion_tokens` is accepted and ignored; `max_tokens` is obeyed.
+
+    Measured on deepseek-v4-flash: asked for 200 via max_completion_tokens it
+    returned 971 and stopped on its own; asked via max_tokens it returned
+    exactly 200 with finish_reason `length`. A cap that is silently dropped is
+    how one section produced 40,938 completion tokens against a 16,000 budget.
+    """
+
+    assert bench.JsonObjectClient.token_limit_param == "max_tokens"
+
+
+def test_deepseek_falls_back_to_json_object_because_json_schema_is_disabled():
+    """Not a preference -- v4-flash and v4-pro reject the type outright."""
+
+    assert "deepseek" in bench.JSON_OBJECT_FALLBACK
+
+
+def test_json_mode_prompt_meets_deepseek_documented_requirements():
+    """The guide requires the word `json` and a sample of the wanted shape."""
+
+    assert "json" in bench._JSON_MODE_INSTRUCTION
+    assert "{schema}" in bench._JSON_MODE_INSTRUCTION

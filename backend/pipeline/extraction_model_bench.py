@@ -29,6 +29,7 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from backend.pipeline.detailed_knowledge_extraction_runner import (
     DEFAULT_MAX_OUTPUT_TOKENS,
+    MODEL_BACKENDS,
     NOTES_PROMPT_PATH,
     PROMPT_PATH,
     SectionSettings,
@@ -36,6 +37,7 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (
     run_source,
 )
 from backend.pipeline.knowledge_source import load_source_manifest
+from backend.pipeline.extraction_quality import GOLD_DIR, GoldSet, render_scores, score_package
 from backend.pipeline.model_prices import price_usage
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -48,9 +50,141 @@ from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 CANDIDATES: dict[str, dict[str, Any]] = {
     "gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY",
+        # Three names for one key, because that is what exists: `config.py`
+        # already reads GEMINI_API_KEY or GOOGLE_API_KEY or GEMINI_API_KEY1,
+        # and this machine's .env only has the third. A bench that failed on
+        # the variable name would look exactly like a model that cannot be
+        # reached.
+        "api_key_env": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY1"),
+        # On the OpenAI-compatible endpoint `reasoning_effort` is how Gemini 3
+        # sets `thinking_level` -- low/medium/high map straight through, and
+        # the two cannot be sent together. Without this flag the client falls
+        # back to "only gpt-5.6 takes the parameter" and Gemini runs at its
+        # own default, which is what the first bench row here measured.
+        "reasoning_effort_supported": True,
     },
 }
+
+
+#: Providers whose `json_schema` response format is unavailable, so the schema
+#: has to travel in the prompt instead. DeepSeek disabled the type outright --
+#: `strict: true`, `strict: false` and no `strict` key all return "This
+#: response_format type is unavailable now" on v4-flash and v4-pro alike, which
+#: means the workflow doc's 备用 model cannot make a single call today.
+#:
+#: A row produced this way is not comparable to one produced under an enforced
+#: schema and must be labelled: the other models were told what shape to
+#: return, this one was asked.
+JSON_OBJECT_FALLBACK = frozenset({"deepseek"})
+
+#: DeepSeek's JSON mode has two documented requirements -- the prompt must
+#: contain the word `json` and must show the shape wanted -- and one documented
+#: failure, an empty `content`, which the guide says to answer by changing the
+#: prompt. Naming the emptiness explicitly is the cheapest form of that.
+_JSON_MODE_INSTRUCTION = """
+
+===== 输出格式（json）=====
+你必须输出一个 json 对象，且只输出 json 本身，不要加解释、不要加 markdown 代码围栏。
+该 json 必须完全符合下面这份 JSON Schema —— 每个必填字段都要出现，字段名必须逐字一致：
+
+{schema}
+
+再说一次：只输出符合上述 schema 的 json 对象，内容不得为空。
+"""
+
+
+class JsonObjectClient:
+    """A client for a provider that cannot enforce a schema, only be told one.
+
+    Implements the four members `run_source` uses -- `generate_json`,
+    `last_usage`, `model`, `max_output_tokens` -- so the runner cannot tell the
+    difference, and the mechanical gates stay exactly as strict as they are for
+    every other model. What changes is only who enforces the shape: here the
+    validator does it after the fact, where the schema normally does it up
+    front.
+    """
+
+    #: DeepSeek's OpenAI-compatible layer accepts `max_tokens` and *silently
+    #: ignores* `max_completion_tokens` -- asked for 200 it returned 971 with
+    #: `finish_reason: stop`, and asked the other way it returned exactly 200
+    #: with `finish_reason: length`. An ignored cap is worse than a rejected
+    #: one: the first section benched here produced 40,938 completion tokens
+    #: against a 16,000 budget, and nothing said so.
+    token_limit_param: str = "max_tokens"
+
+    def __init__(
+        self, model: str, *, base_url: Optional[str], api_key_env: str,
+        max_output_tokens: int, temperature: float = 0.0,
+        max_retries: int = 3, timeout_seconds: float = 900.0,
+    ) -> None:
+        import os
+
+        from openai import OpenAI
+
+        api_key = os.environ.get(api_key_env)
+        if not api_key:
+            raise ValueError(f"{api_key_env} environment variable is not set")
+        self.model = model
+        self.max_output_tokens = max_output_tokens
+        self.temperature = temperature
+        self.max_retries = max_retries
+        self.last_usage: Any = None
+        self._client = OpenAI(
+            api_key=api_key, max_retries=0, timeout=timeout_seconds,
+            **({"base_url": base_url} if base_url else {}),
+        )
+
+    def generate_json(
+        self, system_prompt: str, user_prompt: str, json_schema: Mapping[str, Any],
+        temperature: float = 0.0, timeout_seconds: Optional[float] = None,
+        cache_prefix: Optional[str] = None,
+    ) -> dict[str, Any]:
+        import time as _time
+
+        schema_text = json.dumps(
+            json_schema.get("schema", json_schema), ensure_ascii=False, indent=2
+        )
+        system = system_prompt + _JSON_MODE_INSTRUCTION.format(schema=schema_text)
+        if cache_prefix:
+            user_prompt = cache_prefix + user_prompt
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "system", "content": system},
+                              {"role": "user", "content": user_prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=self.temperature if temperature == 0.0 else temperature,
+                    **{self.token_limit_param: self.max_output_tokens},
+                )
+                self.last_usage = getattr(response, "usage", None)
+                content = response.choices[0].message.content or ""
+                if not content.strip():
+                    # Documented, not exceptional: "在使用 JSON Output 功能时，
+                    # API 有概率会返回空的 content".
+                    raise RuntimeError("json_object returned empty content")
+                return json.loads(content)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    break
+                _time.sleep(min(2 ** (attempt - 1), 8))
+        raise last_error or RuntimeError("json_object call failed without an exception")
+
+
+def _resolve_api_key_env(names: Any, default: str = "OPENAI_API_KEY") -> str:
+    """The first of these environment variables that is actually set."""
+
+    import os
+
+    if isinstance(names, str):
+        return names
+    for name in names or ():
+        if os.environ.get(name):
+            return name
+    return (tuple(names) or (default,))[0] if names else default
 
 
 def _bench_client(
@@ -58,6 +192,16 @@ def _bench_client(
 ) -> Stage1OpenAIClient | Stage1AnthropicClient:
     """Production's client for a known model, this file's for a candidate."""
 
+    family = model.split("-", 1)[0]
+    if family in JSON_OBJECT_FALLBACK:
+        backend = MODEL_BACKENDS.get(family) or CANDIDATES.get(family) or {}
+        return JsonObjectClient(
+            model,
+            base_url=backend.get("base_url"),
+            api_key_env=backend.get("api_key_env", "OPENAI_API_KEY"),
+            max_output_tokens=max_output_tokens or DEFAULT_MAX_OUTPUT_TOKENS,
+            temperature=float(backend.get("temperature") or 0.0),
+        )
     try:
         return build_client(
             model, reasoning_effort=reasoning_effort,
@@ -78,7 +222,7 @@ def _bench_client(
         max_output_tokens=max_output_tokens or candidate.get(
             "max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS),
         base_url=candidate.get("base_url"),
-        api_key_env=candidate.get("api_key_env", "OPENAI_API_KEY"),
+        api_key_env=_resolve_api_key_env(candidate.get("api_key_env")),
         temperature=candidate.get("temperature"),
         send_reasoning_effort=candidate.get("reasoning_effort_supported"),
     )
@@ -364,6 +508,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--reuse-cache", action="store_true",
                         help="replay cached sections; cost columns then cover "
                              "only the sections that actually ran")
+    parser.add_argument("--gold", type=Path,
+                        help="a gold proposition set; adds the recall columns "
+                             f"that claim count cannot give (see {GOLD_DIR})")
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args(argv)
 
@@ -385,6 +532,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         print(f"\n## {source_row.get('source_id')}\n")
         print(render_markdown(rows))
+        if args.gold:
+            gold = GoldSet.load(args.gold)
+            scored = []
+            for row in rows:
+                if row.error:
+                    continue
+                package_path = next(
+                    (args.output_dir / row.model.replace("/", "_")).glob(
+                        "*.detailed-knowledge.json"), None)
+                if package_path is None:
+                    continue
+                package = json.loads(package_path.read_text(encoding="utf-8"))
+                scored.append((row.model, score_package(package, gold)))
+            if scored:
+                print(f"\n### proposition recall against {gold.gold_id}\n")
+                print(render_scores(scored))
         all_rows.extend(rows)
 
     if args.json_out:
