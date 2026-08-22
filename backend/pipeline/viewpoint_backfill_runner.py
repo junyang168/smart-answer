@@ -20,6 +20,9 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
+from backend.api.canonical_repository.viewpoint_candidate_recall import (
+    ViewpointCandidateRecallArtifact,
+)
 from backend.api.canonical_repository.viewpoint_semantic_scheduler import (
     DEFAULT_MAX_BUNDLE_BYTES,
     DEFAULT_MAX_BUNDLE_ITEMS,
@@ -145,6 +148,7 @@ def run_preflight(
     max_recall_neighbors: int = DEFAULT_MAX_NEIGHBORS,
     max_recall_block_claims: int = DEFAULT_MAX_BLOCK_CLAIMS,
     completed_results_path: Path | None = None,
+    candidate_recall_path: Path | None = None,
 ) -> dict[str, Any]:
     selection = _read(selection_path)
     store = PostgresKnowledgeStore(database_url)
@@ -210,6 +214,16 @@ def run_preflight(
         max_neighbors_per_claim=max_recall_neighbors,
         max_block_claims=max_recall_block_claims,
     )
+    candidate_recall = (
+        ViewpointCandidateRecallArtifact.model_validate(_read(candidate_recall_path))
+        if candidate_recall_path else None
+    )
+    if candidate_recall and (
+        candidate_recall.claim_manifest_sha256
+        != artifacts["claim_manifest"]["manifest_sha256"]
+        or candidate_recall.rule_artifact_sha256 != recall_blocking.artifact_sha256
+    ):
+        raise ValueError("candidate recall does not bind this preflight rule/cohort")
     candidates = build_identity_candidate_seeds(
         artifacts["claim_manifest"],
         scoped_relations,
@@ -243,7 +257,8 @@ def run_preflight(
         claims=collections["claims"],
         evidence_steps=collections["evidence_steps"],
         source_fragments=collections["source_fragments"],
-        recall_blocking=recall_blocking,
+        recall_blocking=recall_blocking if candidate_recall is None else None,
+        candidate_recall=candidate_recall,
         completed_results_by_reuse_key=_load_completed_results(completed_results_path),
         max_bundle_items=max_bundle_items,
         max_bundle_bytes=max_bundle_bytes,
@@ -305,6 +320,10 @@ def run_preflight(
         "resolution-ledger.json": ledger.model_dump(mode="json"),
         "resolution-queue.json": queue,
         "recall-blocking-report.json": recall_blocking.model_dump(mode="json"),
+        **(
+            {"candidate-recall-report.json": candidate_recall.model_dump(mode="json")}
+            if candidate_recall else {}
+        ),
         "semantic-bundle-schedule.json": semantic_schedule.model_dump(mode="json"),
         "source-set-discrepancy.json": discrepancy,
     }
@@ -323,6 +342,10 @@ def run_preflight(
         "recall_candidate_pair_count": recall_blocking.statistics[
             "unique_candidate_pair_count"
         ],
+        "candidate_union_pair_count": (
+            candidate_recall.statistics["union_unique_candidate_pair_count"]
+            if candidate_recall else None
+        ),
         "semantic_bundle_count": semantic_schedule.statistics["bundle_count"],
         "semantic_exception_count": semantic_schedule.statistics[
             "exception_candidate_count"
@@ -345,6 +368,7 @@ def main() -> None:
         "--max-recall-block-claims", type=int, default=DEFAULT_MAX_BLOCK_CLAIMS
     )
     parser.add_argument("--completed-results", type=Path)
+    parser.add_argument("--candidate-recall", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -359,6 +383,7 @@ def main() -> None:
                 max_recall_neighbors=args.max_recall_neighbors,
                 max_recall_block_claims=args.max_recall_block_claims,
                 completed_results_path=args.completed_results,
+                candidate_recall_path=args.candidate_recall,
             ),
             ensure_ascii=False,
             indent=2,

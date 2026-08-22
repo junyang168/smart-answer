@@ -91,7 +91,13 @@ def build_claim_embedding_budget(
     model: str = DEFAULT_GEMINI_MODEL,
     dimensions: int = DEFAULT_DIMENSIONS,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    transport_mode: Literal[
+        "gemini_developer_multi_content", "vertex_single_content"
+    ] = "gemini_developer_multi_content",
+    endpoint_location: str = "global",
 ) -> dict[str, Any]:
+    if transport_mode == "vertex_single_content" and batch_size != 1:
+        raise ValueError("Vertex sync embedding plans require batch_size=1 for safe resume")
     unsigned_manifest = {
         key: value for key, value in claim_manifest.items() if key != "manifest_sha256"
     }
@@ -133,6 +139,8 @@ def build_claim_embedding_budget(
         model=model,
         dimensions=dimensions,
         batch_size=batch_size,
+        transport_mode=transport_mode,
+        endpoint_location=endpoint_location,
     )
     plan = build_embedding_generation_plan(
         projections=projections,
@@ -178,6 +186,12 @@ def main() -> int:
     parser.add_argument("--model", default=DEFAULT_GEMINI_MODEL)
     parser.add_argument("--dimensions", type=int, default=DEFAULT_DIMENSIONS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument(
+        "--transport-mode",
+        choices=("gemini_developer_multi_content", "vertex_single_content"),
+        default="gemini_developer_multi_content",
+    )
+    parser.add_argument("--endpoint-location", default="global")
     args = parser.parse_args()
 
     store = PostgresKnowledgeStore(args.database_url)
@@ -187,6 +201,8 @@ def main() -> int:
         model=args.model,
         dimensions=args.dimensions,
         batch_size=args.batch_size,
+        transport_mode=args.transport_mode,
+        endpoint_location=args.endpoint_location,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write(

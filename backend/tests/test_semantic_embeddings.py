@@ -227,6 +227,27 @@ def test_gemini_2_fails_closed_if_provider_aggregates_batch():
         provider.embed_documents(projections, "candidate_recall")
 
 
+def test_vertex_gemini_2_uses_one_content_per_sync_request():
+    models = FakeModels(dimensions=128)
+    provider = GoogleGeminiEmbeddingProvider(
+        dimensions=128,
+        batch_size=2,
+        transport_mode="vertex_single_content",
+        client=SimpleNamespace(models=models, vertexai=True),
+    )
+    projections = [
+        build_claim_embedding_projection(_claim("C1", "彼得本人是磐石")),
+        build_claim_embedding_projection(_claim("C2", "磐石不是彼得个人")),
+    ]
+
+    vectors = provider.embed_documents(projections, "candidate_recall")
+
+    assert len(vectors) == 2
+    assert len(models.calls) == 2
+    assert all(len(call["contents"]) == 1 for call in models.calls)
+    assert provider.descriptor.endpoint_location == "global"
+
+
 def test_legacy_gemini_keeps_task_type_contract():
     models = FakeModels(dimensions=128)
     provider = GoogleGeminiEmbeddingProvider(

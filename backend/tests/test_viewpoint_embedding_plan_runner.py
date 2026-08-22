@@ -94,3 +94,23 @@ def test_budget_runner_keeps_ineligible_claim_in_denominator_without_embedding_c
     assert artifacts["summary"].input_claim_count == 2
     assert artifacts["summary"].projection_count == 1
     assert artifacts["summary"].source_ineligible_claim_ids == ["C2"]
+
+
+def test_vertex_plan_requires_single_item_batches_for_resumability():
+    with pytest.raises(ValueError, match="batch_size=1"):
+        build_claim_embedding_budget(
+            claim_manifest=_manifest([_claim("C1"), _claim("C2")]),
+            claims=[_claim("C1"), _claim("C2")],
+            transport_mode="vertex_single_content",
+            batch_size=2,
+        )
+
+    artifacts = build_claim_embedding_budget(
+        claim_manifest=_manifest([_claim("C1"), _claim("C2")]),
+        claims=[_claim("C1"), _claim("C2")],
+        transport_mode="vertex_single_content",
+        batch_size=1,
+    )
+    assert artifacts["summary"].estimated_provider_call_count == 2
+    assert artifacts["plan"].provider.transport_mode == "vertex_single_content"
+    assert artifacts["plan"].provider.endpoint_location == "global"
