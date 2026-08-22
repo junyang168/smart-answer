@@ -21,6 +21,7 @@ from .knowledge_models import (
     ClaimRelationConstraintRecord,
     ClaimRelationRecord,
     EvidenceStepRecord,
+    evidence_fragment_ids,
     SourceFragmentRecord,
     ViewpointClaimLinkRecord,
     ViewpointCoverageSnapshotRecord,
@@ -767,34 +768,34 @@ def build_identity_review_packet(
         source_ids: set[str] = set()
         for evidence_id in claim.evidence_step_ids:
             evidence = evidence_index.get(evidence_id)
-            if not evidence or not evidence.source_fragment_id:
+            if not evidence or not evidence_fragment_ids(evidence):
                 findings.append(f"{claim_id}: missing evidence {evidence_id}")
                 continue
-            fragment = fragment_index.get(evidence.source_fragment_id)
-            if not fragment:
-                findings.append(
-                    f"{claim_id}: evidence {evidence_id} has no source fragment"
+            for fragment_id in evidence_fragment_ids(evidence):
+                fragment = fragment_index.get(fragment_id)
+                if not fragment:
+                    findings.append(
+                        f"{claim_id}: evidence {evidence_id} has no source fragment {fragment_id}"
+                    )
+                    continue
+                source_ids.add(fragment.source_id)
+                coverage_source = coverage_sources.get(fragment.source_id)
+                citation_id = str(fragment.citation_id or "")
+                citation = citation_index.get(citation_id)
+                valid = bool(
+                    coverage_source
+                    and coverage_source.source_sha256 == fragment.source_sha256
+                    and evidence.support_eligibility in VALID_EVIDENCE_STATES
+                    and fragment.anchor_state in VALID_ANCHOR_STATES
+                    and citation_id
+                    and citation_id in evidence.citation_ids
+                    and citation
+                    and citation.status == "approved"
+                    and citation.source_id == fragment.source_id
+                    and citation.source_sha256 == fragment.source_sha256
+                    and evidence.evidence_step_id in citation.evidence_ids
                 )
-                continue
-            source_ids.add(fragment.source_id)
-            coverage_source = coverage_sources.get(fragment.source_id)
-            citation_id = str(fragment.citation_id or "")
-            citation = citation_index.get(citation_id)
-            valid = bool(
-                coverage_source
-                and coverage_source.source_sha256 == fragment.source_sha256
-                and evidence.support_eligibility in VALID_EVIDENCE_STATES
-                and fragment.anchor_state in VALID_ANCHOR_STATES
-                and citation_id
-                and citation_id in evidence.citation_ids
-                and citation
-                and citation.status == "approved"
-                and citation.source_id == fragment.source_id
-                and citation.source_sha256 == fragment.source_sha256
-                and evidence.evidence_step_id in citation.evidence_ids
-            )
-            evidence_rows.append(
-                ReviewEvidence(
+                evidence_rows.append(ReviewEvidence(
                     evidence_step_id=evidence.evidence_step_id,
                     source_fragment_id=fragment.fragment_id,
                     source_id=fragment.source_id,
@@ -809,8 +810,7 @@ def build_identity_review_packet(
                     support_eligibility=evidence.support_eligibility,
                     anchor_state=fragment.anchor_state,
                     valid_for_identity_review=valid,
-                )
-            )
+                ))
         if len(source_ids) != 1:
             findings.append(f"{claim_id}: Claim evidence is not source-local")
             continue

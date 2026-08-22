@@ -61,6 +61,25 @@ def test_projection_is_public_ready_and_binds_every_dependency():
         type(projection).model_validate(tampered)
 
 
+def test_projection_and_route_validation_accept_plural_fragment_binding():
+    store = _fixture()
+    store.records["evidence_steps"][0] = store.records["evidence_steps"][0].model_copy(
+        update={"source_fragment_id": None, "source_fragment_ids": ["FR-ROCK"]}
+    )
+
+    projection = ViewpointRuntimeCompiler(
+        store.records, store.citations
+    ).compile_projection(
+        consumer_kind="qa_answer",
+        coverage_snapshot_id="CVS-16",
+        viewpoint_ids=["CV-PETER"],
+    )
+
+    assert projection.eligibility == "public_attribution"
+    assert [row["fragment_id"] for row in projection.expanded_fragments] == ["FR-ROCK"]
+    assert validate_runtime_authoring_graph(_serialized(store)) == []
+
+
 def test_projection_sha_changes_when_citation_changes_and_public_fails_closed():
     store = _fixture()
     compiler = ViewpointRuntimeCompiler(store.records, store.citations)

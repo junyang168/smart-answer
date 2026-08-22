@@ -7,7 +7,7 @@ from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .knowledge_models import ProductDependencyRecord
+from .knowledge_models import ProductDependencyRecord, evidence_fragment_ids
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 
 
@@ -210,8 +210,11 @@ def validate_runtime_authoring_graph(
             if not step:
                 findings.append(f"{attestation_id}: missing evidence step {step_id}")
                 continue
-            fragment = fragments.get(str(step.get("source_fragment_id")))
-            if not fragment or fragment.get("source_id") != attestation.get("source_id"):
+            bound = [fragments.get(value) for value in evidence_fragment_ids(step)]
+            if not bound or any(
+                not fragment or fragment.get("source_id") != attestation.get("source_id")
+                for fragment in bound
+            ):
                 findings.append(f"{attestation_id}: evidence step {step_id} is not source-local")
             derived_refs.update(str(value) for value in step.get("scripture_refs") or [])
         if sorted(derived_refs) != list(attestation.get("scripture_refs") or []):
@@ -356,9 +359,10 @@ class ViewpointRuntimeCompiler:
                 claim = claims.get(link.claim_id)
                 for step_id in claim.evidence_step_ids if claim else []:
                     step = evidence.get(step_id)
-                    fragment = fragments.get(step.source_fragment_id) if step and step.source_fragment_id else None
-                    if fragment:
-                        sources.add(fragment.source_id)
+                    for fragment_id in evidence_fragment_ids(step) if step else []:
+                        fragment = fragments.get(fragment_id)
+                        if fragment:
+                            sources.add(fragment.source_id)
             route_items = routes_by_viewpoint.get(viewpoint.viewpoint_id, [])
             ready = (
                 revision.review_status in APPROVED and bool(members)
@@ -441,7 +445,7 @@ class ViewpointRuntimeCompiler:
         })
         attestations = [self.index["argument_route_attestations"][value] for value in attestation_ids]
         fragment_ids = sorted({
-            step.source_fragment_id for step in steps if step.source_fragment_id
+            value for step in steps for value in evidence_fragment_ids(step)
         })
         fragments = [self.index["source_fragments"][value] for value in fragment_ids if value in self.index["source_fragments"]]
         source_ids = sorted({item.source_id for item in fragments} | {item.source_id for item in attestations})
@@ -455,8 +459,12 @@ class ViewpointRuntimeCompiler:
         if any(item.support_eligibility not in PUBLIC_EVIDENCE for item in steps): blockers.append("evidence_not_public")
         fragment_index = self.index.get("source_fragments", {})
         if any(
-            not step.source_fragment_id or fragment_index.get(step.source_fragment_id) is None
-            or fragment_index[step.source_fragment_id].anchor_state not in PUBLIC_ANCHORS
+            not evidence_fragment_ids(step)
+            or any(
+                fragment_index.get(fragment_id) is None
+                or fragment_index[fragment_id].anchor_state not in PUBLIC_ANCHORS
+                for fragment_id in evidence_fragment_ids(step)
+            )
             for step in steps
         ): blockers.append("source_anchor_not_public")
         composition_blockers = {"registry_not_evidence_ready", "resolution_ledger_incomplete", "quality_not_passed", "coverage_incomplete"}

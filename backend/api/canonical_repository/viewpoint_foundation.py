@@ -21,6 +21,7 @@ from .knowledge_models import (
     ClaimRelationConstraintRecord,
     ClaimRelationRecord,
     KnowledgeSourceDocument,
+    evidence_fragment_ids,
     ViewpointClaimLinkRecord,
     ViewpointCoverageSnapshotRecord,
     ViewpointCoverageSource,
@@ -236,12 +237,13 @@ def build_input_claim_manifest(
             if step is None:
                 findings.append(f"{claim.claim_id}: missing evidence step {evidence_id}")
                 continue
-            fragment_id = str(step.get("source_fragment_id") or "")
-            fragment = fragments.get(fragment_id)
-            if fragment is None:
+            bound = [fragments.get(value) for value in evidence_fragment_ids(step)]
+            if not bound or any(fragment is None for fragment in bound):
                 findings.append(f"{claim.claim_id}: evidence {evidence_id} has no source fragment")
                 continue
-            source_ids.add(str(fragment.get("source_id") or ""))
+            source_ids.update(
+                str(fragment.get("source_id") or "") for fragment in bound if fragment
+            )
         if not source_ids:
             findings.append(f"{claim.claim_id}: no source-bound evidence")
             continue
@@ -559,14 +561,16 @@ def build_foundation_quality_report(
                 }:
                     continue
                 citation_ids = set(map(str, step.get("citation_ids") or []))
-                fragment = fragment_by_id.get(str(step.get("source_fragment_id") or ""))
-                if (
-                    not citation_ids
-                    or not fragment
+                bound = [
+                    fragment_by_id.get(value) for value in evidence_fragment_ids(step)
+                ]
+                if not citation_ids or not bound or any(
+                    not fragment
                     or fragment.get("anchor_state")
                     not in {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
                     or not fragment.get("source_sha256")
                     or str(fragment.get("citation_id") or "") not in citation_ids
+                    for fragment in bound
                 ):
                     continue
                 usable_evidence = True

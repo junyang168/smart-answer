@@ -849,6 +849,36 @@ class PostgresKnowledgeStore:
             row = cursor.fetchone()
         return dict(row[0]) if row else None
 
+    def list_records(self, collection: str) -> list[dict[str, Any]]:
+        """Read the active collection in stable object-id order."""
+
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT payload FROM wang_knowledge.objects
+                   WHERE collection=%s AND retired_at IS NULL ORDER BY object_id""",
+                (collection,),
+            )
+            rows = cursor.fetchall()
+        return [dict(row[0]) for row in rows]
+
+    def list_change_set_object_ids(
+        self, change_set_ids: Sequence[str], collection: str
+    ) -> list[str]:
+        """Return the exact object denominator written by explicit ChangeSets."""
+
+        if not change_set_ids:
+            return []
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT DISTINCT object_id FROM wang_knowledge.change_operations
+                   WHERE change_set_id = ANY(%s) AND collection=%s
+                     AND operation IN ('create', 'update', 'revive')
+                   ORDER BY object_id""",
+                (list(change_set_ids), collection),
+            )
+            rows = cursor.fetchall()
+        return [str(row[0]) for row in rows]
+
     def get_plan_document(self, plan_id: str) -> Optional[dict[str, Any]]:
         """A CompositionPlan with its decisions inlined.
 

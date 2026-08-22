@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
@@ -121,6 +122,7 @@ class TopicIdentityReconciliationRecord(EvolvingKnowledgeRecord):
 class EvidenceStepRecord(EvolvingKnowledgeRecord):
     evidence_step_id: str
     source_fragment_id: Optional[str] = None
+    source_fragment_ids: list[str] = Field(default_factory=list)
     statement: str = Field(default="", validation_alias=AliasChoices("statement", "observation"))
     step_type: Optional[str] = None
     claim_group_ids: list[str] = Field(default_factory=list)
@@ -132,6 +134,18 @@ class EvidenceStepRecord(EvolvingKnowledgeRecord):
     support_eligibility: str = "withheld_unreviewed"
     citation_ids: list[str] = Field(default_factory=list)
     scripture_refs: list[str] = Field(default_factory=list)
+
+
+def evidence_fragment_ids(value: Mapping[str, Any] | EvidenceStepRecord) -> list[str]:
+    """Return all source fragments across singular and plural extraction eras."""
+
+    if isinstance(value, Mapping):
+        singular = value.get("source_fragment_id")
+        plural = value.get("source_fragment_ids") or []
+    else:
+        singular = value.source_fragment_id
+        plural = value.source_fragment_ids
+    return sorted({str(item) for item in [singular, *plural] if item})
 
 
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
