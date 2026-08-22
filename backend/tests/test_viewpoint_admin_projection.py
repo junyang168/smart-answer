@@ -8,10 +8,12 @@ from fastapi.testclient import TestClient
 
 from backend.api.canonical_repository.knowledge_models import (
     KNOWLEDGE_COLLECTIONS,
+    ArgumentRouteAttestationRecord,
+    ArgumentRouteRecord,
+    ArgumentRouteRevisionRecord,
     CanonicalViewpointRecord,
     ClaimRecord,
     EvidenceStepRecord,
-    KnowledgeRouteRecord,
     KnowledgeSourceDocument,
     SourceFragmentRecord,
     ViewpointClaimLinkRecord,
@@ -19,6 +21,7 @@ from backend.api.canonical_repository.knowledge_models import (
     ViewpointQualityReportRecord,
     ViewpointResolutionLedgerRecord,
     ViewpointRevisionRecord,
+    ViewpointRelationRecord,
 )
 from backend.api.canonical_repository.models import Citation
 from backend.api.canonical_repository.viewpoint_admin_projection import (
@@ -57,6 +60,7 @@ def _fixture() -> FakeStore:
         evidence_step_id="EV-ROCK", source_fragment_id=fragment.fragment_id,
         statement="彼得与磐石在句法上相关，但正面所指仍需区分。",
         citation_ids=["CIT-ROCK"], support_eligibility="eligible",
+        scripture_refs=["Matt 16:18"],
         speaker="王教授", stance="affirmed", review_status="approved",
     )
     peter_claim = ClaimRecord(
@@ -159,16 +163,41 @@ def _fixture() -> FakeStore:
         eligibility_decision="pass", validator_version="v1",
         build_fingerprint_sha256="q" * 64, artifact_sha256="z" * 64,
     )
-    route = KnowledgeRouteRecord(
-        route_id="KR-PETER", claim_id="CL-PETER", route_type="textual_inference",
-        target_id="CV-PETER", review_status="approved",
+    route = ArgumentRouteRecord(
+        argument_route_id="AR-PETER", conclusion_viewpoint_id="CV-PETER",
+        current_revision_id="ARR-PETER-1", review_status="system_approved",
+    )
+    route_revision = ArgumentRouteRevisionRecord(
+        argument_route_revision_id="ARR-PETER-1", argument_route_id="AR-PETER",
+        revision_number=1, validated_against_conclusion_viewpoint_revision_id="CVR-PETER-1",
+        route_label="文本—认信—代表性角色", route_signature={
+            "premise_roles": ["text", "confession"], "inference_pattern": "textual_inference",
+            "conclusion_viewpoint_id": "CV-PETER",
+        }, review_artifact_sha256="d" * 64, approved_by="system:viewpoint-resolution",
+        approved_at="2026-08-22T12:00:00Z", review_status="system_approved",
+    )
+    attestation = ArgumentRouteAttestationRecord(
+        argument_route_attestation_id="ARA-PETER", argument_route_id="AR-PETER",
+        validated_against_argument_route_revision_id="ARR-PETER-1", source_id="SRC-16",
+        claim_id="CL-PETER", occurrence_ref_id="FR-ROCK",
+        ordered_evidence_step_ids=["EV-ROCK"], terminal_claim_link_id="VCL-PETER",
+        completeness="full", scripture_refs=["Matt 16:18"], review_status="system_approved",
+    )
+    viewpoint_relation = ViewpointRelationRecord(
+        viewpoint_relation_id="VPR-PETER-ROCK", source_viewpoint_id="CV-PETER",
+        target_viewpoint_id="CV-ROCK", validated_source_viewpoint_revision_id="CVR-PETER-1",
+        validated_target_viewpoint_revision_id="CVR-ROCK-1", relation_type="tensions_with",
+        reason="彼得的代表性角色不等于磐石所指可以简化为彼得个人。",
+        supporting_claim_ids=["CL-ROCK"], review_status="system_approved",
     )
     for collection, rows in {
         "source_documents": [source], "source_fragments": [fragment], "evidence_steps": [evidence],
         "claims": [peter_claim, rock_claim], "canonical_viewpoints": viewpoints,
         "viewpoint_revisions": revisions, "viewpoint_claim_links": links,
         "viewpoint_coverage_snapshots": [coverage], "viewpoint_resolution_ledgers": [ledger],
-        "viewpoint_quality_reports": [quality], "knowledge_routes": [route],
+        "viewpoint_quality_reports": [quality], "argument_routes": [route],
+        "argument_route_revisions": [route_revision],
+        "argument_route_attestations": [attestation], "viewpoint_relations": [viewpoint_relation],
     }.items():
         records[collection] = rows
     for collection in KNOWLEDGE_COLLECTIONS:
@@ -200,9 +229,9 @@ def test_peter_and_rock_remain_distinct_and_tension_is_not_membership():
     assert [item["claim"]["claim_id"] for item in detail["data"]["members"]] == ["CL-PETER"]
     assert detail["data"]["relations"] == [
         {
-            "relation_id": "VCL-TENSION", "relation_type": "tension_evidence",
+            "relation_id": "VPR-PETER-ROCK", "relation_type": "tensions_with",
             "from_viewpoint_id": "CV-PETER", "to_viewpoint_id": "CV-ROCK",
-            "claim_id": "CL-ROCK", "claim_statement": "磐石的正面所指不是简单等同于彼得个人",
+            "claim_id": "CL-ROCK", "claim_statement": "彼得的代表性角色不等于磐石所指可以简化为彼得个人。",
             "supporting_relation_ids": [], "review_status": "system_approved",
         }
     ]

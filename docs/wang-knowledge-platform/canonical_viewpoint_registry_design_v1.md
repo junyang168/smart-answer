@@ -1607,6 +1607,8 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 本卡只交付设计。建议按依赖顺序拆分：
 
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 Matthew、QA、Search 已接入，也不表示正式 20 篇已导入；这些仍分别属于 10–12。
+
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
 2. **CoverageSnapshot、ViewpointResolutionLedger 与逐维质量报告**

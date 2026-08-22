@@ -131,6 +131,7 @@ class EvidenceStepRecord(EvolvingKnowledgeRecord):
     anchor_quality: Optional[str] = None
     support_eligibility: str = "withheld_unreviewed"
     citation_ids: list[str] = Field(default_factory=list)
+    scripture_refs: list[str] = Field(default_factory=list)
 
 
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
@@ -184,6 +185,16 @@ class ProductDependencyRecord(EvolvingKnowledgeRecord):
     route_ids: list[str] = Field(default_factory=list)
     status: str = "current"
     invalidation_event_ids: list[str] = Field(default_factory=list)
+    viewpoint_revision_ids: list[str] = Field(default_factory=list)
+    viewpoint_registry_snapshot_ids: list[str] = Field(default_factory=list)
+    argument_route_revision_ids: list[str] = Field(default_factory=list)
+    argument_route_snapshot_ids: list[str] = Field(default_factory=list)
+    coverage_snapshot_id: Optional[str] = None
+    resolution_ledger_id: Optional[str] = None
+    quality_report_id: Optional[str] = None
+    quality_report_sha256: Optional[str] = None
+    projection_sha256: Optional[str] = None
+    dependency_manifest: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ImpactEventRecord(EvolvingKnowledgeRecord):
@@ -614,6 +625,127 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         return self
 
 
+class ArgumentRouteSignature(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    premise_roles: list[str] = Field(min_length=1)
+    inference_pattern: str = Field(min_length=1)
+    conclusion_viewpoint_id: str
+
+
+class ArgumentRouteRecord(StrictViewpointRecord):
+    argument_route_id: str
+    schema_version: Literal["wang_argument_route_v1"] = "wang_argument_route_v1"
+    conclusion_viewpoint_id: str
+    current_revision_id: str
+    route_status: Literal["active", "redirected", "retired"] = "active"
+    redirect_to_argument_route_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_redirect(self) -> "ArgumentRouteRecord":
+        if self.route_status == "redirected" and not self.redirect_to_argument_route_id:
+            raise ValueError("redirected route requires redirect_to_argument_route_id")
+        if self.redirect_to_argument_route_id == self.argument_route_id:
+            raise ValueError("argument route cannot redirect to itself")
+        return self
+
+
+class ArgumentRouteRevisionRecord(StrictViewpointRecord):
+    argument_route_revision_id: str
+    schema_version: Literal["wang_argument_route_revision_v1"] = "wang_argument_route_revision_v1"
+    argument_route_id: str
+    revision_number: int = Field(ge=1)
+    validated_against_conclusion_viewpoint_revision_id: str
+    route_label: str = Field(min_length=1)
+    route_signature: ArgumentRouteSignature
+    representation_kind: Literal["editorial_normalization_of_attested_arguments"] = (
+        "editorial_normalization_of_attested_arguments"
+    )
+    review_artifact_sha256: str
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
+    supersedes_revision_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> "ArgumentRouteRevisionRecord":
+        if self.revision_number != self.revision:
+            raise ValueError("revision_number must equal store revision")
+        if self.review_status in {"system_approved", "human_approved", "approved"}:
+            if not self.approved_by or not self.approved_at:
+                raise ValueError("approved route revision requires approved_by and approved_at")
+        return self
+
+
+class ArgumentRouteAttestationRecord(StrictViewpointRecord):
+    argument_route_attestation_id: str
+    schema_version: Literal["wang_argument_route_attestation_v1"] = "wang_argument_route_attestation_v1"
+    argument_route_id: str
+    validated_against_argument_route_revision_id: str
+    source_id: str
+    claim_id: str
+    occurrence_ref_id: str
+    ordered_evidence_step_ids: list[str] = Field(min_length=1)
+    terminal_claim_link_id: str
+    completeness: Literal["full", "partial"]
+    scripture_refs: list[str] = Field(default_factory=list)
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_ordered_ids(self) -> "ArgumentRouteAttestationRecord":
+        if len(self.ordered_evidence_step_ids) != len(set(self.ordered_evidence_step_ids)):
+            raise ValueError("ordered_evidence_step_ids must be unique")
+        if self.scripture_refs != sorted(set(self.scripture_refs)):
+            raise ValueError("scripture_refs must be sorted and unique")
+        if self.effective_state == "active" and self.review_status not in {
+            "system_approved", "human_approved", "approved"
+        }:
+            raise ValueError("active route attestation requires approved review status")
+        return self
+
+
+class ViewpointTemporalAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asserted_at: str
+    effective_from: Optional[str] = None
+    correction_evidence_claim_ids: list[str] = Field(default_factory=list)
+
+
+class ViewpointRelationRecord(StrictViewpointRecord):
+    viewpoint_relation_id: str
+    schema_version: Literal["wang_viewpoint_relation_v1"] = "wang_viewpoint_relation_v1"
+    source_viewpoint_id: str
+    target_viewpoint_id: str
+    validated_source_viewpoint_revision_id: str
+    validated_target_viewpoint_revision_id: str
+    relation_type: Literal[
+        "generalizes", "specializes", "entails", "extends", "qualifies",
+        "applies", "tensions_with", "supersedes",
+    ]
+    reason: str = Field(min_length=1)
+    supporting_claim_relation_ids: list[str] = Field(default_factory=list)
+    supporting_claim_ids: list[str] = Field(default_factory=list)
+    temporal_assertion: Optional[ViewpointTemporalAssertion] = None
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_relation(self) -> "ViewpointRelationRecord":
+        if self.source_viewpoint_id == self.target_viewpoint_id:
+            raise ValueError("viewpoint relation endpoints must differ")
+        for field_name in ("supporting_claim_relation_ids", "supporting_claim_ids"):
+            values = getattr(self, field_name)
+            if values != sorted(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        if self.relation_type == "tensions_with" and self.source_viewpoint_id > self.target_viewpoint_id:
+            raise ValueError("tensions_with endpoints must use canonical lexical order")
+        if self.relation_type == "supersedes":
+            if not self.temporal_assertion or not self.temporal_assertion.correction_evidence_claim_ids:
+                raise ValueError("supersedes requires temporal assertion and correction evidence")
+        elif self.temporal_assertion is not None:
+            raise ValueError("temporal_assertion is only valid for supersedes")
+        return self
+
+
 class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
     identity_candidate_id: str
     schema_version: Literal["wang_viewpoint_identity_candidate_v1"] = (
@@ -995,6 +1127,10 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "canonical_viewpoints": (CanonicalViewpointRecord, "viewpoint_id"),
     "viewpoint_revisions": (ViewpointRevisionRecord, "viewpoint_revision_id"),
     "viewpoint_claim_links": (ViewpointClaimLinkRecord, "viewpoint_claim_link_id"),
+    "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
+    "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),
+    "argument_route_attestations": (ArgumentRouteAttestationRecord, "argument_route_attestation_id"),
+    "viewpoint_relations": (ViewpointRelationRecord, "viewpoint_relation_id"),
     "viewpoint_identity_candidates": (
         ViewpointIdentityCandidateRecord,
         "identity_candidate_id",
