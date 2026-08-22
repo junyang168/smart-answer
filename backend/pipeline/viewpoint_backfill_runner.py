@@ -18,6 +18,11 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     build_resolution_ledger,
     sha256_json,
 )
+from backend.api.canonical_repository.viewpoint_semantic_scheduler import (
+    DEFAULT_MAX_BUNDLE_BYTES,
+    DEFAULT_MAX_BUNDLE_ITEMS,
+    build_semantic_bundle_schedule,
+)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -32,6 +37,32 @@ def _write(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
+def _load_completed_results(path: Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    payload = _read(path)
+    if payload.get("schema_version") != "wang_viewpoint_semantic_completed_results_v1":
+        raise ValueError("unsupported semantic completed-results artifact")
+    unsigned = dict(payload)
+    stated_sha = str(unsigned.pop("artifact_sha256", ""))
+    if not stated_sha or stated_sha != sha256_json(unsigned):
+        raise ValueError("semantic completed-results artifact SHA mismatch")
+    rows = list(payload.get("results") or [])
+    reuse_keys = [str(row.get("reuse_key_sha256") or "") for row in rows]
+    if reuse_keys != sorted(set(reuse_keys)):
+        raise ValueError("semantic completed results must be sorted and unique")
+    completed: dict[str, str] = {}
+    for row in rows:
+        if row.get("status") != "complete":
+            continue
+        reuse_key = str(row.get("reuse_key_sha256") or "")
+        artifact_sha = str(row.get("result_artifact_sha256") or "")
+        if not reuse_key or not artifact_sha:
+            raise ValueError("completed semantic result is missing a SHA")
+        completed[reuse_key] = artifact_sha
+    return completed
+
+
 def run_preflight(
     *,
     selection_path: Path,
@@ -39,6 +70,9 @@ def run_preflight(
     database_url: str | None = None,
     argument_layer_path: Path | None = None,
     created_at: str | None = None,
+    max_bundle_items: int = DEFAULT_MAX_BUNDLE_ITEMS,
+    max_bundle_bytes: int = DEFAULT_MAX_BUNDLE_BYTES,
+    completed_results_path: Path | None = None,
 ) -> dict[str, Any]:
     selection = _read(selection_path)
     store = PostgresKnowledgeStore(database_url)
@@ -114,6 +148,18 @@ def run_preflight(
         "identity_candidates": [item.model_dump(mode="json") for item in candidates],
     }
     queue["artifact_sha256"] = sha256_json(queue)
+    semantic_schedule = build_semantic_bundle_schedule(
+        preflight_packet_sha256=artifacts["preflight_packet"]["artifact_sha256"],
+        resolution_queue_sha256=queue["artifact_sha256"],
+        claim_manifest=artifacts["claim_manifest"],
+        candidates=candidates,
+        claims=collections["claims"],
+        evidence_steps=collections["evidence_steps"],
+        source_fragments=collections["source_fragments"],
+        completed_results_by_reuse_key=_load_completed_results(completed_results_path),
+        max_bundle_items=max_bundle_items,
+        max_bundle_bytes=max_bundle_bytes,
+    )
     selected_ids = {row["source_id"] for row in manifest["sources"]}
     argument_ids: set[str] = set()
     argument_entry_count: int | None = None
@@ -156,6 +202,7 @@ def run_preflight(
         "preflight-packet.json": artifacts["preflight_packet"],
         "resolution-ledger.json": ledger.model_dump(mode="json"),
         "resolution-queue.json": queue,
+        "semantic-bundle-schedule.json": semantic_schedule.model_dump(mode="json"),
         "source-set-discrepancy.json": discrepancy,
     }
     for name, value in outputs.items():
@@ -168,6 +215,11 @@ def run_preflight(
         **artifacts["readiness"]["summary"],
         "preflight_packet_sha256": artifacts["preflight_packet"]["artifact_sha256"],
         "identity_candidate_count": len(candidates),
+        "semantic_bundle_count": semantic_schedule.statistics["bundle_count"],
+        "semantic_exception_count": semantic_schedule.statistics[
+            "exception_candidate_count"
+        ],
+        "semantic_reused_count": semantic_schedule.statistics["reused_candidate_count"],
     }
 
 
@@ -178,6 +230,9 @@ def main() -> None:
     parser.add_argument("--database-url")
     parser.add_argument("--argument-layer", type=Path)
     parser.add_argument("--created-at")
+    parser.add_argument("--max-bundle-items", type=int, default=DEFAULT_MAX_BUNDLE_ITEMS)
+    parser.add_argument("--max-bundle-bytes", type=int, default=DEFAULT_MAX_BUNDLE_BYTES)
+    parser.add_argument("--completed-results", type=Path)
     args = parser.parse_args()
     print(
         json.dumps(
@@ -187,6 +242,9 @@ def main() -> None:
                 database_url=args.database_url,
                 argument_layer_path=args.argument_layer,
                 created_at=args.created_at,
+                max_bundle_items=args.max_bundle_items,
+                max_bundle_bytes=args.max_bundle_bytes,
+                completed_results_path=args.completed_results,
             ),
             ensure_ascii=False,
             indent=2,

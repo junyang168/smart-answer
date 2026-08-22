@@ -423,6 +423,7 @@ ViewpointBlockerCode = Literal[
     "modality_mismatch",
     "component_locator_required",
     "approved_negative_duplicate_constraint",
+    "reviewed_material_relation",
     "different_active_viewpoints",
     "reviewer_disagreement",
     "evidence_invalid",

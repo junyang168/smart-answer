@@ -1637,6 +1637,8 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
    实施时不得用数据库 active source 总数、staging 目录、batch 名称或文件时间倒推出这 20 篇。operator 先提交按 `source_id` 排序且自带 SHA 的显式 selection；每个成功成员必须绑定实际应用的 `KCS-*` ChangeSet。preflight 再冻结当前 source revision/SHA，并且只把这些 ChangeSets 实际写入的 Claim revisions 纳入 input Claim manifest。失败而未 ingest 的 batch member 不进入本轮 source universe；同源历史 Claim、旧 argument-layer entry 与数据库中的其他 active source 只进入 discrepancy report，不能进入 candidate generation。
 
    preflight 是 fail-closed 的只读步骤：它验证 singular/plural `source_fragment_id(s)`、source-local Evidence、Claim denominator 和 lineage，生成 CoverageSnapshot、全量 `unprocessed` ResolutionLedger 与 resolution queue，但始终保持 `apply_allowed=false`。只有同一 Claim manifest 的 ledger 达到 `complete`，且绑定该 ledger 的逐维 ViewpointQualityReport 为 `pass`，确定性 apply authorization 才能打开 ChangeSet apply 边界；resolution、quality 或 SHA 任一不匹配都必须阻断。
+
+   resolution queue 不得按 Claim 一项一次调用模型。确定性 scheduler 先把 reviewed duplicate connected component 投影为一个 cluster candidate，但 cluster 只表示召回范围，每个 member 仍须分别对拟议 core proposition 作判断，绝不产生传递 membership。其余 singleton discovery candidate 可以按 topic／经文排序后共同装入有 item/byte 硬上限的 transport bundle；bundle 必须要求每个 candidate 独立输出，co-bundling 不构成相似、关系或 identity 证据。active-viewpoint match lane 优先于 duplicate component，后者优先于 singleton discovery；deterministic blocker、已 supersede/reject/retire 的 source-ineligible Claim、超大 work item 与已完成 fingerprint 分别进入 exception、source-ineligible、oversize 或 reuse disposition。source-ineligible 仍保留在 ResolutionLedger 分母中，但不浪费语义调用。相同输入与预算必须 byte-stable，Claim revision/SHA 改变必须使 reuse key 失效。
 13. **逐步扩展至 corpus universe**
    按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
 

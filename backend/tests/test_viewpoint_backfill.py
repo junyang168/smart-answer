@@ -250,6 +250,9 @@ def test_runner_uses_change_set_claim_denominator_and_is_idempotent(
         selection_path=selection_path, output_dir=output_dir
     )
     first_queue = json.loads((output_dir / "resolution-queue.json").read_text())
+    first_schedule = json.loads(
+        (output_dir / "semantic-bundle-schedule.json").read_text()
+    )
     second = viewpoint_backfill_runner.run_preflight(
         selection_path=selection_path, output_dir=output_dir
     )
@@ -258,4 +261,26 @@ def test_runner_uses_change_set_claim_denominator_and_is_idempotent(
     assert first["resolution_ready_claim_count"] == 1
     assert first_queue["claim_count"] == 1
     assert first_queue["identity_candidate_count"] == 1
+    assert first["semantic_bundle_count"] == 1
+    reuse_key = first_schedule["work_items"][0]["reuse_key_sha256"]
+    completed_path = tmp_path / "completed-results.json"
+    completed = {
+        "schema_version": "wang_viewpoint_semantic_completed_results_v1",
+        "results": [
+            {
+                "reuse_key_sha256": reuse_key,
+                "result_artifact_sha256": "result-sha",
+                "status": "complete",
+            }
+        ],
+    }
+    completed["artifact_sha256"] = sha256_json(completed)
+    completed_path.write_text(json.dumps(completed), encoding="utf-8")
+    reused = viewpoint_backfill_runner.run_preflight(
+        selection_path=selection_path,
+        output_dir=output_dir,
+        completed_results_path=completed_path,
+    )
+    assert reused["semantic_bundle_count"] == 0
+    assert reused["semantic_reused_count"] == 1
     assert not list(output_dir.glob("*.tmp"))

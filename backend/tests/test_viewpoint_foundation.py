@@ -282,7 +282,7 @@ def test_source_ineligible_and_component_membership_cannot_be_faked() -> None:
         )
 
 
-def test_duplicate_chain_is_pairwise_not_transitive() -> None:
+def test_duplicate_chain_is_one_cluster_without_transitive_approval() -> None:
     coverage, manifest, *_ = _manifest_for_claim_ids("CL-A", "CL-B", "CL-C")
     candidates = build_identity_candidate_seeds(
         manifest,
@@ -306,9 +306,11 @@ def test_duplicate_chain_is_pairwise_not_transitive() -> None:
     )
 
     assert coverage.coverage_snapshot_id == candidates[0].coverage_snapshot_id
-    pairs = {tuple(item.candidate_claim_ids) for item in candidates}
-    assert pairs == {("CL-A", "CL-B"), ("CL-B", "CL-C")}
-    assert ("CL-A", "CL-C") not in pairs
+    assert [item.candidate_claim_ids for item in candidates] == [
+        ["CL-A", "CL-B", "CL-C"]
+    ]
+    assert candidates[0].review_status == "candidate"
+    assert candidates[0].proposed_action == "create_new"
 
 
 def test_negative_constraint_blocks_duplicate_seed_without_approving_anything() -> None:
@@ -340,6 +342,80 @@ def test_negative_constraint_blocks_duplicate_seed_without_approving_anything() 
     assert candidates[0].proposed_action == "defer"
     assert candidates[0].blocker_codes == ["approved_negative_duplicate_constraint"]
     assert candidates[0].review_status == "candidate"
+
+
+def test_reviewed_material_relation_blocks_an_unsafe_duplicate_component() -> None:
+    _, manifest, *_ = _manifest_for_claim_ids("CL-A", "CL-B", "CL-C")
+    candidates = build_identity_candidate_seeds(
+        manifest,
+        [
+            {
+                "claim_relation_id": "CR-AB",
+                "from_id": "CL-A",
+                "to_id": "CL-B",
+                "relation_type": "duplicate",
+                "review_status": "ai_consensus",
+            },
+            {
+                "claim_relation_id": "CR-BC",
+                "from_id": "CL-B",
+                "to_id": "CL-C",
+                "relation_type": "duplicate",
+                "review_status": "ai_consensus",
+            },
+            {
+                "claim_relation_id": "CR-AC-CONTRAST",
+                "from_id": "CL-A",
+                "to_id": "CL-C",
+                "relation_type": "contrasts",
+                "review_status": "ai_consensus",
+            },
+        ],
+        [],
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_claim_ids == ["CL-A", "CL-B", "CL-C"]
+    assert candidates[0].proposed_action == "defer"
+    assert candidates[0].blocker_codes == ["reviewed_material_relation"]
+    assert candidates[0].seed_relation_ids == ["CR-AB", "CR-BC"]
+
+
+def test_non_edge_negative_constraint_blocks_duplicate_chain_transitivity() -> None:
+    _, manifest, *_ = _manifest_for_claim_ids("CL-A", "CL-B", "CL-C")
+    candidates = build_identity_candidate_seeds(
+        manifest,
+        [
+            {
+                "claim_relation_id": "CR-AB",
+                "from_id": "CL-A",
+                "to_id": "CL-B",
+                "relation_type": "duplicate",
+                "review_status": "ai_consensus",
+            },
+            {
+                "claim_relation_id": "CR-BC",
+                "from_id": "CL-B",
+                "to_id": "CL-C",
+                "relation_type": "duplicate",
+                "review_status": "ai_consensus",
+            },
+        ],
+        [
+            {
+                "constraint_id": "CRC-AC",
+                "source_id": "CL-A",
+                "target_id": "CL-C",
+                "forbidden_relation_types": ["duplicate"],
+                "review_status": "approved",
+            }
+        ],
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].candidate_claim_ids == ["CL-A", "CL-B", "CL-C"]
+    assert candidates[0].proposed_action == "defer"
+    assert candidates[0].blocker_codes == ["approved_negative_duplicate_constraint"]
 
 
 def test_unreviewed_relation_or_constraint_has_no_master_data_authority() -> None:
