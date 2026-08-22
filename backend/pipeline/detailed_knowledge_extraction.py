@@ -345,6 +345,7 @@ def extraction_identity(
     max_output_tokens: int,
     section_plan: dict[str, Any] | None = None,
     source_text_sha256: str | None = None,
+    backend: str | None = None,
 ) -> dict[str, Any]:
     generation = {
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
@@ -370,6 +371,11 @@ def extraction_identity(
     # failure the `section_plan` note above describes, one level down.
     if source_text_sha256 is not None:
         generation["source_text_sha256"] = source_text_sha256
+    # Preserve every existing API fingerprint byte-for-byte. The opt-in Codex
+    # backend is added only when selected, both to identify its artifacts and
+    # to prevent API and subscription runs from sharing a semantic cache.
+    if backend is not None:
+        generation["backend"] = backend
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

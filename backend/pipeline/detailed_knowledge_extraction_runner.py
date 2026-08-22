@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.base_contract_coverage import sentence_spans
 from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
@@ -211,7 +212,7 @@ def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, sect
     )
 
 
-def _subtitle_provider(source_id: str):
+def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = None):
     """The sermon editor's own subtitle generator, for sources with no headings.
 
     It raises on failure and this runner does not catch it, so a source whose
@@ -222,7 +223,7 @@ def _subtitle_provider(source_id: str):
 
     def provider(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return generate_subtitles(
-            paragraphs, subject=source_id, consumer="extraction_sections"
+            paragraphs, subject=source_id, consumer="extraction_sections", client=client
         )
 
     return provider
@@ -231,6 +232,7 @@ def _subtitle_provider(source_id: str):
 def resolve_section_plan(
     *, source: dict[str, Any], source_id: str, source_sha256: str, output_dir: Path,
     level: int = DEFAULT_SECTION_LEVEL, allow_generated: bool = True,
+    client: CodexSubscriptionClient | None = None,
 ) -> SectionPlan:
     """The plan for this source, generated at most once and then reused.
 
@@ -243,7 +245,7 @@ def resolve_section_plan(
     cached = load_cached_plan(path, source_sha256)
     if cached is not None:
         return cached
-    provider = _subtitle_provider(source_id) if allow_generated else None
+    provider = _subtitle_provider(source_id, client) if allow_generated else None
     plan = plan_sections(_segment_texts(source), level=level, provider=provider)
     save_plan(path, plan, source_sha256)
     return plan
@@ -271,7 +273,7 @@ def _extract_sections(
     header: str,
     plan: SectionPlan,
     output_dir: Path,
-    client: Stage1OpenAIClient | Stage1AnthropicClient,
+    client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str,
     fingerprint: str,
     force: bool,
@@ -400,6 +402,11 @@ def compile_package(
     # sermon.  A 200-sermon corpus cannot safely contain 200 different CL001s.
     source_key = str((source_descriptor or {}).get("source_id") or transcript_id)
     namespace = f"DK-{hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:12]}"
+    model_output_sha256 = hashlib.sha256(
+        json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
     response = json.loads(json.dumps(response, ensure_ascii=False))
     id_maps = {
         "question": {row["question_id"]: f"{namespace}-{row['question_id']}" for row in response["questions"]},
@@ -541,7 +548,16 @@ def compile_package(
         "claims": claims,
         "knowledge_relations": response["evidence_relations"],
         "claim_relations": response["claim_relations"],
-        "extraction": {**extraction, "generated_at": datetime.now(timezone.utc).isoformat()},
+        "extraction": {
+            **extraction,
+            # Artifact metadata does not participate in the pre-generation
+            # fingerprint. This lets the unchanged API identity keep matching
+            # older caches while every newly written artifact names its
+            # transport and binds the exact raw structured response.
+            "backend": extraction.get("backend", "api"),
+            "model_output_sha256": model_output_sha256,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
         "summary": {
             "source_fragment_count": len(fragments),
             "question_count": len(questions),
@@ -617,6 +633,7 @@ def _run(
         source=source, source_id=source_id, source_sha256=source_sha256,
         output_dir=output_dir, level=sections.level,
         allow_generated=sections.allow_generated,
+        client=client if isinstance(client, CodexSubscriptionClient) else None,
     )
     identity = extraction_identity(
         source_sha256=source_sha256, prompt=prompt,
@@ -626,6 +643,7 @@ def _run(
         source_text_sha256=hashlib.sha256(
             "\n".join(_segment_texts(source)).encode("utf-8")
         ).hexdigest(),
+        backend=client.backend if isinstance(client, CodexSubscriptionClient) else None,
     )
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
     if output_path.is_file() and not force:
@@ -637,6 +655,8 @@ def _run(
     # that did something.
     with run_record(subject=source_id, stage="extraction") as record:
         record.model(client.model)
+        if isinstance(client, CodexSubscriptionClient):
+            record.metadata({"backend": client.backend})
         # `fingerprint_sha256` is the staleness key, not one input among
         # several: it already composes the source, the prompt, the model, the
         # schema and the section plan, and it is what the skip check above
@@ -659,7 +679,9 @@ def _run(
 def _run_extraction(
     *, record: RunRecord, source_id: str, source: dict[str, Any], raw: bytes,
     source_path: Path, header: str, plan: SectionPlan, identity: dict[str, Any],
-    output_path: Path, output_dir: Path, client: Stage1OpenAIClient, prompt: str,
+    output_path: Path, output_dir: Path,
+    client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
+    prompt: str,
     sections: "SectionSettings", force: bool, source_descriptor: dict[str, Any] | None,
 ) -> tuple[str, Path]:
     """The part of an extraction that is worth recording, once a row exists."""
@@ -767,7 +789,8 @@ def _print_coverage(source_id: str, coverage: dict[str, Any]) -> None:
 
 
 def run_source(
-    source_descriptor: dict[str, Any], *, output_dir: Path, client: Stage1OpenAIClient,
+    source_descriptor: dict[str, Any], *, output_dir: Path,
+    client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
 ) -> tuple[str, Path]:
@@ -787,7 +810,8 @@ def run_source(
 
 
 def run_one(
-    transcript_path: Path, *, output_dir: Path, client: Stage1OpenAIClient,
+    transcript_path: Path, *, output_dir: Path,
+    client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
 ) -> tuple[str, Path]:
@@ -806,9 +830,17 @@ def run_one(
 
 
 def build_client(
-    model: str, *, reasoning_effort: str, max_output_tokens: int
-) -> Stage1OpenAIClient | Stage1AnthropicClient:
+    model: str, *, reasoning_effort: str, max_output_tokens: int, backend: str = "api"
+) -> Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient:
     """The client for a model id, chosen by its family prefix."""
+
+    if backend == "codex-subscription":
+        return CodexSubscriptionClient(
+            model=model, reasoning_effort=reasoning_effort, timeout_seconds=900,
+            max_output_tokens=max_output_tokens,
+        )
+    if backend != "api":
+        raise ValueError(f"unknown backend {backend!r}")
 
     family = model.split("-", 1)[0]
     backend = MODEL_BACKENDS.get(family)
@@ -837,6 +869,10 @@ def main() -> int:
     group.add_argument("--source-manifest", type=Path)
     parser.add_argument("--model", default=DEFAULT_MODEL,
                         help="claude-* (default), gpt-*, or deepseek-*")
+    parser.add_argument(
+        "--backend", choices=["api", "codex-subscription"], default="api",
+        help="model transport; api is the unchanged default, codex-subscription is opt-in",
+    )
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
     # 32,000 was sized for a model that did not think from the same budget.
     # Claude Opus 5 spends adaptive thinking out of `max_tokens`, and a single
@@ -877,12 +913,16 @@ def main() -> int:
         print(json.dumps({
             "transcripts": args.ids or [],
             "sources": [row["source_id"] for row in source_rows], "model": args.model,
+            "backend": args.backend,
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
             "section_level": sections.level,
             "allow_generated_sections": sections.allow_generated,
             "sections_per_source": plans,
+            # Retained for scripts that read the old dry-run shape. Dry runs
+            # never call either backend.
             "would_call_openai": False,
+            "would_call_model": False,
         }, ensure_ascii=False))
         return 0
     load_dotenv(PROJECT_ROOT / ".env")
@@ -890,7 +930,7 @@ def main() -> int:
     prompt = prompt_path.read_text(encoding="utf-8")
     client = build_client(
         args.model, reasoning_effort=args.reasoning_effort,
-        max_output_tokens=args.max_output_tokens,
+        max_output_tokens=args.max_output_tokens, backend=args.backend,
     )
     counts = {"created": 0, "skipped": 0, "failed": 0}
     for path in paths:
