@@ -22,6 +22,7 @@
 8. 全部篇数、来源数、出现次数、路线数与经文数由结构机械计算，不在自然语言 summary 中维护另一份数字。
 9. corpus universe、详细抽取覆盖和观点审核覆盖必须分开记录。当前规划语境为 205+ 篇全语料、20 篇已进入详细整理、核心九篇拥有冻结的跨讲关系与 Topic Discovery artifact；这些数字不可写死在 viewpoint identity 上。
 10. 单次 AI 判断只产生内部 candidate。低风险 identity 可在独立双重语义复核、确定性验证与零 blocker 后获得明确标记的 `system_approved`；张力、scope 改变、component 歧义、split/merge/supersedes 与其他高风险判断才进入人工队列。任何自动批准不得冒充 `human_approved`，现有文章自动发布规则也不得原样挪用为观点批准规则。
+11. 观点解析的完整性分母是 CoverageSnapshot 中实际进入本轮处理的 source-bound Claim revisions，不是模型已经找到的 viewpoint 或 member。source eligibility 本身也是 ledger 要回答的判断，不能在建立分母前先把困难 Claim 过滤掉。每个输入 Claim 必须在 `ViewpointResolutionLedger` 中恰好有一个处理状态；未处理与暂缓必须显式可见，不能从统计和下游 projection 中消失。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -228,6 +229,107 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
 `roles` 第一版只允许 `source_universe`、`detailed_extraction`、`viewpoint_reviewed`；一个 source revision 可以同时拥有多个 roles。`sources` 按 `source_revision_id` 排序后计算 `sources_sha256`，同一个 `source_id` 在同一 snapshot 中最多出现一个 current revision。
 
 机械派生而不存双份真相的字段包括：`source_universe_count`、`historical_survey_baseline_count`、`detailed_source_count` 与 `viewpoint_reviewed_source_count`。若 API 返回这些数字，必须同时返回计算所用 snapshot ID。`historical_survey_baseline_count` 不因后来来源加入而改变；`source_universe_count` 由拥有 `source_universe` role 的 entries 计算。
+
+#### 5.1.1 ViewpointResolutionLedger
+
+CoverageSnapshot 回答“本轮看过哪些 source revisions”，但不能单独证明其中的 Claim 都已处理。观点解析必须另建不可变的 `ViewpointResolutionLedger`，其分母来自 source-bound、revision-pinned 的输入 Claim manifest，不得从已经生成的 viewpoint、member link 或 relation 反推。
+
+```json
+{
+  "resolution_ledger_id": "VRL-opaque",
+  "schema_version": "wang_viewpoint_resolution_ledger_v1",
+  "coverage_snapshot_id": "CVS-opaque",
+  "input_claim_manifest_sha256": "...",
+  "eligibility_policy_version": "viewpoint_source_eligibility_v1",
+  "candidate_blocking_version": "viewpoint_candidate_blocking_v1",
+  "rows": [
+    {
+      "claim_id": "DK-...-CL...",
+      "pinned_claim_revision": 2,
+      "claim_revision_sha256": "...",
+      "processing_status": "resolved",
+      "resolution_kind": "member_existing",
+      "primary_viewpoint_id": "CV-opaque",
+      "new_viewpoint_candidate_id": null,
+      "viewpoint_claim_link_id": "VCL-opaque",
+      "secondary_link_ids": ["VREL-opaque"],
+      "source_eligibility_reason_code": null,
+      "resolution_reason_code": null,
+      "blocker_codes": [],
+      "decision_id": "VID-opaque"
+    }
+  ],
+  "statistics": {
+    "input_claim_count": 1,
+    "resolved_count": 1,
+    "source_ineligible_count": 0,
+    "deferred_count": 0,
+    "unprocessed_count": 0
+  },
+  "coverage_status": "partial",
+  "build_fingerprint_sha256": "...",
+  "artifact_sha256": "..."
+}
+```
+
+`processing_status` 第一版只允许：
+
+- `resolved`：已形成明确 resolution，必须有 decision；
+- `source_ineligible`：按版本化 source eligibility policy 排除，例如并非教授立场、非断言或上游证据不合格；必须有 closed reason code，不能用自由文本把难题排除；
+- `deferred`：已经检查，但存在明确 blocker；必须有 blocker code 和可重试依赖；
+- `unprocessed`：尚未回答，不是语义判断。
+
+当 `processing_status=resolved` 时，`resolution_kind` 只允许：
+
+- `member_existing`：成为现有 viewpoint 的 identity-bearing member；
+- `new_viewpoint_candidate`：没有等价 identity，建立单来源或多来源 candidate；
+- `related_only`：当前 Claim 只支持、扩展、限定、应用或形成张力，没有资格成为该目标 viewpoint 的 member；必须引用 typed link 和该 disposition 的 decision，不能只因“不像 member”便停止处理；
+- `no_registry_assertion`：Claim 经审核后不表达可注册命题；只允许版本化 closed reason code，不允许把“暂时不知道如何归类”写成此项。
+
+字段条件必须由 schema 强制：`member_existing` 要求 `primary_viewpoint_id` 与 `viewpoint_claim_link_id`；`new_viewpoint_candidate` 要求稳定的 `new_viewpoint_candidate_id`；`related_only` 要求至少一个 typed `secondary_link_id`；`no_registry_assertion` 要求 `resolution_reason_code`。非 `resolved` row 的 `resolution_kind` 和 identity/link fields 必须为空，不能一边声称 deferred，一边让下游把它当 member 使用。
+
+一个 Claim 可以是某一 viewpoint 的 member，同时与其他 viewpoints 有多个 typed secondary links；因此“恰好一个”约束作用于 ledger row 和 primary resolution，不删除合法的多边关系。一个完整 Claim revision 仍最多拥有一个 active `equivalent_full` membership。
+
+Ledger statistics 必须从 rows 机械重算。`coverage_status=complete` 要求：input manifest 中每个 Claim revision 恰好出现一次、无额外 Claim、`unprocessed_count=0`，且所有 `resolved` references 可解析。`deferred` 可以存在于完整的“处理覆盖”中，但任何下游 projection 必须显式携带其 blocker；它不计为 identity resolved。`source_ineligible` 只表示不进入观点解析，不表示来源句子可从 extraction sentence ledger 消失。
+
+#### 5.1.2 ViewpointQualityReport
+
+每次 approval 或 consumer projection 都必须绑定一个程序生成的逐维质量报告。报告可以引用语义审核结果，但自身由 validator 根据 artifacts 重算，模型不能直接宣布通过：
+
+```json
+{
+  "quality_report_id": "VQR-opaque",
+  "schema_version": "wang_viewpoint_quality_report_v1",
+  "scope_kind": "consumer_projection",
+  "scope_ids": ["VKP-opaque"],
+  "coverage_snapshot_id": "CVS-opaque",
+  "resolution_ledger_id": "VRL-opaque",
+  "input_artifact_sha256s": ["..."],
+  "dimensions": [
+    {
+      "dimension": "resolution_coverage",
+      "applicable": true,
+      "minimum_policy": "exact_once_and_scope_unprocessed_zero",
+      "observed": {
+        "missing_rows": 0,
+        "duplicate_rows": 0,
+        "scope_unprocessed": 0
+      },
+      "status": "pass",
+      "evidence_artifact_sha256s": ["..."]
+    }
+  ],
+  "hard_failures": [],
+  "eligibility_decision": "pass",
+  "validator_version": "...",
+  "build_fingerprint_sha256": "...",
+  "artifact_sha256": "..."
+}
+```
+
+`scope_kind` 至少支持 `identity_decision`、`registry_snapshot` 与 `consumer_projection`。每个 scope 只运行适用维度，但必须明确记录 `applicable=false` 及原因，不能删除难以计算的维度。`eligibility_decision` 只由逐维 minimum 与 hard failures 派生，可为 `pass / fail / partial_internal_only`；它不是总分阈值。
+
+为避免 projection 与 quality report 的 SHA 循环，compiler 先生成不含 `quality_report_id`、`quality_report_sha256` 和最终 `projection_sha256` 的 canonical projection payload；quality validator 对该 payload SHA 及其 dependencies 生成报告；compiler 最后把报告 ID/SHA 装入 envelope 并计算最终 projection SHA。任何 payload 字段改变都必须重跑质量报告。
 
 ### 5.2 CanonicalViewpoint identity
 
@@ -716,6 +818,15 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 
 ## 9. 机械不变量
 
+本层继承而不重写 extraction layer 的质量事实。详细抽取仍按 [detailed knowledge extraction workflow](./detailed_knowledge_extraction_workflow_v1.md) 以源文本为完整性分母，保存逐字 anchor、sentence audit、speaker/stance 与审核 provenance；跨讲关系仍按 [cross-sermon relation workflow](./cross_sermon_relation_workflow_v1.md) 要求每个候选进入关系判断或明确 unassigned。Viewpoint registry 不得因为自己的 identity review 通过，就把上游 candidate Claim、未批准 exclusion 或无效 anchor 升级为可公开事实。
+
+因此系统有两个不可互相替代的完整性账本：
+
+1. extraction sentence ledger 回答“源文本每句话是否被表示、明确排除或尚未处理”；
+2. ViewpointResolutionLedger 回答“进入本轮观点解析的每个 Claim revision 是否成为 member、新 viewpoint candidate、typed related disposition，或被明确暂缓／排除”。
+
+第一本账防止来源内容在抽取前消失，第二本账防止 Claim 在归并时消失。任一本账出现 scope-relevant `unprocessed`，对应下游资格都必须 fail closed；100% 结构覆盖也不能替代 identity、route 与 attribution 的独立语义审核。
+
 ### 9.1 引用完整性
 
 1. 所有 viewpoint、revision、Claim link、route、attestation、relation 与 decision ID 唯一。
@@ -780,6 +891,33 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 
 `recurrence` 只表示出现次数，不表示思想重要性、正确性、成熟度或出版优先级。
 
+### 9.7 Resolution ledger 完整性
+
+1. 每个 ledger 必须绑定一个 CoverageSnapshot、一个不可变 input Claim manifest 及其 eligibility policy version。
+2. input manifest 中每个 `(claim_id, pinned_claim_revision, claim_revision_sha256)` 必须在 rows 中恰好出现一次；不得出现 manifest 之外的 Claim。
+3. `resolved` row 必须引用可解析且同 revision 有效的 identity/link/relation decision；`deferred` 必须引用 blocker；`source_ineligible` 与 `no_registry_assertion` 必须使用 closed reason code。
+4. `unprocessed` 是唯一表示“尚未回答”的状态，不得被计算为 rejected、unrelated、source ineligible 或 identity resolved。
+5. statistics、coverage status 和 unresolved counts 只由 rows 派生；模型不得自报覆盖率。
+6. 新增来源只建立新的 ledger/snapshot；不得原地改写旧 ledger 来制造更高覆盖。
+7. registry 可以在 partial coverage 上内部工作，但不得向 consumer 声称处理完整；任何进入产品 scope 的 deferred/unprocessed Claim 必须使相应 eligibility fail closed 或产生明确 partial disclosure，具体由第 13 节 consumer gate 决定。
+
+### 9.8 逐维数据质量门
+
+观点层不设置一个可相互补偿的总质量分。每个适用维度必须独立通过自己的 minimum；任一 hard failure 即阻止对应 approval 或 consumer eligibility：
+
+| 维度 | 机械／语义问题 | 最低通过条件 |
+|---|---|---|
+| provenance integrity | Claim、EvidenceStep、Citation、source revision 是否真实可解析 | 全部 pinned dependencies 可解析，anchor 与归属验证通过 |
+| source maturity | 上游对象是否只有 candidate、attribution 是否可用 | 达到当前 consumer 的 source eligibility policy；不得由 viewpoint 层替上游升级 |
+| resolution coverage | 输入 Claim 是否有静默遗漏 | ledger exact-once；产品 scope 内 `unprocessed=0`，deferred 被显式阻断或披露 |
+| identity precision | 是否把近似、支持、限定或张力误并为同一观点 | truth-condition fields 全部兼容；无 identity blocker；member decision 完整 |
+| candidate recall | 是否因 blocking/近邻检索漏掉可能等价项 | gold fixtures 与 mutation tests 达标；unmatched/new candidate 队列可解释，不以已发现 member 为分母 |
+| route fidelity | 是否把不同论证压平或跨来源拼接 | ordered source-local attestation、full/partial 与 conclusion binding 全部有效 |
+| temporal correctness | 是否把“较晚出现”误写为“取代早期观点” | supersedes 有方向、时间与教授明确修正证据；否则只保留 tension/sequence |
+| consumer projection integrity | 下游是否丢掉来源、限定、张力或 blocker | projection、packet、ledger、audit 与 dependency SHA 闭环验证 |
+
+`total_score` 可用于观察趋势，但不得决定 approval。质量报告必须列出每个维度的 applicable minimum、实际结果、evidence artifact SHA 和 hard failures；不能让高 provenance 分数抵消错误 identity merge，也不能让高 precision 掩盖低 coverage。
+
 ## 10. Review、approval 与公开资格
 
 ### 10.1 状态分离
@@ -823,6 +961,8 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 - candidate subgraph 中没有 `unrelated`、`contrasts`、`qualifies`、`supersedes`、未决 attribution 或 material scope blocker；
 - canonical wording 只是保守归一化，不增加因果、范围、重要性、时间发展或神学评价；
 - actual Claim/Evidence/Citation dependency 与 coverage disclosure 均可机械编译；
+- identity decision input manifest（包含 deterministic blocking 召回的全部 candidate Claims 与适用的 approved constraints）在 ViewpointResolutionLedger 中 exact-once，其中没有 `unprocessed` 或会改变 identity boundary 的 `deferred`；更大 corpus 的 partial coverage 仍须披露；
+- 第 9.8 节全部适用质量维度分别达到 minimum，hard failures 为零；
 - 回归测试证明相同输入产生 byte-stable decision 与 snapshot。
 
 以下事项必须进入 human exception queue：
@@ -847,6 +987,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 5. **影响排序**：先显示阻塞当前产品、可能撤回公开内容或涉及 split/merge/supersedes 的事项；普通 candidate discovery 不计入人工 backlog；
 6. **明确默认动作**：无把握时保持 internal/defer，不把“尚未处理”伪装成 rejected，也不阻塞无关的 source-local 产品；
 7. **可批量决策但不可批量失忆**：editor 可一次接受多个相同模式的低风险 exception，但每个 identity decision 仍保留独立理由、输入与 lineage。
+8. **抽样监测而非逐条复核**：`system_approved` 不要求 editor 事前逐项点选；系统按风险和版本变更抽取一个有上限的质量样本，重点覆盖新模型／prompt／blocking version、低 reviewer agreement 边界和高 consumer impact。抽样发现系统性 false merge/false split 时，撤销对应 policy version 的自动资格并生成影响事件，而不是要求 editor 回头阅读所有正常记录。
 
 ### 10.5 不设置 recurrence 门槛
 
@@ -860,6 +1001,36 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 - 每个 active member 有可解析来源；
 - hard blockers 为零；
 - qualification 与 tension 未被隐藏。
+
+### 10.6 Golden、adversarial 与 mutation tests
+
+自动化质量不能只测“应该合并的重复句”，还必须测最危险的错误合并、错误拆分和下游丢失。fixture 分为两类：
+
+- synthetic minimal fixtures：只表达一个真值条件差异，用来定位 validator 失败原因；
+- corpus-pinned regression fixtures：绑定真实 Claim/Evidence/source revision SHA，只证明 pipeline 对已审核测试期望保持稳定，不借测试文件批准正式观点。
+
+太 16:18 的“彼得—磐石”至少固定以下对抗矩阵：
+
+| candidate proposition | 与“彼得本人是磐石”的预期 | 必须验证的字段／行为 |
+|---|---|---|
+| 彼得本人是磐石 | 可成为 identity candidate 的正样本重复 | subject/object、polarity、scope 一致；不同措辞不能造成 false split |
+| 教会不是建立在彼得个人身上 | 不是正向 proposition 的等价 member | polarity 与 predicate 冲突；可形成 contradiction/tension evidence，不能增加 recurrence |
+| 磐石是彼得所承认的基督／真理 | distinct viewpoint 或未决 tension，不得自动 merge | 正面所指不同；不能因共享“彼得、磐石、认信”或 embedding 相近而合并 |
+| 磐石直接指基督 | distinct viewpoint 或未决 tension，不得自动 merge | object identity 不同；多数来源或多数模型不能覆盖 blocker |
+| 彼得因认信代表使徒群体 | `extends`、`qualifies` 或独立 identity candidate，不是自动 member | population、representative role 与新增真值条件必须保留 |
+
+mutation suite 至少包含：
+
+1. 改换 subject、object、polarity、population、condition、modality、temporal scope 中任一项，预期 identity gate 拒绝自动 membership；
+2. 删除 tension/qualification edge，预期 quality report 或 projection compiler fail；
+3. 将 `equivalent_component` 的 component locator 删除或改成不匹配 Claim SHA，预期 validation fail；
+4. 构造 A≈B、B≈C、A≉C，证明 duplicate candidate chain 不产生传递 membership；
+5. 从 route attestation 删除中间 EvidenceStep、跨 source 拼接一步或把 `partial` 改报 `full`，预期 route gate fail；
+6. 从 ViewpointResolutionLedger 删除一行、重复一行、把 `unprocessed` 伪装成 `source_ineligible`，预期 coverage gate fail；
+7. 在 projection 中删除一个 material qualification/tension/blocker，或只保留 canonical wording 不带来源，预期 consumer gate fail；
+8. 在 ClaimRelation PostgreSQL round-trip 中互换或丢失 endpoint aliases，预期 compatibility test fail。
+
+每次改变模型、prompt、schema、eligibility policy、candidate blocking、review logic 或 projection compiler version，都必须运行适用 fixture。测试输出保存每个维度的结果与 artifact SHA；不得只保存一个总 pass rate。
 
 ## 11. 增量更新与时间序列
 
@@ -1005,6 +1176,8 @@ Topic Discovery 下一版可以同时读取：
     "topic_ids": ["TOPIC-..."]
   },
   "coverage_snapshot_id": "CVS-...",
+  "resolution_ledger_id": "VRL-...",
+  "quality_report_id": "VQR-...",
   "viewpoints": [
     {
       "viewpoint_id": "CV-...",
@@ -1035,9 +1208,9 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 
 | 等级 | 允许消费者 | 最低条件 | 禁止行为 |
 |---|---|---|---|
-| `internal_candidate` | registry review、内部 discovery、审核 UI | 引用完整；candidate 与未决项有清楚标签 | 不得进入公开文字，不得称为教授 canonical viewpoint |
-| `composition_eligible` | 内部 CompositionPlan、文章/QA 规划 | ViewpointRevision 已按第 10 节 policy 获得 `system_approved` 或 `human_approved`；RegistrySnapshot 为 `approved_evidence_ready` 且 system verified；所选 member/route 的审核状态和缺口完整传入 | 不得仅凭 canonical wording 写正文；不得隐藏 candidate qualification/tension |
-| `public_attribution_eligible` | 可发布文章、公开 QA/search | 满足 composition 条件；实际使用的 Claim revision、EvidenceStep 与 Citation 全部符合该产品的公开资格；零 identity blockers；attribution template 已绑定 | 不得把编辑归一化表述当直接引文；不得把未批准 member 算入公开 recurrence |
+| `internal_candidate` | registry review、内部 discovery、审核 UI | 引用完整；candidate、ledger 未处理项与 blocker 有清楚标签 | 不得进入公开文字，不得称为教授 canonical viewpoint |
+| `composition_eligible` | 内部 CompositionPlan、文章/QA 规划 | ViewpointRevision 已按第 10 节 policy 获得 `system_approved` 或 `human_approved`；RegistrySnapshot 为 `approved_evidence_ready` 且 system verified；所选 member/route 的审核状态和缺口完整传入；产品 scope 内 ViewpointResolutionLedger 与逐维质量报告通过 | 不得仅凭 canonical wording 写正文；不得隐藏 candidate qualification/tension；不得把 `unprocessed` 当作没有相关材料 |
+| `public_attribution_eligible` | 可发布文章、公开 QA/search | 满足 composition 条件；实际使用的 Claim revision、EvidenceStep 与 Citation 全部符合该产品的公开资格；零 identity blockers；attribution template 已绑定；projection 保留 ledger/quality SHA | 不得把编辑归一化表述当直接引文；不得把未批准 member 算入公开 recurrence |
 
 `composition_eligible` 只授权使用 viewpoint 进行内部编排，不自动批准文章。文章仍须通过其 authoring、editorial 与 Program Audit gates；QA 仍须通过自己的完整度、引用和诊断 gates。没有接入 viewpoint layer 的既有来源局部文章流程不因本设计被追溯阻断；一旦产品明确引用 canonical viewpoint identity，就必须使用本 projection。
 
@@ -1056,6 +1229,9 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
   "argument_route_revision_ids": ["ARR-..."],
   "argument_route_snapshot_ids": ["ARS-..."],
   "coverage_snapshot_id": "CVS-...",
+  "resolution_ledger_id": "VRL-...",
+  "quality_report_id": "VQR-...",
+  "quality_report_sha256": "...",
   "claim_dependencies": [
     {"claim_id": "DK-...-CL...", "pinned_claim_revision": 2}
   ],
@@ -1099,6 +1275,9 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
     "projection_id": "VKP-...",
     "projection_sha256": "...",
     "coverage_snapshot_id": "CVS-...",
+    "resolution_ledger_id": "VRL-...",
+    "quality_report_id": "VQR-...",
+    "quality_report_sha256": "...",
     "dependency_manifest_sha256": "..."
   },
   "decisions": [
@@ -1134,6 +1313,9 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
     "projection_sha256": "...",
     "consumer_kind": "matthew_exposition_article",
     "consumer_eligibility": "composition_eligible",
+    "resolution_ledger_id": "VRL-...",
+    "quality_report_id": "VQR-...",
+    "quality_report_sha256": "...",
     "viewpoints": [],
     "argument_route_snapshots": [],
     "viewpoint_relations": [],
@@ -1154,6 +1336,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 - 每个 selected route 和 required relation 均属于该 viewpoint revision，并在 projection 中；
 - decision `claim_ids` 是 projection 允许该 decision 使用的 Claim 子集；
 - Claim revision、EvidenceStep、Citation 与 SourceFragment 均可解析并通过现有锚点／归属门槛；
+- 产品 scope 的 ViewpointResolutionLedger exact-once 且 `unprocessed=0`；quality report 的全部适用维度通过并与 packet payload SHA 一致；
 - qualification、tension、supersedes 或 coverage gap 只要会改变正文含义，就不得因 packet 大小预算被静默截断；
 - legacy relation aliases 只可在 ingress 接受；packet 内部统一使用 canonical `from_id / to_id`，不得同时维护两种 endpoint 语义。
 
@@ -1182,7 +1365,7 @@ Revision Agent 接收与初稿相同的最小 projection slice。修改涉及未
 
 Program Audit 在现有 Claim/Evidence/Fragment 检查之外增加以下 hard gates：
 
-1. plan、AuthoringPacket、稿件 ledger、audit manifest 与 publication dependency manifest 的 projection SHA 完全一致；
+1. plan、AuthoringPacket、稿件 ledger、audit manifest 与 publication dependency manifest 的 projection、ViewpointResolutionLedger、quality report ID/SHA 完全一致；
 2. 每个 used viewpoint revision、registry snapshot、route snapshot 与 relation 均在 projection 中且未失效；
 3. 发布时每个实际对外归属的 viewpoint use 达到 `public_attribution_eligible`；只有 `composition_eligible` 的计划可以写内部草稿，但不能据此自动发布；
 4. 每个 viewpoint paragraph 同时具有实际 Claim grounding，禁止 viewpoint-only provenance；
@@ -1291,10 +1474,10 @@ reader-facing renderer 必须采用 attribution-aware template：
 | #165 验收项 | 本设计覆盖 |
 |---|---|
 | 版本化设计、对象边界、归属、生命周期、review/approval | 第 1、3、4、10、11 节 |
-| 最小 schema：identity、proposition、scope、members、occurrences、routes、qualifications、tensions、provenance | 第 5 节 |
+| 最小 schema：identity、proposition、scope、members、occurrences、routes、qualifications、tensions、provenance、resolution ledger | 第 5 节 |
 | 核心九篇只读映射，重复出现与两条不同路线 | 第 8 节 |
-| 无悬空引用、来源不丢失、成员资格、route evidence 与 derived counts | 第 9 节 |
-| 增量更新、自动低风险审核、人工 exception、错误 split/merge 与历史修订 | 第 10、11 节 |
+| 无悬空引用、来源不丢失、成员资格、route evidence、resolution coverage 与逐维质量门 | 第 9 节 |
+| 增量更新、自动低风险审核、人工 exception、错误 split/merge、对抗测试与历史修订 | 第 10、11 节 |
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | 实现拆成后续 tickets | 第 16 节 |
@@ -1306,18 +1489,18 @@ reader-facing renderer 必须采用 attribution-aware template：
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
-2. **CoverageSnapshot 与机械统计**
-   建立 SHA-bound source manifest、三层覆盖统计、derived counts 与 active snapshot manifest；禁止目录扫描计数。
+2. **CoverageSnapshot、ViewpointResolutionLedger 与逐维质量报告**
+   建立 SHA-bound source/Claim manifests、三层来源覆盖统计、Claim exact-once resolution、closed exclusion/blocker vocabulary、逐维 minimum/hard failure report、derived counts 与 active snapshot manifest；禁止目录扫描计数或以生成结果为覆盖分母。
 3. **Identity candidate projection**
-   从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blockers 与 stable fingerprints；不调用内容模型。
+   从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blocking recall、unmatched/new-viewpoint disposition、blockers 与 stable fingerprints；不调用内容模型。
 4. **Viewpoint identity review workflow**
-   定义 proposal、blind independent review、deterministic risk gates、`system_approved` decision、adjudication、reconsideration schemas、可恢复 runner 与只显示高风险 exception 的人工 UI；明确模型调用不变量。
+   定义 proposal、blind independent review、deterministic risk gates、`system_approved` decision、adjudication、reconsideration schemas、可恢复 runner、风险抽样监测与只显示高风险 exception 的人工 UI；明确模型调用不变量。
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
    建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
 7. **ViewpointKnowledgeProjection compiler 与 eligibility**
-   实现统一 immutable runtime projection、三档 consumer eligibility、dependency manifest、SHA verification、coverage disclosure 与 fail-closed active build；只使用合成 consumer fixture。
+   实现统一 immutable runtime projection、三档 consumer eligibility、ViewpointResolutionLedger/quality report binding、dependency manifest、SHA verification、coverage disclosure 与 fail-closed active build；只使用合成 consumer fixture。
 8. **Matthew authoring downstream integration**
    先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；保持 source-local legacy path 与 Editorial Reviewer packet 边界。
 9. **QA、Search 与 Topic Discovery adapters**
@@ -1345,4 +1528,4 @@ reader-facing renderer 必须采用 attribution-aware template：
 
 ## 18. 最终定义
 
-> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph，并以 CoverageSnapshot 与不可变 RegistrySnapshot 明示当前只审核了两百多篇语料中的哪一部分。文章、QA、搜索和专题编排只消费 SHA-bound ViewpointKnowledgeProjection，不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
+> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph。CoverageSnapshot 说明看过哪些 source revisions，ViewpointResolutionLedger 逐项交代输入 Claim 的处理归宿，ViewpointQualityReport 逐维阻断 provenance、coverage、identity、route、temporal 或 consumer projection 的失败。文章、QA、搜索和专题编排只消费绑定这些不可变 artifacts 的 SHA-bound ViewpointKnowledgeProjection，不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
