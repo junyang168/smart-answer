@@ -39,7 +39,7 @@ COVERAGE_BUILDER_VERSION = "viewpoint_coverage_builder_v1"
 CLAIM_MANIFEST_VERSION = "viewpoint_input_claim_manifest_v1"
 LEDGER_BUILDER_VERSION = "viewpoint_resolution_ledger_builder_v1"
 QUALITY_VALIDATOR_VERSION = "viewpoint_quality_validator_v1"
-CANDIDATE_BLOCKING_VERSION = "viewpoint_candidate_blocking_v1"
+CANDIDATE_BLOCKING_VERSION = "viewpoint_candidate_blocking_v2"
 SOURCE_ELIGIBILITY_POLICY_VERSION = "viewpoint_source_eligibility_v1"
 REVIEWED_DUPLICATE_STATUSES = frozenset(
     {"ai_consensus", "system_approved", "human_approved", "approved"}
@@ -419,26 +419,29 @@ def build_identity_candidate_seeds(
             forbidden_duplicate_pairs.add(tuple(sorted((item.source_id, item.target_id))))
 
     duplicate_relations: dict[tuple[str, str], list[str]] = defaultdict(list)
+    material_relations: dict[tuple[str, str], list[str]] = defaultdict(list)
     findings: list[str] = []
     for raw in claim_relations:
         relation = _as_model(raw, ClaimRelationRecord)
-        if (
-            relation.relation_type != "duplicate"
-            or relation.review_status not in REVIEWED_DUPLICATE_STATUSES
-        ):
+        if relation.review_status not in REVIEWED_DUPLICATE_STATUSES:
             continue
         pair = tuple(sorted((relation.from_id, relation.to_id)))
         if pair[0] == pair[1]:
-            findings.append(f"{relation.claim_relation_id}: duplicate self relation")
+            if relation.relation_type == "duplicate":
+                findings.append(f"{relation.claim_relation_id}: duplicate self relation")
             continue
         missing = set(pair) - set(manifest_claims)
         if missing:
-            findings.append(
-                f"{relation.claim_relation_id}: duplicate seed outside Claim manifest: "
-                f"{', '.join(sorted(missing))}"
-            )
+            if relation.relation_type == "duplicate":
+                findings.append(
+                    f"{relation.claim_relation_id}: duplicate seed outside Claim manifest: "
+                    f"{', '.join(sorted(missing))}"
+                )
             continue
-        duplicate_relations[pair].append(relation.claim_relation_id)
+        if relation.relation_type == "duplicate":
+            duplicate_relations[pair].append(relation.claim_relation_id)
+        elif relation.relation_type in {"unrelated", "contrasts", "qualifies", "supersedes"}:
+            material_relations[pair].append(relation.claim_relation_id)
     if findings:
         raise ViewpointFoundationValidationError(findings)
 
@@ -450,6 +453,9 @@ def build_identity_candidate_seeds(
             "claim_manifest_sha256": claim_manifest.get("manifest_sha256"),
             "duplicate_relations": {
                 "|".join(pair): sorted(ids) for pair, ids in sorted(duplicate_relations.items())
+            },
+            "material_relations": {
+                "|".join(pair): sorted(ids) for pair, ids in sorted(material_relations.items())
             },
             "forbidden_duplicate_pairs": [list(pair) for pair in sorted(forbidden_duplicate_pairs)],
             "owners": {claim_id: sorted(values) for claim_id, values in sorted(owners.items())},
@@ -496,14 +502,45 @@ def build_identity_candidate_seeds(
             )
         )
 
-    for pair, relation_ids in sorted(duplicate_relations.items()):
-        claims_in_pairs.update(pair)
-        blockers = (
-            ["approved_negative_duplicate_constraint"]
-            if pair in forbidden_duplicate_pairs
-            else []
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for left, right in duplicate_relations:
+        adjacency[left].add(right)
+        adjacency[right].add(left)
+    unseen = set(adjacency)
+    while unseen:
+        stack = [min(unseen)]
+        component: set[str] = set()
+        while stack:
+            claim_id = stack.pop()
+            if claim_id in component:
+                continue
+            component.add(claim_id)
+            unseen.discard(claim_id)
+            stack.extend(sorted(adjacency[claim_id] - component, reverse=True))
+        component_ids = sorted(component)
+        claims_in_pairs.update(component_ids)
+        component_pairs = {
+            pair for pair in duplicate_relations if set(pair).issubset(component)
+        }
+        component_material_pairs = {
+            pair for pair in material_relations if set(pair).issubset(component)
+        }
+        component_forbidden_pairs = {
+            pair for pair in forbidden_duplicate_pairs if set(pair).issubset(component)
+        }
+        relation_ids = sorted(
+            {
+                relation_id
+                for pair in component_pairs
+                for relation_id in duplicate_relations[pair]
+            }
         )
-        append_candidate(pair, relation_ids, blockers=blockers)
+        blockers: list[str] = []
+        if component_forbidden_pairs:
+            blockers.append("approved_negative_duplicate_constraint")
+        if component_material_pairs:
+            blockers.append("reviewed_material_relation")
+        append_candidate(component_ids, relation_ids, blockers=blockers)
     for claim_id in sorted(set(manifest_claims) - claims_in_pairs):
         if owners.get(claim_id):
             continue
