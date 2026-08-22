@@ -1,6 +1,6 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
-> 状态：设计提案，供实现拆卡与审核；本文件不创建正式观点、不迁移数据、不调用内容模型，也不授权部署。
+> 状态：Canonical Viewpoint layer 的规范性 architecture authority；实现尚未开始。本文件不创建正式观点、不迁移数据、不调用内容模型，也不授权部署。
 > 版本：v1
 > 日期：2026-08-22
 > 追踪：GitHub issue #165，WKP-F02.7
@@ -24,6 +24,25 @@
 10. AI 共识只产生内部 candidate。公开把一项规范表述归属于教授，需要显式的人类观点审核；现有文章自动发布规则不得挪用为观点批准规则。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
+
+### 1.1 规范范围、优先级与下游读取规则
+
+本文件是所有新增或修改 CanonicalViewpoint、ArgumentRoute、观点关系、观点覆盖统计及其产品消费行为的 architecture authority。以下工作在行动前必须读本文件并遵守其对象边界：
+
+- 王教授释经神学思想整理；
+- 使用跨讲 canonical viewpoint 的释经文章与专题文章；
+- 使用 viewpoint 聚合或 route 展开的 QA、搜索与跨时间比较；
+- Topic Discovery、CompositionPlan 或知识 packet 对 viewpoint 层的接入；
+- viewpoint registry schema、审核 UI、Active Snapshot 与影响传播实现。
+
+它与既有规范的职责不重叠：
+
+- 来源、Claim、EvidenceStep 与 Citation 的权威规则仍由 shared knowledge、来源对账和 PostgreSQL authoring store 规范决定；
+- Matthew exposition 的写作状态机、reviewer-call invariant、Program Audit 与 publication decision 仍由 Matthew authoring workflow 决定；
+- QA 的答案完整度、逐项引用与诊断流程仍由 QA 规范决定；
+- 本文件新增的约束只决定这些流程怎样读取、归属、版本绑定和呈现 canonical viewpoint。
+
+实现者与负责构造 packet 的 agent 必须读本文件；运行时模型不读取这份完整 architecture 文档。实际消费观点知识的 Composition、Author、Revision 或 QA 角色只接收由程序按本文件编译、受大小和任务范围约束的 `ViewpointKnowledgeProjection` 切片。Editorial Reviewer 是否接收任何派生字段仍由其独立 packet contract 决定；Matthew EditorialReviewPacket 与 FinalDeltaReviewPacket 不接收 knowledge projection。Markdown 文档不是 runtime data source。
 
 ## 2. 问题与覆盖边界
 
@@ -185,11 +204,19 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
   "historical_survey_baseline_id": "CORPUS-SURVEY-205-V1",
   "source_universe_manifest_id": "SUM-opaque",
   "source_universe_manifest_sha256": "...",
-  "source_universe_revision_ids": ["SRCREV-..."],
-  "source_revision_ids": ["SRCREV-..."],
-  "source_manifest_sha256": "...",
-  "detailed_extraction_source_ids": ["SRC-..."],
-  "viewpoint_reviewed_source_ids": ["SRC-..."],
+  "sources": [
+    {
+      "source_id": "SRC-...",
+      "source_revision_id": "SRCREV-...",
+      "source_sha256": "...",
+      "roles": [
+        "source_universe",
+        "detailed_extraction",
+        "viewpoint_reviewed"
+      ]
+    }
+  ],
+  "sources_sha256": "...",
   "coverage_status": "partial",
   "created_at": "...",
   "review_status": "system_verified",
@@ -198,7 +225,9 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
 }
 ```
 
-机械派生而不存双份真相的字段包括：`source_universe_count`、`historical_survey_baseline_count`、`detailed_source_count` 与 `viewpoint_reviewed_source_count`。若 API 返回这些数字，必须同时返回计算所用 snapshot ID。`historical_survey_baseline_count` 不因后来来源加入而改变；`source_universe_count` 来自本次 manifest。
+`roles` 第一版只允许 `source_universe`、`detailed_extraction`、`viewpoint_reviewed`；一个 source revision 可以同时拥有多个 roles。`sources` 按 `source_revision_id` 排序后计算 `sources_sha256`，同一个 `source_id` 在同一 snapshot 中最多出现一个 current revision。
+
+机械派生而不存双份真相的字段包括：`source_universe_count`、`historical_survey_baseline_count`、`detailed_source_count` 与 `viewpoint_reviewed_source_count`。若 API 返回这些数字，必须同时返回计算所用 snapshot ID。`historical_survey_baseline_count` 不因后来来源加入而改变；`source_universe_count` 由拥有 `source_universe` role 的 entries 计算。
 
 ### 5.2 CanonicalViewpoint identity
 
@@ -250,13 +279,9 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
     "audience_scope": ["..."],
     "historical_scope": ["..."]
   },
-  "qualification_relation_ids": ["VREL-..."],
-  "tension_ids": ["TEN-..."],
-  "coverage_snapshot_id": "CVS-...",
   "provenance": {
-    "member_link_ids": ["VCL-..."],
-    "identity_decision_ids": ["VID-..."],
-    "source_artifact_sha256s": ["..."]
+    "basis_identity_decision_ids": ["VID-..."],
+    "review_artifact_sha256": "..."
   },
   "review_status": "human_approved",
   "approved_by": "...",
@@ -268,6 +293,8 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
 
 `proposition_signature` 是审核和候选匹配的结构化辅助，不是从文本自动计算出的真理。它与 core proposition 必须在同一 review decision 中一起批准。
 
+`ViewpointRevision` 只保存观点的语义与经审核措辞，不保存当前 member links、relations、routes 或 coverage。新增来源若没有改变 core proposition、scope 或 proposition signature，不产生新的 semantic revision。
+
 措辞变体默认由 member Claim 的原 statement/title 派生，不复制进 revision。只有不对应单一 Claim 的受控 alias 才保存在 `editorial_aliases`，并须标注编辑来源。
 
 ### 5.4 ViewpointClaimLink
@@ -276,7 +303,7 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
 {
   "viewpoint_claim_link_id": "VCL-opaque",
   "viewpoint_id": "CV-opaque",
-  "viewpoint_revision_id": "CVR-opaque",
+  "validated_against_viewpoint_revision_id": "CVR-opaque",
   "claim_id": "DK-...-CL...",
   "pinned_claim_revision": 2,
   "link_type": "equivalent_full",
@@ -291,6 +318,8 @@ CoverageSnapshot 是不可变 manifest，说明一次观点分析看过哪些来
 ```
 
 `component_locator` 用于 `equivalent_component`，至少包含可验证的 statement component、source Claim SHA 及其在 Claim 结构中的稳定定位。仅保存一段模型 summary 不合格。
+
+Claim link 属于稳定 viewpoint identity；`validated_against_viewpoint_revision_id` 记录它最后针对哪个 semantic revision 通过审核。新的 semantic revision 若改变 truth conditions，所有 active member links 必须 invalidated 或重新验证；仅产生新 registry snapshot 不复制 link。
 
 ### 5.5 ViewpointOccurrenceRef
 
@@ -347,6 +376,7 @@ Route revision 保存编辑规范化的 inferential skeleton：
 {
   "argument_route_revision_id": "ARR-opaque",
   "argument_route_id": "AR-opaque",
+  "validated_against_conclusion_viewpoint_revision_id": "CVR-opaque",
   "route_label": "以 παιδαγωγός 的阶段性职能论证律法管辖已经结束",
   "route_signature": {
     "premise_roles": ["historical_semantics", "textual_observation"],
@@ -354,12 +384,13 @@ Route revision 保存编辑规范化的 inferential skeleton：
     "conclusion_viewpoint_id": "CV-opaque"
   },
   "representation_kind": "editorial_normalization_of_attested_arguments",
-  "attestation_ids": ["ARA-..."],
-  "coverage_snapshot_id": "CVS-...",
+  "review_artifact_sha256": "...",
   "review_status": "human_approved",
   "revision": 1
 }
 ```
+
+`ArgumentRouteRevision` 只保存 inferential skeleton。新增同类 source attestation 不产生 route semantic revision。
 
 ### 5.7 ArgumentRouteAttestation
 
@@ -369,6 +400,7 @@ Route revision 保存编辑规范化的 inferential skeleton：
 {
   "argument_route_attestation_id": "ARA-opaque",
   "argument_route_id": "AR-opaque",
+  "validated_against_route_revision_id": "ARR-opaque",
   "source_id": "SRC-...",
   "claim_id": "DK-...-CL...",
   "occurrence_ref_id": "OCC-...",
@@ -392,6 +424,8 @@ Route revision 保存编辑规范化的 inferential skeleton：
   "viewpoint_relation_id": "VREL-opaque",
   "source_viewpoint_id": "CV-...",
   "target_viewpoint_id": "CV-...",
+  "validated_against_source_viewpoint_revision_id": "CVR-...",
+  "validated_against_target_viewpoint_revision_id": "CVR-...",
   "relation_type": "qualifies",
   "reason": "...",
   "supporting_claim_relation_ids": ["CR-..."],
@@ -416,7 +450,60 @@ Route revision 保存编辑规范化的 inferential skeleton：
 
 现有 `TensionRecord` 可在兼容迁移中增加 endpoint IDs，或由 `ViewpointRelation:tensions_with` 投影出 reader-facing tension。不得维护两套互不核对的张力事实。
 
-### 5.9 ViewpointIdentityCandidate 与 Decision
+### 5.9 ViewpointRegistrySnapshot
+
+`ViewpointRegistrySnapshot` 是某个 CoverageSnapshot 下一个 viewpoint 的不可变 as-of 投影。它把不断增长的来源集合与稳定的 semantic revision 分开：
+
+```json
+{
+  "viewpoint_registry_snapshot_id": "VRS-opaque",
+  "viewpoint_id": "CV-opaque",
+  "viewpoint_revision_id": "CVR-opaque",
+  "coverage_snapshot_id": "CVS-opaque",
+  "active_member_link_ids": ["VCL-..."],
+  "active_related_claim_link_ids": ["VCL-..."],
+  "active_argument_route_snapshot_ids": ["ARS-..."],
+  "active_viewpoint_relation_ids": ["VREL-..."],
+  "derived_statistics": {
+    "member_claim_count": 0,
+    "distinct_source_document_count": 0,
+    "source_occurrence_count": 0,
+    "argument_route_count": 0,
+    "full_route_attestation_count": 0,
+    "qualification_count": 0,
+    "tension_count": 0
+  },
+  "derived_statistics_sha256": "...",
+  "build_fingerprint": "...",
+  "registry_eligibility": "candidate_only",
+  "review_status": "system_verified",
+  "created_at": "..."
+}
+```
+
+Snapshot 不改变 viewpoint identity，也不成为新的 authoring authority。其全部 arrays、statistics 和 registry eligibility 由 PostgreSQL 当前记录与明确 coverage 机械编译；相同 fingerprint 必须 byte-stable。`registry_eligibility` 只表达 registry 自身是否 `candidate_only` 或 `approved_evidence_ready`，不替具体产品决定 publication gate。增加一篇来源通常只产生新 CoverageSnapshot、member/route records 和新的 registry snapshot，不产生 `ViewpointRevision`。
+
+### 5.10 ArgumentRouteSnapshot
+
+```json
+{
+  "argument_route_snapshot_id": "ARS-opaque",
+  "argument_route_id": "AR-opaque",
+  "argument_route_revision_id": "ARR-opaque",
+  "conclusion_viewpoint_revision_id": "CVR-opaque",
+  "coverage_snapshot_id": "CVS-opaque",
+  "active_attestation_ids": ["ARA-..."],
+  "full_attestation_count": 0,
+  "distinct_source_document_count": 0,
+  "registry_eligibility": "candidate_only",
+  "build_fingerprint": "...",
+  "review_status": "system_verified"
+}
+```
+
+Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 route revision、该 route revision 已针对当前 conclusion viewpoint revision 验证、且其 source revision 位于 CoverageSnapshot 的 attestations。新增 attestation 不修改 `ArgumentRouteRevision`；route inferential skeleton 或 conclusion viewpoint truth conditions 改变时，旧 route/attestations 必须等待重新验证。
+
+### 5.11 ViewpointIdentityCandidate 与 Decision
 
 候选与决定是不同对象：
 
@@ -633,6 +720,9 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 3. 所有 Claim、EvidenceStep、source、occurrence、relation、coverage snapshot 与 review artifact 引用必须可解析。
 4. pinned Claim revision 不存在时不得自动改指 current revision。
 5. eligible/public provenance 最终必须通过 Canonical Citation authority；staging path 不是 citation identity。
+6. ViewpointRegistrySnapshot 必须绑定一个 ViewpointRevision 和一个 CoverageSnapshot；RouteSnapshot 同理绑定一个 ArgumentRouteRevision 和同一 coverage。
+7. projection 中的 registry/route snapshots 必须共享同一个 CoverageSnapshot，除非 schema 明确标记并解释跨 snapshot 比较模式。
+8. RegistrySnapshot 只能收录已经针对其当前 ViewpointRevision 验证的 member links、routes 与 relations；关系的另一端也必须绑定并解析到明确 semantic revision。
 
 ### 9.2 来源不丢失
 
@@ -643,7 +733,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 
 ### 9.3 成员资格
 
-1. `(viewpoint_revision_id, claim_id, component_locator)` 在 active state 中唯一。
+1. `(viewpoint_id, claim_id, pinned_claim_revision, component_locator)` 在 active state 中唯一；link 另以 `validated_against_viewpoint_revision_id` 记录语义验证版本。
 2. 一个完整 Claim revision 最多拥有一个 active `equivalent_full` viewpoint membership。
 3. 一个复合 Claim 可拥有多个 `equivalent_component` membership，但每个必须有互不冒充的稳定 component locator。
 4. 其他跨观点使用必须通过 typed `ViewpointClaimLink` 或 `ViewpointRelation` 显式表示，不能复制 Claim。
@@ -659,7 +749,15 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 5. `full` attestation 必须覆盖 route revision 声明的 required premise/inference roles。
 6. partial attestation 不计入 recurring route count。
 
-### 9.5 Derived counts
+### 9.5 Semantic revision 与 snapshot 分离
+
+1. ViewpointRevision 不得内嵌 active member、route、relation、occurrence 或 coverage arrays。
+2. ArgumentRouteRevision 不得内嵌 attestation 或 coverage arrays。
+3. 新来源只改变 links、attestations 与 snapshots；若 compiler 发现 semantic payload 未变却建立新 semantic revision，ChangeSet 失败。
+4. snapshot 是不可变 read projection，不可反向写回或覆盖 PostgreSQL authoring records。
+5. 相同 semantic revision、coverage、active link/relation/attestation 集合和 compiler version 必须得到相同 build fingerprint 与 canonical JSON SHA。
+
+### 9.6 Derived counts
 
 以下数字只由 active、指定 coverage snapshot 下的结构计算：
 
@@ -735,13 +833,13 @@ flowchart LR
     R --> V
     G --> V
     N --> V
-    V --> I["dependency impact + new CoverageSnapshot"]
+    V --> I["dependency impact + new CoverageSnapshot/RegistrySnapshot"]
 ```
 
 新来源不得要求全库重新生成。系统建立新的 immutable CoverageSnapshot，并只对：
 
 - 新 Claim 与候选 viewpoint；
-- 受新 member 影响的 viewpoint revision；
+- 受新 member 影响的 viewpoint registry snapshot；
 - 受新 EvidenceStep 影响的 routes；
 - 可能变化的 qualification/tension；
 - 依赖这些对象的产品
@@ -753,7 +851,7 @@ flowchart LR
 - 仅措辞澄清且真值条件不变：同 identity 新 revision；
 - scope/condition 改变但编辑判断仍是同一观点的更准确表述：新 revision，必须重审全部 active members；
 - substantive conclusion 改变：新 viewpoint identity，并用 `supersedes`、`tensions_with` 或 lineage 连接；
-- 新证据只增加 route：viewpoint identity 不变；
+- 新 member 或新证据只增加 link、attestation 与 registry/route snapshot：viewpoint 和 route semantic revision 不变；
 - 新 application：新增 relation，不修改 core proposition。
 
 ### 11.3 Merge
@@ -844,13 +942,96 @@ Topic Discovery 下一版可以同时读取：
 - `argument_route_attestations`；
 - `viewpoint_relations`。
 
-它们继续使用 objects/object_versions/edges/change_sets/review_events 关系骨架。Active Snapshot 只编译逐项符合资格的 registry 子图；编译失败不替换上一个 active build。
+这些 authoring records 继续使用 objects/object_versions/edges/change_sets/review_events 关系骨架。`ViewpointRegistrySnapshot`、`ArgumentRouteSnapshot` 与 `ViewpointKnowledgeProjection` 是 compiler 产生的不可变 build artifacts，不作为可手工编辑的 knowledge collections 写回 PostgreSQL；数据库只保存其 build manifest、fingerprint 与产品 dependency references。Active Snapshot 只编译逐项符合资格的 registry 子图；编译失败不替换上一个 active build。
 
 本设计不授权数据库 migration、backfill、Active Snapshot rebuild、正式模型运行或生产部署。
 
 ## 13. 消费者行为
 
-### 13.1 Topic Discovery 与专题写作
+### 13.1 ViewpointKnowledgeProjection：唯一运行时读取契约
+
+文章、QA、搜索与 Topic Discovery 不直接遍历 registry，不读取本 Markdown，也不自行拼接 Claim、route 和 coverage。compiler 从 PostgreSQL authoring authority 生成任务范围内的不可变投影：
+
+```json
+{
+  "schema_version": "wang_viewpoint_knowledge_projection_v1",
+  "projection_id": "VKP-opaque",
+  "consumer_kind": "composition_plan",
+  "consumer_scope": {
+    "passage": "...",
+    "topic_ids": ["TOPIC-..."]
+  },
+  "coverage_snapshot_id": "CVS-...",
+  "viewpoints": [
+    {
+      "viewpoint_id": "CV-...",
+      "viewpoint_revision_id": "CVR-...",
+      "viewpoint_registry_snapshot_id": "VRS-...",
+      "core_proposition": "...",
+      "representation_kind": "editorial_normalization_of_source_claims",
+      "consumer_eligibility": "composition_eligible",
+      "member_claim_links": ["VCL-..."],
+      "argument_route_snapshots": ["ARS-..."],
+      "viewpoint_relations": ["VREL-..."],
+      "required_attribution_template": "editorial_normalization"
+    }
+  ],
+  "claim_revisions": ["DK-...-CL...@2"],
+  "evidence_step_ids": ["DK-...-E..."],
+  "citation_ids": ["CIT-..."],
+  "dependency_manifest_sha256": "...",
+  "projection_sha256": "..."
+}
+```
+
+projection 必须展开实际会交给消费者的 Claim、EvidenceStep、Citation、qualification 与 tension 内容；上例为身份摘要，不表示 runtime packet 只能含 ID。compiler 验证全部引用、资格、coverage 和 attribution 后，才输出 projection SHA。消费者不得在 projection 外另查更“方便”的 candidate summary 补写内容。
+
+### 13.2 Consumer eligibility
+
+consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry eligibility 和该产品现有 gates 机械计算，不由模型或 RegistrySnapshot 自报：
+
+| 等级 | 允许消费者 | 最低条件 | 禁止行为 |
+|---|---|---|---|
+| `internal_candidate` | registry review、内部 discovery、审核 UI | 引用完整；candidate 与未决项有清楚标签 | 不得进入公开文字，不得称为教授 canonical viewpoint |
+| `composition_eligible` | 内部 CompositionPlan、文章/QA 规划 | ViewpointRevision 已 human approved；RegistrySnapshot 为 `approved_evidence_ready` 且 system verified；所选 member/route 的审核状态和缺口完整传入 | 不得仅凭 canonical wording 写正文；不得隐藏 candidate qualification/tension |
+| `public_attribution_eligible` | 可发布文章、公开 QA/search | 满足 composition 条件；实际使用的 Claim revision、EvidenceStep 与 Citation 全部符合该产品的公开资格；零 identity blockers；attribution template 已绑定 | 不得把编辑归一化表述当直接引文；不得把未批准 member 算入公开 recurrence |
+
+`composition_eligible` 只授权使用 viewpoint 进行内部编排，不自动批准文章。文章仍须通过其 authoring、editorial 与 Program Audit gates；QA 仍须通过自己的完整度、引用和诊断 gates。没有接入 viewpoint layer 的既有来源局部文章流程不因本设计被追溯阻断；一旦产品明确引用 canonical viewpoint identity，就必须使用本 projection。
+
+若某项 qualification 或 tension 仍是 candidate，内部 projection 可以带标签返回；public projection 只能选择已批准、可公开的关系集合，或明确把该 viewpoint 标为不具备 `public_attribution_eligible`。compiler 不得静默删除一个会实质改变 core proposition 适用范围的未决 blocker。
+
+### 13.3 Product dependency 与失效
+
+所有消费 viewpoint 的 CompositionPlan、文章、QA answer、搜索卡或课程单元都必须保存 dependency manifest：
+
+```json
+{
+  "consumer_kind": "qa_answer",
+  "consumer_id": "...",
+  "viewpoint_revision_ids": ["CVR-..."],
+  "viewpoint_registry_snapshot_ids": ["VRS-..."],
+  "argument_route_revision_ids": ["ARR-..."],
+  "argument_route_snapshot_ids": ["ARS-..."],
+  "coverage_snapshot_id": "CVS-...",
+  "claim_dependencies": [
+    {"claim_id": "DK-...-CL...", "pinned_claim_revision": 2}
+  ],
+  "evidence_step_ids": ["DK-...-E..."],
+  "citation_ids": ["CIT-..."],
+  "projection_sha256": "..."
+}
+```
+
+失效规则：
+
+- core proposition、scope、signature 或 attribution 产生新 ViewpointRevision：所有 pin 旧 revision 的消费者进入 semantic review，针对旧 revision 验证的 member links、routes 与 viewpoint relations 等待重新验证；旧产品不被静默改写；
+- route skeleton 产生新 ArgumentRouteRevision：使用该 route 的消费者进入 route review；
+- pinned Claim revision、EvidenceStep 或 Citation 失效：沿用既有 ProductDependency/ImpactEvent 的撤回或重建规则；
+- 只增加新 source member 或同 route attestation：生成新 snapshot，但不自动使 pin 旧 snapshot 的已发布产品失效；消费者可在下一次明确 rebuild 时采用新覆盖；
+- 新 qualification、tension 或 supersedes relation 若被 reviewer 标记为可能改变旧公开表述：产生 ImpactEvent，要求人工判断是否撤回、加注或重建；
+- CoverageSnapshot 改变不能原地更新产品数字；所有显示次数必须来自产品 pinned snapshot。
+
+### 13.4 Topic Discovery 与专题写作
 
 专题编排看到的是：
 
@@ -860,9 +1041,9 @@ Topic Discovery 下一版可以同时读取：
 - qualifications、applications 与 tensions；
 - 尚未覆盖的 corpus 范围。
 
-CompositionPlan 必须 pin viewpoint revision 和实际使用的 Claim/Evidence dependencies。作者不能仅凭 canonical wording 写正文而丢失来源。
+CompositionPlan 必须 pin `ViewpointKnowledgeProjection`、viewpoint semantic revision、registry snapshot 和实际使用的 Claim/Evidence/Citation dependencies。作者不能仅凭 canonical wording 写正文而丢失来源。
 
-### 13.2 Search 与 QA
+### 13.5 Search 与 QA
 
 搜索结果可聚合为一个观点卡，而不是列出一组平铺 claim IDs。观点卡至少显示：
 
@@ -875,7 +1056,7 @@ CompositionPlan 必须 pin viewpoint revision 和实际使用的 Claim/Evidence 
 
 QA 回答必须能够选择：简要结论、按 route 展开、跨时间比较或只看某篇来源。若 coverage partial，回答必须显式说明。
 
-### 13.3 跨时间比较
+### 13.6 跨时间比较
 
 比较的是 occurrence、route 和 viewpoint relation 的时间序列，而不是比较两个 canonical summary 的更新时间。系统应回答：
 
@@ -885,7 +1066,7 @@ QA 回答必须能够选择：简要结论、按 route 展开、跨时间比较�
 - 是否存在尚未协调的张力；
 - 是否有教授明确自述的立场改变。
 
-### 13.4 Reader attribution
+### 13.7 Reader attribution
 
 reader-facing renderer 必须采用 attribution-aware template：
 
@@ -920,6 +1101,7 @@ reader-facing renderer 必须采用 attribution-aware template：
 | 无悬空引用、来源不丢失、成员资格、route evidence 与 derived counts | 第 9 节 |
 | 增量更新、人工复核、错误 split/merge 与历史修订 | 第 10、11 节 |
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
+| 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | 实现拆成后续 tickets | 第 16 节 |
 | 不调用内容模型、不迁移正式数据、不部署 | 文件状态、2.1、8、12.4 节 |
 
@@ -928,7 +1110,7 @@ reader-facing renderer 必须采用 attribution-aware template：
 本卡只交付设计。建议按依赖顺序拆分：
 
 1. **Viewpoint registry schema 与 store integrity**
-   增加 Pydantic records、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
+   增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
 2. **CoverageSnapshot 与机械统计**
    建立 SHA-bound source manifest、三层覆盖统计、derived counts 与 active snapshot manifest；禁止目录扫描计数。
 3. **Identity candidate projection**
@@ -938,11 +1120,11 @@ reader-facing renderer 必须采用 attribution-aware template：
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
-   建立 lineage、redirect、successor、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
+   建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
 7. **Topic Discovery v2 compatibility projection**
    让 Topic Discovery 同时读取 viewpoint projection 与原 Claim graph，保持 Claim coverage 守门和旧 consumer fallback。
-8. **Search/QA 与思想整理 reader projection**
-   提供 attribution-aware viewpoint card、route 展开、coverage disclosure、时间比较与 citation drill-down。
+8. **ViewpointKnowledgeProjection 与产品接入**
+   实现统一 runtime projection、三档 consumer eligibility、attribution-aware viewpoint card、route 展开、coverage disclosure、文章/QA packet 切片、时间比较与 citation drill-down。
 9. **受控二十篇 backfill 与审核**
    在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析并人工审核；不得作为本设计卡的隐藏步骤。
 10. **逐步扩展至 corpus universe**
@@ -966,4 +1148,4 @@ reader-facing renderer 必须采用 attribution-aware template：
 
 ## 18. 最终定义
 
-> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph，并以 CoverageSnapshot 明示当前只审核了两百多篇语料中的哪一部分。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
+> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph，并以 CoverageSnapshot 与不可变 RegistrySnapshot 明示当前只审核了两百多篇语料中的哪一部分。文章、QA、搜索和专题编排只消费 SHA-bound ViewpointKnowledgeProjection，不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。

@@ -10,6 +10,8 @@ The Exegesis and Topic Repository is the reviewed navigation and provenance laye
 
 The common knowledge objects, attribution rules, product projections, and evolution policy are defined in [Knowledge Platform Design](./knowledge_platform_design.md). This specification defines the search and QA projection of that platform.
 
+Cross-sermon viewpoint identity, argument-route expansion, coverage disclosure and viewpoint dependency binding are governed by [Canonical Viewpoint Registry and cross-sermon argument-route design v1](./canonical_viewpoint_registry_design_v1.md). Search and QA consume its scoped, SHA-bound `ViewpointKnowledgeProjection`; they do not infer canonical identity from similarity results or read the architecture Markdown at runtime.
+
 ## 2. Scope
 
 In scope:
