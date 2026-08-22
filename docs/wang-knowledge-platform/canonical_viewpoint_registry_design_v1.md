@@ -21,7 +21,7 @@
 7. `duplicate` 连通分量只能生成 identity candidate，不能用 union-find 自动建立 canonical membership；`duplicate` 不是可安全传递的等价闭包。
 8. 全部篇数、来源数、出现次数、路线数与经文数由结构机械计算，不在自然语言 summary 中维护另一份数字。
 9. corpus universe、详细抽取覆盖和观点审核覆盖必须分开记录。当前规划语境为 205+ 篇全语料、20 篇已进入详细整理、核心九篇拥有冻结的跨讲关系与 Topic Discovery artifact；这些数字不可写死在 viewpoint identity 上。
-10. AI 共识只产生内部 candidate。公开把一项规范表述归属于教授，需要显式的人类观点审核；现有文章自动发布规则不得挪用为观点批准规则。
+10. 单次 AI 判断只产生内部 candidate。低风险 identity 可在独立双重语义复核、确定性验证与零 blocker 后获得明确标记的 `system_approved`；张力、scope 改变、component 歧义、split/merge/supersedes 与其他高风险判断才进入人工队列。任何自动批准不得冒充 `human_approved`，现有文章自动发布规则也不得原样挪用为观点批准规则。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -95,7 +95,7 @@
 | mastered attributes | 当前 approved `ViewpointRevision` 的 core proposition 与 scope |
 | source lineage | Claim → EvidenceStep → SourceFragment → Citation |
 | survivorship | 哪些 approved member links 支持当前 revision |
-| stewardship | 独立复核、仲裁、人工批准、split/merge |
+| stewardship | 独立复核、风险分级、低风险 system approval、人工 exception、split/merge |
 | hierarchy management | `TopicNode`，不是 viewpoint parent pointer |
 | temporal history | revision、occurrence timeline、successor relations |
 
@@ -572,8 +572,11 @@ flowchart LR
     R -->|agree| C["AI-consensus internal candidate"]
     R -->|change/reject| A["adjudication and reconsideration"]
     A -->|persistent disagreement| H["human queue"]
-    C --> H2["human viewpoint approval"]
-    H2 --> V["active registry identity/revision"]
+    C --> G["risk and deterministic gates"]
+    G -->|low risk, all pass| S["system approval"]
+    G -->|ambiguous or high impact| H2["human exception review"]
+    S --> V["active registry identity/revision"]
+    H2 --> V
 ```
 
 候选 blocking 可以使用：
@@ -607,7 +610,7 @@ flowchart LR
 
 - duplicate connected component 只生成一个 cluster candidate；
 - 每个 member 必须与拟议 core proposition 单独获得 decision；
-- active member 之间若存在 `unrelated`、`contrasts`、`qualifies` 或 `supersedes` blocker，candidate 必须失败或转人工；
+- active member 之间若存在 `unrelated`、`contrasts`、`qualifies` 或 `supersedes` blocker，candidate 必须失败或进入风险队列；只有不能由既定规则安全拆分的高影响项才转人工；
 - component 可能过宽，也可能不完整；语义相同的两个 disconnected components 仍可能解析到同一 viewpoint；
 - 不因 recurrence 多就提高重要性、成熟度或批准等级。
 
@@ -786,30 +789,70 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 建议分别保存：
 
 - generation status：`generated / validated / failed`；
-- review status：`candidate / ai_consensus / human_approved / rejected`；
+- review status：`candidate / ai_consensus / system_approved / human_approved / rejected`；
+- approval basis：`deterministic / dual_model_consensus / human_exception_review`；
 - identity status：`active / redirected / split / merged / retired`；
 - visibility：`internal / active_snapshot_eligible / public`；
 - dependency status：`current / invalidated / withdrawn / rebuilt`。
 
-### 10.2 Reviewer workflow
+第 5 节 JSON 示例中的 `human_approved` 表示一种已批准实例，不是所有对象的固定门槛；低风险对象可按本节产生 `system_approved`，但必须同时保存 approval basis 与验证 provenance。
 
-观点候选可复用现有跨讲关系的 proposal → independent review → adjudication → reconsideration 模式：
+### 10.2 Automation-first reviewer workflow
+
+平台只有一位 editor，审核设计必须减少人工次数，而不是把每个 Claim pair、member link 和产品使用分别送给同一个人。默认流程是：
 
 1. proposal 提出 identity、member links、core proposition 与 route candidates；
-2. independent reviewer 逐项判断 proposition equivalence、scope、attribution 与 route identity；
-3. change/reject 进入 adjudication；
-4. 被拒意见进入 reconsideration；
-5. 持续分歧只把该项送人工；
-6. AI 共识保持 `candidate/internal`；
-7. 人类 editor 批准 viewpoint identity、当前 revision 和可对外归属的 canonical wording。
+2. independent semantic reviewer 不读取 proposal 的结论，只读取同一 SHA-bound evidence packet，独立判断 proposition equivalence、scope、attribution 与 route identity；
+3. 程序验证两份结果的 ID、Claim revisions、source independence、scope signature、Evidence/Citation anchors、blockers 与 schema；
+4. 两者一致且命中第 10.3 节低风险条件时，产生 `system_approved` decision；
+5. 不一致时只对分歧字段做 adjudication；reconsideration 仍无法收敛才进入人工 exception queue；
+6. 高风险候选不经过“多调用直到同意”的方式绕过人工门槛；
+7. editor 的一次决定批准 identity boundary、当前 semantic revision、canonical wording 与明确列出的 member/route/relation 集合，后续产品复用该决定，不逐文章重复批准；
+8. 自动与人工决定都保存完整 approval basis、输入 SHA、模型／程序版本、理由和可撤销 lineage。
 
-本设计不规定模型供应商或调用次数；实现 ticket 必须定义可恢复 generation fingerprint 与 exact reviewer-call invariant。不得把 Matthew exposition article 的 reviewer invariant 或自动 publication decision 直接套用到观点审核。
+本设计不规定模型供应商或具体调用次数；实现 ticket 必须定义可恢复 generation fingerprint 与 exact reviewer-call invariant。不得把 Matthew exposition article 的 reviewer invariant 或自动 publication decision 直接套用到观点审核，也不得把 `system_approved` 显示成同工读过。
 
-### 10.3 不设置 recurrence 门槛
+### 10.3 风险分级与自动批准边界
+
+低风险 candidate 只有同时满足以下条件才可 `system_approved`：
+
+- 两个独立语义判断对同一 core proposition、scope signature、member role 与 attribution 完全一致；
+- 至少两个独立 source documents 提供可解析、revision-pinned、anchor-valid 的 source-local Claim occurrence；
+- 每个 member 都是完整命题等价，不使用 `equivalent_component`，也不依赖复合 Claim 的隐含切分；
+- subject、predicate/object、polarity、population、scripture scope、temporal scope、conditions 与 modality 全部兼容；
+- candidate subgraph 中没有 `unrelated`、`contrasts`、`qualifies`、`supersedes`、未决 attribution 或 material scope blocker；
+- canonical wording 只是保守归一化，不增加因果、范围、重要性、时间发展或神学评价；
+- actual Claim/Evidence/Citation dependency 与 coverage disclosure 均可机械编译；
+- 回归测试证明相同输入产生 byte-stable decision 与 snapshot。
+
+以下事项必须进入 human exception queue：
+
+- 正面所指、scope、condition、modality 或 professor/external attribution 存在分歧；
+- `equivalent_component` 会决定是否把复合 Claim 的一部分算作 member；
+- 新 qualification 或 tension 可能改变公开表述；
+- `supersedes`、教授立场改变、identity split/merge/retire；
+- canonical wording 无法在不增加真值条件的情况下形成；
+- 自动 reviewer 持续分歧或任何 deterministic gate 无法验证。
+
+太 16:18 是风险分级的回归样例：“教会不是建立在彼得个人身上”的完整重复可成为低风险自动候选；“磐石直接指基督”与“磐石指彼得的认信／真理”的正面所指冲突必须保留为 `tensions_with` 并进入人工 exception queue，不能靠多数票合并。
+
+### 10.4 单人编辑的工作量控制
+
+人工队列遵守以下规则：
+
+1. **按产品需求懒审核**：未被文章、QA、专题或搜索请求的候选可以长期保持 internal，不为完成全库数字而送人工；
+2. **按 identity decision bundle 审核**：一次 packet 同时呈现 core proposition、全部拟议 members、routes、blockers、逐字证据和自动判断差异；不逐 pair 弹出多个任务；
+3. **一次批准，多处复用**：同 semantic revision/snapshot 的后续产品只 pin dependency，不再次要求 editor 批准；
+4. **只审差异**：新增同类 member 或 route attestation 若自动 gates 全过，生成新 snapshot；不要求 editor 重读既有 viewpoint；
+5. **影响排序**：先显示阻塞当前产品、可能撤回公开内容或涉及 split/merge/supersedes 的事项；普通 candidate discovery 不计入人工 backlog；
+6. **明确默认动作**：无把握时保持 internal/defer，不把“尚未处理”伪装成 rejected，也不阻塞无关的 source-local 产品；
+7. **可批量决策但不可批量失忆**：editor 可一次接受多个相同模式的低风险 exception，但每个 identity decision 仍保留独立理由、输入与 lineage。
+
+### 10.5 不设置 recurrence 门槛
 
 单一来源也可形成一个 candidate identity，以便未来增量匹配；但消费者只能称其为“反复观点”，当且仅当机械统计显示至少两个独立 source documents 中存在 approved occurrences。
 
-观点是否 active 不由出现次数决定。批准要求逐项满足：
+观点是否 active 不由出现次数决定。`system_approved` 或 `human_approved` 都要求逐项满足：
 
 - identity boundary 已审核；
 - core proposition 与 proposition signature 已审核；
@@ -993,7 +1036,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 | 等级 | 允许消费者 | 最低条件 | 禁止行为 |
 |---|---|---|---|
 | `internal_candidate` | registry review、内部 discovery、审核 UI | 引用完整；candidate 与未决项有清楚标签 | 不得进入公开文字，不得称为教授 canonical viewpoint |
-| `composition_eligible` | 内部 CompositionPlan、文章/QA 规划 | ViewpointRevision 已 human approved；RegistrySnapshot 为 `approved_evidence_ready` 且 system verified；所选 member/route 的审核状态和缺口完整传入 | 不得仅凭 canonical wording 写正文；不得隐藏 candidate qualification/tension |
+| `composition_eligible` | 内部 CompositionPlan、文章/QA 规划 | ViewpointRevision 已按第 10 节 policy 获得 `system_approved` 或 `human_approved`；RegistrySnapshot 为 `approved_evidence_ready` 且 system verified；所选 member/route 的审核状态和缺口完整传入 | 不得仅凭 canonical wording 写正文；不得隐藏 candidate qualification/tension |
 | `public_attribution_eligible` | 可发布文章、公开 QA/search | 满足 composition 条件；实际使用的 Claim revision、EvidenceStep 与 Citation 全部符合该产品的公开资格；零 identity blockers；attribution template 已绑定 | 不得把编辑归一化表述当直接引文；不得把未批准 member 算入公开 recurrence |
 
 `composition_eligible` 只授权使用 viewpoint 进行内部编排，不自动批准文章。文章仍须通过其 authoring、editorial 与 Program Audit gates；QA 仍须通过自己的完整度、引用和诊断 gates。没有接入 viewpoint layer 的既有来源局部文章流程不因本设计被追溯阻断；一旦产品明确引用 canonical viewpoint identity，就必须使用本 projection。
@@ -1031,7 +1074,159 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 - 新 qualification、tension 或 supersedes relation 若被 reviewer 标记为可能改变旧公开表述：产生 ImpactEvent，要求人工判断是否撤回、加注或重建；
 - CoverageSnapshot 改变不能原地更新产品数字；所有显示次数必须来自产品 pinned snapshot。
 
-### 13.4 Topic Discovery 与专题写作
+### 13.4 当前实现差距：设计存在不等于 consumer 已接入
+
+截至本设计版本，现有代码仍是 Claim-first authoring pipeline，不能因为本文件已经定义 `ViewpointKnowledgeProjection`，就把文章、QA 或搜索标记为已消费 CanonicalViewpoint。实现 ticket 必须显式关闭以下差距：
+
+1. `KNOWLEDGE_COLLECTIONS` 尚无 viewpoint、viewpoint revision、member link、argument route revision/attestation 与 viewpoint relation records；
+2. `CompositionDecision` 只正式拥有 `claim_ids`，尚无 projection binding 或 viewpoint use contract；
+3. store-backed Matthew authoring 调用的通用 `compile_package()` 只按 `retired_at IS NULL` 汇集记录，不计算 viewpoint consumer eligibility；
+4. AuthoringPacket 只由 decision `claim_ids` 展开 Claim、EvidenceStep 与 SourceFragment，Author/Revision ledger 也只申报 `claim_ids_used`；
+5. Program Audit 与现有 ProductDependency 只验证 Claim 层，不能验证 viewpoint semantic revision、registry/route snapshot、coverage 或 projection SHA；
+6. 现有 ClaimRelation 在入库后 canonical endpoint 为 `from_id / to_id`，而部分 packet slicing 仍读取 legacy `source_id / target_id`。实现 viewpoint projection 前必须统一 ingress normalization，并增加 PostgreSQL round-trip regression，禁止关系或张力因 alias 差异静默消失。
+
+旧 CompositionPlan 把“跨来源共同结论”“两种正面解释”“不得静默调和”等文字直接写进 decision，是已有文章的显式编辑决定，不是可复用的 canonical identity。不得从这些文字反向声称 registry 已经存在，也不得让下一篇文章复制该段文字来冒充 viewpoint reuse。
+
+### 13.5 Matthew 文章接入契约
+
+#### 13.5.1 CompositionPlan binding
+
+规划分两步，避免 plan 与 projection 循环依赖：先以 passage/topic scope 请求只供选择的 planning preview；Composition 完成 viewpoint/route/relation 选择后，compiler 以 draft plan 和所选实际来源依赖生成 `consumer_kind=matthew_exposition_article` 的最终不可变 projection；finalized CompositionPlan 再固定该 projection。planning preview 不进入 AuthoringPacket，也不能成为产品 dependency。计划至少保存：
+
+```json
+{
+  "viewpoint_projection_binding": {
+    "projection_id": "VKP-...",
+    "projection_sha256": "...",
+    "coverage_snapshot_id": "CVS-...",
+    "dependency_manifest_sha256": "..."
+  },
+  "decisions": [
+    {
+      "decision_id": "CD-...",
+      "claim_ids": ["DK-...-CL..."],
+      "viewpoint_uses": [
+        {
+          "viewpoint_revision_id": "CVR-...",
+          "viewpoint_registry_snapshot_id": "VRS-...",
+          "composition_role": "main_thesis",
+          "selected_argument_route_snapshot_ids": ["ARS-..."],
+          "required_viewpoint_relation_ids": ["VREL-..."]
+        }
+      ]
+    }
+  ]
+}
+```
+
+`composition_role` 至少区分 `main_thesis`、`corroboration`、`qualification`、`tension`、`application` 与 `route_out`。它说明文章怎样使用观点，不改变 registry 内的观点身份。
+
+迁移期 `claim_ids` 与 `viewpoint_uses` 双写，但 `claim_ids` 必须由所 pin projection 的实际 Claim dependencies 验证，不得由编辑凭记忆另列一组。若二者不一致，计划保存或 packet compilation 失败；不得选择较方便的一边继续。
+
+#### 13.5.2 AuthoringPacket deterministic expansion
+
+当计划的 `viewpoint_uses` 非空时，Matthew packet builder 必须接收并验证该计划 pin 的 projection，而不是调用通用全库 snapshot 后自行重建观点。`matthew-exposition-authoring-packet` 增加独立顶层字段：
+
+```json
+{
+  "viewpoint_knowledge_projection": {
+    "projection_id": "VKP-...",
+    "projection_sha256": "...",
+    "consumer_kind": "matthew_exposition_article",
+    "consumer_eligibility": "composition_eligible",
+    "viewpoints": [],
+    "argument_route_snapshots": [],
+    "viewpoint_relations": [],
+    "coverage_disclosure": {},
+    "dependency_manifest_sha256": "..."
+  },
+  "knowledge": {
+    "claims": [],
+    "evidence_steps": [],
+    "source_fragments": []
+  }
+}
+```
+
+其中 `knowledge` 不是另一份独立选择，而是 projection 中实际依赖的 source-local records 的任务切片。builder 必须机械验证：
+
+- 每个 selected viewpoint use 可在 projection 中解析，revision/snapshot 完全相等；
+- 每个 selected route 和 required relation 均属于该 viewpoint revision，并在 projection 中；
+- decision `claim_ids` 是 projection 允许该 decision 使用的 Claim 子集；
+- Claim revision、EvidenceStep、Citation 与 SourceFragment 均可解析并通过现有锚点／归属门槛；
+- qualification、tension、supersedes 或 coverage gap 只要会改变正文含义，就不得因 packet 大小预算被静默截断；
+- legacy relation aliases 只可在 ingress 接受；packet 内部统一使用 canonical `from_id / to_id`，不得同时维护两种 endpoint 语义。
+
+若 packet 超过大小预算，compiler 应缩小 consumer scope 或分离未选择的 routes；不得只留下 core proposition、删除其来源或 blocker。
+
+#### 13.5.3 Author 与 Revision ledger
+
+Author 可以用 core proposition 组织段落，但不能只凭 canonical wording 写正文。每个实际使用 viewpoint 的 section ledger 至少申报：
+
+```json
+{
+  "section_id": "AS-...",
+  "decision_ids": ["CD-..."],
+  "viewpoint_revision_ids_used": ["CVR-..."],
+  "argument_route_snapshot_ids_used": ["ARS-..."],
+  "viewpoint_relation_ids_preserved": ["VREL-..."],
+  "claim_ids_used": ["DK-...-CL..."]
+}
+```
+
+`viewpoint_revision_ids_used` 解释段落的跨讲组织依据，`claim_ids_used` 继续承担逐段 source grounding；前者不能替代后者。若正文呈现 canonical editorial wording，隐藏 provenance 必须绑定 viewpoint revision 和实际 Claim；若逐字引用教授，仍只从 SourceFragment/Citation 取得原话，不从 `core_proposition` 产生引文。
+
+Revision Agent 接收与初稿相同的最小 projection slice。修改涉及未选 route、新 Claim、未包含的 qualification 或改变 viewpoint role 时，必须返回 `plan_change_required`；不得越出 projection 自行查询 registry。
+
+#### 13.5.4 Program Audit、发布与失效
+
+Program Audit 在现有 Claim/Evidence/Fragment 检查之外增加以下 hard gates：
+
+1. plan、AuthoringPacket、稿件 ledger、audit manifest 与 publication dependency manifest 的 projection SHA 完全一致；
+2. 每个 used viewpoint revision、registry snapshot、route snapshot 与 relation 均在 projection 中且未失效；
+3. 发布时每个实际对外归属的 viewpoint use 达到 `public_attribution_eligible`；只有 `composition_eligible` 的计划可以写内部草稿，但不能据此自动发布；
+4. 每个 viewpoint paragraph 同时具有实际 Claim grounding，禁止 viewpoint-only provenance；
+5. required `tensions_with`、qualification、coverage disclosure 或 supersedes 没有被静默删除或调和；
+6. canonical wording 使用 editorial-normalization attribution，未被标成 direct quotation；
+7. ProductDependency 同时 pin viewpoint semantic revision、registry/route snapshot、coverage、实际 Claim revisions、Evidence/Citation 与 projection SHA。
+
+任何一项失败都不得退回 legacy Claim-only audit 后继续发布。已发布产品 pin 旧 snapshot 时保持历史可复现；新 snapshot 不自动改写旧文章，只有第 13.3 节定义的语义或 blocker 变化触发 impact review。
+
+#### 13.5.5 Editorial Reviewer 边界保持不变
+
+Independent Editorial Review 与 Final Delta Review 不接收 `ViewpointKnowledgeProjection`、registry records 或完整 dependency manifest。它们只读取现有受限 review packet 中判断写作质量、母本保全和已声明张力所需的最小信息。Program Audit 负责 identity、revision、eligibility、source dependency 与 SHA 验证；不得把这些程序责任转移给写作品质 reviewer。
+
+### 13.6 兼容迁移与 fail-closed 规则
+
+消费者分成两条显式路径：
+
+- `source_local_only`：旧文章只依赖 Claim，不声称消费 canonical viewpoint，现有流程继续运行；
+- `canonical_viewpoint_bound`：计划包含 `viewpoint_uses`，上述 projection、ledger、audit 与 dependency fields 全部必需。
+
+不得建立“字段缺失就猜测”的半接入状态。只要 `viewpoint_uses`、viewpoint ID 或 canonical attribution 任一出现，系统必须走 `canonical_viewpoint_bound`；projection 缺失、SHA 不符、eligibility 不足或 dependency 不完整均 fail closed。系统也不得从 Claim duplicate cluster、EditorialSynthesis 标题、CompositionDecision prose 或相似度结果在运行时临时推导 viewpoint identity。
+
+迁移顺序：
+
+1. 修复 ClaimRelation canonical endpoint round-trip，并为现有 Claim-only packet 建立不丢 relation/tension 的回归；
+2. 增加 registry records、review workflow 与 compiler；
+3. 扩展 CompositionPlan、AuthoringPacket、Author/Revision schema、Program Audit 与 ProductDependency；
+4. 以太 16:18“彼得／磐石”作为 golden fixture，验证共同否定观点、两个正面观点及 `tensions_with` 全部进入 packet 且无法被静默删除；
+5. 只在上述回归通过后，把某篇新文章显式迁移为 `canonical_viewpoint_bound`；
+6. QA、search 与 Topic Discovery 分别接入同一 projection contract，不从文章专用字段反向恢复 registry。
+
+### 13.7 下游 consumer 矩阵
+
+| consumer | 接收内容 | 必须 pin | 关键 gate |
+|---|---|---|---|
+| Composition | scoped viewpoint/route/relation/coverage projection | projection、viewpoint revision、registry/route snapshot、实际来源依赖 | `composition_eligible`，blocker 不可缺失 |
+| Author / Revision | 计划选择后的最小 projection slice 与实际 Claim/Evidence/Fragment | packet SHA 与 projection SHA；ledger 申报实际使用项 | 不得只从 core proposition 写正文；越界则 plan change |
+| Editorial Reviewer | 不接收 viewpoint projection | manuscript/review packet SHA | 只审写作质量与已声明张力，不裁决 identity |
+| Program Audit / publisher | 完整 dependency manifest 与本地 projection | 所有 semantic/source revisions 与 SHAs | 对外使用须 `public_attribution_eligible`；任一不一致阻断发布 |
+| QA | 问题范围内的 projection，可按 route 展开 | answer dependency manifest 与 projection SHA | 回答模式、coverage 与 attribution 完整 |
+| Search | viewpoint card projection 与 citation drill-down | card build snapshot 与 projection SHA | 不从相似度临时 merge；次数来自 pinned snapshot |
+| Topic Discovery | viewpoint projection 加原 Claim graph | topic build manifest 与两层 coverage | TopicNode 保持层级 owner；Claim coverage 不下降 |
+
+### 13.8 Topic Discovery 与专题写作
 
 专题编排看到的是：
 
@@ -1043,7 +1238,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 
 CompositionPlan 必须 pin `ViewpointKnowledgeProjection`、viewpoint semantic revision、registry snapshot 和实际使用的 Claim/Evidence/Citation dependencies。作者不能仅凭 canonical wording 写正文而丢失来源。
 
-### 13.5 Search 与 QA
+### 13.9 Search 与 QA
 
 搜索结果可聚合为一个观点卡，而不是列出一组平铺 claim IDs。观点卡至少显示：
 
@@ -1056,7 +1251,7 @@ CompositionPlan 必须 pin `ViewpointKnowledgeProjection`、viewpoint semantic r
 
 QA 回答必须能够选择：简要结论、按 route 展开、跨时间比较或只看某篇来源。若 coverage partial，回答必须显式说明。
 
-### 13.6 跨时间比较
+### 13.10 跨时间比较
 
 比较的是 occurrence、route 和 viewpoint relation 的时间序列，而不是比较两个 canonical summary 的更新时间。系统应回答：
 
@@ -1066,7 +1261,7 @@ QA 回答必须能够选择：简要结论、按 route 展开、跨时间比较�
 - 是否存在尚未协调的张力；
 - 是否有教授明确自述的立场改变。
 
-### 13.7 Reader attribution
+### 13.11 Reader attribution
 
 reader-facing renderer 必须采用 attribution-aware template：
 
@@ -1099,7 +1294,7 @@ reader-facing renderer 必须采用 attribution-aware template：
 | 最小 schema：identity、proposition、scope、members、occurrences、routes、qualifications、tensions、provenance | 第 5 节 |
 | 核心九篇只读映射，重复出现与两条不同路线 | 第 8 节 |
 | 无悬空引用、来源不丢失、成员资格、route evidence 与 derived counts | 第 9 节 |
-| 增量更新、人工复核、错误 split/merge 与历史修订 | 第 10、11 节 |
+| 增量更新、自动低风险审核、人工 exception、错误 split/merge 与历史修订 | 第 10、11 节 |
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | 实现拆成后续 tickets | 第 16 节 |
@@ -1116,18 +1311,20 @@ reader-facing renderer 必须采用 attribution-aware template：
 3. **Identity candidate projection**
    从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blockers 与 stable fingerprints；不调用内容模型。
 4. **Viewpoint identity review workflow**
-   定义 proposal、independent review、adjudication、reconsideration schemas、可恢复 runner 与人工 approval UI；明确模型调用不变量。
+   定义 proposal、blind independent review、deterministic risk gates、`system_approved` decision、adjudication、reconsideration schemas、可恢复 runner 与只显示高风险 exception 的人工 UI；明确模型调用不变量。
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
    建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
-7. **Topic Discovery v2 compatibility projection**
-   让 Topic Discovery 同时读取 viewpoint projection 与原 Claim graph，保持 Claim coverage 守门和旧 consumer fallback。
-8. **ViewpointKnowledgeProjection 与产品接入**
-   实现统一 runtime projection、三档 consumer eligibility、attribution-aware viewpoint card、route 展开、coverage disclosure、文章/QA packet 切片、时间比较与 citation drill-down。
-9. **受控二十篇 backfill 与审核**
-   在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析并人工审核；不得作为本设计卡的隐藏步骤。
-10. **逐步扩展至 corpus universe**
+7. **ViewpointKnowledgeProjection compiler 与 eligibility**
+   实现统一 immutable runtime projection、三档 consumer eligibility、dependency manifest、SHA verification、coverage disclosure 与 fail-closed active build；只使用合成 consumer fixture。
+8. **Matthew authoring downstream integration**
+   先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；保持 source-local legacy path 与 Editorial Reviewer packet 边界。
+9. **QA、Search 与 Topic Discovery adapters**
+   让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
+10. **受控二十篇 backfill 与风险审核**
+   在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析；低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
+11. **逐步扩展至 corpus universe**
     按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
 
 每张实现 ticket 都必须声明：输入 authority、是否允许模型调用、是否允许 `--apply`、回滚方式、测试 fixture 和不部署边界。生产迁移与部署必须另走 operations ticket，并在执行前阅读 operations runbook。
