@@ -63,7 +63,7 @@ def test_saved_result_rejects_body_text_mutation() -> None:
         before, _insertions(), source_sha256="c" * 64, user_id="pipeline@example.org"
     )
     after[-1]["text"] = "被改掉的正文。"
-    with pytest.raises(SubtitleBodyMutationError, match="body differs"):
+    with pytest.raises(SubtitleBodyMutationError, match="pre-save sermon rows"):
         verify_saved_result(before, after, expected_insertions=2)
 
 
@@ -75,11 +75,12 @@ class _SavingWriter:
         self.calls = 0
 
     def __call__(
-        self, source_path: Path, *, expected_source_sha256: str,
-        insertions: list[dict[str, Any]], actor_id: str,
+        self, actor_id: str, item: str, *, expected_source_sha256: str,
+        insertions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         self.calls += 1
-        assert source_path == self.path
+        assert item == self.path.stem
+        source_path = self.path
         if self.save_error:
             raise RuntimeError("write failed")
         raw = self.path.read_bytes()
@@ -95,6 +96,7 @@ class _SavingWriter:
         return {
             "source_path": str(self.path),
             "after_source_sha256": after_sha256,
+            "insertions": len(insertions),
         }
 
 
@@ -138,6 +140,7 @@ def test_run_one_reloads_persisted_source_before_extraction(
         force=False,
         sections=SectionSettings(),
         write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
         subtitle_writer=writer,
     )
 
@@ -179,6 +182,7 @@ def test_write_back_subtitle_generation_uses_the_subscription_client(
         reasoning_effort="medium",
         force=False,
         write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
         subtitle_writer=writer,
     )
     assert seen["client"] is client
@@ -202,6 +206,7 @@ def test_write_failure_stops_before_extraction_and_is_audited(
             reasoning_effort="medium",
             force=False,
             write_back_subtitles=True,
+            subtitle_actor_id="editor@example.org",
             subtitle_writer=writer,
         )
 
@@ -219,7 +224,7 @@ def test_post_save_body_mutation_stops_before_extraction(
     captured = _capture_run(monkeypatch)
     monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
 
-    with pytest.raises(SubtitleBodyMutationError, match="changed existing"):
+    with pytest.raises(SubtitleBodyMutationError, match="pre-save sermon rows"):
         runner.run_one(
             source_path,
             output_dir=tmp_path / "out",
@@ -228,9 +233,86 @@ def test_post_save_body_mutation_stops_before_extraction(
             reasoning_effort="medium",
             force=False,
             write_back_subtitles=True,
+            subtitle_actor_id="editor@example.org",
             subtitle_writer=writer,
         )
     assert captured == {}
+
+
+def test_missing_actor_stops_before_generation_or_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(
+        runner, "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("generator must not run without an actor"),
+    )
+
+    with pytest.raises(SubtitlePersistenceError, match="subtitle-user-id"):
+        runner.run_one(
+            source_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+            write_back_subtitles=True,
+        )
+    assert captured == {}
+
+
+def test_pipeline_default_writer_uses_governed_service_and_stops_on_acl_denial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.api.sc_api import sermon_manager as manager_module
+
+    source_path = _source(tmp_path)
+    output_dir = tmp_path / "out"
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
+    calls: list[tuple[str, str]] = []
+
+    class DenyingManager:
+        def persist_generated_subtitles(self, actor_id: str, item: str, **_kwargs: Any) -> dict:
+            calls.append((actor_id, item))
+            raise PermissionError("ACL denied")
+
+    monkeypatch.setattr(manager_module, "sermonManager", DenyingManager())
+    with pytest.raises(PermissionError, match="ACL denied"):
+        runner.run_one(
+            source_path,
+            output_dir=output_dir,
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+            write_back_subtitles=True,
+            subtitle_actor_id="reader@example.org",
+        )
+
+    assert calls == [("reader@example.org", "S test")]
+    assert captured == {}
+    audit = json.loads(
+        next((output_dir / "subtitle-applications").rglob("application.json")).read_text()
+    )
+    assert audit["status"] == "failed"
+    assert "PermissionError" in audit["error"]
+
+
+def test_saved_result_rejects_mutation_of_an_existing_subtitle_row() -> None:
+    before = [
+        {"index": "existing-subtitle", "type": "subtitle", "text": "### 原有提示"},
+        *_rows(),
+    ]
+    after = apply_insertions(
+        before, _insertions(), source_sha256="d" * 64, user_id="editor@example.org"
+    )
+    next(row for row in after if row["index"] == "existing-subtitle")["text"] = (
+        "### 被改掉的原有提示"
+    )
+    with pytest.raises(SubtitleBodyMutationError, match="pre-save sermon rows"):
+        verify_saved_result(before, after, expected_insertions=2)
 
 
 def test_existing_headings_are_a_noop_for_persistence(
@@ -252,6 +334,7 @@ def test_existing_headings_are_a_noop_for_persistence(
         reasoning_effort="medium",
         force=False,
         write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
         subtitle_writer=writer,
     )
     assert writer.calls == 0

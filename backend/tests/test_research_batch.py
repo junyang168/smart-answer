@@ -96,6 +96,35 @@ def test_command_plan_keeps_each_transcript_independent(tmp_path: Path) -> None:
     )
 
 
+def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
+    tmp_path: Path,
+) -> None:
+    review = tmp_path / "script_review"
+    published = tmp_path / "script_published"
+    review.mkdir()
+    published.mkdir()
+    (review / "讲道甲.json").write_text("[]", encoding="utf-8")
+    (published / "讲道乙.json").write_text("[]", encoding="utf-8")
+
+    plan = build_command_plan(
+        _batch(), transcript_dir=[review, published], output_root=tmp_path / "output",
+        force=False, extraction_backend="codex-subscription",
+        write_back_generated_subtitles=True,
+        subtitle_user_id="editor@example.org",
+    )
+    extracts = {
+        row["transcript_id"]: row["command"] for row in plan if row["stage"] == "extract"
+    }
+    assert extracts["讲道甲"][extracts["讲道甲"].index("--backend") + 1] == (
+        "codex-subscription"
+    )
+    assert "--write-back-generated-subtitles" in extracts["讲道甲"]
+    assert extracts["讲道甲"][extracts["讲道甲"].index("--subtitle-user-id") + 1] == (
+        "editor@example.org"
+    )
+    assert "--write-back-generated-subtitles" not in extracts["讲道乙"]
+
+
 def test_command_plan_reuses_explicit_reviewed_package(tmp_path: Path) -> None:
     batch = _batch()
     batch["reviewed_package_reuse"] = {"讲道甲": "output/prior/甲.json"}

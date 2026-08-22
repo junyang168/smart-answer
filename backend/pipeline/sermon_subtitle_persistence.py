@@ -88,9 +88,14 @@ def apply_insertions(
             level = int(insertion.get("level"))
         except (TypeError, ValueError) as exc:
             raise SubtitlePersistenceError("generated subtitle level is not an integer") from exc
+        generated_index = f"subtitle-pipeline-{source_sha256[:12]}-{ordinal:02d}"
+        if generated_index in known:
+            raise SubtitlePersistenceError(
+                f"generated subtitle index {generated_index!r} already exists"
+            )
         accepted.append(
             {
-                "index": f"subtitle-pipeline-{source_sha256[:12]}-{ordinal:02d}",
+                "index": generated_index,
                 "type": "subtitle",
                 "text": _heading_text(str(insertion.get("text") or ""), level),
                 "user_id": user_id,
@@ -114,13 +119,22 @@ def verify_saved_result(
     *,
     expected_insertions: int,
 ) -> None:
-    """Prove the save changed only the requested number of subtitle rows."""
+    """Prove the save inserted subtitles and changed no pre-existing row."""
 
-    if body_rows(after) != body_rows(before):
-        raise SubtitleBodyMutationError("saved sermon body differs from the pre-save body")
-    before_headings = sum(1 for row in before if heading_level(str(row.get("text") or "")))
-    after_headings = sum(1 for row in after if heading_level(str(row.get("text") or "")))
-    if after_headings - before_headings != expected_insertions:
+    before_rows = [dict(row) for row in before]
+    after_rows = [dict(row) for row in after]
+    before_indexes = [str(row.get("index")) for row in before_rows]
+    after_indexes = [str(row.get("index")) for row in after_rows]
+    if len(after_indexes) != len(set(after_indexes)):
+        raise SubtitlePersistenceError("saved sermon paragraph indexes are not unique")
+    known = set(before_indexes)
+    inserted = [row for row in after_rows if str(row.get("index")) not in known]
+    preserved = [row for row in after_rows if str(row.get("index")) in known]
+    if preserved != before_rows:
+        raise SubtitleBodyMutationError("saved sermon differs from the pre-save sermon rows")
+    if len(inserted) != expected_insertions or any(
+        str(row.get("type") or "") != "subtitle" for row in inserted
+    ):
         raise SubtitlePersistenceError(
             "saved sermon did not contain exactly the generated subtitle insertions"
         )

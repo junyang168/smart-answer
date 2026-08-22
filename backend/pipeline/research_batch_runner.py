@@ -151,7 +151,9 @@ def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
 
 def build_command_plan(
     batch: dict[str, Any], *, transcript_dir: Path | list[Path], output_root: Path,
-    force: bool, apply_ingest: bool = False,
+    force: bool, apply_ingest: bool = False, extraction_backend: str = "api",
+    write_back_generated_subtitles: bool = False,
+    subtitle_user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     models = batch.get("models") or {}
     extraction_model = str(models.get("extraction") or "gpt-5.6-sol")
@@ -182,6 +184,7 @@ def build_command_plan(
             sys.executable, "-m", "backend.pipeline.detailed_knowledge_extraction_runner",
             "--output-dir", str(paths["package"].parent),
             "--model", extraction_model, "--reasoning-effort", extraction_effort,
+            "--backend", extraction_backend,
         ]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
@@ -190,6 +193,17 @@ def build_command_plan(
             extract += ["--source-manifest", str(paths["source_manifest"])]
         else:
             extract += ["--transcript-dir", str(member_dir), "--ids", key]
+            # Published transcripts are immutable historical snapshots. Only
+            # review transcripts can receive reader-visible generated titles.
+            if write_back_generated_subtitles and member_dir.name == "script_review":
+                if not subtitle_user_id:
+                    raise ValueError(
+                        "subtitle_user_id is required for generated subtitle write-back"
+                    )
+                extract += [
+                    "--write-back-generated-subtitles",
+                    "--subtitle-user-id", subtitle_user_id,
+                ]
 
         cross_section = [
             sys.executable, "-m", "backend.pipeline.cross_section_relation_runner",
@@ -359,8 +373,22 @@ def main() -> int:
              "stage plans the change set and prints it",
     )
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--extraction-backend", choices=("api", "codex-subscription"), default="api",
+        help="transport used by the detailed extraction stage",
+    )
+    parser.add_argument(
+        "--write-back-generated-subtitles", action="store_true",
+        help="persist generated headings for headingless script_review sermon members",
+    )
+    parser.add_argument(
+        "--subtitle-user-id",
+        help="authenticated sermon editor identity used for ACL-checked subtitle write-back",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.write_back_generated_subtitles and not args.subtitle_user_id:
+        parser.error("--write-back-generated-subtitles requires --subtitle-user-id")
 
     batch = load_research_batch(args.batch)
     output_root = args.output_root or (
@@ -399,6 +427,9 @@ def main() -> int:
     plan = build_command_plan(
         selected_batch, transcript_dir=transcript_dirs, output_root=output_root,
         force=args.force, apply_ingest=args.apply,
+        extraction_backend=args.extraction_backend,
+        write_back_generated_subtitles=args.write_back_generated_subtitles,
+        subtitle_user_id=args.subtitle_user_id,
     )
     wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     selected = [row for row in plan if row["stage"] in wanted]
@@ -421,6 +452,9 @@ def main() -> int:
         },
         "merged_output": str(merged_output),
         "ingest_applies": bool(args.apply),
+        "extraction_backend": args.extraction_backend,
+        "write_back_generated_subtitles": bool(args.write_back_generated_subtitles),
+        "subtitle_user_id": args.subtitle_user_id,
         "would_call_models": not args.dry_run
         and bool(wanted & {"extract", "cross_section", "review", "adjudicate"}),
     }

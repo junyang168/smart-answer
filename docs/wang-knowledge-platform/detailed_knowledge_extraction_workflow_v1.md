@@ -96,8 +96,8 @@ flowchart LR
 
 三个设计约束：
 
-- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有显式传入 `--write-back-generated-subtitles` 才可修改 `script_review`，其他来源拒绝写回。
-- **正文逐列不变。** 写入前后比较所有非标题 row，保存正文旧／新 SHA 与完整 insertion artifact；任何正文差异都在抽取前失败。
+- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与有写权限的 `--subtitle-user-id`，并通过讲道 ACL，才可修改 `script_review`，其他来源拒绝写回。
+- **原有 row 逐列不变。** 保存后移除本次新增的 subtitle rows，剩余内容必须与写入前逐列、逐序完全相同；任何正文或既有标题差异都在抽取前失败。
 - **抽取只认写入后的来源。** 保存后重新读取档案，新的 `source_sha256`、S 编号、section plan 与 extraction fingerprint 全部从带标题版本重算。旧来源的 section cache 不会被误用。
 
 未开启写入模式时，内部 section plan 仍按来源雜湊快取，其指纹进入 `extraction_identity`；这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
@@ -244,6 +244,7 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_ext
   --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
   --ids "S 220206" \
   --write-back-generated-subtitles \
+  --subtitle-user-id <有该讲道写权限的用户 email> \
   --backend codex-subscription \
   --model gpt-5.6-sol
 ```
@@ -324,6 +325,23 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
   --batch backend/pipeline/research_batches/covenant_law_validation_01.json \
   --dry-run
 ```
+
+批次中若同时包含母本、`script_review` 与不可变的 `script_published` 讲道，可明确让详细
+抽取走 subscription，并只对 `script_review` 成员执行 ACL 检查后的标题写回：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.research_batch_runner \
+  --batch <research-batch.json> \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_published \
+  --extraction-backend codex-subscription \
+  --write-back-generated-subtitles \
+  --subtitle-user-id <有写权限的用户 email> \
+  --dry-run
+```
+
+`--dry-run` 只显示逐成员命令，不调用模型或写档。正式运行时，母本照常抽取；已发布讲道
+只使用内部 section plan；只有仍在 review 区且没有可用标题的讲道会进入 governed save。
 
 实际执行可用 `--stage extract|review|adjudicate|apply|merge` 分阶段恢复，也可使用默认 `all`。抽取、复审与仲裁都以来源、prompt、模型和 schema 指纹判断是否可以跳过；相同世代不会重复消耗模型调用。`--force` 只应用于明确要求重做的抽取与 Claude 复审。
 
