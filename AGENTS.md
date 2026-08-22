@@ -5,6 +5,13 @@ When the task concerns Matthew exposition articles or Wang repository content pr
 1. `docs/wang-knowledge-platform/CURRENT_AUTHORING_SESSION.md`
 2. `docs/wang-knowledge-platform/matthew_exposition_multi_agent_authoring_workflow_v1.md`
 3. `docs/wang-knowledge-platform/fast_passage_editorial_workflow_v1.md`
+4. `docs/wang-knowledge-platform/canonical_viewpoint_registry_design_v1.md`
+
+The Canonical Viewpoint specification governs cross-sermon viewpoint identity,
+argument routes, coverage disclosure and downstream article/QA/search use. Read
+it as an architecture and packet-construction authority; do not send the full
+document to a runtime content model. Runtime agents receive only the scoped,
+SHA-bound `ViewpointKnowledgeProjection` compiled for their task.
 
 Do not import gates or maintenance operations from `docs/notes-to-sermon-agent/` into this workflow. In particular, do not run notes-to-sermon fidelity audits unless the user explicitly asks to work on that separate project.
 

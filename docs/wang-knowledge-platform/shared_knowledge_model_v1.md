@@ -15,6 +15,8 @@
 | `Question` | 听众或教授提出的问题 | 允许已回答、部分回答、未回答 |
 | `Observation` | 对经文、原文、背景或文体的观察 | 尚未等同于最终结论 |
 | `Claim` | 教授主张什么 | 必须有归属、语料范围、成熟度和证据 |
+| `CanonicalViewpoint` | 多个来源 Claim 经审核后是否属于同一个稳定观点身份 | 采用保留来源的 registry MDM；规范措辞是编辑归一化，不是教授逐字原话；完整 schema 与消费边界见 Canonical Viewpoint Registry 设计 v1 |
+| `ArgumentRoute` | 教授通过哪一种可区分的推理路径到达一个 CanonicalViewpoint | 每个来源实例必须 source-local；不得把不同讲道的 EvidenceStep 拼成虚构论证 |
 | `TopicNode` | 全平台共享的主题身份 | Canonical Repository 拥有 ID；搜索、文章和论证层只能引用或保存显式旧 ID 映射 |
 | `EvidenceStep` | 教授怎样从问题与证据走到结论 | 除功能外，必须记录说话者、立场、话语角色、锚点质量与支持资格 |
 | `KnowledgeRelation` | 两个知识对象怎样相连 | 如 `supports`、`answers`、`qualifies`、`contrasts`、`extends` |
@@ -24,10 +26,12 @@
 | `KnowledgeRoute` | 每条主张下一步去哪里 | 可进入释经、专题、问答、方法研究或思想发展；不得审核后失去去向 |
 | `EditorialSynthesis` | 编辑跨来源归纳出的模式或候选专题 | 必须标为编辑归纳，不能冒充教授原话 |
 | `ProductPlan` | 为某一具体交付物作出的取舍与编排 | Carson-style 释经、专题专论或问答集各有自己的计划 |
-| `ProductDependency` | 某个具体产品实际采用了哪个 claim revision | 用于反向影响分析，不可只依赖 claim → route 的正向意图 |
+| `ProductDependency` | 某个具体产品实际采用了哪个 Claim revision，以及在接入观点层后采用哪个 viewpoint/route semantic revision、registry snapshot 与 projection SHA | 用于反向影响分析，不可只依赖 claim → route 的正向意图；新增来源 snapshot 不得冒充语义修改 |
 | `ImpactEvent` | 主张修订后哪些产品已经失效 | 保存撤回、重建和 cache 失效的待办及处理状态 |
 | `AIReviewArtifact` | 第二模型对候选抽取的独立复审、问题与风险分流 | 必须绑定来源抽取世代与 reviewer fingerprint；不是批准记录 |
 | `ReviewRecord` | 人工审核结论 | AI 只能提出候选和分流，不能自行批准 |
+
+`CanonicalViewpoint`、`ArgumentRoute`、Coverage/Registry Snapshot 与 `ViewpointKnowledgeProjection` 的规范性 architecture authority 是 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)。正式 schema 尚未实现前，现有 Claim、ClaimRelation 和 EditorialSynthesis 不得被临时改名或静默当作 viewpoint registry。
 
 ## 三、三条不可破坏的边界
 
