@@ -17,6 +17,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.corpus_ai_adjudication import (
     ADJUDICATION_VERSION,
     CLAUDE_RECONSIDERATION_SCHEMA,
@@ -249,7 +250,7 @@ def run(
     overrides_path: Path,
     transcript_dirs: list[Path],
     openai_client: Stage1OpenAIClient | CodexSubscriptionClient,
-    claude_client: Stage1AnthropicClient,
+    claude_client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     openai_prompt: str,
     claude_prompt: str,
 ) -> dict[str, Any]:
@@ -277,7 +278,7 @@ def _run_adjudication(
     overrides_path: Path,
     transcript_dirs: list[Path],
     openai_client: Stage1OpenAIClient | CodexSubscriptionClient,
-    claude_client: Stage1AnthropicClient,
+    claude_client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     openai_prompt: str,
     claude_prompt: str,
 ) -> dict[str, Any]:
@@ -392,6 +393,7 @@ def _run_adjudication(
         openai_backend=getattr(openai_client, "backend", "api").replace("_", "-"),
         claude_prompt=claude_prompt,
         claude_model=claude_client.model,
+        claude_backend=getattr(claude_client, "backend", "api").replace("_", "-"),
     )
     outcome = compile_outcome(openai_response, reconsideration, reviews=reviews)
     record.inputs({"fingerprint_sha256": fingerprint.get("fingerprint_sha256")})
@@ -442,6 +444,10 @@ def main() -> int:
         help="primary adjudicator transport; codex-subscription uses the ChatGPT login",
     )
     parser.add_argument("--claude-model", default="claude-sonnet-5")
+    parser.add_argument(
+        "--claude-backend", choices=["api", "claude-subscription"], default="api",
+        help="reconsideration transport; claude-subscription uses the Claude.ai login",
+    )
     # Raised with the reviewer's for the same reason, before it bites rather
     # than after: adjudication answers the reviewer's findings, and a package
     # with five times the claims produces more of them. 16,000 is also exactly
@@ -464,6 +470,7 @@ def main() -> int:
         openai_backend=args.openai_backend,
         claude_prompt=claude_prompt,
         claude_model=args.claude_model,
+        claude_backend=args.claude_backend,
     )
     if args.dry_run:
         print(
@@ -513,11 +520,16 @@ def main() -> int:
             max_output_tokens=args.max_output_tokens,
         )
     )
-    claude_client = Stage1AnthropicClient(
-        model=args.claude_model,
-        timeout_seconds=300,
-        max_retries=3,
-        max_output_tokens=args.max_output_tokens,
+    claude_client = (
+        ClaudeSubscriptionClient(
+            model=args.claude_model, timeout_seconds=900,
+            max_output_tokens=args.max_output_tokens,
+        )
+        if args.claude_backend == "claude-subscription"
+        else Stage1AnthropicClient(
+            model=args.claude_model, timeout_seconds=300, max_retries=3,
+            max_output_tokens=args.max_output_tokens,
+        )
     )
     artifact = run(
         package_path=args.package,

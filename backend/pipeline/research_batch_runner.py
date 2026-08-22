@@ -152,6 +152,7 @@ def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
 def build_command_plan(
     batch: dict[str, Any], *, transcript_dir: Path | list[Path], output_root: Path,
     force: bool, apply_ingest: bool = False, extraction_backend: str = "api",
+    anthropic_backend: str = "api",
     write_back_generated_subtitles: bool = False,
     subtitle_user_id: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -220,6 +221,7 @@ def build_command_plan(
             "--claim-layer-package", source,
             "--claim-layer-output", str(paths["review"]),
             "--transcript-dir", str(member_dir), "--model", review_model,
+            "--backend", anthropic_backend,
         ]
         if review_budget:
             review += ["--max-output-tokens", str(int(review_budget))]
@@ -251,6 +253,7 @@ def build_command_plan(
                         "--openai-reasoning-effort", extraction_effort,
                         "--openai-backend", extraction_backend,
                         "--claude-model", reconsideration_model,
+                        "--claude-backend", anthropic_backend,
                         *(["--max-output-tokens", str(int(adjudicator_budget))]
                           if adjudicator_budget else []),
                     ],
@@ -380,6 +383,10 @@ def main() -> int:
         help="transport used by extraction, cross-section, and primary adjudication",
     )
     parser.add_argument(
+        "--anthropic-backend", choices=("api", "claude-subscription"), default="api",
+        help="transport used by independent review and conditional reconsideration",
+    )
+    parser.add_argument(
         "--write-back-generated-subtitles", action="store_true",
         help="persist generated headings for headingless script_review sermon members",
     )
@@ -430,6 +437,7 @@ def main() -> int:
         selected_batch, transcript_dir=transcript_dirs, output_root=output_root,
         force=args.force, apply_ingest=args.apply,
         extraction_backend=args.extraction_backend,
+        anthropic_backend=args.anthropic_backend,
         write_back_generated_subtitles=args.write_back_generated_subtitles,
         subtitle_user_id=args.subtitle_user_id,
     )
@@ -455,6 +463,7 @@ def main() -> int:
         "merged_output": str(merged_output),
         "ingest_applies": bool(args.apply),
         "extraction_backend": args.extraction_backend,
+        "anthropic_backend": args.anthropic_backend,
         "write_back_generated_subtitles": bool(args.write_back_generated_subtitles),
         "subtitle_user_id": args.subtitle_user_id,
         "would_call_models": not args.dry_run

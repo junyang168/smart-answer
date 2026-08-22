@@ -28,6 +28,11 @@ def test_subscription_adjudication_has_a_distinct_backend_bound_fingerprint() ->
     assert "openai_backend" not in api
     assert subscription["openai_backend"] == "codex-subscription"
     assert subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
+    claude_subscription = adjudication_fingerprint(
+        **kwargs, claude_backend="claude-subscription"
+    )
+    assert claude_subscription["claude_backend"] == "claude-subscription"
+    assert claude_subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
 
 
 def _claims() -> dict[str, dict]:

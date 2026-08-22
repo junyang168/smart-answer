@@ -321,6 +321,7 @@ def adjudication_fingerprint(
     claude_prompt: str,
     claude_model: str,
     openai_backend: str = "api",
+    claude_backend: str = "api",
 ) -> dict[str, str]:
     identity = {
         "review_fingerprint": review_fingerprint,
@@ -335,6 +336,8 @@ def adjudication_fingerprint(
     # must not reuse one that was paid for through the API account.
     if openai_backend != "api":
         identity["openai_backend"] = openai_backend
+    if claude_backend != "api":
+        identity["claude_backend"] = claude_backend
     identity["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

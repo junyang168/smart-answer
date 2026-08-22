@@ -109,6 +109,7 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     plan = build_command_plan(
         _batch(), transcript_dir=[review, published], output_root=tmp_path / "output",
         force=False, extraction_backend="codex-subscription",
+        anthropic_backend="claude-subscription",
         write_back_generated_subtitles=True,
         subtitle_user_id="editor@example.org",
     )
@@ -132,6 +133,15 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert adjudications["讲道甲"][
         adjudications["讲道甲"].index("--openai-backend") + 1
     ] == "codex-subscription"
+    reviews = {
+        row["transcript_id"]: row["command"] for row in plan if row["stage"] == "review"
+    }
+    assert reviews["讲道甲"][reviews["讲道甲"].index("--backend") + 1] == (
+        "claude-subscription"
+    )
+    assert adjudications["讲道甲"][
+        adjudications["讲道甲"].index("--claude-backend") + 1
+    ] == "claude-subscription"
     assert "--write-back-generated-subtitles" in extracts["讲道甲"]
     assert extracts["讲道甲"][extracts["讲道甲"].index("--subtitle-user-id") + 1] == (
         "editor@example.org"
