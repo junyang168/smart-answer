@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import List, Sequence
 
+from ..semantic_index.embeddings import GoogleGeminiEmbeddingProvider
+
 
 class EmbeddingClient:
     def __init__(self) -> None:
@@ -10,7 +12,7 @@ class EmbeddingClient:
         self.model = os.getenv("SERMON_SEARCH_EMBEDDING_MODEL", "gemini-embedding-001")
         self.dimensions = int(os.getenv("SERMON_SEARCH_EMBEDDING_DIMENSIONS", "768"))
         self.batch_size = int(os.getenv("SERMON_SEARCH_EMBEDDING_BATCH_SIZE", "64"))
-        self._client = None
+        self._provider = None
 
     @property
     def available(self) -> bool:
@@ -26,22 +28,14 @@ class EmbeddingClient:
     def _embed(self, texts: Sequence[str], task_type: str) -> List[List[float]]:
         if not self.available or not texts:
             return []
-        from google import genai
-        from google.genai import types
-
-        if self._client is None:
-            api_key = os.getenv("GEMINI_API_KEY") or None
-            self._client = genai.Client(api_key=api_key) if api_key else genai.Client()
-        vectors: List[List[float]] = []
-        batch_size = max(1, self.batch_size)
-        for start in range(0, len(texts), batch_size):
-            response = self._client.models.embed_content(
+        if self._provider is None:
+            self._provider = GoogleGeminiEmbeddingProvider(
                 model=self.model,
-                contents=list(texts[start : start + batch_size]),
-                config=types.EmbedContentConfig(
-                    taskType=task_type,
-                    outputDimensionality=self.dimensions,
-                ),
+                dimensions=self.dimensions,
+                batch_size=max(1, self.batch_size),
             )
-            vectors.extend(list(embedding.values) for embedding in response.embeddings or [])
-        return vectors
+        if task_type == "RETRIEVAL_DOCUMENT":
+            return self._provider.embed_document_texts(
+                texts, use_case="semantic_search"
+            )
+        return self._provider.embed_queries(texts, use_case="semantic_search")

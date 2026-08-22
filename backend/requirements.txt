@@ -30,4 +30,5 @@ rich
 azure-cognitiveservices-speech
 moviepy
 mutagen
+numpy
 psycopg[binary]>=3.1

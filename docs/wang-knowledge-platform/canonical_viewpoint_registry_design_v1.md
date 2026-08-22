@@ -754,6 +754,21 @@ new reviewed Claim
 
 incremental 的主检索对象是 `CanonicalViewpoint`，不是全部历史 Claim。只有无 active-viewpoint match、候选观点内部边界不清、冲突或 split/merge 风险时，才进入 bounded Claim-to-Claim fallback。每个 viewpoint 的检索投影应包含 core proposition、scope/signature、必要 qualification/tension、代表性 member IDs 与 route synopsis；代表性 member 只帮助检索和证据下钻，不获得高于其他 approved member 的来源权威。
 
+#### 6.2.3 平台级 embedding contract
+
+embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap、增量匹配、智能搜索与 QA 共享 provider/client、batch validation、model descriptor、projection manifest、预算和向量 artifact contract，但各知识对象保持独立 projection/index：
+
+| object kind | projection 的语义主体 | 主要 consumer |
+|---|---|---|
+| `canonical_viewpoint` | core proposition、truth-condition signature、scope、必要 qualification/tension 与编辑别名 | incremental match、Search、QA |
+| `claim` | source-local statement、claim type、经文范围与 attribution | bootstrap recall、来源下钻 |
+| `argument_route` | route label、premise roles、inference pattern 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
+| `evidence` | EvidenceStep statement、step/discourse role、经文范围；需要时绑定 source fragment excerpt | 引文／证据召回 |
+
+每个 object kind 使用独立 `EmbeddingProjectionManifest` 和向量 index，不把四类对象拼进同一个无类型集合。projection 保存 object revision、source record SHA、额外 dependency SHAs、reader-visible-derived text SHA 与 projection SHA；plan 再绑定 provider、model、dimensions、provider contract version、use case、batch fingerprints 与 token estimation method。provider 返回数量、object IDs、dimensions、finite/non-zero vector 任一不匹配均 fail closed。
+
+首个 calibration baseline 是稳定版 `gemini-embedding-2`、768 dimensions。bootstrap Claim-to-Claim 使用对称 `sentence similarity` instruction；Search/QA 使用非对称 document/query instructions。Gemini 2 的多个 raw parts 会聚合为一个 vector，因此 adapter 必须把每项包装成独立 Content 或使用 Batch API，并验证 input/output exact-once；不能只把现有 `gemini-embedding-001` 环境变量改名。模型或维度改变会建立新 index artifact，不能原地覆盖旧向量或修改 master-data semantic revision。
+
 ### 6.3 关系分类
 
 | 比较结果 | registry 动作 | route 动作 |
@@ -1659,6 +1674,21 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 7. 浏览器刷新、深链与 back/forward 保留 viewpoint、snapshot、selected node 和 filter context；重要调查状态进入 URL，而不是只存在 React memory。
 8. 360px 可完成列表、来源和 exception 阅读；复杂 graph 可要求桌面宽度，但必须提供等价的文本／表格视图和键盘导航。
 
+### 13.13 智能搜索与 QA 的分层 embedding 读取
+
+Search/QA 可以复用第 6.2.3 节的 embedding infrastructure，但不能只从一个扁平向量索引生成答案。默认检索顺序是：
+
+```text
+user query
+→ CanonicalViewpoint index（稳定观点候选）
+→ Claim / Evidence index（source-local 可引用依据）
+→ ArgumentRoute index（解释为什么）
+→ ViewpointKnowledgeProjection compiler + consumer eligibility
+→ answer/search card with citations and dependency SHA
+```
+
+不同索引的 score 不直接相加，也不因为同一次查询命中就建立 registry relation。fusion policy 必须保存每层 top-K、filter、score/rank、model/index SHA 与下钻理由；QA 的最终引用仍来自 source-local Evidence/Fragment/Citation，CanonicalViewpoint embedding 只帮助选择稳定解释立场。已有 sermon search 可通过 adapter 复用 shared provider contract，但其旧 SQLite `source_unit_embeddings` 不是 viewpoint/Claim/Evidence index authority，不能因为 provider 相同就混用记录或生命周期。
+
 ## 14. 性能与可扩展性
 
 205+ 篇不能每次对所有 Claim 做全对全比较，也不能反复把全库塞给模型。扩展目标按运行模式定义：
@@ -1684,6 +1714,8 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 性能优化不能降低 identity gate。embedding score、模型置信度、共享经文数、duplicate degree 或某观点已有 member 数都只是召回/排序信号。系统优先减少重复计算和无意义上下文，不以减少证据、隐藏 qualification/tension 或放宽 truth-condition equivalence 换取吞吐量。
 
+截至 #183 的 no-call dry-run，当前 19 篇成功 cohort 的 Claim manifest 分母为 1,212；其中 29 条 source-ineligible Claim 保留 disposition 但不支付模型调用，另外 1,183 条编译为 SHA-bound projections。以 `gemini-embedding-2`、768 dimensions、batch size 64 规划为 19 个 batch／预计 19 次 provider calls，provider input 274,547 bytes，保守 token estimate 137,568。该数字是调用前预算，不是实际 API usage；`model_calls_executed=0`、`apply_allowed=false`。当前 block-matrix exact cosine recall builder 只服务受控 bootstrap/calibration，并在 2,000 records fail closed；更大 cohort 必须接入 bounded ANN index，不能把 exact builder 扩成全库 `O(N²)`。模型、instruction、projection、index algorithm 或 cohort 改变必须重新生成预算，不能把这组数字写成长期常量。
+
 ## 15. 验收映射
 
 | #165 验收项 | 本设计覆盖 |
@@ -1704,7 +1736,7 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 embedding/model-discovery、Matthew、QA、Search 已接入，也不表示正式 viewpoint decisions 已生成；真实语义调用与 apply 仍须另行授权。
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。#183 增加共享 embedding projection/plan/index contract、Gemini 2 exact-per-input adapter、sermon-search compatibility adapter、Claim embedding recall artifact 与 1,212 Claim denominator／1,183 eligible projection no-call budget；这里的“完成”仍不表示真实 embedding 已生成、embedding/model-discovery 已进入 candidate union、Matthew/QA/Search 已接入 viewpoint projection，也不表示正式 viewpoint decisions 已生成。真实语义调用与 apply 仍须另行授权。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
