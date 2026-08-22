@@ -684,6 +684,10 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
     approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review"]
     reason: str = Field(min_length=1)
     input_sha256: str
+    review_artifact_sha256: Optional[str] = None
+    policy_version: Optional[str] = None
+    reviewer_model_ids: list[str] = Field(default_factory=list)
+    semantic_call_artifact_sha256s: list[str] = Field(default_factory=list)
     created_at: str
     review_status: Literal[
         "candidate", "system_approved", "human_approved", "approved", "rejected"
@@ -707,6 +711,26 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
             raise ValueError("system reviewer cannot create human approval")
         if self.reviewer_kind == "human_editor" and self.review_status == "system_approved":
             raise ValueError("human editor decision cannot be labeled system_approved")
+        if self.reviewer_model_ids != sorted(set(self.reviewer_model_ids)):
+            raise ValueError("reviewer_model_ids must be sorted and unique")
+        if self.semantic_call_artifact_sha256s != sorted(
+            set(self.semantic_call_artifact_sha256s)
+        ):
+            raise ValueError(
+                "semantic_call_artifact_sha256s must be sorted and unique"
+            )
+        if self.review_status == "system_approved":
+            if self.approval_basis != "dual_model_consensus":
+                raise ValueError("system-approved identity requires dual-model consensus")
+            if (
+                not self.review_artifact_sha256
+                or not self.policy_version
+                or len(self.reviewer_model_ids) != 2
+                or len(self.semantic_call_artifact_sha256s) != 2
+            ):
+                raise ValueError(
+                    "system-approved identity requires complete review provenance"
+                )
         return self
 
 
