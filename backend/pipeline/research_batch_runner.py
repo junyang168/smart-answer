@@ -209,6 +209,7 @@ def build_command_plan(
             sys.executable, "-m", "backend.pipeline.cross_section_relation_runner",
             "--package", str(paths["package"]), "--output", str(paths["cross_section"]),
             "--model", relation_model, "--reasoning-effort", extraction_effort,
+            "--backend", extraction_backend,
         ]
         # Downstream reads the cross-section package, not the raw extraction.
         # A single-section source gets it written through unchanged, so this
@@ -248,6 +249,7 @@ def build_command_plan(
                         "--transcript-dir", str(member_dir),
                         "--openai-model", adjudicator_model,
                         "--openai-reasoning-effort", extraction_effort,
+                        "--openai-backend", extraction_backend,
                         "--claude-model", reconsideration_model,
                         *(["--max-output-tokens", str(int(adjudicator_budget))]
                           if adjudicator_budget else []),
@@ -375,7 +377,7 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--extraction-backend", choices=("api", "codex-subscription"), default="api",
-        help="transport used by the detailed extraction stage",
+        help="transport used by extraction, cross-section, and primary adjudication",
     )
     parser.add_argument(
         "--write-back-generated-subtitles", action="store_true",
