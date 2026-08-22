@@ -45,6 +45,14 @@ class KnowledgePackageImporter:
         "cross_source_syntheses": "editorial_syntheses",
         "editorial_checks": "editorial_checks",
         "tensions": "tensions",
+        "viewpoint_coverage_snapshots": "viewpoint_coverage_snapshots",
+        "canonical_viewpoints": "canonical_viewpoints",
+        "viewpoint_revisions": "viewpoint_revisions",
+        "viewpoint_claim_links": "viewpoint_claim_links",
+        "viewpoint_identity_candidates": "viewpoint_identity_candidates",
+        "viewpoint_identity_decisions": "viewpoint_identity_decisions",
+        "viewpoint_resolution_ledgers": "viewpoint_resolution_ledgers",
+        "viewpoint_quality_reports": "viewpoint_quality_reports",
     }
 
     REVIEW_FIELDS = {
@@ -124,6 +132,7 @@ class KnowledgePackageImporter:
 
         if findings:
             raise KnowledgePackageValidationError(findings)
+
         return records
 
     @staticmethod
@@ -251,6 +260,49 @@ class KnowledgePackageImporter:
 
         if findings:
             raise KnowledgePackageValidationError(findings)
+
+        # Shape validation cannot prove that a viewpoint's current revision,
+        # membership decision, Claim SHA, ledger, and quality report all name
+        # the same immutable graph. Reuse the PostgreSQL ChangeSet validator so
+        # the filesystem exchange repository cannot accept a package the
+        # authoring authority would refuse.
+        viewpoint_collections = (
+            "viewpoint_coverage_snapshots",
+            "canonical_viewpoints",
+            "viewpoint_revisions",
+            "viewpoint_claim_links",
+            "viewpoint_identity_candidates",
+            "viewpoint_identity_decisions",
+            "viewpoint_resolution_ledgers",
+            "viewpoint_quality_reports",
+        )
+        if any(records[collection] for collection in viewpoint_collections):
+            from .viewpoint_foundation import (
+                ViewpointFoundationValidationError,
+                semantic_record_sha,
+                validate_foundation_change_set,
+            )
+
+            normalized: dict[str, dict[str, dict[str, Any]]] = {}
+            existing: dict[tuple[str, str], dict[str, Any]] = {}
+            for collection, items in records.items():
+                _, id_field = KNOWLEDGE_COLLECTIONS[collection]
+                normalized[collection] = {
+                    str(getattr(item, id_field)): item.model_dump(mode="json")
+                    for item in items
+                }
+                for stored in self.store.list_knowledge_records(collection):
+                    object_id = str(getattr(stored, id_field))
+                    payload = stored.model_dump(mode="json")
+                    existing[(collection, object_id)] = {
+                        "revision": stored.revision,
+                        "content_sha256": semantic_record_sha(payload),
+                        "payload": payload,
+                    }
+            try:
+                validate_foundation_change_set(normalized, existing)
+            except ViewpointFoundationValidationError as exc:
+                raise KnowledgePackageValidationError(exc.findings) from exc
 
     def _validate_provenance(
         self,

@@ -27,6 +27,7 @@ EDGE_COLLECTIONS = {
     "knowledge_relations",
     "claim_relations",
     "claim_relation_constraints",
+    "viewpoint_claim_links",
 }
 REVIEW_FIELDS = {
     "review_status",
@@ -55,6 +56,14 @@ SOURCE_KEYS = {
     "editorial_syntheses": "cross_source_syntheses",
     "editorial_checks": "editorial_checks",
     "tensions": "tensions",
+    "viewpoint_coverage_snapshots": "viewpoint_coverage_snapshots",
+    "canonical_viewpoints": "canonical_viewpoints",
+    "viewpoint_revisions": "viewpoint_revisions",
+    "viewpoint_claim_links": "viewpoint_claim_links",
+    "viewpoint_identity_candidates": "viewpoint_identity_candidates",
+    "viewpoint_identity_decisions": "viewpoint_identity_decisions",
+    "viewpoint_resolution_ledgers": "viewpoint_resolution_ledgers",
+    "viewpoint_quality_reports": "viewpoint_quality_reports",
 }
 
 
@@ -518,6 +527,13 @@ def build_change_set_plan(
     source_kind: str = "knowledge_package",
 ) -> ChangeSetPlan:
     normalized, stated = _normalize_records(package)
+    # The generic JSONB tables deliberately accept new collections without a
+    # DDL migration, but viewpoint master data has cross-record invariants the
+    # shape validator cannot see.  Refuse the ChangeSet before it receives an
+    # id or touches PostgreSQL.
+    from .viewpoint_foundation import validate_foundation_change_set
+
+    validate_foundation_change_set(normalized, existing)
     operations: list[ChangeOperation] = []
     unchanged = 0
     for collection in sorted(normalized):
@@ -913,6 +929,12 @@ class PostgresKnowledgeStore:
     def _edge_values(collection: str, payload: Mapping[str, Any]) -> tuple[str, str, str]:
         if collection == "claim_relation_constraints":
             return str(payload["source_id"]), str(payload["target_id"]), "forbids"
+        if collection == "viewpoint_claim_links":
+            return (
+                str(payload["viewpoint_id"]),
+                str(payload["claim_id"]),
+                str(payload["link_type"]),
+            )
         return (
             str(payload.get("from_id") or payload.get("source_id") or payload.get("from_claim_id")),
             str(payload.get("to_id") or payload.get("target_id") or payload.get("to_claim_id")),
