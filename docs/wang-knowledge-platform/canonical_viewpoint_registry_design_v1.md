@@ -1633,6 +1633,10 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
    让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
 12. **受控二十篇 backfill 与风险审核**
    在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析；低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
+
+   实施时不得用数据库 active source 总数、staging 目录、batch 名称或文件时间倒推出这 20 篇。operator 先提交按 `source_id` 排序且自带 SHA 的显式 selection；每个成功成员必须绑定实际应用的 `KCS-*` ChangeSet。preflight 再冻结当前 source revision/SHA，并且只把这些 ChangeSets 实际写入的 Claim revisions 纳入 input Claim manifest。失败而未 ingest 的 batch member 不进入本轮 source universe；同源历史 Claim、旧 argument-layer entry 与数据库中的其他 active source 只进入 discrepancy report，不能进入 candidate generation。
+
+   preflight 是 fail-closed 的只读步骤：它验证 singular/plural `source_fragment_id(s)`、source-local Evidence、Claim denominator 和 lineage，生成 CoverageSnapshot、全量 `unprocessed` ResolutionLedger 与 resolution queue，但始终保持 `apply_allowed=false`。只有同一 Claim manifest 的 ledger 达到 `complete`，且绑定该 ledger 的逐维 ViewpointQualityReport 为 `pass`，确定性 apply authorization 才能打开 ChangeSet apply 边界；resolution、quality 或 SHA 任一不匹配都必须阻断。
 13. **逐步扩展至 corpus universe**
    按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
 
