@@ -23,6 +23,7 @@
 9. corpus universe、详细抽取覆盖和观点审核覆盖必须分开记录。当前规划语境为 205+ 篇全语料、20 篇已进入详细整理、核心九篇拥有冻结的跨讲关系与 Topic Discovery artifact；这些数字不可写死在 viewpoint identity 上。
 10. 单次 AI 判断只产生内部 candidate。低风险 identity 可在独立双重语义复核、确定性验证与零 blocker 后获得明确标记的 `system_approved`；张力、scope 改变、component 歧义、split/merge/supersedes 与其他高风险判断才进入人工队列。任何自动批准不得冒充 `human_approved`，现有文章自动发布规则也不得原样挪用为观点批准规则。
 11. 观点解析的完整性分母是 CoverageSnapshot 中实际进入本轮处理的 source-bound Claim revisions，不是模型已经找到的 viewpoint 或 member。source eligibility 本身也是 ledger 要回答的判断，不能在建立分母前先把困难 Claim 过滤掉。每个输入 Claim 必须在 `ViewpointResolutionLedger` 中恰好有一个处理状态；未处理与暂缓必须显式可见，不能从统计和下游 projection 中消失。
+12. Canonical master data 必须有 `/admin/wang` 内的可视化工作台。默认体验是只读浏览已编译的 identity、route、relation、coverage、quality 与 lineage；人工只从 exception inbox 进入需要判断的 decision bundle。UI 不直接写 PostgreSQL、不从原始 records 临时重算观点，也不把全库绘成无法审核的 graph hairball。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -1260,6 +1261,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 4. AuthoringPacket 只由 decision `claim_ids` 展开 Claim、EvidenceStep 与 SourceFragment，Author/Revision ledger 也只申报 `claim_ids_used`；
 5. Program Audit 与现有 ProductDependency 只验证 Claim 层，不能验证 viewpoint semantic revision、registry/route snapshot、coverage 或 projection SHA；
 6. 现有 ClaimRelation 在入库后 canonical endpoint 为 `from_id / to_id`，而部分 packet slicing 仍读取 legacy `source_id / target_id`。实现 viewpoint projection 前必须统一 ingress normalization，并增加 PostgreSQL round-trip regression，禁止关系或张力因 alias 差异静默消失。
+7. `/admin/wang` 已有来源覆盖、单来源论证层和健康视图，但没有跨来源 CanonicalViewpoint explorer、route/lineage/impact drill-down 或统一 exception inbox；不得把现有单来源 ArgumentCanvas 直接改名后视为完成主数据 UI。
 
 旧 CompositionPlan 把“跨来源共同结论”“两种正面解释”“不得静默调和”等文字直接写进 decision，是已有文章的显式编辑决定，不是可复用的 canonical identity。不得从这些文字反向声称 registry 已经存在，也不得让下一篇文章复制该段文字来冒充 viewpoint reuse。
 
@@ -1454,6 +1456,123 @@ reader-facing renderer 必须采用 attribution-aware template：
 - editorial synthesis：明确称“编辑综合”；
 - tension candidate：使用未决语气，不静默调和。
 
+### 13.12 Canonical master data workbench
+
+#### 13.12.1 产品位置与用户目标
+
+工作台属于现有 `/admin/wang` 内部编辑界面，与“健康视图”“论证层”“来源覆盖”“马太进度”使用同一 admin auth、导航和视觉系统。新增导航项建议命名为“观点主数据”，路径为：
+
+- `/admin/wang/viewpoints`：全库观点索引与覆盖总览；
+- `/admin/wang/viewpoints/[viewpointId]`：单一 viewpoint 主数据详情；
+- `/admin/wang/viewpoint-exceptions`：唯一的人工 exception inbox。
+
+它主要回答五个问题：
+
+1. 系统当前整理出了哪些观点，处于什么 semantic revision 与 approval 状态？
+2. 每个观点由哪些来源 Claim 支持，分别采用哪些 ArgumentRoutes？
+3. 哪些是 member，哪些只是支持、扩展、限定、应用或张力？
+4. 当前 coverage、ResolutionLedger 和逐维质量是否完整，哪里仍未处理？
+5. 某项 merge/split/revision 会影响哪些文章、QA、搜索卡或其他产品？
+
+#### 13.12.2 信息架构
+
+```mermaid
+flowchart LR
+    O["观点主数据总览"] --> E["Viewpoint Explorer"]
+    O --> X["Exception Inbox"]
+    E --> D["Viewpoint Detail"]
+    D --> S["来源 Claim / Evidence / Citation"]
+    D --> R["Argument Routes"]
+    D --> G["Typed Viewpoint Relations"]
+    D --> L["Revision / Split / Merge Lineage"]
+    D --> P["Product Impact"]
+    X --> B["Decision Bundle"]
+    B --> C["Validated ChangeSet Preview"]
+    C --> D
+```
+
+总览不是 KPI dashboard，也不维护另一套 master counts。顶部只显示与当前 CoverageSnapshot 绑定的最小状态：source coverage、Claim resolution、active viewpoints、exceptions 和受影响产品；全部数字必须链接到组成它的 records。主要内容采用可排序列表而不是全库力导向图，至少支持按 canonical wording/ID、topic、scripture、approval、quality blocker、coverage 与 source date 查找。
+
+#### 13.12.3 Viewpoint Explorer 与 detail
+
+Explorer 默认一行一个 stable `CanonicalViewpoint` identity，显示：
+
+- editorial-normalized core proposition 与明确的措辞标签；
+- identity/revision ID、review status、approval basis；
+- snapshot-bound member/source/route/tension counts；
+- CoverageSnapshot、ViewpointResolutionLedger 和 ViewpointQualityReport 状态；
+- latest attested source date 与 product-impact indicator。
+
+进入 detail 后使用“一个 viewpoint 一个 bounded subgraph”，不能默认载入 205+ 篇全部节点。中心为当前 ViewpointRevision，第一圈只放 identity-bearing members、ArgumentRoutes 和直接 ViewpointRelations；第二圈按用户展开 source-local attestations、Claims、EvidenceSteps 与 Citations。视觉语义必须稳定：
+
+| UI element | 表示什么 | 不能误导成什么 |
+|---|---|---|
+| viewpoint node | 稳定 identity + 当前 semantic revision | 教授逐字原话 |
+| member edge | `equivalent_full/component` identity membership | supports/extends/embedding similarity |
+| route branch | 独立 inferential skeleton | 一组平铺经文或跨来源合成论证 |
+| source attestation | 单一来源中的 ordered EvidenceSteps | registry 自己生成的证据 |
+| typed relation edge | qualifies/extends/applies/tensions/supersedes 等 | membership 或已解决协调 |
+| blocker marker | deferred、unprocessed、quality hard failure | 普通提示或可以忽略的 warning |
+
+detail 同时提供四个非图形视图，避免图形成为唯一入口：
+
+1. **来源**：逐 member 展开 Claim、speaker/stance、EvidenceStep、逐字 Citation、媒体时间和上游成熟度；
+2. **路线**：按 route 对比 source-local attestations 与 full/partial；
+3. **关系与张力**：显示方向、对称性、支持 ClaimRelations、qualification 与 unresolved blockers；
+4. **历史与影响**：revision diff、split/merge/redirect lineage、pinned products 和 pending ImpactEvents。
+
+默认标签使用人能读懂的中文；opaque IDs、SHA、validator/model versions 与 raw JSON 放在 provenance drawer，不占据主阅读面，但必须可复制和深链。
+
+#### 13.12.4 Exception inbox 与单人工作流
+
+Exception inbox 只显示第 10 节明确要求人工判断的事项，不把普通 candidate discovery、尚未运行的自动阶段或低风险 `system_approved` 塞进人工 backlog。默认排序：
+
+1. 阻塞当前文章／QA；
+2. 可能撤回或改变已公开产品；
+3. split/merge/supersedes 与正面所指冲突；
+4. 持续 reviewer disagreement；
+5. 其余人工 exception。
+
+每个 decision bundle 在一个屏幕内并排呈现 proposal 与 independent review 的分歧字段、逐字证据、当前 graph 邻域、下游影响和系统建议的最小 ChangeSet。editor 只选择 `approve proposal / approve reviewer correction / defer / custom correction` 并填写必要理由；不能逐 pair 重复批准同一 identity decision。
+
+第一版 UI 严格只读，用来验证 projections、graph semantics、覆盖和 drill-down。后续写入版本也不得直接 PATCH master records；它只提交带 expected revision、input SHA 和 editor decision 的 ChangeSet，后端完成 validation、impact preview 与原子 apply。apply 前必须再次显示将创建、失效、redirect 或影响的对象；浏览器不能自行计算这些后果。
+
+#### 13.12.5 API 与 projection boundary
+
+UI 只读取后端编译的 `AdminViewpointProjection`，不能扫描 artifact 目录、直接拼 PostgreSQL collections 或在 TypeScript 中重新判断 eligibility。下列为 backend service paths；浏览器沿用现有 same-origin BFF 形式请求对应的 `/api/admin/wang/...`，不能绕过 Next admin proxy 直接访问 backend。建议的只读 endpoints：
+
+```text
+GET /admin/wang/viewpoints/overview?coverage_snapshot_id=...
+GET /admin/wang/viewpoints?q=...&topic_id=...&review_status=...&cursor=...
+GET /admin/wang/viewpoints/{viewpoint_id}?registry_snapshot_id=...
+GET /admin/wang/viewpoints/{viewpoint_id}/lineage
+GET /admin/wang/viewpoints/{viewpoint_id}/impact
+GET /admin/wang/viewpoint-exceptions?priority=...&cursor=...
+GET /admin/wang/viewpoint-exceptions/{decision_bundle_id}
+```
+
+所有 response 至少返回 authority kind、as-of IDs、CoverageSnapshot、ResolutionLedger、quality report、projection SHA 和 links；列表采用 cursor pagination，detail graph 按圈层懒加载。不存在或失效的 revision 返回明确错误，不能自动跳到 current revision。
+
+后续 write endpoint 只接受 ChangeSet proposal，不接受任意 master record body：
+
+```text
+POST /admin/wang/viewpoint-exceptions/{decision_bundle_id}/changesets
+POST /admin/wang/viewpoint-changesets/{changeset_id}/apply
+```
+
+apply 必须要求 editor/admin auth、expected current revisions、CSRF protection、idempotency key 与已验证 impact preview SHA；冲突返回重新加载，不做 last-write-wins。
+
+#### 13.12.6 UI 验收条件
+
+1. 从 viewpoint 可在不复制 ID 的情况下 drill down 到 member Claim、EvidenceStep、Citation 和 source media locator，再原路返回。
+2. `equivalent`、`supports/extends/qualifies/applies`、route 与 tension 在图形和文本中都不能混用同一种视觉或计数。
+3. 选择旧 RegistrySnapshot 时，数字、graph、quality 与来源全部保持同一 as-of，不混入 current records。
+4. partial coverage、`unprocessed`、deferred 与 hard failure 在总览、detail 和 exception bundle 中一致，不得被空白或零代替。
+5. “彼得—磐石”fixture 同屏显示 distinct propositions 与 tension，不会因关键词相同画成一个 member cluster。
+6. first release 没有 mutation controls；后续 release 的每次人工操作只产生可预览、可审计、可重放的 ChangeSet。
+7. 浏览器刷新、深链与 back/forward 保留 viewpoint、snapshot、selected node 和 filter context；重要调查状态进入 URL，而不是只存在 React memory。
+8. 360px 可完成列表、来源和 exception 阅读；复杂 graph 可要求桌面宽度，但必须提供等价的文本／表格视图和键盘导航。
+
 ## 14. 性能与可扩展性
 
 205+ 篇不能每次对所有 Claim 做全对全比较。实现应分层：
@@ -1480,6 +1599,7 @@ reader-facing renderer 必须采用 attribution-aware template：
 | 增量更新、自动低风险审核、人工 exception、错误 split/merge、对抗测试与历史修订 | 第 10、11 节 |
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
+| Canonical master data UI、exception inbox、API/write boundary 与 UI 验收 | 第 13.12 节 |
 | 实现拆成后续 tickets | 第 16 节 |
 | 不调用内容模型、不迁移正式数据、不部署 | 文件状态、2.1、8、12.4 节 |
 
@@ -1494,21 +1614,25 @@ reader-facing renderer 必须采用 attribution-aware template：
 3. **Identity candidate projection**
    从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blocking recall、unmatched/new-viewpoint disposition、blockers 与 stable fingerprints；不调用内容模型。
 4. **Viewpoint identity review workflow**
-   定义 proposal、blind independent review、deterministic risk gates、`system_approved` decision、adjudication、reconsideration schemas、可恢复 runner、风险抽样监测与只显示高风险 exception 的人工 UI；明确模型调用不变量。
+   定义 proposal、blind independent review、deterministic risk gates、`system_approved` decision、adjudication、reconsideration schemas、可恢复 runner、风险抽样监测与 machine-readable exception bundles；明确模型调用不变量，本卡不实现 user-facing UI。
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
    建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
 7. **ViewpointKnowledgeProjection compiler 与 eligibility**
    实现统一 immutable runtime projection、三档 consumer eligibility、ViewpointResolutionLedger/quality report binding、dependency manifest、SHA verification、coverage disclosure 与 fail-closed active build；只使用合成 consumer fixture。
-8. **Matthew authoring downstream integration**
+8. **Canonical master data read-only workbench**
+   在现有 `/admin/wang` 增加“观点主数据”导航、overview、Explorer、bounded viewpoint subgraph、来源／路线／关系／历史／影响 tabs、provenance drawer 与深链；后端提供 cursor-paginated `AdminViewpointProjection` endpoints。第一版没有写按钮，只用合成和只读 POC fixtures。
+9. **Viewpoint exception inbox 与 ChangeSet decisions**
+   实现风险排序的唯一人工队列、proposal/reviewer field diff、source evidence、impact preview、editor decision bundle 与 validated ChangeSet submit/apply；禁止浏览器直写 records，并覆盖 auth、CSRF、idempotency、optimistic concurrency 与 audit lineage。
+10. **Matthew authoring downstream integration**
    先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；保持 source-local legacy path 与 Editorial Reviewer packet 边界。
-9. **QA、Search 与 Topic Discovery adapters**
+11. **QA、Search 与 Topic Discovery adapters**
    让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
-10. **受控二十篇 backfill 与风险审核**
+12. **受控二十篇 backfill 与风险审核**
    在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析；低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
-11. **逐步扩展至 corpus universe**
-    按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
+13. **逐步扩展至 corpus universe**
+   按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
 
 每张实现 ticket 都必须声明：输入 authority、是否允许模型调用、是否允许 `--apply`、回滚方式、测试 fixture 和不部署边界。生产迁移与部署必须另走 operations ticket，并在执行前阅读 operations runbook。
 
@@ -1528,4 +1652,4 @@ reader-facing renderer 必须采用 attribution-aware template：
 
 ## 18. 最终定义
 
-> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph。CoverageSnapshot 说明看过哪些 source revisions，ViewpointResolutionLedger 逐项交代输入 Claim 的处理归宿，ViewpointQualityReport 逐维阻断 provenance、coverage、identity、route、temporal 或 consumer projection 的失败。文章、QA、搜索和专题编排只消费绑定这些不可变 artifacts 的 SHA-bound ViewpointKnowledgeProjection，不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
+> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph。CoverageSnapshot 说明看过哪些 source revisions，ViewpointResolutionLedger 逐项交代输入 Claim 的处理归宿，ViewpointQualityReport 逐维阻断 provenance、coverage、identity、route、temporal 或 consumer projection 的失败。文章、QA、搜索和专题编排只消费绑定这些不可变 artifacts 的 SHA-bound ViewpointKnowledgeProjection；单人 editor 则通过 `/admin/wang` 的 Canonical master data workbench 浏览同一批 compiled facts，并只在 exception inbox 处理高风险 decision bundles。任何 consumer 都不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
