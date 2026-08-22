@@ -14,6 +14,9 @@ from .canonical_repository.viewpoint_admin_projection import (
     AdminViewpointProjectionError,
 )
 from .canonical_repository.viewpoint_resolution import ViewpointExceptionQueueArtifact
+from .canonical_repository.viewpoint_recall_blocking import (
+    ViewpointRecallBlockingArtifact,
+)
 
 
 router = APIRouter(prefix="/admin/wang", tags=["wang-admin-viewpoints"])
@@ -33,10 +36,27 @@ def _exception_queue() -> ViewpointExceptionQueueArtifact | None:
     )
 
 
+def _recall_blocking() -> ViewpointRecallBlockingArtifact | None:
+    """Read one explicitly configured, SHA-valid recall artifact; never scan."""
+
+    configured = os.getenv("WANG_VIEWPOINT_RECALL_BLOCKING_FILE")
+    if not configured:
+        return None
+    path = Path(configured).resolve()
+    if not path.is_file():
+        raise AdminViewpointProjectionError(
+            "configured viewpoint recall blocking artifact does not exist"
+        )
+    return ViewpointRecallBlockingArtifact.model_validate(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
 def _compiler() -> AdminViewpointProjectionCompiler:
     return AdminViewpointProjectionCompiler(
         canonical_repository_service.store,
         exception_queue=_exception_queue(),
+        recall_blocking=_recall_blocking(),
     )
 
 
@@ -53,6 +73,14 @@ def _run(method: str, *args, **kwargs):
 @router.get("/viewpoints/overview")
 def viewpoint_overview(coverage_snapshot_id: str | None = None):
     return _run("overview", coverage_snapshot_id)
+
+
+@router.get("/viewpoints/recall-blocking")
+def viewpoint_recall_blocking_diagnostics(
+    cursor: str | None = None,
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    return _run("recall_diagnostics", cursor=cursor, limit=limit)
 
 
 @router.get("/viewpoints")

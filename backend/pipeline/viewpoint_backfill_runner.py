@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.knowledge_models import ClaimRecord
 from backend.api.canonical_repository.viewpoint_backfill import (
     audit_backfill_readiness,
     freeze_source_manifest,
@@ -16,12 +17,18 @@ from backend.api.canonical_repository.viewpoint_backfill import (
 from backend.api.canonical_repository.viewpoint_foundation import (
     build_identity_candidate_seeds,
     build_resolution_ledger,
+    semantic_record_sha,
     sha256_json,
 )
 from backend.api.canonical_repository.viewpoint_semantic_scheduler import (
     DEFAULT_MAX_BUNDLE_BYTES,
     DEFAULT_MAX_BUNDLE_ITEMS,
     build_semantic_bundle_schedule,
+)
+from backend.api.canonical_repository.viewpoint_recall_blocking import (
+    DEFAULT_MAX_BLOCK_CLAIMS,
+    DEFAULT_MAX_NEIGHBORS,
+    build_viewpoint_recall_blocking,
 )
 
 
@@ -63,6 +70,69 @@ def _load_completed_results(path: Path | None) -> dict[str, str]:
     return completed
 
 
+def _claim_set_closure(
+    *,
+    selection: dict[str, Any],
+    source_manifest: dict[str, Any],
+    claim_manifest: dict[str, Any],
+    change_set_ids: list[str],
+    change_set_states: list[dict[str, str]],
+) -> dict[str, Any]:
+    claim_rows = sorted(
+        claim_manifest["claims"], key=lambda item: str(item["claim_id"])
+    )
+    payload = {
+        "schema_version": "wang_viewpoint_claim_set_closure_v1",
+        "closure_policy_version": "explicit_applied_change_set_snapshot_v1",
+        "selection_id": selection["selection_id"],
+        "selection_sha256": selection["selection_sha256"],
+        "source_manifest_sha256": source_manifest["manifest_sha256"],
+        "claim_manifest_sha256": claim_manifest["manifest_sha256"],
+        "change_sets": change_set_states,
+        "selected_change_sets_terminal": all(
+            item["status"] == "applied" for item in change_set_states
+        ),
+        "source_completeness_claimed": False,
+        "closure_basis": (
+            "exact Claims written by the explicitly selected applied ChangeSets; "
+            "later extraction is outside this immutable cohort"
+        ),
+        "claim_count": len(claim_rows),
+        "claim_set_digest_sha256": sha256_json(claim_rows),
+    }
+    payload["artifact_sha256"] = sha256_json(payload)
+    return payload
+
+
+def _recheck_claim_set_closure(
+    *,
+    store: PostgresKnowledgeStore,
+    change_set_ids: list[str],
+    expected_change_set_states: list[dict[str, str]],
+    claim_manifest: dict[str, Any],
+) -> None:
+    if store.list_change_set_states(change_set_ids) != expected_change_set_states:
+        raise ValueError("selected ChangeSet state changed during preflight")
+    expected_ids = sorted(str(item["claim_id"]) for item in claim_manifest["claims"])
+    current_ids = sorted(store.list_change_set_object_ids(change_set_ids, "claims"))
+    if current_ids != expected_ids:
+        raise ValueError("selected ChangeSet Claim denominator changed during preflight")
+    current_claims = {
+        str(item["claim_id"]): item for item in store.list_records("claims")
+    }
+    for pinned in claim_manifest["claims"]:
+        claim_id = str(pinned["claim_id"])
+        current = current_claims.get(claim_id)
+        if current is None:
+            raise ValueError(f"{claim_id}: Claim disappeared during preflight")
+        claim = ClaimRecord.model_validate(current)
+        if (
+            claim.revision != int(pinned["pinned_claim_revision"])
+            or semantic_record_sha(claim) != pinned["claim_revision_sha256"]
+        ):
+            raise ValueError(f"{claim_id}: Claim changed during preflight")
+
+
 def run_preflight(
     *,
     selection_path: Path,
@@ -72,6 +142,8 @@ def run_preflight(
     created_at: str | None = None,
     max_bundle_items: int = DEFAULT_MAX_BUNDLE_ITEMS,
     max_bundle_bytes: int = DEFAULT_MAX_BUNDLE_BYTES,
+    max_recall_neighbors: int = DEFAULT_MAX_NEIGHBORS,
+    max_recall_block_claims: int = DEFAULT_MAX_BLOCK_CLAIMS,
     completed_results_path: Path | None = None,
 ) -> dict[str, Any]:
     selection = _read(selection_path)
@@ -94,6 +166,13 @@ def run_preflight(
         for row in manifest["sources"]
         if row["latest_extraction_status"] == "applied"
     ]
+    change_set_states = store.list_change_set_states(change_set_ids)
+    if (
+        [item["change_set_id"] for item in change_set_states]
+        != sorted(change_set_ids)
+        or any(item["status"] != "applied" for item in change_set_states)
+    ):
+        raise ValueError("selected source cohort requires existing applied ChangeSets")
     claim_scope_ids = store.list_change_set_object_ids(change_set_ids, "claims")
     artifacts = audit_backfill_readiness(
         manifest=manifest,
@@ -123,6 +202,14 @@ def run_preflight(
             manifest_claim_ids
         )
     ]
+    recall_blocking = build_viewpoint_recall_blocking(
+        claim_manifest=artifacts["claim_manifest"],
+        claims=collections["claims"],
+        claim_relations=scoped_relations,
+        existing_links=collections["viewpoint_claim_links"],
+        max_neighbors_per_claim=max_recall_neighbors,
+        max_block_claims=max_recall_block_claims,
+    )
     candidates = build_identity_candidate_seeds(
         artifacts["claim_manifest"],
         scoped_relations,
@@ -156,6 +243,7 @@ def run_preflight(
         claims=collections["claims"],
         evidence_steps=collections["evidence_steps"],
         source_fragments=collections["source_fragments"],
+        recall_blocking=recall_blocking,
         completed_results_by_reuse_key=_load_completed_results(completed_results_path),
         max_bundle_items=max_bundle_items,
         max_bundle_bytes=max_bundle_bytes,
@@ -193,15 +281,30 @@ def run_preflight(
         "selection_rule": "explicit_manifest_only; database and argument-layer sets are diagnostics",
     }
     discrepancy["artifact_sha256"] = sha256_json(discrepancy)
+    closure = _claim_set_closure(
+        selection=selection,
+        source_manifest=manifest,
+        claim_manifest=artifacts["claim_manifest"],
+        change_set_ids=change_set_ids,
+        change_set_states=change_set_states,
+    )
+    _recheck_claim_set_closure(
+        store=store,
+        change_set_ids=change_set_ids,
+        expected_change_set_states=change_set_states,
+        claim_manifest=artifacts["claim_manifest"],
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = {
         "source-manifest.json": manifest,
         "coverage-snapshot.json": artifacts["coverage_snapshot"],
         "claim-manifest.json": artifacts["claim_manifest"],
+        "claim-set-closure.json": closure,
         "readiness-report.json": artifacts["readiness"],
         "preflight-packet.json": artifacts["preflight_packet"],
         "resolution-ledger.json": ledger.model_dump(mode="json"),
         "resolution-queue.json": queue,
+        "recall-blocking-report.json": recall_blocking.model_dump(mode="json"),
         "semantic-bundle-schedule.json": semantic_schedule.model_dump(mode="json"),
         "source-set-discrepancy.json": discrepancy,
     }
@@ -215,6 +318,11 @@ def run_preflight(
         **artifacts["readiness"]["summary"],
         "preflight_packet_sha256": artifacts["preflight_packet"]["artifact_sha256"],
         "identity_candidate_count": len(candidates),
+        "recall_covered_claim_count": recall_blocking.statistics["covered_claim_count"],
+        "recall_uncovered_claim_count": recall_blocking.statistics["uncovered_claim_count"],
+        "recall_candidate_pair_count": recall_blocking.statistics[
+            "unique_candidate_pair_count"
+        ],
         "semantic_bundle_count": semantic_schedule.statistics["bundle_count"],
         "semantic_exception_count": semantic_schedule.statistics[
             "exception_candidate_count"
@@ -232,6 +340,10 @@ def main() -> None:
     parser.add_argument("--created-at")
     parser.add_argument("--max-bundle-items", type=int, default=DEFAULT_MAX_BUNDLE_ITEMS)
     parser.add_argument("--max-bundle-bytes", type=int, default=DEFAULT_MAX_BUNDLE_BYTES)
+    parser.add_argument("--max-recall-neighbors", type=int, default=DEFAULT_MAX_NEIGHBORS)
+    parser.add_argument(
+        "--max-recall-block-claims", type=int, default=DEFAULT_MAX_BLOCK_CLAIMS
+    )
     parser.add_argument("--completed-results", type=Path)
     args = parser.parse_args()
     print(
@@ -244,6 +356,8 @@ def main() -> None:
                 created_at=args.created_at,
                 max_bundle_items=args.max_bundle_items,
                 max_bundle_bytes=args.max_bundle_bytes,
+                max_recall_neighbors=args.max_recall_neighbors,
+                max_recall_block_claims=args.max_recall_block_claims,
                 completed_results_path=args.completed_results,
             ),
             ensure_ascii=False,

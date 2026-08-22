@@ -15,11 +15,12 @@ from .knowledge_models import (
     evidence_fragment_ids,
 )
 from .viewpoint_foundation import canonical_json, semantic_record_sha, sha256_json
+from .viewpoint_recall_blocking import ViewpointRecallBlockingArtifact
 
 
-SCHEDULER_VERSION = "viewpoint_semantic_bundle_scheduler_v1"
-SCHEDULE_VERSION = "wang_viewpoint_semantic_bundle_schedule_v1"
-TRANSPORT_VERSION = "wang_viewpoint_semantic_transport_bundle_v1"
+SCHEDULER_VERSION = "viewpoint_semantic_bundle_scheduler_v2"
+SCHEDULE_VERSION = "wang_viewpoint_semantic_bundle_schedule_v2"
+TRANSPORT_VERSION = "wang_viewpoint_semantic_transport_bundle_v2"
 DEFAULT_MAX_BUNDLE_ITEMS = 8
 DEFAULT_MAX_BUNDLE_BYTES = 96 * 1024
 
@@ -37,6 +38,7 @@ class SemanticCandidateWorkItem(StrictScheduleArtifact):
     source_ids: list[str]
     topic_ids: list[str]
     scripture_refs: list[str]
+    recall_neighbor_claim_ids: list[str] = Field(default_factory=list)
     candidate_artifact_sha256: str
     semantic_input: dict[str, Any]
     estimated_input_bytes: int = Field(gt=0)
@@ -44,7 +46,13 @@ class SemanticCandidateWorkItem(StrictScheduleArtifact):
 
     @model_validator(mode="after")
     def validate_item(self) -> "SemanticCandidateWorkItem":
-        for name in ("claim_ids", "source_ids", "topic_ids", "scripture_refs"):
+        for name in (
+            "claim_ids",
+            "source_ids",
+            "topic_ids",
+            "scripture_refs",
+            "recall_neighbor_claim_ids",
+        ):
             values = getattr(self, name)
             if values != sorted(set(values)):
                 raise ValueError(f"{name} must be sorted and unique")
@@ -57,6 +65,15 @@ class SemanticCandidateWorkItem(StrictScheduleArtifact):
             raise ValueError("semantic input candidate id mismatch")
         if self.semantic_input.get("candidate_claim_ids") != self.claim_ids:
             raise ValueError("semantic input Claim ids mismatch")
+        context_ids = sorted(
+            {
+                str(neighbor["claim_id"])
+                for neighborhood in self.semantic_input.get("recall_neighborhoods") or []
+                for neighbor in neighborhood.get("neighbors") or []
+            }
+        )
+        if context_ids != self.recall_neighbor_claim_ids:
+            raise ValueError("semantic input recall-neighbor ids mismatch")
         return self
 
 
@@ -108,10 +125,11 @@ class SemanticReuseBinding(StrictScheduleArtifact):
 
 
 class SemanticBundleSchedule(StrictScheduleArtifact):
-    schema_version: Literal["wang_viewpoint_semantic_bundle_schedule_v1"] = SCHEDULE_VERSION
-    scheduler_version: Literal["viewpoint_semantic_bundle_scheduler_v1"] = SCHEDULER_VERSION
+    schema_version: Literal["wang_viewpoint_semantic_bundle_schedule_v2"] = SCHEDULE_VERSION
+    scheduler_version: Literal["viewpoint_semantic_bundle_scheduler_v2"] = SCHEDULER_VERSION
     preflight_packet_sha256: str
     resolution_queue_sha256: str
+    recall_blocking_artifact_sha256: str | None = None
     max_bundle_items: int = Field(gt=0)
     max_bundle_bytes: int = Field(gt=0)
     input_candidate_ids: list[str]
@@ -153,6 +171,7 @@ class SemanticBundleSchedule(StrictScheduleArtifact):
                     "scheduler_version": self.scheduler_version,
                     "preflight_packet_sha256": self.preflight_packet_sha256,
                     "resolution_queue_sha256": self.resolution_queue_sha256,
+                    "recall_blocking_artifact_sha256": self.recall_blocking_artifact_sha256,
                     "candidate_artifact_sha256": item.candidate_artifact_sha256,
                     "semantic_input": item.semantic_input,
                 }
@@ -195,6 +214,9 @@ class SemanticBundleSchedule(StrictScheduleArtifact):
             "bundle_count": len(self.bundles),
             "reused_candidate_count": len(reused),
             "exception_candidate_count": len(exceptions),
+            "recall_neighbor_reference_count": sum(
+                len(item.recall_neighbor_claim_ids) for item in self.work_items
+            ),
         }
         if self.statistics != expected:
             raise ValueError("schedule statistics mismatch")
@@ -298,6 +320,7 @@ def build_semantic_bundle_schedule(
     claims: Sequence[Mapping[str, Any] | ClaimRecord],
     evidence_steps: Sequence[Mapping[str, Any] | EvidenceStepRecord],
     source_fragments: Sequence[Mapping[str, Any] | SourceFragmentRecord],
+    recall_blocking: Mapping[str, Any] | ViewpointRecallBlockingArtifact | None = None,
     completed_results_by_reuse_key: Mapping[str, str] | None = None,
     max_bundle_items: int = DEFAULT_MAX_BUNDLE_ITEMS,
     max_bundle_bytes: int = DEFAULT_MAX_BUNDLE_BYTES,
@@ -333,6 +356,19 @@ def build_semantic_bundle_schedule(
     stated_manifest_sha = str(manifest_payload.pop("manifest_sha256", ""))
     if not stated_manifest_sha or stated_manifest_sha != sha256_json(manifest_payload):
         raise ValueError("Claim manifest SHA mismatch")
+    recall_artifact = (
+        _as_model(recall_blocking, ViewpointRecallBlockingArtifact)
+        if recall_blocking is not None
+        else None
+    )
+    if (
+        recall_artifact is not None
+        and recall_artifact.claim_manifest_sha256 != stated_manifest_sha
+    ):
+        raise ValueError("recall blocking artifact belongs to another Claim manifest")
+    recall_by_claim = {
+        item.focal_claim_id: item for item in recall_artifact.neighborhoods
+    } if recall_artifact else {}
     evidence_index = {
         item.evidence_step_id: item
         for item in (_as_model(value, EvidenceStepRecord) for value in evidence_steps)
@@ -397,11 +433,59 @@ def build_semantic_bundle_schedule(
             "blocker_codes": candidate.blocker_codes,
             "claims": claim_rows,
         }
+        recall_neighborhoods: list[dict[str, Any]] = []
+        recall_neighbor_ids: set[str] = set()
+        for focal_claim_id in candidate.candidate_claim_ids:
+            neighborhood = recall_by_claim.get(focal_claim_id)
+            if not neighborhood:
+                continue
+            neighbor_rows: list[dict[str, Any]] = []
+            for neighbor in neighborhood.neighbors:
+                neighbor_claim = claim_index.get(neighbor.claim_id)
+                pinned_neighbor = manifest_claims.get(neighbor.claim_id)
+                if (
+                    not neighbor_claim
+                    or not pinned_neighbor
+                    or pinned_neighbor.get("claim_revision_sha256")
+                    != semantic_record_sha(neighbor_claim)
+                ):
+                    raise ValueError(
+                        f"{candidate.identity_candidate_id}: recall neighbor "
+                        f"{neighbor.claim_id} is missing or stale"
+                    )
+                recall_neighbor_ids.add(neighbor.claim_id)
+                neighbor_rows.append(
+                    {
+                        **neighbor.model_dump(mode="json"),
+                        "claim_type": neighbor_claim.claim_type,
+                        "attribution": neighbor_claim.attribution,
+                        "scripture_refs": sorted(
+                            value if isinstance(value, str) else canonical_json(value)
+                            for value in neighbor_claim.scripture_refs
+                        ),
+                    }
+                )
+            recall_neighborhoods.append(
+                {
+                    "focal_claim_id": focal_claim_id,
+                    "claim_role": neighborhood.claim_role,
+                    "normalized_topic_terms": neighborhood.normalized_topic_terms,
+                    "scripture_chapter_keys": neighborhood.scripture_chapter_keys,
+                    "neighbors": sorted(neighbor_rows, key=lambda item: item["claim_id"]),
+                }
+            )
+        semantic_input["recall_blocking_artifact_sha256"] = (
+            recall_artifact.artifact_sha256 if recall_artifact else None
+        )
+        semantic_input["recall_neighborhoods"] = recall_neighborhoods
         candidate_sha = semantic_record_sha(candidate)
         reuse_payload = {
             "scheduler_version": SCHEDULER_VERSION,
             "preflight_packet_sha256": preflight_packet_sha256,
             "resolution_queue_sha256": resolution_queue_sha256,
+            "recall_blocking_artifact_sha256": (
+                recall_artifact.artifact_sha256 if recall_artifact else None
+            ),
             "candidate_artifact_sha256": candidate_sha,
             "semantic_input": semantic_input,
         }
@@ -464,6 +548,7 @@ def build_semantic_bundle_schedule(
                 source_ids=sorted(source_ids),
                 topic_ids=topic_ids,
                 scripture_refs=scripture_refs,
+                recall_neighbor_claim_ids=sorted(recall_neighbor_ids),
                 candidate_artifact_sha256=candidate_sha,
                 semantic_input=semantic_input,
                 estimated_input_bytes=estimated_bytes,
@@ -534,12 +619,18 @@ def build_semantic_bundle_schedule(
         "bundle_count": len(bundles),
         "reused_candidate_count": len(reused),
         "exception_candidate_count": len(exceptions),
+        "recall_neighbor_reference_count": sum(
+            len(item.recall_neighbor_claim_ids) for item in work_items
+        ),
     }
     payload = {
         "schema_version": SCHEDULE_VERSION,
         "scheduler_version": SCHEDULER_VERSION,
         "preflight_packet_sha256": preflight_packet_sha256,
         "resolution_queue_sha256": resolution_queue_sha256,
+        "recall_blocking_artifact_sha256": (
+            recall_artifact.artifact_sha256 if recall_artifact else None
+        ),
         "max_bundle_items": max_bundle_items,
         "max_bundle_bytes": max_bundle_bytes,
         "input_candidate_ids": candidate_ids,

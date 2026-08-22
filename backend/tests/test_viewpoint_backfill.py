@@ -243,6 +243,16 @@ def test_runner_uses_change_set_claim_denominator_and_is_idempotent(
             assert collection == "claims"
             return ["CL-CURRENT"]
 
+        def list_change_set_states(self, change_set_ids):
+            assert change_set_ids == ["KCS-A"]
+            return [
+                {
+                    "change_set_id": "KCS-A",
+                    "fingerprint_sha256": "kcs-fingerprint",
+                    "status": "applied",
+                }
+            ]
+
     monkeypatch.setattr(viewpoint_backfill_runner, "PostgresKnowledgeStore", FakeStore)
     output_dir = tmp_path / "output"
 
@@ -253,6 +263,8 @@ def test_runner_uses_change_set_claim_denominator_and_is_idempotent(
     first_schedule = json.loads(
         (output_dir / "semantic-bundle-schedule.json").read_text()
     )
+    first_recall = json.loads((output_dir / "recall-blocking-report.json").read_text())
+    closure = json.loads((output_dir / "claim-set-closure.json").read_text())
     second = viewpoint_backfill_runner.run_preflight(
         selection_path=selection_path, output_dir=output_dir
     )
@@ -262,6 +274,13 @@ def test_runner_uses_change_set_claim_denominator_and_is_idempotent(
     assert first_queue["claim_count"] == 1
     assert first_queue["identity_candidate_count"] == 1
     assert first["semantic_bundle_count"] == 1
+    assert first["recall_covered_claim_count"] == 0
+    assert first["recall_uncovered_claim_count"] == 1
+    assert first_recall["statistics"]["input_claim_count"] == 1
+    assert first_schedule["recall_blocking_artifact_sha256"] == first_recall["artifact_sha256"]
+    assert closure["claim_count"] == 1
+    assert closure["selected_change_sets_terminal"] is True
+    assert closure["source_completeness_claimed"] is False
     reuse_key = first_schedule["work_items"][0]["reuse_key_sha256"]
     completed_path = tmp_path / "completed-results.json"
     completed = {

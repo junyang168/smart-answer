@@ -25,6 +25,7 @@ from .knowledge_models import (
 )
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 from .viewpoint_resolution import ViewpointExceptionQueueArtifact
+from .viewpoint_recall_blocking import ViewpointRecallBlockingArtifact
 from .viewpoint_runtime_projection import ViewpointRuntimeCompiler
 
 
@@ -69,9 +70,15 @@ def _read_cursor(value: str | None, snapshot_id: str) -> int:
 class AdminViewpointProjectionCompiler:
     """Compile repository objects into one immutable admin-facing read model."""
 
-    def __init__(self, store: Any, exception_queue: ViewpointExceptionQueueArtifact | None = None):
+    def __init__(
+        self,
+        store: Any,
+        exception_queue: ViewpointExceptionQueueArtifact | None = None,
+        recall_blocking: ViewpointRecallBlockingArtifact | None = None,
+    ):
         self.store = store
         self.exception_queue = exception_queue
+        self.recall_blocking = recall_blocking
         self.records = {
             name: list(store.list_knowledge_records(name))
             for name in (
@@ -184,6 +191,12 @@ class AdminViewpointProjectionCompiler:
                 "id": self.exception_queue.exception_queue_id,
                 "sha256": self.exception_queue.artifact_sha256,
             })
+        if self.recall_blocking:
+            bound.append({
+                "collection": "viewpoint_recall_blocking",
+                "id": self.recall_blocking.blocking_version,
+                "sha256": self.recall_blocking.artifact_sha256,
+            })
         bound.sort(key=lambda item: (item["collection"], item["id"]))
         projection_sha = sha256_json(bound)
         registry_set_sha = sha256_json(
@@ -282,10 +295,94 @@ class AdminViewpointProjectionCompiler:
                 "exceptions": len(self.exception_queue.bundles) if self.exception_queue else 0,
                 "affected_products": len(affected),
                 "quality_dimensions": [_dump(item) for item in state["quality"].dimensions] if state["quality"] else [],
+                "recall": {
+                    "available": True,
+                    "artifact_sha256": self.recall_blocking.artifact_sha256,
+                    "blocking_version": self.recall_blocking.blocking_version,
+                    "normalization_version": self.recall_blocking.normalization_version,
+                    "statistics": self.recall_blocking.statistics,
+                    "known_positive_recall": _dump(
+                        self.recall_blocking.known_positive_recall
+                    ),
+                } if self.recall_blocking else {"available": False},
             },
             {
                 "viewpoints": "/admin/wang/viewpoints",
                 "exceptions": "/admin/wang/viewpoint-exceptions",
+            },
+        )
+
+    def recall_diagnostics(
+        self, *, cursor: str | None = None, limit: int = 10
+    ) -> dict[str, Any]:
+        state = self._state()
+        artifact = self.recall_blocking
+        if not artifact:
+            return self._envelope(
+                state,
+                {
+                    "available": False,
+                    "items": [],
+                    "total": 0,
+                    "next_cursor": None,
+                    "suppressed_blocks": [],
+                    "unparsed_scripture_refs": [],
+                },
+                {
+                    "self": "/admin/wang/viewpoints/recall-blocking",
+                    "viewpoints": "/admin/wang/viewpoints",
+                },
+            )
+        ordered = sorted(
+            artifact.neighborhoods,
+            key=lambda item: (
+                -max((neighbor.score for neighbor in item.neighbors), default=0),
+                -len(item.neighbors),
+                item.focal_claim_id,
+            ),
+        )
+        offset = _read_cursor(cursor, state["registry_snapshot_id"])
+        page = ordered[offset:offset + limit]
+        next_cursor = (
+            _cursor(state["registry_snapshot_id"], offset + limit)
+            if offset + limit < len(ordered)
+            else None
+        )
+        items = []
+        for neighborhood in page:
+            items.append({
+                "focal_claim_id": neighborhood.focal_claim_id,
+                "focal_statement": neighborhood.focal_statement,
+                "claim_role": neighborhood.claim_role,
+                "normalized_topic_terms": neighborhood.normalized_topic_terms,
+                "scripture_chapter_keys": neighborhood.scripture_chapter_keys,
+                "neighbors": [
+                    {
+                        **_dump(neighbor),
+                    }
+                    for neighbor in neighborhood.neighbors
+                ],
+            })
+        return self._envelope(
+            state,
+            {
+                "available": True,
+                "artifact_sha256": artifact.artifact_sha256,
+                "blocking_version": artifact.blocking_version,
+                "normalization_version": artifact.normalization_version,
+                "statistics": artifact.statistics,
+                "known_positive_recall": _dump(artifact.known_positive_recall),
+                "items": items,
+                "total": len(ordered),
+                "next_cursor": next_cursor,
+                "suppressed_blocks": [
+                    _dump(item) for item in artifact.suppressed_blocks
+                ],
+                "unparsed_scripture_refs": artifact.unparsed_scripture_refs,
+            },
+            {
+                "self": "/admin/wang/viewpoints/recall-blocking",
+                "viewpoints": "/admin/wang/viewpoints",
             },
         )
 
