@@ -68,6 +68,8 @@ class EmbeddingProviderDescriptor(StrictEmbeddingModel):
     model: str = Field(min_length=1)
     dimensions: int = Field(ge=1, le=3072)
     provider_contract_version: str = Field(min_length=1)
+    transport_mode: str = "provider_defined"
+    endpoint_location: str = "provider_default"
 
 
 class EmbeddingProjectionManifest(StrictEmbeddingModel):
@@ -422,6 +424,10 @@ class GoogleGeminiEmbeddingProvider:
         model: str = DEFAULT_GEMINI_MODEL,
         dimensions: int = DEFAULT_DIMENSIONS,
         batch_size: int = DEFAULT_BATCH_SIZE,
+        transport_mode: Literal[
+            "gemini_developer_multi_content", "vertex_single_content"
+        ] = "gemini_developer_multi_content",
+        endpoint_location: str = "global",
         client: Any | None = None,
     ) -> None:
         if not 128 <= dimensions <= 3072:
@@ -431,6 +437,8 @@ class GoogleGeminiEmbeddingProvider:
         self.model = model
         self.dimensions = dimensions
         self.batch_size = batch_size
+        self.transport_mode = transport_mode
+        self.endpoint_location = endpoint_location
         self._client = client
 
     @property
@@ -440,10 +448,12 @@ class GoogleGeminiEmbeddingProvider:
             model=self.model,
             dimensions=self.dimensions,
             provider_contract_version=(
-                "google_gemini_embedding_2_exact_content_v1"
+                "google_gemini_embedding_2_exact_content_v2"
                 if self.model == DEFAULT_GEMINI_MODEL
                 else "google_gemini_embedding_1_task_type_v1"
             ),
+            transport_mode=self.transport_mode,
+            endpoint_location=self.endpoint_location,
         )
 
     def prepare_document(
@@ -471,7 +481,46 @@ class GoogleGeminiEmbeddingProvider:
             from google import genai
 
             api_key = os.getenv("GEMINI_API_KEY") or None
-            self._client = genai.Client(api_key=api_key) if api_key else genai.Client()
+            if api_key:
+                self._client = genai.Client(api_key=api_key)
+            elif self.transport_mode == "vertex_single_content":
+                discovered = genai.Client()
+                if not bool(getattr(discovered, "vertexai", False)):
+                    raise ValueError("embedding plan requires a Vertex AI client")
+                project = getattr(discovered._api_client, "project", None)
+                self._client = genai.Client(
+                    vertexai=True,
+                    project=project,
+                    location=self.endpoint_location,
+                )
+            else:
+                self._client = genai.Client()
+        is_vertex = bool(getattr(self._client, "vertexai", False))
+        actual_location = getattr(
+            getattr(self._client, "_api_client", None), "location", None
+        )
+        if (
+            self.model == DEFAULT_GEMINI_MODEL
+            and self.transport_mode == "vertex_single_content"
+            and not is_vertex
+        ):
+            raise ValueError("embedding plan requires a Vertex AI client")
+        if (
+            self.model == DEFAULT_GEMINI_MODEL
+            and self.transport_mode == "vertex_single_content"
+            and actual_location is not None
+            and actual_location != self.endpoint_location
+        ):
+            raise ValueError("embedding client location differs from the pinned plan")
+        if (
+            self.model == DEFAULT_GEMINI_MODEL
+            and self.transport_mode == "gemini_developer_multi_content"
+            and is_vertex
+        ):
+            raise ValueError(
+                "embedding plan requires Gemini Developer API; Vertex AI accepts "
+                "only one gemini-embedding-2 Content per sync request"
+            )
         return self._client
 
     def embed_documents(
@@ -524,8 +573,14 @@ class GoogleGeminiEmbeddingProvider:
 
         vectors: list[list[float]] = []
         client = self._get_client()
-        for start in range(0, len(prepared), self.batch_size):
-            batch = prepared[start : start + self.batch_size]
+        request_batch_size = (
+            1
+            if self.model == DEFAULT_GEMINI_MODEL
+            and self.transport_mode == "vertex_single_content"
+            else self.batch_size
+        )
+        for start in range(0, len(prepared), request_batch_size):
+            batch = prepared[start : start + request_batch_size]
             if self.model == DEFAULT_GEMINI_MODEL:
                 contents = [
                     types.Content(parts=[types.Part.from_text(text=text)]) for text in batch
