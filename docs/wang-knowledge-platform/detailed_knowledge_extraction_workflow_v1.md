@@ -90,12 +90,17 @@ flowchart LR
 
 ### 没有 `##` 的来源
 
-115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能（`GeminiClient.generate_subtitles`）取得边界。
+115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
 
-两个设计约束：
+已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：保存全部一级、二级 insertion，核对旧 SHA，写入后重新加载，再从带标题的新来源开始抽取。
 
-- **生成的小标题不写回来源档**。插入会让其后所有 S 编号位移，锚点、ledger inventory、`source_sha256` 全跟着变；而这里只需要边界，标题文字放进 prompt 当 breadcrumb 就够了。
-- **计画按来源雜湊快取，其指纹进 `extraction_identity`**。它是模型调用，不快取的话重跑可能重新分段，两次抽取就不可比。
+三个设计约束：
+
+- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与有写权限的 `--subtitle-user-id`，并通过讲道 ACL，才可修改 `script_review`，其他来源拒绝写回。
+- **原有 row 逐列不变。** 保存后移除本次新增的 subtitle rows，剩余内容必须与写入前逐列、逐序完全相同；任何正文或既有标题差异都在抽取前失败。
+- **抽取只认写入后的来源。** 保存后重新读取档案，新的 `source_sha256`、S 编号、section plan 与 extraction fingerprint 全部从带标题版本重算。旧来源的 section cache 不会被误用。
+
+未开启写入模式时，内部 section plan 仍按来源雜湊快取，其指纹进入 `extraction_identity`；这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
 
 ### 每次抽取自带计分板
 
@@ -232,6 +237,20 @@ schema、model、generation fingerprint 與輸出 SHA 的既有審計鏈。
 Claude 獨立複審仍使用 Anthropic provider，仍可能產生 Anthropic API 費用；它不會因
 `--backend codex-subscription` 改走 Codex。
 
+对仍在 `script_review` 的无标题讲道，先由 pipeline 通过正式服务写入标题，再抽取：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
+  --ids "S 220206" \
+  --write-back-generated-subtitles \
+  --subtitle-user-id <有该讲道写权限的用户 email> \
+  --backend codex-subscription \
+  --model gpt-5.6-sol
+```
+
+这个命令不会自动认领讲道。它先在 audit 目录备份写回前原稿，正文逐列不变且保存后 SHA 可重载验证时才开始知识抽取。
+
 切分层级可以调，且**必须靠 ledger 分数来调，不靠改措辞**。改动前后各跑一次 `sentence_ledger_runner`，比较 `by_category.prose.represented_pct`：
 
 ```bash
@@ -306,6 +325,23 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
   --batch backend/pipeline/research_batches/covenant_law_validation_01.json \
   --dry-run
 ```
+
+批次中若同时包含母本、`script_review` 与不可变的 `script_published` 讲道，可明确让详细
+抽取走 subscription，并只对 `script_review` 成员执行 ACL 检查后的标题写回：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.research_batch_runner \
+  --batch <research-batch.json> \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_review \
+  --transcript-dir /opt/homebrew/var/www/church/web/data/script_published \
+  --extraction-backend codex-subscription \
+  --write-back-generated-subtitles \
+  --subtitle-user-id <有写权限的用户 email> \
+  --dry-run
+```
+
+`--dry-run` 只显示逐成员命令，不调用模型或写档。正式运行时，母本照常抽取；已发布讲道
+只使用内部 section plan；只有仍在 review 区且没有可用标题的讲道会进入 governed save。
 
 实际执行可用 `--stage extract|review|adjudicate|apply|merge` 分阶段恢复，也可使用默认 `all`。抽取、复审与仲裁都以来源、prompt、模型和 schema 指纹判断是否可以跳过；相同世代不会重复消耗模型调用。`--force` 只应用于明确要求重做的抽取与 Claude 复审。
 

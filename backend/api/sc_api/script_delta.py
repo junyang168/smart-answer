@@ -5,6 +5,7 @@ import os
 import math
 import re
 import datetime
+import tempfile
 
 from .sentence_splitter import SentenceSplitter
 
@@ -208,23 +209,57 @@ class ScriptDelta:
     def save_script(self,user_id:str, type:str, item:str, data):
         #update local file        
         folder = 'slide' if type == 'slides' else 'script_review'
-        file_path = os.path.join(self.base_folder, folder, item + '.json')  
-        with open(file_path, "w", encoding='UTF-8') as file:
-            data_dicts = []
-            for p in data:
-                ent = { 'text':p.text }
-                if p.type:
-                    ent['type'] = p.type
-                    ent['user_id'] = p.user_id 
-                if p.index:
-                    ent['index'] = p.index
-                if p.end_index:
-                    ent['end_index'] = p.end_index
-                data_dicts.append(ent)    
-
-            json.dump(data_dicts, file, ensure_ascii=False, indent=4)    
+        data_dicts = []
+        for p in data:
+            ent = { 'text':p.text }
+            if p.type:
+                ent['type'] = p.type
+                ent['user_id'] = p.user_id
+            if p.index:
+                ent['index'] = p.index
+            if p.end_index:
+                ent['end_index'] = p.end_index
+            data_dicts.append(ent)
+        self.save_script_rows(folder, data_dicts)
 
         return {"message": f"{folder} updated successfully"}
+
+    def save_script_rows(self, folder: str, rows):
+        """Atomically save already-normalized rows without dropping their fields.
+
+        The editor's ``save_script`` deliberately projects Pydantic objects to
+        its historical wire shape. Pipeline subtitle persistence starts with
+        the canonical JSON rows and must prove every existing row stayed exact,
+        so it uses this narrower mapping-based entry point.
+        """
+
+        self.save_rows(self.base_folder, self.item_name, folder, rows)
+
+    @staticmethod
+    def save_rows(base_folder: str, item_name: str, folder: str, rows):
+        """Atomic mapping save that does not require loading the media timeline."""
+
+        if folder not in ('slide', 'script_review'):
+            raise ValueError(f"unsupported script folder: {folder}")
+        target = os.path.join(base_folder, folder, item_name + '.json')
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        target_mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{item_name}.", suffix=".tmp", dir=os.path.dirname(target)
+        )
+        try:
+            os.chmod(temporary, target_mode)
+            with os.fdopen(descriptor, "w", encoding="UTF-8") as file:
+                json.dump(list(rows), file, ensure_ascii=False, indent=4)
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, target)
+        except Exception:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
 
 
     @staticmethod

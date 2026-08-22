@@ -221,6 +221,7 @@ export interface SubtitleInsertion {
 
 export interface GenerateSubtitlesPayload {
   paragraphs: SurmonScriptParagraph[];
+  user_id?: string;
   // Which sermon this is, so the model call it triggers is recorded against the
   // same source the pipeline records against instead of an anonymous run.
   item?: string;

@@ -2856,6 +2856,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       const payload: GenerateSubtitlesPayload = {
         paragraphs: contentParagraphs,
         item,
+        user_id: resolvedUserEmail ?? undefined,
       };
 
       const insertions = await fetchJSON<SubtitleInsertion[]>(`${API_PREFIX}/generate_subtitles`, {
@@ -2898,7 +2899,7 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
           for (const ins of startInsertions) {
             newParagraphs.push({
               index: `subtitle-${Date.now()}-${insertedCount++}`,
-              type: "content",
+              type: "subtitle",
               text: ins.text,
               user_id: resolvedUserEmail ?? undefined,
               user_name: "AI Assistant",

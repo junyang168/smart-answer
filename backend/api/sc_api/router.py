@@ -247,7 +247,12 @@ def load(user_id: str, file_type: str, item: str, ext: str = "txt") -> str:
 
 @router.post("/update_script")
 def update_script(request: UpdateRequest):
-    return sermon_manager.update_sermon(request.user_id or "", request.type, request.item, request.data)
+    try:
+        return sermon_manager.update_sermon(
+            request.user_id or "", request.type, request.item, request.data
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.post("/update_header")
@@ -321,6 +326,13 @@ def generate_subtitles(payload: GenerateSubtitlesRequest):
     told the editor's user nothing had gone wrong -- and drop an insertion whose
     `after_index` does not parse.
     """
+
+    if payload.user_id and payload.item:
+        permissions = sermon_manager.get_sermon_permissions(payload.user_id, payload.item)
+        if not permissions.canWrite:
+            raise HTTPException(
+                status_code=403, detail="You don't have permission to update this item"
+            )
 
     # Imported here because `backend.pipeline.stage1` imports back into
     # `backend.api`, and this module is part of what that import builds.

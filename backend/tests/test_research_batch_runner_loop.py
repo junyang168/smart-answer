@@ -274,6 +274,17 @@ def test_a_transcript_is_found_across_several_directories(tmp_path, monkeypatch,
     assert str(review) in by_member["乙"]
 
 
+def test_batch_cli_requires_actor_for_subtitle_writeback(tmp_path, monkeypatch) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    with pytest.raises(SystemExit):
+        _run(
+            monkeypatch,
+            ["--batch", str(batch), "--transcript-dir", str(transcripts),
+             "--write-back-generated-subtitles", "--dry-run"],
+        )
+
+
 def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatch) -> None:
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙")

@@ -178,13 +178,47 @@ class SermonManager:
     def update_sermon(self, user_id:str, type:str,  item:str, data:dict):
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canWrite:
-            return {"message": "You don't have permission to update this item"}
+            raise PermissionError("You don't have permission to update this item")
         
         #update last updated and author
         self._sm.update_sermon_metadata(user_id, item)
 
         sd = ScriptDelta(self.base_folder, item)
         return sd.save_script(user_id, type, item,data)
+
+    def persist_generated_subtitles(
+        self,
+        user_id: str,
+        item: str,
+        *,
+        expected_source_sha256: str,
+        insertions: List[dict],
+    ) -> dict:
+        """Persist pipeline-generated headings through the governed save layer.
+
+        This is intentionally not a direct-write helper in the extraction
+        runner. The same ACL that guards the editor guards this method, and an
+        optimistic SHA check prevents a model response generated for an older
+        transcript from being applied over a proofreader's newer work.
+        """
+
+        permissions = self.get_sermon_permissions(user_id, item)
+        if not permissions.canWrite:
+            raise PermissionError("You don't have permission to update this item")
+
+        from backend.pipeline.sermon_subtitle_persistence import (
+            write_back_generated_subtitles,
+        )
+
+        source_path = Path(self.base_folder) / "script_review" / f"{item}.json"
+        report = write_back_generated_subtitles(
+            source_path,
+            expected_source_sha256=expected_source_sha256,
+            insertions=insertions,
+            actor_id=user_id,
+        )
+        self._sm.update_sermon_metadata(user_id, item)
+        return report
 
     def update_sermon_header(
         self,
