@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -488,6 +489,30 @@ class _RecordingConnection:
 
     def cursor(self) -> _RecordingCursor:
         return self._cursor
+
+
+def test_dependency_invalidation_matches_any_pinned_manifest_record() -> None:
+    cursor = _RecordingCursor(())
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+
+    count = store._invalidate_dependencies(
+        cursor,
+        SimpleNamespace(change_set_id="CS-VIEWPOINT"),
+        [("viewpoint_revisions", "CVR-PETER-1", 1, 2)],
+        0,
+    )
+
+    select = next(
+        (sql, params) for sql, params in cursor.statements
+        if "collection='product_dependencies'" in sql and "SELECT object_id" in sql
+    )
+    assert count == 0
+    assert "dependency_manifest" in select[0]
+    assert select[1] == (
+        "viewpoint_revisions",
+        "CVR-PETER-1",
+        '[{"collection":"viewpoint_revisions","record_id":"CVR-PETER-1"}]',
+    )
 
 
 def test_apply_records_which_fields_an_update_removed() -> None:

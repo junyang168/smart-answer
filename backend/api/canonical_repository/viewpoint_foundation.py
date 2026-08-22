@@ -754,6 +754,10 @@ def validate_foundation_change_set(
         "canonical_viewpoints",
         "viewpoint_revisions",
         "viewpoint_claim_links",
+        "argument_routes",
+        "argument_route_revisions",
+        "argument_route_attestations",
+        "viewpoint_relations",
         "viewpoint_identity_candidates",
         "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers",
@@ -765,6 +769,8 @@ def validate_foundation_change_set(
     immutable_collections = {
         "viewpoint_coverage_snapshots",
         "viewpoint_revisions",
+        "argument_route_revisions",
+        "argument_route_attestations",
         "viewpoint_identity_candidates",
         "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers",
@@ -1122,6 +1128,19 @@ def validate_foundation_change_set(
             for scope_id in report.get("scope_ids") or []:
                 if str(scope_id) not in decisions and str(scope_id) not in candidates:
                     findings.append(f"{report_id}: missing identity scope {scope_id}")
+
+    from .viewpoint_runtime_projection import validate_runtime_authoring_graph
+
+    runtime_collections = {
+        collection: payloads(collection)
+        for collection in (
+            "source_documents", "source_fragments", "claims", "evidence_steps",
+            "claim_relations", "canonical_viewpoints", "viewpoint_revisions",
+            "viewpoint_claim_links", "argument_routes", "argument_route_revisions",
+            "argument_route_attestations", "viewpoint_relations",
+        )
+    }
+    findings.extend(validate_runtime_authoring_graph(runtime_collections))
 
     if findings:
         raise ViewpointFoundationValidationError(findings)

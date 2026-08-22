@@ -25,6 +25,7 @@ from .knowledge_models import (
 )
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 from .viewpoint_resolution import ViewpointExceptionQueueArtifact
+from .viewpoint_runtime_projection import ViewpointRuntimeCompiler
 
 
 MEMBERSHIP_TYPES = frozenset({"equivalent_full", "equivalent_component"})
@@ -86,6 +87,10 @@ class AdminViewpointProjectionCompiler:
                 "canonical_viewpoints",
                 "viewpoint_revisions",
                 "viewpoint_claim_links",
+                "argument_routes",
+                "argument_route_revisions",
+                "argument_route_attestations",
+                "viewpoint_relations",
                 "viewpoint_resolution_ledgers",
                 "viewpoint_quality_reports",
             )
@@ -138,6 +143,15 @@ class AdminViewpointProjectionCompiler:
             coverage.coverage_snapshot_id if coverage else None,
             ledger.resolution_ledger_id if ledger else None,
         )
+        runtime = ViewpointRuntimeCompiler(self.records, self.citations)
+        registry_snapshots = (
+            runtime.compile_registry_snapshots(coverage.coverage_snapshot_id)
+            if coverage else []
+        )
+        route_snapshots = (
+            runtime.compile_route_snapshots(coverage.coverage_snapshot_id)
+            if coverage else []
+        )
         bound = []
         for name in (
             "source_documents",
@@ -148,6 +162,10 @@ class AdminViewpointProjectionCompiler:
             "claims",
             "evidence_steps",
             "knowledge_routes",
+            "argument_routes",
+            "argument_route_revisions",
+            "argument_route_attestations",
+            "viewpoint_relations",
             "claim_relations",
             "product_dependencies",
             "impact_events",
@@ -168,11 +186,16 @@ class AdminViewpointProjectionCompiler:
             })
         bound.sort(key=lambda item: (item["collection"], item["id"]))
         projection_sha = sha256_json(bound)
+        registry_set_sha = sha256_json(
+            [item.artifact_sha256 for item in registry_snapshots]
+        )
         return {
             "coverage": coverage,
             "ledger": ledger,
             "quality": quality,
-            "registry_snapshot_id": f"RGS-{projection_sha[:20]}",
+            "registry_snapshot_id": f"RGSET-{registry_set_sha[:20]}",
+            "registry_snapshots": registry_snapshots,
+            "route_snapshots": route_snapshots,
             "projection_sha256": projection_sha,
         }
 
@@ -181,6 +204,8 @@ class AdminViewpointProjectionCompiler:
         for name in (
             "coverage_snapshot_id", "resolution_ledger_id", "quality_report_id",
             "viewpoint_id", "viewpoint_revision_id", "viewpoint_claim_link_id",
+            "argument_route_id", "argument_route_revision_id", "argument_route_attestation_id",
+            "viewpoint_relation_id",
             "claim_id", "evidence_step_id", "route_id", "claim_relation_id",
             "dependency_id", "impact_event_id", "source_id", "fragment_id",
         ):
@@ -198,6 +223,10 @@ class AdminViewpointProjectionCompiler:
             "viewpoint_coverage_snapshots": "coverage_snapshot_id",
             "canonical_viewpoints": "viewpoint_id", "viewpoint_revisions": "viewpoint_revision_id",
             "viewpoint_claim_links": "viewpoint_claim_link_id",
+            "argument_routes": "argument_route_id",
+            "argument_route_revisions": "argument_route_revision_id",
+            "argument_route_attestations": "argument_route_attestation_id",
+            "viewpoint_relations": "viewpoint_relation_id",
             "viewpoint_resolution_ledgers": "resolution_ledger_id",
             "viewpoint_quality_reports": "quality_report_id",
         }
@@ -316,7 +345,16 @@ class AdminViewpointProjectionCompiler:
                 continue
             claim_ids = {item.claim_id for item in member_links}
             source_ids = set().union(*(sources_by_claim.get(claim_id, set()) for claim_id in claim_ids)) if claim_ids else set()
-            route_count = sum(item.claim_id in claim_ids for item in self.records["knowledge_routes"])
+            route_count = sum(
+                item.conclusion_viewpoint_id == viewpoint.viewpoint_id
+                for item in self.records["argument_routes"]
+                if item.route_status == "active"
+            )
+            viewpoint_relations = [
+                item for item in self.records["viewpoint_relations"]
+                if item.effective_state == "active"
+                and viewpoint.viewpoint_id in {item.source_viewpoint_id, item.target_viewpoint_id}
+            ]
             products = set().union(*(deps_by_claim.get(claim_id, set()) for claim_id in claim_ids)) if claim_ids else set()
             if impact_only and not products:
                 continue
@@ -333,8 +371,8 @@ class AdminViewpointProjectionCompiler:
                 "counts": {
                     "members": len(member_links), "sources": len(source_ids),
                     "routes": route_count,
-                    "tensions": sum(item.link_type == "tension_evidence" for item in related_links),
-                    "related": len(related_links),
+                    "tensions": sum(item.relation_type == "tensions_with" for item in viewpoint_relations),
+                    "related": len(viewpoint_relations),
                 },
                 "product_impact_count": len(products),
                 "quality_blocked": state["quality"].eligibility_decision == "fail" if state["quality"] else None,
@@ -420,31 +458,64 @@ class AdminViewpointProjectionCompiler:
                     },
                 })
             members.append({"link": _dump(link), "claim": _dump(claim), "evidence": steps})
-        membership_by_claim: dict[str, str] = {}
-        for link in self.records["viewpoint_claim_links"]:
-            if link.effective_state == "active" and link.link_type in MEMBERSHIP_TYPES:
-                membership_by_claim.setdefault(link.claim_id, link.viewpoint_id)
         relations = []
-        for link in [item for item in links if item.link_type in RELATION_TYPES]:
+        for relation in sorted(
+            [
+                item for item in self.records["viewpoint_relations"]
+                if item.effective_state == "active"
+                and viewpoint_id in {item.source_viewpoint_id, item.target_viewpoint_id}
+            ],
+            key=lambda item: item.viewpoint_relation_id,
+        ):
             relations.append({
-                "relation_id": link.viewpoint_claim_link_id,
-                "relation_type": link.link_type,
-                "from_viewpoint_id": viewpoint_id,
-                "to_viewpoint_id": membership_by_claim.get(link.claim_id),
-                "claim_id": link.claim_id,
-                "claim_statement": claims[link.claim_id].statement if link.claim_id in claims else None,
-                "supporting_relation_ids": link.supporting_relation_ids,
-                "review_status": link.review_status,
+                "relation_id": relation.viewpoint_relation_id,
+                "relation_type": relation.relation_type,
+                "from_viewpoint_id": relation.source_viewpoint_id,
+                "to_viewpoint_id": relation.target_viewpoint_id,
+                "claim_id": relation.supporting_claim_ids[0] if relation.supporting_claim_ids else None,
+                "claim_statement": relation.reason,
+                "supporting_relation_ids": relation.supporting_claim_relation_ids,
+                "review_status": relation.review_status,
             })
         routes = []
-        for route in self.records["knowledge_routes"]:
-            if route.claim_id in member_claim_ids:
-                routes.append({**_dump(route), "evidence_step_ids": claims[route.claim_id].evidence_step_ids if route.claim_id in claims else []})
+        route_revisions = idx["argument_route_revisions"]
+        route_attestations = self.records["argument_route_attestations"]
+        snapshots = {
+            item.argument_route_id: item
+            for item in state["route_snapshots"]
+            if item.conclusion_viewpoint_id == viewpoint_id
+        }
+        for route in sorted(
+            [item for item in self.records["argument_routes"] if item.conclusion_viewpoint_id == viewpoint_id and item.route_status == "active"],
+            key=lambda item: item.argument_route_id,
+        ):
+            route_revision = route_revisions.get(route.current_revision_id)
+            snapshot = snapshots.get(route.argument_route_id)
+            attestations = sorted(
+                [
+                    item for item in route_attestations
+                    if snapshot and item.argument_route_attestation_id in snapshot.active_attestation_ids
+                ],
+                key=lambda item: item.argument_route_attestation_id,
+            )
+            evidence_step_ids = [
+                step_id for item in attestations for step_id in item.ordered_evidence_step_ids
+            ]
+            routes.append({
+                "route_id": route.argument_route_id,
+                "route_type": route_revision.route_label if route_revision else "推理路线",
+                "claim_id": attestations[0].claim_id if attestations else None,
+                "evidence_step_ids": evidence_step_ids,
+                "route": _dump(route),
+                "revision": _dump(route_revision) if route_revision else None,
+                "attestations": [_dump(item) for item in attestations],
+                "snapshot": snapshot.model_dump(mode="json") if snapshot else None,
+            })
         revisions = sorted(
             [_dump(item) for item in self.records["viewpoint_revisions"] if item.viewpoint_id == viewpoint_id],
             key=lambda item: item["revision_number"], reverse=True,
         )
-        impact = self._impact(member_claim_ids)
+        impact = self._impact(member_claim_ids, viewpoint.current_revision_id)
         graph = {
             "nodes": [
                 {"id": viewpoint_id, "kind": "viewpoint", "label": revision.core_proposition},
@@ -469,8 +540,11 @@ class AdminViewpointProjectionCompiler:
             {"self": f"/admin/wang/viewpoints/{viewpoint_id}", "collection": "/admin/wang/viewpoints"},
         )
 
-    def _impact(self, claim_ids: set[str]) -> dict[str, Any]:
-        dependencies = [item for item in self.records["product_dependencies"] if item.claim_id in claim_ids]
+    def _impact(self, claim_ids: set[str], viewpoint_revision_id: str) -> dict[str, Any]:
+        dependencies = [
+            item for item in self.records["product_dependencies"]
+            if item.claim_id in claim_ids or viewpoint_revision_id in item.viewpoint_revision_ids
+        ]
         dep_ids = {item.dependency_id for item in dependencies}
         events = [item for item in self.records["impact_events"] if dep_ids.intersection(item.affected_dependency_ids)]
         return {"dependencies": [_dump(item) for item in dependencies], "events": [_dump(item) for item in events]}

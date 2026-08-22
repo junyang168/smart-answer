@@ -60,10 +60,14 @@ export type ViewpointDetail = {
     representation_kind: string; not_a_direct_quote: true; scope: { scripture_scope: string[] };
   };
   members: Member[];
-  routes: Array<Record<string, unknown> & { route_id: string; route_type: string; claim_id: string; evidence_step_ids: string[] }>;
+  routes: Array<Record<string, unknown> & {
+    route_id: string; route_type: string; claim_id: string | null; evidence_step_ids: string[];
+    attestations: Array<Record<string, unknown>>;
+    snapshot: null | Record<string, unknown> & { eligibility: string; full_attestation_count: number; partial_attestation_count: number };
+  }>;
   relations: Array<{
     relation_id: string; relation_type: string; from_viewpoint_id: string; to_viewpoint_id: string | null;
-    claim_id: string; claim_statement: string | null; review_status: string;
+    claim_id: string | null; claim_statement: string | null; review_status: string;
   }>;
   history: Array<Record<string, unknown> & { viewpoint_revision_id: string; revision_number: number; core_proposition: string; review_status: string }>;
   impact: { dependencies: Array<Record<string, unknown>>; events: Array<Record<string, unknown>> };
