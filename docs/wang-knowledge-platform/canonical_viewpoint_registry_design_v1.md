@@ -1,9 +1,9 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
-> 状态：Canonical Viewpoint layer 的规范性 architecture authority；实现尚未开始。本文件不创建正式观点、不迁移数据、不调用内容模型，也不授权部署。
+> 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、review contract、projection、只读 UI、受控 cohort scheduler 与规则召回诊断已经实现，正式语义解析、master-data apply 与下游接入尚未执行。本文件不创建正式观点、不迁移数据、不调用内容模型，也不授权部署。
 > 版本：v1
 > 日期：2026-08-22
-> 追踪：GitHub issue #165，WKP-F02.7
+> 追踪：GitHub issue #165（WKP-F02.7）、#181（WKP-F02.15 scalability revision）
 > 权威边界：PostgreSQL 继续是 authoring authority；来源局部 `Claim`、`EvidenceStep`、`SourceFragment` 与 Canonical Citation 继续是可追溯事实的权威。
 
 ## 1. 决策摘要
@@ -20,10 +20,13 @@
 6. 同一结论、同一推理表示为同一 viewpoint 下同一 `ArgumentRoute` 的多个 source-local attestations；同一结论、不同推理表示为同一 viewpoint 下不同 routes。
 7. `duplicate` 连通分量只能生成 identity candidate，不能用 union-find 自动建立 canonical membership；`duplicate` 不是可安全传递的等价闭包。
 8. 全部篇数、来源数、出现次数、路线数与经文数由结构机械计算，不在自然语言 summary 中维护另一份数字。
-9. corpus universe、详细抽取覆盖和观点审核覆盖必须分开记录。当前规划语境为 205+ 篇全语料、20 篇已进入详细整理、核心九篇拥有冻结的跨讲关系与 Topic Discovery artifact；这些数字不可写死在 viewpoint identity 上。
+9. corpus universe、详细抽取覆盖和观点审核覆盖必须分开记录。当前规划语境为 205+ 篇全语料、最新 20 篇选择中 19 篇成功应用并组成受控详细 cohort、核心九篇拥有冻结的跨讲关系与 Topic Discovery artifact；这些数字不可写死在 viewpoint identity 上，失败的第 20 项不进入 Claim 分母。
 10. 单次 AI 判断只产生内部 candidate。低风险 identity 可在独立双重语义复核、确定性验证与零 blocker 后获得明确标记的 `system_approved`；张力、scope 改变、component 歧义、split/merge/supersedes 与其他高风险判断才进入人工队列。任何自动批准不得冒充 `human_approved`，现有文章自动发布规则也不得原样挪用为观点批准规则。
 11. 观点解析的完整性分母是 CoverageSnapshot 中实际进入本轮处理的 source-bound Claim revisions，不是模型已经找到的 viewpoint 或 member。source eligibility 本身也是 ledger 要回答的判断，不能在建立分母前先把困难 Claim 过滤掉。每个输入 Claim 必须在 `ViewpointResolutionLedger` 中恰好有一个处理状态；未处理与暂缓必须显式可见，不能从统计和下游 projection 中消失。
 12. Canonical master data 必须有 `/admin/wang` 内的可视化工作台。默认体验是只读浏览已编译的 identity、route、relation、coverage、quality 与 lineage；人工只从 exception inbox 进入需要判断的 decision bundle。UI 不直接写 PostgreSQL、不从原始 records 临时重算观点，也不把全库绘成无法审核的 graph hairball。
+13. 观点解析分为两种不同运行模式。`bootstrap` 用于尚无足够 active registry identity 的初次建库，主要解析 Claim-to-Claim 候选；`incremental` 用于 registry 建立后的新来源，必须先把新 Claim 匹配到少量 active CanonicalViewpoint，再按需下钻其代表性 Claim、Evidence 与 ArgumentRoute。日常增量不得重跑全量 Claim-to-Claim。
+14. 候选发现采用多通道召回：可解释的规则召回、版本化 embedding 近邻召回，以及受预算约束的模型语义发现。三者结果取并集并保存通道 provenance；任何通道都只能提出“值得比较”，不能建立 member、relation、CanonicalViewpoint 或 approval。没有 scoped gold set 时不得宣称某一通道或并集已达到 corpus-wide recall。
+15. 可扩展性的目标不是让全量重算跑得更快，而是让成本随本轮新增 Claim 近似线性增长。候选数、模型 packet 与人工 exception 都必须有硬上限；正常增量只产生 delta ChangeSet，定期全局审计独立离线运行，不能成为每篇新来源入库的前置条件。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -55,10 +58,10 @@
 | 范围 | 当前含义 | 可作什么结论 |
 |---|---|---|
 | source universe | 平台两百多篇来源；其中 `CORPUS-SURVEY-205-V1` 是 205 篇的封闭历史普查基线，后来来源不得写回该基线 | 当前 source-universe manifest 决定 registry 本轮理论覆盖范围；survey claims 仍是 candidate，不是已审核 Claim |
-| detailed extraction coverage | 当前已有 20 篇进入较详细知识整理 | 可为观点匹配提供来源局部 Claim，但各篇审核成熟度仍须逐项检查 |
+| detailed extraction coverage | 最新显式选择包含 20 项；其中 19 篇成功应用并组成当前受控 cohort，失败项明确排除 | 19 篇的 pinned Claim revisions 可为观点匹配提供来源局部 Claim；失败项、旧世代与其他 active source 不进入本轮分母 |
 | frozen viewpoint POC fixture | 核心九篇 artifact：158 条 Claim、67 条经复核跨讲关系、6 个母题、13 个子专题、55 个篇章段落 | 可做只读 schema 映射与回归；不代表当前全覆盖，也不得推广为 205+ 篇结论 |
 
-“20 篇”是当前规划事实，不是从 staging 文件数推导的权威统计。同一来源可能存在于多个 research batch 或 generation；实现后必须由 SHA-bound source manifest 计算覆盖，而不是扫描目录或读取 batch 名称。
+“最新 20 项选择、19 篇成功 cohort”是当前运行事实，不是从 staging 文件数推导的权威统计。同一来源可能存在于多个 research batch 或 generation；实现必须由 SHA-bound selection、实际应用的 KCS ChangeSet 与 Claim manifest 计算覆盖，而不是扫描目录或读取 batch 名称。失败项只保留在 selection/discrepancy 记录中，不进入 candidate generation 或 ResolutionLedger Claim 分母。
 
 205 篇 corpus survey 是一次性、已关闭的历史普查基线，不是会随新讲道变化的 source-universe registry。它不能因为 viewpoint registry 建立而被刷新、滚动生成 V2，survey candidate 也不能直接成为 approved viewpoint member。survey 只能帮助候选召回和覆盖缺口说明；当前全平台来源范围另由不可变的 source-universe manifest snapshot 表示。
 
@@ -665,12 +668,17 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 
 论据不同不妨碍 identity 相同；结论相似但条件或范围不同，则通常是 `qualifies`、`extends` 或 `specializes`。
 
-### 6.2 发现流水线
+### 6.2 多通道候选发现与身份解析
 
 ```mermaid
 flowchart LR
-    N["new or unmastered Claim"] --> B["deterministic candidate blocking"]
-    B --> P["proposition comparison proposal"]
+    N["new or unmastered Claim"] --> D["rule recall"]
+    N --> E["embedding recall"]
+    N --> M["bounded model discovery"]
+    D --> U["candidate union + provenance"]
+    E --> U
+    M --> U
+    U --> P["proposition comparison proposal"]
     P --> R["independent identity review"]
     R -->|agree| C["AI-consensus internal candidate"]
     R -->|change/reject| A["adjudication and reconsideration"]
@@ -682,17 +690,21 @@ flowchart LR
     H2 --> V
 ```
 
-候选 blocking 可以使用：
+候选召回可以使用：
 
 - 已审核 `duplicate` 边；
 - proposition signature 的 exact/compatible fields；
 - 相同或相近主体、谓词、经文与概念；
-- survey 与 semantic retrieval 只用于召回，不用于归并；
+- 版本化 embedding 近邻、survey 线索与受预算约束的模型语义发现，只用于召回，不用于归并；
 - `unrelated` constraint、外部 attribution 与明确冲突作为 blocker。
 
-模型可提出 signature、关系分类和理由，但程序必须验证 ID、来源、范围与 evidence references；模型不得分配 canonical ID 或批准自己的输出。
+三个通道不是多数投票。候选并集优先保护 recall；每个 pair 必须保存由哪些通道召回、各通道版本及原始 score/signal。规则未命中不能否决 embedding 或模型发现的候选，低 embedding score 也不能否决规则命中。模型可提出 signature、关系分类和理由，但程序必须验证 ID、来源、范围与 evidence references；模型不得分配 canonical ID 或批准自己的输出。
 
-#### 6.2.1 释经观点与 deterministic recall blocking
+embedding 输入必须是 SHA-bound、reader-visible text 未被改写的检索投影；索引保存 embedding model/version、projection version、向量维度、构建 manifest 与 artifact SHA。top-K 与最低相似度只控制工作量，不能作为 identity threshold。模型主动发现只读取受大小约束的主题包或 registry synopsis，不自行遍历数据库；其输出必须列出 input 中的 Claim/viewpoint IDs，不能凭记忆创造候选。
+
+启用哪些通道由版本化 `retrieval_policy` 决定。规则 baseline 始终保留；embedding 与模型发现先在 calibration/exploration lane 测量边际召回和成本，只有证明有价值或用于明确的漏项审计时才进入常规运行。policy 必须记录每个通道的 top-K、阈值、预算与 fallback，不能把一次实验配置静默变成永久成本。
+
+#### 6.2.1 释经观点与规则召回基线
 
 `CanonicalViewpoint` 不只保存跨经卷的神学综合，也保存可跨文章复用、具有稳定真值条件的具体经文解释。两者使用同一个 registry identity，不另建 `ExegeticalViewpoint` master table：
 
@@ -703,17 +715,44 @@ flowchart LR
 
 `claim_role` 是版本化的召回与下游使用分类，不是第二套 identity，也不建立 passage/theology 的 parent-child hierarchy。局部释义可以通过 `supports`、`grounds`、`generalizes` 或 `applies` 等显式关系支撑较广神学观点；相同经文范围不表示同一观点。
 
-正式 backfill 在 identity review 之前必须先产生 SHA-bound `ViewpointRecallBlockingArtifact`。它以 pinned Claim manifest 为唯一分母，并满足：
+正式 bootstrap 在 identity review 之前必须先产生 SHA-bound `ViewpointRecallBlockingArtifact`。它是可解释、可复现的规则召回 baseline，不是最终唯一召回通道；它以 pinned Claim manifest 为唯一分母，并满足：
 
 1. 使用规范化 `topic_terms`、经文章节、claim role、proposition signature、已审核 duplicate 与已有 viewpoint membership 建立有界 recall neighborhood；繁简体归一只改变 blocking key，不改写 Claim statement、教授原话或 canonical wording；
 2. 每个 eligible Claim 恰好作为一个 focal Claim 出现一次；neighbor 可在多个 neighborhood 中重复，因为共现只表示“值得比较”；
 3. 每个 neighborhood、单个 block、transport item 与 transport bundle 均有显式 item/byte 上限；超过上限的高频泛词或经文章节必须进入 `suppressed_blocks`，不能静默截断；
-4. shared keyword、shared scripture、embedding 或 co-bundling 都不是 identity evidence；它们不能创建 duplicate edge、membership、CanonicalViewpoint 或 approval；
+4. shared keyword、shared scripture、embedding、模型发现或 co-bundling 都不是 identity evidence；它们不能创建 duplicate edge、membership、CanonicalViewpoint 或 approval；
 5. 已知 reviewed duplicate 只能作为版本化 regression gold set。报告必须同时给出分母、找回数与适用范围；没有 scope 内正例时写 `recall=null`，不得把旧数据或候选 relation 冒充 gold，也不得把 known-positive recall 宣称为 corpus-wide recall；
 6. artifact 报告每个 Claim 的 neighbor 数、uncovered Claims、unique candidate pairs、suppressed blocks、无法解析的经文引用和预计 transport 量，并绑定 normalization/blocking version；
 7. semantic shortlist 可以读取 neighbor 的简洁 statement/signals，但正式 identity decision 仍必须为进入 proposal 的比较对象编译 source-local、SHA-bound Evidence packet，并遵守 proposal／blind review／risk gate。
 
-这使 `singleton_discovery` 表示“该 focal Claim 尚无 registry identity”，而不是“不要拿它与别的 Claim 比较”。scheduler 必须把 recall neighborhood 作为 semantic input 和 reuse fingerprint 的一部分；blocking artifact、Claim revision 或 normalization version 任一改变都使旧 schedule/reuse 失效。
+这使 `singleton_discovery` 表示“该 focal Claim 尚无 registry identity”，而不是“不要拿它与别的 Claim 比较”。scheduler 必须把候选并集及其 channel provenance 作为 semantic input 和 reuse fingerprint 的一部分；任一通道 artifact、Claim revision、检索投影或版本改变都使受影响 schedule/reuse 失效。#179 已实现的 deterministic artifact 在 embedding/model-discovery 接入后继续保留，作为覆盖诊断、回归与 fallback，而不是被删除或被误报为完整语义召回。
+
+#### 6.2.2 Bootstrap 与 incremental 是两条不同 lane
+
+`bootstrap` 解决“当前 Claim 尚未形成稳定 registry”的冷启动问题：
+
+```text
+pinned historical Claim cohort
+→ rule ∪ embedding ∪ bounded-model candidate recall
+→ Claim-to-Claim semantic shortlist
+→ evidence-bound identity review
+→ proposed CanonicalViewpoint / member / relation / route ChangeSets
+```
+
+它允许 bounded Claim-to-Claim 比较，但复杂度目标是 `O(N × K)`，其中 `K` 是每个 focal Claim 的候选硬上限；禁止退化为 `O(N²)` 全对全。bootstrap 是显式、可恢复的批处理，不因每篇新讲道而重跑。
+
+`incremental` 解决 registry 建立后的日常维护问题：
+
+```text
+new reviewed Claim
+→ retrieve top-K active CanonicalViewpoint signatures
+→ compare Claim with viewpoint core + representative members
+→ only on ambiguity load further Claim/Evidence/ArgumentRoute context
+→ match / new route / typed relation / candidate new viewpoint
+→ delta ChangeSet
+```
+
+incremental 的主检索对象是 `CanonicalViewpoint`，不是全部历史 Claim。只有无 active-viewpoint match、候选观点内部边界不清、冲突或 split/merge 风险时，才进入 bounded Claim-to-Claim fallback。每个 viewpoint 的检索投影应包含 core proposition、scope/signature、必要 qualification/tension、代表性 member IDs 与 route synopsis；代表性 member 只帮助检索和证据下钻，不获得高于其他 approved member 的来源权威。
 
 ### 6.3 关系分类
 
@@ -778,7 +817,7 @@ flowchart LR
 
 ## 8. 核心九篇只读 schema 映射示例
 
-本节只读取现有冻结 artifact，不创建正式 ID、不重新调用模型、不把九篇结果推广到当前 20 篇或 205+ 篇。
+本节只读取现有冻结 artifact，不创建正式 ID、不重新调用模型、不把九篇结果推广到当前 19 篇成功 cohort 或 205+ 篇。
 
 ### 8.1 候选观点
 
@@ -935,7 +974,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 | source maturity | 上游对象是否只有 candidate、attribution 是否可用 | 达到当前 consumer 的 source eligibility policy；不得由 viewpoint 层替上游升级 |
 | resolution coverage | 输入 Claim 是否有静默遗漏 | ledger exact-once；产品 scope 内 `unprocessed=0`，deferred 被显式阻断或披露 |
 | identity precision | 是否把近似、支持、限定或张力误并为同一观点 | truth-condition fields 全部兼容；无 identity blocker；member decision 完整 |
-| candidate recall | 是否因 blocking/近邻检索漏掉可能等价项 | gold fixtures 与 mutation tests 达标；unmatched/new candidate 队列可解释，不以已发现 member 为分母 |
+| candidate recall | 是否因规则、embedding 或模型发现漏掉可能等价项 | scoped calibration/gold fixtures 与 mutation tests 达标；unmatched/new candidate 队列可解释，不以已发现 member 为分母 |
 | route fidelity | 是否把不同论证压平或跨来源拼接 | ordered source-local attestation、full/partial 与 conclusion binding 全部有效 |
 | temporal correctness | 是否把“较晚出现”误写为“取代早期观点” | supersedes 有方向、时间与教授明确修正证据；否则只保留 tension/sequence |
 | consumer projection integrity | 下游是否丢掉来源、限定、张力或 blocker | projection、packet、ledger、audit 与 dependency SHA 闭环验证 |
@@ -985,7 +1024,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 - candidate subgraph 中没有 `unrelated`、`contrasts`、`qualifies`、`supersedes`、未决 attribution 或 material scope blocker；
 - canonical wording 只是保守归一化，不增加因果、范围、重要性、时间发展或神学评价；
 - actual Claim/Evidence/Citation dependency 与 coverage disclosure 均可机械编译；
-- identity decision input manifest（包含 deterministic blocking 召回的全部 candidate Claims 与适用的 approved constraints）在 ViewpointResolutionLedger 中 exact-once，其中没有 `unprocessed` 或会改变 identity boundary 的 `deferred`；更大 corpus 的 partial coverage 仍须披露；
+- identity decision input manifest（包含多通道候选并集中的全部 candidate Claims、channel provenance 与适用的 approved constraints）在 ViewpointResolutionLedger 中 exact-once，其中没有 `unprocessed` 或会改变 identity boundary 的 `deferred`；更大 corpus 的 partial coverage 仍须披露；
 - 第 9.8 节全部适用质量维度分别达到 minimum，hard failures 为零；
 - 回归测试证明相同输入产生 byte-stable decision 与 snapshot。
 
@@ -1011,7 +1050,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 5. **影响排序**：先显示阻塞当前产品、可能撤回公开内容或涉及 split/merge/supersedes 的事项；普通 candidate discovery 不计入人工 backlog；
 6. **明确默认动作**：无把握时保持 internal/defer，不把“尚未处理”伪装成 rejected，也不阻塞无关的 source-local 产品；
 7. **可批量决策但不可批量失忆**：editor 可一次接受多个相同模式的低风险 exception，但每个 identity decision 仍保留独立理由、输入与 lineage。
-8. **抽样监测而非逐条复核**：`system_approved` 不要求 editor 事前逐项点选；系统按风险和版本变更抽取一个有上限的质量样本，重点覆盖新模型／prompt／blocking version、低 reviewer agreement 边界和高 consumer impact。抽样发现系统性 false merge/false split 时，撤销对应 policy version 的自动资格并生成影响事件，而不是要求 editor 回头阅读所有正常记录。
+8. **抽样监测而非逐条复核**：`system_approved` 不要求 editor 事前逐项点选；系统按风险和版本变更抽取一个有上限的质量样本，重点覆盖新模型／prompt／retrieval policy version、低 reviewer agreement 边界和高 consumer impact。抽样发现系统性 false merge/false split 时，撤销对应 policy version 的自动资格并生成影响事件，而不是要求 editor 回头阅读所有正常记录。
 
 ### 10.5 不设置 recurrence 门槛
 
@@ -1054,7 +1093,19 @@ mutation suite 至少包含：
 7. 在 projection 中删除一个 material qualification/tension/blocker，或只保留 canonical wording 不带来源，预期 consumer gate fail；
 8. 在 ClaimRelation PostgreSQL round-trip 中互换或丢失 endpoint aliases，预期 compatibility test fail。
 
-每次改变模型、prompt、schema、eligibility policy、candidate blocking、review logic 或 projection compiler version，都必须运行适用 fixture。测试输出保存每个维度的结果与 artifact SHA；不得只保存一个总 pass rate。
+每次改变模型、prompt、schema、eligibility policy、任一召回通道／fusion policy、review logic 或 projection compiler version，都必须运行适用 fixture。测试输出保存每个维度的结果与 artifact SHA；不得只保存一个总 pass rate。
+
+除回归 fixture 外，bootstrap 上线前还必须建立一个小型、分层抽样的 calibration set。它至少包含同观点正例、主题相近但真值条件不同的 hard negatives、跨经文/跨词汇正例、polarity/scope/condition 变异和完全无关项；“彼得—磐石”只能是其中一个高难主题，不能代表全部语料。
+
+评估必须分别报告：
+
+- rule-only、embedding-only、model-discovery-only 的 scoped recall/precision；
+- 每个通道相对前序并集新增的 true candidates（marginal gain）；
+- 三通道 union recall、每个 focal 的候选数分布与 suppressed/oversize 数；
+- semantic identity review 的 false merge、false split 与 uncertain rate；
+- bootstrap 与 incremental lane 分开的指标。
+
+没有足够已审核正例时，recall 必须为 `null` 并报告样本范围；不得用“模型看起来合理”、候选总数增加或下游已发现 member 数替代召回评估。calibration 是一次性建立、后续抽样扩充的系统测量，不是要求单人 editor 审核全部 pair。
 
 ## 11. 增量更新与时间序列
 
@@ -1062,7 +1113,8 @@ mutation suite 至少包含：
 
 ```mermaid
 flowchart LR
-    S["new reviewed source Claim"] --> M["match against active registry signatures"]
+    S["new reviewed source Claim"] --> Q["multi-channel retrieve top-K active viewpoints"]
+    Q --> M["compare core, scope and representative members"]
     M -->|equivalent| L["candidate member link"]
     M -->|same conclusion/new reasoning| R["candidate new route"]
     M -->|extension/qualification/application| G["candidate typed relation"]
@@ -1083,6 +1135,15 @@ flowchart LR
 - 依赖这些对象的产品
 
 产生增量预览。
+
+增量检索按需逐层展开：
+
+1. `CanonicalViewpoint` 检索层：默认只读取 active viewpoint retrieval projection；
+2. representative Claim 层：对 top-K 候选验证真实来源表达与边界；
+3. Evidence/ArgumentRoute 层：只在正式 membership、route、冲突或新观点决策时加载；
+4. bounded Claim fallback：只处理无匹配或高风险边界，不扫描全部历史 Claim。
+
+每条新 Claim 无论是否匹配都必须进入本轮 ResolutionLedger。top-K 未命中只表示“当前索引未找到候选”，不能自动证明 `create_new`；系统必须运行至少一个独立的 unmatched/new-viewpoint 检查，并把低置信度项送入 exception。新增来源处理完成后，只重建受影响 viewpoint/route snapshot、索引条目和产品依赖。
 
 ### 11.2 Revision 与 identity change
 
@@ -1600,18 +1661,28 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 ## 14. 性能与可扩展性
 
-205+ 篇不能每次对所有 Claim 做全对全比较。实现应分层：
+205+ 篇不能每次对所有 Claim 做全对全比较，也不能反复把全库塞给模型。扩展目标按运行模式定义：
 
-1. deterministic blocking 产生有限候选；
-2. approved negative constraints 提前排除已知误配；
-3. 先与 active viewpoint signatures 匹配，再考虑 candidate-to-candidate；
-4. 只对候选集做语义判断；
-5. generation fingerprint 绑定输入 Claim revisions、coverage snapshot、prompt、model、schema 与 pipeline version；
-6. 相同 fingerprint 复用结果；
-7. 每次新来源只产生 delta ChangeSet；
-8. metrics 分别报告 recall queue、review queue 与 human disagreement，不能把“自动阶段尚未运行”显示为人工问题。
+| 模式 | 主索引 | 允许的比较 | 复杂度目标 | 触发频率 |
+|---|---|---|---|---|
+| bootstrap | pinned Claim cohort | bounded Claim-to-Claim | `O(N × Kc)` | 初次建库或明确授权的分批扩容 |
+| incremental | active CanonicalViewpoint | new Claim-to-viewpoint，按需下钻 | `O(ΔN × Kv)` | 每批新审核来源 |
+| global audit | registry/Claim indexes | drift、near-duplicate、split/merge risk | 离线有预算上限 | 定期或 policy/model 变更后 |
 
-性能优化不能降低 identity gate。近邻检索分数、共享经文数或 duplicate degree 都只是候选排序信号。
+`N` 是 bootstrap Claim 数，`ΔN` 是本轮新增或修订 Claim 数，`Kc/Kv` 是配置化候选硬上限。实现不得以“向量数据库很快”或“模型上下文够大”为理由取消上限；索引检索复杂度可以低于表中目标，但语义判断和 packet 体量仍须 bounded。
+
+执行要求：
+
+1. rule、embedding 与 model-discovery 产生带 provenance 的候选并集；approved negative constraints 只排除其明确适用范围内的已知误配；
+2. incremental 先匹配 active viewpoint retrieval projections，再考虑 bounded candidate-to-candidate；
+3. semantic transport 按主题包批量执行，而不是每个 pair 一次调用；包内每个判断仍独立输出，co-bundling 不产生关系；
+4. generation fingerprint 绑定 Claim/viewpoint revisions、coverage/registry snapshot、各召回 artifact、retrieval projection、prompt、model、schema 与 pipeline version；相同 fingerprint 才能复用；
+5. 每次新来源只产生 delta ChangeSet；只失效受影响索引条目、snapshot 与 consumer dependency；
+6. 模型调用前生成预算报告，至少列 proposal/blind call 数、input bytes/token estimate、最大 packet、reuse 数和 oversize/exception 数；未授权不得执行真实内容模型；
+7. metrics 分开报告各通道召回、候选 union、identity review、apply 与 human disagreement，不能把“自动阶段尚未运行”显示为人工问题；
+8. 定期 global audit 检测 registry 近义膨胀、过宽观点、低证据 singleton、层级投影异常与新旧观点冲突，但不阻塞无关的新来源增量入库。
+
+性能优化不能降低 identity gate。embedding score、模型置信度、共享经文数、duplicate degree 或某观点已有 member 数都只是召回/排序信号。系统优先减少重复计算和无意义上下文，不以减少证据、隐藏 qualification/tension 或放宽 truth-condition equivalence 换取吞吐量。
 
 ## 15. 验收映射
 
@@ -1625,6 +1696,7 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | Canonical master data UI、exception inbox、API/write boundary 与 UI 验收 | 第 13.12 节 |
+| bootstrap/incremental、复杂度、多通道召回与评估 | 第 6.2、10.6、11、14 节 |
 | 实现拆成后续 tickets | 第 16 节 |
 | 不调用内容模型、不迁移正式数据、不部署 | 文件状态、2.1、8、12.4 节 |
 
@@ -1632,7 +1704,7 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 Matthew、QA、Search 已接入，也不表示正式 viewpoint decisions 已生成；真实语义调用与 apply 仍须另行授权。
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 embedding/model-discovery、Matthew、QA、Search 已接入，也不表示正式 viewpoint decisions 已生成；真实语义调用与 apply 仍须另行授权。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
@@ -1656,16 +1728,16 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
    先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；保持 source-local legacy path 与 Editorial Reviewer packet 边界。
 11. **QA、Search 与 Topic Discovery adapters**
    让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
-12. **受控二十篇 backfill 与风险审核**
-   在前述基础设施通过后另行授权，冻结当时实际 20 篇 source manifest，运行正式观点解析；低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
+12. **受控十九篇 bootstrap 与风险审核**
+   在前述基础设施通过后另行授权，冻结最新 20 项显式选择中实际成功应用的 19 篇 source manifest，运行正式观点解析；失败项不进入 cohort。低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
 
-   实施时不得用数据库 active source 总数、staging 目录、batch 名称或文件时间倒推出这 20 篇。operator 先提交按 `source_id` 排序且自带 SHA 的显式 selection；每个成功成员必须绑定实际应用的 `KCS-*` ChangeSet。preflight 再冻结当前 source revision/SHA，并且只把这些 ChangeSets 实际写入的 Claim revisions 纳入 input Claim manifest。失败而未 ingest 的 batch member 不进入本轮 source universe；同源历史 Claim、旧 argument-layer entry 与数据库中的其他 active source 只进入 discrepancy report，不能进入 candidate generation。
+   实施时不得用数据库 active source 总数、staging 目录、batch 名称或文件时间倒推出这 19 篇。operator 提交的 20 项显式 selection 按 `source_id` 排序且自带 SHA；每个成功成员必须绑定实际应用的 `KCS-*` ChangeSet。preflight 再冻结当前 source revision/SHA，并且只把这 19 个 ChangeSet 实际写入的 Claim revisions 纳入 input Claim manifest。失败而未 ingest 的 batch member 不进入本轮 source universe；同源历史 Claim、旧 argument-layer entry 与数据库中的其他 active source 只进入 discrepancy report，不能进入 candidate generation。
 
    preflight 是 fail-closed 的只读步骤：它验证 singular/plural `source_fragment_id(s)`、source-local Evidence、Claim denominator 和 lineage，生成 CoverageSnapshot、全量 `unprocessed` ResolutionLedger 与 resolution queue，但始终保持 `apply_allowed=false`。只有同一 Claim manifest 的 ledger 达到 `complete`，且绑定该 ledger 的逐维 ViewpointQualityReport 为 `pass`，确定性 apply authorization 才能打开 ChangeSet apply 边界；resolution、quality 或 SHA 任一不匹配都必须阻断。
 
-   resolution queue 不得按 Claim 一项一次调用模型。确定性 scheduler 先把 reviewed duplicate connected component 投影为一个 cluster candidate，但 cluster 只表示召回范围，每个 member 仍须分别对拟议 core proposition 作判断，绝不产生传递 membership。其余 singleton discovery candidate 可以按 topic／经文排序后共同装入有 item/byte 硬上限的 transport bundle；bundle 必须要求每个 candidate 独立输出，co-bundling 不构成相似、关系或 identity 证据。active-viewpoint match lane 优先于 duplicate component，后者优先于 singleton discovery；deterministic blocker、已 supersede/reject/retire 的 source-ineligible Claim、超大 work item 与已完成 fingerprint 分别进入 exception、source-ineligible、oversize 或 reuse disposition。source-ineligible 仍保留在 ResolutionLedger 分母中，但不浪费语义调用。相同输入与预算必须 byte-stable，Claim revision/SHA 改变必须使 reuse key 失效。
+   resolution queue 不得按 Claim 一项一次调用模型。#179 的确定性 scheduler/recall artifact 作为第一条规则 baseline；以同一 Claim manifest 构建 embedding recall，并为 bounded model discovery 先生成 mock-validated schedule 与预算。获得真实内容模型调用授权后，model-discovery artifact 与前两条通道保存 provenance 并取候选并集，随后才能编译最终 semantic identity schedule。reviewed duplicate connected component 仍只表示召回范围，每个 member 必须分别对拟议 core proposition 作判断，绝不产生传递 membership。singleton discovery candidate 可以按 topic／经文排序后共同装入有 item/byte 硬上限的 transport bundle；bundle 必须要求每个 candidate 独立输出，co-bundling 不构成相似、关系或 identity 证据。active-viewpoint match lane 优先于 candidate-to-candidate；deterministic blocker、已 supersede/reject/retire 的 source-ineligible Claim、超大 work item 与已完成 fingerprint 分别进入 exception、source-ineligible、oversize 或 reuse disposition。source-ineligible 仍保留在 ResolutionLedger 分母中，但不浪费语义调用。相同输入与预算必须 byte-stable，Claim revision/SHA 或任一召回 artifact 改变必须使受影响 reuse key 失效。真实调用前必须先交付现有通道的 scoped 评估、model-discovery 与 proposal/blind 调用预算及 mock executor 验证；没有明确授权不调用内容模型。某通道只有在 calibration 显示有边际价值或作为明确的探索样本时才进入常规 policy，不能因架构列出三种能力就永远强制支付三份成本。
 13. **逐步扩展至 corpus universe**
-   按明确成果冻结最小知识子图并逐批审核；不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
+   先用受控 cohort 完成 bootstrap 并建立 active viewpoint retrieval projection；此后按 viewpoint-first incremental lane 逐批接入新审核来源，只为 `ΔClaims × top-K viewpoints` 产生候选与 delta ChangeSet。定期 global audit 与日常 ingest 分离。不得刷新已关闭的 205 篇 corpus survey，也不得把 survey candidates 直接提升为 viewpoint members。
 
 每张实现 ticket 都必须声明：输入 authority、是否允许模型调用、是否允许 `--apply`、回滚方式、测试 fixture 和不部署边界。生产迁移与部署必须另走 operations ticket，并在执行前阅读 operations runbook。
 
@@ -1679,7 +1751,7 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 - 不因 duplicate component、embedding score 或共享经文自动 merge；
 - 不把不同来源 EvidenceStep 拼成虚构的完整 route；
 - 不把 recurrence 当作重要性；
-- 不把九篇 POC 当作当前 20 篇或 205+ 篇覆盖；
+- 不把九篇 POC 当作当前 19 篇成功 cohort 或 205+ 篇覆盖；
 - 不刷新封闭 corpus survey；
 - 不在本设计卡运行正式模型、迁移数据库、重建正式 Active Snapshot、发布或部署。
 
