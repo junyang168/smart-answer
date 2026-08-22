@@ -39,6 +39,45 @@ export type OverviewData = {
   exceptions: number;
   affected_products: number;
   quality_dimensions: Array<{ dimension: string; status: string; applicable: boolean }>;
+  recall: {
+    available: boolean;
+    artifact_sha256?: string;
+    blocking_version?: string;
+    normalization_version?: string;
+    statistics?: Record<string, number>;
+    known_positive_recall?: { eligible_pair_count: number; found_pair_count: number; recall: number | null };
+  };
+};
+
+export type RecallNeighbor = {
+  claim_id: string;
+  statement: string | null;
+  score: number;
+  signals: string[];
+  shared_topic_terms: string[];
+  shared_scripture_chapters: string[];
+  candidate_viewpoint_ids: string[];
+};
+
+export type RecallDiagnostics = {
+  available: boolean;
+  artifact_sha256?: string;
+  blocking_version?: string;
+  normalization_version?: string;
+  statistics?: Record<string, number>;
+  known_positive_recall?: { eligible_pair_count: number; found_pair_count: number; recall: number | null };
+  items: Array<{
+    focal_claim_id: string;
+    focal_statement: string | null;
+    claim_role: string;
+    normalized_topic_terms: string[];
+    scripture_chapter_keys: string[];
+    neighbors: RecallNeighbor[];
+  }>;
+  total: number;
+  next_cursor: string | null;
+  suppressed_blocks: Array<{ block_key: string; signal_kind: string; claim_count: number; reason_code: string }>;
+  unparsed_scripture_refs: string[];
 };
 
 export type Member = {

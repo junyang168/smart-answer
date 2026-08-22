@@ -11,6 +11,9 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
+from backend.api.canonical_repository.viewpoint_recall_blocking import (
+    build_viewpoint_recall_blocking,
+)
 
 
 def _candidate(candidate_id: str, *claim_ids: str, blockers: list[str] | None = None) -> dict:
@@ -60,6 +63,7 @@ def _fragment(claim_id: str) -> dict:
 
 
 def _schedule(candidates: list[dict], claims: list[dict], **kwargs) -> SemanticBundleSchedule:
+    include_recall = kwargs.pop("include_recall", False)
     claim_ids = [row["claim_id"] for row in claims]
     manifest = {
         "schema_version": "test_claim_manifest_v1",
@@ -73,6 +77,11 @@ def _schedule(candidates: list[dict], claims: list[dict], **kwargs) -> SemanticB
         ],
     }
     manifest["manifest_sha256"] = sha256_json(manifest)
+    recall = (
+        build_viewpoint_recall_blocking(claim_manifest=manifest, claims=claims)
+        if include_recall
+        else None
+    )
     return build_semantic_bundle_schedule(
         preflight_packet_sha256="preflight-sha",
         resolution_queue_sha256="queue-sha",
@@ -81,6 +90,7 @@ def _schedule(candidates: list[dict], claims: list[dict], **kwargs) -> SemanticB
         claims=claims,
         evidence_steps=[_evidence(value) for value in claim_ids],
         source_fragments=[_fragment(value) for value in claim_ids],
+        recall_blocking=recall,
         **kwargs,
     )
 
@@ -100,11 +110,39 @@ def test_independent_singletons_share_transport_bundles_without_becoming_a_clust
         "bundle_count": 2,
         "reused_candidate_count": 0,
         "exception_candidate_count": 0,
+        "recall_neighbor_reference_count": 0,
     }
     assert all(item.independent_candidate_outputs_required for item in schedule.bundles)
     assert all(item.priority_lane == "singleton_discovery" for item in schedule.bundles)
     assert all(len(work.claim_ids) == 1 for work in schedule.work_items)
     SemanticBundleSchedule.model_validate(schedule.model_dump(mode="json"))
+
+
+def test_recall_neighborhood_is_bound_into_semantic_input_and_reuse_key() -> None:
+    claims = [
+        {**_claim("CL-A"), "topic_terms": ["圣灵"]},
+        {**_claim("CL-B"), "topic_terms": ["聖靈"]},
+    ]
+    without_recall = _schedule(
+        [_candidate("VIC-A", "CL-A"), _candidate("VIC-B", "CL-B")], claims
+    )
+    with_recall = _schedule(
+        [_candidate("VIC-A", "CL-A"), _candidate("VIC-B", "CL-B")],
+        claims,
+        include_recall=True,
+    )
+
+    by_candidate = {
+        item.identity_candidate_id: item for item in with_recall.work_items
+    }
+    assert by_candidate["VIC-A"].recall_neighbor_claim_ids == ["CL-B"]
+    assert by_candidate["VIC-A"].semantic_input["recall_neighborhoods"][0][
+        "neighbors"
+    ][0]["statement"] == "命题 CL-B"
+    assert with_recall.statistics["recall_neighbor_reference_count"] == 2
+    assert {
+        item.reuse_key_sha256 for item in with_recall.work_items
+    }.isdisjoint({item.reuse_key_sha256 for item in without_recall.work_items})
 
 
 def test_blocked_candidate_is_exception_and_completed_fingerprint_is_reused() -> None:

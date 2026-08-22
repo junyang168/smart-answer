@@ -692,6 +692,29 @@ flowchart LR
 
 模型可提出 signature、关系分类和理由，但程序必须验证 ID、来源、范围与 evidence references；模型不得分配 canonical ID 或批准自己的输出。
 
+#### 6.2.1 释经观点与 deterministic recall blocking
+
+`CanonicalViewpoint` 不只保存跨经卷的神学综合，也保存可跨文章复用、具有稳定真值条件的具体经文解释。两者使用同一个 registry identity，不另建 `ExegeticalViewpoint` master table：
+
+- `passage_interpretation`：回答某段经文在王教授解释中是什么意思，例如太 16:18 的“磐石”所指；
+- `theological_judgment`：回答由一处或多处经文形成的稳定神学判断；
+- `interpretive_method`、`application` 可成为独立观点的候选，但必须真的表达可复用判断，不能只因它们是 Claim 就自动注册；
+- 语法观察、历史背景、引文和推理中间步骤通常进入 EvidenceStep 或 ArgumentRoute，而不是另建 viewpoint。
+
+`claim_role` 是版本化的召回与下游使用分类，不是第二套 identity，也不建立 passage/theology 的 parent-child hierarchy。局部释义可以通过 `supports`、`grounds`、`generalizes` 或 `applies` 等显式关系支撑较广神学观点；相同经文范围不表示同一观点。
+
+正式 backfill 在 identity review 之前必须先产生 SHA-bound `ViewpointRecallBlockingArtifact`。它以 pinned Claim manifest 为唯一分母，并满足：
+
+1. 使用规范化 `topic_terms`、经文章节、claim role、proposition signature、已审核 duplicate 与已有 viewpoint membership 建立有界 recall neighborhood；繁简体归一只改变 blocking key，不改写 Claim statement、教授原话或 canonical wording；
+2. 每个 eligible Claim 恰好作为一个 focal Claim 出现一次；neighbor 可在多个 neighborhood 中重复，因为共现只表示“值得比较”；
+3. 每个 neighborhood、单个 block、transport item 与 transport bundle 均有显式 item/byte 上限；超过上限的高频泛词或经文章节必须进入 `suppressed_blocks`，不能静默截断；
+4. shared keyword、shared scripture、embedding 或 co-bundling 都不是 identity evidence；它们不能创建 duplicate edge、membership、CanonicalViewpoint 或 approval；
+5. 已知 reviewed duplicate 只能作为版本化 regression gold set。报告必须同时给出分母、找回数与适用范围；没有 scope 内正例时写 `recall=null`，不得把旧数据或候选 relation 冒充 gold，也不得把 known-positive recall 宣称为 corpus-wide recall；
+6. artifact 报告每个 Claim 的 neighbor 数、uncovered Claims、unique candidate pairs、suppressed blocks、无法解析的经文引用和预计 transport 量，并绑定 normalization/blocking version；
+7. semantic shortlist 可以读取 neighbor 的简洁 statement/signals，但正式 identity decision 仍必须为进入 proposal 的比较对象编译 source-local、SHA-bound Evidence packet，并遵守 proposal／blind review／risk gate。
+
+这使 `singleton_discovery` 表示“该 focal Claim 尚无 registry identity”，而不是“不要拿它与别的 Claim 比较”。scheduler 必须把 recall neighborhood 作为 semantic input 和 reuse fingerprint 的一部分；blocking artifact、Claim revision 或 normalization version 任一改变都使旧 schedule/reuse 失效。
+
 ### 6.3 关系分类
 
 | 比较结果 | registry 动作 | route 动作 |
@@ -1267,6 +1290,8 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 
 ### 13.5 Matthew 文章接入契约
 
+释经文章使用 CanonicalViewpoint 决定“本篇采用王教授哪一个稳定解释立场”，但不得只凭 canonical wording 生成正文。核心释义、神学结论和跨文章重复使用的判断来自 eligible CanonicalViewpoint projection；语法观察、历史背景、上下文转折和逐字引文仍绑定 source-local Claim/Evidence，并在 CompositionPlan 中承担 observation、premise、qualification 或 attestation 角色。CanonicalViewpoint 提供解释立场的一致性，ArgumentRoute 提供释经推理，Claim/Evidence 提供可核验的教授原声，CompositionPlan 决定它们在本篇文章中的用途。
+
 #### 13.5.1 CompositionPlan binding
 
 规划分两步，避免 plan 与 projection 循环依赖：先以 passage/topic scope 请求只供选择的 planning preview；Composition 完成 viewpoint/route/relation 选择后，compiler 以 draft plan 和所选实际来源依赖生成 `consumer_kind=matthew_exposition_article` 的最终不可变 projection；finalized CompositionPlan 再固定该 projection。planning preview 不进入 AuthoringPacket，也不能成为产品 dependency。计划至少保存：
@@ -1607,7 +1632,7 @@ apply 必须要求 editor/admin auth、expected current revisions、CSRF protect
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 Matthew、QA、Search 已接入，也不表示正式 20 篇已导入；这些仍分别属于 10–12。
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。这里的“完成”只表示合成 fixture 和基础设施契约完成，不表示 Matthew、QA、Search 已接入，也不表示正式 viewpoint decisions 已生成；真实语义调用与 apply 仍须另行授权。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。

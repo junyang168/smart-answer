@@ -28,6 +28,13 @@ from backend.api.canonical_repository.viewpoint_admin_projection import (
     AdminViewpointProjectionCompiler,
     AdminViewpointProjectionError,
 )
+from backend.api.canonical_repository.viewpoint_foundation import (
+    semantic_record_sha,
+    sha256_json,
+)
+from backend.api.canonical_repository.viewpoint_recall_blocking import (
+    build_viewpoint_recall_blocking,
+)
 from backend.api import viewpoint_admin
 
 
@@ -211,6 +218,32 @@ def _fixture() -> FakeStore:
     return FakeStore(records, [citation])
 
 
+def _recall_fixture(store: FakeStore):
+    claims = [
+        ClaimRecord.model_validate(
+            {**item.model_dump(mode="json"), "topic_terms": ["彼得與磐石"]}
+        )
+        for item in store.records["claims"]
+    ]
+    payload = {
+        "schema_version": "viewpoint_input_claim_manifest_v1",
+        "coverage_snapshot_id": "CVS-16",
+        "claims": [
+            {
+                "claim_id": item.claim_id,
+                "pinned_claim_revision": item.revision,
+                "claim_revision_sha256": semantic_record_sha(item),
+                "source_id": "SRC-16",
+            }
+            for item in claims
+        ],
+    }
+    payload["manifest_sha256"] = sha256_json(payload)
+    return build_viewpoint_recall_blocking(
+        claim_manifest=payload, claims=claims
+    )
+
+
 def test_overview_and_list_are_bound_to_one_projection_snapshot():
     compiler = AdminViewpointProjectionCompiler(_fixture())
     overview = compiler.overview()
@@ -221,6 +254,20 @@ def test_overview_and_list_are_bound_to_one_projection_snapshot():
     assert listing["projection_sha256"] == overview["projection_sha256"]
     assert listing["data"]["total"] == 2
     assert listing["data"]["next_cursor"]
+
+
+def test_recall_diagnostics_are_sha_bound_and_show_candidate_evidence():
+    store = _fixture()
+    recall = _recall_fixture(store)
+    compiler = AdminViewpointProjectionCompiler(store, recall_blocking=recall)
+
+    overview = compiler.overview()
+    diagnostics = compiler.recall_diagnostics()
+
+    assert overview["data"]["recall"]["artifact_sha256"] == recall.artifact_sha256
+    assert diagnostics["projection_sha256"] == overview["projection_sha256"]
+    assert diagnostics["data"]["statistics"]["unique_candidate_pair_count"] == 1
+    assert diagnostics["data"]["items"][0]["neighbors"][0]["statement"]
 
 
 def test_peter_and_rock_remain_distinct_and_tension_is_not_membership():
@@ -273,7 +320,10 @@ def test_projection_sha_binds_citations_and_historical_coverage_fails_closed():
 
 
 def test_read_only_http_boundary_exposes_projection_and_no_mutation(monkeypatch):
-    compiler = AdminViewpointProjectionCompiler(_fixture())
+    store = _fixture()
+    compiler = AdminViewpointProjectionCompiler(
+        store, recall_blocking=_recall_fixture(store)
+    )
     monkeypatch.setattr(viewpoint_admin, "_compiler", lambda: compiler)
     app = FastAPI()
     app.include_router(viewpoint_admin.router)
@@ -282,10 +332,13 @@ def test_read_only_http_boundary_exposes_projection_and_no_mutation(monkeypatch)
     overview = client.get("/admin/wang/viewpoints/overview")
     listing = client.get("/admin/wang/viewpoints", params={"q": "代表性"})
     detail = client.get("/admin/wang/viewpoints/CV-PETER")
+    recall = client.get("/admin/wang/viewpoints/recall-blocking")
 
     assert overview.status_code == 200
     assert listing.status_code == 200
     assert [item["viewpoint_id"] for item in listing.json()["data"]["items"]] == ["CV-PETER"]
     assert detail.json()["data"]["members"][0]["claim"]["claim_id"] == "CL-PETER"
+    assert recall.status_code == 200
+    assert recall.json()["data"]["available"] is True
     assert client.post("/admin/wang/viewpoints/CV-PETER", json={}).status_code == 405
     assert client.post("/admin/wang/viewpoint-exceptions/VEX-1/changesets", json={}).status_code == 404

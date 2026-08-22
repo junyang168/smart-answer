@@ -879,6 +879,31 @@ class PostgresKnowledgeStore:
             rows = cursor.fetchall()
         return [str(row[0]) for row in rows]
 
+    def list_change_set_states(
+        self, change_set_ids: Sequence[str]
+    ) -> list[dict[str, str]]:
+        """Return immutable identity and terminal state for an explicit cohort."""
+
+        if not change_set_ids:
+            return []
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT change_set_id, fingerprint_sha256, status
+                   FROM wang_knowledge.change_sets
+                   WHERE change_set_id = ANY(%s)
+                   ORDER BY change_set_id""",
+                (list(change_set_ids),),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "change_set_id": str(row[0]),
+                "fingerprint_sha256": str(row[1]),
+                "status": str(row[2]),
+            }
+            for row in rows
+        ]
+
     def get_plan_document(self, plan_id: str) -> Optional[dict[str, Any]]:
         """A CompositionPlan with its decisions inlined.
 
