@@ -163,5 +163,9 @@ export type PilotEnvelope = {
     consumer_kind: "composition_plan"; eligibility: "internal_candidate";
     projection_sha256: string; blocker_codes: string[];
   };
+  source_files: Record<string, {
+    source_id: string; title: string; source_type: string; file_name: string;
+  }>;
+  source_files_sha256: string;
   data: ViewpointPilot;
 };
