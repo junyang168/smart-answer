@@ -64,8 +64,21 @@ export function SourceText({
 
   useEffect(() => {
     if (!scrollTo || !scroller.current) return;
-    const target = scroller.current.querySelector(`[data-segment="${scrollTo.ordinal}"]`);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // The detail pane receives its measured height immediately after mount.
+    // Wait through that layout update before positioning a deep-linked
+    // fragment, otherwise scrollIntoView runs against the unconstrained pane
+    // and the subsequent height change leaves the target below the viewport.
+    let innerFrame = 0;
+    const outerFrame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        const target = scroller.current?.querySelector(`[data-segment="${scrollTo.ordinal}"]`);
+        target?.scrollIntoView({ behavior: "auto", block: "center" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outerFrame);
+      cancelAnimationFrame(innerFrame);
+    };
   }, [scrollTo]);
 
   return (

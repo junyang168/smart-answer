@@ -9,6 +9,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from backend.api.canonical_repository.viewpoint_runtime_projection import (
+    ViewpointKnowledgeProjection,
+)
 from backend.pipeline.knowledge_source import live_script
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
@@ -113,6 +116,10 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "section_id": {"type": "string"},
                         "decision_ids": {"type": "array", "items": {"type": "string"}},
                         "claim_ids_used": {"type": "array", "items": {"type": "string"}},
+                        "viewpoint_revision_ids_used": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                         "integration_operations": {"type": "array", "items": {"type": "string"}},
                         "applied_operations": {"type": "array", "items": {"type": "string"}},
                         "output_anchor": {"type": "string"},
@@ -121,6 +128,7 @@ AUTHOR_RESULT_SCHEMA: dict[str, Any] = {
                         "section_id",
                         "decision_ids",
                         "claim_ids_used",
+                        "viewpoint_revision_ids_used",
                         "integration_operations",
                         "applied_operations",
                         "output_anchor",
@@ -630,6 +638,7 @@ def validate_author_result(
     contract: dict[str, Any],
     plan: dict[str, Any],
     valid_claim_ids: set[str] | None = None,
+    valid_viewpoint_revision_ids: set[str] | None = None,
 ) -> None:
     validate_base_contract(contract)
     status = result.get("status")
@@ -672,6 +681,7 @@ def validate_author_result(
 
     covered_decisions: list[str] = []
     used_claim_ids: list[str] = []
+    used_viewpoint_revision_ids: list[str] = []
     for section_index, section_value in enumerate(authored_sections):
         section = _require_mapping(section_value, f"sections[{section_index}]")
         decision_ids = section.get("decision_ids", [])
@@ -685,6 +695,18 @@ def validate_author_result(
             section, contract=contract, field=f"sections[{section_index}]"
         )
         used_claim_ids.extend(section.get("claim_ids_used", []))
+        section_viewpoint_ids = section.get("viewpoint_revision_ids_used")
+        if valid_viewpoint_revision_ids is not None:
+            if not isinstance(section_viewpoint_ids, list):
+                raise AuthoringContractError(
+                    "composition-eligible viewpoint projection requires "
+                    "viewpoint_revision_ids_used on every authored section"
+                )
+            if duplicates := _duplicates(section_viewpoint_ids):
+                raise AuthoringContractError(
+                    f"viewpoint revision used twice in one section: {sorted(duplicates)}"
+                )
+            used_viewpoint_revision_ids.extend(section_viewpoint_ids)
         anchor = _require_nonempty_string(section.get("output_anchor"), "output_anchor")
         if not _anchor_present(anchor, manuscript):
             raise AuthoringContractError(f"output anchor not found in manuscript: {anchor}")
@@ -712,6 +734,22 @@ def validate_author_result(
         unknown_claim_ids = set(used_claim_ids) - valid_claim_ids
         if unknown_claim_ids:
             raise AuthoringContractError(f"unknown claim_ids: {sorted(unknown_claim_ids)}")
+    if valid_viewpoint_revision_ids is not None:
+        unknown_viewpoints = (
+            set(used_viewpoint_revision_ids) - valid_viewpoint_revision_ids
+        )
+        if unknown_viewpoints:
+            raise AuthoringContractError(
+                f"unknown viewpoint_revision_ids: {sorted(unknown_viewpoints)}"
+            )
+        missing_viewpoints = (
+            valid_viewpoint_revision_ids - set(used_viewpoint_revision_ids)
+        )
+        if missing_viewpoints:
+            raise AuthoringContractError(
+                "projected viewpoint revisions were not used: "
+                f"{sorted(missing_viewpoints)}"
+            )
 
 
 def reader_text(markdown: str) -> str:
@@ -1701,6 +1739,7 @@ def validate_revision_result(
     contract: dict[str, Any],
     plan: dict[str, Any],
     valid_claim_ids: set[str],
+    valid_viewpoint_revision_ids: set[str] | None = None,
 ) -> None:
     validate_strict_schema(revision, REVISION_SCHEMA)
     author_status = "drafted" if revision["status"] == "revised" else "plan_change_required"
@@ -1714,6 +1753,7 @@ def validate_revision_result(
         contract=contract,
         plan=plan,
         valid_claim_ids=valid_claim_ids,
+        valid_viewpoint_revision_ids=valid_viewpoint_revision_ids,
     )
 
 
@@ -1843,6 +1883,7 @@ def build_authoring_packet_from_store(
     compiled_snapshot_path: str | Path | None = None,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
+    viewpoint_projection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build an authoring packet with the plan and contract read from PostgreSQL.
 
@@ -1915,6 +1956,7 @@ def build_authoring_packet_from_store(
             contract_path=contract_path,
             publication_profile_path=publication_profile_path,
             quality_profile_path=quality_profile_path,
+            viewpoint_projection_path=viewpoint_projection_path,
         )
 
     # The plan and contract were staged through a temporary directory, whose
@@ -1951,6 +1993,7 @@ def build_authoring_packet(
     contract_path: str | Path,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
+    viewpoint_projection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     paths = {
         "plan": Path(plan_path),
@@ -1970,6 +2013,33 @@ def build_authoring_packet(
         except json.JSONDecodeError as exc:
             raise AuthoringContractError(f"invalid JSON in {name}: {path}") from exc
         sources[name] = {"path": str(path.resolve()), "sha256": sha256_text(raw)}
+
+    viewpoint_projection = None
+    if viewpoint_projection_path is not None:
+        projection_path = Path(viewpoint_projection_path)
+        if not projection_path.is_file():
+            raise AuthoringContractError(
+                f"missing viewpoint_projection: {projection_path}"
+            )
+        raw_projection = projection_path.read_text(encoding="utf-8")
+        try:
+            viewpoint_projection = ViewpointKnowledgeProjection.model_validate_json(
+                raw_projection
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise AuthoringContractError(
+                f"invalid viewpoint_projection: {projection_path}"
+            ) from exc
+        if viewpoint_projection.consumer_kind != "composition_plan":
+            raise AuthoringContractError(
+                "viewpoint projection consumer_kind must be composition_plan"
+            )
+        sources["viewpoint_projection"] = {
+            "path": str(projection_path.resolve()),
+            "sha256": sha256_text(raw_projection),
+            "projection_sha256": viewpoint_projection.projection_sha256,
+            "eligibility": viewpoint_projection.eligibility,
+        }
 
     contract = loaded["base_contract"]
     validate_base_contract(contract)
@@ -2123,5 +2193,7 @@ def build_authoring_packet(
             "reason": "human publication approval and external program audit are not part of authoring",
         },
     }
+    if viewpoint_projection is not None:
+        packet["viewpoint_projection"] = viewpoint_projection.model_dump(mode="json")
     packet["packet_sha256"] = sha256_text(canonical_json(packet))
     return packet

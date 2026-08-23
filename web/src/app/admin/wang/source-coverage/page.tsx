@@ -27,7 +27,9 @@ export default function SourceCoveragePage() {
 function SourceCoverageView() {
   const router = useRouter();
   const pathname = usePathname();
-  const requestedSourceId = useSearchParams().get("source");
+  const searchParams = useSearchParams();
+  const requestedSourceId = searchParams.get("source");
+  const requestedFragmentId = searchParams.get("fragment");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [detailError, setDetailError] = useState<{ sourceId: string; message: string } | null>(null);
@@ -94,14 +96,20 @@ function SourceCoverageView() {
         if (!response.ok) throw new Error(`來源服務回傳 ${response.status}`);
         const data = (await response.json()) as SourceDetail;
         if (cancelled) return;
+        const linkedFragment = requestedFragmentId ? data.fragments[requestedFragmentId] : undefined;
         setDetail(data);
-        // A source opens on itself: nothing selected, and no filter carried
-        // over from whichever source was read before it.
-        setSelectedFragmentId(null);
+        // A normal source link opens on the source itself. A SourceFragment
+        // deep link selects and scrolls to that exact fragment as part of the
+        // same state transition, so the initial load cannot clear it again.
+        setSelectedFragmentId(linkedFragment ? requestedFragmentId : null);
         setClaimFragmentIds(new Set());
         setSelectedClaimId(null);
         setFilter("");
         setOnlyUncovered(false);
+        if (linkedFragment?.segment_ordinal !== null && linkedFragment?.segment_ordinal !== undefined) {
+          nonce.current += 1;
+          setScrollTo({ ordinal: linkedFragment.segment_ordinal, nonce: nonce.current });
+        }
       } catch (reason) {
         if (!cancelled)
           setDetailError({
@@ -113,21 +121,12 @@ function SourceCoverageView() {
     return () => {
       cancelled = true;
     };
-  }, [requestedSourceId]);
+  }, [requestedFragmentId, requestedSourceId]);
 
   const openSource = useCallback(
     (sourceId: string) => router.push(`${pathname}?source=${encodeURIComponent(sourceId)}`),
     [pathname, router],
   );
-
-  // Deep link from the operations overview: `?source=<id>` opens straight into
-  // that source instead of landing on the catalog and asking the reader to find
-  // a sermon they had already picked. Read from `location` rather than
-  // `useSearchParams` so this client page needs no Suspense boundary.
-  useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("source");
-    if (requested) void openSource(requested);
-  }, [openSource]);
 
   const scrollToOrdinal = useCallback((ordinal: number | null) => {
     if (ordinal === null) return;

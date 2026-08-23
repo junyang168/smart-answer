@@ -56,5 +56,6 @@
 
 12. 每個 ledger item 必須在 `applied_operations` 誠實列出本小節對母本實際執行的操作，取值只能來自該 section 契約的 `allowed_operations`；列入 `ineligible_operations` 的操作一律不得執行，也不得申報。`integration_operations` 只登記補充材料的處置方式，取值限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即交稿失敗，不進 review。
 13. 生活應用是正當的內容，跟其他段落用同一條規則:提出今日處境或行動建議的段落，`claim_ids` 必須列出它所依據的材料，程式會逐段檢查該段的斷言有沒有超出那些材料。教授講過的應用引用得到；他沒講過的，材料撐不住,就不要寫。**不要為了讓文章有個結尾而補一段通用應用**——材料不足時不寫，是正確處理，不是缺漏。`editorial_synthesis` 段落不需要另外聲明含不含應用。
+14. 每個 section 都必須輸出 `viewpoint_revision_ids_used`。packet 沒有可用觀點或本 section 沒有使用觀點時輸出空陣列；若 `viewpoint_projection.eligibility` 是 `composition` 或 `public_attribution`，它是已核准的跨來源語義邊界：用 `revision.core_proposition` 保持同一觀點的規範表述，用 `member_proposition_units` 判斷哪些原子真值條件屬於該觀點；不得把相鄰非成員或整條複合 Claim 一併吞入。實際使用時列出精確 revision ID，整篇必須交代 projection 中每個 revision。CanonicalViewpoint 不是新的來源，正文每個斷言仍必須由 `claim_ids` 支持，也不得把規範措辭冒充教授逐字引文。
 
 若完成文章需要改變 CompositionPlan 的 action、claim 集合、coverage、主要順序或張力處置，返回 `plan_change_required` 與具體請求，不要先寫一篇越權的稿。否則返回 `drafted`、完整 Markdown 和逐節 authoring ledger。

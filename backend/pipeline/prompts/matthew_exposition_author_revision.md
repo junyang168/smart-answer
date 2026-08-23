@@ -2,6 +2,8 @@
 
 ledger 與初稿使用同一份契約：`applied_operations` 只能取自該 section 的 `allowed_operations`，`ineligible_operations` 中的操作不得執行也不得申報；`integration_operations` 限於 `corroborate`、`extend`、`qualify`、`tension`、`route_out`。程式會逐項比對，違反即修訂失敗。
 
+修訂必須逐 section 保留並誠實更新 `viewpoint_revision_ids_used`；CanonicalViewpoint 只規範跨來源的同一語義邊界，不替代 `claim_ids` 的來源責任，也不得把相鄰 PropositionUnit 吸收到觀點中。
+
 每一段的斷言必須能回到該段 `claim_ids` 所涵蓋的材料，程式會逐段檢查。修訂特別容易在兩種情況下引入無源內容，兩者都不允許：
 
 - finding 要求「把推論鏈補完整」或「讓結論更有力」時，用材料沒有的動機、因果、反事實、神學辯護或一般原則去補；

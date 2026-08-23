@@ -81,14 +81,26 @@ export type RecallDiagnostics = {
 };
 
 export type Member = {
-  link: Record<string, unknown> & { link_type: string; viewpoint_claim_link_id: string };
+  membership_kind?: "proposition_unit";
+  link: Record<string, unknown> & {
+    link_type: string; viewpoint_claim_link_id?: string;
+    viewpoint_proposition_unit_link_id?: string;
+  };
+  proposition_unit?: Record<string, unknown> & {
+    proposition_unit_id: string; parent_claim_id: string; unit_statement: string;
+    review_status: string;
+  };
   claim: Record<string, unknown> & { claim_id: string; statement: string; attribution?: string; review_status: string };
   evidence: Array<{
     evidence_step: null | Record<string, unknown> & { evidence_step_id: string; statement: string; speaker?: string; stance?: string };
     source_fragment: null | Record<string, unknown> & { fragment_id: string; verbatim_excerpt: string };
     source: null | Record<string, unknown> & { source_id: string; title?: string };
     citations: Array<Record<string, unknown> & { citation_id: string; status: string }>;
-    locator: { source_url: string | null; paragraph_key: string | number | null; media_time: number | null };
+    locator: {
+      source_url: string | null; source_admin_url?: string | null;
+      source_file_name?: string | null; source_type?: string | null;
+      paragraph_key: string | number | null; media_time: number | null;
+    };
   }>;
 };
 
@@ -120,4 +132,103 @@ export type ViewpointDetail = {
 export type ExceptionSummary = {
   exception_bundle_id: string; candidate_id: string; priority: number;
   consumer_impact: string; blocker_codes: string[]; remaining_findings: string[]; claim_count: number;
+};
+
+export type ViewpointPilot = {
+  viewpoint_candidate_id: string;
+  viewpoint_revision_candidate_id: string;
+  core_proposition: string;
+  wording_label: string;
+  review_status: string;
+  consumer_eligibility: "internal_candidate";
+  scope: { scripture_scope: string[] };
+  members: Array<{
+    proposition_unit: {
+      proposition_unit_id: string; parent_claim_id: string; source_id: string;
+      unit_statement: string;
+      evidence: Array<{
+        evidence_step_id: string; source_fragment_id: string; verbatim_excerpt: string;
+        source_id: string; media_time: number | null; paragraph_key: string | number | null;
+      }>;
+    };
+    parent_claim: { claim_id: string; statement: string; source_id: string; review_status: string };
+  }>;
+  adjacent_non_members: Array<{
+    proposition_unit_id: string; parent_claim_id: string; unit_statement: string;
+    disposition: "adjacent_non_member"; reason: "different_truth_condition";
+  }>;
+  article_acceptance: {
+    draft_id: string; manuscript_sha256: string; article_proposition: string;
+    status: "supported"; article_is_source_authority: false; supporting_proposition_unit_ids: string[];
+  };
+  model_ids: string[];
+  blockers: string[];
+  artifact_sha256: string;
+  apply_allowed: false;
+};
+
+export type PilotEnvelope = {
+  schema_version: string;
+  authority: { kind: string; projection: string; representation: string; read_only: true };
+  projection_sha256: string;
+  consumer_projection: {
+    consumer_kind: "composition_plan"; eligibility: "internal_candidate";
+    projection_sha256: string; blocker_codes: string[];
+  };
+  knowledge_classification: {
+    schema_version: "wang_viewpoint_knowledge_classification_v1";
+    knowledge_role: "passage_interpretation";
+    processing_phase: "passage_exegesis";
+    scripture_scope: string[];
+    policy_version: "matthew16_pilot_classification_v1";
+    basis_fields: string[];
+  };
+  promotion: null | {
+    schema_version: "wang_matthew16_viewpoint_promotion_proposal_v1";
+    artifact_sha256: string;
+    canonical_viewpoint: { viewpoint_id: string; review_status: string };
+    proposition_units: Array<{ proposition_unit_id: string; effective_state: "proposed" }>;
+    proposition_unit_links: Array<{ proposition_unit_id: string; effective_state: "proposed" }>;
+    excluded_proposition_unit_ids: string[];
+    quality_checks: Array<{ code: string; status: "pass"; detail: string }>;
+    blockers: string[];
+    claim_membership_link_count: 0;
+    master_data_mutations: 0;
+    apply_allowed: false;
+  };
+  finalization: null | {
+    schema_version: "wang_matthew16_viewpoint_finalization_bundle_v1";
+    artifact_sha256: string;
+    master_data_mutation_count: number;
+    apply_allowed: true;
+    atomic_coverage_snapshot: {
+      atomic_coverage_snapshot_id: string; coverage_status: "complete";
+      proposition_unit_ids: string[];
+    };
+    atomic_resolution_ledger: {
+      atomic_resolution_ledger_id: string; coverage_status: "complete";
+      statistics: {
+        input_unit_count: number; member_count: number;
+        adjacent_non_member_count: number; unresolved_count: number;
+      };
+    };
+    atomic_quality_report: {
+      atomic_quality_report_id: string; eligibility_decision: "pass" | "fail";
+      checks: Array<{ code: string; status: "pass" | "fail"; detail: string }>;
+    };
+    automated_promotion_decision: {
+      automated_promotion_decision_id: string; decision: "approve" | "reject";
+      approval_basis: "programmatic_atomic_quality_gate"; human_approval: false;
+    };
+    canonical_viewpoint: { viewpoint_id: string; review_status: string };
+  };
+  master_application: null | {
+    change_set_id: string; status: "applied" | "not_applied";
+    operation_count: number; unchanged_count: number;
+  };
+  source_files: Record<string, {
+    source_id: string; title: string; source_type: string; file_name: string;
+  }>;
+  source_files_sha256: string;
+  data: ViewpointPilot;
 };

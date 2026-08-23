@@ -26,7 +26,9 @@ DEFAULT_DIMENSIONS = 768
 DEFAULT_BATCH_SIZE = 64
 MAX_BATCH_SIZE = 100
 
-EmbeddingObjectKind = Literal["canonical_viewpoint", "claim", "argument_route", "evidence"]
+EmbeddingObjectKind = Literal[
+    "canonical_viewpoint", "claim", "claim_signature", "argument_route", "evidence"
+]
 EmbeddingUseCase = Literal["semantic_search", "question_answering", "candidate_recall"]
 
 

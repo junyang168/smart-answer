@@ -1,10 +1,12 @@
 # Matthew exposition current authoring session
 
-Updated: 2026-08-18 (America/Chicago)
+Updated: 2026-08-23 (America/Chicago)
 
 ## Project boundary
 
 This session belongs to Wang Knowledge Platform, not notes-to-sermon-agent. Do not run notes-to-sermon fidelity audit, source reconstruction, or article generation outside the Matthew exposition runner.
+
+The first active exegesis CanonicalViewpoint is now end-to-end master data: `CV-59fdfc87534d1f17fc9f` (“太 16:18 的磐石不指彼得本人”), system-approved by the formal atomic gate and applied to PostgreSQL. Its active composition projection is `matthew16-viewpoint-pilot-rock-v14-active-composition-projection-2026-08-23/composition-projection.json`, SHA-256 `78ed881b55ac2a6598c25b8a1a89ecedc3f2b9495f760659ab82ed70a7baf701`. `CP-matthew-16-13-20` passed a no-model/no-publication packet dry-run with that projection. Before the next real Matthew run, read `canonical_viewpoint_registry_design_v1.md` section 13.12: article sections must report exact `viewpoint_revision_ids_used`, while every reader-visible assertion still needs source Claim provenance. Do not start a second viewpoint until this first one has been exercised by the intended article generation or revision run.
 
 ## Completed articles
 

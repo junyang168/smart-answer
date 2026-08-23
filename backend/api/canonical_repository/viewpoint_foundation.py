@@ -561,6 +561,7 @@ def build_foundation_quality_report(
     approved_source_statuses: frozenset[str] = frozenset(
         {"approved", "system_approved", "human_approved"}
     ),
+    source_eligibility_attestations: Mapping[str, str] | None = None,
 ) -> ViewpointQualityReportRecord:
     """Generate the foundation's non-compensating identity-decision quality report."""
 
@@ -575,6 +576,7 @@ def build_foundation_quality_report(
     fragment_by_id = {
         str(item["fragment_id"]): dict(item) for item in source_fragments
     }
+    eligibility_attestations = dict(source_eligibility_attestations or {})
     failures: list[ViewpointQualityFailure] = []
     dimensions: list[ViewpointQualityDimension] = []
 
@@ -589,32 +591,51 @@ def build_foundation_quality_report(
         ):
             provenance_bad.append(row.claim_id)
         elif row.processing_status != "source_ineligible":
+            attested = bool(eligibility_attestations.get(row.claim_id))
             usable_evidence = False
             for evidence_id in claim.evidence_step_ids:
                 step = evidence_by_id.get(evidence_id)
-                if not step or step.get("support_eligibility") not in {
-                    "eligible",
-                    "eligible_with_label",
-                }:
+                allowed_support = {"eligible", "eligible_with_label"} | (
+                    {"eligible_candidate"} if attested else set()
+                )
+                if not step or step.get("support_eligibility") not in allowed_support:
                     continue
-                citation_ids = set(map(str, step.get("citation_ids") or []))
                 bound = [
                     fragment_by_id.get(value) for value in evidence_fragment_ids(step)
                 ]
-                if not citation_ids or not bound or any(
-                    not fragment
-                    or fragment.get("anchor_state")
-                    not in {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
-                    or not fragment.get("source_sha256")
-                    or str(fragment.get("citation_id") or "") not in citation_ids
-                    for fragment in bound
-                ):
-                    continue
+                if attested:
+                    if (
+                        step.get("support_eligibility")
+                        not in {"eligible", "eligible_candidate", "eligible_with_label"}
+                        or not bound
+                        or any(
+                            not fragment
+                            or fragment.get("anchor_state")
+                            not in {
+                                "source_version_bound", "canonical_citation_bound",
+                                "verified", "valid",
+                            }
+                            or not fragment.get("source_sha256")
+                            for fragment in bound
+                        )
+                    ):
+                        continue
+                else:
+                    citation_ids = set(map(str, step.get("citation_ids") or []))
+                    if not citation_ids or not bound or any(
+                        not fragment
+                        or fragment.get("anchor_state")
+                        not in {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
+                        or not fragment.get("source_sha256")
+                        or str(fragment.get("citation_id") or "") not in citation_ids
+                        for fragment in bound
+                    ):
+                        continue
                 usable_evidence = True
                 break
             if not usable_evidence:
                 provenance_bad.append(row.claim_id)
-            if claim.review_status not in approved_source_statuses:
+            if claim.review_status not in approved_source_statuses and not attested:
                 maturity_bad.append(row.claim_id)
     if provenance_bad:
         failures.append(
@@ -749,6 +770,7 @@ def build_foundation_quality_report(
             coverage.sources_sha256,
             resolution.artifact_sha256,
             candidate_regression_artifact_sha256,
+            *eligibility_attestations.values(),
         }
     )
     build_payload = {
@@ -795,6 +817,12 @@ def validate_foundation_change_set(
         "canonical_viewpoints",
         "viewpoint_revisions",
         "viewpoint_claim_links",
+        "viewpoint_proposition_units",
+        "viewpoint_proposition_unit_links",
+        "viewpoint_atomic_coverage_snapshots",
+        "viewpoint_atomic_resolution_ledgers",
+        "viewpoint_atomic_quality_reports",
+        "viewpoint_automated_promotion_decisions",
         "argument_routes",
         "argument_route_revisions",
         "argument_route_attestations",
@@ -810,6 +838,12 @@ def validate_foundation_change_set(
     immutable_collections = {
         "viewpoint_coverage_snapshots",
         "viewpoint_revisions",
+        "viewpoint_proposition_units",
+        "viewpoint_proposition_unit_links",
+        "viewpoint_atomic_coverage_snapshots",
+        "viewpoint_atomic_resolution_ledgers",
+        "viewpoint_atomic_quality_reports",
+        "viewpoint_automated_promotion_decisions",
         "argument_route_revisions",
         "argument_route_attestations",
         "viewpoint_identity_candidates",
@@ -846,10 +880,18 @@ def validate_foundation_change_set(
 
     sources = payloads("source_documents")
     claims = payloads("claims")
+    evidence_steps = payloads("evidence_steps")
+    source_fragments = payloads("source_fragments")
     coverages = payloads("viewpoint_coverage_snapshots")
     viewpoints = payloads("canonical_viewpoints")
     revisions = payloads("viewpoint_revisions")
     links = payloads("viewpoint_claim_links")
+    proposition_units = payloads("viewpoint_proposition_units")
+    proposition_unit_links = payloads("viewpoint_proposition_unit_links")
+    atomic_coverages = payloads("viewpoint_atomic_coverage_snapshots")
+    atomic_ledgers = payloads("viewpoint_atomic_resolution_ledgers")
+    atomic_reports = payloads("viewpoint_atomic_quality_reports")
+    automated_promotions = payloads("viewpoint_automated_promotion_decisions")
     claim_relations = payloads("claim_relations")
     candidates = payloads("viewpoint_identity_candidates")
     decisions = payloads("viewpoint_identity_decisions")
@@ -921,7 +963,11 @@ def validate_foundation_change_set(
         if redirect and str(redirect) not in viewpoints:
             findings.append(f"{viewpoint_id}: missing redirect target {redirect}")
         candidate_id = str(viewpoint["created_from_candidate_id"])
-        if candidate_id not in candidates:
+        atomic_candidate_ids = {
+            str(item.get("viewpoint_candidate_id"))
+            for item in atomic_coverages.values()
+        }
+        if candidate_id not in candidates and candidate_id not in atomic_candidate_ids:
             findings.append(f"{viewpoint_id}: missing origin candidate {candidate_id}")
 
     active_full: dict[tuple[str, int], set[str]] = defaultdict(set)
@@ -988,6 +1034,251 @@ def validate_foundation_change_set(
         if len(owners) > 1:
             findings.append(f"{key[0]}@{key[1]}: multiple active equivalent_full memberships")
 
+    for unit_id, unit in proposition_units.items():
+        claim_id = str(unit["parent_claim_id"])
+        claim = claims.get(claim_id)
+        if not claim:
+            findings.append(f"{unit_id}: missing parent Claim {claim_id}")
+            continue
+        if int(claim.get("revision", 1)) != int(unit["pinned_claim_revision"]):
+            findings.append(f"{unit_id}: pinned Claim revision mismatch")
+        if unit.get("claim_revision_sha256") != semantic_record_sha(claim):
+            findings.append(f"{unit_id}: parent Claim SHA mismatch")
+        statement = str(claim.get("statement") or "")
+        for span in unit.get("claim_statement_spans") or []:
+            start = int(span["start_char"])
+            end = int(span["end_char"])
+            if statement[start:end] != span.get("exact_text"):
+                findings.append(f"{unit_id}: statement span does not match pinned Claim")
+        for binding in unit.get("evidence_bindings") or []:
+            evidence_id = str(binding["evidence_step_id"])
+            fragment_id = str(binding["source_fragment_id"])
+            evidence = evidence_steps.get(evidence_id)
+            fragment = source_fragments.get(fragment_id)
+            if not evidence:
+                findings.append(f"{unit_id}: missing EvidenceStep {evidence_id}")
+            elif fragment_id not in evidence_fragment_ids(evidence):
+                findings.append(f"{unit_id}: EvidenceStep does not bind fragment {fragment_id}")
+            if not fragment:
+                findings.append(f"{unit_id}: missing SourceFragment {fragment_id}")
+            elif fragment.get("source_id") != unit.get("source_id"):
+                findings.append(f"{unit_id}: SourceFragment belongs to another source")
+
+    active_unit_owners: dict[str, set[str]] = defaultdict(set)
+    active_unit_link_keys: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for link_id, link in proposition_unit_links.items():
+        viewpoint_id = str(link["viewpoint_id"])
+        revision_id = str(link["validated_against_viewpoint_revision_id"])
+        unit_id = str(link["proposition_unit_id"])
+        decision = decisions.get(str(link["decision_id"]))
+        if viewpoint_id not in viewpoints:
+            findings.append(f"{link_id}: missing viewpoint {viewpoint_id}")
+        if revisions.get(revision_id, {}).get("viewpoint_id") != viewpoint_id:
+            findings.append(f"{link_id}: invalid viewpoint revision {revision_id}")
+        elif (
+            link.get("effective_state") == "active"
+            and viewpoints.get(viewpoint_id, {}).get("current_revision_id") != revision_id
+        ):
+            findings.append(f"{link_id}: active link is not validated against current revision")
+        unit = proposition_units.get(unit_id)
+        if not unit:
+            findings.append(f"{link_id}: missing proposition unit {unit_id}")
+        elif unit.get("effective_state") != "active":
+            findings.append(f"{link_id}: proposition unit is not active")
+        if not decision:
+            findings.append(f"{link_id}: missing decision {link['decision_id']}")
+        else:
+            allowed = {
+                (str(item["proposition_unit_id"]), str(item["link_type"]))
+                for item in decision.get("proposition_unit_link_decisions") or []
+            }
+            if (unit_id, str(link["link_type"])) not in allowed:
+                findings.append(f"{link_id}: proposition unit link is not authorized")
+            if decision.get("resolved_viewpoint_id") not in {None, viewpoint_id}:
+                findings.append(f"{link_id}: decision resolves a different viewpoint")
+            if link.get("effective_state") == "active" and decision.get("review_status") not in {
+                "system_approved", "human_approved", "approved",
+            }:
+                findings.append(f"{link_id}: active link depends on an unapproved decision")
+        if link.get("effective_state") == "active":
+            active_unit_link_keys[(viewpoint_id, unit_id)].append(link_id)
+            active_unit_owners[unit_id].add(viewpoint_id)
+    for key, link_ids in active_unit_link_keys.items():
+        if len(link_ids) > 1:
+            findings.append(
+                f"{key[0]}/{key[1]}: duplicate active proposition unit links "
+                + ", ".join(sorted(link_ids))
+            )
+    for unit_id, owners in active_unit_owners.items():
+        if len(owners) > 1:
+            findings.append(
+                f"{unit_id}: multiple active CanonicalViewpoint memberships"
+            )
+
+    for coverage_id, coverage in normalized.get(
+        "viewpoint_atomic_coverage_snapshots", {}
+    ).items():
+        coverage_unit_ids = list(coverage.get("proposition_unit_ids") or [])
+        actual_units = {
+            unit_id: proposition_units.get(str(unit_id))
+            for unit_id in coverage_unit_ids
+        }
+        if any(item is None for item in actual_units.values()):
+            missing = sorted(
+                unit_id for unit_id, item in actual_units.items() if item is None
+            )
+            findings.append(f"{coverage_id}: missing proposition units {missing}")
+            continue
+        actual_claim_ids = sorted(
+            {str(item["parent_claim_id"]) for item in actual_units.values() if item}
+        )
+        actual_source_ids = sorted(
+            {str(item["source_id"]) for item in actual_units.values() if item}
+        )
+        if actual_claim_ids != list(coverage.get("claim_ids") or []):
+            findings.append(f"{coverage_id}: Claim denominator mismatch")
+        if actual_source_ids != list(coverage.get("source_ids") or []):
+            findings.append(f"{coverage_id}: source denominator mismatch")
+
+    for ledger_id, ledger in normalized.get(
+        "viewpoint_atomic_resolution_ledgers", {}
+    ).items():
+        coverage = atomic_coverages.get(str(ledger["atomic_coverage_snapshot_id"]))
+        if not coverage:
+            findings.append(f"{ledger_id}: missing atomic coverage snapshot")
+            continue
+        ledger_unit_ids = [str(row["proposition_unit_id"]) for row in ledger.get("rows") or []]
+        if ledger_unit_ids != list(coverage.get("proposition_unit_ids") or []):
+            findings.append(f"{ledger_id}: atomic unit denominator mismatch")
+        member_unit_ids: list[str] = []
+        for row in ledger.get("rows") or []:
+            unit_id = str(row["proposition_unit_id"])
+            unit = proposition_units.get(unit_id)
+            if not unit:
+                findings.append(f"{ledger_id}: missing proposition unit {unit_id}")
+                continue
+            if row.get("parent_claim_id") != unit.get("parent_claim_id"):
+                findings.append(f"{ledger_id}: parent Claim mismatch for {unit_id}")
+            expected_evidence_sha = sha256_json(unit.get("evidence_bindings") or [])
+            if row.get("evidence_binding_sha256") != expected_evidence_sha:
+                findings.append(f"{ledger_id}: evidence binding SHA mismatch for {unit_id}")
+            if row.get("boundary_run_artifact_sha256") != coverage.get(
+                "boundary_run_artifact_sha256"
+            ):
+                findings.append(f"{ledger_id}: boundary binding mismatch for {unit_id}")
+            if row.get("disposition") == "member":
+                member_unit_ids.append(unit_id)
+        active_members = sorted(
+            unit_id
+            for unit_id in ledger_unit_ids
+            if any(
+                link.get("effective_state") == "active"
+                and str(link.get("proposition_unit_id")) == unit_id
+                and str(link.get("viewpoint_id")) == str(ledger["proposed_viewpoint_id"])
+                for link in proposition_unit_links.values()
+            )
+        )
+        if sorted(member_unit_ids) != active_members:
+            findings.append(f"{ledger_id}: active membership differs from atomic ledger")
+
+    for report_id, report in normalized.get(
+        "viewpoint_atomic_quality_reports", {}
+    ).items():
+        coverage = atomic_coverages.get(str(report["atomic_coverage_snapshot_id"]))
+        ledger = atomic_ledgers.get(str(report["atomic_resolution_ledger_id"]))
+        if not coverage:
+            findings.append(f"{report_id}: missing atomic coverage snapshot")
+        if not ledger:
+            findings.append(f"{report_id}: missing atomic resolution ledger")
+        elif coverage and ledger.get("atomic_coverage_snapshot_id") != coverage.get(
+            "atomic_coverage_snapshot_id"
+        ):
+            findings.append(f"{report_id}: coverage and ledger do not bind")
+        if report.get("eligibility_decision") == "pass" and (
+            report.get("hard_failures")
+            or any(item.get("status") != "pass" for item in report.get("checks") or [])
+        ):
+            findings.append(f"{report_id}: passing report contains a failed check")
+
+    for promotion_id, promotion in normalized.get(
+        "viewpoint_automated_promotion_decisions", {}
+    ).items():
+        viewpoint_id = str(promotion["viewpoint_id"])
+        revision_id = str(promotion["viewpoint_revision_id"])
+        identity_decision_id = str(promotion["identity_decision_id"])
+        quality = next(
+            (
+                item
+                for item in atomic_reports.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_quality_report_artifact_sha256")
+            ),
+            None,
+        )
+        coverage = next(
+            (
+                item
+                for item in atomic_coverages.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_coverage_snapshot_artifact_sha256")
+            ),
+            None,
+        )
+        ledger = next(
+            (
+                item
+                for item in atomic_ledgers.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_resolution_ledger_artifact_sha256")
+            ),
+            None,
+        )
+        if not quality or quality.get("eligibility_decision") != "pass":
+            findings.append(f"{promotion_id}: automated approval requires passing quality")
+        if not coverage or not ledger:
+            findings.append(f"{promotion_id}: automated approval has missing gate artifacts")
+        if viewpoints.get(viewpoint_id, {}).get("current_revision_id") != revision_id:
+            findings.append(f"{promotion_id}: viewpoint revision binding mismatch")
+        if identity_decision_id not in decisions:
+            findings.append(f"{promotion_id}: missing identity decision")
+        expected_applied_ids = sorted(
+            [
+                viewpoint_id,
+                revision_id,
+                identity_decision_id,
+                *(
+                    [str(coverage["atomic_coverage_snapshot_id"])]
+                    if coverage else []
+                ),
+                *(
+                    [str(ledger["atomic_resolution_ledger_id"])]
+                    if ledger else []
+                ),
+                *(
+                    [str(quality["atomic_quality_report_id"])]
+                    if quality else []
+                ),
+                *sorted(
+                    unit_id
+                    for unit_id, unit in proposition_units.items()
+                    if unit.get("effective_state") == "active"
+                    and unit_id in set((coverage or {}).get("proposition_unit_ids") or [])
+                ),
+                *sorted(
+                    link_id
+                    for link_id, link in proposition_unit_links.items()
+                    if link.get("effective_state") == "active"
+                    and str(link.get("viewpoint_id")) == viewpoint_id
+                ),
+            ]
+        )
+        if list(promotion.get("applied_record_ids") or []) != expected_applied_ids:
+            findings.append(f"{promotion_id}: applied record set mismatch")
+        if quality and promotion.get("consumer_projection_sha256") != quality.get(
+            "consumer_projection_sha256"
+        ):
+            findings.append(f"{promotion_id}: consumer projection binding mismatch")
+
     for candidate_id, candidate in normalized.get("viewpoint_identity_candidates", {}).items():
         candidate_identity = {
             "claims": candidate.get("candidate_claim_ids") or [],
@@ -1018,14 +1309,31 @@ def validate_foundation_change_set(
                 findings.append(f"{candidate_id}: unreviewed duplicate seed relation {relation_id}")
     for decision_id, decision in normalized.get("viewpoint_identity_decisions", {}).items():
         candidate = candidates.get(str(decision["identity_candidate_id"]))
-        if not candidate:
+        atomic_coverage = next(
+            (
+                item
+                for item in atomic_coverages.values()
+                if item.get("viewpoint_candidate_id")
+                == decision.get("identity_candidate_id")
+            ),
+            None,
+        )
+        if not candidate and not atomic_coverage:
             findings.append(f"{decision_id}: missing identity candidate")
         elif (
             decision.get("review_status")
             in {"system_approved", "human_approved", "approved"}
+            and candidate
             and decision.get("input_sha256") != candidate.get("generation_fingerprint")
         ):
             findings.append(f"{decision_id}: approved decision input SHA is stale")
+        elif (
+            decision.get("review_status") == "system_approved"
+            and atomic_coverage
+            and decision.get("input_sha256")
+            != atomic_coverage.get("boundary_run_artifact_sha256")
+        ):
+            findings.append(f"{decision_id}: approved atomic decision input SHA is stale")
         resolved = decision.get("resolved_viewpoint_id")
         if resolved and str(resolved) not in viewpoints:
             findings.append(f"{decision_id}: missing resolved viewpoint {resolved}")
@@ -1177,7 +1485,8 @@ def validate_foundation_change_set(
         for collection in (
             "source_documents", "source_fragments", "claims", "evidence_steps",
             "claim_relations", "canonical_viewpoints", "viewpoint_revisions",
-            "viewpoint_claim_links", "argument_routes", "argument_route_revisions",
+            "viewpoint_claim_links", "viewpoint_proposition_units",
+            "viewpoint_proposition_unit_links", "argument_routes", "argument_route_revisions",
             "argument_route_attestations", "viewpoint_relations",
         )
     }

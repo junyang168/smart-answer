@@ -262,6 +262,12 @@ class ViewpointRuntimeCompiler:
             "claims": "claim_id", "evidence_steps": "evidence_step_id",
             "claim_relations": "claim_relation_id", "canonical_viewpoints": "viewpoint_id",
             "viewpoint_revisions": "viewpoint_revision_id", "viewpoint_claim_links": "viewpoint_claim_link_id",
+            "viewpoint_proposition_units": "proposition_unit_id",
+            "viewpoint_proposition_unit_links": "viewpoint_proposition_unit_link_id",
+            "viewpoint_atomic_coverage_snapshots": "atomic_coverage_snapshot_id",
+            "viewpoint_atomic_resolution_ledgers": "atomic_resolution_ledger_id",
+            "viewpoint_atomic_quality_reports": "atomic_quality_report_id",
+            "viewpoint_automated_promotion_decisions": "automated_promotion_decision_id",
             "argument_routes": "argument_route_id", "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
             "viewpoint_relations": "viewpoint_relation_id", "viewpoint_coverage_snapshots": "coverage_snapshot_id",
@@ -400,6 +406,14 @@ class ViewpointRuntimeCompiler:
         self, *, consumer_kind: Literal["registry_review", "composition_plan", "qa_answer", "search_card"],
         coverage_snapshot_id: str, viewpoint_ids: Sequence[str] | None = None,
     ) -> ViewpointKnowledgeProjection:
+        if coverage_snapshot_id in self.index.get(
+            "viewpoint_atomic_coverage_snapshots", {}
+        ):
+            return self._compile_atomic_projection(
+                consumer_kind=consumer_kind,
+                coverage_snapshot_id=coverage_snapshot_id,
+                viewpoint_ids=viewpoint_ids,
+            )
         snapshots = self.compile_registry_snapshots(coverage_snapshot_id)
         selected_ids = sorted(set(viewpoint_ids or [item.viewpoint_id for item in snapshots]))
         selected = [item for item in snapshots if item.viewpoint_id in selected_ids]
@@ -525,6 +539,249 @@ class ViewpointRuntimeCompiler:
         base["projection_sha256"] = sha256_json(base)
         return ViewpointKnowledgeProjection.model_validate(base)
 
+    def _compile_atomic_projection(
+        self,
+        *,
+        consumer_kind: Literal[
+            "registry_review", "composition_plan", "qa_answer", "search_card"
+        ],
+        coverage_snapshot_id: str,
+        viewpoint_ids: Sequence[str] | None,
+    ) -> ViewpointKnowledgeProjection:
+        """Compile an approved PropositionUnit master boundary for consumers."""
+
+        coverage = self.index["viewpoint_atomic_coverage_snapshots"][
+            coverage_snapshot_id
+        ]
+        ledgers = sorted(
+            [
+                item
+                for item in self.records.get(
+                    "viewpoint_atomic_resolution_ledgers", ()
+                )
+                if item.atomic_coverage_snapshot_id == coverage_snapshot_id
+            ],
+            key=lambda item: (item.revision, item.atomic_resolution_ledger_id),
+        )
+        ledger = ledgers[-1] if ledgers else None
+        reports = sorted(
+            [
+                item
+                for item in self.records.get("viewpoint_atomic_quality_reports", ())
+                if ledger
+                and item.atomic_resolution_ledger_id
+                == ledger.atomic_resolution_ledger_id
+            ],
+            key=lambda item: (item.revision, item.atomic_quality_report_id),
+        )
+        quality = reports[-1] if reports else None
+        promotions = [
+            item
+            for item in self.records.get(
+                "viewpoint_automated_promotion_decisions", ()
+            )
+            if quality
+            and item.atomic_quality_report_artifact_sha256
+            == quality.artifact_sha256
+            and item.decision == "approve"
+        ]
+        available_ids = sorted({item.viewpoint_id for item in promotions})
+        selected_ids = sorted(set(viewpoint_ids or available_ids))
+        selected_promotions = [
+            item for item in promotions if item.viewpoint_id in set(selected_ids)
+        ]
+        if sorted({item.viewpoint_id for item in selected_promotions}) != selected_ids:
+            raise ViewpointRuntimeProjectionError(
+                ["atomic projection scope contains unknown or unapproved viewpoint"]
+            )
+
+        viewpoints = self.index.get("canonical_viewpoints", {})
+        revisions = self.index.get("viewpoint_revisions", {})
+        units = self.index.get("viewpoint_proposition_units", {})
+        all_links = self.index.get("viewpoint_proposition_unit_links", {})
+        claims_index = self.index.get("claims", {})
+        evidence_index = self.index.get("evidence_steps", {})
+        fragment_index = self.index.get("source_fragments", {})
+        source_index = self.index.get("source_documents", {})
+        selected_links = sorted(
+            [
+                item
+                for item in all_links.values()
+                if item.viewpoint_id in set(selected_ids)
+                and item.effective_state == "active"
+            ],
+            key=lambda item: (item.viewpoint_id, item.proposition_unit_id),
+        )
+        selected_unit_ids = sorted(
+            {item.proposition_unit_id for item in selected_links}
+        )
+        missing_unit_ids = sorted(set(selected_unit_ids) - set(units))
+        selected_units = [units[item] for item in selected_unit_ids if item in units]
+        claim_ids = sorted({item.parent_claim_id for item in selected_units})
+        claims = [claims_index[item] for item in claim_ids if item in claims_index]
+        binding_pairs = sorted(
+            {
+                (binding.evidence_step_id, binding.source_fragment_id)
+                for unit in selected_units
+                for binding in unit.evidence_bindings
+            }
+        )
+        steps = [
+            evidence_index[evidence_id]
+            for evidence_id in sorted({item[0] for item in binding_pairs})
+            if evidence_id in evidence_index
+        ]
+        fragments = [
+            fragment_index[fragment_id]
+            for fragment_id in sorted({item[1] for item in binding_pairs})
+            if fragment_id in fragment_index
+        ]
+        source_ids = sorted({item.source_id for item in fragments})
+        sources = [source_index[item] for item in source_ids if item in source_index]
+        citation_ids = sorted({value for item in steps for value in item.citation_ids})
+        citation_index = {_id(item, "citation_id"): item for item in self.citations}
+        citations = [
+            citation_index[item] for item in citation_ids if item in citation_index
+        ]
+
+        blockers: list[str] = []
+        if coverage.coverage_status != "complete":
+            blockers.append("coverage_incomplete")
+        if not ledger or ledger.coverage_status != "complete":
+            blockers.append("resolution_ledger_incomplete")
+        if not quality or quality.eligibility_decision != "pass":
+            blockers.append("quality_not_passed")
+        if len(selected_promotions) != len(selected_ids):
+            blockers.append("promotion_not_approved")
+        if missing_unit_ids:
+            blockers.append("atomic_member_missing")
+        if len(claims) != len(claim_ids) or len(steps) != len({x[0] for x in binding_pairs}):
+            blockers.append("atomic_dependency_missing")
+        if len(fragments) != len({x[1] for x in binding_pairs}) or len(sources) != len(source_ids):
+            blockers.append("atomic_dependency_missing")
+        for promotion in selected_promotions:
+            viewpoint = viewpoints.get(promotion.viewpoint_id)
+            revision = revisions.get(promotion.viewpoint_revision_id)
+            member_links = [
+                item for item in selected_links if item.viewpoint_id == promotion.viewpoint_id
+            ]
+            if not viewpoint or viewpoint.identity_status != "active":
+                blockers.append("registry_not_evidence_ready")
+            if not revision or revision.review_status not in APPROVED:
+                blockers.append("registry_not_evidence_ready")
+            if any(item.review_status not in APPROVED for item in member_links):
+                blockers.append("registry_not_evidence_ready")
+        public_blockers = list(blockers)
+        if len(citations) != len(citation_ids) or any(
+            _dump(item).get("status") != "approved" for item in citations
+        ):
+            public_blockers.append("citation_not_public")
+        if any(item.support_eligibility not in PUBLIC_EVIDENCE for item in steps):
+            public_blockers.append("evidence_not_public")
+        if any(item.anchor_state not in PUBLIC_ANCHORS for item in fragments):
+            public_blockers.append("source_anchor_not_public")
+        blockers = sorted(set(public_blockers))
+        composition_blockers = {
+            "coverage_incomplete",
+            "resolution_ledger_incomplete",
+            "quality_not_passed",
+            "promotion_not_approved",
+            "atomic_member_missing",
+            "atomic_dependency_missing",
+            "registry_not_evidence_ready",
+        }
+        eligibility = (
+            "internal_candidate"
+            if composition_blockers.intersection(blockers)
+            else "public_attribution"
+            if not blockers
+            else "composition"
+        )
+
+        dependency_values: list[tuple[str, str, Any]] = [
+            ("viewpoint_atomic_coverage_snapshots", coverage_snapshot_id, coverage),
+            *[("viewpoint_automated_promotion_decisions", item.automated_promotion_decision_id, item) for item in selected_promotions],
+            *[("canonical_viewpoints", item.viewpoint_id, item) for item in (viewpoints.get(value) for value in selected_ids) if item],
+            *[("viewpoint_revisions", item.viewpoint_revision_id, item) for item in (revisions.get(value.viewpoint_revision_id) for value in selected_promotions) if item],
+            *[("viewpoint_proposition_unit_links", item.viewpoint_proposition_unit_link_id, item) for item in selected_links],
+            *[("viewpoint_proposition_units", item.proposition_unit_id, item) for item in selected_units],
+            *[("claims", item.claim_id, item) for item in claims],
+            *[("evidence_steps", item.evidence_step_id, item) for item in steps],
+            *[("source_fragments", item.fragment_id, item) for item in fragments],
+            *[("source_documents", item.source_id, item) for item in sources],
+            *[("citations", _id(item, "citation_id"), item) for item in citations],
+        ]
+        if ledger:
+            dependency_values.append(
+                (
+                    "viewpoint_atomic_resolution_ledgers",
+                    ledger.atomic_resolution_ledger_id,
+                    ledger,
+                )
+            )
+        if quality:
+            dependency_values.append(
+                (
+                    "viewpoint_atomic_quality_reports",
+                    quality.atomic_quality_report_id,
+                    quality,
+                )
+            )
+        manifest = sorted(
+            [
+                ProjectionDependency(
+                    collection=collection,
+                    record_id=record_id,
+                    revision=int(_dump(value).get("revision", 1)),
+                    sha256=semantic_record_sha(value),
+                )
+                for collection, record_id, value in dependency_values
+            ],
+            key=lambda item: (item.collection, item.record_id),
+        )
+        manifest_payload = [item.model_dump(mode="json") for item in manifest]
+        viewpoint_rows = []
+        for promotion in sorted(selected_promotions, key=lambda item: item.viewpoint_id):
+            viewpoint = viewpoints[promotion.viewpoint_id]
+            revision = revisions[promotion.viewpoint_revision_id]
+            member_units = [
+                unit
+                for unit in selected_units
+                if any(
+                    link.viewpoint_id == promotion.viewpoint_id
+                    and link.proposition_unit_id == unit.proposition_unit_id
+                    for link in selected_links
+                )
+            ]
+            viewpoint_rows.append({
+                "viewpoint": _dump(viewpoint),
+                "revision": _dump(revision),
+                "member_proposition_units": [_dump(item) for item in member_units],
+                "automated_promotion_decision": _dump(promotion),
+            })
+        base = {
+            "schema_version": "wang_viewpoint_knowledge_projection_v1",
+            "consumer_kind": consumer_kind,
+            "scope_viewpoint_ids": selected_ids,
+            "coverage_snapshot_id": coverage_snapshot_id,
+            "resolution_ledger_id": ledger.atomic_resolution_ledger_id if ledger else None,
+            "quality_report_id": quality.atomic_quality_report_id if quality else None,
+            "eligibility": eligibility,
+            "blocker_codes": blockers,
+            "viewpoints": viewpoint_rows,
+            "argument_routes": [],
+            "expanded_claims": [_dump(item) for item in claims],
+            "expanded_evidence": [_dump(item) for item in steps],
+            "expanded_fragments": [_dump(item) for item in fragments],
+            "expanded_sources": [_dump(item) for item in sources],
+            "expanded_citations": [_dump(item) for item in citations],
+            "relations": [],
+            "dependency_manifest": manifest_payload,
+            "dependency_manifest_sha256": sha256_json(manifest_payload),
+        }
+        base["projection_sha256"] = sha256_json(base)
+        return ViewpointKnowledgeProjection.model_validate(base)
+
 
 def build_projection_dependencies(
     projection: ViewpointKnowledgeProjection, *, consumer_id: str
@@ -533,6 +790,7 @@ def build_projection_dependencies(
     registry_ids = sorted(
         item["snapshot"]["viewpoint_registry_snapshot_id"]
         for item in projection.viewpoints
+        if "snapshot" in item
     )
     viewpoint_revision_ids = sorted(
         item["revision"]["viewpoint_revision_id"] for item in projection.viewpoints
@@ -547,7 +805,14 @@ def build_projection_dependencies(
     )
     route_ids = sorted(item["route"]["argument_route_id"] for item in projection.argument_routes)
     quality_dependency = next(
-        (item for item in projection.dependency_manifest if item.collection == "viewpoint_quality_reports"),
+        (
+            item
+            for item in projection.dependency_manifest
+            if item.collection in {
+                "viewpoint_quality_reports",
+                "viewpoint_atomic_quality_reports",
+            }
+        ),
         None,
     )
     manifest = [item.model_dump(mode="json") for item in projection.dependency_manifest]

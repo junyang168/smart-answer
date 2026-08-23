@@ -12,12 +12,19 @@ import base64
 import json
 from collections import defaultdict
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .knowledge_models import (
     CanonicalViewpointRecord,
     ClaimRecord,
     ViewpointClaimLinkRecord,
+    ViewpointAtomicCoverageSnapshotRecord,
+    ViewpointAtomicQualityReportRecord,
+    ViewpointAtomicResolutionLedgerRecord,
+    ViewpointPropositionUnitLinkRecord,
+    ViewpointPropositionUnitRecord,
     ViewpointCoverageSnapshotRecord,
     ViewpointQualityReportRecord,
     ViewpointResolutionLedgerRecord,
@@ -94,6 +101,11 @@ class AdminViewpointProjectionCompiler:
                 "canonical_viewpoints",
                 "viewpoint_revisions",
                 "viewpoint_claim_links",
+                "viewpoint_proposition_units",
+                "viewpoint_proposition_unit_links",
+                "viewpoint_atomic_coverage_snapshots",
+                "viewpoint_atomic_resolution_ledgers",
+                "viewpoint_atomic_quality_reports",
                 "argument_routes",
                 "argument_route_revisions",
                 "argument_route_attestations",
@@ -144,20 +156,73 @@ class AdminViewpointProjectionCompiler:
         return sorted(rows, key=lambda item: (item.revision, item.quality_report_id))[-1] if rows else None
 
     def _state(self, coverage_snapshot_id: str | None = None) -> dict[str, Any]:
-        coverage = self._coverage(coverage_snapshot_id)
-        ledger = self._ledger(coverage.coverage_snapshot_id if coverage else None)
-        quality = self._quality(
-            coverage.coverage_snapshot_id if coverage else None,
-            ledger.resolution_ledger_id if ledger else None,
+        legacy_coverage = self._coverage(coverage_snapshot_id)
+        legacy_ledger = self._ledger(
+            legacy_coverage.coverage_snapshot_id if legacy_coverage else None
         )
-        runtime = ViewpointRuntimeCompiler(self.records, self.citations)
+        legacy_quality = self._quality(
+            legacy_coverage.coverage_snapshot_id if legacy_coverage else None,
+            legacy_ledger.resolution_ledger_id if legacy_ledger else None,
+        )
+        atomic_coverages = sorted(
+            self.records["viewpoint_atomic_coverage_snapshots"],
+            key=lambda item: (item.revision, item.atomic_coverage_snapshot_id),
+        )
+        atomic_coverage = atomic_coverages[-1] if atomic_coverages else None
+        atomic_ledgers = [
+            item
+            for item in self.records["viewpoint_atomic_resolution_ledgers"]
+            if atomic_coverage
+            and item.atomic_coverage_snapshot_id
+            == atomic_coverage.atomic_coverage_snapshot_id
+        ]
+        atomic_ledger = (
+            sorted(
+                atomic_ledgers,
+                key=lambda item: (item.revision, item.atomic_resolution_ledger_id),
+            )[-1]
+            if atomic_ledgers
+            else None
+        )
+        atomic_qualities = [
+            item
+            for item in self.records["viewpoint_atomic_quality_reports"]
+            if atomic_ledger
+            and item.atomic_resolution_ledger_id
+            == atomic_ledger.atomic_resolution_ledger_id
+        ]
+        atomic_quality = (
+            sorted(
+                atomic_qualities,
+                key=lambda item: (item.revision, item.atomic_quality_report_id),
+            )[-1]
+            if atomic_qualities
+            else None
+        )
+        coverage = legacy_coverage or atomic_coverage
+        ledger = legacy_ledger or atomic_ledger
+        quality = legacy_quality or atomic_quality
+        runtime = ViewpointRuntimeCompiler(
+            {
+                name: rows
+                for name, rows in self.records.items()
+                if name not in {
+                    "viewpoint_proposition_units",
+                    "viewpoint_proposition_unit_links",
+                    "viewpoint_atomic_coverage_snapshots",
+                    "viewpoint_atomic_resolution_ledgers",
+                    "viewpoint_atomic_quality_reports",
+                }
+            },
+            self.citations,
+        )
         registry_snapshots = (
-            runtime.compile_registry_snapshots(coverage.coverage_snapshot_id)
-            if coverage else []
+            runtime.compile_registry_snapshots(legacy_coverage.coverage_snapshot_id)
+            if legacy_coverage else []
         )
         route_snapshots = (
-            runtime.compile_route_snapshots(coverage.coverage_snapshot_id)
-            if coverage else []
+            runtime.compile_route_snapshots(legacy_coverage.coverage_snapshot_id)
+            if legacy_coverage else []
         )
         bound = []
         for name in (
@@ -166,6 +231,11 @@ class AdminViewpointProjectionCompiler:
             "canonical_viewpoints",
             "viewpoint_revisions",
             "viewpoint_claim_links",
+            "viewpoint_proposition_units",
+            "viewpoint_proposition_unit_links",
+            "viewpoint_atomic_coverage_snapshots",
+            "viewpoint_atomic_resolution_ledgers",
+            "viewpoint_atomic_quality_reports",
             "claims",
             "evidence_steps",
             "knowledge_routes",
@@ -216,7 +286,10 @@ class AdminViewpointProjectionCompiler:
     def _record_id_from_model(item: Any) -> str:
         for name in (
             "coverage_snapshot_id", "resolution_ledger_id", "quality_report_id",
+            "atomic_coverage_snapshot_id", "atomic_resolution_ledger_id",
+            "atomic_quality_report_id",
             "viewpoint_id", "viewpoint_revision_id", "viewpoint_claim_link_id",
+            "proposition_unit_id", "viewpoint_proposition_unit_link_id",
             "argument_route_id", "argument_route_revision_id", "argument_route_attestation_id",
             "viewpoint_relation_id",
             "claim_id", "evidence_step_id", "route_id", "claim_relation_id",
@@ -236,6 +309,11 @@ class AdminViewpointProjectionCompiler:
             "viewpoint_coverage_snapshots": "coverage_snapshot_id",
             "canonical_viewpoints": "viewpoint_id", "viewpoint_revisions": "viewpoint_revision_id",
             "viewpoint_claim_links": "viewpoint_claim_link_id",
+            "viewpoint_proposition_units": "proposition_unit_id",
+            "viewpoint_proposition_unit_links": "viewpoint_proposition_unit_link_id",
+            "viewpoint_atomic_coverage_snapshots": "atomic_coverage_snapshot_id",
+            "viewpoint_atomic_resolution_ledgers": "atomic_resolution_ledger_id",
+            "viewpoint_atomic_quality_reports": "atomic_quality_report_id",
             "argument_routes": "argument_route_id",
             "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
@@ -260,11 +338,20 @@ class AdminViewpointProjectionCompiler:
             },
             "as_of": {
                 "registry_snapshot_id": state["registry_snapshot_id"],
-                "coverage_snapshot_id": coverage.coverage_snapshot_id if coverage else None,
+                "coverage_snapshot_id": (
+                    getattr(coverage, "coverage_snapshot_id", None)
+                    or getattr(coverage, "atomic_coverage_snapshot_id", None)
+                ) if coverage else None,
                 "coverage_status": coverage.coverage_status if coverage else "unavailable",
-                "resolution_ledger_id": ledger.resolution_ledger_id if ledger else None,
+                "resolution_ledger_id": (
+                    getattr(ledger, "resolution_ledger_id", None)
+                    or getattr(ledger, "atomic_resolution_ledger_id", None)
+                ) if ledger else None,
                 "resolution_status": ledger.coverage_status if ledger else "unavailable",
-                "quality_report_id": quality.quality_report_id if quality else None,
+                "quality_report_id": (
+                    getattr(quality, "quality_report_id", None)
+                    or getattr(quality, "atomic_quality_report_id", None)
+                ) if quality else None,
                 "quality_decision": quality.eligibility_decision if quality else "unavailable",
             },
             "projection_sha256": state["projection_sha256"],
@@ -276,6 +363,10 @@ class AdminViewpointProjectionCompiler:
         state = self._state(coverage_snapshot_id)
         coverage = state["coverage"]
         ledger = state["ledger"]
+        atomic_coverage = isinstance(coverage, ViewpointAtomicCoverageSnapshotRecord)
+        atomic_quality = isinstance(
+            state["quality"], ViewpointAtomicQualityReportRecord
+        )
         active = [item for item in self.records["canonical_viewpoints"] if item.identity_status == "active"]
         affected = {
             (item.consumer_kind, item.consumer_id)
@@ -286,15 +377,39 @@ class AdminViewpointProjectionCompiler:
             state,
             {
                 "source_coverage": {
-                    "covered": sum("viewpoint_reviewed" in item.roles for item in coverage.sources) if coverage else None,
-                    "total": len(coverage.sources) if coverage else None,
+                    "covered": (
+                        len(coverage.source_ids)
+                        if atomic_coverage
+                        else sum(
+                            "viewpoint_reviewed" in item.roles
+                            for item in coverage.sources
+                        ) if coverage else None
+                    ),
+                    "total": (
+                        len(coverage.source_ids)
+                        if atomic_coverage
+                        else len(coverage.sources) if coverage else None
+                    ),
                     "status": coverage.coverage_status if coverage else "unavailable",
                 },
                 "claim_resolution": _dump(ledger.statistics) if ledger else None,
                 "active_viewpoints": len(active),
                 "exceptions": len(self.exception_queue.bundles) if self.exception_queue else 0,
                 "affected_products": len(affected),
-                "quality_dimensions": [_dump(item) for item in state["quality"].dimensions] if state["quality"] else [],
+                "quality_dimensions": (
+                    [
+                        {
+                            "dimension": item.code,
+                            "status": item.status,
+                            "applicable": True,
+                        }
+                        for item in state["quality"].checks
+                    ]
+                    if atomic_quality
+                    else [_dump(item) for item in state["quality"].dimensions]
+                    if state["quality"]
+                    else []
+                ),
                 "recall": {
                     "available": True,
                     "artifact_sha256": self.recall_blocking.artifact_sha256,
@@ -412,6 +527,15 @@ class AdminViewpointProjectionCompiler:
         for link in self.records["viewpoint_claim_links"]:
             if link.effective_state == "active":
                 links_by_viewpoint[link.viewpoint_id].append(link)
+        unit_links_by_viewpoint: dict[
+            str, list[ViewpointPropositionUnitLinkRecord]
+        ] = defaultdict(list)
+        for link in self.records["viewpoint_proposition_unit_links"]:
+            if link.effective_state == "active":
+                unit_links_by_viewpoint[link.viewpoint_id].append(link)
+        units: dict[str, ViewpointPropositionUnitRecord] = idx[
+            "viewpoint_proposition_units"
+        ]
         deps_by_claim: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for dep in self.records["product_dependencies"]:
             deps_by_claim[dep.claim_id].add((dep.consumer_kind, dep.consumer_id))
@@ -428,20 +552,47 @@ class AdminViewpointProjectionCompiler:
             member_links = [item for item in links if item.link_type in MEMBERSHIP_TYPES]
             related_links = [item for item in links if item.link_type in RELATION_TYPES]
             member_claims = [claims[item.claim_id] for item in member_links if item.claim_id in claims]
+            atomic_links = [
+                item
+                for item in unit_links_by_viewpoint.get(viewpoint.viewpoint_id, [])
+                if item.validated_against_viewpoint_revision_id
+                == viewpoint.current_revision_id
+            ]
+            member_units = [
+                units[item.proposition_unit_id]
+                for item in atomic_links
+                if item.proposition_unit_id in units
+            ]
+            atomic_claims = [
+                claims[item.parent_claim_id]
+                for item in member_units
+                if item.parent_claim_id in claims
+            ]
+            all_member_claims = [*member_claims, *atomic_claims]
             haystack = " ".join([viewpoint.viewpoint_id, revision.core_proposition, *revision.editorial_aliases]).casefold()
             if q and q.casefold() not in haystack:
                 continue
             if review_status and revision.review_status != review_status:
                 continue
-            if topic_id and not any(topic_id in item.topic_ids for item in member_claims):
+            if topic_id and not any(topic_id in item.topic_ids for item in all_member_claims):
                 continue
             if scripture and not any(
                 scripture.casefold() in json.dumps(item.scripture_refs, ensure_ascii=False).casefold()
-                for item in member_claims
+                for item in all_member_claims
             ):
                 continue
-            claim_ids = {item.claim_id for item in member_links}
-            source_ids = set().union(*(sources_by_claim.get(claim_id, set()) for claim_id in claim_ids)) if claim_ids else set()
+            claim_ids = {
+                *[item.claim_id for item in member_links],
+                *[item.parent_claim_id for item in member_units],
+            }
+            source_ids = (
+                set().union(
+                    *(sources_by_claim.get(claim_id, set()) for claim_id in claim_ids)
+                )
+                if claim_ids
+                else set()
+            )
+            source_ids.update(item.source_id for item in member_units)
             route_count = sum(
                 item.conclusion_viewpoint_id == viewpoint.viewpoint_id
                 for item in self.records["argument_routes"]
@@ -464,9 +615,9 @@ class AdminViewpointProjectionCompiler:
                 "review_status": revision.review_status,
                 "approval_basis": self._approval_basis(revision),
                 "scripture_scope": revision.scope.scripture_scope,
-                "topic_ids": sorted({topic for item in member_claims for topic in item.topic_ids}),
+                "topic_ids": sorted({topic for item in all_member_claims for topic in item.topic_ids}),
                 "counts": {
-                    "members": len(member_links), "sources": len(source_ids),
+                    "members": len(member_links) + len(atomic_links), "sources": len(source_ids),
                     "routes": route_count,
                     "tensions": sum(item.relation_type == "tensions_with" for item in viewpoint_relations),
                     "related": len(viewpoint_relations),
@@ -528,6 +679,23 @@ class AdminViewpointProjectionCompiler:
             key=lambda item: (item.link_type, item.claim_id),
         )
         member_claim_ids = {item.claim_id for item in links if item.link_type in MEMBERSHIP_TYPES}
+        atomic_links = sorted(
+            [
+                item
+                for item in self.records["viewpoint_proposition_unit_links"]
+                if item.viewpoint_id == viewpoint_id
+                and item.effective_state == "active"
+                and item.validated_against_viewpoint_revision_id
+                == viewpoint.current_revision_id
+            ],
+            key=lambda item: (item.link_type, item.proposition_unit_id),
+        )
+        proposition_units = idx["viewpoint_proposition_units"]
+        member_claim_ids.update(
+            proposition_units[item.proposition_unit_id].parent_claim_id
+            for item in atomic_links
+            if item.proposition_unit_id in proposition_units
+        )
         claims = idx["claims"]
         evidence = idx["evidence_steps"]
         fragments = idx["source_fragments"]
@@ -550,11 +718,66 @@ class AdminViewpointProjectionCompiler:
                     "citations": [_dump(citations[cid]) for cid in (step.citation_ids if step else []) if cid in citations],
                     "locator": {
                         "source_url": (fragment.source_url if fragment else None) or (source.source_url if source else None),
+                        "source_admin_url": (
+                            f"/admin/wang/source-coverage?source={quote(fragment.source_id)}&fragment={quote(fragment.fragment_id)}"
+                            if fragment else None
+                        ),
+                        "source_file_name": (
+                            Path(getattr(source, "source_path", "")).name
+                            if source and getattr(source, "source_path", "") else None
+                        ),
+                        "source_type": source.source_type if source else None,
                         "paragraph_key": fragment.paragraph_key if fragment else None,
                         "media_time": fragment.media_time if fragment else None,
                     },
                 })
             members.append({"link": _dump(link), "claim": _dump(claim), "evidence": steps})
+        for link in atomic_links:
+            unit = proposition_units.get(link.proposition_unit_id)
+            if not unit:
+                continue
+            claim = claims.get(unit.parent_claim_id)
+            steps = []
+            for binding in unit.evidence_bindings:
+                step = evidence.get(binding.evidence_step_id)
+                fragment = fragments.get(binding.source_fragment_id)
+                source = sources.get(fragment.source_id) if fragment else None
+                steps.append({
+                    "evidence_step": _dump(step) if step else None,
+                    "source_fragment": _dump(fragment) if fragment else None,
+                    "source": _dump(source) if source else None,
+                    "citations": [
+                        _dump(citations[cid])
+                        for cid in (step.citation_ids if step else [])
+                        if cid in citations
+                    ],
+                    "locator": {
+                        "source_url": (fragment.source_url if fragment else None)
+                        or (source.source_url if source else None),
+                        "source_admin_url": (
+                            f"/admin/wang/source-coverage?source={quote(fragment.source_id)}&fragment={quote(fragment.fragment_id)}"
+                            if fragment else None
+                        ),
+                        "source_file_name": (
+                            Path(getattr(source, "source_path", "")).name
+                            if source and getattr(source, "source_path", "") else None
+                        ),
+                        "source_type": source.source_type if source else None,
+                        "paragraph_key": fragment.paragraph_key if fragment else None,
+                        "media_time": fragment.media_time if fragment else None,
+                    },
+                })
+            members.append({
+                "membership_kind": "proposition_unit",
+                "link": _dump(link),
+                "proposition_unit": _dump(unit),
+                "claim": _dump(claim) if claim else {
+                    "claim_id": unit.parent_claim_id,
+                    "statement": unit.unit_statement,
+                    "review_status": "missing",
+                },
+                "evidence": steps,
+            })
         relations = []
         for relation in sorted(
             [
@@ -616,12 +839,26 @@ class AdminViewpointProjectionCompiler:
         graph = {
             "nodes": [
                 {"id": viewpoint_id, "kind": "viewpoint", "label": revision.core_proposition},
-                *[{"id": item["claim"]["claim_id"], "kind": "member", "label": item["claim"]["statement"]} for item in members],
+                *[{
+                    "id": (item.get("proposition_unit") or item["claim"])[
+                        "proposition_unit_id" if item.get("proposition_unit") else "claim_id"
+                    ],
+                    "kind": "member",
+                    "label": (item.get("proposition_unit") or item["claim"])[
+                        "unit_statement" if item.get("proposition_unit") else "statement"
+                    ],
+                } for item in members],
                 *[{"id": item["route_id"], "kind": "route", "label": item.get("route_type") or "推理路线"} for item in routes],
                 *[{"id": item["to_viewpoint_id"], "kind": "related_viewpoint", "label": item["to_viewpoint_id"]} for item in relations if item["to_viewpoint_id"]],
             ],
             "edges": [
-                *[{"from": item["claim"]["claim_id"], "to": viewpoint_id, "kind": item["link"]["link_type"]} for item in members],
+                *[{
+                    "from": (item.get("proposition_unit") or item["claim"])[
+                        "proposition_unit_id" if item.get("proposition_unit") else "claim_id"
+                    ],
+                    "to": viewpoint_id,
+                    "kind": item["link"]["link_type"],
+                } for item in members],
                 *[{"from": item["route_id"], "to": viewpoint_id, "kind": "argument_route"} for item in routes],
                 *[{"from": viewpoint_id, "to": item["to_viewpoint_id"], "kind": item["relation_type"]} for item in relations if item["to_viewpoint_id"]],
             ],
