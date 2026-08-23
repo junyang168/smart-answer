@@ -123,6 +123,7 @@ def test_pilot_scope_preserves_context_and_reports_source_gap(tmp_path):
         "C-CONTEXT": "source_context_candidate",
         "C-CORE": "core",
     }
+    assert next(item for item in result.claims if item.claim_id == "C-CORE").passage_unit_ids == ["16:13-18"]
     fixture = result.article_acceptance_fixtures[0]
     assert fixture.exact_current_claim_ids == ["C-CORE"]
     assert fixture.requires_semantic_alignment_claim_ids == ["LEGACY-CLAIM"]

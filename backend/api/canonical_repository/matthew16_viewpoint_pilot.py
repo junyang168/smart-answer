@@ -47,6 +47,7 @@ class PilotClaim(StrictPilotModel):
     review_status: str
     scripture_refs: list[Any] = Field(default_factory=list)
     lane: Literal["core", "source_context_candidate"]
+    passage_unit_ids: list[str] = Field(default_factory=list)
 
 
 class ArticleAcceptanceFixture(StrictPilotModel):
@@ -144,6 +145,28 @@ def _article_fixture(article_dir: Path, current_claim_ids: set[str]) -> ArticleA
     )
 
 
+PASSAGE_UNITS: dict[str, tuple[Passage, ...]] = {
+    "16:1-12": (Passage("Matt", 16, 1, 12),),
+    "16:13-18": (Passage("Matt", 16, 13, 18),),
+    "16:19": (Passage("Matt", 16, 19, 19),),
+    "16:20-23": (Passage("Matt", 16, 20, 23),),
+    "16:24-27": (Passage("Matt", 16, 24, 27),),
+    "16:28-17:8": (Passage("Matt", 16, 28, 28), Passage("Matt", 17, 1, 8)),
+}
+
+
+def _passage_unit_ids(scripture_refs: Sequence[Any]) -> list[str]:
+    return [
+        unit_id
+        for unit_id, passages in PASSAGE_UNITS.items()
+        if any(
+            reference_overlaps(str(reference), passage)
+            for reference in scripture_refs
+            for passage in passages
+        )
+    ]
+
+
 def build_matthew16_pilot_scope(
     *,
     source_catalog: Mapping[str, Any],
@@ -211,7 +234,6 @@ def build_matthew16_pilot_scope(
     }
     if set(claim_index) != set(manifest_rows):
         raise ValueError("database is missing a pinned Matthew 16 pilot Claim")
-    passage = Passage("Matt", 16, 1, 28)
     pilot_claims: list[PilotClaim] = []
     for claim_id, pinned in manifest_rows.items():
         claim = claim_index[claim_id]
@@ -220,11 +242,8 @@ def build_matthew16_pilot_scope(
             or semantic_record_sha(claim) != pinned["claim_revision_sha256"]
         ):
             raise ValueError(f"{claim_id}: pinned Claim revision mismatch")
-        lane = (
-            "core"
-            if any(reference_overlaps(str(ref), passage) for ref in claim.scripture_refs)
-            else "source_context_candidate"
-        )
+        passage_unit_ids = _passage_unit_ids(claim.scripture_refs)
+        lane = "core" if passage_unit_ids else "source_context_candidate"
         pilot_claims.append(
             PilotClaim(
                 claim_id=claim_id,
@@ -237,6 +256,7 @@ def build_matthew16_pilot_scope(
                 review_status=claim.review_status,
                 scripture_refs=claim.scripture_refs,
                 lane=lane,
+                passage_unit_ids=passage_unit_ids,
             )
         )
     pilot_claims.sort(key=lambda item: item.claim_id)
@@ -248,7 +268,7 @@ def build_matthew16_pilot_scope(
     payload = {
         "schema_version": "wang_matthew16_viewpoint_pilot_scope_v1",
         "chapter": 16,
-        "passage_units": ["16:1-12", "16:13-18", "16:19", "16:20-23", "16:24-27", "16:28-17:8"],
+        "passage_units": list(PASSAGE_UNITS),
         "source_catalog_sha256": source_catalog_sha256,
         "source_map_sha256": source_map_sha256,
         "source_selection_sha256": selection_sha,
@@ -265,6 +285,13 @@ def build_matthew16_pilot_scope(
             "claim_total": len(pilot_claims),
             "core_claim_total": sum(item.lane == "core" for item in pilot_claims),
             "source_context_candidate_total": sum(item.lane == "source_context_candidate" for item in pilot_claims),
+            "passage_unit_assignment_total": sum(len(item.passage_unit_ids) for item in pilot_claims),
+            **{
+                f"unit_{unit_id.replace(':', '_').replace('-', '_')}_claim_total": sum(
+                    unit_id in item.passage_unit_ids for item in pilot_claims
+                )
+                for unit_id in PASSAGE_UNITS
+            },
             "article_fixture_total": len(article_fixtures),
             "article_used_claim_total": sum(len(item.used_claim_ids) for item in article_fixtures),
             "article_exact_current_claim_total": sum(len(item.exact_current_claim_ids) for item in article_fixtures),
