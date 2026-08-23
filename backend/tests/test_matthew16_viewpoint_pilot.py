@@ -5,17 +5,35 @@ import json
 
 import pytest
 
-from backend.api.canonical_repository.knowledge_models import ClaimRecord
+from backend.api.canonical_repository.knowledge_models import (
+    ClaimRecord,
+    ViewpointIdentityCandidateRecord,
+)
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import (
     build_matthew16_pilot_scope,
 )
 from backend.api.canonical_repository.matthew16_viewpoint_candidate import (
+    AdjacentPropositionUnit,
+    ArticleViewpointAcceptance,
     Matthew16ViewpointPilotArtifact,
+    PilotViewpointMember,
     classify_pilot_viewpoint,
+)
+from backend.api.canonical_repository.matthew16_viewpoint_promotion import (
+    build_matthew16_viewpoint_promotion_proposal,
 )
 from backend.api.canonical_repository.knowledge_models import (
     ViewpointPropositionSignature,
     ViewpointScope,
+)
+from backend.api.canonical_repository.viewpoint_proposition_units import (
+    ClaimAtomicDecompositionArtifact,
+    PropositionUnitCandidate,
+)
+from backend.api.canonical_repository.viewpoint_resolution import (
+    ReviewClaim,
+    ReviewEvidence,
+    ViewpointIdentityReviewPacket,
 )
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
@@ -185,3 +203,135 @@ def test_pilot_viewpoint_classification_is_explicit_and_fail_closed():
     unscoped = pilot.model_copy(update={"scope": ViewpointScope()})
     with pytest.raises(ValueError, match="cannot be classified"):
         classify_pilot_viewpoint(unscoped)
+
+
+def test_master_promotion_preserves_atomic_membership_boundary():
+    evidence = ReviewEvidence(
+        evidence_step_id="EV-1",
+        source_fragment_id="FR-1",
+        source_id="SRC-1",
+        evidence_statement="证据",
+        verbatim_excerpt="原文",
+        citation_id="",
+        citation_revision=1,
+        citation_status="unresolved",
+        source_sha256="s" * 64,
+        support_eligibility="eligible_candidate",
+        anchor_state="source_version_bound",
+        source_eligibility_attestation_sha256="a" * 64,
+        valid_for_identity_review=True,
+    )
+
+    def unit(start: int, end: int, text: str) -> PropositionUnitCandidate:
+        payload = {
+            "parent_claim_id": "CL-1",
+            "pinned_claim_revision": 1,
+            "claim_revision_sha256": "c" * 64,
+            "source_id": "SRC-1",
+            "unit_statement": text,
+            "structural_role": "conjunct",
+            "claim_statement_spans": [{"start_char": start, "end_char": end, "exact_text": text}],
+            "evidence": [evidence],
+            "candidate_status": "atomic_candidate",
+            "approval_status": "not_human_approved",
+        }
+        return PropositionUnitCandidate(
+            proposition_unit_id=f"VPU-{sha256_json({
+                **payload,
+                'evidence': [evidence.model_dump(mode='json')],
+            })[:20]}",
+            **payload,
+        )
+
+    units = [
+        unit(0, 1, "甲"),
+        unit(1, 2, "乙"),
+        unit(2, 3, "丙"),
+    ]
+    member_ids = sorted([units[0].proposition_unit_id, units[1].proposition_unit_id])
+    excluded_id = units[2].proposition_unit_id
+    claim = ReviewClaim(
+        claim_id="CL-1",
+        pinned_claim_revision=1,
+        claim_revision_sha256="c" * 64,
+        source_id="SRC-1",
+        statement="甲乙丙",
+        review_status="candidate",
+        source_eligibility_attestation_sha256="a" * 64,
+        evidence=[evidence],
+    )
+    decomposition = ClaimAtomicDecompositionArtifact.model_construct(
+        parent_packet_sha256="packet-sha",
+        claim=claim,
+        proposition_units=units,
+        artifact_sha256="d" * 64,
+    )
+    pilot = Matthew16ViewpointPilotArtifact.model_construct(
+        viewpoint_candidate_id="CVP-TEST",
+        viewpoint_revision_candidate_id="CVPR-TEST",
+        core_proposition="甲与乙表达同一释经判断",
+        proposition_signature=ViewpointPropositionSignature(
+            subject="太16:18的磐石",
+            predicate="指向",
+            object="彼得本人",
+            polarity="denied",
+            modality="教授的释经判断",
+        ),
+        scope=ViewpointScope(scripture_scope=["Matt.16.18"]),
+        members=[
+            PilotViewpointMember(proposition_unit=units[0], parent_claim=claim),
+            PilotViewpointMember(proposition_unit=units[1], parent_claim=claim),
+        ],
+        adjacent_non_members=[
+            AdjacentPropositionUnit(
+                proposition_unit_id=excluded_id,
+                parent_claim_id="CL-1",
+                unit_statement="丙",
+            )
+        ],
+        article_acceptance=ArticleViewpointAcceptance(
+            draft_id="DRAFT-1",
+            manuscript_sha256="m" * 64,
+            article_proposition="甲与乙",
+            start_char=0,
+            end_char=3,
+            supporting_proposition_unit_ids=member_ids,
+        ),
+        boundary_run_artifact_sha256="b" * 64,
+        artifact_sha256="p" * 64,
+        model_ids=["claude-opus-5", "gpt-5.6-sol"],
+    )
+    boundary = {
+        "artifact_sha256": "b" * 64,
+        "semantic_agreement": True,
+        "synthesis_eligible": True,
+        "model_ids": ["claude-opus-5", "gpt-5.6-sol"],
+        "decomposition_artifact_sha256s": ["d" * 64],
+        "unit_universe_ids": sorted([*member_ids, excluded_id]),
+        "participant_unit_ids": member_ids,
+        "adjacent_unit_ids": [excluded_id],
+        "assessment_artifact_sha256s": ["a" * 64, "z" * 64],
+    }
+    evidence_packet = ViewpointIdentityReviewPacket.model_construct(
+        candidate=ViewpointIdentityCandidateRecord.model_construct(
+            candidate_claim_ids=["CL-1"]
+        ),
+        claims=[claim],
+        deterministic_blockers=[],
+        packet_sha256="packet-sha",
+    )
+
+    proposal = build_matthew16_viewpoint_promotion_proposal(
+        pilot=pilot,
+        boundary_run=boundary,
+        evidence_packet=evidence_packet,
+        decompositions=[decomposition],
+        proposed_at="2026-08-23T00:00:00Z",
+    )
+
+    assert len(proposal.proposition_units) == 3
+    assert [item.proposition_unit_id for item in proposal.proposition_unit_links] == member_ids
+    assert proposal.excluded_proposition_unit_ids == [excluded_id]
+    assert proposal.claim_membership_link_count == 0
+    assert proposal.apply_allowed is False
+    assert "formal_quality_report_missing" in proposal.blockers

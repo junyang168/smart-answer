@@ -817,6 +817,8 @@ def validate_foundation_change_set(
         "canonical_viewpoints",
         "viewpoint_revisions",
         "viewpoint_claim_links",
+        "viewpoint_proposition_units",
+        "viewpoint_proposition_unit_links",
         "argument_routes",
         "argument_route_revisions",
         "argument_route_attestations",
@@ -832,6 +834,8 @@ def validate_foundation_change_set(
     immutable_collections = {
         "viewpoint_coverage_snapshots",
         "viewpoint_revisions",
+        "viewpoint_proposition_units",
+        "viewpoint_proposition_unit_links",
         "argument_route_revisions",
         "argument_route_attestations",
         "viewpoint_identity_candidates",
@@ -868,10 +872,14 @@ def validate_foundation_change_set(
 
     sources = payloads("source_documents")
     claims = payloads("claims")
+    evidence_steps = payloads("evidence_steps")
+    source_fragments = payloads("source_fragments")
     coverages = payloads("viewpoint_coverage_snapshots")
     viewpoints = payloads("canonical_viewpoints")
     revisions = payloads("viewpoint_revisions")
     links = payloads("viewpoint_claim_links")
+    proposition_units = payloads("viewpoint_proposition_units")
+    proposition_unit_links = payloads("viewpoint_proposition_unit_links")
     claim_relations = payloads("claim_relations")
     candidates = payloads("viewpoint_identity_candidates")
     decisions = payloads("viewpoint_identity_decisions")
@@ -1009,6 +1017,87 @@ def validate_foundation_change_set(
     for key, owners in active_full.items():
         if len(owners) > 1:
             findings.append(f"{key[0]}@{key[1]}: multiple active equivalent_full memberships")
+
+    for unit_id, unit in proposition_units.items():
+        claim_id = str(unit["parent_claim_id"])
+        claim = claims.get(claim_id)
+        if not claim:
+            findings.append(f"{unit_id}: missing parent Claim {claim_id}")
+            continue
+        if int(claim.get("revision", 1)) != int(unit["pinned_claim_revision"]):
+            findings.append(f"{unit_id}: pinned Claim revision mismatch")
+        if unit.get("claim_revision_sha256") != semantic_record_sha(claim):
+            findings.append(f"{unit_id}: parent Claim SHA mismatch")
+        statement = str(claim.get("statement") or "")
+        for span in unit.get("claim_statement_spans") or []:
+            start = int(span["start_char"])
+            end = int(span["end_char"])
+            if statement[start:end] != span.get("exact_text"):
+                findings.append(f"{unit_id}: statement span does not match pinned Claim")
+        for binding in unit.get("evidence_bindings") or []:
+            evidence_id = str(binding["evidence_step_id"])
+            fragment_id = str(binding["source_fragment_id"])
+            evidence = evidence_steps.get(evidence_id)
+            fragment = source_fragments.get(fragment_id)
+            if not evidence:
+                findings.append(f"{unit_id}: missing EvidenceStep {evidence_id}")
+            elif fragment_id not in evidence_fragment_ids(evidence):
+                findings.append(f"{unit_id}: EvidenceStep does not bind fragment {fragment_id}")
+            if not fragment:
+                findings.append(f"{unit_id}: missing SourceFragment {fragment_id}")
+            elif fragment.get("source_id") != unit.get("source_id"):
+                findings.append(f"{unit_id}: SourceFragment belongs to another source")
+
+    active_unit_owners: dict[str, set[str]] = defaultdict(set)
+    active_unit_link_keys: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for link_id, link in proposition_unit_links.items():
+        viewpoint_id = str(link["viewpoint_id"])
+        revision_id = str(link["validated_against_viewpoint_revision_id"])
+        unit_id = str(link["proposition_unit_id"])
+        decision = decisions.get(str(link["decision_id"]))
+        if viewpoint_id not in viewpoints:
+            findings.append(f"{link_id}: missing viewpoint {viewpoint_id}")
+        if revisions.get(revision_id, {}).get("viewpoint_id") != viewpoint_id:
+            findings.append(f"{link_id}: invalid viewpoint revision {revision_id}")
+        elif (
+            link.get("effective_state") == "active"
+            and viewpoints.get(viewpoint_id, {}).get("current_revision_id") != revision_id
+        ):
+            findings.append(f"{link_id}: active link is not validated against current revision")
+        unit = proposition_units.get(unit_id)
+        if not unit:
+            findings.append(f"{link_id}: missing proposition unit {unit_id}")
+        elif unit.get("effective_state") != "active":
+            findings.append(f"{link_id}: proposition unit is not active")
+        if not decision:
+            findings.append(f"{link_id}: missing decision {link['decision_id']}")
+        else:
+            allowed = {
+                (str(item["proposition_unit_id"]), str(item["link_type"]))
+                for item in decision.get("proposition_unit_link_decisions") or []
+            }
+            if (unit_id, str(link["link_type"])) not in allowed:
+                findings.append(f"{link_id}: proposition unit link is not authorized")
+            if decision.get("resolved_viewpoint_id") not in {None, viewpoint_id}:
+                findings.append(f"{link_id}: decision resolves a different viewpoint")
+            if link.get("effective_state") == "active" and decision.get("review_status") not in {
+                "system_approved", "human_approved", "approved",
+            }:
+                findings.append(f"{link_id}: active link depends on an unapproved decision")
+        if link.get("effective_state") == "active":
+            active_unit_link_keys[(viewpoint_id, unit_id)].append(link_id)
+            active_unit_owners[unit_id].add(viewpoint_id)
+    for key, link_ids in active_unit_link_keys.items():
+        if len(link_ids) > 1:
+            findings.append(
+                f"{key[0]}/{key[1]}: duplicate active proposition unit links "
+                + ", ".join(sorted(link_ids))
+            )
+    for unit_id, owners in active_unit_owners.items():
+        if len(owners) > 1:
+            findings.append(
+                f"{unit_id}: multiple active CanonicalViewpoint memberships"
+            )
 
     for candidate_id, candidate in normalized.get("viewpoint_identity_candidates", {}).items():
         candidate_identity = {
@@ -1199,7 +1288,8 @@ def validate_foundation_change_set(
         for collection in (
             "source_documents", "source_fragments", "claims", "evidence_steps",
             "claim_relations", "canonical_viewpoints", "viewpoint_revisions",
-            "viewpoint_claim_links", "argument_routes", "argument_route_revisions",
+            "viewpoint_claim_links", "viewpoint_proposition_units",
+            "viewpoint_proposition_unit_links", "argument_routes", "argument_route_revisions",
             "argument_route_attestations", "viewpoint_relations",
         )
     }

@@ -27,6 +27,9 @@ from .canonical_repository.matthew16_viewpoint_candidate import (
     build_pilot_composition_projection,
     classify_pilot_viewpoint,
 )
+from .canonical_repository.matthew16_viewpoint_promotion import (
+    Matthew16ViewpointPromotionProposal,
+)
 from .canonical_repository.viewpoint_foundation import sha256_json
 
 
@@ -73,6 +76,20 @@ def _viewpoint_pilot() -> Matthew16ViewpointPilotArtifact | None:
     if not path.is_file():
         raise AdminViewpointProjectionError("configured viewpoint pilot does not exist")
     return Matthew16ViewpointPilotArtifact.model_validate(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
+def _viewpoint_promotion() -> Matthew16ViewpointPromotionProposal | None:
+    configured = os.getenv("WANG_VIEWPOINT_PROMOTION_FILE")
+    if not configured:
+        return None
+    path = Path(configured)
+    if not path.is_file():
+        raise AdminViewpointProjectionError(
+            f"configured viewpoint promotion does not exist: {path}"
+        )
+    return Matthew16ViewpointPromotionProposal.model_validate(
         json.loads(path.read_text(encoding="utf-8"))
     )
 
@@ -188,8 +205,14 @@ def viewpoint_pilot():
     try:
         consumer_projection = build_pilot_composition_projection(pilot)
         knowledge_classification = classify_pilot_viewpoint(pilot)
+        promotion = _viewpoint_promotion()
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
+    if promotion and promotion.pilot_artifact_sha256 != pilot.artifact_sha256:
+        raise HTTPException(
+            status_code=503,
+            detail="Viewpoint pilot unavailable: promotion proposal is bound to another pilot",
+        )
     try:
         source_files, source_files_sha256 = _viewpoint_pilot_source_files(pilot)
     except (AdminViewpointProjectionError, PostgresKnowledgeStoreError) as exc:
@@ -210,6 +233,7 @@ def viewpoint_pilot():
             "blocker_codes": consumer_projection.blocker_codes,
         },
         "knowledge_classification": knowledge_classification.model_dump(mode="json"),
+        "promotion": promotion.model_dump(mode="json") if promotion else None,
         "source_files": source_files,
         "source_files_sha256": source_files_sha256,
         "data": pilot.model_dump(mode="json"),

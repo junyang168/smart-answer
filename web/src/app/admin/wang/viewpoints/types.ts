@@ -171,6 +171,19 @@ export type PilotEnvelope = {
     policy_version: "matthew16_pilot_classification_v1";
     basis_fields: string[];
   };
+  promotion: null | {
+    schema_version: "wang_matthew16_viewpoint_promotion_proposal_v1";
+    artifact_sha256: string;
+    canonical_viewpoint: { viewpoint_id: string; review_status: string };
+    proposition_units: Array<{ proposition_unit_id: string; effective_state: "proposed" }>;
+    proposition_unit_links: Array<{ proposition_unit_id: string; effective_state: "proposed" }>;
+    excluded_proposition_unit_ids: string[];
+    quality_checks: Array<{ code: string; status: "pass"; detail: string }>;
+    blockers: string[];
+    claim_membership_link_count: 0;
+    master_data_mutations: 0;
+    apply_allowed: false;
+  };
   source_files: Record<string, {
     source_id: string; title: string; source_type: string; file_name: string;
   }>;

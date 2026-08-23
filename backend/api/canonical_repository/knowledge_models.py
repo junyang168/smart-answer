@@ -640,6 +640,93 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         return self
 
 
+class PropositionUnitStatementSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    exact_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_span(self) -> "PropositionUnitStatementSpan":
+        if self.end_char <= self.start_char:
+            raise ValueError("proposition unit statement span is empty or reversed")
+        return self
+
+
+class PropositionUnitEvidenceBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_step_id: str
+    source_fragment_id: str
+
+
+class ViewpointPropositionUnitRecord(StrictViewpointRecord):
+    """Durable atomic truth-condition unit promoted from a reviewed candidate."""
+
+    proposition_unit_id: str
+    schema_version: Literal["wang_viewpoint_proposition_unit_v1"] = (
+        "wang_viewpoint_proposition_unit_v1"
+    )
+    parent_claim_id: str
+    pinned_claim_revision: int = Field(ge=1)
+    claim_revision_sha256: str
+    source_id: str
+    unit_statement: str = Field(min_length=1)
+    structural_role: Literal["whole_claim", "conjunct", "qualified_clause"]
+    claim_statement_spans: list[PropositionUnitStatementSpan] = Field(min_length=1)
+    evidence_bindings: list[PropositionUnitEvidenceBinding] = Field(min_length=1)
+    decomposition_artifact_sha256: str
+    effective_state: Literal["proposed", "active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_unit(self) -> "ViewpointPropositionUnitRecord":
+        spans = [
+            (item.start_char, item.end_char, item.exact_text)
+            for item in self.claim_statement_spans
+        ]
+        if spans != sorted(set(spans)):
+            raise ValueError("proposition unit spans must be canonical and unique")
+        bindings = [
+            (item.evidence_step_id, item.source_fragment_id)
+            for item in self.evidence_bindings
+        ]
+        if bindings != sorted(set(bindings)):
+            raise ValueError("proposition unit evidence bindings must be canonical and unique")
+        if self.effective_state == "active" and self.review_status not in {
+            "system_approved",
+            "human_approved",
+            "approved",
+        }:
+            raise ValueError("active proposition unit requires approved review status")
+        return self
+
+
+class ViewpointPropositionUnitLinkRecord(StrictViewpointRecord):
+    """Exact CanonicalViewpoint membership at the reviewed atomic boundary."""
+
+    viewpoint_proposition_unit_link_id: str
+    schema_version: Literal["wang_viewpoint_proposition_unit_link_v1"] = (
+        "wang_viewpoint_proposition_unit_link_v1"
+    )
+    viewpoint_id: str
+    validated_against_viewpoint_revision_id: str
+    proposition_unit_id: str
+    link_type: Literal["equivalent"] = "equivalent"
+    decision_id: str
+    effective_state: Literal["proposed", "active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_link(self) -> "ViewpointPropositionUnitLinkRecord":
+        if self.effective_state == "active" and self.review_status not in {
+            "system_approved",
+            "human_approved",
+            "approved",
+        }:
+            raise ValueError("active proposition unit link requires approved review status")
+        return self
+
+
 class ArgumentRouteSignature(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -809,6 +896,13 @@ class ViewpointClaimLinkDecision(BaseModel):
     ]
 
 
+class ViewpointPropositionUnitLinkDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposition_unit_id: str
+    link_type: Literal["equivalent"] = "equivalent"
+
+
 class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
     identity_decision_id: str
     schema_version: Literal["wang_viewpoint_identity_decision_v1"] = (
@@ -826,6 +920,9 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
     ]
     resolved_viewpoint_id: Optional[str] = None
     claim_link_decisions: list[ViewpointClaimLinkDecision] = Field(default_factory=list)
+    proposition_unit_link_decisions: list[ViewpointPropositionUnitLinkDecision] = Field(
+        default_factory=list
+    )
     reviewer_kind: Literal["system", "human_editor"]
     reviewer_id: str
     approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review"]
@@ -847,6 +944,12 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
         ]
         if len(link_decisions) != len(set(link_decisions)):
             raise ValueError("claim_link_decisions must be unique")
+        unit_link_decisions = [
+            (item.proposition_unit_id, item.link_type)
+            for item in self.proposition_unit_link_decisions
+        ]
+        if len(unit_link_decisions) != len(set(unit_link_decisions)):
+            raise ValueError("proposition_unit_link_decisions must be unique")
         if self.decision in {"match_existing", "create_new", "merge_identities"}:
             if not self.resolved_viewpoint_id:
                 raise ValueError(f"{self.decision} requires resolved_viewpoint_id")
@@ -1142,6 +1245,14 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "canonical_viewpoints": (CanonicalViewpointRecord, "viewpoint_id"),
     "viewpoint_revisions": (ViewpointRevisionRecord, "viewpoint_revision_id"),
     "viewpoint_claim_links": (ViewpointClaimLinkRecord, "viewpoint_claim_link_id"),
+    "viewpoint_proposition_units": (
+        ViewpointPropositionUnitRecord,
+        "proposition_unit_id",
+    ),
+    "viewpoint_proposition_unit_links": (
+        ViewpointPropositionUnitLinkRecord,
+        "viewpoint_proposition_unit_link_id",
+    ),
     "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
     "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),
     "argument_route_attestations": (ArgumentRouteAttestationRecord, "argument_route_attestation_id"),

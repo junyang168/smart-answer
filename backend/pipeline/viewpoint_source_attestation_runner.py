@@ -63,6 +63,16 @@ def build_attestations(
         if not review_path.is_file():
             continue
         review_payload = _read(review_path)
+        adjudication_path = (
+            path.parent.parent / "adjudications" / f"{slug}.ai-adjudication.json"
+        )
+        adjudication_payload = (
+            _read(adjudication_path) if adjudication_path.is_file() else None
+        )
+        adjudication_results = {
+            str(row.get("claim_id") or ""): row
+            for row in ((adjudication_payload or {}).get("results") or [])
+        }
         source = review_payload.get("source") or {}
         review_input_path = Path(str(source.get("package_path") or ""))
         stated_input_sha = str(source.get("package_sha256") or "")
@@ -101,6 +111,13 @@ def build_attestations(
                 "review_input_artifact_sha256": stated_input_sha,
                 "artifact_sha256": _file_sha(review_path),
                 "path": str(review_path),
+                "adjudication_payload": adjudication_payload,
+                "adjudication_result": adjudication_results.get(claim_id),
+                "adjudication_artifact_sha256": (
+                    _file_sha(adjudication_path)
+                    if adjudication_payload is not None
+                    else None
+                ),
             }
             candidates.setdefault(claim_id, []).append(
                 (package_binding, review_binding)

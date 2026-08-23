@@ -33,9 +33,15 @@ class IdentitySourceEligibilityAttestation(StrictAttestationModel):
     independent_review_model_id: str
     independent_review_provider: str
     independent_review_fingerprint_sha256: str
-    independent_review_decision: Literal["pass", "changes_suggested_applied"]
+    independent_review_decision: Literal[
+        "pass",
+        "changes_suggested_applied",
+        "changes_suggested_withdrawn",
+    ]
     review_input_artifact_sha256: str
     independent_review_artifact_sha256: str
+    adjudication_artifact_sha256: str | None = None
+    adjudication_status: Literal["withdrawn"] | None = None
     reviewed_candidate_artifact_sha256: str
     evidence_dependency_sha256: str
     attestation_sha256: str
@@ -45,8 +51,19 @@ class IdentitySourceEligibilityAttestation(StrictAttestationModel):
 
     @model_validator(mode="after")
     def validate_attestation(self) -> "IdentitySourceEligibilityAttestation":
+        if self.independent_review_decision == "changes_suggested_withdrawn":
+            if not self.adjudication_artifact_sha256 or self.adjudication_status != "withdrawn":
+                raise ValueError("withdrawn review decision requires a bound withdrawn adjudication")
+        elif self.adjudication_artifact_sha256 is not None or self.adjudication_status is not None:
+            raise ValueError("adjudication binding is only valid for a withdrawn review decision")
         payload = self.model_dump(mode="json", exclude={"attestation_sha256"})
-        if self.attestation_sha256 != sha256_json(payload):
+        legacy_payload = dict(payload)
+        legacy_payload.pop("adjudication_artifact_sha256", None)
+        legacy_payload.pop("adjudication_status", None)
+        if self.attestation_sha256 not in {
+            sha256_json(payload),
+            sha256_json(legacy_payload),
+        }:
             raise ValueError("source eligibility attestation SHA mismatch")
         return self
 
@@ -95,7 +112,14 @@ class IdentitySourceEligibilityArtifact(StrictAttestationModel):
         if self.statistics != expected:
             raise ValueError("source eligibility statistics mismatch")
         payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
-        if self.artifact_sha256 != sha256_json(payload):
+        legacy_payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        for row in legacy_payload["attestations"]:
+            row.pop("adjudication_artifact_sha256", None)
+            row.pop("adjudication_status", None)
+        if self.artifact_sha256 not in {
+            sha256_json(payload),
+            sha256_json(legacy_payload),
+        }:
             raise ValueError("source eligibility artifact SHA mismatch")
         return self
 
@@ -174,10 +198,22 @@ def build_source_eligibility_artifact(
             continue
         decision = str(review_row.get("decision") or "")
         applied = set((package.get("consensus_application") or {}).get("applied_claim_ids") or [])
+        adjudication_result = review_binding.get("adjudication_result") or {}
+        adjudication_payload = review_binding.get("adjudication_payload") or {}
+        adjudicator = adjudication_payload.get("adjudicator") or {}
+        consensus = package.get("consensus_application") or {}
+        withdrawn = bool(
+            decision == "changes_suggested"
+            and adjudication_result.get("claim_id") == claim_id
+            and adjudication_result.get("status") == "withdrawn"
+            and adjudicator.get("review_fingerprint") == reviewer.get("fingerprint_sha256")
+            and consensus.get("adjudication_fingerprint") == adjudicator.get("fingerprint_sha256")
+            and review_binding.get("adjudication_artifact_sha256")
+        )
         if decision == "human_review_required":
             reject(claim_id, "human_review_required", "Independent source review explicitly requires human review.")
             continue
-        if decision == "changes_suggested" and claim_id not in applied:
+        if decision == "changes_suggested" and claim_id not in applied and not withdrawn:
             reject(claim_id, "unapplied_review_change", "Independent review requested a change not bound as applied.")
             continue
         if decision not in {"pass", "changes_suggested"}:
@@ -232,6 +268,13 @@ def build_source_eligibility_artifact(
             reject(claim_id, "invalid_source_evidence", "Claim fragments do not bind one source revision.")
             continue
         extraction = package.get("extraction") or {}
+        review_decision = (
+            "changes_suggested_withdrawn"
+            if withdrawn
+            else "changes_suggested_applied"
+            if decision == "changes_suggested"
+            else "pass"
+        )
         row_payload = {
             "claim_id": claim_id,
             "pinned_claim_revision": claim.revision,
@@ -244,9 +287,15 @@ def build_source_eligibility_artifact(
             "independent_review_model_id": str(reviewer.get("review_model_id") or ""),
             "independent_review_provider": str(reviewer.get("provider") or ""),
             "independent_review_fingerprint_sha256": str(reviewer.get("fingerprint_sha256") or ""),
-            "independent_review_decision": "pass" if decision == "pass" else "changes_suggested_applied",
+            "independent_review_decision": review_decision,
             "review_input_artifact_sha256": str(review_binding["review_input_artifact_sha256"]),
             "independent_review_artifact_sha256": str(review_binding["artifact_sha256"]),
+            "adjudication_artifact_sha256": (
+                str(review_binding["adjudication_artifact_sha256"])
+                if withdrawn
+                else None
+            ),
+            "adjudication_status": "withdrawn" if withdrawn else None,
             "reviewed_candidate_artifact_sha256": str(package_binding["artifact_sha256"]),
             "evidence_dependency_sha256": sha256_json(dependencies),
             "eligibility_scope": "viewpoint_identity_review",

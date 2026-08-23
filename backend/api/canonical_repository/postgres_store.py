@@ -28,6 +28,7 @@ EDGE_COLLECTIONS = {
     "claim_relations",
     "claim_relation_constraints",
     "viewpoint_claim_links",
+    "viewpoint_proposition_unit_links",
     "viewpoint_relations",
 }
 REVIEW_FIELDS = {
@@ -61,6 +62,8 @@ SOURCE_KEYS = {
     "canonical_viewpoints": "canonical_viewpoints",
     "viewpoint_revisions": "viewpoint_revisions",
     "viewpoint_claim_links": "viewpoint_claim_links",
+    "viewpoint_proposition_units": "viewpoint_proposition_units",
+    "viewpoint_proposition_unit_links": "viewpoint_proposition_unit_links",
     "argument_routes": "argument_routes",
     "argument_route_revisions": "argument_route_revisions",
     "argument_route_attestations": "argument_route_attestations",
@@ -993,6 +996,12 @@ class PostgresKnowledgeStore:
             return (
                 str(payload["viewpoint_id"]),
                 str(payload["claim_id"]),
+                str(payload["link_type"]),
+            )
+        if collection == "viewpoint_proposition_unit_links":
+            return (
+                str(payload["viewpoint_id"]),
+                str(payload["proposition_unit_id"]),
                 str(payload["link_type"]),
             )
         if collection == "viewpoint_relations":
