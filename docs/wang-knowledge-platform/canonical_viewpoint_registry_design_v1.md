@@ -1736,6 +1736,29 @@ user query
 
 不同索引的 score 不直接相加，也不因为同一次查询命中就建立 registry relation。fusion policy 必须保存每层 top-K、filter、score/rank、model/index SHA 与下钻理由；QA 的最终引用仍来自 source-local Evidence/Fragment/Citation，CanonicalViewpoint embedding 只帮助选择稳定解释立场。已有 sermon search 可通过 adapter 复用 shared provider contract，但其旧 SQLite `source_unit_embeddings` 不是 viewpoint/Claim/Evidence index authority，不能因为 provider 相同就混用记录或生命周期。
 
+### 13.14 马太福音 16 章垂直 pilot 与文章验收
+
+全库 identity holdout 未达到 rollout 门槛后，正式实现不得继续消耗 corpus-wide 模型调用。#194 先以马太福音 16 章作为垂直切片，同时验证 atomic PropositionUnit、CanonicalViewpoint identity、来源追溯、authoring projection 和 reader-visible article coverage。这里的三篇已发布释经文章是**下游 acceptance fixtures**，不是 extraction authority：文章文字不能反向制造 Claim、Evidence 或 viewpoint membership；每个被判为 supported 的承重命题必须沿 `article proposition → ViewpointKnowledgeProjection → CanonicalViewpointRevision → PropositionUnit → Claim → EvidenceStep → SourceFragment` 回到来源。
+
+pilot source universe 由 `matthew_16_source_map_v1.md` 与 coverage catalog 固定为 12 个独立来源；实际 Claim denominator 只取用户指定的“最新 20 项中成功应用的 19 项”selection 与这 12 个来源的交集。缺少最新 detailed extraction 的来源只报 gap，不能偷偷读旧 extraction 代替。Claim scope 分两条 lane：
+
+1. `core`：结构化 scripture refs 与太 16:1–28 重叠，进入首轮 atomic decomposition、identity grouping 与文章语义对齐；
+2. `source_context_candidate`：同一 dedicated source 中没有显式太 16 reference 的教授 Claim，保留以防遗漏希腊文、应用、跨经文论证或承重背景，但不自动进入 viewpoint membership。
+
+处理顺序严格为 **释经优先、主题随后**。第一阶段只在六个 passage units 内建立 passage-bound CanonicalViewpoints：经文含义、文学上下文、原文词义、语法、解释判断、论证结论及由该经文直接推出的应用。203 个 `core` Claims 是首轮 denominator；410 个 context candidates 不做 corpus-like 主题归并，只有当文章 proposition、当前 Claim 的 source-local evidence route 或明确的跨经文解释需要它时，才以记录理由的 `on_demand_context` 方式加入当前 passage packet。第二阶段在释经 identity、证据与文章验收稳定后，才从多个 passage viewpoints 派生基督论、教会论、门徒论等主题 projection。主题层复用而不吞并 passage viewpoints，不能以主题措辞反向改写经文解释，也不能因同属一个主题就建立 equivalent membership。
+
+2026-08-22 的确定性实跑 artifact 为 `$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/matthew16-viewpoint-pilot-scope-v1-2026-08-22/pilot-scope.json`，SHA-256 `0d38024be3aa7d7ef5c17bdea52f5b54a70c2349e46d98186540e9353cc97133`。结果为 12 个 mapped sources、11 个 latest-detailed sources、1 个明确 gap（`sermon:220-426-110-1139`）；613 个当前 pinned Claims 中 203 个为 `core`、410 个为 context candidate。三篇已发布文章的 Program Audit 共声明使用 74 个 Claim IDs，但与当前 203 个 core IDs exact overlap 为 0，说明 extraction 版本换代缺少 semantic migration，不说明文章无来源。后续必须做 evidence-bound semantic alignment，不能用 ID equality 直接判 unsupported，也不能把旧 ID 重新写入 current master data。
+
+文章验收分三层，禁止用一个 coverage 百分比掩盖失败：
+
+- **identity availability**：文章承重 proposition 能否对齐到当前 PropositionUnit／CanonicalViewpoint；
+- **evidence traceability**：对齐结果能否回到 eligible 的当前 source-local evidence 和逐字 fragment；
+- **projection usability**：Matthew runner 能否只读取最小 `ViewpointKnowledgeProjection` 重建其论证、限定、应用与引用，而不扫描 registry 或设计文档。
+
+首个 hard regression 是 Article 2 的句子「君王與祭司的職分在制度上分開，不可集於一身」。当前 core Claims 已覆盖“先知、祭司、君王均为受膏职分”及“耶稣三职集中于一身”，但仍没有 Claim 明确承载“制度上分开、不可集于一身”这一独立真值条件。pilot 若只把相邻 Claim 合成一句看似完整的话，必须判为 invented support；正确结果是 `unsupported_load_bearing_proposition`，回到 extraction gap，而不是在 CanonicalViewpoint 层补写。彼得／磐石、天国钥匙未来完成式、`phroneō`、太 16:28 与登山变像，以及生活应用分别作为 identity、语法、词义、跨章 route 与 application fixtures。
+
+在上述三层全部通过前，pilot artifacts 保持 `apply_allowed=false`、0 master-data mutations；UI 可以只读展示 scope、alignment、gap 与 evidence drill-down，但不能把 pilot candidate 显示为 approved viewpoint。文章不在本卡重新生成或静默修改；真正的 authoring regression 必须由 `backend.pipeline.matthew_exposition_authoring_runner` 消费 SHA-bound projection 后另行运行。
+
 ## 14. 性能与可扩展性
 
 205+ 篇不能每次对所有 Claim 做全对全比较，也不能反复把全库塞给模型。扩展目标按运行模式定义：
@@ -1793,7 +1816,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。#183 增加共享 embedding projection/plan/index contract、sermon-search compatibility adapter、Claim embedding recall artifact 与 no-call budget。#185 增加可恢复的原子 batch executor、规则／embedding lossless candidate union（带 channel provenance、`identity_evidence=false`）及 scheduler v3 binding。#187 增加 Sol ClaimSemanticSignature exact-once index、signature embedding/index/recall、三通道 final candidate graph、graph-aware group-discovery plan 与可恢复 Codex Subscription runner；所有当前产物仍是 screening/recall-only。Matthew/QA/Search 尚未接入 viewpoint projection，正式 evidence-bound identity decisions 与 master-data apply 也尚未执行。
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。#183 增加共享 embedding projection/plan/index contract、sermon-search compatibility adapter、Claim embedding recall artifact 与 no-call budget。#185 增加可恢复的原子 batch executor、规则／embedding lossless candidate union（带 channel provenance、`identity_evidence=false`）及 scheduler v3 binding。#187 增加 Sol ClaimSemanticSignature exact-once index、signature embedding/index/recall、三通道 final candidate graph、graph-aware group-discovery plan 与可恢复 Codex Subscription runner；所有当前产物仍是 screening/recall-only。#194 增加 evidence-bound atomic PropositionUnit contract，并将下一阶段收窄为太 16 垂直 pilot：12-source authority、最新成功 extraction 交集、203 个 core Claims 与三篇已发布文章 acceptance fixtures。Matthew/QA/Search 尚未接入 viewpoint projection，正式 evidence-bound identity decisions 与 master-data apply 也尚未执行。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
