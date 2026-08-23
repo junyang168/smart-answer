@@ -81,14 +81,26 @@ export type RecallDiagnostics = {
 };
 
 export type Member = {
-  link: Record<string, unknown> & { link_type: string; viewpoint_claim_link_id: string };
+  membership_kind?: "proposition_unit";
+  link: Record<string, unknown> & {
+    link_type: string; viewpoint_claim_link_id?: string;
+    viewpoint_proposition_unit_link_id?: string;
+  };
+  proposition_unit?: Record<string, unknown> & {
+    proposition_unit_id: string; parent_claim_id: string; unit_statement: string;
+    review_status: string;
+  };
   claim: Record<string, unknown> & { claim_id: string; statement: string; attribution?: string; review_status: string };
   evidence: Array<{
     evidence_step: null | Record<string, unknown> & { evidence_step_id: string; statement: string; speaker?: string; stance?: string };
     source_fragment: null | Record<string, unknown> & { fragment_id: string; verbatim_excerpt: string };
     source: null | Record<string, unknown> & { source_id: string; title?: string };
     citations: Array<Record<string, unknown> & { citation_id: string; status: string }>;
-    locator: { source_url: string | null; paragraph_key: string | number | null; media_time: number | null };
+    locator: {
+      source_url: string | null; source_admin_url?: string | null;
+      source_file_name?: string | null; source_type?: string | null;
+      paragraph_key: string | number | null; media_time: number | null;
+    };
   }>;
 };
 
@@ -209,6 +221,10 @@ export type PilotEnvelope = {
       approval_basis: "programmatic_atomic_quality_gate"; human_approval: false;
     };
     canonical_viewpoint: { viewpoint_id: string; review_status: string };
+  };
+  master_application: null | {
+    change_set_id: string; status: "applied" | "not_applied";
+    operation_count: number; unchanged_count: number;
   };
   source_files: Record<string, {
     source_id: string; title: string; source_type: string; file_name: string;

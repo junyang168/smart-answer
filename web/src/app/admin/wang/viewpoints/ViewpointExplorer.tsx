@@ -67,12 +67,15 @@ export function ViewpointExplorer() {
 
   const coverage = overview.data.source_coverage;
   const resolution = overview.data.claim_resolution;
-  const resolved = resolution?.resolved_count;
-  const totalClaims = resolution?.input_claim_count;
+  const resolved = resolution?.resolved_count ?? (
+    resolution ? (resolution.member_count ?? 0) + (resolution.adjacent_non_member_count ?? 0) : undefined
+  );
+  const totalClaims = resolution?.input_claim_count ?? resolution?.input_unit_count;
+  const resolutionLabel = resolution?.input_unit_count != null ? "原子归宿" : "Claim 归宿";
   const recallStats = recall.data.statistics;
   const metrics = [
     { label: "来源覆盖", value: coverage.total == null ? "未知" : `${coverage.covered}/${coverage.total}`, href: "/admin/wang/source-coverage", detail: coverage.status },
-    { label: "Claim 归宿", value: totalClaims == null ? "未知" : `${resolved}/${totalClaims}`, href: "/admin/wang/viewpoints#snapshot-provenance", detail: overview.as_of.resolution_status },
+    { label: resolutionLabel, value: totalClaims == null ? "未知" : `${resolved}/${totalClaims}`, href: "/admin/wang/viewpoints#snapshot-provenance", detail: overview.as_of.resolution_status },
     { label: "活跃观点", value: String(overview.data.active_viewpoints), href: "/admin/wang/viewpoints", detail: "稳定 identity" },
     { label: "人工例外", value: String(overview.data.exceptions), href: "/admin/wang/viewpoint-exceptions", detail: "仅高风险判断" },
     { label: "受影响产品", value: String(overview.data.affected_products), href: "/admin/wang/viewpoints?impact=1", detail: "文章 / QA / 搜索" },
@@ -84,7 +87,7 @@ export function ViewpointExplorer() {
       <WorkbenchHeader exceptions={overview.data.exceptions} />
       <AsOfStrip asOf={listing.as_of} projectionSha={listing.projection_sha256} />
       {pilot && <Link href="/admin/wang/viewpoints/pilot" className="block rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 hover:border-violet-500">
-        <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-violet-700 px-2.5 py-1 text-xs font-black text-white">释经观点 · {pilot.knowledge_classification.scripture_scope.map((value) => value.replace(/^Matt\.(\d+)\.(\d+)$/, "太 $1:$2")).join("、")}</span><span className="rounded-full bg-sky-100 px-2.5 py-1 font-mono text-[11px] font-bold text-sky-800">{pilot.knowledge_classification.knowledge_role}</span><StatusBadge value={pilot.data.review_status} /><span className="text-xs font-bold text-violet-700">只读 candidate</span></div>
+        <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-violet-700 px-2.5 py-1 text-xs font-black text-white">释经观点 · {pilot.knowledge_classification.scripture_scope.map((value) => value.replace(/^Matt\.(\d+)\.(\d+)$/, "太 $1:$2")).join("、")}</span><span className="rounded-full bg-sky-100 px-2.5 py-1 font-mono text-[11px] font-bold text-sky-800">{pilot.knowledge_classification.knowledge_role}</span><StatusBadge value={pilot.data.review_status} /><span className="text-xs font-bold text-violet-700">{pilot.master_application?.status === "applied" ? "已进入 master" : "只读 candidate"}</span></div>
         <h2 className="mt-3 text-lg font-black text-slate-950">{pilot.data.core_proposition}</h2>
         <p className="mt-2 text-sm text-slate-600">{pilot.data.members.length} 个证据绑定 atomic members · {pilot.data.adjacent_non_members.length} 个相邻非成员 · Article 2 {pilot.data.article_acceptance.status}</p>
         <p className="mt-2 break-all font-mono text-[11px] text-slate-400">{pilot.data.viewpoint_candidate_id} · {pilot.projection_sha256}</p>

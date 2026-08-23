@@ -291,7 +291,12 @@ def test_detail_drills_to_evidence_citation_and_source_locator():
 
     assert evidence["citations"][0]["citation_id"] == "CIT-ROCK"
     assert evidence["locator"] == {
-        "source_url": "https://example.test/sermon/16", "paragraph_key": "p16", "media_time": 618.0,
+        "source_url": "https://example.test/sermon/16",
+        "source_admin_url": "/admin/wang/source-coverage?source=SRC-16&fragment=FR-ROCK",
+        "source_file_name": None,
+        "source_type": "sermon_transcript",
+        "paragraph_key": "p16",
+        "media_time": 618.0,
     }
 
 

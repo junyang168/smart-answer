@@ -33,10 +33,30 @@ from .canonical_repository.matthew16_viewpoint_promotion import (
 from .canonical_repository.matthew16_viewpoint_finalization import (
     Matthew16ViewpointFinalizationBundle,
 )
+from .canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from .canonical_repository.viewpoint_foundation import sha256_json
 
 
 router = APIRouter(prefix="/admin/wang", tags=["wang-admin-viewpoints"])
+
+
+class _PostgresAdminProjectionStore:
+    """Expose the PostgreSQL authority through the typed admin compiler API."""
+
+    def __init__(self) -> None:
+        self.postgres = PostgresKnowledgeStore(database_url_from_env())
+
+    def list_knowledge_records(self, collection: str):
+        model, _ = KNOWLEDGE_COLLECTIONS[collection]
+        return [
+            model.model_validate(item)
+            for item in self.postgres.list_records(collection)
+        ]
+
+    @staticmethod
+    def list_citations():
+        # Citation authoring still lives in the canonical repository store.
+        return canonical_repository_service.store.list_citations()
 
 
 def _exception_queue() -> ViewpointExceptionQueueArtifact | None:
@@ -153,7 +173,7 @@ def _viewpoint_pilot_source_files(
 
 def _compiler() -> AdminViewpointProjectionCompiler:
     return AdminViewpointProjectionCompiler(
-        canonical_repository_service.store,
+        _PostgresAdminProjectionStore(),
         exception_queue=_exception_queue(),
         recall_blocking=_recall_blocking(),
     )
@@ -253,6 +273,20 @@ def viewpoint_pilot():
         source_files, source_files_sha256 = _viewpoint_pilot_source_files(pilot)
     except (AdminViewpointProjectionError, PostgresKnowledgeStoreError) as exc:
         raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
+    master_application = None
+    if finalization:
+        store = PostgresKnowledgeStore(database_url_from_env())
+        plan = store.plan_package(
+            finalization.knowledge_package,
+            source_kind="matthew16_atomic_viewpoint_promotion",
+        )
+        states = store.list_change_set_states([plan.change_set_id])
+        master_application = {
+            "change_set_id": plan.change_set_id,
+            "status": states[0]["status"] if states else "not_applied",
+            "operation_count": len(plan.operations),
+            "unchanged_count": plan.unchanged,
+        }
     return {
         "schema_version": "wang_admin_viewpoint_pilot_projection_v1",
         "authority": {
@@ -273,6 +307,7 @@ def viewpoint_pilot():
         "finalization": (
             finalization.model_dump(mode="json") if finalization else None
         ),
+        "master_application": master_application,
         "source_files": source_files,
         "source_files_sha256": source_files_sha256,
         "data": pilot.model_dump(mode="json"),
