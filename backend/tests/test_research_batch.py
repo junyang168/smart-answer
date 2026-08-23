@@ -96,6 +96,27 @@ def test_command_plan_keeps_each_transcript_independent(tmp_path: Path) -> None:
     )
 
 
+def test_command_plan_applies_section_limit_to_only_the_named_member(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["extraction_max_section_sentences"] = {"讲道甲": 180}
+    plan = build_command_plan(
+        batch, transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
+        force=False,
+    )
+    extracts = {
+        row["transcript_id"]: row["command"] for row in plan if row["stage"] == "extract"
+    }
+    assert extracts["讲道甲"][extracts["讲道甲"].index("--max-section-sentences") + 1] == "180"
+    assert "--max-section-sentences" not in extracts["讲道乙"]
+
+
+def test_batch_rejects_section_limit_for_member_outside_batch() -> None:
+    batch = _batch()
+    batch["extraction_max_section_sentences"] = {"讲道丙": 180}
+    with pytest.raises(ResearchBatchValidationError, match="outside the batch"):
+        validate_research_batch(batch)
+
+
 def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     tmp_path: Path,
 ) -> None:

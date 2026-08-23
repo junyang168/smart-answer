@@ -159,6 +159,24 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "every reviewed_package_reuse path must be a non-empty string"
         )
+    section_limits = payload.get("extraction_max_section_sentences") or {}
+    if not isinstance(section_limits, dict):
+        raise ResearchBatchValidationError(
+            "extraction_max_section_sentences must be an object"
+        )
+    unknown_limits = sorted(set(section_limits).difference(keys))
+    if unknown_limits:
+        raise ResearchBatchValidationError(
+            "extraction_max_section_sentences contains members outside the batch: "
+            + ", ".join(unknown_limits)
+        )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in section_limits.values()
+    ):
+        raise ResearchBatchValidationError(
+            "every extraction_max_section_sentences value must be a positive integer"
+        )
     policy = payload.get("candidate_generation_policy") or {}
     if policy.get("derive_after_independent_extraction") is not True:
         raise ResearchBatchValidationError(

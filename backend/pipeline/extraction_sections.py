@@ -33,6 +33,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -41,6 +42,11 @@ HEADING_PATTERN = re.compile(r"^(#{1,6})\s")
 #: Headings at or above this level start a new section. See the module docstring
 #: for why this is 2 and not 3.
 DEFAULT_SECTION_LEVEL = 2
+
+#: Versioned because it becomes part of the extraction identity whenever the
+#: adaptive guard is enabled.  Changing how equal-sized choices are resolved
+#: must invalidate the old section cache rather than silently moving anchors.
+ADAPTIVE_SECTION_STRATEGY = "next_heading_balanced_min_chunks_v1"
 
 #: How the boundaries were arrived at. Recorded on the plan because the two are
 #: not equally trustworthy: one is where the author actually broke the text, the
@@ -70,6 +76,9 @@ class Section:
 class SectionPlan:
     sections: tuple[Section, ...]
     origin: str
+    level: int = DEFAULT_SECTION_LEVEL
+    max_section_sentences: int | None = None
+    strategy: str | None = None
 
     def identity(self) -> dict[str, Any]:
         """What has to enter the extraction fingerprint.
@@ -79,7 +88,7 @@ class SectionPlan:
         answers a question nobody is asking any more.
         """
 
-        return {
+        identity = {
             "origin": self.origin,
             "section_count": len(self.sections),
             "boundaries": [section.start for section in self.sections],
@@ -87,6 +96,16 @@ class SectionPlan:
                 json.dumps([s.title for s in self.sections], ensure_ascii=False).encode("utf-8")
             ).hexdigest()[:16],
         }
+        # Preserve the legacy identity for the default `##` plan.  Existing
+        # completed sources must not rerun merely because an opt-in guard was
+        # added for one oversized source.
+        if self.level != DEFAULT_SECTION_LEVEL or self.max_section_sentences is not None:
+            identity["section_policy"] = {
+                "level": self.level,
+                "max_section_sentences": self.max_section_sentences,
+                "strategy": self.strategy,
+            }
+        return identity
 
     def section_of(self, position: int) -> Section | None:
         return next((s for s in self.sections if s.contains(position)), None)
@@ -154,6 +173,10 @@ class SectionBoundaryError(ValueError):
     """A generated boundary does not land on a segment of this source."""
 
 
+class OversizedSectionError(ValueError):
+    """A section is over its limit and has no safe next-level split."""
+
+
 def sections_from_generator(
     segments: Sequence[str], provider: SubtitleProvider
 ) -> list[Section]:
@@ -212,6 +235,8 @@ def plan_sections(
     *,
     level: int = DEFAULT_SECTION_LEVEL,
     provider: SubtitleProvider | None = None,
+    sentence_counts: Sequence[int] | None = None,
+    max_section_sentences: int | None = None,
 ) -> SectionPlan:
     """Section the source, generating boundaries only when it has none.
 
@@ -226,8 +251,19 @@ def plan_sections(
     and the generation had nothing in it.
     """
 
+    if max_section_sentences is not None:
+        if max_section_sentences <= 0:
+            raise ValueError("max_section_sentences must be positive")
+        if sentence_counts is None or len(sentence_counts) != len(segments):
+            raise ValueError(
+                "sentence_counts must cover every segment when adaptive sectioning is enabled"
+            )
     if not segments:
-        return SectionPlan(sections=(), origin=FROM_SOURCE)
+        return SectionPlan(
+            sections=(), origin=FROM_SOURCE, level=level,
+            max_section_sentences=max_section_sentences,
+            strategy=ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None,
+        )
     sections = sections_from_headings(segments, level=level)
     origin = FROM_SOURCE
     if len(sections) <= 1 and provider is not None:
@@ -235,10 +271,120 @@ def plan_sections(
         origin = FROM_GENERATOR
         if len(generated) > 1:
             sections = generated
-    return SectionPlan(sections=tuple(sections), origin=origin)
+    if max_section_sentences is not None:
+        sections = _split_oversized_sections(
+            segments, sections, sentence_counts or (), level=level,
+            max_section_sentences=max_section_sentences,
+        )
+    return SectionPlan(
+        sections=tuple(sections), origin=origin, level=level,
+        max_section_sentences=max_section_sentences,
+        strategy=ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None,
+    )
 
 
-def load_cached_plan(path: Path, source_sha256: str) -> SectionPlan | None:
+def _split_oversized_sections(
+    segments: Sequence[str], sections: Sequence[Section], sentence_counts: Sequence[int],
+    *, level: int, max_section_sentences: int,
+) -> list[Section]:
+    """Split only oversized sections, at the next heading depth.
+
+    The next-level headings are atomic boundaries, not an instruction to make
+    one model call per heading.  Contiguous atoms are grouped into the fewest
+    chunks that fit the limit; among equally small plans the most balanced one
+    wins.  This keeps the normal case at two calls.
+    """
+
+    result: list[Section] = []
+    for section in sections:
+        total = sum(sentence_counts[section.start:section.end])
+        if total <= max_section_sentences:
+            result.append(section)
+            continue
+
+        starts = [section.start] + [
+            position
+            for position in range(section.start + 1, section.end)
+            if heading_level(segments[position]) == level + 1
+        ]
+        if len(starts) == 1:
+            raise OversizedSectionError(
+                f"section {section.index} has {total} sentences (limit "
+                f"{max_section_sentences}) but no level-{level + 1} heading boundary"
+            )
+        ends = starts[1:] + [section.end]
+        atom_weights = [sum(sentence_counts[start:end]) for start, end in zip(starts, ends)]
+        if max(atom_weights) > max_section_sentences:
+            position = atom_weights.index(max(atom_weights))
+            raise OversizedSectionError(
+                f"section {section.index} has a level-{level + 1} block with "
+                f"{atom_weights[position]} sentences (limit {max_section_sentences})"
+            )
+        groups = _balanced_minimum_groups(tuple(atom_weights), max_section_sentences)
+        for atom_start, atom_end in groups:
+            start = starts[atom_start]
+            end = ends[atom_end - 1]
+            title = section.title if start == section.start else breadcrumb_for(segments, start)
+            result.append(Section(index=0, start=start, end=end, title=title))
+
+    return [
+        Section(index=index, start=row.start, end=row.end, title=row.title)
+        for index, row in enumerate(result, start=1)
+    ]
+
+
+def _balanced_minimum_groups(
+    weights: tuple[int, ...], limit: int,
+) -> tuple[tuple[int, int], ...]:
+    """Return contiguous half-open atom ranges, minimizing calls then imbalance."""
+
+    # With positive weights, filling each group as far as possible establishes
+    # the minimum group count.  The second pass keeps that count but chooses
+    # boundaries closest to equal totals.  It is polynomial even if a source
+    # has dozens of subheadings; enumerating every partition is not.
+    minimum_groups = 0
+    position = 0
+    while position < len(weights):
+        total = 0
+        while position < len(weights) and total + weights[position] <= limit:
+            total += weights[position]
+            position += 1
+        minimum_groups += 1
+
+    target_total = sum(weights)
+
+    @lru_cache(maxsize=None)
+    def best(
+        start: int, groups_left: int,
+    ) -> tuple[int, tuple[int, ...], tuple[tuple[int, int], ...]] | None:
+        if groups_left == 0:
+            return (0, (), ()) if start == len(weights) else None
+        if len(weights) - start < groups_left:
+            return None
+        choices: list[tuple[int, tuple[int, ...], tuple[tuple[int, int], ...]]] = []
+        total = 0
+        last_end = len(weights) - groups_left + 1
+        for end in range(start + 1, last_end + 1):
+            total += weights[end - 1]
+            if total > limit:
+                break
+            suffix = best(end, groups_left - 1)
+            if suffix is None:
+                continue
+            cost = (total * minimum_groups - target_total) ** 2 + suffix[0]
+            choices.append((cost, (total,) + suffix[1], ((start, end),) + suffix[2]))
+        return min(choices, default=None, key=lambda row: (row[0], row[1]))
+
+    selected = best(0, minimum_groups)
+    if selected is None:
+        raise OversizedSectionError(f"no contiguous partition satisfies sentence limit {limit}")
+    return selected[2]
+
+
+def load_cached_plan(
+    path: Path, source_sha256: str, *, level: int = DEFAULT_SECTION_LEVEL,
+    max_section_sentences: int | None = None,
+) -> SectionPlan | None:
     """A generated plan is only reusable for the exact source it was made from."""
 
     if not path.is_file():
@@ -246,9 +392,22 @@ def load_cached_plan(path: Path, source_sha256: str) -> SectionPlan | None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("source_sha256") != source_sha256:
         return None
+    cached_level = int(payload.get("section_level", DEFAULT_SECTION_LEVEL))
+    cached_max = payload.get("max_section_sentences")
+    cached_strategy = payload.get("section_strategy")
+    expected_strategy = (
+        ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None
+    )
+    if (cached_level, cached_max, cached_strategy) != (
+        level, max_section_sentences, expected_strategy,
+    ):
+        return None
     return SectionPlan(
         sections=tuple(Section(**row) for row in payload["sections"]),
         origin=str(payload.get("origin") or FROM_SOURCE),
+        level=cached_level,
+        max_section_sentences=cached_max,
+        strategy=cached_strategy,
     )
 
 
@@ -259,6 +418,9 @@ def save_plan(path: Path, plan: SectionPlan, source_sha256: str) -> None:
             {
                 "source_sha256": source_sha256,
                 "origin": plan.origin,
+                "section_level": plan.level,
+                "max_section_sentences": plan.max_section_sentences,
+                "section_strategy": plan.strategy,
                 "sections": [vars(section) for section in plan.sections],
             },
             ensure_ascii=False,

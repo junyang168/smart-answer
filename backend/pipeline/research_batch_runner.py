@@ -169,6 +169,7 @@ def build_command_plan(
     # exists to end.
     review_budget = models.get("review_max_output_tokens")
     adjudicator_budget = models.get("adjudicator_max_output_tokens")
+    section_limits = batch.get("extraction_max_section_sentences") or {}
     plan: list[dict[str, Any]] = []
     reused = set((batch.get("reviewed_package_reuse") or {}).keys())
     transcript_dirs = (
@@ -187,6 +188,13 @@ def build_command_plan(
             "--model", extraction_model, "--reasoning-effort", extraction_effort,
             "--backend", extraction_backend,
         ]
+        if key in section_limits:
+            limit = int(section_limits[key])
+            if limit <= 0:
+                raise ValueError(
+                    f"extraction_max_section_sentences[{key!r}] must be positive"
+                )
+            extract += ["--max-section-sentences", str(limit)]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
         # the source through `load_knowledge_source_document`.

@@ -360,6 +360,7 @@ def _persist_generated_subtitles(
 def resolve_section_plan(
     *, source: dict[str, Any], source_id: str, source_sha256: str, output_dir: Path,
     level: int = DEFAULT_SECTION_LEVEL, allow_generated: bool = True,
+    max_section_sentences: int | None = None,
     client: CodexSubscriptionClient | None = None,
 ) -> SectionPlan:
     """The plan for this source, generated at most once and then reused.
@@ -370,11 +371,19 @@ def resolve_section_plan(
     """
 
     path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
-    cached = load_cached_plan(path, source_sha256)
+    cached = load_cached_plan(
+        path, source_sha256, level=level,
+        max_section_sentences=max_section_sentences,
+    )
     if cached is not None:
         return cached
     provider = _subtitle_provider(source_id, client) if allow_generated else None
-    plan = plan_sections(_segment_texts(source), level=level, provider=provider)
+    texts = _segment_texts(source)
+    plan = plan_sections(
+        texts, level=level, provider=provider,
+        sentence_counts=[len(sentence_spans(text)) for text in texts],
+        max_section_sentences=max_section_sentences,
+    )
     save_plan(path, plan, source_sha256)
     return plan
 
@@ -738,6 +747,10 @@ class SectionSettings:
     """How the source is cut into the units it was composed in."""
 
     level: int = DEFAULT_SECTION_LEVEL
+    #: Optional guard for exceptional sources.  It remains opt-in so completed
+    #: sources keep their legacy fingerprints; a configured source starts at
+    #: `##` and only an oversized unit consults its `###` boundaries.
+    max_sentences: int | None = None
     #: Whether a source with no headings may have boundaries generated for it.
     #: Off makes the run offline and deterministic; on covers the 90 published
     #: transcripts that carry no headings at all.
@@ -775,6 +788,7 @@ def _run(
     plan = resolve_section_plan(
         source=source, source_id=source_id, source_sha256=source_sha256,
         output_dir=output_dir, level=sections.level,
+        max_section_sentences=sections.max_sentences,
         allow_generated=sections.allow_generated,
         client=client if isinstance(client, CodexSubscriptionClient) else None,
     )
@@ -1081,6 +1095,11 @@ def main() -> int:
     parser.add_argument("--max-output-tokens", type=int, default=64000)
     parser.add_argument("--section-level", type=int, default=DEFAULT_SECTION_LEVEL,
                         help="headings at or above this level start a section")
+    parser.add_argument(
+        "--max-section-sentences", type=int,
+        help="split only an oversized section at the next heading level, using the "
+             "fewest balanced chunks that satisfy this limit",
+    )
     parser.add_argument("--only-sections", type=int, nargs="+", metavar="N",
                         help="run only these section numbers (1-based); the package "
                              "is then marked incomplete")
@@ -1104,8 +1123,11 @@ def main() -> int:
         parser.error("--write-back-generated-subtitles cannot be combined with --no-generated-sections")
     if args.write_back_generated_subtitles and not args.subtitle_user_id:
         parser.error("--write-back-generated-subtitles requires --subtitle-user-id")
+    if args.max_section_sentences is not None and args.max_section_sentences <= 0:
+        parser.error("--max-section-sentences must be positive")
     sections = SectionSettings(
-        level=args.section_level, allow_generated=not args.no_generated_sections,
+        level=args.section_level, max_sentences=args.max_section_sentences,
+        allow_generated=not args.no_generated_sections,
         only=tuple(args.only_sections) if args.only_sections else None,
     )
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
@@ -1114,14 +1136,27 @@ def main() -> int:
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
-        def section_count(source: dict[str, Any]) -> int:
+        def section_plan_summary(source: dict[str, Any]) -> list[dict[str, Any]]:
             # Dry run never calls the generator; a source with no headings
             # reports one section, which is what an offline run would do.
-            return len(plan_sections(_segment_texts(source), level=sections.level).sections)
+            texts = _segment_texts(source)
+            counts = [len(sentence_spans(text)) for text in texts]
+            plan = plan_sections(
+                texts, level=sections.level,
+                sentence_counts=counts,
+                max_section_sentences=sections.max_sentences,
+            )
+            return [
+                {
+                    **vars(section),
+                    "sentences": sum(counts[section.start:section.end]),
+                }
+                for section in plan.sections
+            ]
 
-        plans = {path.stem: section_count(_load(path)[0]) for path in paths}
-        plans.update({
-            str(row["source_id"]): section_count(markdown_source_document(row)[0])
+        plan_rows = {path.stem: section_plan_summary(_load(path)[0]) for path in paths}
+        plan_rows.update({
+            str(row["source_id"]): section_plan_summary(markdown_source_document(row)[0])
             for row in source_rows
         })
         print(json.dumps({
@@ -1131,10 +1166,14 @@ def main() -> int:
             "reasoning_effort": args.reasoning_effort,
             "max_output_tokens": args.max_output_tokens,
             "section_level": sections.level,
+            "max_section_sentences": sections.max_sentences,
             "allow_generated_sections": sections.allow_generated,
             "write_back_generated_subtitles": args.write_back_generated_subtitles,
             "subtitle_user_id": args.subtitle_user_id,
-            "sections_per_source": plans,
+            "sections_per_source": {
+                key: len(value) for key, value in plan_rows.items()
+            },
+            "section_plans": plan_rows,
             # Retained for scripts that read the old dry-run shape. Dry runs
             # never call either backend.
             "would_call_openai": False,

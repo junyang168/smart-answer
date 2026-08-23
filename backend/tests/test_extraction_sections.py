@@ -13,6 +13,7 @@ from backend.pipeline.detailed_knowledge_extraction import (
 from backend.pipeline.extraction_sections import (
     FROM_GENERATOR,
     FROM_SOURCE,
+    OversizedSectionError,
     Section,
     breadcrumb_for,
     load_cached_plan,
@@ -51,6 +52,49 @@ def test_subheadings_do_not_start_a_section() -> None:
     segments[4] = "### 釋經"
     segments[8] = "### 神學意義"
     assert len(sections_from_headings(segments)) == 1
+
+
+def test_oversized_section_uses_subheadings_to_make_two_balanced_chunks() -> None:
+    segments = _segments(12)
+    segments[0] = "## 第一部分"
+    for position in (2, 4, 6, 8, 10):
+        segments[position] = f"### 子题 {position}"
+    plan = plan_sections(
+        segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+    )
+    assert [(row.start, row.end) for row in plan.sections] == [(0, 6), (6, 12)]
+    assert [sum([30] * (row.end - row.start)) for row in plan.sections] == [180, 180]
+    assert plan.sections[1].title == "第一部分 > 子题 6"
+
+
+def test_adaptive_sectioning_keeps_normal_h2_section_whole() -> None:
+    segments = _segments(6)
+    segments[0] = "## 第一部分"
+    segments[3] = "### 子题"
+    plan = plan_sections(
+        segments, sentence_counts=[20] * len(segments), max_section_sentences=180,
+    )
+    assert [(row.start, row.end) for row in plan.sections] == [(0, 6)]
+
+
+def test_adaptive_sectioning_uses_three_chunks_only_when_two_cannot_fit() -> None:
+    segments = _segments(9)
+    segments[0] = "## 第一部分"
+    segments[3] = "### 子题二"
+    segments[6] = "### 子题三"
+    plan = plan_sections(
+        segments, sentence_counts=[50] * len(segments), max_section_sentences=180,
+    )
+    assert [(row.start, row.end) for row in plan.sections] == [(0, 3), (3, 6), (6, 9)]
+
+
+def test_adaptive_sectioning_fails_closed_without_a_safe_subheading() -> None:
+    segments = _segments(8)
+    segments[0] = "## 第一部分"
+    with pytest.raises(OversizedSectionError, match="no level-3 heading"):
+        plan_sections(
+            segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+        )
 
 
 def test_sections_cover_every_segment_exactly_once() -> None:
@@ -129,6 +173,34 @@ def test_plan_enters_the_fingerprint_and_survives_a_round_trip(tmp_path: Path) -
     save_plan(path, plan, source_sha256="abc")
     assert load_cached_plan(path, "abc") == plan
     assert load_cached_plan(path, "different-source") is None, "a plan is bound to its source"
+
+
+def test_cached_plan_is_bound_to_adaptive_policy(tmp_path: Path) -> None:
+    segments = _segments(10)
+    segments[0] = "## 第一部分"
+    segments[5] = "### 第二小段"
+    plan = plan_sections(
+        segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+    )
+    path = tmp_path / "plan.json"
+    save_plan(path, plan, source_sha256="abc")
+    assert load_cached_plan(path, "abc", max_section_sentences=180) == plan
+    assert load_cached_plan(path, "abc") is None
+    assert load_cached_plan(path, "abc", max_section_sentences=200) is None
+
+
+def test_legacy_default_cache_remains_compatible_but_not_with_new_policy(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-plan.json"
+    path.write_text(json.dumps({
+        "source_sha256": "abc",
+        "origin": FROM_SOURCE,
+        "sections": [vars(Section(index=1, start=0, end=4, title="第一部分"))],
+    }, ensure_ascii=False), encoding="utf-8")
+    assert load_cached_plan(path, "abc") is not None
+    assert load_cached_plan(path, "abc", level=3) is None
+    assert load_cached_plan(path, "abc", max_section_sentences=180) is None
 
 
 # --------------------------------------------------------------------------
