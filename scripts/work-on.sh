@@ -18,7 +18,11 @@
 #   fatal: 'main' is already used by worktree at '/Users/junyang/app/smart-answer'
 set -Eeuo pipefail
 
-SOURCE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -n "${SMART_ANSWER_SOURCE_REPO:-}" ]]; then
+  SOURCE_REPO="$(cd "$SMART_ANSWER_SOURCE_REPO" && pwd)"
+else
+  SOURCE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 # Deliberately not under /tmp: `test_matthew_exposition_authoring` asserts that
 # no packet source path contains "tmp", so a worktree there fails a test that
 # has nothing to do with the change being made.
@@ -32,6 +36,14 @@ SLUG="${2:-issue}"
 [[ "$NUMBER" =~ ^[0-9]+$ ]] || fail "usage: work-on.sh <issue-number> [slug]"
 [[ "$WORKTREE_ROOT" != */tmp/* && "$WORKTREE_ROOT" != /tmp/* ]] \
   || fail "worktrees must not live under /tmp (a test asserts no source path contains it)"
+
+# GitHub cannot delete a workstation directory when an issue closes remotely.
+# Reconcile here so cleanup converges before another card creates one more
+# worktree. A dirty closed worktree is reported but never blocks new work.
+if [[ -x "$SOURCE_REPO/scripts/reconcile-closed-worktrees.sh" ]]; then
+  "$SOURCE_REPO/scripts/reconcile-closed-worktrees.sh" --exclude-root "$SOURCE_REPO" || \
+    printf 'work-on: warning — closed-worktree reconciliation reported a problem\n' >&2
+fi
 
 read -r state labels < <(
   gh issue view "$NUMBER" --json state,labels \

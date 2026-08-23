@@ -40,21 +40,12 @@ if (( CLEANUP )); then
   state="$(gh pr view "$BRANCH" --json state -q .state 2>/dev/null || echo NONE)"
   [[ "$state" == "MERGED" ]] || fail "pull request for $BRANCH is $state, not MERGED — nothing to clean up yet"
   root="$(git rev-parse --show-toplevel)"
-  common="$(git rev-parse --path-format=absolute --git-common-dir)"
-  primary="$(cd "$(dirname "$common")" && pwd)"
-  [[ "$root" != "$primary" ]] || fail "this is the primary checkout, not a worktree"
-  # Stop this card's dev servers before the directory they are running out of
-  # disappears. `wkp-141` was left running for 43 hours after its own merge,
-  # serving a branch that no longer existed on the one port nginx publishes,
-  # because removing the worktree never touched the processes inside it.
-  if [[ -x "$root/scripts/dev.sh" ]]; then
-    "$root/scripts/dev.sh" stop || true
-  fi
-  cd "$primary"
-  git worktree remove "$root"
-  git branch -d "$BRANCH" >/dev/null 2>&1 || true
-  printf 'removed %s · branch %s\n' "$root" "$BRANCH"
-  exit 0
+  [[ -x "$root/scripts/reconcile-closed-worktrees.sh" ]] \
+    || fail "lifecycle reconciler is missing from $BRANCH"
+  issue_state="$(gh issue view "$NUMBER" --json state -q .state 2>/dev/null || echo UNKNOWN)"
+  [[ "$issue_state" == "CLOSED" ]] \
+    || fail "issue #$NUMBER is $issue_state, not CLOSED — cleanup would hide a tracking error"
+  exec "$root/scripts/reconcile-closed-worktrees.sh" --issue "$NUMBER"
 fi
 
 [[ -z "$(git status --porcelain)" ]] || fail "uncommitted changes — commit them before opening the PR"
