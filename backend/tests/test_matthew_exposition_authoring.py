@@ -89,6 +89,7 @@ def valid_author_result():
                 "section_id": "matt16-18-rock",
                 "decision_ids": ["CD-M16-002-04", "CD-M16-002-05"],
                 "claim_ids_used": [],
+                "viewpoint_revision_ids_used": [],
                 "integration_operations": ["tension"],
                 "applied_operations": ["preserve", "clarify"],
                 "output_anchor": "耶穌說：「你是彼得",
@@ -108,6 +109,13 @@ def test_author_ledger_allows_many_decisions_in_one_reader_section():
     validate_author_result(valid_author_result(), contract=contract(), plan=mini_plan())
 
 
+def test_author_schema_requires_the_viewpoint_usage_ledger_field():
+    result = valid_author_result()
+    del result["sections"][0]["viewpoint_revision_ids_used"]
+    with pytest.raises(AuthoringContractError, match="missing required fields"):
+        validate_strict_schema(result, AUTHOR_RESULT_SCHEMA)
+
+
 def test_author_ledger_rejects_unknown_claim_id():
     result = valid_author_result()
     result["sections"][0]["claim_ids_used"] = ["DK-not-real-CL999"]
@@ -118,6 +126,58 @@ def test_author_ledger_rejects_unknown_claim_id():
             plan=mini_plan(),
             valid_claim_ids={"DK-real-CL001"},
         )
+
+
+def test_author_ledger_requires_viewpoint_usage_for_composition_projection():
+    result = valid_author_result()
+    del result["sections"][0]["viewpoint_revision_ids_used"]
+    with pytest.raises(
+        AuthoringContractError,
+        match="viewpoint_revision_ids_used on every authored section",
+    ):
+        validate_author_result(
+            result,
+            contract=contract(),
+            plan=mini_plan(),
+            valid_viewpoint_revision_ids={"CVR-M16-ROCK-001"},
+        )
+
+
+def test_author_ledger_rejects_unknown_viewpoint_revision():
+    result = valid_author_result()
+    result["sections"][0]["viewpoint_revision_ids_used"] = ["CVR-NOT-REAL"]
+    with pytest.raises(AuthoringContractError, match="unknown viewpoint_revision_ids"):
+        validate_author_result(
+            result,
+            contract=contract(),
+            plan=mini_plan(),
+            valid_viewpoint_revision_ids={"CVR-M16-ROCK-001"},
+        )
+
+
+def test_author_ledger_requires_every_projected_viewpoint_revision_to_be_used():
+    result = valid_author_result()
+    result["sections"][0]["viewpoint_revision_ids_used"] = []
+    with pytest.raises(
+        AuthoringContractError, match="projected viewpoint revisions were not used"
+    ):
+        validate_author_result(
+            result,
+            contract=contract(),
+            plan=mini_plan(),
+            valid_viewpoint_revision_ids={"CVR-M16-ROCK-001"},
+        )
+
+
+def test_author_ledger_accepts_exact_projected_viewpoint_revision_usage():
+    result = valid_author_result()
+    result["sections"][0]["viewpoint_revision_ids_used"] = ["CVR-M16-ROCK-001"]
+    validate_author_result(
+        result,
+        contract=contract(),
+        plan=mini_plan(),
+        valid_viewpoint_revision_ids={"CVR-M16-ROCK-001"},
+    )
 
 
 def test_author_ledger_requires_output_anchor_in_full_manuscript():
@@ -438,6 +498,12 @@ def test_internal_candidate_viewpoint_projection_is_shadow_only():
                 }
             }
         )
+
+
+def test_composition_viewpoint_projection_is_generation_eligible():
+    validate_viewpoint_projection_for_generation(
+        {"viewpoint_projection": {"eligibility": "composition"}}
+    )
 
 
 class _FakeAuthoringStore:

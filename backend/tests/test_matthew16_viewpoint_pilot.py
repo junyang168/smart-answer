@@ -7,6 +7,9 @@ import pytest
 
 from backend.api.canonical_repository.knowledge_models import (
     ClaimRecord,
+    EvidenceStepRecord,
+    KnowledgeSourceDocument,
+    SourceFragmentRecord,
     ViewpointIdentityCandidateRecord,
 )
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import (
@@ -38,6 +41,10 @@ from backend.api.canonical_repository.viewpoint_resolution import (
     ReviewClaim,
     ReviewEvidence,
     ViewpointIdentityReviewPacket,
+)
+from backend.api.canonical_repository.viewpoint_runtime_projection import (
+    ViewpointRuntimeCompiler,
+    build_projection_dependencies,
 )
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
@@ -381,3 +388,72 @@ def test_master_promotion_preserves_atomic_membership_boundary():
     )
     with pytest.raises(ValueError, match="every required check"):
         type(finalization.atomic_quality_report).model_validate(incomplete_report)
+
+    records = {
+        "source_documents": [
+            KnowledgeSourceDocument(
+                source_id="SRC-1",
+                source_type="sermon_transcript",
+                source_sha256="s" * 64,
+            )
+        ],
+        "source_fragments": [
+            SourceFragmentRecord(
+                fragment_id="FR-1",
+                source_id="SRC-1",
+                verbatim_excerpt="原文",
+                source_sha256="s" * 64,
+                anchor_state="source_version_bound",
+            )
+        ],
+        "claims": [
+            ClaimRecord(
+                claim_id="CL-1",
+                statement="甲乙丙",
+                claim_type="interpretive_judgment",
+                evidence_step_ids=["EV-1"],
+            )
+        ],
+        "evidence_steps": [
+            EvidenceStepRecord(
+                evidence_step_id="EV-1",
+                statement="证据",
+                source_fragment_id="FR-1",
+                support_eligibility="eligible_candidate",
+            )
+        ],
+        "canonical_viewpoints": [finalization.canonical_viewpoint],
+        "viewpoint_revisions": [finalization.viewpoint_revision],
+        "viewpoint_proposition_units": finalization.proposition_units,
+        "viewpoint_proposition_unit_links": finalization.proposition_unit_links,
+        "viewpoint_atomic_coverage_snapshots": [
+            finalization.atomic_coverage_snapshot
+        ],
+        "viewpoint_atomic_resolution_ledgers": [
+            finalization.atomic_resolution_ledger
+        ],
+        "viewpoint_atomic_quality_reports": [finalization.atomic_quality_report],
+        "viewpoint_automated_promotion_decisions": [
+            finalization.automated_promotion_decision
+        ],
+    }
+    active_projection = ViewpointRuntimeCompiler(records).compile_projection(
+        consumer_kind="composition_plan",
+        coverage_snapshot_id=(
+            finalization.atomic_coverage_snapshot.atomic_coverage_snapshot_id
+        ),
+        viewpoint_ids=[finalization.canonical_viewpoint.viewpoint_id],
+    )
+
+    assert active_projection.eligibility == "composition"
+    assert active_projection.blocker_codes == ["evidence_not_public"]
+    assert len(active_projection.viewpoints[0]["member_proposition_units"]) == 2
+    assert len(active_projection.expanded_claims) == 1
+    assert len(active_projection.expanded_evidence) == 1
+    dependencies = build_projection_dependencies(
+        active_projection, consumer_id="DRAFT-SYNTHETIC"
+    )
+    assert len(dependencies) == 1
+    assert dependencies[0].quality_report_id == (
+        finalization.atomic_quality_report.atomic_quality_report_id
+    )

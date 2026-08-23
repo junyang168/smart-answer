@@ -710,11 +710,24 @@ def run_authoring(
         for item in packet["knowledge"].get("claims", [])
         if isinstance(item, dict) and item.get("claim_id")
     }
+    valid_viewpoint_revision_ids = (
+        {
+            item["revision"]["viewpoint_revision_id"]
+            for item in packet.get("viewpoint_projection", {}).get("viewpoints", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("revision"), dict)
+            and item["revision"].get("viewpoint_revision_id")
+        }
+        if packet.get("viewpoint_projection", {}).get("eligibility")
+        in {"composition", "public_attribution"}
+        else None
+    )
     validate_author_result(
         author_result,
         contract=packet["base_contract"],
         plan=packet["plan"],
         valid_claim_ids=valid_claim_ids,
+        valid_viewpoint_revision_ids=valid_viewpoint_revision_ids,
     )
     if author_result["status"] == "plan_change_required":
         return {
@@ -1127,6 +1140,7 @@ def run_authoring(
         contract=packet["base_contract"],
         plan=packet["plan"],
         valid_claim_ids=valid_claim_ids,
+        valid_viewpoint_revision_ids=valid_viewpoint_revision_ids,
     )
     dispositions = revision.get("finding_dispositions", [])
     _validate_exact_ids(dispositions, accepted_ids, "revision dispositions")
