@@ -812,15 +812,22 @@ ChangeSet builder 只接收 review-pass 的最终 proposal。它可以生成现�
 
 batch workflow 只用 `ViewpointClaimLink`（`equivalent_full` 或带 span locator 的 `equivalent_component`）表示 active 成员资格。唯一 component key 为 `(claim_id, claim_revision_sha256, canonical_spans)`；`canonical_spans` 是按序排列的 `(start_char, end_char, exact_text)`，`equivalent_full` 在计算该 key 时视为覆盖完整 statement 的单一 span。该 key 是 validator 的派生值，不落库，因此不与「`component_locator` 只对 `equivalent_component` 有效」冲突。invariant 是：同一 component key 至多一个 active viewpoint owner。
 
-#194 已 apply 的 `CV-59fdfc87534d1f17fc9f` 用 19 个 `ViewpointPropositionUnitRecord` 加 8 个 `ViewpointPropositionUnitLinkRecord` 表示成员。它不做机械转换：新 workflow 上线时，该 viewpoint 连同其 units、links、atomic coverage/ledger/quality 与 automated decision 一并以 compensating ChangeSet retire（不是 SQL 删除），太 16 由 batch workflow 重新处理。#204 的定向 POC 已经证明，只给 7 条 Claim 与证据、不给现有 CVP，模型能直接产出等价 core proposition 并找回同一 7/7 Claim set，因此重建成本低于维护两套成员表示。
+#194 已 apply 的 `CV-59fdfc87534d1f17fc9f` 用 19 个 `ViewpointPropositionUnitRecord` 加 8 个 `ViewpointPropositionUnitLinkRecord` 表示成员。这批 master data 是 pilot 的 reference，不是必须保全的生产资产：它不做机械转换，而是先整体导出为不可变 baseline，再由 batch workflow 重跑太 16 并与 baseline 比对。#204 的定向 POC 已经证明，只给 7 条 Claim 与证据、不给现有 CVP，模型能直接产出等价 core proposition 并找回同一 7/7 Claim set，因此重建比维护两套成员表示便宜，也顺带给新流程一次真实的对照测试。
 
-由此产生三个必须承认的后果：
+baseline 已于 2026-08-23 导出：`$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/matthew16-viewpoint-rock-v15-pre-rebuild-baseline-2026-08-23/master-baseline.json`，SHA-256 `6e7ef1d5dd8a3d35d0f8cecc2e87745f55aef17b94422fee0d411b81e74328f7`，含全部 9 个 viewpoint collections 的 34 条记录。它是 testing oracle，不是 master authority，也不可被 importer 当作可 apply 的 package。
 
-- 重建后的观点是新 identity，`CV-59fdfc87534d1f17fc9f` 不被复用；旧 ID 只在 retired 记录与历史 artifacts 中可解析。
-- 该 viewpoint 作为 regression fixture 的含义是**语义边界**——core proposition 的真值条件、7 个 parent Claims、8 个成员 component 与 11 个 adjacent 判断——不是 record IDs 或 artifact SHA。重建结果与该边界不符即为回归。
-- active composition projection `78ed881b…`（v14）随之作废：它内嵌 8 个 `proposition_unit_id`，成员表示改变后 payload 与 `projection_sha256` 必然改变。必须编译新的不可变 projection，并把 Matthew authoring consumption ledger、`CP-matthew-16-13-20` dry-run receipt 与 `CURRENT_AUTHORING_SESSION.md` 的引用重新指向；旧 projection 降为历史。
+重建结果按**语义边界**与 baseline 比对，不比 record ID 或 artifact SHA：
 
-PropositionUnit records、decomposition、boundary 与 finalization artifacts 保留为 immutable historical provenance，但 retire 后不再是 active master：`viewpoint_proposition_units` 与 `viewpoint_proposition_unit_links` 在 cutover 后不得有 active 行，runtime compiler、coverage 与 UI 不维护双表示分支。
+- core proposition 的真值条件等价；
+- 7 个 parent Claims 完全相同；
+- 8 个成员 component 与 11 个 adjacent 判断的边界一致；
+- 每个成员的 EvidenceStep／SourceFragment 绑定可回到同一来源位置。
+
+差异不自动判为失败，但必须逐项解释：新流程发现 baseline 漏掉的成分是改进，把 baseline 的 adjacent 收成 member 则是回归信号，两者都要在测试报告中写明，不能只报一个通过率。
+
+比对完成后，`viewpoint_proposition_units` 与 `viewpoint_proposition_unit_links` 不得再有 active 行；PropositionUnit records、decomposition、boundary 与 finalization artifacts 连同上述 baseline 一起作为 immutable historical provenance 保留，runtime compiler、coverage 与 UI 不维护双表示分支。重建后的观点是新 identity，`CV-59fdfc87534d1f17fc9f` 只在 baseline 与历史 artifacts 中可解析。
+
+active composition projection `78ed881b…`（v14）随之作废：它内嵌 8 个 `proposition_unit_id`，成员表示改变后 payload 与 `projection_sha256` 必然改变。必须编译新的不可变 projection，并把 Matthew authoring consumption ledger、`CP-matthew-16-13-20` dry-run receipt 与 `CURRENT_AUTHORING_SESSION.md` 的引用重新指向；旧 projection 降为历史。
 
 ## 6. 怎样判断两个 Claim 是同一观点
 
@@ -2189,7 +2196,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 4. **Viewpoint batch resolution workflow**
    定义 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet`；实现 Opus 5/high proposer、Sol/high proposal-aware reviewer、deterministic exact-coverage/span/evidence gates、一次 finding-only reconsideration、可恢复 runner、风险抽样监测与 machine-readable exception bundles。旧 blind/group/promotion/finalization runners 只作为只读历史诊断，不能进入默认状态机或长期 runtime compatibility surface。
 
-   本项有三个必须先完成的前置条件：span-only component 契约与 Unicode code-point 校验落地（`viewpoint_claim_links` 为 0 行，不存在迁移，只需正确定义与 round-trip fixture），并以 compensating ChangeSet retire #194 的 PropositionUnit active membership，readback 证明 runtime authority 只剩 span-based Claim links；以全链路实测定出 batch 上限并分别配置 proposer/reviewer/reconsideration 的 `max_output_tokens`；runner 强制同一 scope 内 batch 经过 applied-readback 或 exception-recorded checkpoint，并把 pending candidate synopsis 传给后续 batch（第 6.2.1 节）。三者任一缺失都会让 exact-span 校验落不了地、让 batch 在任一模型阶段截断，或让分批执行造出重复身份。
+   本项有三个必须先完成的前置条件：span-only component 契约与 Unicode code-point 校验落地（`viewpoint_claim_links` 为 0 行，不存在迁移，只需正确定义与 round-trip fixture），#194 master data 已导出为 baseline 并在重建后完成语义边界比对，readback 证明 runtime authority 只剩 span-based Claim links；以全链路实测定出 batch 上限并分别配置 proposer/reviewer/reconsideration 的 `max_output_tokens`；runner 强制同一 scope 内 batch 经过 applied-readback 或 exception-recorded checkpoint，并把 pending candidate synopsis 传给后续 batch（第 6.2.1 节）。三者任一缺失都会让 exact-span 校验落不了地、让 batch 在任一模型阶段截断，或让分批执行造出重复身份。
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
