@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--source-selection", type=Path, required=True)
     parser.add_argument("--claim-manifest", type=Path, required=True)
     parser.add_argument("--article-dir", type=Path, action="append", default=[])
+    parser.add_argument("--thematic-source-id", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--database-url")
     args = parser.parse_args()
@@ -37,6 +38,7 @@ def main() -> int:
         source_documents=store.list_records("source_documents"),
         claims=store.list_records("claims"),
         article_dirs=args.article_dir,
+        thematic_source_ids=args.thematic_source_id,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.output.exists():

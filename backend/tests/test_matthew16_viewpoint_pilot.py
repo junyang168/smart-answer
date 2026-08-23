@@ -112,11 +112,13 @@ def test_pilot_scope_preserves_context_and_reports_source_gap(tmp_path):
         source_documents=sources,
         claims=claims,
         article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
     )
 
     assert result.statistics["mapped_source_total"] == 12
     assert result.statistics["latest_detailed_source_total"] == 2
-    assert result.statistics["latest_detailed_source_gap_total"] == 10
+    assert result.statistics["thematic_deferred_source_total"] == 1
+    assert result.statistics["latest_detailed_source_gap_total"] == 9
     assert {item.claim_id: item.lane for item in result.claims} == {
         "C-CONTEXT": "source_context_candidate",
         "C-CORE": "core",
@@ -140,6 +142,7 @@ def test_pilot_scope_sha_binds_article_bytes(tmp_path):
         source_documents=sources,
         claims=claims,
         article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
     )
     expected = hashlib.sha256((article / "manuscript.md").read_bytes()).hexdigest()
     assert result.article_acceptance_fixtures[0].manuscript_sha256 == expected

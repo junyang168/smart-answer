@@ -30,7 +30,10 @@ class PilotSource(StrictPilotModel):
     source_type: str
     transcript_id: str | None = None
     canonical_source_ids: list[str] = Field(default_factory=list)
-    status: Literal["latest_detailed_available", "latest_detailed_missing"]
+    processing_phase: Literal["passage_exegesis", "thematic_followup"]
+    status: Literal[
+        "latest_detailed_available", "latest_detailed_missing", "thematic_deferred"
+    ]
 
 
 class PilotClaim(StrictPilotModel):
@@ -151,6 +154,7 @@ def build_matthew16_pilot_scope(
     source_documents: Sequence[Mapping[str, Any]],
     claims: Sequence[Mapping[str, Any]],
     article_dirs: Sequence[Path] = (),
+    thematic_source_ids: Sequence[str] = (),
 ) -> Matthew16PilotScope:
     """Compile the exact zero-call Claim denominator for the chapter pilot."""
 
@@ -166,6 +170,7 @@ def build_matthew16_pilot_scope(
     }
     pilot_sources: list[PilotSource] = []
     eligible_source_ids: set[str] = set()
+    thematic_ids = set(thematic_source_ids)
     for row in _catalog_source_rows(source_catalog):
         catalog_id = str(row["source_id"])
         transcript_id = catalog_id.removeprefix("sermon:") if catalog_id.startswith("sermon:") else None
@@ -175,7 +180,9 @@ def build_matthew16_pilot_scope(
             if source.source_id == catalog_id
             or (transcript_id is not None and source.transcript_id == transcript_id)
         )
-        eligible_source_ids.update(matches)
+        is_thematic = catalog_id in thematic_ids
+        if not is_thematic:
+            eligible_source_ids.update(matches)
         pilot_sources.append(
             PilotSource(
                 catalog_source_id=catalog_id,
@@ -183,7 +190,12 @@ def build_matthew16_pilot_scope(
                 source_type=str(row.get("source_type") or "unknown"),
                 transcript_id=transcript_id,
                 canonical_source_ids=matches,
-                status="latest_detailed_available" if matches else "latest_detailed_missing",
+                processing_phase="thematic_followup" if is_thematic else "passage_exegesis",
+                status=(
+                    "thematic_deferred"
+                    if is_thematic
+                    else "latest_detailed_available" if matches else "latest_detailed_missing"
+                ),
             )
         )
     pilot_sources.sort(key=lambda item: item.catalog_source_id)
@@ -246,6 +258,8 @@ def build_matthew16_pilot_scope(
         "article_acceptance_fixtures": [item.model_dump(mode="json") for item in article_fixtures],
         "statistics": {
             "mapped_source_total": len(pilot_sources),
+            "passage_exegesis_source_total": sum(item.processing_phase == "passage_exegesis" for item in pilot_sources),
+            "thematic_deferred_source_total": sum(item.status == "thematic_deferred" for item in pilot_sources),
             "latest_detailed_source_total": sum(item.status == "latest_detailed_available" for item in pilot_sources),
             "latest_detailed_source_gap_total": sum(item.status == "latest_detailed_missing" for item in pilot_sources),
             "claim_total": len(pilot_claims),
