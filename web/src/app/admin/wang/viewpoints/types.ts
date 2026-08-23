@@ -159,5 +159,9 @@ export type PilotEnvelope = {
   schema_version: string;
   authority: { kind: string; projection: string; representation: string; read_only: true };
   projection_sha256: string;
+  consumer_projection: {
+    consumer_kind: "composition_plan"; eligibility: "internal_candidate";
+    projection_sha256: string; blocker_codes: string[];
+  };
   data: ViewpointPilot;
 };

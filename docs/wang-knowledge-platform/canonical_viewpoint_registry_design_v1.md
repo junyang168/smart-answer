@@ -1765,6 +1765,8 @@ pilot source universe 由 `matthew_16_source_map_v1.md` 与 coverage catalog 固
 
 该结果只达到 `dual-model evidence-bound internal candidate`，不是 registry master record，也不是 human approval：`apply_allowed=false`、0 master-data mutations，blockers 仍为 `not_master_applied` 与 `pilot_scope_only`。只读 endpoint `GET /admin/wang/viewpoints/pilot` 只接受显式配置的 `WANG_VIEWPOINT_PILOT_FILE`，验证 artifact schema/SHA 后投影；不扫描 staging，不把 candidate 混入 active viewpoint 计数。UI 必须同时显示 7 个 members、10 个 non-members、文章 acceptance、逐字证据、model IDs、artifact SHA 与 blockers。完成这一 viewpoint 的测试与设计记录前，不启动第二个 viewpoint。
 
+下游 shadow contract 使用既有标准 `wang_viewpoint_knowledge_projection_v1`，而不是另造一套 Article-only schema。由该 candidate 确定性编译的 `composition_plan` projection SHA-256 为 `ee381d8f18943e661f1b267da7e3095298604381251a9aae2a80a82d07f47484`，只含 1 个 candidate viewpoint、6 个 parent Claims、7 个 member PropositionUnits、32 个 evidence occurrences 及其 fragment/source/citation rows，并以 dependency manifest 绑定 candidate、Claim revisions 与 units；不读取全 registry。`matthew_exposition_authoring_runner --viewpoint-projection ... --dry-run` 在当前 PostgreSQL plan `CP-matthew-16-13-20` 与 current compiled knowledge 上实际返回 `inputs_valid`，packet SHA-256 `6cf966b61b0e02fdedef916b4e709258783279973d0eb29dcc71afebf8c3100f`，0 model calls、no publication。因为 projection eligibility 仍是 `internal_candidate`，非 dry-run 写作会 fail closed；不能用 shadow validation 绕过 registry/quality/apply gate。历史 Article 2 snapshot 自身另有 sermon source SHA stale，故验证必须从 current store 编译 knowledge，不能复用那份过期 snapshot 假装 current。
+
 ## 14. 性能与可扩展性
 
 205+ 篇不能每次对所有 Claim 做全对全比较，也不能反复把全库塞给模型。扩展目标按运行模式定义：

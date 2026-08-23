@@ -9,6 +9,9 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from backend.api.canonical_repository.viewpoint_runtime_projection import (
+    ViewpointKnowledgeProjection,
+)
 from backend.pipeline.knowledge_source import live_script
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
@@ -1843,6 +1846,7 @@ def build_authoring_packet_from_store(
     compiled_snapshot_path: str | Path | None = None,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
+    viewpoint_projection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build an authoring packet with the plan and contract read from PostgreSQL.
 
@@ -1915,6 +1919,7 @@ def build_authoring_packet_from_store(
             contract_path=contract_path,
             publication_profile_path=publication_profile_path,
             quality_profile_path=quality_profile_path,
+            viewpoint_projection_path=viewpoint_projection_path,
         )
 
     # The plan and contract were staged through a temporary directory, whose
@@ -1951,6 +1956,7 @@ def build_authoring_packet(
     contract_path: str | Path,
     publication_profile_path: str | Path,
     quality_profile_path: str | Path,
+    viewpoint_projection_path: str | Path | None = None,
 ) -> dict[str, Any]:
     paths = {
         "plan": Path(plan_path),
@@ -1970,6 +1976,33 @@ def build_authoring_packet(
         except json.JSONDecodeError as exc:
             raise AuthoringContractError(f"invalid JSON in {name}: {path}") from exc
         sources[name] = {"path": str(path.resolve()), "sha256": sha256_text(raw)}
+
+    viewpoint_projection = None
+    if viewpoint_projection_path is not None:
+        projection_path = Path(viewpoint_projection_path)
+        if not projection_path.is_file():
+            raise AuthoringContractError(
+                f"missing viewpoint_projection: {projection_path}"
+            )
+        raw_projection = projection_path.read_text(encoding="utf-8")
+        try:
+            viewpoint_projection = ViewpointKnowledgeProjection.model_validate_json(
+                raw_projection
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise AuthoringContractError(
+                f"invalid viewpoint_projection: {projection_path}"
+            ) from exc
+        if viewpoint_projection.consumer_kind != "composition_plan":
+            raise AuthoringContractError(
+                "viewpoint projection consumer_kind must be composition_plan"
+            )
+        sources["viewpoint_projection"] = {
+            "path": str(projection_path.resolve()),
+            "sha256": sha256_text(raw_projection),
+            "projection_sha256": viewpoint_projection.projection_sha256,
+            "eligibility": viewpoint_projection.eligibility,
+        }
 
     contract = loaded["base_contract"]
     validate_base_contract(contract)
@@ -2123,5 +2156,7 @@ def build_authoring_packet(
             "reason": "human publication approval and external program audit are not part of authoring",
         },
     }
+    if viewpoint_projection is not None:
+        packet["viewpoint_projection"] = viewpoint_projection.model_dump(mode="json")
     packet["packet_sha256"] = sha256_text(canonical_json(packet))
     return packet

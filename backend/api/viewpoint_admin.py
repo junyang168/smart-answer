@@ -19,6 +19,7 @@ from .canonical_repository.viewpoint_recall_blocking import (
 )
 from .canonical_repository.matthew16_viewpoint_candidate import (
     Matthew16ViewpointPilotArtifact,
+    build_pilot_composition_projection,
 )
 
 
@@ -132,6 +133,7 @@ def viewpoint_pilot():
         raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
     if pilot is None:
         raise HTTPException(status_code=404, detail="No viewpoint pilot is configured")
+    consumer_projection = build_pilot_composition_projection(pilot)
     return {
         "schema_version": "wang_admin_viewpoint_pilot_projection_v1",
         "authority": {
@@ -141,6 +143,12 @@ def viewpoint_pilot():
             "read_only": True,
         },
         "projection_sha256": pilot.artifact_sha256,
+        "consumer_projection": {
+            "consumer_kind": consumer_projection.consumer_kind,
+            "eligibility": consumer_projection.eligibility,
+            "projection_sha256": consumer_projection.projection_sha256,
+            "blocker_codes": consumer_projection.blocker_codes,
+        },
         "data": pilot.model_dump(mode="json"),
     }
 

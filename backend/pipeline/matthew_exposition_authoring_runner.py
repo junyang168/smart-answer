@@ -72,6 +72,15 @@ def _read_prompt(name: str) -> str:
     return PROMPTS[name].read_text(encoding="utf-8")
 
 
+def validate_viewpoint_projection_for_generation(packet: dict[str, Any]) -> None:
+    projection = packet.get("viewpoint_projection")
+    if projection and projection.get("eligibility") == "internal_candidate":
+        raise AuthoringContractError(
+            "internal-candidate viewpoint projection is shadow-validation only; "
+            "run with --dry-run or supply a composition-eligible projection"
+        )
+
+
 def _client_generation_parameters(client: Any) -> dict[str, Any]:
     return {
         "max_output_tokens": getattr(client, "max_output_tokens", None),
@@ -1321,6 +1330,14 @@ def main() -> int:
     parser.add_argument("--base-contract", type=Path)
     parser.add_argument("--publication-profile", type=Path, required=True)
     parser.add_argument("--quality-profile", type=Path, required=True)
+    parser.add_argument(
+        "--viewpoint-projection",
+        type=Path,
+        help=(
+            "Optional SHA-bound ViewpointKnowledgeProjection. Internal candidates "
+            "are accepted only by --dry-run shadow validation."
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--claude-model", default="claude-sonnet-5")
@@ -1415,6 +1432,7 @@ def main() -> int:
             compiled_snapshot_path=compiled_snapshot_path,
             publication_profile_path=args.publication_profile,
             quality_profile_path=args.quality_profile,
+            viewpoint_projection_path=args.viewpoint_projection,
         )
         if compiled_snapshot_path is not None:
             knowledge_path = compiled_snapshot_path
@@ -1425,6 +1443,7 @@ def main() -> int:
             contract_path=args.base_contract,
             publication_profile_path=args.publication_profile,
             quality_profile_path=args.quality_profile,
+            viewpoint_projection_path=args.viewpoint_projection,
         )
     if args.dry_run:
         print(
@@ -1434,11 +1453,19 @@ def main() -> int:
                     "packet_sha256": packet["packet_sha256"],
                     "would_call_models": False,
                     "would_publish": False,
+                    "viewpoint_projection_sha256": (
+                        packet.get("viewpoint_projection", {}).get("projection_sha256")
+                    ),
+                    "viewpoint_projection_eligibility": (
+                        packet.get("viewpoint_projection", {}).get("eligibility")
+                    ),
                 },
                 ensure_ascii=False,
             )
         )
         return 0
+
+    validate_viewpoint_projection_for_generation(packet)
 
     load_dotenv(PROJECT_ROOT / ".env")
     result = run_authoring(

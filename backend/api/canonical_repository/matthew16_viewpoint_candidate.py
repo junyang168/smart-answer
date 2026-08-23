@@ -10,6 +10,10 @@ from .knowledge_models import ViewpointPropositionSignature, ViewpointScope
 from .viewpoint_foundation import sha256_json
 from .viewpoint_proposition_units import PropositionUnitCandidate
 from .viewpoint_resolution import ReviewClaim
+from .viewpoint_runtime_projection import (
+    ProjectionDependency,
+    ViewpointKnowledgeProjection,
+)
 
 
 class StrictCandidateModel(BaseModel):
@@ -165,3 +169,120 @@ def build_matthew16_viewpoint_pilot(
         "apply_allowed": False,
     }
     return Matthew16ViewpointPilotArtifact(**payload, artifact_sha256=sha256_json(payload))
+
+
+def build_pilot_composition_projection(
+    pilot: Matthew16ViewpointPilotArtifact,
+) -> ViewpointKnowledgeProjection:
+    """Project one internal candidate for authoring shadow validation.
+
+    This intentionally cannot grant composition eligibility.  It proves that
+    the Matthew runner can read a bounded, standard downstream projection
+    without scanning either the registry or staging directories.
+    """
+
+    claims = {
+        item.parent_claim.claim_id: item.parent_claim
+        for item in pilot.members
+    }
+    evidence = {
+        (row.evidence_step_id, row.source_fragment_id): row
+        for item in pilot.members
+        for row in item.proposition_unit.evidence
+    }
+    sources: dict[str, dict[str, Any]] = {}
+    fragments: dict[str, dict[str, Any]] = {}
+    citations: dict[str, dict[str, Any]] = {}
+    for row in evidence.values():
+        sources[row.source_id] = {
+            "source_id": row.source_id,
+            "source_sha256": row.source_sha256,
+        }
+        fragment = {
+                "fragment_id": row.source_fragment_id,
+                "source_id": row.source_id,
+                "verbatim_excerpt": row.verbatim_excerpt,
+                "paragraph_key": row.paragraph_key,
+                "media_time": row.media_time,
+                "anchor_state": row.anchor_state,
+                "source_sha256": row.source_sha256,
+            }
+        prior_fragment = fragments.get(row.source_fragment_id)
+        if prior_fragment is not None and prior_fragment != fragment:
+            raise ValueError("one source fragment resolved to conflicting projection rows")
+        fragments[row.source_fragment_id] = fragment
+        citations[row.citation_id] = {
+            "citation_id": row.citation_id,
+            "revision": row.citation_revision,
+            "status": row.citation_status,
+            "source_id": row.source_id,
+            "source_sha256": row.source_sha256,
+        }
+    dependencies = [
+        ProjectionDependency(
+            collection="matthew16_viewpoint_pilots",
+            record_id=pilot.viewpoint_candidate_id,
+            revision=1,
+            sha256=pilot.artifact_sha256,
+        ),
+        *[
+            ProjectionDependency(
+                collection="claims",
+                record_id=claim.claim_id,
+                revision=claim.pinned_claim_revision,
+                sha256=claim.claim_revision_sha256,
+            )
+            for claim in claims.values()
+        ],
+        *[
+            ProjectionDependency(
+                collection="proposition_units",
+                record_id=item.proposition_unit.proposition_unit_id,
+                revision=1,
+                sha256=sha256_json(item.proposition_unit.model_dump(mode="json")),
+            )
+            for item in pilot.members
+        ],
+    ]
+    dependencies.sort(key=lambda item: (item.collection, item.record_id))
+    manifest = [item.model_dump(mode="json") for item in dependencies]
+    payload = {
+        "schema_version": "wang_viewpoint_knowledge_projection_v1",
+        "consumer_kind": "composition_plan",
+        "scope_viewpoint_ids": [pilot.viewpoint_candidate_id],
+        "coverage_snapshot_id": f"PILOT-SCOPE-{pilot.parent_scope_artifact_sha256[:20]}",
+        "resolution_ledger_id": None,
+        "quality_report_id": None,
+        "eligibility": "internal_candidate",
+        "blocker_codes": pilot.blockers,
+        "viewpoints": [
+            {
+                "candidate_id": pilot.viewpoint_candidate_id,
+                "revision_candidate_id": pilot.viewpoint_revision_candidate_id,
+                "core_proposition": pilot.core_proposition,
+                "proposition_signature": pilot.proposition_signature.model_dump(mode="json"),
+                "scope": pilot.scope.model_dump(mode="json"),
+                "review_status": pilot.review_status,
+                "member_proposition_unit_ids": [
+                    item.proposition_unit.proposition_unit_id for item in pilot.members
+                ],
+                "article_acceptance": pilot.article_acceptance.model_dump(mode="json"),
+            }
+        ],
+        "argument_routes": [],
+        "expanded_claims": [
+            claims[key].model_dump(mode="json") for key in sorted(claims)
+        ],
+        "expanded_evidence": [
+            evidence[key].model_dump(mode="json") for key in sorted(evidence)
+        ],
+        "expanded_fragments": [fragments[key] for key in sorted(fragments)],
+        "expanded_sources": [sources[key] for key in sorted(sources)],
+        "expanded_citations": [citations[key] for key in sorted(citations)],
+        "relations": [],
+        "dependency_manifest": manifest,
+        "dependency_manifest_sha256": sha256_json(manifest),
+    }
+    return ViewpointKnowledgeProjection(
+        **payload, projection_sha256=sha256_json(payload)
+    )

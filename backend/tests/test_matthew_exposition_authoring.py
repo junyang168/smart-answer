@@ -33,12 +33,17 @@ from backend.pipeline.matthew_exposition_authoring import (
     AUTHOR_RESULT_SCHEMA,
 )
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_runtime_projection import (
+    ViewpointKnowledgeProjection,
+)
 from backend.pipeline.matthew_exposition_authoring_runner import (
     _build_program_audit_manifest,
     _call_final_reviewer,
     _require_audit_draft,
     _run_program_audit_stage,
     run_authoring,
+    validate_viewpoint_projection_for_generation,
 )
 
 
@@ -352,6 +357,87 @@ def full_authoring_packet():
         publication_profile_path=PUBLICATION_PROFILE_PATH,
         quality_profile_path=PROFILE_PATH,
     )
+
+
+def _viewpoint_projection(*, consumer_kind="composition_plan"):
+    payload = {
+        "schema_version": "wang_viewpoint_knowledge_projection_v1",
+        "consumer_kind": consumer_kind,
+        "scope_viewpoint_ids": ["CVP-TEST"],
+        "coverage_snapshot_id": "PILOT-SCOPE-TEST",
+        "resolution_ledger_id": None,
+        "quality_report_id": None,
+        "eligibility": "internal_candidate",
+        "blocker_codes": ["not_master_applied"],
+        "viewpoints": [{"candidate_id": "CVP-TEST"}],
+        "argument_routes": [],
+        "expanded_claims": [],
+        "expanded_evidence": [],
+        "expanded_fragments": [],
+        "expanded_sources": [],
+        "expanded_citations": [],
+        "relations": [],
+        "dependency_manifest": [],
+        "dependency_manifest_sha256": sha256_json([]),
+    }
+    return ViewpointKnowledgeProjection(
+        **payload, projection_sha256=sha256_json(payload)
+    )
+
+
+def test_authoring_packet_reads_sha_valid_bounded_viewpoint_projection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "backend.pipeline.matthew_exposition_authoring._sermon_transcript_slices",
+        lambda **_kwargs: {},
+    )
+    path = tmp_path / "viewpoint-projection.json"
+    path.write_text(
+        _viewpoint_projection().model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    packet = build_authoring_packet(
+        plan_path=PLAN_PATH,
+        knowledge_path=KNOWLEDGE_PATH,
+        contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+        publication_profile_path=PUBLICATION_PROFILE_PATH,
+        quality_profile_path=PROFILE_PATH,
+        viewpoint_projection_path=path,
+    )
+
+    assert packet["viewpoint_projection"]["scope_viewpoint_ids"] == ["CVP-TEST"]
+    assert packet["viewpoint_projection"]["eligibility"] == "internal_candidate"
+    assert packet["sources"]["viewpoint_projection"]["projection_sha256"]
+
+
+def test_authoring_packet_rejects_non_composition_viewpoint_projection(tmp_path):
+    path = tmp_path / "viewpoint-projection.json"
+    path.write_text(
+        _viewpoint_projection(consumer_kind="qa_answer").model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AuthoringContractError, match="consumer_kind"):
+        build_authoring_packet(
+            plan_path=PLAN_PATH,
+            knowledge_path=KNOWLEDGE_PATH,
+            contract_path=FIXTURE_DIR / "base-manuscript-contract.json",
+            publication_profile_path=PUBLICATION_PROFILE_PATH,
+            quality_profile_path=PROFILE_PATH,
+            viewpoint_projection_path=path,
+        )
+
+
+def test_internal_candidate_viewpoint_projection_is_shadow_only():
+    with pytest.raises(AuthoringContractError, match="shadow-validation only"):
+        validate_viewpoint_projection_for_generation(
+            {
+                "viewpoint_projection": {
+                    "eligibility": "internal_candidate",
+                }
+            }
+        )
 
 
 class _FakeAuthoringStore:
