@@ -34,6 +34,7 @@ from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1AnthropicClient
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 CORPUS_SURVEY_ROOT = wang_platform_paths().corpus_survey_staging
@@ -53,10 +54,9 @@ CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v3"
 
 
 def _find_transcript(transcript_id: str, transcript_dirs: list[Path]) -> Path:
-    for directory in transcript_dirs:
-        path = directory / f"{transcript_id}.json"
-        if path.is_file():
-            return path
+    path = resolve_transcript_path(transcript_id, transcript_dirs)
+    if path is not None:
+        return path
     raise FileNotFoundError(f"transcript not found: {transcript_id}")
 
 

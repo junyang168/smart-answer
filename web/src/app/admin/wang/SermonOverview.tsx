@@ -23,7 +23,7 @@ const stateLabels: Record<CellState, string> = {
   failed: "失敗",
   running: "執行中",
   queued: "排隊中",
-  no_source: "未校核",
+  no_source: "無來源",
 };
 
 const stateStyles: Record<CellState, string> = {
@@ -47,9 +47,7 @@ const cellReasons: Record<string, string> = {
   upstream_rerun: "上游階段在這次執行之後又跑過",
   upstream_running: "上游階段正在重跑，這一格的結果即將被取代",
   from_store_not_ledger: "這一格來自主庫本身：物件在庫裡。這次入庫發生在記錄表上線之前，所以沒有時間與花費",
-  // Every one of these has a transcript in script_review; what is missing is a
-  // proofread, published one, which is what extraction reads.
-  no_source: "逐字稿還在校核，抽取讀的是已發布的稿",
+  no_source: "找不到已發布或已校核的逐字稿",
 };
 
 function money(value: number | null | undefined) {
@@ -253,8 +251,8 @@ export function SermonOverview() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="來源" value={String(summary.rows)}
           detail={`講道 ${summary.sermons} · 母本 ${summary.notes_manuscripts}`} />
-        <Metric label="未校核" value={String(summary.unproofread)}
-          detail="逐字稿還在校核，抽取讀已發布的稿" />
+        <Metric label="無來源" value={String(summary.unproofread)}
+          detail="找不到已發布或已校核的逐字稿" />
         <Metric label="已入庫" value={`${summary.ingested} 篇`}
           detail={`已記錄 ${summary.runs_recorded} 次執行`} />
         <Metric label="已記錄的花費" value={money(summary.spend_usd)}
