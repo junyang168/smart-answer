@@ -342,3 +342,28 @@ def test_read_only_http_boundary_exposes_projection_and_no_mutation(monkeypatch)
     assert recall.json()["data"]["available"] is True
     assert client.post("/admin/wang/viewpoints/CV-PETER", json={}).status_code == 405
     assert client.post("/admin/wang/viewpoint-exceptions/VEX-1/changesets", json={}).status_code == 404
+
+
+def test_viewpoint_pilot_is_optional_and_fails_closed(monkeypatch, tmp_path):
+    app = FastAPI()
+    app.include_router(viewpoint_admin.router)
+    client = TestClient(app)
+
+    monkeypatch.delenv("WANG_VIEWPOINT_PILOT_FILE", raising=False)
+    absent = client.get("/admin/wang/viewpoints/pilot")
+    assert absent.status_code == 404
+    assert absent.json()["detail"] == "No viewpoint pilot is configured"
+
+    monkeypatch.setenv(
+        "WANG_VIEWPOINT_PILOT_FILE", str(tmp_path / "missing-pilot.json")
+    )
+    missing = client.get("/admin/wang/viewpoints/pilot")
+    assert missing.status_code == 503
+    assert "configured viewpoint pilot does not exist" in missing.json()["detail"]
+
+    malformed = tmp_path / "malformed-pilot.json"
+    malformed.write_text('{"schema_version":"not-a-pilot"}', encoding="utf-8")
+    monkeypatch.setenv("WANG_VIEWPOINT_PILOT_FILE", str(malformed))
+    invalid = client.get("/admin/wang/viewpoints/pilot")
+    assert invalid.status_code == 503
+    assert "Viewpoint pilot unavailable" in invalid.json()["detail"]

@@ -5,10 +5,18 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowRight, BookOpen, ChevronRight, Loader2, Search } from "lucide-react";
 import { AsOfStrip, StatusBadge, WorkbenchHeader } from "./ViewpointChrome";
-import type { Envelope, OverviewData, RecallDiagnostics, ViewpointSummary } from "./types";
+import type { Envelope, OverviewData, PilotEnvelope, RecallDiagnostics, ViewpointSummary } from "./types";
 
 async function read<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.detail || `服务返回 ${response.status}`);
+  return payload as T;
+}
+
+async function readOptional<T>(url: string): Promise<T | null> {
+  const response = await fetch(url, { cache: "no-store" });
+  if (response.status === 404) return null;
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.detail || `服务返回 ${response.status}`);
   return payload as T;
@@ -20,6 +28,7 @@ export function ViewpointExplorer() {
   const [overview, setOverview] = useState<Envelope<OverviewData> | null>(null);
   const [listing, setListing] = useState<Envelope<{ items: ViewpointSummary[]; total: number; next_cursor: string | null }> | null>(null);
   const [recall, setRecall] = useState<Envelope<RecallDiagnostics> | null>(null);
+  const [pilot, setPilot] = useState<PilotEnvelope | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState(params.get("q") ?? "");
@@ -28,12 +37,14 @@ export function ViewpointExplorer() {
     setLoading(true); setError("");
     try {
       const queryString = params.toString();
-      const [summary, rows, recallDiagnostics] = await Promise.all([
+      const [summary, rows, recallDiagnostics, pilotProjection] = await Promise.all([
         read<Envelope<OverviewData>>("/api/admin/wang/viewpoints/overview"),
         read<Envelope<{ items: ViewpointSummary[]; total: number; next_cursor: string | null }>>(`/api/admin/wang/viewpoints${queryString ? `?${queryString}` : ""}`),
         read<Envelope<RecallDiagnostics>>("/api/admin/wang/viewpoints/recall-blocking?limit=8"),
+        readOptional<PilotEnvelope>("/api/admin/wang/viewpoints/pilot"),
       ]);
       setOverview(summary); setListing(rows); setRecall(recallDiagnostics);
+      setPilot(pilotProjection);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "无法读取观点主数据");
     } finally { setLoading(false); }
@@ -72,6 +83,12 @@ export function ViewpointExplorer() {
     <main className="space-y-6 pb-10">
       <WorkbenchHeader exceptions={overview.data.exceptions} />
       <AsOfStrip asOf={listing.as_of} projectionSha={listing.projection_sha256} />
+      {pilot && <Link href="/admin/wang/viewpoints/pilot" className="block rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 hover:border-violet-500">
+        <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-violet-700 px-2.5 py-1 text-xs font-black text-white">太 16 释经 pilot · WIP 1</span><StatusBadge value={pilot.data.review_status} /><span className="text-xs font-bold text-violet-700">只读 candidate</span></div>
+        <h2 className="mt-3 text-lg font-black text-slate-950">{pilot.data.core_proposition}</h2>
+        <p className="mt-2 text-sm text-slate-600">{pilot.data.members.length} 个证据绑定 atomic members · {pilot.data.adjacent_non_members.length} 个相邻非成员 · Article 2 {pilot.data.article_acceptance.status}</p>
+        <p className="mt-2 break-all font-mono text-[11px] text-slate-400">{pilot.data.viewpoint_candidate_id} · {pilot.projection_sha256}</p>
+      </Link>}
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6" aria-label="当前快照状态">
         {metrics.map((metric) => (
           <Link key={metric.label} href={metric.href} className="group rounded-2xl border border-slate-200 bg-white p-4 hover:border-indigo-300">

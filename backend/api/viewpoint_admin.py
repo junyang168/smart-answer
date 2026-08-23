@@ -17,6 +17,9 @@ from .canonical_repository.viewpoint_resolution import ViewpointExceptionQueueAr
 from .canonical_repository.viewpoint_recall_blocking import (
     ViewpointRecallBlockingArtifact,
 )
+from .canonical_repository.matthew16_viewpoint_candidate import (
+    Matthew16ViewpointPilotArtifact,
+)
 
 
 router = APIRouter(prefix="/admin/wang", tags=["wang-admin-viewpoints"])
@@ -48,6 +51,20 @@ def _recall_blocking() -> ViewpointRecallBlockingArtifact | None:
             "configured viewpoint recall blocking artifact does not exist"
         )
     return ViewpointRecallBlockingArtifact.model_validate(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
+def _viewpoint_pilot() -> Matthew16ViewpointPilotArtifact | None:
+    """Read one explicitly configured SHA-valid pilot; never scan staging."""
+
+    configured = os.getenv("WANG_VIEWPOINT_PILOT_FILE")
+    if not configured:
+        return None
+    path = Path(configured).resolve()
+    if not path.is_file():
+        raise AdminViewpointProjectionError("configured viewpoint pilot does not exist")
+    return Matthew16ViewpointPilotArtifact.model_validate(
         json.loads(path.read_text(encoding="utf-8"))
     )
 
@@ -105,6 +122,27 @@ def list_viewpoints(
         cursor=cursor,
         limit=limit,
     )
+
+
+@router.get("/viewpoints/pilot")
+def viewpoint_pilot():
+    try:
+        pilot = _viewpoint_pilot()
+    except (ValueError, json.JSONDecodeError, AdminViewpointProjectionError) as exc:
+        raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
+    if pilot is None:
+        raise HTTPException(status_code=404, detail="No viewpoint pilot is configured")
+    return {
+        "schema_version": "wang_admin_viewpoint_pilot_projection_v1",
+        "authority": {
+            "kind": "sha_bound_internal_candidate",
+            "projection": "Matthew16ViewpointPilotArtifact",
+            "representation": "read_only",
+            "read_only": True,
+        },
+        "projection_sha256": pilot.artifact_sha256,
+        "data": pilot.model_dump(mode="json"),
+    }
 
 
 @router.get("/viewpoints/{viewpoint_id}")

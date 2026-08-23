@@ -121,3 +121,43 @@ export type ExceptionSummary = {
   exception_bundle_id: string; candidate_id: string; priority: number;
   consumer_impact: string; blocker_codes: string[]; remaining_findings: string[]; claim_count: number;
 };
+
+export type ViewpointPilot = {
+  viewpoint_candidate_id: string;
+  viewpoint_revision_candidate_id: string;
+  core_proposition: string;
+  wording_label: string;
+  review_status: string;
+  consumer_eligibility: "internal_candidate";
+  scope: { scripture_scope: string[] };
+  members: Array<{
+    proposition_unit: {
+      proposition_unit_id: string; parent_claim_id: string; source_id: string;
+      unit_statement: string;
+      evidence: Array<{
+        evidence_step_id: string; source_fragment_id: string; verbatim_excerpt: string;
+        source_id: string; media_time: number | null; paragraph_key: string | number | null;
+      }>;
+    };
+    parent_claim: { claim_id: string; statement: string; source_id: string; review_status: string };
+  }>;
+  adjacent_non_members: Array<{
+    proposition_unit_id: string; parent_claim_id: string; unit_statement: string;
+    disposition: "adjacent_non_member"; reason: "different_truth_condition";
+  }>;
+  article_acceptance: {
+    draft_id: string; manuscript_sha256: string; article_proposition: string;
+    status: "supported"; article_is_source_authority: false; supporting_proposition_unit_ids: string[];
+  };
+  model_ids: string[];
+  blockers: string[];
+  artifact_sha256: string;
+  apply_allowed: false;
+};
+
+export type PilotEnvelope = {
+  schema_version: string;
+  authority: { kind: string; projection: string; representation: string; read_only: true };
+  projection_sha256: string;
+  data: ViewpointPilot;
+};
