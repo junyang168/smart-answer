@@ -463,7 +463,19 @@ Ledger statistics 必须从 rows 机械重算。`coverage_status=complete` 要�
 }
 ```
 
-`component_locator` 用于 `equivalent_component`，至少包含可验证的 statement component、source Claim SHA 及其在 Claim 结构中的稳定定位。仅保存一段模型 summary 不合格。
+`component_locator` 用于 `equivalent_component`，必须是可机械复算的字符区间定位。仅保存一段模型 summary 不合格；只指向 Claim 内部结构节点的 pointer 同样不合格，因为它无法证明所指文字就是 pinned statement 的哪一段。
+
+```json
+{
+  "statement_component": "...",
+  "claim_sha256": "...",
+  "spans": [{"start_char": 0, "end_char": 10, "exact_text": "..."}]
+}
+```
+
+`spans` 相对 pinned Claim statement 计算，按 `(start_char, end_char)` 排序且互不重叠；每个 span 的 `exact_text` 必须与 `statement[start_char:end_char]` 逐字相同，`statement_component` 由 spans 按序拼接得到。允许多个不连续 span，以处理共享主语或限定语。校验只需 Claim SHA 与 statement，不依赖 Claim 内部 JSON 结构的稳定性——这正是第 6.2.5 节第 3 项能够 fail closed 的前提。
+
+当前实现的 `ViewpointComponentLocator` 使用 `statement_component / claim_sha256 / json_pointer`，不能支撑该校验。把 `json_pointer` 迁移为上述 `spans` 是 #204 batch workflow 的实现前置条件：迁移完成前，batch workflow 不得创建 `equivalent_component` link。既有记录不因本次设计更新被改写或删除。
 
 Claim link 属于稳定 viewpoint identity；`validated_against_viewpoint_revision_id` 记录它最后针对哪个 semantic revision 通过审核。新的 semantic revision 若改变 truth conditions，所有 active member links 必须 invalidated 或重新验证；仅产生新 registry snapshot 不复制 link。
 
@@ -713,9 +725,9 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
       "components": [
         {
           "component_locator": {
-            "start_char": 0,
-            "end_char": 10,
-            "exact_text": "..."
+            "statement_component": "...",
+            "claim_sha256": "...",
+            "spans": [{"start_char": 0, "end_char": 10, "exact_text": "..."}]
           },
           "disposition": "member_existing",
           "target_viewpoint_revision_id": "CVR-...",
@@ -738,7 +750,7 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 }
 ```
 
-`claim_decisions` 对 input manifest exact-once；一个 Claim row 内可以有多个 components。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的 locator。`new_viewpoint_candidates` 只使用 batch-local keys；正式 opaque ID 由 ChangeSet builder 分配。
+`claim_decisions` 对 input manifest exact-once；一个 Claim row 内可以有多个 components。`component_locator` 使用第 5.4 节的 span 形式，模型只输出 spans 与拼接后的 `statement_component`，`claim_sha256` 由程序填入并核对。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的单一 span。`new_viewpoint_candidates` 只使用 batch-local keys；正式 opaque ID 由 ChangeSet builder 分配。
 
 #### 5.12.2 `CanonicalViewpointReview`
 
@@ -795,6 +807,16 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 
 ChangeSet builder 只接收 review-pass 的最终 proposal。它可以生成现有 `CanonicalViewpoint`、`ViewpointRevision`、`ViewpointClaimLink`、`ArgumentRoute`、`ViewpointRelation` 与兼容 audit records；这些 master records 仍遵守本文件其余 schema。`apply_allowed` 由程序重算，模型不能输出或修改。
 
+batch workflow 用 `ViewpointClaimLink`（`equivalent_full` 或带 span locator 的 `equivalent_component`）表示成员资格。#194 已 apply 的 `CV-59fdfc87534d1f17fc9f` 则用 19 个 `ViewpointPropositionUnitRecord` 加 8 个 `ViewpointPropositionUnitLinkRecord` 表示同一件事。因此 master data 会在一段时间内同时存在两种成员表示，这是本设计更新的已知后果，不是待修的缺陷：既有记录不被改写，新 batch 也不退回旧表示。
+
+在两者统一之前，实现必须满足：
+
+- foundation validator、Registry UI、`ViewpointKnowledgeProjection` compiler 与 coverage 统计都要同时识别两种表示，任一侧缺失即视为数据不完整而不是 0；
+- 同一 Claim component 不得在两种表示下同时 active——它会成为两条互不可见的成员路径，绕过“一个 unit 最多属于一个 active viewpoint”的既有 invariant；
+- `CV-59fdfc87534d1f17fc9f` 保持 regression fixture 地位，不因新 workflow 上线而被重做或迁移。
+
+统一方向（把 PropositionUnit 成员迁移为 span-locator Claim links，或反之）另开实现 ticket 决定，本卡不作规定。
+
 ## 6. 怎样判断两个 Claim 是同一观点
 
 ### 6.1 Identity rule
@@ -848,6 +870,10 @@ batch 以可解释的内容边界切分，不按任意 pair 数切分。优先�
 
 失败来源、stale revision 或不可解析 evidence 可以在模型调用前机械阻断，但必须保留 closed disposition；不得按 `claim_type`、希腊文、application、背景或“看起来不像观点”做 semantic prefilter。每个可送审 Claim 必须在 proposal 中 exact-once 出现；一个复合 Claim 可以拥有多个 component decisions。
 
+batch size 的实际上限由 reviewer 决定，不由 proposer 决定。reviewer 必须对 proposal 中**每一个** proposed semantic change 逐项输出 decision、finding code、理由与必要 correction（第 6.2.6 节），因此其输出规模随 component 数增长，通常大于 proposal 自身。定量 batch 上限必须以实测的 reviewer output tokens 设定，并为 reconsideration 留出余量；proposer 装得下不等于该 batch 可行。runner 的 `max_output_tokens` 必须按同一实测值配置，不得沿用为更小 packet 设定的旧值。
+
+同一 scope 拆成多个 batch 时，batch 之间必须串行：第 N+1 个 batch 的 Registry context 检索（第 6.2.2 节）必须在第 N 个 batch 的 ChangeSet 已 apply 并 readback 通过之后进行。并行执行会让两个 batch 各自把同一 truth condition 提为 `new_viewpoint`，在 master 中造出重复身份，而两者都通过各自的 exact-once 覆盖校验——确定性校验按定义看不见这类重复。若因故必须并行，则所有并行 batch 的 `new_viewpoint` candidates 只能进入 exception inbox 由人工合并，不得直接 apply。
+
 #### 6.2.2 Step 2 — relevant Registry context
 
 增量 batch 必须把相关 active CanonicalViewpoints 传给 proposer。检索顺序为：
@@ -897,7 +923,7 @@ proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它
 
 1. input manifest 每个可送审 Claim exact-once 出现，且无额外 Claim；
 2. 所有 ID、pinned revision、SHA、source/evidence/fragment 引用可解析；
-3. exact component text 与 pinned Claim statement 的字符切片逐字一致；
+3. 每个 component 的 spans 按 `(start_char, end_char)` 排序、互不重叠、落在 statement 范围内，各 span 的 `exact_text` 与 `statement[start_char:end_char]` 逐字一致，且 `statement_component` 等于 spans 按序拼接的结果；
 4. 引用 evidence 属于该 Claim/source revision，verbatim excerpt 与 anchor 有效；
 5. existing target revision 正是 packet pin 的 revision，没有自动跳到 current；
 6. new candidate local keys、member/related refs 唯一且可解析；
@@ -2155,6 +2181,8 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
    从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blocking recall、unmatched/new-viewpoint disposition、blockers 与 stable fingerprints；不调用内容模型。
 4. **Viewpoint batch resolution workflow**
    定义 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet`；实现 Opus 5/high proposer、Sol/high proposal-aware reviewer、deterministic exact-coverage/span/evidence gates、一次 finding-only reconsideration、可恢复 runner、风险抽样监测与 machine-readable exception bundles。旧 blind/group/promotion/finalization runners 只作为兼容诊断，不能进入默认状态机。
+
+   本项有三个必须先完成的前置条件：`ViewpointComponentLocator` 从 `json_pointer` 迁移为第 5.4 节的 span 形式；以实测 reviewer output 定出 batch 上限并据此配置 runner 的 `max_output_tokens`；runner 强制同一 scope 内 batch 串行 apply（第 6.2.1 节）。三者任一缺失都会让 exact-span 校验落不了地、让 batch 在 reviewer 阶段截断，或让并行 batch 造出重复身份。
 5. **ArgumentRoute 与 source-local attestation**
    实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
 6. **Split/merge、revision 与 impact propagation**
