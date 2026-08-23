@@ -3,7 +3,8 @@
 > Canonical Viewpoint Registry 架构学习版  
 > 状态：面向学习和讨论的伴读文档，不是运行时数据源，也不替代正式规范  
 > 正式 authority：[Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)  
-> 追踪：GitHub issue #189
+> 学习版对齐基线：#187 commit `b6a00de`（2026-08-22）的设计与校准实现<br>
+> 追踪：GitHub issue #189；实现与校准：#187 / PR #191
 
 ## 1. 先从一个常见的数据问题说起
 
@@ -62,7 +63,7 @@
 
 这里与传统客户 MDM 有一个关键差异：系统不从几条来源措辞中挑一条作为“surviving 原话”。`CanonicalViewpoint` 的 core proposition 是编辑归一化，必须明确标记为不是王教授逐字引文；原始措辞仍留在各自 Claim 和来源中。
 
-## 4. 六个最重要的对象
+## 4. 先认识核心对象
 
 ### 4.1 Claim：来源局部断言
 
@@ -70,30 +71,55 @@
 
 同一句话在另一篇讲道中再次出现，仍然是另一条 Claim，因为它属于另一个 source context。
 
-### 4.2 Semantic Signature：便于比较的语义结构
+### 4.2 ClaimSemanticSignatureCandidate：便于筛选的语义结构
 
-自由文本很难稳定比较，所以系统为 Claim 生成结构化的 semantic signature，例如：
+自由文本很难稳定比较，所以系统为每条 source-eligible Claim 最多生成一个 `ClaimSemanticSignatureCandidate`，例如：
 
 ```yaml
 subject: 磐石
 predicate: 指向
 object: 彼得所认信的基督与真理
 polarity: affirmed
+stance: endorsed
 modality: asserted
-scripture_scope:
-  - Matt.16.18
+discourse_roles:
+  - conclusion
 conditions: []
 population_scope: []
-attribution_subject: professor
+temporal_scope: []
+material_qualifications: []
 ```
 
-signature 的作用是把比较问题拆开：主体是否相同、正反是否相同、对象是否相同、范围和条件是否相同。
+一个 signature 可以包含多个 `SemanticAtomCandidate`，因为一条复合 Claim 可能同时断言几个命题。每个 atom 记录 subject、predicate/object、polarity、stance、modality、scope、conditions、material qualifications 和 discourse roles。
 
-它不是最终观点，也不是自动生成的真理。模型可以提出 signature；程序检查字段和引用；正式的 viewpoint revision 仍需要语义审核。
+经文引用和 Claim 类型仍保存在 SHA-bound input/projection 上；不会为了让 atom 看起来完整而让模型凭空补写。
+
+signature 的作用是把召回问题拆开：主体是否相近、正反是否可能相关、对象和范围是否值得进一步核对。
+
+它不是最终观点，也不是 identity evidence。当前 schema 强制保存：
+
+```text
+screening_only = true
+identity_evidence = false
+apply_allowed = false
+```
+
+模型可以提出 signature；程序检查 exact-once、Claim revision、字段和 SHA。它只用于筛选与召回，不能直接成为正式 `ViewpointRevision.proposition_signature`。
+
+#### SemanticAtomCandidate 与 PropositionUnit 不是一回事
+
+最新校准发现，screening atom 还不足以承担观点身份。下一版设计需要 evidence-bound `PropositionUnit`：
+
+| 对象 | 当前状态 | 用途 | 能否作为 identity 输入 |
+|---|---|---|---:|
+| `SemanticAtomCandidate` | 已实现 | 低成本拆解语义，帮助 embedding 和 recall | 否 |
+| `PropositionUnit` | 最新设计方向，尚未实现 | 把 Claim 中的原子命题绑定到可定位 statement span、EvidenceStep、SourceFragment 和 source revision | 完成双审后可以 |
+
+换句话说，Semantic Atom 像目录卡上的摘要字段；PropositionUnit 像已经用页码和原文定位好的、可审核的最小命题。
 
 ### 4.3 Recall Graph：值得比较的候选网络
 
-候选发现可能来自规则、embedding 或受限的大模型语义发现。三个通道的结果取并集，构成 recall graph。
+当前 final graph 的三个基础通道是规则、原 Claim embedding 和 signature embedding；受限的模型 Group Discovery 只在后面为确实缺边的 proposal 增加有 provenance 的 recall extension。
 
 ```mermaid
 graph LR
@@ -118,6 +144,8 @@ graph LR
 
 规则、embedding 和模型在这一阶段都只有“提名权”，没有“归并权”。它们产生的是工作名单，不是主数据结论。
 
+截至 #187 的受控 cohort，1,212 条 Claim 中有 29 条 source-ineligible disposition，另外 1,183 条生成 signature。原规则／Claim-embedding union 有 13,648 个无向 pairs；signature embedding 找到 10,224 个，其中新增 3,806 个，基础 final graph 为 17,454 个 pairs。Group Discovery 后又以 7 条最小 bridge 形成 17,461-pair overlay。这些数字只描述该次 SHA-bound calibration snapshot，不是长期常量，更不表示存在 17,461 个观点关系。
+
 ### 4.4 Candidate Group：一起审核的候选包
 
 Recall graph 中相互连接的 Claims 可以被组织成 bounded candidate group，减少模型调用和人工阅读次数。
@@ -139,9 +167,50 @@ A 与 C 是同一个观点
 
 B 可能是一个范围较宽的复合 Claim，分别与 A、C 局部重叠。因此，每个拟议 member 都必须与拟议的 core proposition 单独比较。
 
-### 4.5 CanonicalViewpoint：稳定的观点身份
+当前实现把 final graph 切成有 48-Claim 上限的 overlapping packets。`review edge` 是本 packet 要主动检查的 signature edge，并在全部 packets 中恰好暴露一次；重复出现的局部边只是 `context edge`，帮助模型理解周围结构，不能重复计数。原 graph 中没有进入 signature review 的边作为 `baseline-only fallback` 保留，不能静默删除。
 
-通过 identity review 后，真值条件等价的 Claims 可以成为同一个 `CanonicalViewpoint` 的 members。
+Group Discovery 产生 `ScreeningGroupProposal`，关系只允许 `possible_equivalent`、`component` 或 `tension`。它们全部是 screening proposals，不是 identity decisions。
+
+### 4.5 IdentityReviewHypothesis：去重后的待审核假设
+
+同一个 proposal 可能因为 overlapping packets 出现多次。系统按关系类型、participant Claim 和角色去重，得到不可变的 `IdentityReviewHypothesis`。
+
+这一步有三个重要规则：
+
+- 重复 proposal 只增加 provenance，不增加模型调用；
+- 相交 hypotheses 不能被重新连成一个大分量；
+- 每个 hypothesis 恰好进入一个 evidence packet，或一个有 closed reason 的 planning exception。
+
+这里的 `participant` 是参加本次比较的 Claim；`participant role` 是它在 screening proposal 中暂时承担的角色，例如 candidate member、component 或 tension side。角色仍是待审核假设，不是 master membership。
+
+### 4.6 Source Eligibility Attestation 与 Evidence Packet
+
+Extraction 层的记录通常保持 `candidate / eligible_candidate`，即使已经过独立复核，也不能被 viewpoint 层批量改写成人工批准。系统改为编译 `IdentitySourceEligibilityAttestation`，证明某条 pinned Claim 具备进入 `viewpoint_identity_review` 的来源条件：
+
+- extraction 和 independent review artifacts 可解析；
+- correction 已实际应用；
+- Claim revision、source revision 和 SHA 一致；
+- EvidenceStep、SourceFragment 与逐字来源有效；
+- attribution 和 source-locality 可验证。
+
+Attestation 只授予“可以送审”的资格，并明确保存 `approval_status=not_human_approved`。它不证明两个命题等价。
+
+`Evidence Packet` 则是为一个 hypothesis 编译的最小、SHA-bound 来源包。它提供 reviewer 真正需要的 Claim、Evidence 和 source locator；若 pinned dependency 已过期，系统产生 `stale_dependency` exception，而不是偷偷读取数据库里的 current revision 替代它。
+
+### 4.7 Identity Boundary：先判断成员边界，再写 canonical wording
+
+最新校准后的设计把 identity review 拆成两个阶段；第一阶段 boundary runner 已实现，第二阶段在原子化完成前明确暂停：
+
+1. **Boundary classification**：两位异源 reviewer 只判断完整 participant set 是 `equivalent_all`、`component`、`tension`、`related_only`、`mixed` 还是 `unknown`；
+2. **Canonical synthesis**：只有边界一致、成员明确的原子命题，才生成 canonical wording、正式 proposition signature 和 scope。
+
+`mixed` 表示一个多成员 hypothesis 中只有某些子集关系一致。它必须给出覆盖原 participant set 的可验证 partition，并产生新的 immutable successor hypotheses；不能在原 hypothesis 内直接批准一个方便的子集。
+
+`unknown` 表示现有 evidence 不能可靠判断。系统最多自动做一次同来源、有限窗口的 `context expansion`，把锚点前后段落加入新 packet；它不能跨来源补料，也不改变 participants。扩展后仍不确定才进入 exception queue。
+
+### 4.8 CanonicalViewpoint：稳定的观点身份
+
+通过 atomic identity review 后，真值条件等价的 PropositionUnits 可以支持同一个 `CanonicalViewpoint`，并沿稳定 locator 回到各自来源 Claims。现有 registry crosswalk 仍以 pinned Claim 为来源记录，PropositionUnit 接入需要补足 unit locator，不能切断 Claim lineage。
 
 判断至少比较：
 
@@ -158,7 +227,7 @@ B 可能是一个范围较宽的复合 Claim，分别与 A、C 局部重叠。�
 
 `CanonicalViewpoint` 也不是强制层级树。主题的 hierarchy 属于 `TopicNode`；观点之间则使用 typed graph，因为一个观点可以同时 specialize 一个观点、qualify 另一个观点，并与第三个观点形成 tension。
 
-### 4.6 ArgumentRoute：到达同一结论的不同道路
+### 4.9 ArgumentRoute：到达同一结论的不同道路
 
 两个 Claim 即使表达同一结论，也可能使用不同论证：
 
@@ -168,16 +237,34 @@ B 可能是一个范围较宽的复合 Claim，分别与 A、C 局部重叠。�
 
 这些 Claim 可以属于同一个 `CanonicalViewpoint`，但应保存为不同的 `ArgumentRoute`。每条 route 的实际证据仍由 source-local attestation 记录，不能把讲道 A 的前提、讲道 B 的推论和讲道 C 的结论拼成一条教授从未完整讲过的路线。
 
+### 4.10 ViewpointKnowledgeProjection：给下游的最小借阅包
+
+`ViewpointKnowledgeProjection` 不是新的 master identity，而是 compiler 为一个具体 consumer 编译的不可变切片。它把被选择的 viewpoint revision、member Claims、routes、relations、coverage、quality、Evidence 和 Citation 绑定到同一个 SHA。
+
+文章、QA 和搜索只读取这个 scoped projection，不直接遍历 registry，也不读取整份 architecture 文档。
+
 ## 5. 完整处理流水线
 
 ```mermaid
-flowchart LR
-    S["来源讲道"] --> X["Extraction<br/>Claim 与 Evidence"]
-    X --> G["Semantic Signature"]
-    G --> R["多通道 Recall Graph"]
-    R --> B["Bounded Candidate Groups"]
-    B --> I["Evidence-bound Identity Review"]
-    I --> C["CanonicalViewpoint / Relations / Routes"]
+flowchart TD
+    S["来源讲道"] --> X["Extraction<br/>Claim / Evidence / SourceFragment"]
+
+    subgraph DONE["#187 已实现并完成受控校准"]
+        X --> G["ClaimSemanticSignatureCandidate<br/>screening only"]
+        G --> R["Rule + Claim embedding + Signature embedding<br/>Final Recall Graph"]
+        R --> B["Overlapping Group-Discovery Packets"]
+        B --> H["IdentityReviewHypothesis<br/>去重且不可传递"]
+        H --> E["Source Eligibility Attestation<br/>+ Evidence Packet"]
+        E --> K["Boundary Calibration / Holdout"]
+    end
+
+    subgraph NEXT["校准后确认的下一步设计"]
+        K --> U["Evidence-bound PropositionUnit"]
+        U --> I["Atomic Identity Boundary<br/>双重异源审核"]
+        I --> Y["Canonical Wording / Signature / Scope Synthesis"]
+    end
+
+    Y --> C["CanonicalViewpoint / Relations / Routes"]
     C --> P["ViewpointKnowledgeProjection"]
     P --> D["文章 / QA / 搜索 / Topic Discovery"]
 ```
@@ -188,9 +275,9 @@ flowchart LR
 
 Canonical Viewpoint layer 不替 extraction 修正遗漏，也不能把上游 candidate 自动升级为公开事实。
 
-### 阶段二：Semantic Signature
+### 阶段二：Screening Signature
 
-模型把 Claim 的自由文本整理为可比较字段。程序验证：
+模型把 Claim 的自由文本整理成一个或多个 screening atoms。程序验证：
 
 - 输入 Claim 是否 exact-once；
 - ID 和 revision 是否匹配；
@@ -198,41 +285,76 @@ Canonical Viewpoint layer 不替 extraction 修正遗漏，也不能把上游 ca
 - statement 和 source SHA 是否仍是同一版本；
 - 失败项是否显式保留。
 
+它的输出只能进入 recall，不能进入 master data。
+
 ### 阶段三：Recall
 
-系统并行使用多种信号寻找“可能值得比较”的 pair：
+系统使用多种信号寻找“可能值得比较”的无向 pair：
 
 - 确定性规则：共享经文、兼容 topic terms、claim role、已有 reviewed relation；
 - embedding：发现用词不同但含义接近的 Claim；
-- bounded model discovery：在受大小限制的主题包中寻找规则和 embedding 可能漏掉的关系。
+- signature embedding：用结构化 screening atoms 补充跨措辞召回；
+- bounded group discovery：在受大小限制的图 packet 中提出可能的 group，并在必要时生成有 provenance 的 recall extension。
 
 结果是带 channel provenance 的无损并集。任何单一通道未命中，都不能否决另一个通道找到的候选。
 
-### 阶段四：Candidate grouping
+`directed pair` 是从 focal Claim A 看邻居 B 的调度记录；`undirected pair` 是规范化后的 `{A,B}`。A→B 与 B→A 不能算两项独立语义事实。#187 正是因为发现旧 scheduler 有 20,619 个 directed comparisons、却只有更少的 unique undirected pairs，才停止逐邻居完整分类方案。
 
-Scheduler 将候选网络切成有 item/byte 上限的工作包。分组只是为了控制成本和上下文，不产生观点关系。
+### 阶段四：Group Discovery
 
-### 阶段五：Identity review
+Scheduler 将候选网络切成 graph-aware、overlapping 且有 item/byte 上限的工作包。模型提出 possible-equivalent、component 或 tension screening groups；未被提出的 Claim 和 edge 继续保持 unresolved，不能被当成 unrelated 或 approved negative。
 
-审核把 candidate group 中的 Claims 分为：
+如果模型提出的 participant group 在 final graph 上不连通，程序只增加使该 group 连通所需的最小 `group_model_discovery` bridge edges。这个 `recall extension` 记录 call、packet、proposal 和相似度 provenance，不扩成 clique，也不是 identity evidence。
+
+### 阶段五：Hypothesis 与 Evidence Planning
+
+系统将 overlapping packet 的 proposals 去重为 immutable hypotheses，然后为每个 hypothesis 编译 evidence packet。当前实现还会机械生成：
+
+- source eligibility attestation；
+- distinct source count；
+- deterministic blocker codes；
+- call eligibility；
+- stale dependency 等 closed planning exceptions。
+
+“可送模型审核”与“可自动批准”是两件事。单一来源 hypothesis 可以送审，但会被 `two_independent_sources` risk gate 阻止自动批准。
+
+### 阶段六：Boundary Calibration
+
+两位 reviewer 对同一 evidence packet 独立判断完整 participant set：
 
 ```mermaid
 graph LR
-    A["Claim A"] -->|"equivalent<br/>同一真值条件"| B["Claim B"]
-    A -->|"supports<br/>提供理由"| C["Claim C"]
-    A -->|"tensions_with<br/>正面所指冲突"| D["Claim D"]
-    A -->|"applies<br/>具体应用"| E["Claim E"]
+    H["Immutable Hypothesis"] --> E["equivalent_all"]
+    H --> C["component"]
+    H --> T["tension"]
+    H --> R["related_only"]
+    H --> M["mixed + partition"]
+    H --> U["unknown + bounded context expansion"]
 ```
 
-只有 `equivalent_full`，或具有稳定 component locator 的 `equivalent_component`，才能成为 identity-bearing member。其他关系必须保留为 typed relation 或 route evidence，不能为了提高重复次数而塞进同一观点。
+旧 schema 同时要求 reviewer 判断 Claim composition、成员边界、canonical wording 和 scope。真实 calibration 显示，即使使用高能力异源模型，复合 Claim 的 `component` 宽度仍不稳定：非重叠 12-item holdout 只有 6/12 exact boundary agreement，并且没有确认的 `equivalent_all` 正例。正式报告因此固定 `full_rollout_recommended=false`。
 
-### 阶段六：Apply master data
+这是一次有价值的失败：它证明问题不只是模型够不够强，而是 identity 输入粒度不对。
 
-审核输出先形成可验证 ChangeSet。程序检查引用、revision、blocker、lineage、覆盖账本和质量报告。通过后才能写入 master data。
+### 阶段七：PropositionUnit 原子化（下一步，尚未实现）
 
-模型不分配 canonical ID，不直接写数据库，也不能批准自己的输出。
+下一版先把复合 Claim 拆成 evidence-bound `PropositionUnit`。每个 unit 必须保存：
 
-### 阶段七：Compile for consumers
+- 所属 Claim revision；
+- 可验证的 statement span；
+- EvidenceStep、SourceFragment 和 source revision；
+- `whole_claim / conjunct / qualified_clause` 等结构角色；
+- attribution、polarity、scope、conditions 和 qualifications。
+
+Identity reviewer 以后只在这些原子单元之间判断 `equivalent / tension / related / unknown`。`generalizes`、`specializes`、`applies`、`grounds` 和 `supports` 另存 typed relations，不再让模糊的 `component` 同时承担“拆 Claim”和“判断 viewpoint”两个责任。
+
+### 阶段八：Canonical Synthesis 与 Apply
+
+只有两个异源 reviewer 对 evidence-bound PropositionUnits 达成 equivalence，并通过独立来源、provenance、scope 和其他 risk gates 后，系统才生成 canonical wording、正式 signature 和 scope。
+
+审核输出先形成可验证 ChangeSet。程序检查引用、revision、blocker、lineage、覆盖账本和质量报告。通过后才能写入 master data。模型不分配 canonical ID，不直接写数据库，也不能批准自己的输出。
+
+### 阶段九：Compile for Consumers
 
 下游不读取整个 registry，也不读取本设计文档。Compiler 按具体任务生成最小、SHA-bound 的 `ViewpointKnowledgeProjection`，包含：
 
@@ -253,6 +375,15 @@ graph LR
 - Claim B：彼得作为认信者和使徒代表构成磐石；
 - Claim C：磐石不是彼得个人，而是彼得所认信的基督与真理；
 - Claim D：磐石直接指基督。
+
+Claim B 是典型的复合 Claim。它可能至少包含两个 PropositionUnits：
+
+```text
+B.1 彼得是认信者
+B.2 彼得在这里代表使徒群体
+```
+
+如果直接比较整条 Claim B，reviewer 很容易对“它是 A 的 component，还是 A 的 extension”使用不同宽度。先把 B.1、B.2 分别绑定到原文 span 和 Evidence，再比较原子命题，identity 问题就会清楚得多。
 
 因为它们共享太 16:18、彼得、磐石、认信等语义信号，规则或 embedding 很可能把它们放进同一 recall neighborhood。这是正确的：它们确实值得一起比较。
 
@@ -295,6 +426,8 @@ graph LR
 
 这不是削弱大模型，而是把它用在最有价值、也最需要语言理解的地方。
 
+当前校准还把两个语义角色分给异源模型：OpenAI 侧 proposal 使用 Codex Subscription，blind review 使用经过验证的 Claude Subscription。子进程移除 API billing credentials；Subscription 验证失败便 fail closed，不能静默改走 API 计费。异源复核的目的不是多数投票，而是暴露 schema、证据和边界定义中的不稳定。
+
 ## 8. 怎样保证数据质量
 
 系统使用两本完整性账：
@@ -316,6 +449,14 @@ graph LR
 - consumer projection integrity。
 
 例如，来源引用全部正确，不能抵消一次错误 merge；召回覆盖很好，也不能抵消 route 跨来源拼接。任一适用维度失败，就阻止相应 approval 或 consumer eligibility。
+
+质量验证还区分三类测试资料：
+
+- `calibration set`：用来调整 schema、prompt 和判断定义；
+- `holdout set`：与 calibration 完全不重叠，用来检查调整后的方案是否真的泛化；
+- `gold set`：具有人工确认答案的正负例，才能计算有意义的 recall、precision 和 false merge/false split。
+
+如果 gold set 没有 confirmed equivalent positives，就不能因为 negative 或 related 分类看起来稳定而批准 full rollout。`silver calibration` 只表示两个模型在受限样本上形成一致候选，不等于 gold，也不建立正式 master data。
 
 ## 9. 怎样减少单人编辑的负担
 
@@ -343,7 +484,9 @@ graph LR
 ```text
 pinned historical Claims
 → rule ∪ embedding ∪ bounded-model recall
-→ bounded Claim-to-Claim review
+→ screening group discovery
+→ evidence-bound PropositionUnits
+→ bounded atomic identity review
 → initial CanonicalViewpoints
 ```
 
@@ -418,7 +561,111 @@ Embedding score 只用于召回和排序，不建立 registry relation。最终�
 
 第一版只读。人工决定通过 exception inbox 形成 ChangeSet proposal，再由服务端验证和 apply；浏览器不直接修改 master records。
 
-## 14. 用一个比喻收尾
+## 14. 截至 #187，实际做到哪一步
+
+| 能力 | 状态 | 结果或边界 |
+|---|---|---|
+| Claim signature exact-once index | 已完成 | 1,183 signatures、2,426 screening atoms；全部 `identity_evidence=false` |
+| Signature embedding | 已完成 | Gemini embedding 独立 projection/index，支持 0-call checkpoint reuse |
+| Lossless final candidate graph | 已完成 | 规则、Claim embedding、signature embedding 并集；17,454 无向 pairs |
+| Graph-aware group discovery | 已完成 | 72 个 overlapping packets，791 个 screening proposals |
+| Recall extension | 已完成 | 添加 7 条最小 bridge，overlay 为 17,461 pairs；不扩成 clique |
+| IdentityReviewHypothesis | 已完成 | 791 proposals 去重为 750 hypotheses；41 个重复只增加 provenance |
+| Source eligibility attestation | 已完成 | 1,104 Claims 自动 attested、108 closed exceptions；不冒充人工 approval |
+| Evidence packet planning | 已完成 | 684 packets、66 stale exceptions；source gate 后 613 可送审、137 被机械阻断 |
+| Boundary calibration 与 holdout | 已完成 | holdout 6/12 exact agreement；正式结论是不得 full rollout |
+| Evidence-bound PropositionUnit | 下一步设计 | 用可定位原子命题替代复合 Claim 的模糊 component 判断 |
+| 正式 CanonicalViewpoint decisions | 尚未执行 | 当前没有由 #187 创建的 master viewpoint |
+| Master-data apply | 尚未执行 | 当前 planning/screening artifacts 禁止 apply，0 master-data mutations |
+| Matthew / QA / Search 接入 | 尚未执行 | 仍需正式 eligible projection 和各 consumer gate |
+
+因此，当前最准确的一句话不是“观点库已经生成”，而是：
+
+> 候选发现、来源门禁和 identity schema 校准已经跑通；校准发现 Claim 粒度不适合直接做身份归并，下一步必须先实现 evidence-bound PropositionUnit。
+
+## 15. 名词表
+
+| 名词 | 普通语言解释 | 它不是什么 |
+|---|---|---|
+| `source universe` | 平台理论上的来源范围 | 不是本轮已经详细抽取或审核的范围 |
+| `cohort` | 本轮明确冻结并处理的一组来源／Claims | 不是扫描目录临时猜出的文件集合 |
+| `Claim manifest` | 本轮 Claim 分母及其 pinned revision/SHA 清单 | 不是模型已经找到的结果列表 |
+| `pinned revision` | 明确固定使用某一历史 revision | 不是运行时自动跟随 current revision |
+| `SHA-bound` | artifact 明确绑定输入内容的 SHA-256 | 不是只记录一个可变文件路径 |
+| `lineage` | 从派生对象一路回到 Claim、Evidence、Fragment 和来源的谱系 | 不是自然语言写一句“来自某讲道” |
+| `invariant` | 无论模型怎样输出都必须成立、可由程序检查的规则 | 不是提示模型“最好这样做” |
+| `exact-once` | 分母中的每个对象恰好出现一次：不漏、不重、不多 | 不是“数量大致相等” |
+| `source-eligible` | 来源、revision 和结构条件允许进入 screening | 不是“这一定是重要观点” |
+| `source-ineligible disposition` | 以 closed reason 记录为何本轮不能进入 | 不是把 Claim 从完整性账本删除 |
+| `hard eligibility` | 只检查可程序证明的来源、版本和完整性问题 | 不是判断内容“像不像观点” |
+| `semantic prefilter` | 按 claim type、主题或角色预先拒绝观点候选 | 本设计禁止用它排除释经、希腊文或 application |
+| `claim_role` | Claim 在召回或产品中的用途分类 | 不是第二套观点 identity |
+| `ClaimSemanticSignatureCandidate` | 一条 Claim 的 screening-only 语义结构 | 不是正式 viewpoint signature |
+| `SemanticAtomCandidate` | signature 内帮助召回的候选语义原子 | 不是 evidence-bound PropositionUnit |
+| `PropositionUnit` | 绑定原文 span 和 Evidence 的最小可审核命题 | 不是已经批准的 CanonicalViewpoint |
+| `polarity` | 命题是肯定、否定还是未知 | 不是 reviewer 的好坏评价 |
+| `stance` | 王教授支持、反对、仅提出可能性或转述外部立场 | 不是语句本身的正负语法 |
+| `scope` | 命题适用的经文、人群、时间和条件范围 | 不是 topic 分类标签 |
+| `material qualification` | 若删除就会改变命题真值条件的限定 | 不是可有可无的写作细节 |
+| `embedding` | 将检索投影编码为向量以寻找语义近邻 | 不是 identity 判断或 approval |
+| `projection` | 为某种索引或 consumer 编译的不可变数据切片 | 不是 master record 本身 |
+| `index` | 可供近邻查询的向量或结构化集合 | 不是来源 authority |
+| `pair` | 两个待比较对象的规范组合 | 不是已确认关系 |
+| `directed pair` | 从 focal A 看 neighbor B 的调度方向 | A→B 与 B→A 不是两个语义事实 |
+| `candidate union` | 多个 recall 通道结果的无损并集 | 不是多数投票结果 |
+| `lossless union` | 合并通道时保留任一通道提出的 pair 和 provenance | 不是只保留交集或最高分通道 |
+| `top-K` | 为每个 focal 最多取 K 个近邻以控制工作量 | 不是 identity 阈值 |
+| `Recall Graph` | Claims 为节点、候选 pairs 为边的工作图 | 不是 CanonicalViewpoint graph |
+| `connected component` | 通过候选边可以彼此到达的一组节点 | 不是等价类或 candidate viewpoint |
+| `clique` | 组内任意两个节点都有边 | 即使是 clique 也不自动证明 identity |
+| `mutual-kNN` | A、B 彼此都在对方 top-K 中才保留的近邻图 | 仍可能形成巨大、不可传递的分量 |
+| `review edge` | 本 packet 负责主动检查、全计划恰好暴露一次的边 | 不是 reviewed identity edge |
+| `context edge` | overlapping packet 中帮助理解局部结构的重复边 | 不是新的候选计数 |
+| `baseline-only fallback` | 原 rule/Claim-embedding graph 中保留的其他候选 | 不是被 signature channel 否决的 pair |
+| `Group Discovery` | 在 bounded graph packet 中提出可能相关的 Claim 组 | 不是建立 viewpoint |
+| `ScreeningGroupProposal` | possible-equivalent/component/tension 的筛选提案 | 不是 identity decision |
+| `recall extension` | 为模型发现但图上不连通的 group 增加最小 bridge | 不是把 group 补成 clique |
+| `IdentityReviewHypothesis` | 去重、不可变、准备加载证据的审核假设 | 不是可传递的等价类 |
+| `participant` | 一个 hypothesis 中被共同比较的 Claim 或 unit | 不是已批准 member |
+| `Evidence Packet` | 为一次审核编译的 SHA-bound 最小来源上下文 | 不是整库 dump |
+| `Source Eligibility Attestation` | 证明 pinned Claim 的抽取与来源链适合 identity review | 不是观点 equivalence 证明 |
+| `stale_dependency` | hypothesis pin 的 revision/SHA 已不再与依赖一致 | 不是自动改读 current revision 的许可 |
+| `deterministic blocker` | 程序可证明、无需模型猜测的阻断条件 | 不是低 embedding score |
+| `risk gate` | 在语义判断之后检查是否允许自动批准的高风险条件 | 不是候选召回过滤器 |
+| `Boundary classification` | 先判断完整 participant set 的关系边界 | 不是 canonical 文案写作 |
+| `equivalent_all` | 全部 participants 的原子命题真值条件等价 | 不是“主题差不多” |
+| `component` | 在旧 Claim-level schema 中表示严格命题包含 | 校准已证明它不能替代 PropositionUnit 原子化 |
+| `related_only` | 有语义关系，但不构成同一 identity | 不是 unrelated |
+| `mixed` | participant set 内存在多个不同子关系 | 不是挑一个方便子集直接批准 |
+| `unknown` | 当前 evidence 不足以可靠判断 | 不是 negative decision |
+| `partition` | 将 mixed hypothesis 完整、互斥地拆成 successor groups | 不是在原 hypothesis 上静默删成员 |
+| `context expansion` | 在同一 source revision 内有限扩展锚点上下文 | 不是跨来源补证据 |
+| `proposal review` | 第一位模型对 evidence packet 作语义判断 | 不是自己批准自己 |
+| `blind review` | 不读取 proposal 结论的异源独立判断 | 不是对 proposal 投赞成票 |
+| `adjudication` | 只处理两份判断的具体 delta | 不是反复调用直到同意 |
+| `calibration` | 用已知采样检查 schema/prompt 是否可用 | 不是正式 full rollout |
+| `holdout` | 与调参样本不重叠的泛化测试 | 不是第二次调参集 |
+| `gold / silver` | 人工确认答案／模型共识候选 | silver 不能冒充 gold |
+| `generation fingerprint` | 输入、模型、prompt、schema、版本等组成的复用身份 | 不是只看文件名判断能否复用 |
+| `checkpoint` | 一次已验证模型调用的可恢复结果 | 不是 master data |
+| `0-call reuse` | fingerprint 相同，完全复用 checkpoint 而不再调用模型 | 不是跳过验证 |
+| `identity_evidence=false` | artifact 只能用于 screening/recall | 不是“数据无价值” |
+| `apply_allowed=false` | 当前 artifact 禁止写入 master data | 不是流程失败 |
+| `opaque ID` | ID 不编码标题、topic、日期或当前 members | 不是给人阅读的语义名称 |
+| `CanonicalViewpoint` | 经审核的稳定跨来源观点身份 | 不是 TopicNode，也不是教授逐字原话 |
+| `ViewpointRevision` | viewpoint 当前经审核的 core proposition、signature 和 scope | 不是当前 member/coverage snapshot |
+| `ViewpointClaimLink` | 当前是 viewpoint 与 pinned source Claim 的 crosswalk；PropositionUnit 接入后还须保存稳定 unit locator | 不是删除或覆盖来源 Claim |
+| `ArgumentRoute` | 到达同一结论的一种稳定推理骨架 | 不是把多讲证据拼成虚构长论证 |
+| `recurrence` | approved occurrence 在独立来源中的机械出现次数 | 不是重要性、正确性或成熟度 |
+| `system_approved` | 双重语义判断和全部 gates 通过后的自动批准 | 不是人工读过 |
+| `human_approved` | editor 明确审核并批准 | 不能由系统自动冒充 |
+| `CoverageSnapshot` | 某次分析看过哪些 source revisions | 不是 Claim resolution 完整性 |
+| `ViewpointResolutionLedger` | 每个输入 Claim 的处理归宿账本 | 不是由已生成 viewpoints 反推的统计 |
+| `ViewpointQualityReport` | 按维度机械验证 eligibility 的报告 | 不是可互相补偿的总分 |
+| `ViewpointKnowledgeProjection` | 给具体文章、QA 或搜索任务的 SHA-bound 最小知识包 | 不是让 runtime model 读取整库 |
+| `ChangeSet` | 可预览、验证、审计和 apply 的原子变更包 | 不是浏览器任意直写 master records |
+
+## 16. 用一个比喻收尾
 
 可以把整个系统想成一座图书馆：
 
@@ -426,6 +673,7 @@ Embedding score 只用于召回和排序，不建立 registry relation。最终�
 - Semantic Signature 是卡片上的结构化索引字段；
 - Recall Graph 是馆员桌上的“可能相关卡片”工作清单；
 - Candidate Group 是一次拿来共同核对的卡片包；
+- PropositionUnit 是从卡片所指原页中精确圈出的最小命题；
 - CanonicalViewpoint 是跨多本书的稳定主题身份；
 - ArgumentRoute 是作者到达同一结论所走的不同论证路径；
 - ViewpointKnowledgeProjection 是为某位读者、某篇文章或某个问题临时编好的借阅包。
@@ -433,4 +681,3 @@ Embedding score 只用于召回和排序，不建立 registry relation。最终�
 馆员可以把许多卡片登记到同一个主题，却不会把原书剪碎后粘成一本“标准原著”。这正是 registry MDM 在王教授知识平台中的意义：
 
 > 统一观点身份，但永远保留来源、差异、论证和历史。
-
