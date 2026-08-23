@@ -267,7 +267,8 @@ def apply_proposals(
 
 
 def discovery_identity(
-    *, package_sha256: str, prompt: str, model_id: str, section_count: int
+    *, package_sha256: str, prompt: str, model_id: str, section_count: int,
+    backend: str = "api",
 ) -> dict[str, Any]:
     generation = {
         "package_sha256": package_sha256,
@@ -276,6 +277,10 @@ def discovery_identity(
         "section_count": section_count,
         "schema_version": SCHEMA_VERSION,
     }
+    # Keep the historical API fingerprint stable while making a subscription
+    # generation distinct from a separately billed API generation.
+    if backend != "api":
+        generation["backend"] = backend
     generation["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

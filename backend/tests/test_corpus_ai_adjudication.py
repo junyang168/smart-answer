@@ -7,6 +7,7 @@ import pytest
 
 from backend.pipeline.corpus_ai_adjudication import (
     AIAdjudicationValidationError,
+    adjudication_fingerprint,
     compile_outcome,
     validate_claude_reconsideration,
     validate_openai_adjudication,
@@ -14,6 +15,24 @@ from backend.pipeline.corpus_ai_adjudication import (
 from backend.pipeline.corpus_ai_adjudication_runner import _has_matching_generation, _load_context
 from backend.pipeline.shared_knowledge_pilot import _apply_claim_overrides
 from backend.pipeline.stage1 import Stage1AnthropicClient
+
+
+def test_subscription_adjudication_has_a_distinct_backend_bound_fingerprint() -> None:
+    kwargs = {
+        "review_fingerprint": "review", "openai_prompt": "primary",
+        "openai_model": "gpt-5.6-sol", "openai_reasoning_effort": "medium",
+        "claude_prompt": "reconsider", "claude_model": "claude-sonnet-5",
+    }
+    api = adjudication_fingerprint(**kwargs)
+    subscription = adjudication_fingerprint(**kwargs, openai_backend="codex-subscription")
+    assert "openai_backend" not in api
+    assert subscription["openai_backend"] == "codex-subscription"
+    assert subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
+    claude_subscription = adjudication_fingerprint(
+        **kwargs, claude_backend="claude-subscription"
+    )
+    assert claude_subscription["claude_backend"] == "claude-subscription"
+    assert claude_subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
 
 
 def _claims() -> dict[str, dict]:

@@ -130,6 +130,7 @@ def reviewer_fingerprint(
     prompt: str,
     model_id: str,
     max_output_tokens: int,
+    backend: str = "api",
 ) -> dict[str, Any]:
     identity = {
         "source_extraction_fingerprint": source_extraction_fingerprint,
@@ -145,6 +146,8 @@ def reviewer_fingerprint(
             ).encode("utf-8")
         ).hexdigest(),
     }
+    if backend != "api":
+        identity["backend"] = backend
     return {
         **identity,
         "fingerprint_sha256": hashlib.sha256(

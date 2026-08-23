@@ -7,6 +7,7 @@ from backend.pipeline.cross_section_relation import (
     CrossSectionValidationError,
     apply_proposals,
     build_catalogue,
+    discovery_identity,
     existing_edges,
     record_positions,
     validate_proposals,
@@ -141,3 +142,15 @@ def test_boundaries_follow_the_package_section_plan() -> None:
     assert _section_boundaries(resectioned) == [0, 10, 40]
     # No plan means one section, so every proposal is same-section and rejected.
     assert _section_boundaries({"extraction": {}}) == [0]
+
+
+def test_subscription_generation_has_a_distinct_backend_bound_fingerprint() -> None:
+    kwargs = {
+        "package_sha256": "package", "prompt": "prompt",
+        "model_id": "gpt-5.6-sol", "section_count": 2,
+    }
+    api = discovery_identity(**kwargs)
+    subscription = discovery_identity(**kwargs, backend="codex-subscription")
+    assert "backend" not in api
+    assert subscription["backend"] == "codex-subscription"
+    assert subscription["fingerprint_sha256"] != api["fingerprint_sha256"]

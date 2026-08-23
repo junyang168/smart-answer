@@ -161,6 +161,18 @@ def test_reviewer_fingerprint_changes_with_model_or_prompt() -> None:
     assert base != changed
 
 
+def test_subscription_reviewer_fingerprint_is_backend_bound_without_changing_api() -> None:
+    kwargs = {
+        "source_extraction_fingerprint": "extract-1", "prompt": "review-v1",
+        "model_id": "claude-sonnet-5", "max_output_tokens": 64000,
+    }
+    api = reviewer_fingerprint(**kwargs)
+    subscription = reviewer_fingerprint(**kwargs, backend="claude-subscription")
+    assert "backend" not in api
+    assert subscription["backend"] == "claude-subscription"
+    assert subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
+
+
 def test_invalid_model_review_is_retried_with_validation_feedback() -> None:
     class FakeClient:
         def __init__(self) -> None:
