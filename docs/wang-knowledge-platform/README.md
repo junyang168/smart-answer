@@ -30,13 +30,14 @@
 18. [微讲道：三至五分钟短篇教导 Use Case](./micro_sermon_product_use_case.md)
 19. [母题—子专题—篇章段落自动发现与双模型复核 v1](./topic_structure_discovery_workflow_v1.md)
 20. [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)
-21. [同工反馈到产品需求与验收标准 v1](./stakeholder_feedback_to_requirements_v1.md)
-22. [馬太福音釋經教學文集：成書體例 v2](./matthew_exposition_publication_profile_v1.md)
-23. [馬太福音釋經：來源進入論證層與跨來源整合流程 v1](./matthew_source_to_argument_workflow_v1.md)
-24. [釋經初稿的程序化審計流程 v1](./editorial_draft_audit_workflow_v1.md)
-25. [篇章釋經快速路徑 v1](./fast_passage_editorial_workflow_v1.md)
-26. [來源逐句對帳與 claim 層完整性 v1](./source_to_claim_layer_ledger_v1.md)
-27. [王教授文庫營運總表 v1](./operational_dashboard_v1.md)
+21. [Canonical Viewpoint Registry 架构学习版](./canonical_viewpoint_architecture_primer_v1.md)
+22. [同工反馈到产品需求与验收标准 v1](./stakeholder_feedback_to_requirements_v1.md)
+23. [馬太福音釋經教學文集：成書體例 v2](./matthew_exposition_publication_profile_v1.md)
+24. [馬太福音釋經：來源進入論證層與跨來源整合流程 v1](./matthew_source_to_argument_workflow_v1.md)
+25. [釋經初稿的程序化審計流程 v1](./editorial_draft_audit_workflow_v1.md)
+26. [篇章釋經快速路徑 v1](./fast_passage_editorial_workflow_v1.md)
+27. [來源逐句對帳與 claim 層完整性 v1](./source_to_claim_layer_ledger_v1.md)
+28. [王教授文庫營運總表 v1](./operational_dashboard_v1.md)
 
 共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 仍是 legacy 候选交换包，不等于 PostgreSQL authoring authority，也不会直接进入公开文库。
 
