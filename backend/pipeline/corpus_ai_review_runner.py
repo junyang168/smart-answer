@@ -18,6 +18,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.corpus_ai_review import (
     AI_REVIEW_RESPONSE_SCHEMA,
     AI_REVIEW_VERSION,
@@ -34,6 +35,7 @@ from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.stage1 import Stage1AnthropicClient
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 CORPUS_SURVEY_ROOT = wang_platform_paths().corpus_survey_staging
@@ -53,10 +55,9 @@ CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v3"
 
 
 def _find_transcript(transcript_id: str, transcript_dirs: list[Path]) -> Path:
-    for directory in transcript_dirs:
-        path = directory / f"{transcript_id}.json"
-        if path.is_file():
-            return path
+    path = resolve_transcript_path(transcript_id, transcript_dirs)
+    if path is not None:
+        return path
     raise FileNotFoundError(f"transcript not found: {transcript_id}")
 
 
@@ -214,7 +215,7 @@ def _claim_layer_input(
 
 def _generate_valid_review(
     *,
-    client: Stage1AnthropicClient,
+    client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     prompt: str,
     user_input: str,
     survey: dict[str, Any],
@@ -259,7 +260,7 @@ def run_one(
     *,
     transcript_dirs: list[Path],
     output_dir: Path,
-    client: Stage1AnthropicClient,
+    client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     prompt: str,
     spot_check_percent: int,
     force: bool,
@@ -286,6 +287,7 @@ def run_one(
         prompt=prompt,
         model_id=client.model,
         max_output_tokens=client.max_output_tokens,
+        backend=getattr(client, "backend", "api").replace("_", "-"),
     )
     output_path = output_dir / f"{_slug(transcript_id)}.independent-review.json"
     if output_path.is_file() and not force:
@@ -357,7 +359,7 @@ def run_claim_layer(
     *,
     transcript_dirs: list[Path],
     output_path: Path,
-    client: Stage1AnthropicClient,
+    client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     prompt: str,
     spot_check_percent: int,
     force: bool,
@@ -412,6 +414,7 @@ def run_claim_layer(
         prompt=prompt,
         model_id=client.model,
         max_output_tokens=client.max_output_tokens,
+        backend=getattr(client, "backend", "api").replace("_", "-"),
     )
     if output_path.is_file() and not force:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
@@ -500,6 +503,10 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--transcript-dir", action="append", type=Path, dest="transcript_dirs")
     parser.add_argument("--model", default="claude-sonnet-5")
+    parser.add_argument(
+        "--backend", choices=["api", "claude-subscription"], default="api",
+        help="review transport; claude-subscription uses the Claude.ai login",
+    )
     # Sonnet 5 counts adaptive-thinking tokens inside max_tokens.  The two-
     # lecture claim-layer review consumed the old 10k ceiling before emitting
     # JSON, so the default must leave room for both reasoning and the schema.
@@ -564,11 +571,16 @@ def main() -> int:
             return 0
         load_dotenv(PROJECT_ROOT / ".env")
         prompt = PROMPT_PATH.read_text(encoding="utf-8")
-        client = Stage1AnthropicClient(
-            model=args.model,
-            timeout_seconds=240,
-            max_retries=3,
-            max_output_tokens=args.max_output_tokens,
+        client = (
+            ClaudeSubscriptionClient(
+                model=args.model, timeout_seconds=900,
+                max_output_tokens=args.max_output_tokens,
+            )
+            if args.backend == "claude-subscription"
+            else Stage1AnthropicClient(
+                model=args.model, timeout_seconds=240, max_retries=3,
+                max_output_tokens=args.max_output_tokens,
+            )
         )
         status, output = run_claim_layer(
             args.claim_layer_package,
@@ -622,11 +634,16 @@ def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
-    client = Stage1AnthropicClient(
-        model=args.model,
-        timeout_seconds=240,
-        max_retries=3,
-        max_output_tokens=args.max_output_tokens,
+    client = (
+        ClaudeSubscriptionClient(
+            model=args.model, timeout_seconds=900,
+            max_output_tokens=args.max_output_tokens,
+        )
+        if args.backend == "claude-subscription"
+        else Stage1AnthropicClient(
+            model=args.model, timeout_seconds=240, max_retries=3,
+            max_output_tokens=args.max_output_tokens,
+        )
     )
     counts = {"created": 0, "skipped": 0, "failed": 0}
     for position, survey_path in enumerate(paths, start=1):

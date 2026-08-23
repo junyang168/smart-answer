@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.model_prices import price_table_for
 from backend.pipeline.source_keys import document_row_key
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
@@ -81,20 +82,22 @@ def _load_json(path: Path) -> Optional[dict[str, Any]]:
 def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
     """Every sermon in the catalog, extracted or not.
 
-    Sermons with no published transcript stay on the list rather than being
-    filtered out: "this one still needs a transcript" is work the queue has to
-    show, and hiding it turns the overview into a progress bar for the part
-    already started.
+    Published is the authority when available; a reviewed transcript is the
+    usable fallback before publication. Sermons with neither stay on the list
+    rather than being filtered out.
     """
 
     catalog = _load_json(paths.sermon_catalog) or {}
-    transcripts = data_base / "script_published"
+    transcript_dirs = [
+        data_base / "script_published",
+        data_base / "script_review",
+    ]
     rows: list[dict[str, Any]] = []
     for record in catalog.get("records") or []:
         source_id = str(record.get("transcript_id") or "")
         if not source_id:
             continue
-        source_path = transcripts / f"{source_id}.json"
+        source_path = resolve_transcript_path(source_id, transcript_dirs)
         # Where this sermon sits in scripture, from the same field the sermon
         # centre and the coverage page read, so the three cannot disagree.
         passage = record.get("catalog_primary_passage") or {}
@@ -108,52 +111,73 @@ def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
             "chapter": passage.get("chapter"),
             "verse_start": passage.get("verse_start"),
             "topics": list(record.get("topics") or []),
-            "source_path": source_path if source_path.is_file() else None,
+            "source_path": source_path,
         })
     return rows
 
 
-#: Which file in a notes project is the manuscript knowledge is extracted from.
-#:
-#: `final.md` first because that is demonstrably what was extracted: every
-#: notes source document in the store points at one. `unified_source.md` is a
-#: different artifact and the two do not coincide -- 21 projects have a
-#: `final.md`, 35 have a `unified_source.md`, and neither set contains the
-#: other. Picking one silently would either hide projects that have been
-#: extracted or invent rows for material nothing reads, so both are accepted and
-#: each row reports which file it stands on.
-NOTES_MANUSCRIPT_FILES = ("final.md", "unified_source.md")
-
-
 def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
-    """Notes manuscripts, which are sources too and are not in the sermon catalog."""
+    """Every project published through a notes-to-manuscript series.
+
+    A directory is storage, not publication.  The public manuscript-series
+    pages get their membership from ``series_db.json`` lecture
+    ``project_ids``, so the operations overview must read the same authority.
+    Otherwise abandoned local projects with a ``unified_source.md`` become
+    phantom sources even though no reader-facing series includes them.
+
+    Membership and availability are intentionally separate: a linked project
+    stays visible while it awaits ``final.md``, just as a catalogued sermon
+    stays visible while its transcript awaits publication.  ``final.md`` is
+    the only manuscript the extraction pipeline reads and therefore the only
+    file that can supply the row's source SHA.
+    """
 
     root = data_base / "notes_to_surmon"
     rows: list[dict[str, Any]] = []
     if not root.is_dir():
         return rows
-    for project in sorted(item for item in root.iterdir() if item.is_dir()):
-        manuscript = next(
-            (project / name for name in NOTES_MANUSCRIPT_FILES if (project / name).is_file()),
-            None,
-        )
-        if manuscript is None:
-            # Nothing to extract from. These are notes projects at an earlier
-            # stage, not sources waiting on the pipeline.
+
+    series_db = _load_json(root / "series_db.json")
+    if not isinstance(series_db, list):
+        return rows
+
+    project_ids: list[str] = []
+    seen: set[str] = set()
+    for series in series_db:
+        if not isinstance(series, dict):
             continue
+        # Missing project_type is the legacy spelling of sermon_note, matching
+        # lecture_manager. Fellowship Transcript is normalized to transcript
+        # there and must not create a second lineage here.
+        project_type = series.get("project_type") or "sermon_note"
+        if project_type != "sermon_note":
+            continue
+        for lecture in series.get("lectures") or []:
+            if not isinstance(lecture, dict):
+                continue
+            for value in lecture.get("project_ids") or []:
+                project_id = str(value or "").strip()
+                if project_id and project_id not in seen:
+                    seen.add(project_id)
+                    project_ids.append(project_id)
+
+    for project_id in project_ids:
+        project = root / project_id
+        manuscript_path = project / "final.md"
+        manuscript = manuscript_path if manuscript_path.is_file() else None
         meta = _load_json(project / "meta.json") or {}
         placement = _notes_placement(str(meta.get("bible_verse") or ""))
         rows.append({
-            "source_id": project.name,
+            "source_id": project_id,
             "kind": "notes_manuscript",
-            "title": meta.get("title") or project.name,
+            "title": meta.get("title") or project_id,
             "series": meta.get("bible_verse"),
             "year": None,
             "book": placement["book"],
             "chapter": placement["chapter"],
             "verse_start": None,
             "topics": [],
-            "manuscript_file": manuscript.name,
+            "manuscript_file": manuscript.name if manuscript else None,
             "source_path": manuscript,
         })
     return rows
@@ -163,9 +187,9 @@ def corpus_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
     """Every source this platform knows about, extracted or not.
 
     Sermons and notes manuscripts are discovered differently -- one from the
-    catalog, one from a directory -- and any page that needs "how many
-    documents are there" needs both. Naming the pair once keeps a second page
-    from answering that question with a different number.
+    catalog, one from manuscript-series membership -- and any page that needs
+    "how many documents are there" needs both. Naming the pair once keeps a
+    second page from answering that question with a different number.
     """
 
     return _sermon_rows(paths, data_base) + _notes_rows(data_base)
@@ -850,9 +874,9 @@ def _summary(rows: list[dict[str, Any]], runs: Iterable[dict[str, Any]]) -> dict
         "rows": len(rows),
         "sermons": sum(1 for row in rows if row["kind"] == "sermon"),
         "notes_manuscripts": sum(1 for row in rows if row["kind"] == "notes_manuscript"),
-        # Not "no source text": every one of these has a transcript sitting in
-        # script_review. What they lack is a proofread, published one, which is
-        # what extraction reads.
+        # Kept under the response's legacy `unproofread` key for compatibility;
+        # the count now means neither a published nor a reviewed transcript is
+        # available under the governed fallback policy.
         "unproofread": sum(1 for row in rows if not row["source_available"]),
         "ingested": sum(
             1 for row in rows if row["stages"]["ingest"]["state"] in {"current", "stale"}

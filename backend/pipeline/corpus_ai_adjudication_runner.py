@@ -17,6 +17,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.corpus_ai_adjudication import (
     ADJUDICATION_VERSION,
     CLAUDE_RECONSIDERATION_SCHEMA,
@@ -37,6 +38,7 @@ from backend.pipeline.corpus_ai_review_runner import (
 from backend.pipeline.llm_usage import usage_row
 from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -247,8 +249,8 @@ def run(
     output_path: Path,
     overrides_path: Path,
     transcript_dirs: list[Path],
-    openai_client: Stage1OpenAIClient,
-    claude_client: Stage1AnthropicClient,
+    openai_client: Stage1OpenAIClient | CodexSubscriptionClient,
+    claude_client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     openai_prompt: str,
     claude_prompt: str,
 ) -> dict[str, Any]:
@@ -275,8 +277,8 @@ def _run_adjudication(
     output_path: Path,
     overrides_path: Path,
     transcript_dirs: list[Path],
-    openai_client: Stage1OpenAIClient,
-    claude_client: Stage1AnthropicClient,
+    openai_client: Stage1OpenAIClient | CodexSubscriptionClient,
+    claude_client: Stage1AnthropicClient | ClaudeSubscriptionClient,
     openai_prompt: str,
     claude_prompt: str,
 ) -> dict[str, Any]:
@@ -388,8 +390,10 @@ def _run_adjudication(
         openai_prompt=openai_prompt,
         openai_model=openai_client.model,
         openai_reasoning_effort=openai_client.reasoning_effort,
+        openai_backend=getattr(openai_client, "backend", "api").replace("_", "-"),
         claude_prompt=claude_prompt,
         claude_model=claude_client.model,
+        claude_backend=getattr(claude_client, "backend", "api").replace("_", "-"),
     )
     outcome = compile_outcome(openai_response, reconsideration, reviews=reviews)
     record.inputs({"fingerprint_sha256": fingerprint.get("fingerprint_sha256")})
@@ -435,7 +439,15 @@ def main() -> int:
     parser.add_argument("--transcript-dir", action="append", type=Path, dest="transcript_dirs")
     parser.add_argument("--openai-model", default="gpt-5.6-sol")
     parser.add_argument("--openai-reasoning-effort", default="medium")
+    parser.add_argument(
+        "--openai-backend", choices=["api", "codex-subscription"], default="api",
+        help="primary adjudicator transport; codex-subscription uses the ChatGPT login",
+    )
     parser.add_argument("--claude-model", default="claude-sonnet-5")
+    parser.add_argument(
+        "--claude-backend", choices=["api", "claude-subscription"], default="api",
+        help="reconsideration transport; claude-subscription uses the Claude.ai login",
+    )
     # Raised with the reviewer's for the same reason, before it bites rather
     # than after: adjudication answers the reviewer's findings, and a package
     # with five times the claims produces more of them. 16,000 is also exactly
@@ -455,8 +467,10 @@ def main() -> int:
         openai_prompt=openai_prompt,
         openai_model=args.openai_model,
         openai_reasoning_effort=args.openai_reasoning_effort,
+        openai_backend=args.openai_backend,
         claude_prompt=claude_prompt,
         claude_model=args.claude_model,
+        claude_backend=args.claude_backend,
     )
     if args.dry_run:
         print(
@@ -490,18 +504,32 @@ def main() -> int:
         )
         return 0
     load_dotenv(PROJECT_ROOT / ".env")
-    openai_client = Stage1OpenAIClient(
-        model=args.openai_model,
-        reasoning_effort=args.openai_reasoning_effort,
-        timeout_seconds=300,
-        max_retries=3,
-        max_output_tokens=args.max_output_tokens,
+    openai_client = (
+        CodexSubscriptionClient(
+            model=args.openai_model,
+            reasoning_effort=args.openai_reasoning_effort,
+            timeout_seconds=900,
+            max_output_tokens=args.max_output_tokens,
+        )
+        if args.openai_backend == "codex-subscription"
+        else Stage1OpenAIClient(
+            model=args.openai_model,
+            reasoning_effort=args.openai_reasoning_effort,
+            timeout_seconds=300,
+            max_retries=3,
+            max_output_tokens=args.max_output_tokens,
+        )
     )
-    claude_client = Stage1AnthropicClient(
-        model=args.claude_model,
-        timeout_seconds=300,
-        max_retries=3,
-        max_output_tokens=args.max_output_tokens,
+    claude_client = (
+        ClaudeSubscriptionClient(
+            model=args.claude_model, timeout_seconds=900,
+            max_output_tokens=args.max_output_tokens,
+        )
+        if args.claude_backend == "claude-subscription"
+        else Stage1AnthropicClient(
+            model=args.claude_model, timeout_seconds=300, max_retries=3,
+            max_output_tokens=args.max_output_tokens,
+        )
     )
     artifact = run(
         package_path=args.package,

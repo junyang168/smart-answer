@@ -13,6 +13,7 @@ from backend.pipeline.research_batch import (
 from backend.pipeline.research_batch_runner import (
     artifact_paths,
     build_command_plan,
+    resolve_transcript_dir,
     reviewed_package_paths,
 )
 
@@ -96,6 +97,27 @@ def test_command_plan_keeps_each_transcript_independent(tmp_path: Path) -> None:
     )
 
 
+def test_command_plan_applies_section_limit_to_only_the_named_member(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["extraction_max_section_sentences"] = {"讲道甲": 180}
+    plan = build_command_plan(
+        batch, transcript_dir=tmp_path / "transcripts", output_root=tmp_path / "output",
+        force=False,
+    )
+    extracts = {
+        row["transcript_id"]: row["command"] for row in plan if row["stage"] == "extract"
+    }
+    assert extracts["讲道甲"][extracts["讲道甲"].index("--max-section-sentences") + 1] == "180"
+    assert "--max-section-sentences" not in extracts["讲道乙"]
+
+
+def test_batch_rejects_section_limit_for_member_outside_batch() -> None:
+    batch = _batch()
+    batch["extraction_max_section_sentences"] = {"讲道丙": 180}
+    with pytest.raises(ResearchBatchValidationError, match="outside the batch"):
+        validate_research_batch(batch)
+
+
 def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     tmp_path: Path,
 ) -> None:
@@ -109,6 +131,7 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     plan = build_command_plan(
         _batch(), transcript_dir=[review, published], output_root=tmp_path / "output",
         force=False, extraction_backend="codex-subscription",
+        anthropic_backend="claude-subscription",
         write_back_generated_subtitles=True,
         subtitle_user_id="editor@example.org",
     )
@@ -118,11 +141,49 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert extracts["讲道甲"][extracts["讲道甲"].index("--backend") + 1] == (
         "codex-subscription"
     )
+    cross_sections = {
+        row["transcript_id"]: row["command"]
+        for row in plan if row["stage"] == "cross_section"
+    }
+    adjudications = {
+        row["transcript_id"]: row["command"]
+        for row in plan if row["stage"] == "adjudicate"
+    }
+    assert cross_sections["讲道甲"][cross_sections["讲道甲"].index("--backend") + 1] == (
+        "codex-subscription"
+    )
+    assert adjudications["讲道甲"][
+        adjudications["讲道甲"].index("--openai-backend") + 1
+    ] == "codex-subscription"
+    reviews = {
+        row["transcript_id"]: row["command"] for row in plan if row["stage"] == "review"
+    }
+    assert reviews["讲道甲"][reviews["讲道甲"].index("--backend") + 1] == (
+        "claude-subscription"
+    )
+    assert adjudications["讲道甲"][
+        adjudications["讲道甲"].index("--claude-backend") + 1
+    ] == "claude-subscription"
     assert "--write-back-generated-subtitles" in extracts["讲道甲"]
     assert extracts["讲道甲"][extracts["讲道甲"].index("--subtitle-user-id") + 1] == (
         "editor@example.org"
     )
     assert "--write-back-generated-subtitles" not in extracts["讲道乙"]
+
+
+def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
+    tmp_path: Path,
+) -> None:
+    review = tmp_path / "script_review"
+    published = tmp_path / "script_published"
+    review.mkdir()
+    published.mkdir()
+    member = {"key": "讲道甲", "source_type": "sermon_transcript"}
+    (review / "讲道甲.json").write_text("review", encoding="utf-8")
+    (published / "讲道甲.json").write_text("published", encoding="utf-8")
+
+    assert resolve_transcript_dir(member, [review, published]) == published
+    assert resolve_transcript_dir(member, [published, review]) == published
 
 
 def test_command_plan_reuses_explicit_reviewed_package(tmp_path: Path) -> None:

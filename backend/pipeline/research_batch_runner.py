@@ -45,6 +45,7 @@ from backend.pipeline.research_batch import (
     load_research_batch,
     merge_reviewed_packages,
 )
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -116,20 +117,17 @@ def reviewed_package_paths(
 def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) -> Path | None:
     """Which directory holds this member's transcript, or None if none does.
 
-    Repeatable rather than single because chapter 16 is split across two: six
-    of its sermons are in `script_review` and three in `script_published`, and
-    a batch that could name only one directory could not describe the chapter.
+    Published is authoritative when both governed stages contain the same id;
+    reviewed is the fallback before publication. CLI argument order must not
+    change the source SHA a batch reads.
     Notes manuscripts have no transcript directory at all -- they are addressed
     by path -- so they resolve to the first, which nothing then reads.
     """
 
     if member["source_type"] != "sermon_transcript":
         return transcript_dirs[0]
-    return next(
-        (directory for directory in transcript_dirs
-         if (directory / f"{member['key']}.json").is_file()),
-        None,
-    )
+    path = resolve_transcript_path(member["key"], transcript_dirs)
+    return path.parent if path is not None else None
 
 
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
@@ -152,6 +150,7 @@ def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
 def build_command_plan(
     batch: dict[str, Any], *, transcript_dir: Path | list[Path], output_root: Path,
     force: bool, apply_ingest: bool = False, extraction_backend: str = "api",
+    anthropic_backend: str = "api",
     write_back_generated_subtitles: bool = False,
     subtitle_user_id: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -168,6 +167,7 @@ def build_command_plan(
     # exists to end.
     review_budget = models.get("review_max_output_tokens")
     adjudicator_budget = models.get("adjudicator_max_output_tokens")
+    section_limits = batch.get("extraction_max_section_sentences") or {}
     plan: list[dict[str, Any]] = []
     reused = set((batch.get("reviewed_package_reuse") or {}).keys())
     transcript_dirs = (
@@ -186,6 +186,13 @@ def build_command_plan(
             "--model", extraction_model, "--reasoning-effort", extraction_effort,
             "--backend", extraction_backend,
         ]
+        if key in section_limits:
+            limit = int(section_limits[key])
+            if limit <= 0:
+                raise ValueError(
+                    f"extraction_max_section_sentences[{key!r}] must be positive"
+                )
+            extract += ["--max-section-sentences", str(limit)]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
         # the source through `load_knowledge_source_document`.
@@ -209,6 +216,7 @@ def build_command_plan(
             sys.executable, "-m", "backend.pipeline.cross_section_relation_runner",
             "--package", str(paths["package"]), "--output", str(paths["cross_section"]),
             "--model", relation_model, "--reasoning-effort", extraction_effort,
+            "--backend", extraction_backend,
         ]
         # Downstream reads the cross-section package, not the raw extraction.
         # A single-section source gets it written through unchanged, so this
@@ -219,6 +227,7 @@ def build_command_plan(
             "--claim-layer-package", source,
             "--claim-layer-output", str(paths["review"]),
             "--transcript-dir", str(member_dir), "--model", review_model,
+            "--backend", anthropic_backend,
         ]
         if review_budget:
             review += ["--max-output-tokens", str(int(review_budget))]
@@ -248,7 +257,9 @@ def build_command_plan(
                         "--transcript-dir", str(member_dir),
                         "--openai-model", adjudicator_model,
                         "--openai-reasoning-effort", extraction_effort,
+                        "--openai-backend", extraction_backend,
                         "--claude-model", reconsideration_model,
+                        "--claude-backend", anthropic_backend,
                         *(["--max-output-tokens", str(int(adjudicator_budget))]
                           if adjudicator_budget else []),
                     ],
@@ -375,7 +386,11 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--extraction-backend", choices=("api", "codex-subscription"), default="api",
-        help="transport used by the detailed extraction stage",
+        help="transport used by extraction, cross-section, and primary adjudication",
+    )
+    parser.add_argument(
+        "--anthropic-backend", choices=("api", "claude-subscription"), default="api",
+        help="transport used by independent review and conditional reconsideration",
     )
     parser.add_argument(
         "--write-back-generated-subtitles", action="store_true",
@@ -428,6 +443,7 @@ def main() -> int:
         selected_batch, transcript_dir=transcript_dirs, output_root=output_root,
         force=args.force, apply_ingest=args.apply,
         extraction_backend=args.extraction_backend,
+        anthropic_backend=args.anthropic_backend,
         write_back_generated_subtitles=args.write_back_generated_subtitles,
         subtitle_user_id=args.subtitle_user_id,
     )
@@ -453,6 +469,7 @@ def main() -> int:
         "merged_output": str(merged_output),
         "ingest_applies": bool(args.apply),
         "extraction_backend": args.extraction_backend,
+        "anthropic_backend": args.anthropic_backend,
         "write_back_generated_subtitles": bool(args.write_back_generated_subtitles),
         "subtitle_user_id": args.subtitle_user_id,
         "would_call_models": not args.dry_run

@@ -320,6 +320,8 @@ def adjudication_fingerprint(
     openai_reasoning_effort: str,
     claude_prompt: str,
     claude_model: str,
+    openai_backend: str = "api",
+    claude_backend: str = "api",
 ) -> dict[str, str]:
     identity = {
         "review_fingerprint": review_fingerprint,
@@ -330,6 +332,12 @@ def adjudication_fingerprint(
         "claude_model": claude_model,
         "schema_version": ADJUDICATION_VERSION,
     }
+    # Existing API adjudications retain their fingerprint. A subscription run
+    # must not reuse one that was paid for through the API account.
+    if openai_backend != "api":
+        identity["openai_backend"] = openai_backend
+    if claude_backend != "api":
+        identity["claude_backend"] = claude_backend
     identity["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

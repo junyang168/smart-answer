@@ -12,6 +12,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.cross_section_relation import (
     DISCOVERY_SCHEMA,
     PROMPT_PATH,
@@ -62,7 +63,8 @@ def _write_through(
 
 
 def already_current(
-    *, package_path: Path, output_path: Path, prompt: str, model_id: str
+    *, package_path: Path, output_path: Path, prompt: str, model_id: str,
+    backend: str = "api",
 ) -> bool:
     """Whether the output on disk already answers this exact question.
 
@@ -80,7 +82,7 @@ def already_current(
     package = json.loads(raw.decode("utf-8"))
     identity = discovery_identity(
         package_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
-        model_id=model_id, section_count=len(_section_boundaries(package)),
+        model_id=model_id, section_count=len(_section_boundaries(package)), backend=backend,
     )
     try:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
@@ -94,7 +96,7 @@ def run(
     *,
     package_path: Path,
     output_path: Path,
-    client: Stage1OpenAIClient,
+    client: Stage1OpenAIClient | CodexSubscriptionClient,
     prompt: str,
     force: bool = False,
     usage_sink: list[dict[str, Any]] | None = None,
@@ -105,6 +107,7 @@ def run(
     identity = discovery_identity(
         package_sha256=hashlib.sha256(raw).hexdigest(), prompt=prompt,
         model_id=client.model, section_count=len(boundaries),
+        backend=getattr(client, "backend", "api").replace("_", "-"),
     )
     if output_path.is_file() and not force:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
@@ -190,6 +193,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
+    parser.add_argument(
+        "--backend", choices=["api", "codex-subscription"], default="api",
+        help="structured-output transport; codex-subscription uses the ChatGPT login",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args(argv)
 
@@ -200,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.force and already_current(
         package_path=args.package, output_path=args.output,
-        prompt=prompt, model_id=args.model,
+        prompt=prompt, model_id=args.model, backend=args.backend,
     ):
         print(json.dumps({
             "package": str(args.output.name), "status": "skipped",
@@ -214,13 +221,21 @@ def main(argv: list[str] | None = None) -> int:
     with run_record(subject=subject, stage="cross_section") as record:
         record.model(args.model)
         usage_rows: list[dict[str, Any]] = []
+        client = (
+            CodexSubscriptionClient(
+                model=args.model, reasoning_effort=args.reasoning_effort,
+                timeout_seconds=900, max_output_tokens=16000,
+            )
+            if args.backend == "codex-subscription"
+            else Stage1OpenAIClient(
+                model=args.model, reasoning_effort=args.reasoning_effort,
+                timeout_seconds=600, max_retries=3, max_output_tokens=16000,
+            )
+        )
         updated = run(
             package_path=args.package,
             output_path=args.output,
-            client=Stage1OpenAIClient(
-                model=args.model, reasoning_effort=args.reasoning_effort,
-                timeout_seconds=600, max_retries=3, max_output_tokens=16000,
-            ),
+            client=client,
             prompt=prompt,
             force=args.force,
             usage_sink=usage_rows,

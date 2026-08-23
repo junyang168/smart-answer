@@ -1,0 +1,216 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-MATTHEW-PRIMARY-SOURCES-REMAINING-01",
+  "purpose": "处理马太福音页面所列主要来源中除第16章已完成十份来源以外的全部母本与讲道；章节归属只决定队列顺序，不预设主题或结论。",
+  "selection_note": "页面的59篇是章节归属项，对应57个不同来源文件。第16章的3份母本和7篇主要讲道已经完成；本批次固定剩余47个不同来源：33篇讲道和14份母本。跨两章的母本只处理一次。",
+  "semantic_assumption": "none",
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true,
+    "allow_multiple_topic_candidates": true,
+    "preserve_scripture_context": true,
+    "separate_questions_from_topic_exposition": true
+  },
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "independent_review": "claude-sonnet-5",
+    "adjudicator": "gpt-5.6-sol",
+    "reconsideration": "claude-sonnet-5"
+  },
+  "transcript_ids": [
+    "S 201122",
+    "2011 NYSC 專題：馬太福音釋經（二）1",
+    "2011 NYSC 專題：馬太福音釋經（二）2",
+    "2017 NYSC 專題：馬太福音釋經（六）1",
+    "2011 NYSC 專題：馬太福音釋經（二）5",
+    "S 230507",
+    "2011 NYSC 專題：馬太福音釋經（二）6",
+    "2012 NYSC 專題：馬太福音釋經（三）1",
+    "2012 NYSC 專題：馬太福音釋經（三）2",
+    "2019-09-15 施洗约翰与耶稣mp4",
+    "2012 NYSC 專題：馬太福音釋經（三）3",
+    "2012 NYSC 專題：馬太福音釋經（三）4",
+    "2019-4-4 神的國",
+    "2019-10-23 太13章1-53 耶穌為何用比喻？",
+    "191013",
+    "2012 NYSC 專題：馬太福音釋經（三）6",
+    "2016 NYSC 專題：馬太福音釋經（五）4",
+    "2017 NYSC 專題：馬太福音釋經（六）4",
+    "2018 NYSC 專題：馬太福音釋經（七）2",
+    "2018 NYSC 專題：馬太福音釋經（七）3",
+    "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之1",
+    "Rev Wang-Friday Mar 16 2007",
+    "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之3",
+    "S 200517",
+    "S 200524",
+    "S 200531",
+    "2019-04-21 耶稣的空坟墓",
+    "011WSR01",
+    "Rev Wang-2-Saturday Mar 17 2007",
+    "S 200412 復活的主",
+    "S 210404",
+    "Rev Wang-3-Saturday Mar 17 2007",
+    "Rev Wang-4-Saturday Mar 17 2007"
+  ],
+  "sources": [
+    {
+      "source_id": "notes_manuscript:1章-_耶穌的來歷",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/1章-_耶穌的來歷/final.md",
+      "title": "1章- 耶穌的來歷"
+    },
+    {
+      "source_id": "notes_manuscript:2章-东方的博士",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/2章-东方的博士/final.md",
+      "title": "2章-东方的博士,下埃及, 回國"
+    },
+    {
+      "source_id": "notes_manuscript:3_章-_施洗約翰，耶穌受洗",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/3_章-_施洗約翰，耶穌受洗/final.md",
+      "title": "3 章- 施洗約翰，耶穌受洗"
+    },
+    {
+      "source_id": "notes_manuscript:4_章_-_耶穌受試探，耶穌應驗預言",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/4_章_-_耶穌受試探，耶穌應驗預言/final.md",
+      "title": "4 章 - 耶穌受試探，耶穌應驗預言"
+    },
+    {
+      "source_id": "notes_manuscript:登山寶訓-八福",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/登山寶訓-八福/final.md",
+      "title": "5 章 - 八福，門徒使命，勝過文士的義"
+    },
+    {
+      "source_id": "notes_manuscript:義的精意",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/義的精意/final.md",
+      "title": "5章 - 律法從外在條文到內心轉化"
+    },
+    {
+      "source_id": "notes_manuscript:6_章_-_登山寶訓_3",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/6_章_-_登山寶訓_3/final.md",
+      "title": "6,7 章 -門徒義的實踐"
+    },
+    {
+      "source_id": "notes_manuscript:耶穌的權柄與人的回應",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/耶穌的權柄與人的回應/final.md",
+      "title": "8章 - 權柄的顯明"
+    },
+    {
+      "source_id": "notes_manuscript:9_章_-_权柄深化",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/9_章_-_权柄深化/final.md",
+      "title": "9 章 - 权柄深化"
+    },
+    {
+      "source_id": "notes_manuscript:使命與誠實",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/使命與誠實/final.md",
+      "title": "10章 - 差遣、逼迫与赏赐"
+    },
+    {
+      "source_id": "notes_manuscript:衝突與安息-12,13章",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/衝突與安息-12,13章/final.md",
+      "title": "11章 施洗約翰的困惑、天國的進展與耶穌的神性宣告"
+    },
+    {
+      "source_id": "notes_manuscript:_12章_-_安息日的爭議，褻瀆聖靈的罪",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/_12章_-_安息日的爭議，褻瀆聖靈的罪/final.md",
+      "title": "12章 - 安息日的主，國度臨到，人的心被顯明"
+    },
+    {
+      "source_id": "notes_manuscript:13_章",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/13_章/final.md",
+      "title": "13 章 - 天國的比喻"
+    },
+    {
+      "source_id": "notes_manuscript:14章",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/14章/final.md",
+      "title": "14，15章 能力显明，内心显露"
+    }
+  ],
+  "daily_launches": [
+    {
+      "day": 1,
+      "members": [
+        "notes_manuscript:1章-_耶穌的來歷",
+        "notes_manuscript:2章-东方的博士",
+        "notes_manuscript:3_章-_施洗約翰，耶穌受洗",
+        "notes_manuscript:4_章_-_耶穌受試探，耶穌應驗預言",
+        "notes_manuscript:登山寶訓-八福",
+        "notes_manuscript:義的精意",
+        "S 201122",
+        "2011 NYSC 專題：馬太福音釋經（二）1",
+        "2011 NYSC 專題：馬太福音釋經（二）2",
+        "2017 NYSC 專題：馬太福音釋經（六）1"
+      ]
+    },
+    {
+      "day": 2,
+      "members": [
+        "2011 NYSC 專題：馬太福音釋經（二）5",
+        "notes_manuscript:6_章_-_登山寶訓_3",
+        "notes_manuscript:耶穌的權柄與人的回應",
+        "notes_manuscript:9_章_-_权柄深化",
+        "notes_manuscript:使命與誠實",
+        "S 230507",
+        "2011 NYSC 專題：馬太福音釋經（二）6",
+        "2012 NYSC 專題：馬太福音釋經（三）1",
+        "notes_manuscript:衝突與安息-12,13章",
+        "2012 NYSC 專題：馬太福音釋經（三）2"
+      ]
+    },
+    {
+      "day": 3,
+      "members": [
+        "2019-09-15 施洗约翰与耶稣mp4",
+        "2012 NYSC 專題：馬太福音釋經（三）3",
+        "notes_manuscript:_12章_-_安息日的爭議，褻瀆聖靈的罪",
+        "2012 NYSC 專題：馬太福音釋經（三）4",
+        "2019-4-4 神的國",
+        "notes_manuscript:13_章",
+        "2019-10-23 太13章1-53 耶穌為何用比喻？",
+        "191013",
+        "notes_manuscript:14章",
+        "2012 NYSC 專題：馬太福音釋經（三）6"
+      ]
+    },
+    {
+      "day": 4,
+      "members": [
+        "2016 NYSC 專題：馬太福音釋經（五）4",
+        "2017 NYSC 專題：馬太福音釋經（六）4",
+        "2018 NYSC 專題：馬太福音釋經（七）2",
+        "2018 NYSC 專題：馬太福音釋經（七）3",
+        "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之1",
+        "Rev Wang-Friday Mar 16 2007",
+        "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之3",
+        "S 200517",
+        "S 200524",
+        "S 200531"
+      ]
+    },
+    {
+      "day": 5,
+      "members": [
+        "2019-04-21 耶稣的空坟墓",
+        "011WSR01",
+        "Rev Wang-2-Saturday Mar 17 2007",
+        "S 200412 復活的主",
+        "S 210404",
+        "Rev Wang-3-Saturday Mar 17 2007",
+        "Rev Wang-4-Saturday Mar 17 2007"
+      ]
+    }
+  ]
+}
