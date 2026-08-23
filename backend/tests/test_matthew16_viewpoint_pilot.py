@@ -17,7 +17,11 @@ from backend.api.canonical_repository.matthew16_viewpoint_candidate import (
     ArticleViewpointAcceptance,
     Matthew16ViewpointPilotArtifact,
     PilotViewpointMember,
+    build_pilot_composition_projection,
     classify_pilot_viewpoint,
+)
+from backend.api.canonical_repository.matthew16_viewpoint_finalization import (
+    build_matthew16_viewpoint_finalization_bundle,
 )
 from backend.api.canonical_repository.matthew16_viewpoint_promotion import (
     build_matthew16_viewpoint_promotion_proposal,
@@ -278,10 +282,13 @@ def test_master_promotion_preserves_atomic_membership_boundary():
             modality="教授的释经判断",
         ),
         scope=ViewpointScope(scripture_scope=["Matt.16.18"]),
-        members=[
-            PilotViewpointMember(proposition_unit=units[0], parent_claim=claim),
-            PilotViewpointMember(proposition_unit=units[1], parent_claim=claim),
-        ],
+        members=sorted(
+            [
+                PilotViewpointMember(proposition_unit=units[0], parent_claim=claim),
+                PilotViewpointMember(proposition_unit=units[1], parent_claim=claim),
+            ],
+            key=lambda item: item.proposition_unit.proposition_unit_id,
+        ),
         adjacent_non_members=[
             AdjacentPropositionUnit(
                 proposition_unit_id=excluded_id,
@@ -297,9 +304,11 @@ def test_master_promotion_preserves_atomic_membership_boundary():
             end_char=3,
             supporting_proposition_unit_ids=member_ids,
         ),
+        parent_scope_artifact_sha256="q" * 64,
         boundary_run_artifact_sha256="b" * 64,
         artifact_sha256="p" * 64,
         model_ids=["claude-opus-5", "gpt-5.6-sol"],
+        blockers=["not_master_applied", "pilot_scope_only"],
     )
     boundary = {
         "artifact_sha256": "b" * 64,
@@ -335,3 +344,40 @@ def test_master_promotion_preserves_atomic_membership_boundary():
     assert proposal.claim_membership_link_count == 0
     assert proposal.apply_allowed is False
     assert "formal_quality_report_missing" in proposal.blockers
+
+    projection = build_pilot_composition_projection(pilot)
+    finalization = build_matthew16_viewpoint_finalization_bundle(
+        proposal=proposal,
+        pilot=pilot,
+        projection=projection,
+        decided_at="2026-08-23T01:00:00Z",
+    )
+
+    assert finalization.apply_allowed is True
+    assert finalization.master_data_mutation_count == 12
+    assert finalization.atomic_resolution_ledger.statistics.model_dump() == {
+        "input_unit_count": 3,
+        "member_count": 2,
+        "adjacent_non_member_count": 1,
+        "unresolved_count": 0,
+    }
+    assert [row.disposition for row in finalization.atomic_resolution_ledger.rows].count(
+        "member"
+    ) == 2
+    assert len(finalization.atomic_quality_report.checks) == 7
+    assert finalization.atomic_quality_report.eligibility_decision == "pass"
+    assert finalization.automated_promotion_decision.human_approval is False
+    assert finalization.automated_promotion_decision.decision == "approve"
+    assert all(item.effective_state == "active" for item in finalization.proposition_units)
+    assert all(
+        item.effective_state == "active" for item in finalization.proposition_unit_links
+    )
+    assert "viewpoint_claim_links" not in finalization.knowledge_package
+
+    incomplete_report = finalization.atomic_quality_report.model_dump(mode="json")
+    incomplete_report["checks"] = incomplete_report["checks"][:-1]
+    incomplete_report["artifact_sha256"] = sha256_json(
+        {key: value for key, value in incomplete_report.items() if key != "artifact_sha256"}
+    )
+    with pytest.raises(ValueError, match="every required check"):
+        type(finalization.atomic_quality_report).model_validate(incomplete_report)

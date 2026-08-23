@@ -819,6 +819,10 @@ def validate_foundation_change_set(
         "viewpoint_claim_links",
         "viewpoint_proposition_units",
         "viewpoint_proposition_unit_links",
+        "viewpoint_atomic_coverage_snapshots",
+        "viewpoint_atomic_resolution_ledgers",
+        "viewpoint_atomic_quality_reports",
+        "viewpoint_automated_promotion_decisions",
         "argument_routes",
         "argument_route_revisions",
         "argument_route_attestations",
@@ -836,6 +840,10 @@ def validate_foundation_change_set(
         "viewpoint_revisions",
         "viewpoint_proposition_units",
         "viewpoint_proposition_unit_links",
+        "viewpoint_atomic_coverage_snapshots",
+        "viewpoint_atomic_resolution_ledgers",
+        "viewpoint_atomic_quality_reports",
+        "viewpoint_automated_promotion_decisions",
         "argument_route_revisions",
         "argument_route_attestations",
         "viewpoint_identity_candidates",
@@ -880,6 +888,10 @@ def validate_foundation_change_set(
     links = payloads("viewpoint_claim_links")
     proposition_units = payloads("viewpoint_proposition_units")
     proposition_unit_links = payloads("viewpoint_proposition_unit_links")
+    atomic_coverages = payloads("viewpoint_atomic_coverage_snapshots")
+    atomic_ledgers = payloads("viewpoint_atomic_resolution_ledgers")
+    atomic_reports = payloads("viewpoint_atomic_quality_reports")
+    automated_promotions = payloads("viewpoint_automated_promotion_decisions")
     claim_relations = payloads("claim_relations")
     candidates = payloads("viewpoint_identity_candidates")
     decisions = payloads("viewpoint_identity_decisions")
@@ -951,7 +963,11 @@ def validate_foundation_change_set(
         if redirect and str(redirect) not in viewpoints:
             findings.append(f"{viewpoint_id}: missing redirect target {redirect}")
         candidate_id = str(viewpoint["created_from_candidate_id"])
-        if candidate_id not in candidates:
+        atomic_candidate_ids = {
+            str(item.get("viewpoint_candidate_id"))
+            for item in atomic_coverages.values()
+        }
+        if candidate_id not in candidates and candidate_id not in atomic_candidate_ids:
             findings.append(f"{viewpoint_id}: missing origin candidate {candidate_id}")
 
     active_full: dict[tuple[str, int], set[str]] = defaultdict(set)
@@ -1099,6 +1115,170 @@ def validate_foundation_change_set(
                 f"{unit_id}: multiple active CanonicalViewpoint memberships"
             )
 
+    for coverage_id, coverage in normalized.get(
+        "viewpoint_atomic_coverage_snapshots", {}
+    ).items():
+        coverage_unit_ids = list(coverage.get("proposition_unit_ids") or [])
+        actual_units = {
+            unit_id: proposition_units.get(str(unit_id))
+            for unit_id in coverage_unit_ids
+        }
+        if any(item is None for item in actual_units.values()):
+            missing = sorted(
+                unit_id for unit_id, item in actual_units.items() if item is None
+            )
+            findings.append(f"{coverage_id}: missing proposition units {missing}")
+            continue
+        actual_claim_ids = sorted(
+            {str(item["parent_claim_id"]) for item in actual_units.values() if item}
+        )
+        actual_source_ids = sorted(
+            {str(item["source_id"]) for item in actual_units.values() if item}
+        )
+        if actual_claim_ids != list(coverage.get("claim_ids") or []):
+            findings.append(f"{coverage_id}: Claim denominator mismatch")
+        if actual_source_ids != list(coverage.get("source_ids") or []):
+            findings.append(f"{coverage_id}: source denominator mismatch")
+
+    for ledger_id, ledger in normalized.get(
+        "viewpoint_atomic_resolution_ledgers", {}
+    ).items():
+        coverage = atomic_coverages.get(str(ledger["atomic_coverage_snapshot_id"]))
+        if not coverage:
+            findings.append(f"{ledger_id}: missing atomic coverage snapshot")
+            continue
+        ledger_unit_ids = [str(row["proposition_unit_id"]) for row in ledger.get("rows") or []]
+        if ledger_unit_ids != list(coverage.get("proposition_unit_ids") or []):
+            findings.append(f"{ledger_id}: atomic unit denominator mismatch")
+        member_unit_ids: list[str] = []
+        for row in ledger.get("rows") or []:
+            unit_id = str(row["proposition_unit_id"])
+            unit = proposition_units.get(unit_id)
+            if not unit:
+                findings.append(f"{ledger_id}: missing proposition unit {unit_id}")
+                continue
+            if row.get("parent_claim_id") != unit.get("parent_claim_id"):
+                findings.append(f"{ledger_id}: parent Claim mismatch for {unit_id}")
+            expected_evidence_sha = sha256_json(unit.get("evidence_bindings") or [])
+            if row.get("evidence_binding_sha256") != expected_evidence_sha:
+                findings.append(f"{ledger_id}: evidence binding SHA mismatch for {unit_id}")
+            if row.get("boundary_run_artifact_sha256") != coverage.get(
+                "boundary_run_artifact_sha256"
+            ):
+                findings.append(f"{ledger_id}: boundary binding mismatch for {unit_id}")
+            if row.get("disposition") == "member":
+                member_unit_ids.append(unit_id)
+        active_members = sorted(
+            unit_id
+            for unit_id in ledger_unit_ids
+            if any(
+                link.get("effective_state") == "active"
+                and str(link.get("proposition_unit_id")) == unit_id
+                and str(link.get("viewpoint_id")) == str(ledger["proposed_viewpoint_id"])
+                for link in proposition_unit_links.values()
+            )
+        )
+        if sorted(member_unit_ids) != active_members:
+            findings.append(f"{ledger_id}: active membership differs from atomic ledger")
+
+    for report_id, report in normalized.get(
+        "viewpoint_atomic_quality_reports", {}
+    ).items():
+        coverage = atomic_coverages.get(str(report["atomic_coverage_snapshot_id"]))
+        ledger = atomic_ledgers.get(str(report["atomic_resolution_ledger_id"]))
+        if not coverage:
+            findings.append(f"{report_id}: missing atomic coverage snapshot")
+        if not ledger:
+            findings.append(f"{report_id}: missing atomic resolution ledger")
+        elif coverage and ledger.get("atomic_coverage_snapshot_id") != coverage.get(
+            "atomic_coverage_snapshot_id"
+        ):
+            findings.append(f"{report_id}: coverage and ledger do not bind")
+        if report.get("eligibility_decision") == "pass" and (
+            report.get("hard_failures")
+            or any(item.get("status") != "pass" for item in report.get("checks") or [])
+        ):
+            findings.append(f"{report_id}: passing report contains a failed check")
+
+    for promotion_id, promotion in normalized.get(
+        "viewpoint_automated_promotion_decisions", {}
+    ).items():
+        viewpoint_id = str(promotion["viewpoint_id"])
+        revision_id = str(promotion["viewpoint_revision_id"])
+        identity_decision_id = str(promotion["identity_decision_id"])
+        quality = next(
+            (
+                item
+                for item in atomic_reports.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_quality_report_artifact_sha256")
+            ),
+            None,
+        )
+        coverage = next(
+            (
+                item
+                for item in atomic_coverages.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_coverage_snapshot_artifact_sha256")
+            ),
+            None,
+        )
+        ledger = next(
+            (
+                item
+                for item in atomic_ledgers.values()
+                if item.get("artifact_sha256")
+                == promotion.get("atomic_resolution_ledger_artifact_sha256")
+            ),
+            None,
+        )
+        if not quality or quality.get("eligibility_decision") != "pass":
+            findings.append(f"{promotion_id}: automated approval requires passing quality")
+        if not coverage or not ledger:
+            findings.append(f"{promotion_id}: automated approval has missing gate artifacts")
+        if viewpoints.get(viewpoint_id, {}).get("current_revision_id") != revision_id:
+            findings.append(f"{promotion_id}: viewpoint revision binding mismatch")
+        if identity_decision_id not in decisions:
+            findings.append(f"{promotion_id}: missing identity decision")
+        expected_applied_ids = sorted(
+            [
+                viewpoint_id,
+                revision_id,
+                identity_decision_id,
+                *(
+                    [str(coverage["atomic_coverage_snapshot_id"])]
+                    if coverage else []
+                ),
+                *(
+                    [str(ledger["atomic_resolution_ledger_id"])]
+                    if ledger else []
+                ),
+                *(
+                    [str(quality["atomic_quality_report_id"])]
+                    if quality else []
+                ),
+                *sorted(
+                    unit_id
+                    for unit_id, unit in proposition_units.items()
+                    if unit.get("effective_state") == "active"
+                    and unit_id in set((coverage or {}).get("proposition_unit_ids") or [])
+                ),
+                *sorted(
+                    link_id
+                    for link_id, link in proposition_unit_links.items()
+                    if link.get("effective_state") == "active"
+                    and str(link.get("viewpoint_id")) == viewpoint_id
+                ),
+            ]
+        )
+        if list(promotion.get("applied_record_ids") or []) != expected_applied_ids:
+            findings.append(f"{promotion_id}: applied record set mismatch")
+        if quality and promotion.get("consumer_projection_sha256") != quality.get(
+            "consumer_projection_sha256"
+        ):
+            findings.append(f"{promotion_id}: consumer projection binding mismatch")
+
     for candidate_id, candidate in normalized.get("viewpoint_identity_candidates", {}).items():
         candidate_identity = {
             "claims": candidate.get("candidate_claim_ids") or [],
@@ -1129,14 +1309,31 @@ def validate_foundation_change_set(
                 findings.append(f"{candidate_id}: unreviewed duplicate seed relation {relation_id}")
     for decision_id, decision in normalized.get("viewpoint_identity_decisions", {}).items():
         candidate = candidates.get(str(decision["identity_candidate_id"]))
-        if not candidate:
+        atomic_coverage = next(
+            (
+                item
+                for item in atomic_coverages.values()
+                if item.get("viewpoint_candidate_id")
+                == decision.get("identity_candidate_id")
+            ),
+            None,
+        )
+        if not candidate and not atomic_coverage:
             findings.append(f"{decision_id}: missing identity candidate")
         elif (
             decision.get("review_status")
             in {"system_approved", "human_approved", "approved"}
+            and candidate
             and decision.get("input_sha256") != candidate.get("generation_fingerprint")
         ):
             findings.append(f"{decision_id}: approved decision input SHA is stale")
+        elif (
+            decision.get("review_status") == "system_approved"
+            and atomic_coverage
+            and decision.get("input_sha256")
+            != atomic_coverage.get("boundary_run_artifact_sha256")
+        ):
+            findings.append(f"{decision_id}: approved atomic decision input SHA is stale")
         resolved = decision.get("resolved_viewpoint_id")
         if resolved and str(resolved) not in viewpoints:
             findings.append(f"{decision_id}: missing resolved viewpoint {resolved}")

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
+
+def _knowledge_sha256_json(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class EvolvingKnowledgeRecord(BaseModel):
@@ -727,6 +736,212 @@ class ViewpointPropositionUnitLinkRecord(StrictViewpointRecord):
         return self
 
 
+class ViewpointAtomicCoverageSnapshotRecord(StrictViewpointRecord):
+    """Closed denominator for one atomic viewpoint promotion decision."""
+
+    atomic_coverage_snapshot_id: str
+    schema_version: Literal["wang_viewpoint_atomic_coverage_snapshot_v1"] = (
+        "wang_viewpoint_atomic_coverage_snapshot_v1"
+    )
+    viewpoint_candidate_id: str
+    pilot_artifact_sha256: str
+    recall_closure_packet_sha256: str
+    boundary_run_artifact_sha256: str
+    claim_ids: list[str] = Field(min_length=1)
+    proposition_unit_ids: list[str] = Field(min_length=2)
+    source_ids: list[str] = Field(min_length=1)
+    source_eligibility_attestation_sha256s: list[str] = Field(min_length=1)
+    coverage_status: Literal["complete"] = "complete"
+    artifact_sha256: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_snapshot(self) -> "ViewpointAtomicCoverageSnapshotRecord":
+        for label, values in (
+            ("claim_ids", self.claim_ids),
+            ("proposition_unit_ids", self.proposition_unit_ids),
+            ("source_ids", self.source_ids),
+            (
+                "source_eligibility_attestation_sha256s",
+                self.source_eligibility_attestation_sha256s,
+            ),
+        ):
+            if values != sorted(set(values)):
+                raise ValueError(f"atomic coverage {label} must be sorted and unique")
+        payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != _knowledge_sha256_json(payload):
+            raise ValueError("atomic coverage snapshot SHA mismatch")
+        return self
+
+
+class ViewpointAtomicResolutionRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposition_unit_id: str
+    parent_claim_id: str
+    disposition: Literal["member", "adjacent_non_member"]
+    identity_decision_id: str
+    boundary_run_artifact_sha256: str
+    evidence_binding_sha256: str
+
+
+class ViewpointAtomicResolutionStatistics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_unit_count: int = Field(ge=0)
+    member_count: int = Field(ge=0)
+    adjacent_non_member_count: int = Field(ge=0)
+    unresolved_count: int = Field(ge=0)
+
+
+class ViewpointAtomicResolutionLedgerRecord(StrictViewpointRecord):
+    """Exact-once member/non-member disposition for an atomic universe."""
+
+    atomic_resolution_ledger_id: str
+    schema_version: Literal["wang_viewpoint_atomic_resolution_ledger_v1"] = (
+        "wang_viewpoint_atomic_resolution_ledger_v1"
+    )
+    atomic_coverage_snapshot_id: str
+    viewpoint_candidate_id: str
+    proposed_viewpoint_id: str
+    identity_decision_id: str
+    rows: list[ViewpointAtomicResolutionRow] = Field(min_length=2)
+    statistics: ViewpointAtomicResolutionStatistics
+    coverage_status: Literal["complete"] = "complete"
+    artifact_sha256: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_ledger(self) -> "ViewpointAtomicResolutionLedgerRecord":
+        unit_ids = [item.proposition_unit_id for item in self.rows]
+        if unit_ids != sorted(set(unit_ids)):
+            raise ValueError("atomic resolution rows must be unit-sorted and unique")
+        expected = {
+            "input_unit_count": len(self.rows),
+            "member_count": sum(item.disposition == "member" for item in self.rows),
+            "adjacent_non_member_count": sum(
+                item.disposition == "adjacent_non_member" for item in self.rows
+            ),
+            "unresolved_count": 0,
+        }
+        if self.statistics.model_dump(mode="json") != expected:
+            raise ValueError("atomic resolution statistics mismatch")
+        if any(
+            item.identity_decision_id != self.identity_decision_id for item in self.rows
+        ):
+            raise ValueError("atomic resolution row decision mismatch")
+        payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != _knowledge_sha256_json(payload):
+            raise ValueError("atomic resolution ledger SHA mismatch")
+        return self
+
+
+class ViewpointAtomicQualityCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal[
+        "article_acceptance_bound",
+        "atomic_resolution_exact_once",
+        "consumer_projection_bound",
+        "dual_model_boundary_agreed",
+        "master_preview_matches_resolution",
+        "source_evidence_bound",
+        "targeted_recall_closed",
+    ]
+    status: Literal["pass", "fail"]
+    evidence_artifact_sha256s: list[str] = Field(min_length=1)
+    detail: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_check(self) -> "ViewpointAtomicQualityCheck":
+        if self.evidence_artifact_sha256s != sorted(
+            set(self.evidence_artifact_sha256s)
+        ):
+            raise ValueError("atomic quality evidence SHAs must be sorted and unique")
+        return self
+
+
+class ViewpointAtomicQualityReportRecord(StrictViewpointRecord):
+    atomic_quality_report_id: str
+    schema_version: Literal["wang_viewpoint_atomic_quality_report_v1"] = (
+        "wang_viewpoint_atomic_quality_report_v1"
+    )
+    viewpoint_candidate_id: str
+    proposed_viewpoint_id: str
+    atomic_coverage_snapshot_id: str
+    atomic_resolution_ledger_id: str
+    promotion_proposal_artifact_sha256: str
+    consumer_projection_sha256: str
+    checks: list[ViewpointAtomicQualityCheck] = Field(min_length=1)
+    hard_failures: list[str] = Field(default_factory=list)
+    eligibility_decision: Literal["pass", "fail"]
+    validator_version: Literal["matthew16_atomic_promotion_quality_v1"] = (
+        "matthew16_atomic_promotion_quality_v1"
+    )
+    artifact_sha256: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_report(self) -> "ViewpointAtomicQualityReportRecord":
+        codes = [item.code for item in self.checks]
+        if codes != sorted(set(codes)):
+            raise ValueError("atomic quality checks must be code-sorted and unique")
+        expected_codes = {
+            "article_acceptance_bound",
+            "atomic_resolution_exact_once",
+            "consumer_projection_bound",
+            "dual_model_boundary_agreed",
+            "master_preview_matches_resolution",
+            "source_evidence_bound",
+            "targeted_recall_closed",
+        }
+        if set(codes) != expected_codes:
+            raise ValueError("atomic quality report must contain every required check")
+        failed = [item.code for item in self.checks if item.status == "fail"]
+        if self.hard_failures != sorted(set(self.hard_failures)):
+            raise ValueError("atomic quality hard failures must be sorted and unique")
+        if bool(failed or self.hard_failures) != (self.eligibility_decision == "fail"):
+            raise ValueError("atomic quality eligibility decision mismatch")
+        payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != _knowledge_sha256_json(payload):
+            raise ValueError("atomic quality report SHA mismatch")
+        return self
+
+
+class ViewpointAutomatedPromotionDecisionRecord(StrictViewpointRecord):
+    automated_promotion_decision_id: str
+    schema_version: Literal["wang_viewpoint_automated_promotion_decision_v1"] = (
+        "wang_viewpoint_automated_promotion_decision_v1"
+    )
+    viewpoint_candidate_id: str
+    viewpoint_id: str
+    viewpoint_revision_id: str
+    identity_decision_id: str
+    promotion_proposal_artifact_sha256: str
+    atomic_coverage_snapshot_artifact_sha256: str
+    atomic_resolution_ledger_artifact_sha256: str
+    atomic_quality_report_artifact_sha256: str
+    consumer_projection_sha256: str
+    decision: Literal["approve", "reject"]
+    approval_basis: Literal["programmatic_atomic_quality_gate"] = (
+        "programmatic_atomic_quality_gate"
+    )
+    human_approval: Literal[False] = False
+    applied_record_ids: list[str] = Field(min_length=1)
+    decided_at: str
+    artifact_sha256: str
+    review_status: Literal["system_approved"] = "system_approved"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "ViewpointAutomatedPromotionDecisionRecord":
+        if self.applied_record_ids != sorted(set(self.applied_record_ids)):
+            raise ValueError("automated promotion record ids must be sorted and unique")
+        payload = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != _knowledge_sha256_json(payload):
+            raise ValueError("automated promotion decision SHA mismatch")
+        return self
+
+
 class ArgumentRouteSignature(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1252,6 +1467,22 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "viewpoint_proposition_unit_links": (
         ViewpointPropositionUnitLinkRecord,
         "viewpoint_proposition_unit_link_id",
+    ),
+    "viewpoint_atomic_coverage_snapshots": (
+        ViewpointAtomicCoverageSnapshotRecord,
+        "atomic_coverage_snapshot_id",
+    ),
+    "viewpoint_atomic_resolution_ledgers": (
+        ViewpointAtomicResolutionLedgerRecord,
+        "atomic_resolution_ledger_id",
+    ),
+    "viewpoint_atomic_quality_reports": (
+        ViewpointAtomicQualityReportRecord,
+        "atomic_quality_report_id",
+    ),
+    "viewpoint_automated_promotion_decisions": (
+        ViewpointAutomatedPromotionDecisionRecord,
+        "automated_promotion_decision_id",
     ),
     "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
     "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),

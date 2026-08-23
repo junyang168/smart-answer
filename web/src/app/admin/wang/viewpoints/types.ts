@@ -184,6 +184,32 @@ export type PilotEnvelope = {
     master_data_mutations: 0;
     apply_allowed: false;
   };
+  finalization: null | {
+    schema_version: "wang_matthew16_viewpoint_finalization_bundle_v1";
+    artifact_sha256: string;
+    master_data_mutation_count: number;
+    apply_allowed: true;
+    atomic_coverage_snapshot: {
+      atomic_coverage_snapshot_id: string; coverage_status: "complete";
+      proposition_unit_ids: string[];
+    };
+    atomic_resolution_ledger: {
+      atomic_resolution_ledger_id: string; coverage_status: "complete";
+      statistics: {
+        input_unit_count: number; member_count: number;
+        adjacent_non_member_count: number; unresolved_count: number;
+      };
+    };
+    atomic_quality_report: {
+      atomic_quality_report_id: string; eligibility_decision: "pass" | "fail";
+      checks: Array<{ code: string; status: "pass" | "fail"; detail: string }>;
+    };
+    automated_promotion_decision: {
+      automated_promotion_decision_id: string; decision: "approve" | "reject";
+      approval_basis: "programmatic_atomic_quality_gate"; human_approval: false;
+    };
+    canonical_viewpoint: { viewpoint_id: string; review_status: string };
+  };
   source_files: Record<string, {
     source_id: string; title: string; source_type: string; file_name: string;
   }>;

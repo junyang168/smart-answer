@@ -30,6 +30,9 @@ from .canonical_repository.matthew16_viewpoint_candidate import (
 from .canonical_repository.matthew16_viewpoint_promotion import (
     Matthew16ViewpointPromotionProposal,
 )
+from .canonical_repository.matthew16_viewpoint_finalization import (
+    Matthew16ViewpointFinalizationBundle,
+)
 from .canonical_repository.viewpoint_foundation import sha256_json
 
 
@@ -90,6 +93,20 @@ def _viewpoint_promotion() -> Matthew16ViewpointPromotionProposal | None:
             f"configured viewpoint promotion does not exist: {path}"
         )
     return Matthew16ViewpointPromotionProposal.model_validate(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+
+
+def _viewpoint_finalization() -> Matthew16ViewpointFinalizationBundle | None:
+    configured = os.getenv("WANG_VIEWPOINT_FINALIZATION_FILE")
+    if not configured:
+        return None
+    path = Path(configured)
+    if not path.is_file():
+        raise AdminViewpointProjectionError(
+            f"configured viewpoint finalization does not exist: {path}"
+        )
+    return Matthew16ViewpointFinalizationBundle.model_validate(
         json.loads(path.read_text(encoding="utf-8"))
     )
 
@@ -206,6 +223,7 @@ def viewpoint_pilot():
         consumer_projection = build_pilot_composition_projection(pilot)
         knowledge_classification = classify_pilot_viewpoint(pilot)
         promotion = _viewpoint_promotion()
+        finalization = _viewpoint_finalization()
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
     if promotion and promotion.pilot_artifact_sha256 != pilot.artifact_sha256:
@@ -213,6 +231,24 @@ def viewpoint_pilot():
             status_code=503,
             detail="Viewpoint pilot unavailable: promotion proposal is bound to another pilot",
         )
+    if finalization:
+        if promotion is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Viewpoint pilot unavailable: finalization requires its promotion proposal",
+            )
+        if not (
+            finalization.promotion_proposal_artifact_sha256
+            == promotion.artifact_sha256
+            and finalization.atomic_coverage_snapshot.pilot_artifact_sha256
+            == pilot.artifact_sha256
+            and finalization.automated_promotion_decision.consumer_projection_sha256
+            == consumer_projection.projection_sha256
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Viewpoint pilot unavailable: finalization artifact bindings differ",
+            )
     try:
         source_files, source_files_sha256 = _viewpoint_pilot_source_files(pilot)
     except (AdminViewpointProjectionError, PostgresKnowledgeStoreError) as exc:
@@ -234,6 +270,9 @@ def viewpoint_pilot():
         },
         "knowledge_classification": knowledge_classification.model_dump(mode="json"),
         "promotion": promotion.model_dump(mode="json") if promotion else None,
+        "finalization": (
+            finalization.model_dump(mode="json") if finalization else None
+        ),
         "source_files": source_files,
         "source_files_sha256": source_files_sha256,
         "data": pilot.model_dump(mode="json"),

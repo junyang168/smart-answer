@@ -31,6 +31,31 @@ EDGE_COLLECTIONS = {
     "viewpoint_proposition_unit_links",
     "viewpoint_relations",
 }
+VIEWPOINT_VALIDATION_COLLECTIONS = {
+    "source_documents",
+    "source_fragments",
+    "claims",
+    "evidence_steps",
+    "claim_relations",
+    "viewpoint_coverage_snapshots",
+    "canonical_viewpoints",
+    "viewpoint_revisions",
+    "viewpoint_claim_links",
+    "viewpoint_proposition_units",
+    "viewpoint_proposition_unit_links",
+    "argument_routes",
+    "argument_route_revisions",
+    "argument_route_attestations",
+    "viewpoint_relations",
+    "viewpoint_identity_candidates",
+    "viewpoint_identity_decisions",
+    "viewpoint_resolution_ledgers",
+    "viewpoint_quality_reports",
+    "viewpoint_atomic_coverage_snapshots",
+    "viewpoint_atomic_resolution_ledgers",
+    "viewpoint_atomic_quality_reports",
+    "viewpoint_automated_promotion_decisions",
+}
 REVIEW_FIELDS = {
     "review_status",
     "reviewed_at",
@@ -64,6 +89,10 @@ SOURCE_KEYS = {
     "viewpoint_claim_links": "viewpoint_claim_links",
     "viewpoint_proposition_units": "viewpoint_proposition_units",
     "viewpoint_proposition_unit_links": "viewpoint_proposition_unit_links",
+    "viewpoint_atomic_coverage_snapshots": "viewpoint_atomic_coverage_snapshots",
+    "viewpoint_atomic_resolution_ledgers": "viewpoint_atomic_resolution_ledgers",
+    "viewpoint_atomic_quality_reports": "viewpoint_atomic_quality_reports",
+    "viewpoint_automated_promotion_decisions": "viewpoint_automated_promotion_decisions",
     "argument_routes": "argument_routes",
     "argument_route_revisions": "argument_route_revisions",
     "argument_route_attestations": "argument_route_attestations",
@@ -955,6 +984,29 @@ class PostgresKnowledgeStore:
                     }
         return result
 
+    def _existing_collections(
+        self, conn: Any, collections: Iterable[str]
+    ) -> dict[tuple[str, str], dict[str, Any]]:
+        selected = sorted(set(collections))
+        if not selected:
+            return {}
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT collection, object_id, revision, content_sha256, payload
+                   FROM wang_knowledge.objects
+                   WHERE collection = ANY(%s) AND retired_at IS NULL""",
+                (selected,),
+            )
+            rows = cursor.fetchall()
+        return {
+            (str(row[0]), str(row[1])): {
+                "revision": row[2],
+                "content_sha256": row[3],
+                "payload": row[4],
+            }
+            for row in rows
+        }
+
     def plan_package(self, package: Mapping[str, Any], *, source_kind: str = "knowledge_package") -> ChangeSetPlan:
         normalized = normalize_package(package)
         keys = [
@@ -964,6 +1016,16 @@ class PostgresKnowledgeStore:
         ]
         with self.connect() as conn:
             existing = self._existing(conn, keys)
+            if any(
+                collection in VIEWPOINT_VALIDATION_COLLECTIONS - {
+                    "source_documents", "source_fragments", "claims",
+                    "evidence_steps", "claim_relations",
+                }
+                for collection in normalized
+            ):
+                existing.update(
+                    self._existing_collections(conn, VIEWPOINT_VALIDATION_COLLECTIONS)
+                )
         return build_change_set_plan(package, existing, source_kind=source_kind)
 
     def plan_retirement(
