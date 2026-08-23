@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class EvolvingKnowledgeRecord(BaseModel):
@@ -121,6 +122,7 @@ class TopicIdentityReconciliationRecord(EvolvingKnowledgeRecord):
 class EvidenceStepRecord(EvolvingKnowledgeRecord):
     evidence_step_id: str
     source_fragment_id: Optional[str] = None
+    source_fragment_ids: list[str] = Field(default_factory=list)
     statement: str = Field(default="", validation_alias=AliasChoices("statement", "observation"))
     step_type: Optional[str] = None
     claim_group_ids: list[str] = Field(default_factory=list)
@@ -131,6 +133,19 @@ class EvidenceStepRecord(EvolvingKnowledgeRecord):
     anchor_quality: Optional[str] = None
     support_eligibility: str = "withheld_unreviewed"
     citation_ids: list[str] = Field(default_factory=list)
+    scripture_refs: list[str] = Field(default_factory=list)
+
+
+def evidence_fragment_ids(value: Mapping[str, Any] | EvidenceStepRecord) -> list[str]:
+    """Return all source fragments across singular and plural extraction eras."""
+
+    if isinstance(value, Mapping):
+        singular = value.get("source_fragment_id")
+        plural = value.get("source_fragment_ids") or []
+    else:
+        singular = value.source_fragment_id
+        plural = value.source_fragment_ids
+    return sorted({str(item) for item in [singular, *plural] if item})
 
 
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
@@ -184,6 +199,16 @@ class ProductDependencyRecord(EvolvingKnowledgeRecord):
     route_ids: list[str] = Field(default_factory=list)
     status: str = "current"
     invalidation_event_ids: list[str] = Field(default_factory=list)
+    viewpoint_revision_ids: list[str] = Field(default_factory=list)
+    viewpoint_registry_snapshot_ids: list[str] = Field(default_factory=list)
+    argument_route_revision_ids: list[str] = Field(default_factory=list)
+    argument_route_snapshot_ids: list[str] = Field(default_factory=list)
+    coverage_snapshot_id: Optional[str] = None
+    resolution_ledger_id: Optional[str] = None
+    quality_report_id: Optional[str] = None
+    quality_report_sha256: Optional[str] = None
+    projection_sha256: Optional[str] = None
+    dependency_manifest: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ImpactEventRecord(EvolvingKnowledgeRecord):
@@ -361,6 +386,721 @@ class ExclusionRecord(EvolvingKnowledgeRecord):
     decided_by: Optional[str] = None
 
 
+VIEWPOINT_REVIEW_STATUSES = {
+    "candidate",
+    "ai_consensus",
+    "system_approved",
+    "human_approved",
+    "approved",
+    "rejected",
+    "system_verified",
+}
+
+ViewpointSourceIneligibilityReason = Literal[
+    "external_position",
+    "not_professor_claim",
+    "non_asserted",
+    "unsupported_attribution",
+    "upstream_claim_not_approved",
+    "anchor_invalid",
+]
+ViewpointNoAssertionReason = Literal[
+    "not_a_registerable_proposition",
+    "question_only",
+    "observation_only",
+    "editorial_metadata",
+]
+ViewpointBlockerCode = Literal[
+    "insufficient_source_maturity",
+    "attribution_ambiguous",
+    "subject_mismatch",
+    "object_mismatch",
+    "polarity_mismatch",
+    "population_scope_mismatch",
+    "scripture_scope_mismatch",
+    "temporal_scope_mismatch",
+    "condition_mismatch",
+    "modality_mismatch",
+    "component_locator_required",
+    "approved_negative_duplicate_constraint",
+    "reviewed_material_relation",
+    "different_active_viewpoints",
+    "reviewer_disagreement",
+    "evidence_invalid",
+]
+ViewpointQualityDimensionName = Literal[
+    "provenance_integrity",
+    "source_maturity",
+    "resolution_coverage",
+    "identity_precision",
+    "candidate_recall",
+    "route_fidelity",
+    "temporal_correctness",
+    "consumer_projection_integrity",
+]
+VIEWPOINT_QUALITY_DIMENSIONS = {
+    "provenance_integrity",
+    "source_maturity",
+    "resolution_coverage",
+    "identity_precision",
+    "candidate_recall",
+    "route_fidelity",
+    "temporal_correctness",
+    "consumer_projection_integrity",
+}
+
+
+class StrictViewpointRecord(EvolvingKnowledgeRecord):
+    """A viewpoint master-data record with a closed, versioned contract."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_review_status(self) -> "StrictViewpointRecord":
+        if self.review_status not in VIEWPOINT_REVIEW_STATUSES:
+            raise ValueError(f"unsupported viewpoint review_status: {self.review_status}")
+        if self.revision < 1:
+            raise ValueError("revision must be positive")
+        return self
+
+
+class ViewpointCoverageSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str
+    source_revision_id: str
+    source_sha256: str
+    roles: list[
+        Literal["source_universe", "detailed_extraction", "viewpoint_reviewed"]
+    ] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_roles(self) -> "ViewpointCoverageSource":
+        if len(self.roles) != len(set(self.roles)):
+            raise ValueError("coverage source roles must be unique")
+        if self.roles != sorted(self.roles):
+            raise ValueError("coverage source roles must be sorted")
+        return self
+
+
+class ViewpointCoverageSnapshotRecord(StrictViewpointRecord):
+    coverage_snapshot_id: str
+    schema_version: Literal["wang_viewpoint_coverage_snapshot_v1"] = (
+        "wang_viewpoint_coverage_snapshot_v1"
+    )
+    historical_survey_baseline_id: Optional[str] = None
+    source_universe_manifest_id: str
+    source_universe_manifest_sha256: str
+    sources: list[ViewpointCoverageSource] = Field(min_length=1)
+    sources_sha256: str
+    coverage_status: Literal["partial", "complete"] = "partial"
+    created_at: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "ViewpointCoverageSnapshotRecord":
+        source_ids = [item.source_id for item in self.sources]
+        revisions = [item.source_revision_id for item in self.sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("coverage snapshot contains multiple current revisions for one source")
+        if revisions != sorted(revisions):
+            raise ValueError("coverage snapshot sources must be sorted by source_revision_id")
+        if len(revisions) != len(set(revisions)):
+            raise ValueError("coverage snapshot contains duplicate source revisions")
+        if self.coverage_status == "complete" and any(
+            "viewpoint_reviewed" not in source.roles for source in self.sources
+        ):
+            raise ValueError(
+                "complete coverage requires viewpoint_reviewed for every source"
+            )
+        return self
+
+
+class CanonicalViewpointRecord(StrictViewpointRecord):
+    viewpoint_id: str
+    schema_version: Literal["wang_canonical_viewpoint_v1"] = "wang_canonical_viewpoint_v1"
+    current_revision_id: str
+    identity_status: Literal["active", "redirected", "split", "merged", "retired"] = "active"
+    created_from_candidate_id: str
+    redirect_to_viewpoint_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_redirect(self) -> "CanonicalViewpointRecord":
+        if self.identity_status in {"redirected", "merged"} and not self.redirect_to_viewpoint_id:
+            raise ValueError("redirected or merged viewpoint requires redirect_to_viewpoint_id")
+        if self.redirect_to_viewpoint_id == self.viewpoint_id:
+            raise ValueError("viewpoint cannot redirect to itself")
+        return self
+
+
+class ViewpointPropositionSignature(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    subject: str
+    predicate: str
+    object: str
+    polarity: Literal["affirmed", "denied"]
+    modality: str
+    temporal_scope: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    population_scope: list[str] = Field(default_factory=list)
+
+
+class ViewpointScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scripture_scope: list[str] = Field(default_factory=list)
+    audience_scope: list[str] = Field(default_factory=list)
+    historical_scope: list[str] = Field(default_factory=list)
+
+
+class ViewpointRevisionProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    basis_identity_decision_ids: list[str] = Field(min_length=1)
+    review_artifact_sha256: str
+
+
+class ViewpointRevisionRecord(StrictViewpointRecord):
+    viewpoint_revision_id: str
+    schema_version: Literal["wang_viewpoint_revision_v1"] = "wang_viewpoint_revision_v1"
+    viewpoint_id: str
+    revision_number: int = Field(ge=1)
+    core_proposition: str = Field(min_length=1)
+    proposition_signature: ViewpointPropositionSignature
+    attribution_subject: Literal["professor"] = "professor"
+    representation_kind: Literal["editorial_normalization_of_source_claims"] = (
+        "editorial_normalization_of_source_claims"
+    )
+    not_a_direct_quote: Literal[True] = True
+    scope: ViewpointScope
+    provenance: ViewpointRevisionProvenance
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
+    supersedes_revision_id: Optional[str] = None
+    editorial_aliases: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_revision_number(self) -> "ViewpointRevisionRecord":
+        if self.revision_number != self.revision:
+            raise ValueError("revision_number must equal store revision")
+        if self.review_status in {"system_approved", "human_approved", "approved"}:
+            if not self.approved_at or not self.approved_by:
+                raise ValueError("approved viewpoint revision requires approved_by and approved_at")
+        return self
+
+
+class ViewpointComponentLocator(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    statement_component: str = Field(min_length=1)
+    claim_sha256: str
+    json_pointer: str = Field(min_length=1)
+
+
+class ViewpointClaimLinkRecord(StrictViewpointRecord):
+    viewpoint_claim_link_id: str
+    schema_version: Literal["wang_viewpoint_claim_link_v1"] = "wang_viewpoint_claim_link_v1"
+    viewpoint_id: str
+    validated_against_viewpoint_revision_id: str
+    claim_id: str
+    pinned_claim_revision: int = Field(ge=1)
+    link_type: Literal[
+        "equivalent_full",
+        "equivalent_component",
+        "supports",
+        "extends",
+        "qualifies",
+        "applies",
+        "tension_evidence",
+        "superseding_evidence",
+    ]
+    component_locator: Optional[ViewpointComponentLocator] = None
+    supporting_relation_ids: list[str] = Field(default_factory=list)
+    occurrence_refs: list[str] = Field(default_factory=list)
+    decision_id: str
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_component(self) -> "ViewpointClaimLinkRecord":
+        if self.supporting_relation_ids != sorted(set(self.supporting_relation_ids)):
+            raise ValueError("supporting_relation_ids must be sorted and unique")
+        if self.occurrence_refs != sorted(set(self.occurrence_refs)):
+            raise ValueError("occurrence_refs must be sorted and unique")
+        if self.link_type == "equivalent_component" and not self.component_locator:
+            raise ValueError("equivalent_component requires component_locator")
+        if self.link_type != "equivalent_component" and self.component_locator is not None:
+            raise ValueError("component_locator is only valid for equivalent_component")
+        if self.effective_state == "active" and self.review_status not in {
+            "system_approved",
+            "human_approved",
+            "approved",
+        }:
+            raise ValueError("active Claim link requires an approved review status")
+        return self
+
+
+class ArgumentRouteSignature(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    premise_roles: list[str] = Field(min_length=1)
+    inference_pattern: str = Field(min_length=1)
+    conclusion_viewpoint_id: str
+
+
+class ArgumentRouteRecord(StrictViewpointRecord):
+    argument_route_id: str
+    schema_version: Literal["wang_argument_route_v1"] = "wang_argument_route_v1"
+    conclusion_viewpoint_id: str
+    current_revision_id: str
+    route_status: Literal["active", "redirected", "retired"] = "active"
+    redirect_to_argument_route_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_redirect(self) -> "ArgumentRouteRecord":
+        if self.route_status == "redirected" and not self.redirect_to_argument_route_id:
+            raise ValueError("redirected route requires redirect_to_argument_route_id")
+        if self.redirect_to_argument_route_id == self.argument_route_id:
+            raise ValueError("argument route cannot redirect to itself")
+        return self
+
+
+class ArgumentRouteRevisionRecord(StrictViewpointRecord):
+    argument_route_revision_id: str
+    schema_version: Literal["wang_argument_route_revision_v1"] = "wang_argument_route_revision_v1"
+    argument_route_id: str
+    revision_number: int = Field(ge=1)
+    validated_against_conclusion_viewpoint_revision_id: str
+    route_label: str = Field(min_length=1)
+    route_signature: ArgumentRouteSignature
+    representation_kind: Literal["editorial_normalization_of_attested_arguments"] = (
+        "editorial_normalization_of_attested_arguments"
+    )
+    review_artifact_sha256: str
+    approved_by: Optional[str] = None
+    approved_at: Optional[str] = None
+    supersedes_revision_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> "ArgumentRouteRevisionRecord":
+        if self.revision_number != self.revision:
+            raise ValueError("revision_number must equal store revision")
+        if self.review_status in {"system_approved", "human_approved", "approved"}:
+            if not self.approved_by or not self.approved_at:
+                raise ValueError("approved route revision requires approved_by and approved_at")
+        return self
+
+
+class ArgumentRouteAttestationRecord(StrictViewpointRecord):
+    argument_route_attestation_id: str
+    schema_version: Literal["wang_argument_route_attestation_v1"] = "wang_argument_route_attestation_v1"
+    argument_route_id: str
+    validated_against_argument_route_revision_id: str
+    source_id: str
+    claim_id: str
+    occurrence_ref_id: str
+    ordered_evidence_step_ids: list[str] = Field(min_length=1)
+    terminal_claim_link_id: str
+    completeness: Literal["full", "partial"]
+    scripture_refs: list[str] = Field(default_factory=list)
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_ordered_ids(self) -> "ArgumentRouteAttestationRecord":
+        if len(self.ordered_evidence_step_ids) != len(set(self.ordered_evidence_step_ids)):
+            raise ValueError("ordered_evidence_step_ids must be unique")
+        if self.scripture_refs != sorted(set(self.scripture_refs)):
+            raise ValueError("scripture_refs must be sorted and unique")
+        if self.effective_state == "active" and self.review_status not in {
+            "system_approved", "human_approved", "approved"
+        }:
+            raise ValueError("active route attestation requires approved review status")
+        return self
+
+
+class ViewpointTemporalAssertion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asserted_at: str
+    effective_from: Optional[str] = None
+    correction_evidence_claim_ids: list[str] = Field(default_factory=list)
+
+
+class ViewpointRelationRecord(StrictViewpointRecord):
+    viewpoint_relation_id: str
+    schema_version: Literal["wang_viewpoint_relation_v1"] = "wang_viewpoint_relation_v1"
+    source_viewpoint_id: str
+    target_viewpoint_id: str
+    validated_source_viewpoint_revision_id: str
+    validated_target_viewpoint_revision_id: str
+    relation_type: Literal[
+        "generalizes", "specializes", "entails", "extends", "qualifies",
+        "applies", "tensions_with", "supersedes",
+    ]
+    reason: str = Field(min_length=1)
+    supporting_claim_relation_ids: list[str] = Field(default_factory=list)
+    supporting_claim_ids: list[str] = Field(default_factory=list)
+    temporal_assertion: Optional[ViewpointTemporalAssertion] = None
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+
+    @model_validator(mode="after")
+    def validate_relation(self) -> "ViewpointRelationRecord":
+        if self.source_viewpoint_id == self.target_viewpoint_id:
+            raise ValueError("viewpoint relation endpoints must differ")
+        for field_name in ("supporting_claim_relation_ids", "supporting_claim_ids"):
+            values = getattr(self, field_name)
+            if values != sorted(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        if self.relation_type == "tensions_with" and self.source_viewpoint_id > self.target_viewpoint_id:
+            raise ValueError("tensions_with endpoints must use canonical lexical order")
+        if self.relation_type == "supersedes":
+            if not self.temporal_assertion or not self.temporal_assertion.correction_evidence_claim_ids:
+                raise ValueError("supersedes requires temporal assertion and correction evidence")
+        elif self.temporal_assertion is not None:
+            raise ValueError("temporal_assertion is only valid for supersedes")
+        return self
+
+
+class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
+    identity_candidate_id: str
+    schema_version: Literal["wang_viewpoint_identity_candidate_v1"] = (
+        "wang_viewpoint_identity_candidate_v1"
+    )
+    candidate_claim_ids: list[str] = Field(min_length=1)
+    candidate_viewpoint_ids: list[str] = Field(default_factory=list)
+    seed_relation_ids: list[str] = Field(default_factory=list)
+    proposed_action: Literal["match_existing", "create_new", "defer"]
+    proposed_proposition_signature: Optional[ViewpointPropositionSignature] = None
+    coverage_snapshot_id: str
+    blocker_codes: list[ViewpointBlockerCode] = Field(default_factory=list)
+    generation_fingerprint: str
+    review_status: Literal["candidate"] = "candidate"
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> "ViewpointIdentityCandidateRecord":
+        if self.candidate_claim_ids != sorted(set(self.candidate_claim_ids)):
+            raise ValueError("candidate_claim_ids must be sorted and unique")
+        if self.candidate_viewpoint_ids != sorted(set(self.candidate_viewpoint_ids)):
+            raise ValueError("candidate_viewpoint_ids must be sorted and unique")
+        if self.seed_relation_ids != sorted(set(self.seed_relation_ids)):
+            raise ValueError("seed_relation_ids must be sorted and unique")
+        if self.blocker_codes != sorted(set(self.blocker_codes)):
+            raise ValueError("blocker_codes must be sorted and unique")
+        if self.proposed_action == "match_existing" and not self.candidate_viewpoint_ids:
+            raise ValueError("match_existing requires a candidate viewpoint")
+        if self.blocker_codes and self.proposed_action != "defer":
+            raise ValueError("blocked candidate must be deferred")
+        return self
+
+
+class ViewpointClaimLinkDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str
+    link_type: Literal[
+        "equivalent_full",
+        "equivalent_component",
+        "supports",
+        "extends",
+        "qualifies",
+        "applies",
+        "tension_evidence",
+        "superseding_evidence",
+    ]
+
+
+class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
+    identity_decision_id: str
+    schema_version: Literal["wang_viewpoint_identity_decision_v1"] = (
+        "wang_viewpoint_identity_decision_v1"
+    )
+    identity_candidate_id: str
+    decision: Literal[
+        "match_existing",
+        "create_new",
+        "reject_match",
+        "defer",
+        "merge_identities",
+        "split_identity",
+        "retire_identity",
+    ]
+    resolved_viewpoint_id: Optional[str] = None
+    claim_link_decisions: list[ViewpointClaimLinkDecision] = Field(default_factory=list)
+    reviewer_kind: Literal["system", "human_editor"]
+    reviewer_id: str
+    approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review"]
+    reason: str = Field(min_length=1)
+    input_sha256: str
+    review_artifact_sha256: Optional[str] = None
+    policy_version: Optional[str] = None
+    reviewer_model_ids: list[str] = Field(default_factory=list)
+    semantic_call_artifact_sha256s: list[str] = Field(default_factory=list)
+    created_at: str
+    review_status: Literal[
+        "candidate", "system_approved", "human_approved", "approved", "rejected"
+    ] = "candidate"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "ViewpointIdentityDecisionRecord":
+        link_decisions = [
+            (item.claim_id, item.link_type) for item in self.claim_link_decisions
+        ]
+        if len(link_decisions) != len(set(link_decisions)):
+            raise ValueError("claim_link_decisions must be unique")
+        if self.decision in {"match_existing", "create_new", "merge_identities"}:
+            if not self.resolved_viewpoint_id:
+                raise ValueError(f"{self.decision} requires resolved_viewpoint_id")
+        if self.reviewer_kind == "system" and self.approval_basis == "human_exception_review":
+            raise ValueError("system reviewer cannot claim human_exception_review")
+        if self.reviewer_kind == "human_editor" and self.approval_basis != "human_exception_review":
+            raise ValueError("human editor decision requires human_exception_review basis")
+        if self.reviewer_kind == "system" and self.review_status in {"human_approved", "approved"}:
+            raise ValueError("system reviewer cannot create human approval")
+        if self.reviewer_kind == "human_editor" and self.review_status == "system_approved":
+            raise ValueError("human editor decision cannot be labeled system_approved")
+        if self.reviewer_model_ids != sorted(set(self.reviewer_model_ids)):
+            raise ValueError("reviewer_model_ids must be sorted and unique")
+        if self.semantic_call_artifact_sha256s != sorted(
+            set(self.semantic_call_artifact_sha256s)
+        ):
+            raise ValueError(
+                "semantic_call_artifact_sha256s must be sorted and unique"
+            )
+        if self.review_status == "system_approved":
+            if self.approval_basis != "dual_model_consensus":
+                raise ValueError("system-approved identity requires dual-model consensus")
+            if (
+                not self.review_artifact_sha256
+                or not self.policy_version
+                or len(self.reviewer_model_ids) != 2
+                or len(self.semantic_call_artifact_sha256s) != 2
+            ):
+                raise ValueError(
+                    "system-approved identity requires complete review provenance"
+                )
+        return self
+
+
+class ViewpointResolutionRow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_id: str
+    pinned_claim_revision: int = Field(ge=1)
+    claim_revision_sha256: str
+    processing_status: Literal["resolved", "source_ineligible", "deferred", "unprocessed"]
+    resolution_kind: Optional[
+        Literal[
+            "member_existing",
+            "new_viewpoint_candidate",
+            "related_only",
+            "no_registry_assertion",
+        ]
+    ] = None
+    primary_viewpoint_id: Optional[str] = None
+    new_viewpoint_candidate_id: Optional[str] = None
+    viewpoint_claim_link_id: Optional[str] = None
+    secondary_link_ids: list[str] = Field(default_factory=list)
+    source_eligibility_reason_code: Optional[ViewpointSourceIneligibilityReason] = None
+    resolution_reason_code: Optional[ViewpointNoAssertionReason] = None
+    blocker_codes: list[ViewpointBlockerCode] = Field(default_factory=list)
+    decision_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "ViewpointResolutionRow":
+        if self.secondary_link_ids != sorted(set(self.secondary_link_ids)):
+            raise ValueError("secondary_link_ids must be sorted and unique")
+        if self.blocker_codes != sorted(set(self.blocker_codes)):
+            raise ValueError("blocker_codes must be sorted and unique")
+        identity_fields = (
+            self.primary_viewpoint_id,
+            self.new_viewpoint_candidate_id,
+            self.viewpoint_claim_link_id,
+            self.secondary_link_ids,
+            self.decision_id,
+        )
+        if self.processing_status != "resolved":
+            if self.resolution_kind is not None or any(identity_fields):
+                raise ValueError("non-resolved row cannot carry identity resolution fields")
+            if self.resolution_reason_code is not None:
+                raise ValueError("non-resolved row cannot carry resolution_reason_code")
+            if self.processing_status == "source_ineligible":
+                if not self.source_eligibility_reason_code:
+                    raise ValueError("source_ineligible requires a closed reason code")
+                if self.blocker_codes:
+                    raise ValueError("source_ineligible cannot carry blocker_codes")
+            elif self.processing_status == "deferred":
+                if not self.blocker_codes:
+                    raise ValueError("deferred requires blocker_codes")
+                if self.source_eligibility_reason_code is not None:
+                    raise ValueError("deferred cannot carry source_eligibility_reason_code")
+            elif self.source_eligibility_reason_code is not None or self.blocker_codes:
+                raise ValueError("unprocessed row cannot carry reason codes or blockers")
+            return self
+        if not self.resolution_kind or not self.decision_id:
+            raise ValueError("resolved row requires resolution_kind and decision_id")
+        if self.source_eligibility_reason_code is not None:
+            raise ValueError("resolved row cannot carry source_eligibility_reason_code")
+        if self.resolution_kind == "member_existing":
+            if not self.primary_viewpoint_id or not self.viewpoint_claim_link_id:
+                raise ValueError("member_existing requires viewpoint and claim link")
+        elif self.resolution_kind == "new_viewpoint_candidate":
+            if not self.new_viewpoint_candidate_id:
+                raise ValueError("new_viewpoint_candidate requires candidate id")
+        elif self.resolution_kind == "related_only":
+            if not self.secondary_link_ids:
+                raise ValueError("related_only requires a typed secondary link")
+        elif self.resolution_kind == "no_registry_assertion":
+            if not self.resolution_reason_code:
+                raise ValueError("no_registry_assertion requires a closed reason code")
+        if self.resolution_kind != "no_registry_assertion" and self.resolution_reason_code:
+            raise ValueError(
+                "resolution_reason_code is only valid for no_registry_assertion"
+            )
+        return self
+
+
+class ViewpointResolutionStatistics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_claim_count: int = Field(ge=0)
+    resolved_count: int = Field(ge=0)
+    source_ineligible_count: int = Field(ge=0)
+    deferred_count: int = Field(ge=0)
+    unprocessed_count: int = Field(ge=0)
+
+
+class ViewpointResolutionLedgerRecord(StrictViewpointRecord):
+    resolution_ledger_id: str
+    schema_version: Literal["wang_viewpoint_resolution_ledger_v1"] = (
+        "wang_viewpoint_resolution_ledger_v1"
+    )
+    coverage_snapshot_id: str
+    input_claim_manifest_sha256: str
+    eligibility_policy_version: str
+    candidate_blocking_version: str
+    rows: list[ViewpointResolutionRow] = Field(default_factory=list)
+    statistics: ViewpointResolutionStatistics
+    coverage_status: Literal["partial", "complete"]
+    build_fingerprint_sha256: str
+    artifact_sha256: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_statistics(self) -> "ViewpointResolutionLedgerRecord":
+        keys = [(item.claim_id, item.pinned_claim_revision) for item in self.rows]
+        if keys != sorted(keys):
+            raise ValueError("resolution rows must be sorted by claim id and revision")
+        if len(keys) != len(set(keys)):
+            raise ValueError("resolution ledger contains duplicate Claim revisions")
+        expected = {
+            "input_claim_count": len(self.rows),
+            "resolved_count": sum(item.processing_status == "resolved" for item in self.rows),
+            "source_ineligible_count": sum(
+                item.processing_status == "source_ineligible" for item in self.rows
+            ),
+            "deferred_count": sum(item.processing_status == "deferred" for item in self.rows),
+            "unprocessed_count": sum(item.processing_status == "unprocessed" for item in self.rows),
+        }
+        if self.statistics.model_dump() != expected:
+            raise ValueError("resolution statistics do not match rows")
+        expected_status = "complete" if expected["unprocessed_count"] == 0 else "partial"
+        if self.coverage_status != expected_status:
+            raise ValueError("coverage_status does not match unprocessed rows")
+        return self
+
+
+class ViewpointQualityDimension(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    dimension: ViewpointQualityDimensionName
+    applicable: bool
+    minimum_policy: str
+    observed: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pass", "fail", "not_applicable"]
+    evidence_artifact_sha256s: list[str] = Field(default_factory=list)
+    reason_not_applicable: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_applicability(self) -> "ViewpointQualityDimension":
+        if self.applicable and self.status == "not_applicable":
+            raise ValueError("applicable dimension needs pass or fail")
+        if not self.applicable:
+            if self.status != "not_applicable" or not self.reason_not_applicable:
+                raise ValueError("non-applicable dimension needs status and reason")
+        return self
+
+
+class ViewpointQualityFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    dimension: ViewpointQualityDimensionName
+    record_ids: list[str] = Field(default_factory=list)
+    detail: str
+
+
+class ViewpointQualityReportRecord(StrictViewpointRecord):
+    quality_report_id: str
+    schema_version: Literal["wang_viewpoint_quality_report_v1"] = (
+        "wang_viewpoint_quality_report_v1"
+    )
+    scope_kind: Literal["identity_decision", "registry_snapshot", "consumer_projection"]
+    scope_ids: list[str] = Field(min_length=1)
+    coverage_snapshot_id: str
+    resolution_ledger_id: str
+    input_artifact_sha256s: list[str] = Field(min_length=1)
+    dimensions: list[ViewpointQualityDimension] = Field(min_length=1)
+    hard_failures: list[ViewpointQualityFailure] = Field(default_factory=list)
+    eligibility_decision: Literal["pass", "fail", "partial_internal_only"]
+    validator_version: str
+    build_fingerprint_sha256: str
+    artifact_sha256: str
+    review_status: Literal["system_verified"] = "system_verified"
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "ViewpointQualityReportRecord":
+        if self.scope_ids != sorted(set(self.scope_ids)):
+            raise ValueError("quality report scope_ids must be sorted and unique")
+        if self.input_artifact_sha256s != sorted(set(self.input_artifact_sha256s)):
+            raise ValueError("quality report input artifact SHAs must be sorted and unique")
+        names = [item.dimension for item in self.dimensions]
+        if len(names) != len(set(names)):
+            raise ValueError("quality report contains duplicate dimensions")
+        if set(names) != VIEWPOINT_QUALITY_DIMENSIONS:
+            missing = sorted(VIEWPOINT_QUALITY_DIMENSIONS - set(names))
+            extra = sorted(set(names) - VIEWPOINT_QUALITY_DIMENSIONS)
+            raise ValueError(
+                f"quality report must contain every dimension; missing={missing}, extra={extra}"
+            )
+        dimension_status = {item.dimension: item.status for item in self.dimensions}
+        invalid_failures = sorted(
+            {
+                failure.dimension
+                for failure in self.hard_failures
+                if dimension_status[failure.dimension] != "fail"
+            }
+        )
+        if invalid_failures:
+            raise ValueError(
+                "hard failures require their dimensions to fail: "
+                f"{invalid_failures}"
+            )
+        failed = bool(self.hard_failures) or any(
+            item.applicable and item.status == "fail" for item in self.dimensions
+        )
+        if failed and self.eligibility_decision != "fail":
+            raise ValueError("quality failures require eligibility_decision=fail")
+        if not failed and self.eligibility_decision == "fail":
+            raise ValueError(
+                "eligibility_decision=fail requires a failed dimension or hard failure"
+            )
+        if self.eligibility_decision == "pass" and any(
+            item.applicable and item.status != "pass" for item in self.dimensions
+        ):
+            raise ValueError("pass requires every applicable dimension to pass")
+        return self
+
+
 class KnowledgePackageManifest(BaseModel):
     schema_version: str = "canonical_knowledge_package_manifest_v1"
     package_id: str
@@ -395,4 +1135,31 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "composition_decisions": (CompositionDecisionRecord, "decision_id"),
     "editorial_checks": (EditorialCheckRecord, "check_id"),
     "tensions": (TensionRecord, "tension_id"),
+    "viewpoint_coverage_snapshots": (
+        ViewpointCoverageSnapshotRecord,
+        "coverage_snapshot_id",
+    ),
+    "canonical_viewpoints": (CanonicalViewpointRecord, "viewpoint_id"),
+    "viewpoint_revisions": (ViewpointRevisionRecord, "viewpoint_revision_id"),
+    "viewpoint_claim_links": (ViewpointClaimLinkRecord, "viewpoint_claim_link_id"),
+    "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
+    "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),
+    "argument_route_attestations": (ArgumentRouteAttestationRecord, "argument_route_attestation_id"),
+    "viewpoint_relations": (ViewpointRelationRecord, "viewpoint_relation_id"),
+    "viewpoint_identity_candidates": (
+        ViewpointIdentityCandidateRecord,
+        "identity_candidate_id",
+    ),
+    "viewpoint_identity_decisions": (
+        ViewpointIdentityDecisionRecord,
+        "identity_decision_id",
+    ),
+    "viewpoint_resolution_ledgers": (
+        ViewpointResolutionLedgerRecord,
+        "resolution_ledger_id",
+    ),
+    "viewpoint_quality_reports": (
+        ViewpointQualityReportRecord,
+        "quality_report_id",
+    ),
 }

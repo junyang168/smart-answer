@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, FileCheck2, FileText, HeartPulse, Highlighter, LayoutDashboard, Network } from "lucide-react";
+import { Activity, DatabaseZap, FileCheck2, FileText, HeartPulse, Highlighter, LayoutDashboard, Network } from "lucide-react";
 
 const sections = [
   { href: "/admin/wang", label: "總覽", icon: LayoutDashboard, exact: true },
@@ -11,6 +11,7 @@ const sections = [
   { href: "/admin/wang/matthew-progress", label: "馬太進度", icon: Activity },
   { href: "/admin/wang/argument-layer", label: "論證層", icon: Network },
   { href: "/admin/wang/source-coverage", label: "來源覆蓋", icon: Highlighter },
+  { href: "/admin/wang/viewpoints", label: "观点主数据", icon: DatabaseZap },
   { href: "/admin/canonical-repository", label: "出版單元", icon: FileCheck2 },
 ];
 

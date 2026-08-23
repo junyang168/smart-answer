@@ -27,6 +27,8 @@ EDGE_COLLECTIONS = {
     "knowledge_relations",
     "claim_relations",
     "claim_relation_constraints",
+    "viewpoint_claim_links",
+    "viewpoint_relations",
 }
 REVIEW_FIELDS = {
     "review_status",
@@ -55,6 +57,18 @@ SOURCE_KEYS = {
     "editorial_syntheses": "cross_source_syntheses",
     "editorial_checks": "editorial_checks",
     "tensions": "tensions",
+    "viewpoint_coverage_snapshots": "viewpoint_coverage_snapshots",
+    "canonical_viewpoints": "canonical_viewpoints",
+    "viewpoint_revisions": "viewpoint_revisions",
+    "viewpoint_claim_links": "viewpoint_claim_links",
+    "argument_routes": "argument_routes",
+    "argument_route_revisions": "argument_route_revisions",
+    "argument_route_attestations": "argument_route_attestations",
+    "viewpoint_relations": "viewpoint_relations",
+    "viewpoint_identity_candidates": "viewpoint_identity_candidates",
+    "viewpoint_identity_decisions": "viewpoint_identity_decisions",
+    "viewpoint_resolution_ledgers": "viewpoint_resolution_ledgers",
+    "viewpoint_quality_reports": "viewpoint_quality_reports",
 }
 
 
@@ -518,6 +532,13 @@ def build_change_set_plan(
     source_kind: str = "knowledge_package",
 ) -> ChangeSetPlan:
     normalized, stated = _normalize_records(package)
+    # The generic JSONB tables deliberately accept new collections without a
+    # DDL migration, but viewpoint master data has cross-record invariants the
+    # shape validator cannot see.  Refuse the ChangeSet before it receives an
+    # id or touches PostgreSQL.
+    from .viewpoint_foundation import validate_foundation_change_set
+
+    validate_foundation_change_set(normalized, existing)
     operations: list[ChangeOperation] = []
     unchanged = 0
     for collection in sorted(normalized):
@@ -828,6 +849,61 @@ class PostgresKnowledgeStore:
             row = cursor.fetchone()
         return dict(row[0]) if row else None
 
+    def list_records(self, collection: str) -> list[dict[str, Any]]:
+        """Read the active collection in stable object-id order."""
+
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT payload FROM wang_knowledge.objects
+                   WHERE collection=%s AND retired_at IS NULL ORDER BY object_id""",
+                (collection,),
+            )
+            rows = cursor.fetchall()
+        return [dict(row[0]) for row in rows]
+
+    def list_change_set_object_ids(
+        self, change_set_ids: Sequence[str], collection: str
+    ) -> list[str]:
+        """Return the exact object denominator written by explicit ChangeSets."""
+
+        if not change_set_ids:
+            return []
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT DISTINCT object_id FROM wang_knowledge.change_operations
+                   WHERE change_set_id = ANY(%s) AND collection=%s
+                     AND operation IN ('create', 'update', 'revive')
+                   ORDER BY object_id""",
+                (list(change_set_ids), collection),
+            )
+            rows = cursor.fetchall()
+        return [str(row[0]) for row in rows]
+
+    def list_change_set_states(
+        self, change_set_ids: Sequence[str]
+    ) -> list[dict[str, str]]:
+        """Return immutable identity and terminal state for an explicit cohort."""
+
+        if not change_set_ids:
+            return []
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT change_set_id, fingerprint_sha256, status
+                   FROM wang_knowledge.change_sets
+                   WHERE change_set_id = ANY(%s)
+                   ORDER BY change_set_id""",
+                (list(change_set_ids),),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "change_set_id": str(row[0]),
+                "fingerprint_sha256": str(row[1]),
+                "status": str(row[2]),
+            }
+            for row in rows
+        ]
+
     def get_plan_document(self, plan_id: str) -> Optional[dict[str, Any]]:
         """A CompositionPlan with its decisions inlined.
 
@@ -913,6 +989,18 @@ class PostgresKnowledgeStore:
     def _edge_values(collection: str, payload: Mapping[str, Any]) -> tuple[str, str, str]:
         if collection == "claim_relation_constraints":
             return str(payload["source_id"]), str(payload["target_id"]), "forbids"
+        if collection == "viewpoint_claim_links":
+            return (
+                str(payload["viewpoint_id"]),
+                str(payload["claim_id"]),
+                str(payload["link_type"]),
+            )
+        if collection == "viewpoint_relations":
+            return (
+                str(payload["source_viewpoint_id"]),
+                str(payload["target_viewpoint_id"]),
+                str(payload["relation_type"]),
+            )
         return (
             str(payload.get("from_id") or payload.get("source_id") or payload.get("from_claim_id")),
             str(payload.get("to_id") or payload.get("target_id") or payload.get("to_claim_id")),
@@ -942,7 +1030,7 @@ class PostgresKnowledgeStore:
                         canonical_json(metadata or {}),
                     ),
                 )
-                changed_claims: list[tuple[str, int, int]] = []
+                changed_records: list[tuple[str, str, int, int]] = []
                 for index, operation in enumerate(plan.operations):
                     cursor.execute(
                         """SELECT revision, content_sha256, retired_at FROM wang_knowledge.objects
@@ -959,6 +1047,11 @@ class PostgresKnowledgeStore:
                         )
                     if operation.operation in {"retire", "revive"}:
                         self._set_retirement(cursor, plan, index, operation)
+                        if operation.before_revision is not None:
+                            changed_records.append((
+                                operation.collection, operation.object_id,
+                                operation.before_revision, operation.after_revision,
+                            ))
                         continue
                     payload = dict(operation.payload)
                     payload["revision"] = operation.after_revision
@@ -1033,12 +1126,13 @@ class PostgresKnowledgeStore:
                                 canonical_json(payload),
                             ),
                         )
-                    if operation.collection == "claims" and operation.operation == "update":
-                        changed_claims.append(
-                            (operation.object_id, operation.before_revision or 0, operation.after_revision)
+                    if operation.operation == "update":
+                        changed_records.append(
+                            (operation.collection, operation.object_id,
+                             operation.before_revision or 0, operation.after_revision)
                         )
 
-                invalidated = self._invalidate_dependencies(cursor, plan, changed_claims, len(plan.operations))
+                invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations))
                 summary["invalidated_dependencies"] = invalidated
                 cursor.execute(
                     """UPDATE wang_knowledge.change_sets
@@ -1108,19 +1202,26 @@ class PostgresKnowledgeStore:
         self,
         cursor: Any,
         plan: ChangeSetPlan,
-        changed_claims: list[tuple[str, int, int]],
+        changed_records: list[tuple[str, str, int, int]],
         operation_offset: int,
     ) -> int:
         count = 0
-        for claim_id, from_revision, to_revision in changed_claims:
+        for changed_collection, changed_id, from_revision, to_revision in changed_records:
+            manifest_ref = canonical_json([{
+                "collection": changed_collection,
+                "record_id": changed_id,
+            }])
             cursor.execute(
                 """SELECT object_id, revision, payload
                    FROM wang_knowledge.objects
                    WHERE collection='product_dependencies'
                      AND retired_at IS NULL
-                     AND payload->>'claim_id'=%s
+                     AND (
+                       (%s='claims' AND payload->>'claim_id'=%s)
+                       OR COALESCE(payload->'dependency_manifest','[]'::jsonb) @> %s::jsonb
+                     )
                      AND COALESCE(payload->>'status','current')='current'""",
-                (claim_id,),
+                (changed_collection, changed_id, manifest_ref),
             )
             rows = cursor.fetchall()
             affected_ids: list[str] = []
@@ -1155,17 +1256,20 @@ class PostgresKnowledgeStore:
                     (
                         plan.change_set_id, operation_offset + count, dependency_id,
                         content_sha, revision, next_revision,
-                        canonical_json({"changed_claim_id": claim_id}),
+                        canonical_json({
+                            "changed_collection": changed_collection,
+                            "changed_record_id": changed_id,
+                        }),
                     ),
                 )
                 affected_ids.append(dependency_id)
                 count += 1
             if affected_ids:
-                event_id = f"IMPACT-{plan.change_set_id}-{claim_id}"
+                event_id = f"IMPACT-{plan.change_set_id}-{changed_collection}-{changed_id}"
                 event = {
                     "impact_event_id": event_id,
-                    "changed_record_type": "claims",
-                    "changed_record_id": claim_id,
+                    "changed_record_type": changed_collection,
+                    "changed_record_id": changed_id,
                     "from_revision": from_revision,
                     "to_revision": to_revision,
                     "affected_dependency_ids": affected_ids,
@@ -1369,7 +1473,7 @@ class PostgresKnowledgeStore:
                     ignored_keys=(),
                 )
                 invalidated = self._invalidate_dependencies(
-                    cursor, plan, [(object_id, int(revision), updated["revision"])], 1
+                    cursor, plan, [("claims", object_id, int(revision), updated["revision"])], 1
                 )
                 if invalidated:
                     summary["invalidated_dependencies"] = invalidated

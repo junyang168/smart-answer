@@ -2,6 +2,8 @@
 
 > 状态：产品目标与设计约束。本文定义“整理王教授学术思想”如何使用共享知识模型；它不是对教授思想内容的预设分类，也不表示当前候选资料已经全部通过人工审核。
 
+本 use case 的观点身份、跨讲 membership、ArgumentRoute、覆盖披露、时间 revision 与产品消费规则，以 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md) 为 architecture authority。
+
 ## 一、目标
 
 本 use case 的目的不是把专题文章汇编成一本书，也不是替教授制造一套整齐、封闭的神学体系。它要根据王守仁教授两百多篇讲道、录音、逐字稿和笔记，逐步重建：
@@ -51,7 +53,9 @@ flowchart LR
 |---|---|
 | 教授在哪里说过？ | `SourceDocument`、`SourceFragment` |
 | 教授主张什么？ | `Claim` |
+| 哪些来源主张属于同一个稳定观点？ | `CanonicalViewpoint`、`ViewpointClaimLink` |
 | 他怎样得出结论？ | `Observation`、`EvidenceStep`、`KnowledgeRelation` |
+| 同一结论有哪些不同论证路线？ | `ArgumentRoute`、source-local `RouteAttestation` |
 | 他回答什么问题？ | `Question`、`answers` relation |
 | 他反对什么？ | `PositionNode`、`ClaimRelation: refutes` |
 | 不同主张怎样相连？ | `ClaimRelation` |
@@ -60,9 +64,9 @@ flowchart LR
 | 资料应该进入哪类成果？ | `KnowledgeRoute` |
 | 学术思想总论怎样编排？ | `CompositionPlan`、`CompositionDecision` |
 
-目前正式 canonical store 已能保存表中前述共享对象、编辑综合、知识去向与篇章计划。`ThoughtMapRevision` 的完整审核和 active-build 流程仍属于后续实现。
+目前正式 canonical store 已能保存来源局部共享对象、编辑综合、知识去向与篇章计划；Canonical Viewpoint Registry 的正式 schema、审核和 active-build 流程仍属于后续实现。它完成后，`ThoughtMapRevision` 应消费 SHA-bound `ViewpointKnowledgeProjection`，而不是从 EditorialSynthesis 标题反推观点身份。
 
-若实际编辑工作证明仅靠 `EditorialSynthesis` 和 `ThoughtMapRevision` 难以表达一个经过审核的学术思想全貌，再考虑增加 `ScholarlyThoughtProfile`。在此之前，它只是候选产品级对象，不应为了名称完整而过早冻结 schema。
+`CanonicalViewpoint` 解决观点身份，`ArgumentRoute` 解决论证路径，`EditorialSynthesis` 解决编辑叙述，`ThoughtMapRevision` 解决思想地图的产品版本。若这些对象完成真实实现与消费验证后，仍不足以表达一个经过审核的学术思想全貌，再考虑增加 `ScholarlyThoughtProfile`；在此之前不为名称完整而冻结新的产品级 schema。
 
 ## 五、归属与忠实性
 

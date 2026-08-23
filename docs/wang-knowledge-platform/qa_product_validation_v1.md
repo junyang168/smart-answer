@@ -6,6 +6,8 @@
 
 「獨立」指產品入口、問題組織與回答體例獨立；不表示另建一套知識。答案仍只能引用共享知識模型中的 `Question`、`Claim`、`Relation`、`Position`、`SourceFragment` 和經過核查的來源錨點。
 
+问答若聚合跨讲重复观点、按不同论证路线展开，或比较教授不同时期的教导，必须遵守 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)。QA runner 不读取该完整 Markdown，而只消费针对当前问题编译并 SHA 绑定的 `ViewpointKnowledgeProjection`；没有该 projection 时，答案继续使用来源局部 Claim，不得自行发明 canonical viewpoint。
+
 ```mermaid
 flowchart LR
     U["讀者的具體問題"] --> Q["獨立問答產品"]
@@ -46,6 +48,7 @@ flowchart LR
 - `related_product_plan_ids`：延伸阅读入口，不是答案来源；
 - `limitation`：当前语料范围和答案边界；
 - 所有回答主张至少要有一条合格、可核查的教授来源，否则显示质量警告。
+- 使用 canonical viewpoint 时，答案必须保存 `viewpoint_revision_id`、`viewpoint_registry_snapshot_id`、`coverage_snapshot_id`、实际 Claim/Evidence/Citation dependencies 和 projection SHA；公开归属只接受 `public_attribution_eligible` projection。
 
 ## 四、第一批验证案例
 
