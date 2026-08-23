@@ -124,6 +124,26 @@ class AtomicDecompositionProposal(StrictUnitModel):
         return self
 
 
+class AtomicDecompositionBatchResponse(StrictUnitModel):
+    schema_version: Literal["wang_viewpoint_atomic_decomposition_batch_response_v1"] = (
+        "wang_viewpoint_atomic_decomposition_batch_response_v1"
+    )
+    parent_packet_sha256: str
+    proposals: list[AtomicDecompositionProposal] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_response(self) -> "AtomicDecompositionBatchResponse":
+        claim_ids = [item.claim_id for item in self.proposals]
+        if claim_ids != sorted(set(claim_ids)):
+            raise ValueError("atomic batch proposals must be Claim-sorted and unique")
+        if any(
+            item.parent_packet_sha256 != self.parent_packet_sha256
+            for item in self.proposals
+        ):
+            raise ValueError("atomic batch contains a foreign parent packet")
+        return self
+
+
 class PropositionUnitCandidate(StrictUnitModel):
     proposition_unit_id: str
     parent_claim_id: str

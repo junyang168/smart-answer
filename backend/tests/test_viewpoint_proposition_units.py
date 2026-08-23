@@ -4,10 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from backend.api.canonical_repository.viewpoint_proposition_units import (
+    AtomicDecompositionBatchResponse,
     AtomicDecompositionProposal,
     build_claim_atomic_decomposition,
 )
 from backend.tests.test_viewpoint_resolution import _fixture
+from backend.pipeline.matthew16_atomic_proposition_runner import (
+    _canonicalize_set_fields,
+)
 
 
 def _whole_claim_proposal(packet, claim):
@@ -122,3 +126,47 @@ def test_model_cannot_add_truth_conditions():
     raw["units"][0]["added_truth_conditions"] = ["教授未断言的因果关系"]
     with pytest.raises(ValidationError, match="may not add truth conditions"):
         AtomicDecompositionProposal.model_validate(raw)
+
+
+def test_atomic_batch_requires_sorted_unique_claims():
+    packet, _ = _fixture(source_count=2)
+    first = packet.claims[0]
+    second = packet.claims[1]
+    raw = {
+        "parent_packet_sha256": packet.packet_sha256,
+        "proposals": [
+            _whole_claim_proposal(packet, second),
+            _whole_claim_proposal(packet, first),
+        ],
+    }
+    with pytest.raises(ValidationError, match="Claim-sorted"):
+        AtomicDecompositionBatchResponse.model_validate(raw)
+
+
+def test_atomic_runner_only_canonicalizes_exact_set_duplicates():
+    raw = {
+        "proposals": [
+            {
+                "claim_id": "C1",
+                "units": [
+                    {
+                        "local_unit_id": "U001",
+                        "claim_statement_spans": [],
+                        "evidence_references": [
+                            {"evidence_step_id": "E2", "source_fragment_id": "F2"},
+                            {"evidence_step_id": "E1", "source_fragment_id": "F1"},
+                            {"evidence_step_id": "E1", "source_fragment_id": "F1"},
+                        ],
+                    }
+                ],
+                "coverage_segments": [],
+            }
+        ]
+    }
+    normalized, changes = _canonicalize_set_fields(raw)
+    assert normalized["proposals"][0]["units"][0]["evidence_references"] == [
+        {"evidence_step_id": "E1", "source_fragment_id": "F1"},
+        {"evidence_step_id": "E2", "source_fragment_id": "F2"},
+    ]
+    assert changes[0]["operation"] == "exact_deduplicate_and_sort"
+    assert raw["proposals"][0]["units"][0]["evidence_references"][0]["evidence_step_id"] == "E2"
