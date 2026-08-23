@@ -24,6 +24,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
 )
 from backend.api.canonical_repository.viewpoint_resolution import (
     CallableReviewerAdapter,
+    ReviewClaim,
     SemanticAssessment,
     StructuredJsonReviewerAdapter,
     ViewpointResolutionError,
@@ -32,6 +33,36 @@ from backend.api.canonical_repository.viewpoint_resolution import (
     build_identity_review_packet,
     run_viewpoint_resolution,
 )
+
+
+def test_review_claim_allows_one_evidence_step_to_bind_multiple_fragments():
+    evidence = [
+        {
+            "evidence_step_id": "E1",
+            "source_fragment_id": fragment_id,
+            "source_id": "S1",
+            "evidence_statement": "同一推理步骤由连续片段支持",
+            "verbatim_excerpt": fragment_id,
+            "citation_id": "",
+            "citation_revision": 1,
+            "citation_status": "unresolved",
+            "source_sha256": "source-sha",
+            "support_eligibility": "eligible_candidate",
+            "anchor_state": "source_version_bound",
+            "valid_for_identity_review": False,
+        }
+        for fragment_id in ("F1", "F2")
+    ]
+    claim = ReviewClaim(
+        claim_id="C1",
+        pinned_claim_revision=1,
+        claim_revision_sha256="claim-sha",
+        source_id="S1",
+        statement="观点",
+        review_status="candidate",
+        evidence=evidence,
+    )
+    assert [item.source_fragment_id for item in claim.evidence] == ["F1", "F2"]
 
 
 def _source(source_id: str) -> dict[str, Any]:

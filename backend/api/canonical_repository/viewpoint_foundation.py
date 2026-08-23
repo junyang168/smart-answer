@@ -561,6 +561,7 @@ def build_foundation_quality_report(
     approved_source_statuses: frozenset[str] = frozenset(
         {"approved", "system_approved", "human_approved"}
     ),
+    source_eligibility_attestations: Mapping[str, str] | None = None,
 ) -> ViewpointQualityReportRecord:
     """Generate the foundation's non-compensating identity-decision quality report."""
 
@@ -575,6 +576,7 @@ def build_foundation_quality_report(
     fragment_by_id = {
         str(item["fragment_id"]): dict(item) for item in source_fragments
     }
+    eligibility_attestations = dict(source_eligibility_attestations or {})
     failures: list[ViewpointQualityFailure] = []
     dimensions: list[ViewpointQualityDimension] = []
 
@@ -589,32 +591,51 @@ def build_foundation_quality_report(
         ):
             provenance_bad.append(row.claim_id)
         elif row.processing_status != "source_ineligible":
+            attested = bool(eligibility_attestations.get(row.claim_id))
             usable_evidence = False
             for evidence_id in claim.evidence_step_ids:
                 step = evidence_by_id.get(evidence_id)
-                if not step or step.get("support_eligibility") not in {
-                    "eligible",
-                    "eligible_with_label",
-                }:
+                allowed_support = {"eligible", "eligible_with_label"} | (
+                    {"eligible_candidate"} if attested else set()
+                )
+                if not step or step.get("support_eligibility") not in allowed_support:
                     continue
-                citation_ids = set(map(str, step.get("citation_ids") or []))
                 bound = [
                     fragment_by_id.get(value) for value in evidence_fragment_ids(step)
                 ]
-                if not citation_ids or not bound or any(
-                    not fragment
-                    or fragment.get("anchor_state")
-                    not in {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
-                    or not fragment.get("source_sha256")
-                    or str(fragment.get("citation_id") or "") not in citation_ids
-                    for fragment in bound
-                ):
-                    continue
+                if attested:
+                    if (
+                        step.get("support_eligibility")
+                        not in {"eligible", "eligible_candidate", "eligible_with_label"}
+                        or not bound
+                        or any(
+                            not fragment
+                            or fragment.get("anchor_state")
+                            not in {
+                                "source_version_bound", "canonical_citation_bound",
+                                "verified", "valid",
+                            }
+                            or not fragment.get("source_sha256")
+                            for fragment in bound
+                        )
+                    ):
+                        continue
+                else:
+                    citation_ids = set(map(str, step.get("citation_ids") or []))
+                    if not citation_ids or not bound or any(
+                        not fragment
+                        or fragment.get("anchor_state")
+                        not in {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
+                        or not fragment.get("source_sha256")
+                        or str(fragment.get("citation_id") or "") not in citation_ids
+                        for fragment in bound
+                    ):
+                        continue
                 usable_evidence = True
                 break
             if not usable_evidence:
                 provenance_bad.append(row.claim_id)
-            if claim.review_status not in approved_source_statuses:
+            if claim.review_status not in approved_source_statuses and not attested:
                 maturity_bad.append(row.claim_id)
     if provenance_bad:
         failures.append(
@@ -749,6 +770,7 @@ def build_foundation_quality_report(
             coverage.sources_sha256,
             resolution.artifact_sha256,
             candidate_regression_artifact_sha256,
+            *eligibility_attestations.values(),
         }
     )
     build_payload = {

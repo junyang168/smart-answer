@@ -713,6 +713,37 @@ identity review 之前禁止按 `claim_type`、主题或表面 discourse role �
 
 真实执行必须把 backend 与 generation config 写入 plan 和 generation fingerprint。当前 OpenAI 侧内容调用使用 `codex_subscription`：子进程必须移除 API billing credentials，并验证本地登录为 ChatGPT；验证失败时 fail closed，不能静默回退到 OpenAI API。独立 blind reviewer 仍需来自不同模型/provider，避免同源自审。
 
+2026-08-22 的 bootstrap 实跑进一步确定了 identity review 的输入契约：group discovery 的 791 个 packet-local proposal 必须先按 `relation_kind + participant Claim/role` 去重为 750 个不可传递的 `IdentityReviewHypothesis`；41 个 overlapping-packet 重复只增加 provenance，不能增加调用，也不能把相交 hypothesis 编成连通分量。每个 hypothesis 恰好进入一个 SHA-bound evidence packet 或一个 closed planning exception。当前 pinned cohort 编译出 684 个 packet 与 66 个 `stale_dependency` exception；后者不得读取当前 DB revision 代替 pinned Claim。
+
+上游 extraction 固定输出 `candidate / eligible_candidate`，即使 independent review 与 correction 已完成也不会伪装成人工批准。Viewpoint 层不得批量改写这些状态；它应编译 consumer-specific `ViewpointSourceEligibilityAttestation`，逐 Claim 绑定 extraction model/backend/fingerprint、独立 reviewer/provider/fingerprint、review input SHA、reviewed-candidate SHA、已应用 correction、Claim revision SHA 及 EvidenceStep/SourceFragment dependency SHA。attestation 只授予 `viewpoint_identity_review` 输入资格，明确保存 `approval_status=not_human_approved`，不创建 master record，也不绕过后续 identity dual review。当前 1,212-Claim manifest 中 1,104 条可由现有 artifact 自动 attested；108 条保留 closed exception（50 stale、31 invalid evidence、16 missing reviewed candidate、6 human review required、5 unapplied change）。
+
+Identity evidence gate 接受两条可审计 provenance path：已批准 Citation，或有效的 source eligibility attestation。两者都必须继续满足 source revision、verbatim fragment、source-locality、attribution 与 Claim SHA 验证；attestation 不能替 identity reviewer 判断 proposition equivalence。接入后，750 个 hypothesis 中 613 个可送 semantic review，137 个被机械门禁阻断。送审资格不等于自动批准资格：其中 314 个只有单一 source，仍会在 `two_independent_sources` risk gate 被阻断。
+
+全量前固定运行 24-item stratified calibration，覆盖 possible-equivalent/component/tension、single/multi-source、pair/multi-member 共 12 个 strata，各 2 项。预算为 24 次 proposal + 24 次 independent blind review，只有存在 delta 才增加 adjudication，最大 72 次调用。OpenAI proposal/delta 使用 Codex Subscription；blind review 使用已验证为 `claude.ai` subscription 的 Claude Code，并从子进程移除 API billing credentials。API credit failure不能触发静默 fallback。模型 raw output 可以做无语义的 canonical list sorting；任何 semantic repair 都必须生成新 prompt/fingerprint，invalid raw 与 recovery artifact 均保留。
+
+该 24-item calibration 已完成：72 次调用、24/24 出现 semantic delta、152 个 delta fields、member-role exact agreement 8/24、action agreement 17/24、两者共同构成的 identity-boundary agreement 8/24；没有任何样本得到两位 reviewer 对全部 participants 均为 `equivalent_full` 的一致判断，delta adjudication 后仍保留 22 条 unresolved findings。正式 `calibration-report` 因此写入 `full_rollout_recommended=false`；不得把当前 combined schema 扩到其余 613 个 eligible hypothesis。
+
+实跑表明必须把 identity review 再拆成两个状态机。第一阶段是 closed whole-hypothesis boundary classification：两位 reviewer 只能对同一 participant set 判断 `equivalent_all / component / tension / related_only / mixed / unknown`，不能一边否定整组等价、一边各自选择不同 subset 创建 viewpoint，也不生成 canonical wording、正式 proposition signature 或 scope。若输出 `mixed`，只能返回可机械验证的 partition proposal，partition 会成为下一轮新的 immutable hypothesis，不能在原 hypothesis 内直接批准。第二阶段只接收第一阶段双审一致且所有成员边界明确的 candidate，再独立生成 canonical wording/signature/scope 并走现有 risk gate。boundary disagreement 与 synthesis wording delta 必须分别计量；不能让措辞差异把边界一致率伪装成失败，也不能让措辞一致掩盖成员边界冲突。
+
+边界判断以质量而非最低调用成本为优化目标。正式 calibration 与 rollout 固定使用当前可用的高能力、异源 reviewer（OpenAI 侧 `gpt-5.6-sol`，独立侧 Claude Opus 5）及 `high` reasoning；降级模型或 reasoning effort 必须产生新 plan/fingerprint 并重新校准，不能静默复用高能力结果。成本控制来自 stratified sample、immutable cache、bounded packet 与 fail-closed early stop，不来自降低 reviewer 能力。2026-08-22 的前三项新 schema smoke 在 medium 配置下仅 1/3 boundary agreement；相同样本切换为 `gpt-5.6-sol high + Claude Opus 5 high` 后达到 3/3（2 component、1 tension），且仍为零 master-data mutation。该小样本只证明可以继续 24-item calibration，不证明可全量运行。
+
+若任一 reviewer 输出 `unknown`，或双审分歧理由可机械归因为现有 excerpt 无法确定所指、范围、条件或上下文，系统不得要求模型凭常识再猜，也不得立即转人工。它应沿当前 EvidenceStep 绑定的 SourceFragment 在同一 source revision 内编译一次 `context-expanded packet`：只取得每个锚点前后有界段落，保存原 source SHA、paragraph/fragment ids、窗口大小、扩展原因、父 packet SHA 与新 packet SHA，原文逐字保留且不得跨来源补料。两位 reviewer 对新 packet 再独立判断；每个 hypothesis 最多一次自动扩展，扩展后仍为 `unknown` 或分歧才进入 exception queue。context expansion 是 evidence retrieval，不改变 hypothesis participant set，也不算 identity evidence 或 approval。
+
+第一阶段的 `component` 必须按 proposition containment 严格解释：至少一个 participant 的 statement/evidence 明确断言整体命题，另一个 participant 的完整断言是其中可识别的子命题。不得通过想象一个未被任何 participant 断言的上位主题，把一般原则与应用、两个平行实例、证据与推论、原因与结果或互补神学面向归成 `component`；这些默认为 `related_only`。若只有 participant 子集满足严格 equivalence 或 containment，完整组应为 `mixed`，以可机械验证的子组及 unassigned 覆盖原集合。24-item high/Opus calibration 的首轮闭集结果为 14/24 exact boundary agreement，10 个分歧中 8 个涉及 reviewer 对 `component` 使用了不同宽度；因此必须先按上述定义只复测分歧集，不能直接扩到 eligible corpus。
+
+严格定义复测使前述 10 个分歧中的 8 个收敛为 `related_only`，但两项在一次正确绑定 source revision 的 context expansion 后仍不一致，故进入 exception queue；不能通过追加 reviewer 回合追求表面 24/24。更关键的是，因为 component 定义是在看到该 24-item set 后调整的，必须使用完全不重叠的 holdout。新的 12-item holdout 仍覆盖 possible-equivalent/component/tension、single/multi-source、pair/multi-member 共 12 strata，各 1 项，使用 `gpt-5.6-sol high + Claude Opus 5 high`。真实结果只有 6/12 exact agreement（relation label agreement 也是 6/12），其中 5 个 disagreement 涉及 composite Claim 的 containment 或 partition；双方对 `equivalent_all` 的一致正例仍为 0。SHA-bound 正式 report `d8a4613eabc7871e064634cc77cef1284371eb4b141be6a9cab50ec98e8dbc85` 因此固定 `full_rollout_recommended=false`，不得执行其余 eligible hypotheses。
+
+该 holdout 否证的不是“高能力模型能否理解中文神学”，而是当前把 Claim composition 与 viewpoint identity 放进同一决策的 schema。下一版必须在 identity 之前建立 evidence-bound atomic `PropositionUnit`：
+
+1. 每个 Claim 显式映射到一个或多个原子命题单元；每个单元绑定 Claim revision、可定位 statement span、EvidenceStep/SourceFragment 与 source revision，不得只保存模型摘要；
+2. `Claim → PropositionUnit` 保存 `whole_claim / conjunct / qualified_clause` 等结构角色，解决复合 Claim 包含多个断言的问题，但 PropositionUnit 仍是候选结构，不是 CanonicalViewpoint 或批准；
+3. viewpoint identity 只在 PropositionUnit 间判断 `equivalent / tension / related / unknown`，不再要求 reviewer 用宽窄不一的 `component` 替代上游原子化；
+4. generalizes、specializes、applies、grounds、supports 等关系另作 typed relation，不能冒充 identity；释经、希腊文判断和 application 都可以成为 PropositionUnit，不做语义 prefilter；
+5. 只有两个异源 reviewer 对 evidence-bound 原子单元达成 equivalence，且存在独立来源与全部 risk gates 时，才进入 canonical wording/signature/scope synthesis；
+6. 新设计必须先建立含 confirmed equivalent positives 的 gold/holdout。若 calibration 中没有任何 `equivalent` 正例，不能因为 negative/related 分类看似稳定就批准 rollout。
+
+因此现有 signature/embedding/recall graph、750 个 immutable hypotheses、source eligibility attestation 和 evidence packet 仍可复用；需要替换的是 identity 输入粒度和 component 决策，不是重跑 extraction 或丢弃召回层。
+
 embedding 输入必须是 SHA-bound、reader-visible text 未被改写的检索投影；索引保存 embedding model/version、projection version、向量维度、构建 manifest 与 artifact SHA。top-K 与最低相似度只控制工作量，不能作为 identity threshold。模型主动发现只读取受大小约束的主题包或 registry synopsis，不自行遍历数据库；其输出必须列出 input 中的 Claim/viewpoint IDs，不能凭记忆创造候选。
 
 启用哪些通道由版本化 `retrieval_policy` 决定。规则 baseline 始终保留；embedding 与模型发现先在 calibration/exploration lane 测量边际召回和成本，只有证明有价值或用于明确的漏项审计时才进入常规运行。policy 必须记录每个通道的 top-K、阈值、预算与 fallback，不能把一次实验配置静默变成永久成本。

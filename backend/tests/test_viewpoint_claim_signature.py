@@ -25,6 +25,9 @@ from backend.api.canonical_repository.viewpoint_group_discovery import (
 from backend.api.canonical_repository.viewpoint_group_recall_extension import (
     build_group_recall_extension,
 )
+from backend.api.canonical_repository.viewpoint_identity_hypotheses import (
+    build_identity_hypothesis_index,
+)
 from backend.api.semantic_index.embeddings import build_embedding_index_artifact
 from backend.api.canonical_repository.viewpoint_semantic_scheduler import build_semantic_bundle_schedule
 from backend.pipeline.viewpoint_claim_signature_runner import (
@@ -347,3 +350,26 @@ def test_signature_index_compiles_exact_once_immutable_screening_artifact(tmp_pa
     assert extension.statistics["overlay_union_unique_pair_count"] == 1
     assert extension.identity_evidence is False
     assert extension.apply_allowed is False
+    duplicate_response = group_response.model_dump(mode="json")
+    duplicate = dict(duplicate_response["proposals"][0])
+    duplicate["local_group_id"] = "G002"
+    duplicate["proposed_core_proposition"] = "相同参与者的另一次局部措辞"
+    duplicate_response["proposals"].append(duplicate)
+    hypothesis_index = build_identity_hypothesis_index(
+        plan=group_plan,
+        responses_by_packet_id={packet.packet_id: duplicate_response},
+        call_artifact_sha_by_packet_id={packet.packet_id: "call-sha"},
+    )
+    assert hypothesis_index.statistics == {
+        "completed_call_count": 1,
+        "proposal_occurrence_count": 2,
+        "unique_hypothesis_count": 1,
+        "overlap_duplicate_occurrence_count": 1,
+        "possible_equivalent_hypothesis_count": 1,
+        "component_hypothesis_count": 0,
+        "tension_hypothesis_count": 0,
+        "unique_participant_claim_count": 2,
+    }
+    assert len(hypothesis_index.hypotheses[0].provenances) == 2
+    assert hypothesis_index.identity_evidence is False
+    assert hypothesis_index.apply_allowed is False

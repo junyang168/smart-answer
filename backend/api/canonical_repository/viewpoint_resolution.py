@@ -96,17 +96,27 @@ class ReviewEvidence(StrictArtifact):
     source_sha256: str
     support_eligibility: str
     anchor_state: str
+    source_eligibility_attestation_sha256: str | None = None
     valid_for_identity_review: bool
 
     @model_validator(mode="after")
     def validate_eligibility(self) -> "ReviewEvidence":
-        locally_valid = bool(
+        citation_valid = bool(
             self.source_sha256
             and self.citation_status == "approved"
             and self.support_eligibility in VALID_EVIDENCE_STATES
             and self.anchor_state in VALID_ANCHOR_STATES
         )
-        if self.valid_for_identity_review and not locally_valid:
+        attestation_valid = bool(
+            self.source_sha256
+            and self.source_eligibility_attestation_sha256
+            and self.support_eligibility
+            in VALID_EVIDENCE_STATES | {"eligible_candidate"}
+            and self.anchor_state in VALID_ANCHOR_STATES
+        )
+        if self.valid_for_identity_review and not (
+            citation_valid or attestation_valid
+        ):
             raise ValueError("evidence cannot self-report identity-review validity")
         return self
 
@@ -120,6 +130,7 @@ class ReviewClaim(StrictArtifact):
     attribution: str | None = None
     scripture_refs: list[str] = Field(default_factory=list)
     review_status: str
+    source_eligibility_attestation_sha256: str | None = None
     active_full_viewpoint_id: str | None = None
     evidence: list[ReviewEvidence] = Field(min_length=1)
 
@@ -127,8 +138,10 @@ class ReviewClaim(StrictArtifact):
     def validate_claim(self) -> "ReviewClaim":
         if self.scripture_refs != sorted(set(self.scripture_refs)):
             raise ValueError("review Claim scripture refs must be sorted and unique")
-        evidence_ids = [item.evidence_step_id for item in self.evidence]
-        if evidence_ids != sorted(set(evidence_ids)):
+        evidence_keys = [
+            (item.evidence_step_id, item.source_fragment_id) for item in self.evidence
+        ]
+        if evidence_keys != sorted(set(evidence_keys)):
             raise ValueError("review Claim evidence must be sorted and unique")
         if any(item.source_id != self.source_id for item in self.evidence):
             raise ValueError("review Claim evidence must remain source-local")
@@ -297,6 +310,22 @@ class SemanticAssessment(StrictArtifact):
     semantic_blockers: list[str] = Field(default_factory=list)
     rationale: str = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize_transport_lists(cls, value: Any) -> Any:
+        """Normalize ordering only; never repair or reinterpret semantics."""
+        if not isinstance(value, dict):
+            return value
+        result = dict(value)
+        if isinstance(result.get("members"), list):
+            result["members"] = sorted(
+                result["members"], key=lambda item: str(item.get("claim_id", ""))
+            )
+        for name in ("added_truth_conditions", "semantic_blockers"):
+            if isinstance(result.get(name), list):
+                result[name] = sorted(set(str(item) for item in result[name]))
+        return result
+
     @model_validator(mode="after")
     def validate_assessment(self) -> "SemanticAssessment":
         member_ids = [item.claim_id for item in self.members]
@@ -385,6 +414,23 @@ class DeltaResolution(StrictArtifact):
 class DeltaAdjudicationResponse(StrictArtifact):
     resolutions: list[DeltaResolution]
     remaining_findings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize_transport_lists(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        result = dict(value)
+        if isinstance(result.get("resolutions"), list):
+            result["resolutions"] = sorted(
+                result["resolutions"],
+                key=lambda item: str(item.get("field_path", "")),
+            )
+        if isinstance(result.get("remaining_findings"), list):
+            result["remaining_findings"] = sorted(
+                set(str(item) for item in result["remaining_findings"])
+            )
+        return result
 
     @model_validator(mode="after")
     def validate_response(self) -> "DeltaAdjudicationResponse":
@@ -685,6 +731,7 @@ def build_identity_review_packet(
             Mapping[str, Any] | ViewpointRevisionRecord,
         ]
     ] = (),
+    source_eligibility_attestations: Mapping[str, str] | None = None,
 ) -> ViewpointIdentityReviewPacket:
     """Compile the exact evidence packet both semantic reviewers must see."""
 
@@ -693,6 +740,7 @@ def build_identity_review_packet(
     resolution = _as_model(ledger, ViewpointResolutionLedgerRecord)
     quality = _as_model(quality_report, ViewpointQualityReportRecord)
     findings: list[str] = []
+    eligibility_attestations = dict(source_eligibility_attestations or {})
     candidate_identity = {
         "claims": selected.candidate_claim_ids,
         "viewpoints": selected.candidate_viewpoint_ids,
@@ -765,6 +813,7 @@ def build_identity_review_packet(
             findings.append(f"{claim_id}: stale Claim revision or SHA")
             continue
         evidence_rows: list[ReviewEvidence] = []
+        attestation_sha = eligibility_attestations.get(claim_id)
         source_ids: set[str] = set()
         for evidence_id in claim.evidence_step_ids:
             evidence = evidence_index.get(evidence_id)
@@ -782,7 +831,7 @@ def build_identity_review_packet(
                 coverage_source = coverage_sources.get(fragment.source_id)
                 citation_id = str(fragment.citation_id or "")
                 citation = citation_index.get(citation_id)
-                valid = bool(
+                citation_valid = bool(
                     coverage_source
                     and coverage_source.source_sha256 == fragment.source_sha256
                     and evidence.support_eligibility in VALID_EVIDENCE_STATES
@@ -794,6 +843,14 @@ def build_identity_review_packet(
                     and citation.source_id == fragment.source_id
                     and citation.source_sha256 == fragment.source_sha256
                     and evidence.evidence_step_id in citation.evidence_ids
+                )
+                attestation_valid = bool(
+                    coverage_source
+                    and coverage_source.source_sha256 == fragment.source_sha256
+                    and attestation_sha
+                    and evidence.support_eligibility
+                    in VALID_EVIDENCE_STATES | {"eligible_candidate"}
+                    and fragment.anchor_state in VALID_ANCHOR_STATES
                 )
                 evidence_rows.append(ReviewEvidence(
                     evidence_step_id=evidence.evidence_step_id,
@@ -809,12 +866,15 @@ def build_identity_review_packet(
                     source_sha256=str(fragment.source_sha256 or ""),
                     support_eligibility=evidence.support_eligibility,
                     anchor_state=fragment.anchor_state,
-                    valid_for_identity_review=valid,
+                    source_eligibility_attestation_sha256=attestation_sha,
+                    valid_for_identity_review=citation_valid or attestation_valid,
                 ))
         if len(source_ids) != 1:
             findings.append(f"{claim_id}: Claim evidence is not source-local")
             continue
-        evidence_rows.sort(key=lambda item: item.evidence_step_id)
+        evidence_rows.sort(
+            key=lambda item: (item.evidence_step_id, item.source_fragment_id)
+        )
         source_id = next(iter(source_ids))
         review_claims.append(
             ReviewClaim(
@@ -828,13 +888,14 @@ def build_identity_review_packet(
                     {_scripture_ref(value) for value in claim.scripture_refs}
                 ),
                 review_status=claim.review_status,
+                source_eligibility_attestation_sha256=attestation_sha,
                 active_full_viewpoint_id=next(
                     iter(active_owners.get(claim.claim_id, set())), None
                 ),
                 evidence=evidence_rows,
             )
         )
-        if claim.review_status not in APPROVED_STATUSES:
+        if claim.review_status not in APPROVED_STATUSES and not attestation_sha:
             blockers.append(
                 DeterministicBlocker(
                     code="source_maturity",
@@ -1286,11 +1347,11 @@ def _review_call(
             raise ViewpointResolutionError([f"{stage}: cached artifact binding mismatch"])
         return cached, True
     cached_failure = _read_valid(failure_path, SemanticCallFailureArtifact)
-    if cached_failure:
-        raise ViewpointResolutionError(
-            [f"{stage}: semantic call already failed and cannot be retried"]
-        )
-    raw = adapter.generate(packet.model_dump(mode="json"))
+    raw = (
+        cached_failure.raw_response
+        if cached_failure and cached_failure.raw_response is not None
+        else adapter.generate(packet.model_dump(mode="json"))
+    )
     try:
         assessment = SemanticAssessment.model_validate(raw)
         if assessment.candidate_id != packet.candidate.identity_candidate_id:
@@ -1305,6 +1366,13 @@ def _review_call(
                 [f"{stage}: assessment does not cover candidate Claims"]
             )
     except Exception as exc:
+        if cached_failure:
+            raise ViewpointResolutionError(
+                [
+                    f"{stage}: cached semantic failure remains invalid and cannot "
+                    f"be retried: {exc}"
+                ]
+            ) from exc
         failure_payload = {
             "schema_version": "wang_viewpoint_semantic_call_failure_v1",
             "stage": stage,
@@ -1367,12 +1435,10 @@ def _delta_call(
             )
         return cached, True
     cached_failure = _read_valid(failure_path, SemanticCallFailureArtifact)
-    if cached_failure:
-        raise ViewpointResolutionError(
-            ["delta adjudication: semantic call already failed and cannot be retried"]
-        )
     raw = dict(
-        adapter.generate(
+        cached_failure.raw_response
+        if cached_failure and cached_failure.raw_response is not None
+        else adapter.generate(
             {
                 "packet": packet.model_dump(mode="json"),
                 "semantic_deltas": delta_payload,
@@ -1389,6 +1455,13 @@ def _delta_call(
                 ["delta adjudication must cover every differing field exactly once"]
             )
     except Exception as exc:
+        if cached_failure:
+            raise ViewpointResolutionError(
+                [
+                    "delta adjudication: cached semantic failure remains invalid "
+                    f"and cannot be retried: {exc}"
+                ]
+            ) from exc
         failure_payload = {
             "schema_version": "wang_viewpoint_semantic_call_failure_v1",
             "stage": "delta_adjudication",

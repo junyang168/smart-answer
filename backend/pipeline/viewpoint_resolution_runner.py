@@ -15,7 +15,8 @@ from backend.api.canonical_repository.viewpoint_resolution import (
     ViewpointIdentityReviewPacket,
     run_viewpoint_resolution,
 )
-from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -41,24 +42,22 @@ def main() -> int:
     packet = ViewpointIdentityReviewPacket.model_validate(
         json.loads(args.packet.read_text(encoding="utf-8"))
     )
-    proposal_client = Stage1OpenAIClient(
+    proposal_client = CodexSubscriptionClient(
         model=args.proposal_model,
         reasoning_effort="medium",
-        timeout_seconds=360,
-        max_retries=1,
+        timeout_seconds=900,
         max_output_tokens=12000,
     )
-    blind_client = Stage1AnthropicClient(
+    blind_client = ClaudeSubscriptionClient(
         model=args.blind_model,
-        timeout_seconds=360,
-        max_retries=1,
+        reasoning_effort="medium",
+        timeout_seconds=900,
         max_output_tokens=12000,
     )
-    delta_client = Stage1OpenAIClient(
+    delta_client = CodexSubscriptionClient(
         model=args.delta_model,
         reasoning_effort="medium",
-        timeout_seconds=360,
-        max_retries=1,
+        timeout_seconds=900,
         max_output_tokens=8000,
     )
     proposal_prompt = (

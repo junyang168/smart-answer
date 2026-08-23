@@ -9,4 +9,6 @@
 - canonical wording 不得增加来源 Claim 没有共同断言的内容。
 - 不得分配任何 master-data ID、批准自己的判断、忽略程序 blocker，或用多数意见覆盖 object/polarity/scope 冲突。
 - 每个 candidate Claim 必须恰好出现一次，并按 claim_id 排序。
+- `component_statement` 与 `component_json_pointer` 只有在 `member_role=equivalent_component` 时才可填写；`equivalent_full`、`related_only`、`exclude` 必须把两者都明确输出为 `null`。不要为了满足 required field 而复制 Claim statement。
+- `proposed_action` 不是 `match_existing` 时，`target_viewpoint_id` 必须为 `null`；`reject_match` 或 `defer` 时，`core_proposition`、`proposition_signature`、`scope` 必须为 `null`。
 - 只输出 schema 要求的 JSON。
