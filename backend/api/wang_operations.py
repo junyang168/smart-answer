@@ -113,47 +113,68 @@ def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
     return rows
 
 
-#: Which file in a notes project is the manuscript knowledge is extracted from.
-#:
-#: `final.md` first because that is demonstrably what was extracted: every
-#: notes source document in the store points at one. `unified_source.md` is a
-#: different artifact and the two do not coincide -- 21 projects have a
-#: `final.md`, 35 have a `unified_source.md`, and neither set contains the
-#: other. Picking one silently would either hide projects that have been
-#: extracted or invent rows for material nothing reads, so both are accepted and
-#: each row reports which file it stands on.
-NOTES_MANUSCRIPT_FILES = ("final.md", "unified_source.md")
-
-
 def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
-    """Notes manuscripts, which are sources too and are not in the sermon catalog."""
+    """Every project published through a notes-to-manuscript series.
+
+    A directory is storage, not publication.  The public manuscript-series
+    pages get their membership from ``series_db.json`` lecture
+    ``project_ids``, so the operations overview must read the same authority.
+    Otherwise abandoned local projects with a ``unified_source.md`` become
+    phantom sources even though no reader-facing series includes them.
+
+    Membership and availability are intentionally separate: a linked project
+    stays visible while it awaits ``final.md``, just as a catalogued sermon
+    stays visible while its transcript awaits publication.  ``final.md`` is
+    the only manuscript the extraction pipeline reads and therefore the only
+    file that can supply the row's source SHA.
+    """
 
     root = data_base / "notes_to_surmon"
     rows: list[dict[str, Any]] = []
     if not root.is_dir():
         return rows
-    for project in sorted(item for item in root.iterdir() if item.is_dir()):
-        manuscript = next(
-            (project / name for name in NOTES_MANUSCRIPT_FILES if (project / name).is_file()),
-            None,
-        )
-        if manuscript is None:
-            # Nothing to extract from. These are notes projects at an earlier
-            # stage, not sources waiting on the pipeline.
+
+    series_db = _load_json(root / "series_db.json")
+    if not isinstance(series_db, list):
+        return rows
+
+    project_ids: list[str] = []
+    seen: set[str] = set()
+    for series in series_db:
+        if not isinstance(series, dict):
             continue
+        # Missing project_type is the legacy spelling of sermon_note, matching
+        # lecture_manager. Fellowship Transcript is normalized to transcript
+        # there and must not create a second lineage here.
+        project_type = series.get("project_type") or "sermon_note"
+        if project_type != "sermon_note":
+            continue
+        for lecture in series.get("lectures") or []:
+            if not isinstance(lecture, dict):
+                continue
+            for value in lecture.get("project_ids") or []:
+                project_id = str(value or "").strip()
+                if project_id and project_id not in seen:
+                    seen.add(project_id)
+                    project_ids.append(project_id)
+
+    for project_id in project_ids:
+        project = root / project_id
+        manuscript_path = project / "final.md"
+        manuscript = manuscript_path if manuscript_path.is_file() else None
         meta = _load_json(project / "meta.json") or {}
         placement = _notes_placement(str(meta.get("bible_verse") or ""))
         rows.append({
-            "source_id": project.name,
+            "source_id": project_id,
             "kind": "notes_manuscript",
-            "title": meta.get("title") or project.name,
+            "title": meta.get("title") or project_id,
             "series": meta.get("bible_verse"),
             "year": None,
             "book": placement["book"],
             "chapter": placement["chapter"],
             "verse_start": None,
             "topics": [],
-            "manuscript_file": manuscript.name,
+            "manuscript_file": manuscript.name if manuscript else None,
             "source_path": manuscript,
         })
     return rows
@@ -163,9 +184,9 @@ def corpus_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
     """Every source this platform knows about, extracted or not.
 
     Sermons and notes manuscripts are discovered differently -- one from the
-    catalog, one from a directory -- and any page that needs "how many
-    documents are there" needs both. Naming the pair once keeps a second page
-    from answering that question with a different number.
+    catalog, one from manuscript-series membership -- and any page that needs
+    "how many documents are there" needs both. Naming the pair once keeps a
+    second page from answering that question with a different number.
     """
 
     return _sermon_rows(paths, data_base) + _notes_rows(data_base)
