@@ -45,6 +45,7 @@ from backend.pipeline.research_batch import (
     load_research_batch,
     merge_reviewed_packages,
 )
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -116,20 +117,17 @@ def reviewed_package_paths(
 def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) -> Path | None:
     """Which directory holds this member's transcript, or None if none does.
 
-    Repeatable rather than single because chapter 16 is split across two: six
-    of its sermons are in `script_review` and three in `script_published`, and
-    a batch that could name only one directory could not describe the chapter.
+    Published is authoritative when both governed stages contain the same id;
+    reviewed is the fallback before publication. CLI argument order must not
+    change the source SHA a batch reads.
     Notes manuscripts have no transcript directory at all -- they are addressed
     by path -- so they resolve to the first, which nothing then reads.
     """
 
     if member["source_type"] != "sermon_transcript":
         return transcript_dirs[0]
-    return next(
-        (directory for directory in transcript_dirs
-         if (directory / f"{member['key']}.json").is_file()),
-        None,
-    )
+    path = resolve_transcript_path(member["key"], transcript_dirs)
+    return path.parent if path is not None else None
 
 
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:

@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.transcript_source import resolve_transcript_path
+
 
 PUBLICATION_READINESS_DECISIONS = {
     "article_ready",
@@ -116,11 +118,7 @@ def load_knowledge_source_document(
         payload, raw, path = markdown_source_document(source)
     else:
         transcript_id = str(source.get("transcript_id") or source.get("source_id") or "")
-        path = next(
-            (directory / f"{transcript_id}.json" for directory in transcript_dirs
-             if (directory / f"{transcript_id}.json").is_file()),
-            None,
-        )
+        path = resolve_transcript_path(transcript_id, transcript_dirs)
         if path is None:
             raise FileNotFoundError(f"transcript not found: {transcript_id}")
         raw = path.read_bytes()

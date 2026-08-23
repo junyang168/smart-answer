@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.model_prices import price_table_for
 from backend.pipeline.source_keys import document_row_key
+from backend.pipeline.transcript_source import resolve_transcript_path
 
 
 router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
@@ -81,20 +82,22 @@ def _load_json(path: Path) -> Optional[dict[str, Any]]:
 def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
     """Every sermon in the catalog, extracted or not.
 
-    Sermons with no published transcript stay on the list rather than being
-    filtered out: "this one still needs a transcript" is work the queue has to
-    show, and hiding it turns the overview into a progress bar for the part
-    already started.
+    Published is the authority when available; a reviewed transcript is the
+    usable fallback before publication. Sermons with neither stay on the list
+    rather than being filtered out.
     """
 
     catalog = _load_json(paths.sermon_catalog) or {}
-    transcripts = data_base / "script_published"
+    transcript_dirs = [
+        data_base / "script_published",
+        data_base / "script_review",
+    ]
     rows: list[dict[str, Any]] = []
     for record in catalog.get("records") or []:
         source_id = str(record.get("transcript_id") or "")
         if not source_id:
             continue
-        source_path = transcripts / f"{source_id}.json"
+        source_path = resolve_transcript_path(source_id, transcript_dirs)
         # Where this sermon sits in scripture, from the same field the sermon
         # centre and the coverage page read, so the three cannot disagree.
         passage = record.get("catalog_primary_passage") or {}
@@ -108,7 +111,7 @@ def _sermon_rows(paths: Any, data_base: Path) -> list[dict[str, Any]]:
             "chapter": passage.get("chapter"),
             "verse_start": passage.get("verse_start"),
             "topics": list(record.get("topics") or []),
-            "source_path": source_path if source_path.is_file() else None,
+            "source_path": source_path,
         })
     return rows
 
@@ -871,9 +874,9 @@ def _summary(rows: list[dict[str, Any]], runs: Iterable[dict[str, Any]]) -> dict
         "rows": len(rows),
         "sermons": sum(1 for row in rows if row["kind"] == "sermon"),
         "notes_manuscripts": sum(1 for row in rows if row["kind"] == "notes_manuscript"),
-        # Not "no source text": every one of these has a transcript sitting in
-        # script_review. What they lack is a proofread, published one, which is
-        # what extraction reads.
+        # Kept under the response's legacy `unproofread` key for compatibility;
+        # the count now means neither a published nor a reviewed transcript is
+        # available under the governed fallback policy.
         "unproofread": sum(1 for row in rows if not row["source_available"]),
         "ingested": sum(
             1 for row in rows if row["stages"]["ingest"]["state"] in {"current", "stale"}
