@@ -35,6 +35,7 @@ So the primary checkout is for reading. Work happens in a worktree of its own:
 scripts/work-on.sh 116 worktree-per-session   # prints the path to cd into
 scripts/wrap-up.sh                            # opens the PR from inside it
 scripts/wrap-up.sh --cleanup                  # after it merges
+scripts/close-ticket.sh 116 --reason not-planned  # closes + safely cleans
 ```
 
 `work-on.sh` links `.env`, both venvs and the root `node_modules` into the
@@ -93,6 +94,12 @@ on top regardless of who put it there. To read a file from another branch use
 
 **Never switch branches in the primary checkout.** It yanks the floor from
 whatever session is working there.
+
+Closing a card through `scripts/close-ticket.sh` reconciles its local worktree
+immediately. A GitHub-side close cannot delete local files, so `work-on.sh`
+also reconciles closed card worktrees before opening the next one. Cleanup is
+fail-closed: dirty worktrees are reported and preserved, unmerged branches are
+preserved, and no caller may use force or stash to bypass those decisions.
 
 # Operating the production machine
 

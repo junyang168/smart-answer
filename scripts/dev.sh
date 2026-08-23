@@ -30,7 +30,11 @@
 # first.
 set -Eeuo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ -n "${SMART_ANSWER_DEV_REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$(cd "$SMART_ANSWER_DEV_REPO_ROOT" && pwd)"
+else
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 BACKEND_PYTHON="$REPO_ROOT/backend/.venv/bin/python"
 WEB_DIR="$REPO_ROOT/web"
 
@@ -136,9 +140,24 @@ do_status() {
 }
 
 stop_port() {
-  local port="$1" pidfile="$STATE_DIR/$1.pid" pid
+  local port="$1" pidfile="$STATE_DIR/$1.pid" pid cwd recorded_pid=""
   pid="$(pid_on_port "$port")"
+  [[ -s "$pidfile" ]] && recorded_pid="$(<"$pidfile")"
   if [[ -n "$pid" ]]; then
+    # Card-specific cleanup may kill only a process positively attributed to
+    # this worktree. A port number or stale pidfile is not ownership proof.
+    if (( STOP_ALL )); then
+      if [[ -z "$recorded_pid" || "$recorded_pid" != "$pid" ]]; then
+        printf 'dev: refusing to stop port %s: listener pid %s is not the recorded owner (%s)\n' \
+          "$port" "$pid" "${recorded_pid:-none}" >&2
+        return 1
+      fi
+    else
+      cwd="$(cwd_of_pid "$pid")"
+      if [[ -z "$cwd" || ( "$cwd" != "$REPO_ROOT" && "$cwd" != "$REPO_ROOT"/* ) ]]; then
+        fail "refusing to stop port $port: pid $pid cwd '${cwd:-unknown}' is outside $REPO_ROOT"
+      fi
+    fi
     kill "$pid" 2>/dev/null || true
     printf 'dev: stopped %s (pid %s)\n' "$port" "$pid"
   fi
@@ -148,10 +167,12 @@ stop_port() {
 do_stop() {
   if [[ "${1:-}" == "--all" ]]; then
     shopt -s nullglob
-    local pidfile
-    for pidfile in "$STATE_DIR"/*.pid; do stop_port "$(basename "$pidfile" .pid)"; done
+    local pidfile blocked=0
+    for pidfile in "$STATE_DIR"/*.pid; do
+      stop_port "$(basename "$pidfile" .pid)" || blocked=1
+    done
     shopt -u nullglob
-    return
+    return "$blocked"
   fi
   stop_port "$WEB_PORT"
   stop_port "$API_PORT"
@@ -239,6 +260,7 @@ MODE=start
 STAGING=0
 WEB_PORT="" API_PORT="" CARD="" BRANCH="" LABEL=""
 ALLOW_NON_MAIN=0
+STOP_ALL=0
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -274,6 +296,9 @@ fi
 mkdir -p "$STATE_DIR"
 case "$MODE" in
   status) do_status ;;
-  stop)   do_stop "${ARGS[@]:-}" ;;
+  stop)
+    [[ "${ARGS[0]:-}" == "--all" ]] && STOP_ALL=1
+    do_stop "${ARGS[@]:-}"
+    ;;
   start)  do_start ;;
 esac
