@@ -1835,7 +1835,15 @@ class StructuredJsonReviewerAdapter:
         self.model_id = str(getattr(client, "model", ""))
         if not self.model_id:
             raise ValueError("structured reviewer client must expose model")
+        self.backend = str(getattr(client, "backend", "openai_api"))
         self.prompt_sha256 = sha256_json({"prompt": prompt})
+        self.generation_config_sha256 = sha256_json(
+            {
+                "reasoning_effort": getattr(client, "reasoning_effort", None),
+                "max_output_tokens": getattr(client, "max_output_tokens", None),
+                "temperature": 0.0,
+            }
+        )
 
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         schema = {

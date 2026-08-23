@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..canonical_repository.knowledge_models import (
     ArgumentRouteRevisionRecord,
@@ -16,9 +16,15 @@ from ..canonical_repository.knowledge_models import (
 from ..canonical_repository.viewpoint_foundation import semantic_record_sha, sha256_json
 from .embeddings import EMBEDDING_PROJECTION_VERSION, EmbeddingProjection
 
+if TYPE_CHECKING:
+    from ..canonical_repository.viewpoint_claim_signature import (
+        ClaimSemanticSignatureCandidate,
+    )
+
 
 PROJECTION_VERSIONS = {
     "claim": "claim_embedding_projection_v1",
+    "claim_signature": "claim_signature_embedding_projection_v1",
     "canonical_viewpoint": "viewpoint_embedding_projection_v1",
     "argument_route": "argument_route_embedding_projection_v1",
     "evidence": "evidence_embedding_projection_v1",
@@ -78,6 +84,62 @@ def build_claim_embedding_projection(
             f"经文范围：{_sorted_text(claim.scripture_refs)}" if claim.scripture_refs else "",
             f"归属：{claim.attribution}" if claim.attribution else "",
         ],
+    )
+
+
+def build_claim_signature_embedding_projection(
+    value: Mapping[str, Any] | "ClaimSemanticSignatureCandidate",
+    *,
+    signature_index_sha256: str,
+) -> EmbeddingProjection:
+    """Project one screening signature without promoting it to identity evidence."""
+
+    from ..canonical_repository.viewpoint_claim_signature import (
+        ClaimSemanticSignatureCandidate,
+    )
+
+    signature = (
+        value
+        if isinstance(value, ClaimSemanticSignatureCandidate)
+        else ClaimSemanticSignatureCandidate.model_validate(value)
+    )
+    data = _dump(signature)
+    lines: list[str] = []
+    for atom in signature.semantic_atoms:
+        prefix = f"语义原子 {atom.atom_index + 1}"
+        lines.extend(
+            [
+                f"{prefix}：{atom.subject}；{atom.predicate}；{atom.object}",
+                f"{prefix}极性与立场：{atom.polarity}；{atom.stance}",
+                f"{prefix}模态：{atom.modality}",
+                f"{prefix}论述角色：{_sorted_text(atom.discourse_roles)}"
+                if atom.discourse_roles else "",
+                f"{prefix}群体范围：{_sorted_text(atom.population_scope)}"
+                if atom.population_scope else "",
+                f"{prefix}时间范围：{_sorted_text(atom.temporal_scope)}"
+                if atom.temporal_scope else "",
+                f"{prefix}条件：{_sorted_text(atom.conditions)}"
+                if atom.conditions else "",
+                f"{prefix}必要限定：{_sorted_text(atom.material_qualifications)}"
+                if atom.material_qualifications else "",
+            ]
+        )
+    if signature.ambiguities:
+        lines.append(f"证据歧义：{_sorted_text(signature.ambiguities)}")
+    return _projection(
+        object_kind="claim_signature",
+        object_id=signature.claim_id,
+        object_revision=1,
+        source_record=data,
+        dependency_records=[{"signature_index_sha256": signature_index_sha256}],
+        title="；".join(
+            (
+                signature.semantic_atoms[0].subject,
+                signature.semantic_atoms[0].predicate,
+                signature.semantic_atoms[0].object,
+            )
+        ),
+        lines=lines,
     )
 
 

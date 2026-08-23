@@ -700,6 +700,19 @@ flowchart LR
 
 三个通道不是多数投票。候选并集优先保护 recall；每个 pair 必须保存由哪些通道召回、各通道版本及原始 score/signal。规则未命中不能否决 embedding 或模型发现的候选，低 embedding score 也不能否决规则命中。模型可提出 signature、关系分类和理由，但程序必须验证 ID、来源、范围与 evidence references；模型不得分配 canonical ID 或批准自己的输出。
 
+bootstrap 的受预算语义层采用“Claim 一次规范化、signature-aware recall、局部 group discovery、evidence-bound identity review”，而不是把 candidate union 中每个有向邻居都交给模型完整分类：
+
+1. 每条 source-eligible Claim 最多生成一个 SHA-bound `ClaimSemanticSignatureCandidate`，抽取 subject、predicate/object、polarity、population/scripture/temporal scope、conditions、modality、attribution 与 material qualification；它是 screening index，不是已批准的 `ViewpointRevision.proposition_signature`，也不是 identity evidence；
+2. 每个 Claim signature 形成独立检索投影；规则、原 Claim embedding 与 signature embedding 编译为带完整 channel/rank/score/projection provenance 的无向 final candidate graph。任何通道不能删除另一通道的 pair，同一 pair 只保存一次；
+3. group discovery 读取受 48-Claim 上限约束的 overlapping packet；signature edges 恰好作为 review edge 暴露一次，重复出现的局部边只能作为 context edge。模型输出 possible-equivalent、component 或 tension group proposal，未进入 proposal 的 Claim/edge 保持 unresolved，不能被当成 approved negative constraint；
+4. group proposal 不要求 clique，也不允许把连通分量直接当作等价类。若模型提出的 participant group 在已有 final graph 上不连通，程序必须先生成最小、带 call/proposal provenance 的 `group_model_discovery` recall extension，并固定扩展图 SHA；未经扩展的 pair 不能进入 identity review；
+5. 只有 possible-equivalent、component、tension 或 evidence-insufficient proposal 才加载 source-local Evidence，进入 proposal 与 blind independent review；正式观点措辞和批准后的 proposition signature 只在该 identity decision 中产生；
+6. 在 scoped gold set 尚为空时，允许以 proposal/blind 共识建立明确标注的 silver calibration，但不得据此声称 corpus-wide recall。全量执行之前必须先报告 stratified calibration 的漏检、分歧、调用时间与 token 预算；模型名称或 reasoning effort 改变必须建立新 plan/fingerprint。
+
+identity review 之前禁止按 `claim_type`、主题或表面 discourse role 做 semantic prefilter。`interpretive_judgment`、`reasoning_conclusion`、`explicit_claim`、`interpretive_method` 与 `application` 都可能表达稳定、可复用且存在替代理解的教授立场；希腊文翻译、具体 passage interpretation 和 application 不能因同时承担 Evidence、ArgumentRoute premise 或 product-use 角色而失去 viewpoint candidacy。同一 Claim 可以拥有多个下游角色。前置 hard eligibility 只处理可程序证明的来源／版本／完整性问题并保留 closed disposition，例如失败来源、未绑定 source revision 或无效 Claim revision；它不判断“这个内容是否足够像观点”。external attribution 仍可进入 signature/关系发现以保留争议背景，但在 professor-viewpoint membership gate 中是 blocker。是否形成独立 CanonicalViewpoint、作为另一观点的 component/relation，或只作为 route/evidence，必须由后续 evidence-bound identity decision 决定。
+
+真实执行必须把 backend 与 generation config 写入 plan 和 generation fingerprint。当前 OpenAI 侧内容调用使用 `codex_subscription`：子进程必须移除 API billing credentials，并验证本地登录为 ChatGPT；验证失败时 fail closed，不能静默回退到 OpenAI API。独立 blind reviewer 仍需来自不同模型/provider，避免同源自审。
+
 embedding 输入必须是 SHA-bound、reader-visible text 未被改写的检索投影；索引保存 embedding model/version、projection version、向量维度、构建 manifest 与 artifact SHA。top-K 与最低相似度只控制工作量，不能作为 identity threshold。模型主动发现只读取受大小约束的主题包或 registry synopsis，不自行遍历数据库；其输出必须列出 input 中的 Claim/viewpoint IDs，不能凭记忆创造候选。
 
 启用哪些通道由版本化 `retrieval_policy` 决定。规则 baseline 始终保留；embedding 与模型发现先在 calibration/exploration lane 测量边际召回和成本，只有证明有价值或用于明确的漏项审计时才进入常规运行。policy 必须记录每个通道的 top-K、阈值、预算与 fallback，不能把一次实验配置静默变成永久成本。
@@ -762,6 +775,7 @@ embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap�
 |---|---|---|
 | `canonical_viewpoint` | core proposition、truth-condition signature、scope、必要 qualification/tension 与编辑别名 | incremental match、Search、QA |
 | `claim` | source-local statement、claim type、经文范围与 attribution | bootstrap recall、来源下钻 |
+| `claim_signature` | screening-only semantic atoms、polarity/stance、scope、conditions 与 qualifications | bootstrap signature recall；不作为 identity evidence |
 | `argument_route` | route label、premise roles、inference pattern 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
 | `evidence` | EvidenceStep statement、step/discourse role、经文范围；需要时绑定 source fragment excerpt | 引文／证据召回 |
 
@@ -1718,6 +1732,14 @@ user query
 
 真实 recall artifact 的 embedding top-K 为 12：规则通道产生 5,504 个 unique pairs，embedding 通道产生 9,804 个，二者 overlap 1,660 个，lossless union 为 13,648 个；规则通道原来有 108 条 eligible Claim 无候选，union 后 1,183 条 eligible Claim 全部 covered。该数字表示 candidate coverage，不表示观点等价、precision 或 corpus-wide recall；当前 scoped reviewed positive pair 分母仍为 0，因此 recall 明确为 `null`。candidate union SHA 为 `24ce4f6f8c83ec2b0f45a4af01d597fb4a0a2fd4441259c199c3d0ed0c2ae8a7`，scheduler v3 SHA 为 `d7aa3d5b0d8e9b9d4d63343db0046c069547637e07a21d6c152bec450c8cd974`，包含 1,183 个 scheduled candidates、29 个 source-ineligible exceptions 与 175 个 transport bundles；它们都没有建立 CanonicalViewpoint、member、relation 或 approval。
 
+#187 的语义执行校准进一步证明不能直接把上述 scheduler singleton 当成 identity decision：旧 packet 虽有 1,183 个 singleton focal candidates，却有 20,619 个 directed neighbor comparisons；直接调用既会重复判断 6,971 个无向 pair，也会忽略 neighbor 并错误地产生大量 singleton viewpoints。第一版逐 pair 完整分类在 Codex Subscription 上以 Sol/medium、Luna/medium、Luna/low 对同一 53-pair packet 实测约 140/125/110 秒；两个 possible-equivalent shortlist 一致，但一般关系只分别有 24/53 与 33/53 同 Sol 一致，且没有 gold denominator，不能据此选择全量模型。全量旧计划为 175 calls、12,723,024 input bytes、保守 6,361,551 input tokens；8 个 Sol checkpoint 均通过 SHA/schema 校验，但该 lane 因吞吐与协议缺陷停止，0 master-data mutations。pair-centric compact-output prototype 把分母降为 13,648 unique pairs、143 calls；采用 packet Claim dictionary 后 input 为 12,821,445 bytes、保守 6,410,759 tokens，说明只去除双向 pair 和压缩输出仍不足以支持直接全量。正式下一步因此改为先生成 Claim-level screening signatures，再重新编译和校准小量 evidence review shortlist；这些实验 artifact 不得导入 registry。
+
+#187 随后以 Codex Subscription、`gpt-5.6-sol`、medium reasoning 对全部 1,183 条 source-eligible Claim 执行 25 个 signature packets；exact-once index 包含 2,426 个 semantic atoms、858 条 multi-atom Claims 与 147 条 evidence-insufficient signatures，index SHA 为 `2f0640235a30d19651260e68b0874cb1f747800d482a80bc7b9c58e88807306f`。29 条 source-ineligible Claims 保留 closed disposition；Luna 结果只用于被否决的 calibration，未进入 index。失败原始响应可在 validator 修正后 0-call 恢复，正式 index 与后续 artifact 均保持 `identity_evidence=false`、`apply_allowed=false`。
+
+同卡为 signature 建立 `gemini-embedding-2`、768 dimensions、`vertex_single_content`、global endpoint 的独立 projection/index；1,183 个 checkpoint 全部成功，0-call resume 全部复用，embedding index SHA 为 `acf5cda5a2f3820e65ef0cb0dc7a049e560386e6189c05b1042227deb38ef67b`。top-K 12 的 signature recall 产生 10,224 个 unique pairs，其中与原 rule／Claim-embedding union 重叠 6,418 个、新增 3,806 个；lossless final graph 从 13,648 增至 17,454 个 pairs，SHA 为 `ff0319b577ca0917477e6752572ae733e895ba1692fdd9411650dcccc50c62bb`。本地 field-scoped exact + 2/3-char n-gram TF-IDF 只作为 0-call calibration，不替代正式 Gemini signature channel。
+
+group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 Claim occurrences、1,183 unique Claims、10,224 signature review-edge exposures、7,230 baseline-only fallback pairs，input 为 6,183,484 bytes、保守 3,091,759 tokens。mutual-kNN connected components 被明确否决为 identity grouping：即使 similarity 0.90，仍产生 416/221-Claim 巨型分量，证明相似边不可传递。Sol/medium 全量执行产生 791 个 screening proposals，其中 246 possible-equivalent、519 component、26 tension；恢复验证为 0 calls、72 reused，全部仍为 `identity_evidence=false`，不能直接成为 CanonicalViewpoint。`requires_recall_extension` 由程序按 packet 局部图确定性注入，不交给模型计算；18 个 local flags 中有 12 个已由完整 final graph 的 baseline-only paths 覆盖，剩余 6 个 proposals 确实需要 extension。确定性 maximum-similarity spanning bridge 为其增加 7 条 `group_model_discovery` edges，overlay union 为 17,461 pairs、artifact SHA 为 `b0adefda72d40eb88ab85bf460cc7d359f1115d24391bced1e0778a20831a3d2`。extension 绑定 call SHA、packet/local proposal ID、proposal SHA、relation kind 与 signature cosine；它不扩成 clique，也不能绕过后续 evidence-bound identity review。
+
 ## 15. 验收映射
 
 | #165 验收项 | 本设计覆盖 |
@@ -1738,7 +1760,7 @@ user query
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。#183 增加共享 embedding projection/plan/index contract、sermon-search compatibility adapter、Claim embedding recall artifact 与 no-call budget。#185 增加可恢复的原子 batch executor、规则／embedding lossless candidate union（带 channel provenance、`identity_evidence=false`）及 scheduler v3 binding，并通过对抗 fixture 验证“彼得是磐石／磐石不是彼得”可被召回但不会自动归并；1,183 条真实 vector、candidate union 与 scheduler v3 corpus artifact 已生成，且 0-call resume 验证通过。Matthew/QA/Search 尚未接入 viewpoint projection，正式 viewpoint identity decisions 与 master-data apply 也尚未执行。
+实现状态（2026-08-22）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177 增加 byte-stable semantic bundle scheduler；#179 在同一受控 cohort 上补齐 deterministic recall neighborhood、Claim-set closure、scheduler binding 与只读 recall diagnostics。#181 明确该 artifact 是 bootstrap 的规则 baseline，并把最终目标修订为多通道 bootstrap 与 viewpoint-first incremental。#183 增加共享 embedding projection/plan/index contract、sermon-search compatibility adapter、Claim embedding recall artifact 与 no-call budget。#185 增加可恢复的原子 batch executor、规则／embedding lossless candidate union（带 channel provenance、`identity_evidence=false`）及 scheduler v3 binding。#187 增加 Sol ClaimSemanticSignature exact-once index、signature embedding/index/recall、三通道 final candidate graph、graph-aware group-discovery plan 与可恢复 Codex Subscription runner；所有当前产物仍是 screening/recall-only。Matthew/QA/Search 尚未接入 viewpoint projection，正式 evidence-bound identity decisions 与 master-data apply 也尚未执行。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
