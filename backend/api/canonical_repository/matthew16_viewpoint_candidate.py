@@ -47,6 +47,24 @@ class ArticleViewpointAcceptance(StrictCandidateModel):
     status: Literal["supported"] = "supported"
 
 
+class ViewpointKnowledgeClassification(StrictCandidateModel):
+    """Versioned downstream classification; it is not viewpoint identity."""
+
+    schema_version: Literal["wang_viewpoint_knowledge_classification_v1"] = (
+        "wang_viewpoint_knowledge_classification_v1"
+    )
+    knowledge_role: Literal["passage_interpretation"]
+    processing_phase: Literal["passage_exegesis"]
+    scripture_scope: list[str] = Field(min_length=1)
+    policy_version: Literal["matthew16_pilot_classification_v1"] = (
+        "matthew16_pilot_classification_v1"
+    )
+    basis_fields: list[Literal[
+        "proposition_signature.modality",
+        "scope.scripture_scope",
+    ]]
+
+
 class Matthew16ViewpointPilotArtifact(StrictCandidateModel):
     schema_version: Literal["wang_matthew16_viewpoint_pilot_v1"] = (
         "wang_matthew16_viewpoint_pilot_v1"
@@ -171,6 +189,29 @@ def build_matthew16_viewpoint_pilot(
     return Matthew16ViewpointPilotArtifact(**payload, artifact_sha256=sha256_json(payload))
 
 
+def classify_pilot_viewpoint(
+    pilot: Matthew16ViewpointPilotArtifact,
+) -> ViewpointKnowledgeClassification:
+    """Classify the pilot deterministically and fail closed on another shape."""
+
+    if (
+        pilot.proposition_signature.modality != "教授的释经判断"
+        or not pilot.scope.scripture_scope
+    ):
+        raise ValueError(
+            "Matthew 16 pilot cannot be classified as passage interpretation"
+        )
+    return ViewpointKnowledgeClassification(
+        knowledge_role="passage_interpretation",
+        processing_phase="passage_exegesis",
+        scripture_scope=pilot.scope.scripture_scope,
+        basis_fields=[
+            "proposition_signature.modality",
+            "scope.scripture_scope",
+        ],
+    )
+
+
 def build_pilot_composition_projection(
     pilot: Matthew16ViewpointPilotArtifact,
 ) -> ViewpointKnowledgeProjection:
@@ -181,6 +222,7 @@ def build_pilot_composition_projection(
     without scanning either the registry or staging directories.
     """
 
+    classification = classify_pilot_viewpoint(pilot)
     claims = {
         item.parent_claim.claim_id: item.parent_claim
         for item in pilot.members
@@ -262,6 +304,7 @@ def build_pilot_composition_projection(
                 "core_proposition": pilot.core_proposition,
                 "proposition_signature": pilot.proposition_signature.model_dump(mode="json"),
                 "scope": pilot.scope.model_dump(mode="json"),
+                "knowledge_classification": classification.model_dump(mode="json"),
                 "review_status": pilot.review_status,
                 "member_proposition_unit_ids": [
                     item.proposition_unit.proposition_unit_id for item in pilot.members

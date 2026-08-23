@@ -163,6 +163,14 @@ export type PilotEnvelope = {
     consumer_kind: "composition_plan"; eligibility: "internal_candidate";
     projection_sha256: string; blocker_codes: string[];
   };
+  knowledge_classification: {
+    schema_version: "wang_viewpoint_knowledge_classification_v1";
+    knowledge_role: "passage_interpretation";
+    processing_phase: "passage_exegesis";
+    scripture_scope: string[];
+    policy_version: "matthew16_pilot_classification_v1";
+    basis_fields: string[];
+  };
   source_files: Record<string, {
     source_id: string; title: string; source_type: string; file_name: string;
   }>;

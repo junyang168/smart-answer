@@ -25,6 +25,7 @@ from .canonical_repository.viewpoint_recall_blocking import (
 from .canonical_repository.matthew16_viewpoint_candidate import (
     Matthew16ViewpointPilotArtifact,
     build_pilot_composition_projection,
+    classify_pilot_viewpoint,
 )
 from .canonical_repository.viewpoint_foundation import sha256_json
 
@@ -184,7 +185,11 @@ def viewpoint_pilot():
         raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
     if pilot is None:
         raise HTTPException(status_code=404, detail="No viewpoint pilot is configured")
-    consumer_projection = build_pilot_composition_projection(pilot)
+    try:
+        consumer_projection = build_pilot_composition_projection(pilot)
+        knowledge_classification = classify_pilot_viewpoint(pilot)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=f"Viewpoint pilot unavailable: {exc}") from exc
     try:
         source_files, source_files_sha256 = _viewpoint_pilot_source_files(pilot)
     except (AdminViewpointProjectionError, PostgresKnowledgeStoreError) as exc:
@@ -204,6 +209,7 @@ def viewpoint_pilot():
             "projection_sha256": consumer_projection.projection_sha256,
             "blocker_codes": consumer_projection.blocker_codes,
         },
+        "knowledge_classification": knowledge_classification.model_dump(mode="json"),
         "source_files": source_files,
         "source_files_sha256": source_files_sha256,
         "data": pilot.model_dump(mode="json"),

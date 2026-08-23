@@ -3,9 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from backend.api.canonical_repository.knowledge_models import ClaimRecord
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import (
     build_matthew16_pilot_scope,
+)
+from backend.api.canonical_repository.matthew16_viewpoint_candidate import (
+    Matthew16ViewpointPilotArtifact,
+    classify_pilot_viewpoint,
+)
+from backend.api.canonical_repository.knowledge_models import (
+    ViewpointPropositionSignature,
+    ViewpointScope,
 )
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
@@ -148,3 +158,30 @@ def test_pilot_scope_sha_binds_article_bytes(tmp_path):
     expected = hashlib.sha256((article / "manuscript.md").read_bytes()).hexdigest()
     assert result.article_acceptance_fixtures[0].manuscript_sha256 == expected
     assert result.artifact_sha256
+
+
+def test_pilot_viewpoint_classification_is_explicit_and_fail_closed():
+    pilot = Matthew16ViewpointPilotArtifact.model_construct(
+        proposition_signature=ViewpointPropositionSignature(
+            subject="太16:18的磐石",
+            predicate="指向",
+            object="彼得本人",
+            polarity="denied",
+            modality="教授的释经判断",
+        ),
+        scope=ViewpointScope(scripture_scope=["Matt.16.18"]),
+    )
+
+    classification = classify_pilot_viewpoint(pilot)
+
+    assert classification.knowledge_role == "passage_interpretation"
+    assert classification.processing_phase == "passage_exegesis"
+    assert classification.scripture_scope == ["Matt.16.18"]
+    assert classification.basis_fields == [
+        "proposition_signature.modality",
+        "scope.scripture_scope",
+    ]
+
+    unscoped = pilot.model_copy(update={"scope": ViewpointScope()})
+    with pytest.raises(ValueError, match="cannot be classified"):
+        classify_pilot_viewpoint(unscoped)

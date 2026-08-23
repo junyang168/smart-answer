@@ -84,7 +84,7 @@ export function ViewpointExplorer() {
       <WorkbenchHeader exceptions={overview.data.exceptions} />
       <AsOfStrip asOf={listing.as_of} projectionSha={listing.projection_sha256} />
       {pilot && <Link href="/admin/wang/viewpoints/pilot" className="block rounded-2xl border-2 border-violet-300 bg-violet-50 p-5 hover:border-violet-500">
-        <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-violet-700 px-2.5 py-1 text-xs font-black text-white">太 16 释经 pilot · WIP 1</span><StatusBadge value={pilot.data.review_status} /><span className="text-xs font-bold text-violet-700">只读 candidate</span></div>
+        <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-violet-700 px-2.5 py-1 text-xs font-black text-white">释经观点 · {pilot.knowledge_classification.scripture_scope.map((value) => value.replace(/^Matt\.(\d+)\.(\d+)$/, "太 $1:$2")).join("、")}</span><span className="rounded-full bg-sky-100 px-2.5 py-1 font-mono text-[11px] font-bold text-sky-800">{pilot.knowledge_classification.knowledge_role}</span><StatusBadge value={pilot.data.review_status} /><span className="text-xs font-bold text-violet-700">只读 candidate</span></div>
         <h2 className="mt-3 text-lg font-black text-slate-950">{pilot.data.core_proposition}</h2>
         <p className="mt-2 text-sm text-slate-600">{pilot.data.members.length} 个证据绑定 atomic members · {pilot.data.adjacent_non_members.length} 个相邻非成员 · Article 2 {pilot.data.article_acceptance.status}</p>
         <p className="mt-2 break-all font-mono text-[11px] text-slate-400">{pilot.data.viewpoint_candidate_id} · {pilot.projection_sha256}</p>
