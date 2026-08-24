@@ -682,8 +682,8 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
             raise ValueError("evidence_bindings must be sorted and unique")
         if self.link_type == "equivalent_component" and not self.component_locator:
             raise ValueError("equivalent_component requires component_locator")
-        if self.link_type != "equivalent_component" and self.component_locator is not None:
-            raise ValueError("component_locator is only valid for equivalent_component")
+        if self.link_type == "equivalent_full" and self.component_locator is not None:
+            raise ValueError("equivalent_full spans the whole Claim and has no locator")
         if self.effective_state == "active" and self.review_status not in {
             "system_approved",
             "human_approved",

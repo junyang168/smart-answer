@@ -39,6 +39,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     canonicalize_proposal,
     canonicalize_review,
     component_key,
+    component_key_from_spans,
     repair_grouping,
     split_batches,
     validate_grouping,
@@ -427,6 +428,191 @@ def build_route_packet(
         "existing_routes": sorted(
             [dict(item) for item in existing_routes],
             key=lambda item: str(item.get("route_revision_id") or ""),
+        ),
+    }
+    packet["packet_sha256"] = sha256_json(packet)
+    return packet
+
+
+_REGISTRY_LINK_DISPOSITIONS = {
+    "equivalent_full": "member_existing",
+    "equivalent_component": "member_existing",
+    "supports": "support_existing",
+    "extends": "extension_existing",
+    "qualifies": "qualification_existing",
+    "applies": "application_existing",
+    "tension_evidence": "tension_existing",
+}
+
+
+def build_registry_route_packet(
+    *,
+    scope_label: str,
+    approved_viewpoints: list[dict[str, Any]],
+    claims: list[ReviewClaim],
+    viewpoint_claim_links: list[dict[str, Any]],
+    existing_routes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Rebuild Route evidence solely from committed Registry state.
+
+    The async worker must not depend on a prior CVP model response.  Current
+    revisions and their active Claim links are the semantic handoff; the full
+    scope Claims remain available so source-local bridges and objections are
+    not hidden merely because they are not CVP members.
+    """
+
+    approved_index: dict[str, dict[str, Any]] = {}
+    revision_to_viewpoint: dict[str, str] = {}
+    for raw in approved_viewpoints:
+        item = dict(raw)
+        revision_id = str(item.get("viewpoint_revision_id") or "")
+        viewpoint_id = str(item.get("viewpoint_id") or "")
+        if not revision_id or not viewpoint_id:
+            raise ValueError("approved Registry viewpoint lacks identity or revision")
+        if revision_id in approved_index:
+            raise ValueError(f"duplicate approved viewpoint revision {revision_id}")
+        approved_index[revision_id] = item
+        revision_to_viewpoint[revision_id] = viewpoint_id
+    if not approved_index:
+        raise RouteStageNotReadyError(
+            "Route Proposal requires at least one committed viewpoint revision"
+        )
+
+    claim_index = {item.claim_id: item for item in claims}
+    if len(claim_index) != len(claims):
+        raise ValueError("Route scope contains duplicate Claims")
+    components: dict[str, RouteComponentBinding] = {}
+
+    for raw in viewpoint_claim_links:
+        if raw.get("effective_state") != "active":
+            continue
+        revision_id = str(raw.get("validated_against_viewpoint_revision_id") or "")
+        if revision_id not in approved_index:
+            continue
+        if str(raw.get("viewpoint_id") or "") != revision_to_viewpoint[revision_id]:
+            raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: viewpoint/revision mismatch")
+        link_type = str(raw.get("link_type") or "")
+        disposition = _REGISTRY_LINK_DISPOSITIONS.get(link_type)
+        if disposition is None:
+            # superseding evidence is historical identity evidence, not a
+            # source-local route component for the current conclusion.
+            continue
+        claim_id = str(raw.get("claim_id") or "")
+        claim = claim_index.get(claim_id)
+        if claim is None:
+            raise ValueError(f"active Registry link references Claim outside scope: {claim_id}")
+        if int(raw.get("pinned_claim_revision") or 0) != claim.pinned_claim_revision:
+            raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: stale Claim revision")
+
+        locator = raw.get("component_locator")
+        if locator:
+            if str(locator.get("claim_sha256") or "") != claim.claim_revision_sha256:
+                raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: stale Claim SHA")
+            spans = [dict(item) for item in locator.get("canonical_spans") or []]
+            statement_component = str(locator.get("statement_component") or "")
+        else:
+            spans = [{"start_char": 0, "end_char": len(claim.statement), "exact_text": claim.statement}]
+            statement_component = claim.statement
+        if not spans or statement_component != "".join(str(item["exact_text"]) for item in spans):
+            raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: invalid component locator")
+        for span in spans:
+            start, end = int(span["start_char"]), int(span["end_char"])
+            if claim.statement[start:end] != str(span["exact_text"]):
+                raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: locator text mismatch")
+
+        evidence_pairs = sorted(
+            {
+                (str(item["evidence_step_id"]), str(item["source_fragment_id"]))
+                for item in raw.get("evidence_bindings") or []
+            }
+        )
+        allowed_pairs = {
+            (item.evidence_step_id, item.source_fragment_id) for item in claim.evidence
+        }
+        if not evidence_pairs or any(pair not in allowed_pairs for pair in evidence_pairs):
+            raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: invalid evidence binding")
+        key = component_key_from_spans(
+            claim_id=claim.claim_id,
+            claim_revision_sha256=claim.claim_revision_sha256,
+            canonical_spans=spans,
+        )
+        binding = RouteComponentBinding(
+            claim_component_key=key,
+            claim_id=claim.claim_id,
+            source_id=claim.source_id,
+            disposition=disposition,
+            target_viewpoint_revision_id=revision_id,
+            statement_component=statement_component,
+            spans=spans,
+            evidence_step_ids=sorted({item[0] for item in evidence_pairs}),
+            source_fragment_ids=sorted({item[1] for item in evidence_pairs}),
+        )
+        prior = components.get(key)
+        if prior is not None and prior != binding:
+            raise ValueError(f"Claim component key has conflicting Registry links: {key}")
+        components[key] = binding
+
+    # Full Claims are included even when their components have no Registry
+    # assertion. This is how the Route model can see source-local bridge,
+    # objection and connective material without seeing old CVP proposals.
+    for claim in claims:
+        spans = [{"start_char": 0, "end_char": len(claim.statement), "exact_text": claim.statement}]
+        key = component_key_from_spans(
+            claim_id=claim.claim_id,
+            claim_revision_sha256=claim.claim_revision_sha256,
+            canonical_spans=spans,
+        )
+        if key not in components:
+            components[key] = RouteComponentBinding(
+                claim_component_key=key,
+                claim_id=claim.claim_id,
+                source_id=claim.source_id,
+                disposition="no_registry_assertion",
+                statement_component=claim.statement,
+                spans=spans,
+                evidence_step_ids=sorted({item.evidence_step_id for item in claim.evidence}),
+                source_fragment_ids=sorted({item.source_fragment_id for item in claim.evidence}),
+            )
+
+    source_revisions = {
+        claim.source_id: sorted(
+            {
+                evidence.source_sha256
+                for scoped_claim in claims
+                if scoped_claim.source_id == claim.source_id
+                for evidence in scoped_claim.evidence
+            }
+        )
+        for claim in claims
+    }
+    ambiguous = {key: value for key, value in source_revisions.items() if len(value) != 1}
+    if ambiguous:
+        raise ValueError(
+            "Route scope does not pin exactly one revision per source: "
+            + json.dumps(ambiguous, ensure_ascii=False, sort_keys=True)
+        )
+
+    packet = {
+        "schema_version": "wang_argument_route_scope_packet_v2",
+        "scope_label": scope_label,
+        "approved_viewpoint_revision_ids": sorted(approved_index),
+        "approved_viewpoint_set_sha256": sha256_json(
+            [approved_index[key] for key in sorted(approved_index)]
+        ),
+        "registry_handoff": True,
+        "single_source_note": (
+            "每个 attestation 的 Claim、EvidenceStep、SourceFragment 必须同属一篇来源。"
+            "不得从两篇拼出一条谁都没讲完整的论证。"
+        ),
+        "approved_viewpoints": [approved_index[key] for key in sorted(approved_index)],
+        "claim_components": [
+            components[key].model_dump(mode="json") for key in sorted(components)
+        ],
+        "claims": [claim.model_dump(mode="json") for claim in sorted(claims, key=lambda item: item.claim_id)],
+        "source_revisions": {key: value[0] for key, value in source_revisions.items()},
+        "existing_routes": sorted(
+            [dict(item) for item in existing_routes],
+            key=lambda item: str(item.get("route_revision_id") or item.get("argument_route_revision_id") or ""),
         ),
     }
     packet["packet_sha256"] = sha256_json(packet)

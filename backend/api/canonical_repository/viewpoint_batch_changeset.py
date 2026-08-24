@@ -308,7 +308,7 @@ def compile_cvp_batch_package(
             )
             durable_link_type = link_type
             locator = None
-            if durable_link_type == "equivalent_component":
+            if durable_link_type != "equivalent_full":
                 locator = {
                     "statement_component": "".join(item[2] for item in spans),
                     "claim_sha256": claim.claim_revision_sha256,

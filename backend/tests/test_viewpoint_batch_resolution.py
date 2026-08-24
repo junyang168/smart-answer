@@ -29,7 +29,11 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
-from backend.pipeline.viewpoint_batch_resolution_runner import _stable_decided_at, run_batch
+from backend.pipeline.viewpoint_batch_resolution_runner import (
+    _stable_decided_at,
+    build_registry_route_packet,
+    run_batch,
+)
 
 ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
 MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
@@ -1685,6 +1689,102 @@ def _route_component_binding() -> Any:
         evidence_step_ids=component.evidence_step_ids,
         source_fragment_ids=component.source_fragment_ids,
     )
+
+
+def _approved_viewpoint() -> dict[str, Any]:
+    return {
+        "viewpoint_id": "CV-1",
+        "viewpoint_revision_id": "CVR-1",
+        "core_proposition": "太16:18 的磐石不指彼得本人",
+        "proposition_signature": {
+            "subject": "太16:18 的磐石",
+            "predicate": "指向",
+            "object": "彼得本人",
+            "polarity": "denied",
+            "modality": "asserted",
+            "conditions": [],
+            "population_scope": [],
+        },
+        "scope": {"scripture_scope": ["Matt.16.18"]},
+        "review_status": "system_approved",
+    }
+
+
+def _registry_link(claim: ReviewClaim, **overrides: Any) -> dict[str, Any]:
+    span = _span(claim.statement, "磐石不是彼得这个人")
+    payload = {
+        "viewpoint_claim_link_id": "VCL-1",
+        "viewpoint_id": "CV-1",
+        "validated_against_viewpoint_revision_id": "CVR-1",
+        "claim_id": claim.claim_id,
+        "pinned_claim_revision": claim.pinned_claim_revision,
+        "link_type": "equivalent_component",
+        "component_locator": {
+            "statement_component": span["exact_text"],
+            "claim_sha256": claim.claim_revision_sha256,
+            "canonical_spans": [span],
+        },
+        "evidence_bindings": [
+            {"evidence_step_id": "C1-E1", "source_fragment_id": "C1-F1"}
+        ],
+        "effective_state": "active",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_registry_route_packet_rebuilds_components_without_cvp_proposal():
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+
+    assert packet["schema_version"] == "wang_argument_route_scope_packet_v2"
+    assert packet["registry_handoff"] is True
+    member = next(
+        item for item in packet["claim_components"]
+        if item["disposition"] == "member_existing"
+    )
+    assert member["statement_component"] == "磐石不是彼得这个人"
+    assert member["target_viewpoint_revision_id"] == "CVR-1"
+    assert member["evidence_step_ids"] == ["C1-E1"]
+    assert member["source_fragment_ids"] == ["C1-F1"]
+
+
+def test_registry_route_packet_keeps_unlinked_bridge_claim():
+    member = _claim("C1", ROCK_STATEMENT)
+    bridge = _claim("C2", MODAL_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, bridge],
+        viewpoint_claim_links=[_registry_link(member)],
+        existing_routes=[],
+    )
+
+    background = [
+        item for item in packet["claim_components"]
+        if item["claim_id"] == "C2"
+    ]
+    assert len(background) == 1
+    assert background[0]["disposition"] == "no_registry_assertion"
+    assert background[0]["statement_component"] == MODAL_STATEMENT
+
+
+def test_registry_route_packet_rejects_stale_claim_link():
+    claim = _claim("C1", ROCK_STATEMENT)
+    with pytest.raises(ValueError, match="stale Claim revision"):
+        build_registry_route_packet(
+            scope_label="matt16-13-18",
+            approved_viewpoints=[_approved_viewpoint()],
+            claims=[claim],
+            viewpoint_claim_links=[_registry_link(claim, pinned_claim_revision=2)],
+            existing_routes=[],
+        )
 
 
 def test_routes_validate_against_settled_conclusions():

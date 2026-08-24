@@ -596,7 +596,9 @@ class RouteComponentBinding(StrictBatchModel):
     disposition: Literal[
         "member_existing",
         "support_existing",
+        "extension_existing",
         "qualification_existing",
+        "application_existing",
         "tension_existing",
         "no_registry_assertion",
         "deferred",
@@ -722,11 +724,26 @@ def component_key(claim: ReviewClaim, component: ProposedComponent) -> str:
     key instead lets both link types share the single-active-owner invariant.
     """
 
+    return component_key_from_spans(
+        claim_id=claim.claim_id,
+        claim_revision_sha256=claim.claim_revision_sha256,
+        canonical_spans=component.canonical_spans(),
+    )
+
+
+def component_key_from_spans(
+    *,
+    claim_id: str,
+    claim_revision_sha256: str,
+    canonical_spans: Sequence[Mapping[str, Any]],
+) -> str:
+    """Transport key shared by proposal and Registry-backed Route packets."""
+
     return "CCK-" + sha256_json(
         {
-            "claim_id": claim.claim_id,
-            "claim_revision_sha256": claim.claim_revision_sha256,
-            "canonical_spans": component.canonical_spans(),
+            "claim_id": claim_id,
+            "claim_revision_sha256": claim_revision_sha256,
+            "canonical_spans": list(canonical_spans),
         }
     )
 
