@@ -329,8 +329,6 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
     batch_id: str
     claim_decisions: list[ProposedClaimDecision] = Field(min_length=1)
     new_viewpoint_candidates: list[NewViewpointCandidate] = Field(default_factory=list)
-    argument_route_candidates: list[ArgumentRouteCandidate] = Field(default_factory=list)
-    source_route_attestations: list[SourceRouteAttestation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "CanonicalViewpointProposalResponse":
@@ -340,12 +338,6 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
         keys = [item.local_key for item in self.new_viewpoint_candidates]
         if len(keys) != len(set(keys)):
             raise ValueError("new viewpoint candidates must be unique")
-        route_keys = [item.local_route_key for item in self.argument_route_candidates]
-        if len(route_keys) != len(set(route_keys)):
-            raise ValueError("route candidates must be unique")
-        attest_keys = [item.local_attestation_key for item in self.source_route_attestations]
-        if len(attest_keys) != len(set(attest_keys)):
-            raise ValueError("attestations must be unique")
         return self
 
 
@@ -663,15 +655,6 @@ def validate_proposal(
     for orphan in sorted(candidate_keys - referenced_keys):
         findings.append(f"{orphan}: new viewpoint candidate has no member component")
 
-    findings.extend(
-        _route_findings(
-            proposal=proposal,
-            claims=claims,
-            known_revisions=known_revisions,
-            candidate_keys=candidate_keys,
-        )
-    )
-
     if findings:
         raise BatchResolutionError(findings)
 
@@ -705,6 +688,7 @@ def validate_review(
     review: CanonicalViewpointReviewResponse,
     proposal: CanonicalViewpointProposalResponse,
     proposal_sha256: str,
+    routes: "ArgumentRouteProposalResponse | None" = None,
 ) -> dict[str, Any]:
     """Require the reviewer to have answered every proposed change."""
 
@@ -729,9 +713,11 @@ def validate_review(
 
     # Routes and attestations are proposed semantic changes too; a batch-level
     # route summary is not a decision about any of them.
-    expected_keys = {item.local_route_key for item in proposal.argument_route_candidates} | {
-        item.local_attestation_key for item in proposal.source_route_attestations
-    }
+    expected_keys: set[str] = set()
+    if routes is not None:
+        expected_keys = {item.local_route_key for item in routes.argument_route_candidates} | {
+            item.local_attestation_key for item in routes.source_route_attestations
+        }
     reviewed_keys = {
         item.target_key for item in review.change_reviews if item.target_key is not None
     }
@@ -1133,6 +1119,88 @@ def validate_reconsideration(
         # Fail closed: a rebutted or deferred finding, or a novelty miss, is a
         # human judgment. The system never re-asks until the models agree.
         "outcome": "resolved" if not escalations else "exception",
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
+
+
+ROUTE_PROPOSAL_VERSION = "wang_canonical_viewpoint_route_proposal_v1"
+
+
+class ArgumentRouteProposalResponse(StrictBatchModel):
+    """How the professor reached conclusions this batch already established.
+
+    Asked as its own call: proposing viewpoints and routes in one response blew
+    the 900s ceiling on a 14-Claim batch that took 6.3 minutes for viewpoints
+    alone.  Splitting also makes the question easier — the conclusions are given,
+    so this pass only answers which steps reach them, in what order, and whether
+    any one source delivered the whole argument.
+    """
+
+    schema_version: Literal["wang_canonical_viewpoint_route_proposal_v1"] = (
+        ROUTE_PROPOSAL_VERSION
+    )
+    batch_id: str
+    argument_route_candidates: list[ArgumentRouteCandidate] = Field(default_factory=list)
+    source_route_attestations: list[SourceRouteAttestation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_response(self) -> "ArgumentRouteProposalResponse":
+        route_keys = [item.local_route_key for item in self.argument_route_candidates]
+        if len(route_keys) != len(set(route_keys)):
+            raise ValueError("route candidates must be unique")
+        attest_keys = [item.local_attestation_key for item in self.source_route_attestations]
+        if len(attest_keys) != len(set(attest_keys)):
+            raise ValueError("attestations must be unique")
+        return self
+
+
+def validate_route_proposal(
+    *,
+    routes: ArgumentRouteProposalResponse,
+    batch_id: str,
+    claims: Sequence[ReviewClaim],
+    known_revisions: Sequence[str],
+    settled_conclusion_keys: Sequence[str],
+) -> dict[str, Any]:
+    """Check routes against the conclusions the viewpoint pass already settled."""
+
+    findings: list[str] = []
+    if routes.batch_id != batch_id:
+        findings.append(f"route proposal is for {routes.batch_id}, not {batch_id}")
+    findings.extend(
+        _route_findings(
+            proposal=routes,
+            claims=claims,
+            known_revisions=set(known_revisions),
+            candidate_keys=set(settled_conclusion_keys),
+        )
+    )
+    if findings:
+        raise BatchResolutionError(findings)
+
+    report = {
+        "schema_version": "wang_canonical_viewpoint_route_validation_v1",
+        "batch_id": batch_id,
+        "route_count": len(routes.argument_route_candidates),
+        "attestation_count": len(routes.source_route_attestations),
+        "full_count": sum(
+            1 for item in routes.source_route_attestations if item.completeness == "full"
+        ),
+        "partial_count": sum(
+            1 for item in routes.source_route_attestations if item.completeness == "partial"
+        ),
+        "attested_sources": sorted({item.source_id for item in routes.source_route_attestations}),
+        "inference_method_codes": sorted(
+            {code for item in routes.argument_route_candidates for code in item.inference_method_codes}
+        ),
+        "checks_passed": [
+            "conclusion_settled_by_viewpoint_pass",
+            "attestation_is_single_source",
+            "evidence_belongs_to_the_source",
+            "full_requires_every_required_node",
+            "no_route_without_an_attestation",
+        ],
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

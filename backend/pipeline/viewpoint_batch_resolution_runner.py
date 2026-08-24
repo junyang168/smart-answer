@@ -23,6 +23,8 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReconsiderationResponse,
+    ArgumentRouteProposalResponse,
+    EXISTING_DISPOSITIONS,
     CanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
@@ -34,6 +36,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     validate_grouping,
     validate_proposal,
     validate_reconsideration,
+    validate_route_proposal,
     validate_review,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -130,6 +133,104 @@ def build_reconsiderer(model: str, reasoning_effort: str) -> StructuredJsonRevie
     )
 
 
+def build_route_proposer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=ClaudeSubscriptionClient(
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=CALL_TIMEOUT_SECONDS,
+        ),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_routes.md").read_text(encoding="utf-8"),
+        response_model=ArgumentRouteProposalResponse,
+        schema_name="wang_canonical_viewpoint_route_proposal_v1",
+    )
+
+
+def build_route_packet(
+    *,
+    batch_id: str,
+    proposal: CanonicalViewpointProposalResponse,
+    claims: list[ReviewClaim],
+    registry_context: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The route pass sees settled conclusions, not the identity question again.
+
+    Only route-bearing components come through: a component ruled
+    ``no_registry_assertion`` or ``deferred`` has no conclusion to argue toward.
+    """
+
+    bearing = EXISTING_DISPOSITIONS | {"new_viewpoint"}
+    labels = {
+        item.local_key: item.core_proposition for item in proposal.new_viewpoint_candidates
+    }
+    for item in registry_context:
+        revision_id = str(item.get("viewpoint_revision_id") or "")
+        if revision_id:
+            labels[revision_id] = str(item.get("core_proposition") or revision_id)
+
+    conclusions: dict[str, dict[str, Any]] = {}
+    components: list[dict[str, Any]] = []
+    claim_index = {item.claim_id: item for item in claims}
+    for decision in proposal.claim_decisions:
+        claim = claim_index.get(decision.claim_id)
+        if claim is None:
+            continue
+        for index, component in enumerate(decision.components):
+            if component.disposition not in bearing:
+                continue
+            key = str(
+                component.target_viewpoint_revision_id or component.local_new_viewpoint_key
+            )
+            conclusions.setdefault(
+                key, {"conclusion_key": key, "core_proposition": labels.get(key, key)}
+            )
+            components.append(
+                {
+                    "claim_component_key": f"{decision.claim_id}#{index}",
+                    "claim_id": decision.claim_id,
+                    "source_id": claim.source_id,
+                    "component_text": component.statement_component(),
+                    "disposition": component.disposition,
+                    "conclusion_key": key,
+                    "evidence_step_ids": component.evidence_step_ids,
+                    "source_fragment_ids": component.source_fragment_ids,
+                }
+            )
+
+    packet = {
+        "schema_version": "wang_canonical_viewpoint_route_packet_v1",
+        "batch_id": batch_id,
+        "single_source_note": (
+            "每个 attestation 的 Claim、EvidenceStep、SourceFragment 必须同属一篇来源。"
+            "不得从两篇拼出一条谁都没讲完整的论证。"
+        ),
+        "settled_conclusions": [conclusions[key] for key in sorted(conclusions)],
+        "route_bearing_components": components,
+        "claims": [
+            {
+                "claim_id": claim.claim_id,
+                "source_id": claim.source_id,
+                "statement": claim.statement,
+                "evidence": [
+                    {
+                        "evidence_step_id": item.evidence_step_id,
+                        "source_fragment_id": item.source_fragment_id,
+                        "evidence_statement": item.evidence_statement,
+                        "verbatim_excerpt": item.verbatim_excerpt,
+                        "paragraph_key": item.paragraph_key,
+                    }
+                    for item in claim.evidence
+                ],
+            }
+            for claim in claims
+            if claim.claim_id in {item["claim_id"] for item in components}
+        ],
+        "existing_routes": [dict(item) for item in registry_context if item.get("route_revision_id")],
+    }
+    packet["packet_sha256"] = sha256_json(packet)
+    return packet
+
+
 def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str, Any], int, float]:
     """Return (raw response, calls executed, wall seconds).
 
@@ -169,6 +270,7 @@ def run_batch(
     proposer: Any,
     reviewer: Any,
     reconsiderer: Any = None,
+    route_proposer: Any = None,
 ) -> dict[str, Any]:
     packet = build_batch_packet(
         batch_id=batch_id,
@@ -214,18 +316,69 @@ def run_batch(
         },
     )
 
+    # Routes are a second call against settled conclusions. Asking for both in
+    # one response timed out at 900s on this same 14-Claim batch.
+    route_report: dict[str, Any] | None = None
+    route_calls = 0
+    route_seconds = 0.0
+    route_payload: dict[str, Any] | None = None
+    if route_proposer is not None:
+        route_packet = build_route_packet(
+            batch_id=batch_id,
+            proposal=proposal,
+            claims=claims,
+            registry_context=registry_context,
+        )
+        _write_immutable(output_dir / "route-packet.json", route_packet)
+        raw_routes, route_calls, route_seconds = _call(
+            route_proposer, route_packet, output_dir / "raw-routes.json"
+        )
+        routes = ArgumentRouteProposalResponse.model_validate(
+            canonicalize_proposal(raw_routes)[0]
+        )
+        route_report = validate_route_proposal(
+            routes=routes,
+            batch_id=batch_id,
+            claims=claims,
+            known_revisions=[
+                str(item["viewpoint_revision_id"])
+                for item in registry_context
+                if item.get("viewpoint_revision_id")
+            ],
+            settled_conclusion_keys=[
+                str(item["conclusion_key"]) for item in route_packet["settled_conclusions"]
+            ],
+        )
+        route_payload = routes.model_dump(mode="json")
+        _write_immutable(
+            output_dir / "routes.json",
+            {
+                "schema_version": "wang_canonical_viewpoint_route_envelope_v1",
+                "batch_id": batch_id,
+                "route_packet_sha256": route_packet["packet_sha256"],
+                "proposal_sha256": proposal_sha,
+                "routes_sha256": sha256_json(route_payload),
+                "routes": route_payload,
+                "validation_report": route_report,
+            },
+        )
+
     review_packet = {
         "batch_id": batch_id,
         "packet": packet,
         "proposal_sha256": proposal_sha,
         "proposal": proposal_payload,
+        "routes": route_payload,
     }
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
     review = CanonicalViewpointReviewResponse.model_validate(raw_review)
     review_validation = validate_review(
-        review=review, proposal=proposal, proposal_sha256=proposal_sha
+        review=review,
+        proposal=proposal,
+        proposal_sha256=proposal_sha,
+        routes=routes if route_proposer is not None else None,
     )
     review_payload = review.model_dump(mode="json")
     _write_immutable(
@@ -300,6 +453,9 @@ def run_batch(
         "component_count": validation["component_count"],
         "disposition_counts": validation["disposition_counts"],
         "new_viewpoint_candidate_count": validation["new_viewpoint_candidate_count"],
+        "route_count": route_report["route_count"] if route_report else 0,
+        "attestation_count": route_report["attestation_count"] if route_report else 0,
+        "full_attestation_count": route_report["full_count"] if route_report else 0,
         "outcome": review_validation["outcome"],
         "reconsideration_required": review_validation["reconsideration_required"],
         "novelty_status": review_validation["novelty_status"],
@@ -332,6 +488,8 @@ def run_batch(
     measurements = {
         "proposal_calls_executed": proposal_calls,
         "proposal_wall_seconds": proposal_seconds,
+        "route_calls_executed": route_calls,
+        "route_wall_seconds": route_seconds,
         "review_calls_executed": review_calls,
         "review_wall_seconds": review_seconds,
         "reconsideration_calls_executed": reconsideration_calls,
@@ -374,6 +532,12 @@ def main() -> int:
         type=int,
         help="stop after this many batches; 0 groups the scope and stops",
     )
+    parser.add_argument(
+        "--no-routes",
+        action="store_true",
+        help="stop after viewpoints instead of asking how he argued them",
+    )
+    parser.add_argument("--route-effort", choices=("high", "xhigh", "max"), default="high")
     parser.add_argument(
         "--no-reconsider",
         action="store_true",
@@ -497,6 +661,9 @@ def main() -> int:
     reconsiderer = (
         None if args.no_reconsider else build_reconsiderer(args.proposal_model, args.proposal_effort)
     )
+    route_proposer = (
+        None if args.no_routes else build_route_proposer(args.proposal_model, args.route_effort)
+    )
 
     reports: list[dict[str, Any]] = []
     for ordinal, batch in enumerate(batches, start=1):
@@ -513,6 +680,7 @@ def main() -> int:
                 proposer=proposer,
                 reviewer=reviewer,
                 reconsiderer=reconsiderer,
+                route_proposer=route_proposer,
             )
         except BatchResolutionError as exc:
             exception_bundle = {
