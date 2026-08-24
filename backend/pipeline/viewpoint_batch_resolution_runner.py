@@ -28,6 +28,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     batches_from_groups,
     build_batch_packet,
     canonicalize_proposal,
+    repair_grouping,
     split_batches,
     validate_grouping,
     validate_proposal,
@@ -306,7 +307,11 @@ def main() -> int:
     parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="xhigh")
     parser.add_argument("--review-model", default="gpt-5.6-sol")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")
-    parser.add_argument("--max-batches", type=int, help="stop after this many batches")
+    parser.add_argument(
+        "--max-batches",
+        type=int,
+        help="stop after this many batches; 0 groups the scope and stops",
+    )
     parser.add_argument(
         "--group",
         action="store_true",
@@ -349,6 +354,7 @@ def main() -> int:
         grouping = ClaimGroupingResponse.model_validate(
             canonicalize_proposal(raw_grouping)[0]
         )
+        grouping, repairs = repair_grouping(grouping=grouping, claim_ids=list(claims))
         grouping_report = validate_grouping(
             grouping=grouping, scope_label=scope_label, claim_ids=list(claims)
         )
@@ -358,6 +364,7 @@ def main() -> int:
                 "schema_version": "wang_canonical_viewpoint_grouping_envelope_v1",
                 "scope_label": scope_label,
                 "grouping": grouping.model_dump(mode="json"),
+                "coverage_repairs": repairs,
                 "validation_report": grouping_report,
             },
         )
@@ -366,6 +373,7 @@ def main() -> int:
                 {
                     "grouping_calls_executed": grouping_calls,
                     "grouping_wall_seconds": grouping_seconds,
+                    "coverage_repairs": len(repairs),
                     **{k: grouping_report[k] for k in ("group_count", "group_sizes")},
                 },
                 ensure_ascii=False,
@@ -374,7 +382,9 @@ def main() -> int:
         batches = batches_from_groups(grouping, batch_size=args.batch_size)
     else:
         batches = split_batches(sorted(claims), batch_size=args.batch_size)
-    if args.max_batches:
+    if args.max_batches is not None:
+        # 0 is meaningful: group the scope and stop, so the plan can be read
+        # before any proposal call is spent against it.
         batches = batches[: args.max_batches]
 
     proposer = build_proposer(args.proposal_model, args.proposal_effort)

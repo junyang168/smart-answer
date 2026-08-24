@@ -704,3 +704,38 @@ def test_a_claim_in_two_groups_is_rejected():
     )
     with pytest.raises(BatchResolutionError, match="in both group"):
         validate_grouping(grouping=grouping, scope_label="s", claim_ids=["C1"])
+
+
+def test_grouping_coverage_is_repaired_not_thrown_away():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        RESIDUAL_GROUP_KEY,
+        repair_grouping,
+        validate_grouping,
+    )
+
+    # A real 190-Claim grouping put one Claim in two groups. Grouping is a
+    # batching plan, so one slip must not cost the whole scope's call.
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "s",
+            "groups": [
+                {"group_key": "a_rock", "claim_ids": ["C1", "C2"], "rationale": "r"},
+                {"group_key": "b_keys", "claim_ids": ["C2", "C3", "C9"], "rationale": "r"},
+            ],
+        }
+    )
+    repaired, repairs = repair_grouping(grouping=grouping, claim_ids=["C1", "C2", "C3", "C4"])
+    assignments = [claim for group in repaired.groups for claim in group.claim_ids]
+
+    assert sorted(assignments) == ["C1", "C2", "C3", "C4"]
+    assert len(assignments) == 4, "exact-once coverage after repair"
+    # First group in canonical order keeps the duplicate.
+    assert dict((g.group_key, g.claim_ids) for g in repaired.groups)["a_rock"] == ["C1", "C2"]
+    # Unassigned Claims land in a residual batch; out-of-scope ids are dropped.
+    assert dict((g.group_key, g.claim_ids) for g in repaired.groups)[RESIDUAL_GROUP_KEY] == ["C4"]
+    assert any("C2" in item and "already grouped" in item for item in repairs)
+    assert any("C9" in item and "not in scope" in item for item in repairs)
+
+    # The repaired plan is what gets validated, and it passes.
+    validate_grouping(grouping=repaired, scope_label="s", claim_ids=["C1", "C2", "C3", "C4"])

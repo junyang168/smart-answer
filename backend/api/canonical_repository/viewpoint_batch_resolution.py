@@ -525,6 +525,55 @@ class ClaimGroupingResponse(StrictBatchModel):
         return self
 
 
+RESIDUAL_GROUP_KEY = "zz_ungrouped_residual"
+
+
+def repair_grouping(
+    *, grouping: ClaimGroupingResponse, claim_ids: Sequence[str]
+) -> tuple[ClaimGroupingResponse, list[str]]:
+    """Force exact-once coverage deterministically, recording each repair.
+
+    Grouping is a batching plan, not identity evidence, so an assignment slip
+    must not cost the whole scope's call.  Every repair here is mechanical and
+    order-independent: a Claim placed twice keeps its first group, a Claim left
+    out joins a residual group, and an id that is not in scope is dropped.
+    None of it decides what any Claim means.
+    """
+
+    repairs: list[str] = []
+    expected = set(claim_ids)
+    seen: set[str] = set()
+    groups: list[ProposedClaimGroup] = []
+    for group in sorted(grouping.groups, key=lambda item: item.group_key):
+        kept: list[str] = []
+        for claim_id in sorted(group.claim_ids):
+            if claim_id not in expected:
+                repairs.append(f"{claim_id}: dropped, not in scope (group {group.group_key})")
+                continue
+            if claim_id in seen:
+                repairs.append(f"{claim_id}: dropped from {group.group_key}, already grouped")
+                continue
+            seen.add(claim_id)
+            kept.append(claim_id)
+        if kept:
+            groups.append(group.model_copy(update={"claim_ids": kept}))
+
+    missing = sorted(expected - seen)
+    if missing:
+        repairs.append(f"{len(missing)} ungrouped Claims placed in {RESIDUAL_GROUP_KEY}")
+        groups.append(
+            ProposedClaimGroup(
+                group_key=RESIDUAL_GROUP_KEY,
+                claim_ids=missing,
+                rationale="程序补入：分组结果未覆盖这些 Claim，按残余批次处理。",
+            )
+        )
+    return (
+        grouping.model_copy(update={"groups": sorted(groups, key=lambda item: item.group_key)}),
+        repairs,
+    )
+
+
 def validate_grouping(
     *,
     grouping: ClaimGroupingResponse,
