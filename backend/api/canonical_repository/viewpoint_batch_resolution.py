@@ -504,16 +504,27 @@ def _route_findings(
             findings.append(f"{where}: names local route {route_key}, which was not proposed")
 
         source_ids = set()
-        allowed_steps: set[str] = set()
-        allowed_fragments: set[str] = set()
         for claim_id in attestation.claim_ids:
             claim = claim_index.get(claim_id)
             if claim is None:
                 findings.append(f"{where}: Claim {claim_id} is not in this batch")
                 continue
             source_ids.add(claim.source_id)
-            allowed_steps.update(item.evidence_step_id for item in claim.evidence)
-            allowed_fragments.update(item.source_fragment_id for item in claim.evidence)
+        # The invariant is the source revision, not the Claims the attestation
+        # happened to list. A step from a sibling Claim in the same sermon is
+        # the professor's own reasoning; only another sermon is fabrication.
+        allowed_steps = {
+            item.evidence_step_id
+            for claim in claims
+            if claim.source_id == attestation.source_id
+            for item in claim.evidence
+        }
+        allowed_fragments = {
+            item.source_fragment_id
+            for claim in claims
+            if claim.source_id == attestation.source_id
+            for item in claim.evidence
+        }
         if len(source_ids) > 1:
             findings.append(
                 f"{where}: Claims span {sorted(source_ids)}; an attestation is one source only"

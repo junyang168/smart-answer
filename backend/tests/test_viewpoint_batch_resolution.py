@@ -1175,3 +1175,74 @@ def test_review_must_decide_every_route_and_attestation():
             proposal_sha256="proposal-sha",
             routes=routes,
         )
+
+
+def test_a_sibling_claim_in_the_same_sermon_is_not_cross_source():
+    # The first real route run bound a step from another Claim in the same
+    # sermon. That is the professor's own reasoning; the invariant is the source
+    # revision, not the Claims the attestation happened to list.
+    sibling = ReviewClaim(
+        claim_id="C2",
+        pinned_claim_revision=1,
+        claim_revision_sha256="sha-C2",
+        source_id="S1",
+        statement=MODAL_STATEMENT,
+        review_status="approved",
+        evidence=[_evidence("C2")],
+    )
+    routes = _routes(
+        source_route_attestations=[
+            _attestation(
+                claim_ids=["C1"],
+                step_bindings=[
+                    {
+                        "route_step_key": "P1",
+                        "evidence_step_ids": ["C1-E1", "C2-E1"],
+                        "source_fragment_ids": ["C1-F1", "C2-F1"],
+                        "attestation_status": "attested",
+                    },
+                    {
+                        "route_step_key": "C1",
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                ],
+            )
+        ]
+    )
+    report = _check_routes(routes, [_claim("C1", ROCK_STATEMENT), sibling])
+    assert report["attestation_count"] == 1
+
+    # A step from a different sermon still fails.
+    other_sermon = ReviewClaim(
+        claim_id="C3",
+        pinned_claim_revision=1,
+        claim_revision_sha256="sha-C3",
+        source_id="S2",
+        statement=MODAL_STATEMENT,
+        review_status="approved",
+        evidence=[{**_evidence("C3"), "source_id": "S2"}],
+    )
+    borrowed = _routes(
+        source_route_attestations=[
+            _attestation(
+                step_bindings=[
+                    {
+                        "route_step_key": "P1",
+                        "evidence_step_ids": ["C3-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                    {
+                        "route_step_key": "C1",
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                ]
+            )
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="EvidenceStep C3-E1 is outside this source"):
+        _check_routes(borrowed, [_claim("C1", ROCK_STATEMENT), other_sermon])
