@@ -25,7 +25,7 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
-from backend.pipeline.viewpoint_batch_resolution_runner import run_batch
+from backend.pipeline.viewpoint_batch_resolution_runner import _stable_decided_at, run_batch
 
 ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
 MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
@@ -129,6 +129,15 @@ def test_split_batches_defaults_to_twenty_and_stays_ordered():
     batches = split_batches(claim_ids)
     assert [len(batch) for batch in batches] == [20, 20, 5]
     assert [claim for batch in batches for claim in batch] == sorted(claim_ids)
+
+
+def test_batch_decision_time_is_frozen_across_resume(tmp_path: Path):
+    first = _stable_decided_at(tmp_path)
+    second = _stable_decided_at(tmp_path)
+
+    assert first == second
+    artifact = json.loads((tmp_path / "decision-time.json").read_text())
+    assert artifact["decided_at"] == first
 
 
 def test_route_job_requires_exact_cvp_authority_readback():

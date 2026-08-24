@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,8 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     anchor_proposal_spans,
     batches_from_groups,
     build_batch_packet,
+    build_cvp_batch_readback_receipt,
+    build_route_resolution_job,
     canonicalize_proposal,
     canonicalize_review,
     component_key,
@@ -46,12 +49,19 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     validate_route_review,
     validate_review,
 )
+from backend.api.canonical_repository.viewpoint_batch_changeset import (
+    compile_cvp_batch_package,
+)
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import (
     ReviewClaim,
     StructuredJsonReviewerAdapter,
 )
-from backend.pipeline.viewpoint_scope_packet_runner import SCOPE_PACKET_VERSION
+from backend.pipeline.viewpoint_scope_packet_runner import (
+    SCOPE_PACKET_VERSION,
+    registry_context as load_registry_context,
+)
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
@@ -155,6 +165,24 @@ def _write_current_state(
     state["artifact_sha256"] = sha256_json(state)
     _write_derived(output_dir / "current-state.json", state)
     return state
+
+
+def _stable_decided_at(batch_dir: Path) -> str:
+    """Freeze one audit timestamp so a resume regenerates identical ids."""
+
+    path = batch_dir / "decision-time.json"
+    if path.exists():
+        payload = _read(path)
+        body = {key: value for key, value in payload.items() if key != "artifact_sha256"}
+        if payload.get("artifact_sha256") != sha256_json(body):
+            raise ValueError(f"decision time artifact SHA mismatch: {path}")
+        return str(payload["decided_at"])
+    body = {
+        "schema_version": "wang_cvp_batch_decision_time_v1",
+        "decided_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_immutable(path, body | {"artifact_sha256": sha256_json(body)})
+    return str(body["decided_at"])
 
 
 def _subscription_client(
@@ -636,6 +664,7 @@ def run_batch(
 
     review_sha = sha256_json(review_payload)
     reconsideration_report: dict[str, Any] | None = None
+    reconsideration: CanonicalViewpointReconsiderationResponse | None = None
     reconsideration_calls = 0
     reconsideration_seconds = 0.0
     effective_proposal = proposal
@@ -809,6 +838,10 @@ def run_batch(
         # In-memory orchestration input only. The immutable proposal and
         # reconsideration envelopes above remain the auditable artifacts.
         "_effective_proposal": effective_proposal,
+        "_original_proposal": proposal,
+        "_review": review,
+        "_reconsideration": reconsideration,
+        "_effective_validation": effective_validation,
     }
 
 
@@ -1137,6 +1170,15 @@ def main() -> int:
     )
     parser.add_argument("--route-effort", choices=("high", "xhigh", "max"), default="high")
     parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "explicitly apply each passing CVP ChangeSet, verify authority readback, "
+            "and enqueue route work; default is plan-only and fail-stop"
+        ),
+    )
+    parser.add_argument("--database-url")
+    parser.add_argument(
         "--no-reconsider",
         action="store_true",
         help="stop after review instead of giving the proposer its one revision",
@@ -1159,6 +1201,11 @@ def main() -> int:
         help="resolve only these groups; the grouping plan itself still covers the whole scope",
     )
     args = parser.parse_args()
+    if args.apply and args.no_routes:
+        raise SystemExit(
+            "--apply cannot be combined with --no-routes: every committed CVP batch "
+            "must enqueue RouteResolutionJob"
+        )
 
     scope_packet = _read(args.packet)
     if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
@@ -1176,6 +1223,10 @@ def main() -> int:
         for item in scope_packet["claims"]
     }
     registry_context = list(scope_packet.get("registry_context") or [])
+    store = PostgresKnowledgeStore(args.database_url)
+    enqueued_route_jobs: list[dict[str, Any]] = []
+    awaiting_cvp_apply = False
+    master_data_mutations = 0
 
     if args.grouping:
         # A grouping plan belongs to the scope, not to one resolution run.
@@ -1336,8 +1387,155 @@ def main() -> int:
             print(json.dumps(stop, ensure_ascii=False, indent=2))
             return 1
 
+        raw_proposal = _read(batch_dir / "raw-proposal.json")
+        raw_review = _read(batch_dir / "raw-review.json")
+        correction = report["_reconsideration"]
+        effective_raw = (
+            _read(batch_dir / "raw-reconsideration.json")
+            if correction is not None
+            else raw_proposal
+        )
+        package = compile_cvp_batch_package(
+            proposal=report["_effective_proposal"],
+            review=report["_review"],
+            reviewed_proposal=(
+                report["_original_proposal"] if correction is not None else None
+            ),
+            reconsideration=correction,
+            deterministic_validation_sha256=report["_effective_validation"][
+                "artifact_sha256"
+            ],
+            scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
+            claims=[claims[claim_id] for claim_id in batch],
+            registry_context=registry_context,
+            proposal_artifact_sha256=str(effective_raw["artifact_sha256"]),
+            review_artifact_sha256=str(raw_review["artifact_sha256"]),
+            proposer_model_id=str(effective_raw["model_id"]),
+            reviewer_model_id=str(raw_review["model_id"]),
+            decided_at=_stable_decided_at(batch_dir),
+        )
+        _write_immutable(batch_dir / "cvp-change-package.json", package)
+        plan = store.plan_package(package, source_kind="cvp_batch_resolution")
+        plan_document = plan.as_dict()
+        plan_document["schema_version"] = "wang_cvp_batch_changeset_plan_v1"
+        plan_document["apply_allowed"] = bool(args.apply)
+        plan_document["artifact_sha256"] = sha256_json(plan_document)
+        _write_derived(batch_dir / "cvp-change-plan.json", plan_document)
+
+        if not args.apply:
+            awaiting_cvp_apply = True
+            _write_current_state(
+                batch_dir,
+                schema_version="wang_canonical_viewpoint_batch_current_state_v1",
+                identity={"batch_id": batch_id},
+                status="awaiting_cvp_apply",
+                authoritative_artifact="cvp-change-plan.json",
+                authoritative_artifact_sha256=plan_document["artifact_sha256"],
+            )
+            break
+
+        apply_result = store.apply_plan(
+            plan,
+            metadata={
+                "scope_label": scope_label,
+                "batch_id": batch_id,
+                "proposal_artifact_sha256": effective_raw["artifact_sha256"],
+                "review_artifact_sha256": raw_review["artifact_sha256"],
+            },
+        )
+        if apply_result.get("status") == "applied":
+            master_data_mutations += len(plan.operations)
+        expected_revisions = {
+            str(item["viewpoint_id"]): str(item["current_revision_id"])
+            for item in package["canonical_viewpoints"]
+        }
+        current_by_viewpoint = {
+            str(item["viewpoint_id"]): str(item["viewpoint_revision_id"])
+            for item in registry_context
+        }
+        for decision in package["viewpoint_identity_decisions"]:
+            viewpoint_id = str(decision["resolved_viewpoint_id"])
+            if viewpoint_id not in expected_revisions:
+                expected_revisions[viewpoint_id] = current_by_viewpoint[viewpoint_id]
+        observed_revisions: dict[str, str] = {}
+        for viewpoint_id in expected_revisions:
+            record = store.get_record("canonical_viewpoints", viewpoint_id)
+            if record:
+                observed_revisions[viewpoint_id] = str(record["current_revision_id"])
+        receipt = build_cvp_batch_readback_receipt(
+            scope_label=scope_label,
+            scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
+            triggering_cvp_batch_id=batch_id,
+            cvp_changeset_id=plan.change_set_id,
+            cvp_changeset_sha256=plan.fingerprint_sha256,
+            expected_current_revisions=expected_revisions,
+            observed_current_revisions=observed_revisions,
+        )
+        _write_immutable(
+            batch_dir / "cvp-readback-receipt.json",
+            receipt.model_dump(mode="json"),
+        )
+        apply_result_document = {
+            "schema_version": "wang_cvp_batch_apply_result_v1",
+            "batch_id": batch_id,
+            "change_set_id": plan.change_set_id,
+            "result": apply_result,
+        }
+        apply_result_document["artifact_sha256"] = sha256_json(
+            apply_result_document
+        )
+        _write_derived(batch_dir / "cvp-apply-result.json", apply_result_document)
+        route_policy_fingerprint = sha256_json(
+            {
+                "proposal_provider": args.proposal_provider,
+                "proposal_model": args.proposal_model,
+                "route_effort": args.route_effort,
+                "review_provider": args.review_provider,
+                "review_model": args.review_model,
+                "review_effort": args.review_effort,
+                "route_prompt_sha256": sha256_json(
+                    (PROMPT_DIR / "canonical_viewpoint_batch_routes.md").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            }
+        )
+        route_job = build_route_resolution_job(
+            receipt=receipt,
+            evidence_scope_sha256=str(scope_packet["packet_sha256"]),
+            route_policy_fingerprint_sha256=route_policy_fingerprint,
+        )
+        route_job_payload = route_job.model_dump(mode="json")
+        _write_immutable(
+            args.output_dir / "route-queue" / "jobs" / f"{route_job.job_id}.json",
+            route_job_payload,
+        )
+        enqueued_route_jobs.append(route_job_payload)
+        _write_current_state(
+            batch_dir,
+            schema_version="wang_canonical_viewpoint_batch_current_state_v1",
+            identity={"batch_id": batch_id},
+            status="applied_and_route_enqueued",
+            authoritative_artifact="cvp-readback-receipt.json",
+            authoritative_artifact_sha256=receipt.artifact_sha256,
+        )
+        registry_context = load_registry_context(
+            store.list_records("canonical_viewpoints"),
+            store.list_records("viewpoint_revisions"),
+        )
+
     route_stage: dict[str, Any]
-    if args.no_routes:
+    if awaiting_cvp_apply:
+        route_stage = {
+            "status": "awaiting_cvp_apply",
+            "reason": "plan-only run stops before the next serial CVP batch",
+        }
+    elif args.apply:
+        route_stage = {
+            "status": "queued",
+            "job_ids": [item["job_id"] for item in enqueued_route_jobs],
+        }
+    elif args.no_routes:
         route_stage = {"status": "disabled"}
     elif args.group_key or len(reports) != planned_batch_count:
         route_stage = {
@@ -1463,8 +1661,8 @@ def main() -> int:
             3,
         ),
         "route_stage": route_stage,
-        "master_data_mutations": 0,
-        "apply_allowed": False,
+        "master_data_mutations": master_data_mutations,
+        "apply_allowed": bool(args.apply),
     }
     summary["artifact_sha256"] = sha256_json(summary)
     # Derived from the batch reports, same as batch-run.json: rewritten.
