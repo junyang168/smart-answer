@@ -11,6 +11,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ProposedComponent,
     ProposedSpan,
     build_batch_packet,
+    canonicalize_review,
     component_key,
     split_batches,
     validate_proposal,
@@ -292,6 +293,40 @@ def test_review_must_answer_every_component():
         validate_review(review=partial, proposal=proposal, proposal_sha256=proposal_sha)
 
 
+def test_review_canonicalization_sorts_and_deduplicates_nonsemantic_codes():
+    raw = {
+        "proposal_sha256": "proposal-sha",
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "decision": "correct",
+                "finding_codes": ["wrong_role", "modality_collapsed", "wrong_role"],
+                "reason": "需要修正",
+                "correction": "保留模态并修正角色",
+            }
+        ],
+        "novelty_review": {
+            "status": "missed_novelty",
+            "missed_claim_ids": ["C2", "C1", "C2"],
+            "reason": "有漏项",
+        },
+    }
+
+    canonical, changed_paths = canonicalize_review(raw)
+
+    assert canonical["change_reviews"][0]["finding_codes"] == [
+        "modality_collapsed",
+        "wrong_role",
+    ]
+    assert canonical["novelty_review"]["missed_claim_ids"] == ["C1", "C2"]
+    assert changed_paths == [
+        "/change_reviews/0/finding_codes",
+        "/novelty_review/missed_claim_ids",
+    ]
+    CanonicalViewpointReviewResponse.model_validate(canonical)
+
+
 def test_modality_finding_routes_the_batch_to_reconsideration():
     # The blind POC collapsed "更可能是基督……而不是彼得个人" into a categorical
     # member; the reviewer catching that must stop the batch, not soften it.
@@ -420,6 +455,24 @@ def test_cached_call_is_bound_to_provider_and_model(tmp_path: Path):
             {"input": "same"},
             cache,
         )
+
+
+def test_explicit_model_roles_use_separate_subscription_providers():
+    from backend.pipeline.viewpoint_batch_resolution_runner import (
+        build_proposer,
+        build_reviewer,
+    )
+
+    proposer = build_proposer("gpt-5.6-sol", "high", provider="codex")
+    reviewer = build_reviewer("claude-opus-5", "high", provider="claude")
+    assert (proposer.backend, proposer.model_id) == (
+        "codex_subscription",
+        "gpt-5.6-sol",
+    )
+    assert (reviewer.backend, reviewer.model_id) == (
+        "claude_subscription",
+        "claude-opus-5",
+    )
 
 
 def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
@@ -998,6 +1051,55 @@ def test_reconsideration_can_merge_components_the_reviewer_flagged():
         review_sha256="review-sha",
     )
     assert report["outcome"] == "resolved"
+
+
+def test_reconsideration_can_merge_flagged_span_into_unchanged_passed_component():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    passed = revised["claim_decisions"][0]["components"][0]
+    flagged = revised["claim_decisions"][0]["components"][1]
+    passed["spans"].extend(flagged["spans"])
+    revised["claim_decisions"][0]["components"] = [passed]
+    reconsideration_payload = _reconsideration(revised, "accepted").model_dump(mode="json")
+    reconsideration_payload["finding_dispositions"][0]["component_index"] = 1
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+    )
+
+    report = validate_reconsideration(
+        reconsideration=CanonicalViewpointReconsiderationResponse.model_validate(
+            reconsideration_payload
+        ),
+        proposal=proposal,
+        review=_review("pass", "correct"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+
+    assert report["outcome"] == "resolved"
+
+
+def test_reconsideration_merge_cannot_rewrite_passed_component_metadata():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    passed = revised["claim_decisions"][0]["components"][0]
+    flagged = revised["claim_decisions"][0]["components"][1]
+    passed["spans"].extend(flagged["spans"])
+    passed["reason"] = "借合并偷偷改写"
+    revised["claim_decisions"][0]["components"] = [passed]
+
+    with pytest.raises(BatchResolutionError, match="unflagged component changed"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(revised, "accepted"),
+            proposal=proposal,
+            review=_review("pass", "correct"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
 
 
 def test_reconsideration_preserves_an_unflagged_component_after_index_shift():

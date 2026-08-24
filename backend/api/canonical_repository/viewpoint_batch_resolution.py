@@ -1023,9 +1023,12 @@ def batches_from_groups(
 #: order; rejecting that would throw away a ten-minute call over presentation.
 _SET_FIELDS = (
     "approved_viewpoint_revision_ids",
+    "claim_ids",
     "claim_component_keys",
     "evidence_step_ids",
+    "finding_codes",
     "inference_method_codes",
+    "missed_claim_ids",
     "source_fragment_ids",
     "scripture_scope",
     "conditions",
@@ -1047,8 +1050,6 @@ _ORDERED_LISTS = {
     "source_route_attestations": lambda item: str(item.get("local_attestation_key", "")),
     "viewpoints_with_no_route": lambda item: str(item.get("viewpoint_revision_id", "")),
     "groups": lambda item: str(item.get("group_key", "")),
-    "claim_ids": lambda item: str(item),
-    "missed_claim_ids": lambda item: str(item),
 }
 
 
@@ -1086,6 +1087,17 @@ def canonicalize_proposal(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[
         return node
 
     return walk(dict(raw), ""), sorted(changes)
+
+
+def canonicalize_review(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Canonicalize only order-free review lists before strict validation.
+
+    The same structural normalizer is used for proposals and reviews, but this
+    named entry point makes the semantic boundary explicit at each call site.
+    Raw model output remains immutable beside the normalized envelope.
+    """
+
+    return canonicalize_proposal(raw)
 
 
 def anchor_proposal_spans(
@@ -1243,16 +1255,55 @@ def validate_reconsideration(
         # Claim; matching by original index would make an authorized merge
         # shift later components and falsely report that they changed.
         remaining = list(after_components)
+        flagged_spans = {
+            sha256_json(span)
+            for index in claim_flags
+            if index < len(before_components)
+            for span in before_components[index].get("spans", [])
+        }
         for index, component in enumerate(before_components):
             if index in claim_flags:
                 continue
             try:
                 matched = remaining.index(component)
             except ValueError:
-                findings.append(
-                    f"{claim_id}#{index}: unflagged component changed or disappeared "
-                    "during reconsideration"
-                )
+                # A reviewer can flag one component and require its span to be
+                # merged into a neighbouring component that otherwise passed.
+                # Permit only that exact structural operation: every non-span
+                # field remains byte-identical and every added span belonged to
+                # a flagged component in the immutable original proposal.
+                original_without_spans = {
+                    key: value for key, value in component.items() if key != "spans"
+                }
+                original_spans = {
+                    sha256_json(span)
+                    for span in component.get("spans", [])
+                }
+                merge_match = None
+                for candidate_index, candidate in enumerate(remaining):
+                    candidate_without_spans = {
+                        key: value for key, value in candidate.items() if key != "spans"
+                    }
+                    candidate_spans = {
+                        sha256_json(span)
+                        for span in candidate.get("spans", [])
+                    }
+                    added_spans = candidate_spans - original_spans
+                    if (
+                        candidate_without_spans == original_without_spans
+                        and original_spans <= candidate_spans
+                        and added_spans
+                        and added_spans <= flagged_spans
+                    ):
+                        merge_match = candidate_index
+                        break
+                if merge_match is None:
+                    findings.append(
+                        f"{claim_id}#{index}: unflagged component changed or disappeared "
+                        "during reconsideration"
+                    )
+                else:
+                    remaining.pop(merge_match)
             else:
                 remaining.pop(matched)
     for extra_claim_id in sorted(set(after_by_claim) - set(before_by_claim)):

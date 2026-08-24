@@ -24,10 +24,10 @@
 10. CVP 与 ArgumentRoute 各自使用 evidence-bound proposal、独立 review 与 Registry ChangeSet。模型 proposal 不能批准自己；确定性 validator 与独立 reviewer 通过后，低风险结果才可标为 `system_approved`。任何自动批准不得冒充 `human_approved`。
 11. 完整性分母是本轮输入 manifest 中的 source-bound Claim revisions。每个 Claim 及其被提议使用的精确 component 必须在 CVP proposal 中有 disposition；每个 approved CVP 必须在 Route Proposal 中有 route/attestation 或 no-route disposition。coverage、quality、readback 与 SHA 是对应 artifacts 的 checks／derived reports，不再成为彼此重新绑定的业务阶段。
 12. Canonical master data 必须有 `/admin/wang` 内的可视化工作台。默认体验是只读浏览已编译的 identity、route、relation、coverage、quality 与 lineage；人工只从 exception inbox 进入需要判断的 decision bundle。UI 不直接写 PostgreSQL、不从原始 records 临时重算观点，也不把全库绘成无法审核的 graph hairball。
-13. `bootstrap` 与 `incremental` 的 CVP resolution 使用同一 contract。超出单次上下文预算的 Claim scope 先生成 `IntelligentBatchingPlan`：它只把可能需要互相比较的 Claims 放入 bounded batches，减轻 Opus 的单次认知与输出负担，不是 taxonomy、identity evidence 或 approval。每条 Claim 恰好拥有一个 CVP batch；batching rationale 不传给 proposer。每个 CVP batch 只看到自己的 Claims，但读取当时最新的 approved Registry context。IntelligentBatchingPlan 在 CVP scope 完成后即结束，不传入 Route Proposal。
+13. `bootstrap` 与 `incremental` 的 CVP resolution 使用同一 contract。超出单次上下文预算的 Claim scope 先生成 `IntelligentBatchingPlan`：它只把可能需要互相比较的 Claims 放入 bounded batches，减轻 Sol proposer 的单次认知与输出负担，不是 taxonomy、identity evidence 或 approval。每条 Claim 恰好拥有一个 CVP batch；batching rationale 不传给 proposer。每个 CVP batch 只看到自己的 Claims，但读取当时最新的 approved Registry context。IntelligentBatchingPlan 在 CVP scope 完成后即结束，不传入 Route Proposal。
 14. 现有 CanonicalViewpoints 必须传给增量 proposer，但它们是开放参考集，不是封闭 taxonomy。proposal schema 必须保留 `new_viewpoint` 出口，并对每个输入 Claim exact-once 交代 `member / support / qualification / tension / new_viewpoint / no_registry_assertion / deferred`。
 15. embedding、规则 blocking、SemanticSignature 与 RecallGraph 只负责检索、校准、漏项审计或历史诊断；它们不是 identity evidence，也不是每批生产所需的 durable stage。正常成本随新增 Claims 与 retrieved viewpoints 近似线性增长；定期 blind/global audit 不阻塞日常 ingest。
-16. 生产模型策略固定为 Claude Subscription `claude-opus-5` high proposer 与 Codex Subscription `gpt-5.6-sol` high independent reviewer。模型、provider、effort、prompt 或 schema 改变必须形成新 generation fingerprint；不得静默降级或回退 API billing。
+16. 生产模型策略固定为 Codex Subscription `gpt-5.6-sol` high proposer/corrector 与 Claude Subscription `claude-opus-5` high independent reviewer。模型、provider、effort、prompt 或 schema 改变必须形成新 generation fingerprint；不得静默降级或回退 API billing。
 17. reviewer 读取 proposal、相关 active viewpoint boundary、精确 Claim components 与必要 source evidence，专门检查 truth-condition identity、polarity、modality、scope、attribution、novelty 和 typed role。reviewer 不是第二次全库 discovery。
 18. reviewer findings 只允许触发一次 proposer finding-only correction；持续分歧、split/merge/supersedes、无法验证的证据或实质 scope 冲突进入 exception。不得增加 promotion proposal、finalization bundle、score-gap review 或重复 full review 来追求表面一致。
 19. 只有在 scope 内全部 CVP batches 完成 apply/readback 后，才开始 `ArgumentRouteProposal`。Route Proposal 一次可处理该 scope 的全部 approved CVPs；每条 route 的语义工作单元仍是 `source_id + conclusion_viewpoint_revision_id`，并从完整 scope 重新编译 Claims、Claim components、EvidenceSteps 与 SourceFragments。不得只读某个原 CVP batch 的 Claims。
@@ -83,22 +83,22 @@ flowchart TD
     S["reviewed Claim scope"] --> B["IntelligentBatchingPlan"]
     B --> N["next PlannedClaimBatch"]
     N --> L["reload latest approved CVPs"]
-    L --> P["Opus 5 high: CVP Proposal"]
+    L --> P["GPT-5.6 sol high: CVP Proposal"]
     P --> D["deterministic validation"]
-    D --> R["GPT-5.6 sol high: CVP Review"]
+    D --> R["Opus 5 high: CVP Review"]
     R -->|"pass"| C["CVP RegistryChangeSet"]
-    R -->|"correctable"| O["one Opus CVP correction"]
+    R -->|"correctable"| O["one Sol CVP correction"]
     O --> V["validate correction"]
     V -->|"resolved"| C
     V -->|"unresolved"| X["record exception and stop CVP scope"]
     C --> A["atomic CVP apply + readback"]
     A -->|"more CVP batches"| N
     A -->|"all CVPs approved"| Q["compile complete route evidence for all approved CVPs"]
-    Q --> RP["Opus 5 high: batched ArgumentRouteProposal"]
+    Q --> RP["GPT-5.6 sol high: batched ArgumentRouteProposal"]
     RP --> RD["per-route deterministic validation"]
-    RD --> RR["GPT-5.6 sol high: ArgumentRouteReview"]
+    RD --> RR["Opus 5 high: ArgumentRouteReview"]
     RR -->|"pass"| RC["route RegistryChangeSet"]
-    RR -->|"correctable"| RO["one Opus route correction"]
+    RR -->|"correctable"| RO["one Sol route correction"]
     RO --> RV["validate route correction"]
     RV -->|"resolved"| RC
     RV -->|"unresolved"| RX["route exception; keep approved CVPs"]
@@ -969,7 +969,7 @@ flowchart TD
 
 #### 6.2.1 Step 1–3 — scope、Intelligent Batching 与输入分母
 
-scope 先以可解释的内容边界确定，不按任意 pair 数切分。优先 scope 为同一 passage unit、相邻 passage units、同一新增来源 cohort，或一个明确专题 slice。scope 超出全链路单次预算时，`IntelligentBatchingPlan` 再把 Claims 编成多个语义相关的 bounded batches；它的唯一目标是减轻 Opus 单次需要同时理解、比较和输出的负担。
+scope 先以可解释的内容边界确定，不按任意 pair 数切分。优先 scope 为同一 passage unit、相邻 passage units、同一新增来源 cohort，或一个明确专题 slice。scope 超出全链路单次预算时，`IntelligentBatchingPlan` 再把 Claims 编成多个语义相关的 bounded batches；它的唯一目标是减轻 Sol proposer 单次需要同时理解、比较和输出的负担。
 
 Intelligent Batching 是 execution scheduling，不是知识分类或 identity decision。它必须满足：
 
@@ -1008,7 +1008,7 @@ batch size 的实际安全上限取全链路最紧的限制：proposer input、p
 
 每个 retrieved viewpoint synopsis 至少含 viewpoint/revision IDs、core proposition、truth-condition signature、scope、modality、material qualifications/tensions、代表性 member components 和 source coverage。它们是开放参考集，packet 必须明确声明“Registry 可能不完整”；低 embedding score 或没有 retrieved viewpoint 不能否决 `new_viewpoint`。Route retrieval 在 CVP 全部 approved 后另行执行。
 
-bootstrap 在某 passage 尚无 active Registry 时，第一个 batch 的 relevant viewpoint list 可以为空；Opus 仍直接从该 batch 发现 CVP candidates。它完全通过并写入 Registry 后，第二个及后续 batch 必须看见这些新 active CVPs。首次建库不要求先构造 Claim-pair graph。
+bootstrap 在某 passage 尚无 active Registry 时，第一个 batch 的 relevant viewpoint list 可以为空；Sol proposer 仍直接从该 batch 发现 CVP candidates。它完全通过并写入 Registry 后，第二个及后续 batch 必须看见这些新 active CVPs。首次建库不要求先构造 Claim-pair graph。
 
 #### 6.2.3 Step 5 — progressive evidence packet
 
@@ -1021,7 +1021,7 @@ proposal 的默认 packet 包含全部 Claim statements 与 EvidenceStep stateme
 
 #### 6.2.4 Step 6 — `CanonicalViewpointProposal`
 
-proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它同时读取本 batch 与 relevant Registry context，一次完成 existing match 和 novelty discovery，不以 pair 为调用单位。
+proposal model 固定为 Codex Subscription `gpt-5.6-sol`、high effort。它同时读取本 batch 与 relevant Registry context，一次完成 existing match 和 novelty discovery，不以 pair 为调用单位。
 
 对每个 Claim component，允许的 primary disposition 为：
 
@@ -1059,7 +1059,7 @@ CVP Proposal 在此结束。它可以把理由标为 `support_existing`，但不
 
 #### 6.2.6 Step 8 — `CanonicalViewpointReview`
 
-review model 固定为 Codex Subscription `gpt-5.6-sol`、high effort。reviewer 读取 proposal、相关 CVP boundary、全部 proposed components 与展开后的 source evidence；它不重新扫描全库，也不重新做一次无目标 discovery。
+review model 固定为 Claude Subscription `claude-opus-5`、high effort。reviewer 读取 proposal、相关 CVP boundary、全部 proposed components 与展开后的 source evidence；它不重新扫描全库，也不重新做一次无目标 discovery。
 
 reviewer 对每项 proposed change 检查：
 
@@ -1079,7 +1079,7 @@ review 输出逐 viewpoint component 的 `pass / correct / reject / defer`、fin
 
 #### 6.2.7 Step 9–10 — 一次 correction 与验证
 
-review 全部通过时不调用 correction。存在 correctable findings 时，原 Opus proposer 只接收 proposal、review findings 与相应 evidence，允许一次结构化 finding-only correction；不得重跑全 batch discovery 或新增 reviewer 问题。程序再次执行同一 deterministic validation，并要求每个 finding 有 `accepted / rebutted / deferred` disposition。
+review 全部通过时不调用 correction。存在 correctable findings 时，原 Sol proposer 只接收 proposal、review findings 与相应 evidence，允许一次结构化 finding-only correction；不得重跑全 batch discovery 或新增 reviewer 问题。程序再次执行同一 deterministic validation，并要求每个 finding 有 `accepted / rebutted / deferred` disposition。
 
 review finding 被接受、且修正严格落在 reviewer 已给出的 correction/acceptance criteria 内时，由 deterministic validator 核对后即可进入 ChangeSet，不再调用 reviewer。proposer 若 rebut finding、提出 reviewer 未预先允许的替代修正，或改变其他语义字段，则不能自动视为解决，直接进入 exception inbox。持续语义分歧、`unknown`、split/merge/supersedes、material scope change 或证据无法验证同样进入 exception。系统不得通过多次重问直到模型同意。
 
@@ -1100,7 +1100,7 @@ readback 通过即完成本 CVP batch；其通过的 `CanonicalViewpoint`、revi
 
 当且仅当 scope 内所有 CVP batches 已 apply/readback，runner 冻结 `approved_viewpoint_set_sha256`，并开始独立 Route 阶段。它忽略 `IntelligentBatchingPlan` 的 group 边界，从完整 scope 重新编译 route evidence。每个证据单元以 `source_id + source_revision_sha256 + conclusion_viewpoint_revision_id` 为 key，包含该来源中可能支持该结论的全部 Claims、确定性 `claim_component_keys`、EvidenceSteps、SourceFragments 与相关 active route synopses。`support_existing`、`no_registry_assertion`、外部立场、背景观察、objection 和 connective Claim 都不得仅因未成为 CVP member 而从 route evidence 中删除。
 
-Opus 一次 `ArgumentRouteProposal` 可处理该 scope 的**全部 approved CVPs**并输出多条 routes/attestations。这是效率 batch，不是 route identity；每条 route 仍独立绑定一个 approved conclusion revision，每个 attestation 仍严格 source-local。只有超出已测定的模型 input/output 容量时才可将 Route Proposal 拆成多个 capacity batches；拆分后仍必须对 approved CVP set exact-once coverage，且不得沿用 Claim grouping。
+Sol 一次 `ArgumentRouteProposal` 可处理该 scope 的**全部 approved CVPs**并输出多条 routes/attestations。这是效率 batch，不是 route identity；每条 route 仍独立绑定一个 approved conclusion revision，每个 attestation 仍严格 source-local。只有超出已测定的模型 input/output 容量时才可将 Route Proposal 拆成多个 capacity batches；拆分后仍必须对 approved CVP set exact-once coverage，且不得沿用 Claim grouping。
 
 程序在 Route Review 前逐条 fail closed 验证：
 
@@ -1112,7 +1112,7 @@ Opus 一次 `ArgumentRouteProposal` 可处理该 scope 的**全部 approved CVPs
 6. `match_existing` pin 当前 route revision，且 materially equivalent ordered skeleton 与 conclusion 均一致；
 7. Route Proposal fingerprint 绑定 approved CVP set、完整 route packet、prompt、schema、model/provider/effort 与 validator version。
 
-Sol Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。其 response 必须绑定 Route Proposal SHA，不得复用 CVP review 的 component-key uniqueness contract。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Opus 做最多一次 route-only correction。
+Opus Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。其 response 必须绑定 Route Proposal SHA，不得复用 CVP review 的 component-key uniqueness contract。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Sol 做最多一次 route-only correction。
 
 通过的 routes/attestations 分别进入可幂等 Route ChangeSet 并 readback；一条 route 失败只产生 route exception，不撤销 approved CVP，也不阻止同次 proposal 中其他通过 routes 写入 Registry。若 route review 发现 CVP identity 可能错误，它只建立 CVP re-review exception，不在 Route workflow 中直接改写 CVP。
 
@@ -1506,15 +1506,17 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 required premi
 
 平台只有一位 editor，审核设计必须减少人工次数，而不是把每个 Claim pair、member link 和产品使用分别送给同一个人。默认流程是：
 
-1. 每个 Intelligent CVP batch 由 Claude Subscription `claude-opus-5/high` 生成 `CanonicalViewpointProposal`，程序验证 exact Claim coverage、IDs、revisions、component spans 与 evidence lineage，Codex Subscription `gpt-5.6-sol/high` 独立审核 identity、role 与 novelty；
+1. 每个 Intelligent CVP batch 由 Codex Subscription `gpt-5.6-sol/high` 生成 `CanonicalViewpointProposal`，程序验证 exact Claim coverage、IDs、revisions、component spans 与 evidence lineage，Claude Subscription `claude-opus-5/high` 独立审核 identity、role 与 novelty；
 2. 有 CVP finding 时只允许一次 CVP finding-only correction；通过后立即生成 CVP ChangeSet、原子 apply/readback，下一 CVP batch 再读取 Registry；
-3. scope 内所有 CVPs approved 后，冻结 approved viewpoint set，重新汇集完整 Claims/components/Evidence/Fragments，Opus 一次批量生成这些 CVPs 的 `ArgumentRouteProposal`；
-4. 程序逐 route 验证 conclusion revision、component keys、required nodes 与 source locality；Sol 使用独立 `ArgumentRouteReview` 逐 route/attestation 审核 inferential validity、route identity 与 full/partial boundary；
+3. scope 内所有 CVPs approved 后，冻结 approved viewpoint set，重新汇集完整 Claims/components/Evidence/Fragments，Sol 一次批量生成这些 CVPs 的 `ArgumentRouteProposal`；
+4. 程序逐 route 验证 conclusion revision、component keys、required nodes 与 source locality；Opus 使用独立 `ArgumentRouteReview` 逐 route/attestation 审核 inferential validity、route identity 与 full/partial boundary；
 5. 有 route finding 时只允许一次 route-only correction；通过的 routes 分别生成可幂等 ChangeSets 并 apply/readback，失败 route 进入 exception queue 而不撤销 CVP 或阻断其他 route；
 6. 命中第 10.3 节低风险条件时标为 `system_approved`，持续分歧或高风险项才进入人工 exception queue；
 7. editor 的决定被后续产品复用，不逐文章重复批准；自动与人工决定都保存 approval basis、输入 SHA、模型／程序版本、理由和可撤销 lineage。
 
 模型调用 invariant 分两类工作单元：每个 CVP batch 恰好一次 CVP proposer 和一次 CVP reviewer；每个 Route Proposal capacity batch 恰好一次 route proposer 和一次 route reviewer。各自只在存在 findings 时最多增加一次同类 finding-only correction。transport/schema failure 可以在同 fingerprint 下做一次无语义 retry，但不能借 retry 修改 prompt、evidence 或结论。不得增加 blind full review、promotion review、finalization review 或其他 ad-hoc stage。`system_approved` 不能显示成同工读过。
+
+模型 raw review 必须原样保存；validation 前只允许对声明为 order-free 的 ID/code lists 做排序和 exact de-duplication，并在 review envelope 记录 changed paths、raw SHA 与 `truth_conditions_changed=false`。finding-only correction 若按 reviewer 要求把一个 flagged component 合入相邻 passed component，deterministic validator 只允许 passed component 的 spans 增加且新增 spans 必须逐字来自 flagged component；其 disposition、target、evidence、reason 与其他字段必须 byte-identical，否则仍按 collateral edit 阻断。
 
 ```mermaid
 flowchart TD
@@ -1653,11 +1655,11 @@ mutation suite 至少包含：
 flowchart TD
     S["new reviewed Claim scope"] --> B["IntelligentBatchingPlan when needed"]
     B --> N["next batch + latest Registry context"]
-    N --> P["Opus proposal"]
+    N --> P["Sol proposal"]
     P --> V["deterministic validation"]
-    V --> R["Sol review"]
+    V --> R["Opus review"]
     R -->|"all pass"| C["delta RegistryChangeSet"]
-    R -->|"correctable findings"| F["one Opus correction"]
+    R -->|"correctable findings"| F["one Sol correction"]
     F --> D["deterministic finding validation"]
     D -->|"resolved"| C
     D -->|"unresolved"| X["record exception and stop scope"]
@@ -1683,7 +1685,7 @@ flowchart TD
 3. Evidence/ArgumentRoute 层：只在正式 membership、route、冲突或新观点决策时加载；
 4. bounded Claim fallback：只处理无匹配或高风险边界，不扫描全部历史 Claim。
 
-每条新 Claim 无论是否匹配都必须进入 proposal coverage。top-K 未命中只表示“当前索引未找到候选”，不能自动证明 `create_new`；同一次 Opus proposal 必须检查 residual Claims 并明确提出 `new_viewpoint / no_registry_assertion / deferred`，同时检查本来源是否为 existing/new viewpoint 提供 existing/new ArgumentRoute attestation。GPT reviewer 再检查 proposer 是否因已有 Registry context 而强行归类、漏掉 novelty、漏掉论证，或把相同结论误当作相同 route；不需要为 unmatched Claims 固定增加一次 blind discovery call。
+每条新 Claim 无论是否匹配都必须进入 proposal coverage。top-K 未命中只表示“当前索引未找到候选”，不能自动证明 `create_new`；同一次 Sol proposal 必须检查 residual Claims 并明确提出 `new_viewpoint / no_registry_assertion / deferred`，同时检查本来源是否为 existing/new viewpoint 提供 existing/new ArgumentRoute attestation。Opus reviewer 再检查 proposer 是否因已有 Registry context 而强行归类、漏掉 novelty、漏掉论证，或把相同结论误当作相同 route；不需要为 unmatched Claims 固定增加一次 blind discovery call。
 
 已存在的 CVP context 是增量维护的优势，不是污染。生产默认把它传入；blind discovery 只用于 calibration、prompt/model version 变更后的 holdout、以及 periodic novelty audit。audit 发现系统性漏项时撤销相应 policy version 的自动资格，并重跑受影响 batch，而不是让每个正常 batch 永久支付第二次 discovery。
 
@@ -2297,6 +2299,8 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 - Opus 5/high proposal 后由 GPT-5.6 sol/high review proposal boundary，不采用两次互不知情的全量 discovery；
 - blind discovery 继续作为 calibration instrument 与 periodic audit，不是永久每批税负。
 
+#206 在同一 `rock_referent_not_peter` intelligent group 上完成角色反转 POC：输入 13 条 Claims 与现有 active CVP，由 Codex Subscription `gpt-5.6-sol/high` proposal（322.905 秒）、Claude Subscription `claude-opus-5/high` independent review（237.354 秒）、有 findings 时同一 Sol proposer 做唯一 correction（187.568 秒）。Opus 对 30 个原始 components 给出 26 pass、4 correct，并识别 1 个被 qualification 掩盖的 novelty；Sol 接受并满足全部 4 项，最终为 29 个有效 components、12 个 new-viewpoint candidates、0 unresolved novelty、0 escalations。review raw output 中两处 finding-code order 只做有记录的无语义 canonical sorting；一次 flagged-span merge 依前述窄规则验证。scope-run SHA-256 为 `c4bef98c8bd583bf9d1427c398f985c7409f56917c0b05aab342898ea340b69d`，`apply_allowed=false`、0 master-data mutations。该实测将 #204 的 Opus-proposal/Sol-review 结论 supersede 为本设计的 Sol-proposal/correction、Opus-review 生产默认；旧 POC 仍作为历史证据保留。
+
 62-Claim POC 也只证明 Opus 可以在该规模发现观点，不代表所有 passage/topic scope 都应塞入一次调用。生产 runner 把超过全链路预算的 Claim scope 交给 Intelligent Batching；每个 CVP batch 通过后直接写入 Registry，下一批只读取更新后的 CVP master data，不读取上一批 Claims。这里没有 pending/provisional 状态，也没有 scope-end CVP reconciliation：任一 CVP batch 失败即停止 CVP scope，保留前序已完成 transactions，修正后从失败批恢复。所有 CVPs approved 后才单独开始 Route Proposal。
 
 这两次 POC 是 architecture evidence，不是新的 master approval，也没有保存成 Registry record。正式实施必须以 regression fixture 重现其输入 manifest 与期望 boundary；不能从本段自然语言反向创建 member links。
@@ -2320,7 +2324,7 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 1. incremental CVP 阶段用 scripture/topic filters 与 CVP embedding 取得 relevant active viewpoint synopsis；Route 阶段再为 approved CVP set 取得 active route synopses；approved constraints 只阻断其明确适用范围内的误配；
 2. scope 超限时先生成一次 SHA-bound IntelligentBatchingPlan；plan 只决定 bounded batch composition，batching rationale 不进入 proposer packet，也不产生 identity evidence；
 3. CVP proposer packet 包含本 batch Claims、EvidenceSteps、必要 fragments 与**调用开始时重新读取**的 relevant CVPs，保留 `new_viewpoint`；Route packet 另行包含完整 scope evidence、全部 approved CVPs 与 relevant routes，保留 `create_new` route；
-4. 每个 CVP batch 为一次 Opus CVP proposal + 一次 Sol CVP review；全部 CVPs approved 后，Route Proposal 正常为一次 Opus batch call + 一次 Sol route review；两阶段都只在 findings 存在时增加一次同类 correction；
+4. 每个 CVP batch 为一次 Sol CVP proposal + 一次 Opus CVP review；全部 CVPs approved 后，Route Proposal 正常为一次 Sol batch call + 一次 Opus route review；两阶段都只在 findings 存在时增加一次由 Sol 完成的同类 correction；
 5. 同一 scope 不并行处理 semantic batches，不传递前批 Claims、proposal 或 pending candidates；跨批共享只通过已提交的 Registry master data；
 6. generation fingerprint 绑定 Claim/viewpoint/route revisions、Registry slice、evidence expansion、prompt、model/provider/effort、schema 与 validator version；相同 fingerprint 才能复用；
 7. 每个 planned CVP batch 产生至多一个 CVP delta ChangeSet；Route Proposal 可产生多个相互独立的 route ChangeSets，只失效受影响索引条目、snapshot 与 consumer dependency；
@@ -2356,7 +2360,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | Canonical master data UI、exception inbox、API/write boundary 与 UI 验收 | 第 13.12 节 |
-| Intelligent Batching 只服务 CVP、全部 approved CVPs 的独立 Route Proposal、Opus proposal、Sol review、一次 correction、ChangeSet apply/readback | 第 1.2、5.12、6.2、10.2、11.1、14 节 |
+| Intelligent Batching 只服务 CVP、全部 approved CVPs 的独立 Route Proposal、Sol proposal/correction、Opus review、一次 correction、ChangeSet apply/readback | 第 1.2、5.12、6.2、10.2、11.1、14 节 |
 | bootstrap/incremental、embedding、blind audit 与复杂度 | 第 6.2、10.6、11、14 节 |
 | 实现拆成后续 tickets | 第 16 节 |
 | 不调用内容模型、不迁移正式数据、不部署 | 文件状态、2.1、8、12.4 节 |
@@ -2365,7 +2369,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-23）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions：每批 Opus 5/high proposal、deterministic validation、GPT-5.6 sol/high review、必要时一次 finding-only correction、一个 RegistryChangeSet 及立即 apply/readback。该设计更新本身不改 code、DB 或已发布 viewpoint。
+实现状态（2026-08-24）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions。#206 将生产模型角色固定为 GPT-5.6 Sol/high proposal 与 finding-only correction、deterministic validation、Claude Opus 5/high independent review、一个 RegistryChangeSet 及立即 apply/readback；模型角色和 provider 都进入 generation fingerprint，不允许静默 fallback。该实现不修改 DB 或已发布 viewpoint。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。
@@ -2376,7 +2380,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 4. **ArgumentRoute 与 source-local attestation contract**
    扩展 route revision 的 ordered inference nodes、required-node semantics 与 route identity rule；实现 source-local step bindings、multi-Claim attestation、terminal viewpoint binding、full/partial gate、跨来源拼接阻断、route/attestation projection 和合成 fixture。该 schema 是独立 Route Proposal workflow 的前置条件。
 5. **Intelligent CVP Batching 与 Approved-CVP Route resolution workflow**
-   定义 SHA-bound `IntelligentBatchingPlan`、CVP proposal/review/ChangeSet 与独立 Route proposal/review/ChangeSet。planner 只负责 CVP Claims 的 exact-once coverage、bounded capacity 与相关 Claims 共批，不产生 identity evidence，不把 rationale 传给 proposer，也不把 batch boundary 传给 Route Proposal。每个 planned CVP batch 串行执行 Opus proposal → validation → Sol review → 最多一次 CVP correction → ChangeSet apply/readback。全部 CVPs approved 后，runner 冻结 approved viewpoint set，从完整 scope 重新编译 route evidence，一次 Opus call 可为全部 approved CVPs 提出 routes/attestations，Sol 再逐条审核，只对 route findings 做最多一次 route-only correction。通过 routes 独立 apply；失败 route 不撤销 CVP 或阻塞其他 route。不得引入 pending candidate、provisional CVP 或 joint CVP/route proposal。
+   定义 SHA-bound `IntelligentBatchingPlan`、CVP proposal/review/ChangeSet 与独立 Route proposal/review/ChangeSet。planner 只负责 CVP Claims 的 exact-once coverage、bounded capacity 与相关 Claims 共批，不产生 identity evidence，不把 rationale 传给 proposer，也不把 batch boundary 传给 Route Proposal。每个 planned CVP batch 串行执行 Sol proposal → validation → Opus review → 最多一次 Sol CVP correction → ChangeSet apply/readback。全部 CVPs approved 后，runner 冻结 approved viewpoint set，从完整 scope 重新编译 route evidence，一次 Sol call 可为全部 approved CVPs 提出 routes/attestations，Opus 再逐条审核，只对 route findings 做最多一次由 Sol 完成的 route-only correction。通过 routes 独立 apply；失败 route 不撤销 CVP 或阻塞其他 route。不得引入 pending candidate、provisional CVP 或 joint CVP/route proposal。
 
    本项必须先完成：span-only component 契约与 Unicode code-point 校验（`viewpoint_claim_links` 当前为 0 行，只需正确定义与 round-trip fixture）；canonical route node-role enum 与 versioned inference-method vocabulary；自由文本 `EvidenceStep.discourse_role` 到 route node 的 reviewed binding contract；移除自由文本 `inference_pattern` 的 identity 作用；第 13.14.1 节的 no-apply route POC；#194 master data baseline 与重建后的语义边界／route regression；全链路 batch 上限及 proposer/reviewer/correction 各自 `max_output_tokens`；batching plan 对 Claim manifest SHA 的绑定；每批 effective proposal、atomic apply/readback、idempotent resume 与 fail-stop exception checkpoint。缺一即不能打开 `--apply`。
 6. **Split/merge、revision 与 impact propagation**
@@ -2398,7 +2402,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
    preflight 是 fail-closed 的只读步骤：它验证 singular/plural `source_fragment_id(s)`、source-local Evidence、Claim denominator 和 lineage，编译 deterministic batch packet 与 relevant active-CVP context，但始终保持 `apply_allowed=false`。packet 中每条 eligible Claim 都须 exact-once 出现；source-ineligible、超大或缺失证据的 Claim 也必须以明确 exception disposition 留在 coverage 分母中。
 
-   正式语义流程按第 6.2 节运行：scope 超出预算时先编译 IntelligentBatchingPlan；每个 bounded CVP batch 开始前读取最新 Registry，执行 Opus CVP Proposal、确定性 validation、Sol CVP Review、必要时一次 CVP correction 及立即 ChangeSet apply/readback。全部 CVPs approved 后再对 complete scope 编译 Route packet，一次 Opus Route Proposal 可处理全部 approved CVPs；程序和 Sol 逐 route/attestation 验证，必要时仅做一次 route-only correction，并独立 apply 通过 routes。相同输入、模型配置与 policy version 必须产生可追踪 fingerprint，Claim/CVP/route revision 或 evidence SHA 改变必须使受影响 reuse key 失效。
+   正式语义流程按第 6.2 节运行：scope 超出预算时先编译 IntelligentBatchingPlan；每个 bounded CVP batch 开始前读取最新 Registry，执行 Sol CVP Proposal、确定性 validation、Opus CVP Review、必要时一次由 Sol 完成的 CVP correction 及立即 ChangeSet apply/readback。全部 CVPs approved 后再对 complete scope 编译 Route packet，一次 Sol Route Proposal 可处理全部 approved CVPs；程序和 Opus 逐 route/attestation 验证，必要时仅做一次由 Sol 完成的 route-only correction，并独立 apply 通过 routes。相同输入、模型配置与 policy version 必须产生可追踪 fingerprint，Claim/CVP/route revision 或 evidence SHA 改变必须使受影响 reuse key 失效。
 
    embedding、规则 blocking、SemanticSignature、RecallGraph 和 blind discovery 不再是这 19 篇 bootstrap 的 mandatory gates。batch 超过上下文预算时，embedding/scripture/topic retrieval 只负责选出 relevant active CVPs 与组织 bounded packets；它不裁定 identity。旧 scheduler artifacts 可用于 scoped regression、漏项审计和 periodic blind novelty audit，任何 audit finding 都必须重新进入同一 Proposal → Review → ChangeSet contract，不能直接写 master data。
 13. **逐步扩展至 corpus universe**

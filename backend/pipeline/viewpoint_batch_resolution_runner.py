@@ -34,6 +34,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     batches_from_groups,
     build_batch_packet,
     canonicalize_proposal,
+    canonicalize_review,
     component_key,
     repair_grouping,
     split_batches,
@@ -83,7 +84,7 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _proposal_client(
+def _subscription_client(
     provider: str, model: str, reasoning_effort: str
 ) -> ClaudeSubscriptionClient | CodexSubscriptionClient:
     client_type = {
@@ -91,7 +92,7 @@ def _proposal_client(
         "codex": CodexSubscriptionClient,
     }.get(provider)
     if client_type is None:
-        raise ValueError(f"unsupported proposal provider: {provider}")
+        raise ValueError(f"unsupported subscription provider: {provider}")
     return client_type(
         model=model,
         reasoning_effort=reasoning_effort,
@@ -103,7 +104,7 @@ def build_proposer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=_proposal_client(provider, model, reasoning_effort),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_proposal.md").read_text(
             encoding="utf-8"
         ),
@@ -112,13 +113,11 @@ def build_proposer(
     )
 
 
-def build_reviewer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def build_reviewer(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=CodexSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_review.md").read_text(
             encoding="utf-8"
         ),
@@ -146,7 +145,7 @@ def build_reconsiderer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=_proposal_client(provider, model, reasoning_effort),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
             encoding="utf-8"
         ),
@@ -159,20 +158,18 @@ def build_route_proposer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=_proposal_client(provider, model, reasoning_effort),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_routes.md").read_text(encoding="utf-8"),
         response_model=ArgumentRouteProposalResponse,
         schema_name="wang_argument_route_proposal_v1",
     )
 
 
-def build_route_reviewer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def build_route_reviewer(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=CodexSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_route_review.md").read_text(
             encoding="utf-8"
         ),
@@ -185,7 +182,7 @@ def build_route_reconsiderer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=_proposal_client(provider, model, reasoning_effort),
+        client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_route_reconsideration.md").read_text(
             encoding="utf-8"
         ),
@@ -538,7 +535,8 @@ def run_batch(
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
-    review = CanonicalViewpointReviewResponse.model_validate(raw_review)
+    canonical_review, review_normalization_changes = canonicalize_review(raw_review)
+    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
     review_validation = validate_review(
         review=review,
         proposal=proposal,
@@ -554,6 +552,12 @@ def run_batch(
             "review_sha256": sha256_json(review_payload),
             "review": review_payload,
             "validation_report": review_validation,
+            "normalization": {
+                "raw_response_sha256": sha256_json(dict(raw_review)),
+                "changed_paths": review_normalization_changes,
+                "reader_visible_text_changed": False,
+                "truth_conditions_changed": False,
+            },
         },
     )
 
@@ -797,7 +801,8 @@ def run_route_scope(
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-route-review.json"
     )
-    review = ArgumentRouteReviewResponse.model_validate(raw_review)
+    canonical_review, review_normalization_changes = canonicalize_review(raw_review)
+    review = ArgumentRouteReviewResponse.model_validate(canonical_review)
     review_validation = validate_route_review(
         review=review,
         proposal=proposal,
@@ -816,6 +821,12 @@ def run_route_scope(
             "route_review_sha256": review_sha,
             "review": review_payload,
             "validation_report": review_validation,
+            "normalization": {
+                "raw_response_sha256": sha256_json(dict(raw_review)),
+                "changed_paths": review_normalization_changes,
+                "reader_visible_text_changed": False,
+                "truth_conditions_changed": False,
+            },
         },
     )
 
@@ -971,12 +982,18 @@ def main() -> int:
     parser.add_argument(
         "--proposal-provider",
         choices=("claude", "codex"),
-        default="claude",
+        default="codex",
         help="subscription CLI used for CVP/Route proposal and correction; never falls back",
     )
-    parser.add_argument("--proposal-model", default="claude-opus-5")
-    parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="xhigh")
-    parser.add_argument("--review-model", default="gpt-5.6-sol")
+    parser.add_argument("--proposal-model", default="gpt-5.6-sol")
+    parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="high")
+    parser.add_argument(
+        "--review-provider",
+        choices=("claude", "codex"),
+        default="claude",
+        help="subscription CLI used for CVP/Route review; never falls back",
+    )
+    parser.add_argument("--review-model", default="claude-opus-5")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")
     parser.add_argument(
         "--max-batches",
@@ -1128,7 +1145,11 @@ def main() -> int:
         args.proposal_effort,
         provider=args.proposal_provider,
     )
-    reviewer = build_reviewer(args.review_model, args.review_effort)
+    reviewer = build_reviewer(
+        args.review_model,
+        args.review_effort,
+        provider=args.review_provider,
+    )
     reconsiderer = (
         None
         if args.no_reconsider
@@ -1219,7 +1240,11 @@ def main() -> int:
                     args.route_effort,
                     provider=args.proposal_provider,
                 ),
-                reviewer=build_route_reviewer(args.review_model, args.review_effort),
+                reviewer=build_route_reviewer(
+                    args.review_model,
+                    args.review_effort,
+                    provider=args.review_provider,
+                ),
                 reconsiderer=(
                     None
                     if args.no_reconsider
