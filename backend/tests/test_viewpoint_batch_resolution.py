@@ -1576,7 +1576,11 @@ def _review(*decisions: str) -> CanonicalViewpointReviewResponse:
     )
 
 
-def _reconsideration(revised: dict[str, Any], *dispositions: str) -> Any:
+def _reconsideration(
+    *dispositions: str,
+    component_patches: list[dict[str, Any]] | None = None,
+    candidate_patches: list[dict[str, Any]] | None = None,
+) -> Any:
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         CanonicalViewpointReconsiderationResponse,
     )
@@ -1594,7 +1598,8 @@ def _reconsideration(revised: dict[str, Any], *dispositions: str) -> Any:
                 }
                 for index, disposition in enumerate(dispositions)
             ],
-            "revised_proposal": revised,
+            "component_patches": component_patches or [],
+            "candidate_patches": candidate_patches or [],
         }
     )
 
@@ -1603,14 +1608,20 @@ def test_accepted_finding_resolves_the_batch():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    revised["claim_decisions"][0]["components"][0]["disposition"] = "support_existing"
-    revised["claim_decisions"][0]["components"][0]["target_viewpoint_revision_id"] = "CVR-1"
-    revised["claim_decisions"][0]["components"][0]["local_new_viewpoint_key"] = None
-    revised["new_viewpoint_candidates"] = []
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "support_existing"
+    replacement["target_viewpoint_revision_id"] = "CVR-1"
+    replacement["local_new_viewpoint_key"] = None
 
     report = validate_reconsideration(
-        reconsideration=_reconsideration(revised, "accepted"),
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [replacement],
+            }],
+            candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+        ),
         proposal=proposal,
         review=_review("correct", "pass"),
         proposal_sha256="proposal-sha",
@@ -1662,7 +1673,19 @@ def test_accepted_novelty_correction_resolves_when_revised_claim_creates_viewpoi
     original = CanonicalViewpointProposalResponse.model_validate(original_payload)
 
     report = validate_reconsideration(
-        reconsideration=_reconsideration(revised.model_dump(mode="json"), "accepted"),
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [
+                    revised.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+                ],
+            }],
+            candidate_patches=[{
+                "local_key": "ROCK-NOT-PETER", "action": "upsert",
+                "candidate": revised.model_dump(mode="json")["new_viewpoint_candidates"][0],
+            }],
+        ),
         proposal=original,
         review=_missed_novelty_review(),
         proposal_sha256="proposal-sha",
@@ -1686,7 +1709,15 @@ def test_accepted_novelty_correction_must_actually_create_a_viewpoint():
 
     with pytest.raises(BatchResolutionError, match="produced no new_viewpoint"):
         validate_reconsideration(
-            reconsideration=_reconsideration(payload, "accepted"),
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [
+                        original.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+                    ],
+                }],
+            ),
             proposal=original,
             review=_missed_novelty_review(),
             proposal_sha256="proposal-sha",
@@ -1699,7 +1730,7 @@ def test_rebutted_finding_goes_to_a_human_not_another_round():
 
     proposal = _proposal()
     report = validate_reconsideration(
-        reconsideration=_reconsideration(proposal.model_dump(mode="json"), "rebutted"),
+        reconsideration=_reconsideration("rebutted"),
         proposal=proposal,
         review=_review("correct", "pass"),
         proposal_sha256="proposal-sha",
@@ -1709,17 +1740,62 @@ def test_rebutted_finding_goes_to_a_human_not_another_round():
     assert report["escalations"] == ["C1#0:rebutted"]
 
 
-def test_reconsideration_cannot_touch_a_component_the_reviewer_passed():
+def test_reconsideration_cannot_patch_a_component_the_reviewer_passed():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    # Component 1 passed review; quietly rewriting it is not a revision.
-    revised["claim_decisions"][0]["components"][1]["reason"] = "偷偷改掉的理由"
+    passed = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][1]
+    passed["reason"] = "偷偷改掉的理由"
 
-    with pytest.raises(BatchResolutionError, match="unflagged component changed"):
+    with pytest.raises(BatchResolutionError, match="patch is not an accepted finding"):
         validate_reconsideration(
-            reconsideration=_reconsideration(revised, "accepted"),
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 1,
+                    "replacement_components": [passed],
+                }],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
+def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_component():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["claim_decisions"][0]["components"][1] = json.loads(
+        json.dumps(proposal_payload["claim_decisions"][0]["components"][0])
+    )
+    proposal_payload["claim_decisions"][0]["components"][1]["spans"] = [
+        _component(
+            ROCK_STATEMENT,
+            "而是彼得所承认的信仰",
+            "new_viewpoint",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )["spans"][0]
+    ]
+    proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    changed_candidate = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    changed_candidate["core_proposition"] = "偷偷影响 passed component"
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    with pytest.raises(BatchResolutionError, match="unflagged referrers C1#1"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [component],
+                }],
+                candidate_patches=[{
+                    "local_key": "ROCK-NOT-PETER", "action": "upsert",
+                    "candidate": changed_candidate,
+                }],
+            ),
             proposal=proposal,
             review=_review("correct", "pass"),
             proposal_sha256="proposal-sha",
@@ -1731,13 +1807,16 @@ def test_reconsideration_can_merge_components_the_reviewer_flagged():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    revised["claim_decisions"][0]["components"] = [
-        revised["claim_decisions"][0]["components"][0]
-    ]
+    first = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
 
     report = validate_reconsideration(
-        reconsideration=_reconsideration(revised, "accepted", "accepted"),
+        reconsideration=_reconsideration(
+            "accepted", "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [first]},
+                {"claim_id": "C1", "component_index": 1, "replacement_components": []},
+            ],
+        ),
         proposal=proposal,
         review=_review("correct", "correct"),
         proposal_sha256="proposal-sha",
@@ -1750,16 +1829,15 @@ def test_reconsideration_can_merge_flagged_span_into_unchanged_passed_component(
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    passed = revised["claim_decisions"][0]["components"][0]
-    flagged = revised["claim_decisions"][0]["components"][1]
-    passed["spans"].extend(flagged["spans"])
-    revised["claim_decisions"][0]["components"] = [passed]
-    reconsideration_payload = _reconsideration(revised, "accepted").model_dump(mode="json")
+    reconsideration_payload = _reconsideration(
+        "accepted",
+        component_patches=[{
+            "claim_id": "C1", "component_index": 1,
+            "merge_into_component_index": 0,
+        }],
+    ).model_dump(mode="json")
     reconsideration_payload["finding_dispositions"][0]["component_index"] = 1
-    from backend.api.canonical_repository.viewpoint_batch_resolution import (
-        CanonicalViewpointReconsiderationResponse,
-    )
+    from backend.api.canonical_repository.viewpoint_batch_resolution import CanonicalViewpointReconsiderationResponse
 
     report = validate_reconsideration(
         reconsideration=CanonicalViewpointReconsiderationResponse.model_validate(
@@ -1774,36 +1852,47 @@ def test_reconsideration_can_merge_flagged_span_into_unchanged_passed_component(
     assert report["outcome"] == "resolved"
 
 
-def test_reconsideration_merge_cannot_rewrite_passed_component_metadata():
-    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+def test_patch_merge_preserves_passed_component_metadata_byte_for_byte():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import apply_reconsideration_patches
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    passed = revised["claim_decisions"][0]["components"][0]
-    flagged = revised["claim_decisions"][0]["components"][1]
-    passed["spans"].extend(flagged["spans"])
-    passed["reason"] = "借合并偷偷改写"
-    revised["claim_decisions"][0]["components"] = [passed]
-
-    with pytest.raises(BatchResolutionError, match="unflagged component changed"):
-        validate_reconsideration(
-            reconsideration=_reconsideration(revised, "accepted"),
-            proposal=proposal,
-            review=_review("pass", "correct"),
-            proposal_sha256="proposal-sha",
-            review_sha256="review-sha",
-        )
+    reconsideration = _reconsideration(
+        "accepted",
+        component_patches=[{
+            "claim_id": "C1", "component_index": 1,
+            "merge_into_component_index": 0,
+        }],
+    ).model_copy(update={
+        "finding_dispositions": [
+            _reconsideration("accepted").finding_dispositions[0].model_copy(
+                update={"component_index": 1}
+            )
+        ]
+    })
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("pass", "correct"),
+    )
+    before = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+    after = effective.claim_decisions[0].components[0].model_dump(mode="json")
+    assert {k: v for k, v in after.items() if k != "spans"} == {
+        k: v for k, v in before.items() if k != "spans"
+    }
 
 
 def test_reconsideration_preserves_an_unflagged_component_after_index_shift():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal = _proposal()
-    revised = proposal.model_dump(mode="json")
-    revised["claim_decisions"][0]["components"].pop(0)
-
     report = validate_reconsideration(
-        reconsideration=_reconsideration(revised, "accepted"),
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [],
+            }],
+        ),
         proposal=proposal,
         review=_review("correct", "pass"),
         proposal_sha256="proposal-sha",
@@ -1818,7 +1907,15 @@ def test_every_finding_needs_a_disposition():
     proposal = _proposal()
     with pytest.raises(BatchResolutionError, match="C1#1: finding has no disposition"):
         validate_reconsideration(
-            reconsideration=_reconsideration(proposal.model_dump(mode="json"), "accepted"),
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [
+                        proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+                    ],
+                }],
+            ),
             proposal=proposal,
             review=_review("correct", "correct"),
             proposal_sha256="proposal-sha",
@@ -1898,10 +1995,8 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         ],
         "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
     }
-    revised = json.loads(json.dumps(proposal_payload))
-    revised["claim_decisions"][0]["components"].pop(1)
     reconsideration_payload = {
-        "schema_version": "wang_canonical_viewpoint_reconsideration_v1",
+        "schema_version": "wang_canonical_viewpoint_reconsideration_v2",
         "proposal_sha256": proposal_sha,
         "review_sha256": sha256_json(review_payload),
         "finding_dispositions": [
@@ -1913,7 +2008,21 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
             }
             for index in (0, 1)
         ],
-        "revised_proposal": revised,
+        "component_patches": [
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "replacement_components": [
+                    proposal_payload["claim_decisions"][0]["components"][0]
+                ],
+            },
+            {
+                "claim_id": "C1",
+                "component_index": 1,
+                "replacement_components": [],
+            },
+        ],
+        "candidate_patches": [],
     }
 
     report = run_batch(

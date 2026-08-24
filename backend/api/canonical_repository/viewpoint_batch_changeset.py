@@ -27,6 +27,7 @@ from .viewpoint_batch_resolution import (
     CanonicalViewpointReviewResponse,
     NewViewpointCandidate,
     ProposedComponent,
+    apply_reconsideration_patches,
     validate_reconsideration,
     validate_review,
 )
@@ -101,9 +102,14 @@ def compile_cvp_batch_package(
             proposal_sha256=review_target_sha256,
             review_sha256=sha256_json(review.model_dump(mode="json")),
         )
+        effective_correction = apply_reconsideration_patches(
+            reconsideration=reconsideration,
+            proposal=reviewed_proposal,
+            review=review,
+        )
         if (
             correction_validation["outcome"] != "resolved"
-            or reconsideration.revised_proposal != proposal
+            or effective_correction != proposal
         ):
             raise CvpBatchChangeSetError(
                 "CVP ChangeSet correction is unresolved or differs from the effective proposal"

@@ -27,6 +27,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
     anchor_proposal_spans,
+    apply_reconsideration_patches,
     batches_from_groups,
     build_batch_packet,
     build_cvp_batch_readback_receipt,
@@ -127,7 +128,7 @@ def build_reconsiderer(
             encoding="utf-8"
         ),
         response_model=CanonicalViewpointReconsiderationResponse,
-        schema_name="wang_canonical_viewpoint_reconsideration_v1",
+        schema_name="wang_canonical_viewpoint_reconsideration_v2",
     )
 
 
@@ -263,11 +264,16 @@ def run_batch(
             proposal_sha256=proposal_sha,
             review_sha256=review_sha,
         )
+        revised_proposal = apply_reconsideration_patches(
+            reconsideration=reconsideration,
+            proposal=proposal,
+            review=review,
+        )
         # The revision faces the same deterministic gates as the first pass;
         # accepting a finding cannot smuggle a bad span or a stale target past
         # checks the original proposal had to clear.
         revised_validation = validate_proposal(
-            proposal=reconsideration.revised_proposal,
+            proposal=revised_proposal,
             batch_id=batch_id,
             claims=claims,
             registry_revision_ids=[
@@ -277,7 +283,7 @@ def run_batch(
             ],
         )
         if reconsideration_report["outcome"] == "resolved":
-            effective_proposal = reconsideration.revised_proposal
+            effective_proposal = revised_proposal
             effective_validation = revised_validation
         _write_immutable(
             output_dir / "reconsideration.json",
@@ -287,6 +293,7 @@ def run_batch(
                 "proposal_sha256": proposal_sha,
                 "review_sha256": review_sha,
                 "reconsideration": reconsideration.model_dump(mode="json"),
+                "effective_proposal": revised_proposal.model_dump(mode="json"),
                 "validation_report": reconsideration_report,
                 "revised_validation_report": revised_validation,
                 "normalization": {

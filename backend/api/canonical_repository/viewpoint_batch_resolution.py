@@ -1379,6 +1379,15 @@ _ORDERED_LISTS = {
     "source_route_attestations": lambda item: str(item.get("local_attestation_key", "")),
     "viewpoints_with_no_route": lambda item: str(item.get("viewpoint_revision_id", "")),
     "groups": lambda item: str(item.get("group_key", "")),
+    "component_patches": lambda item: (
+        str(item.get("claim_id", "")),
+        int(item.get("component_index") or 0),
+    ),
+    "candidate_patches": lambda item: str(item.get("local_key", "")),
+    "finding_dispositions": lambda item: (
+        str(item.get("claim_id", "")),
+        int(item.get("component_index") or 0),
+    ),
 }
 
 
@@ -1481,12 +1490,53 @@ def anchor_proposal_spans(
                     f"{prefix}/claim_decisions/{decision_index}/components/"
                     f"{component_index}/spans/{span_index}/offsets"
                 )
+    # Patch-only reconsideration does not carry Claim decisions. Anchor only
+    # replacement payloads; merge operations reuse already-validated original
+    # spans and therefore need no model-supplied offsets.
+    for patch_index, patch in enumerate(payload.get("component_patches") or []):
+        claim_id = str(patch.get("claim_id") or "")
+        statement = claim_statements.get(claim_id)
+        if statement is None:
+            continue
+        for component_index, component in enumerate(
+            patch.get("replacement_components") or []
+        ):
+            for span_index, span in enumerate(component.get("spans") or []):
+                exact_text = span.get("exact_text")
+                start = span.get("start_char")
+                end = span.get("end_char")
+                if (
+                    not isinstance(exact_text, str)
+                    or not isinstance(start, int)
+                    or not isinstance(end, int)
+                ):
+                    continue
+                if end - start == len(exact_text) and statement[start:end] == exact_text:
+                    continue
+                occurrences: list[int] = []
+                cursor = statement.find(exact_text)
+                while cursor >= 0:
+                    occurrences.append(cursor)
+                    cursor = statement.find(exact_text, cursor + 1)
+                where = f"{claim_id}#patch-{patch_index}/component-{component_index}/span-{span_index}"
+                if len(occurrences) != 1:
+                    findings.append(
+                        f"{where}: exact_text has {len(occurrences)} matches in the pinned statement"
+                    )
+                    continue
+                anchored_start = occurrences[0]
+                span["start_char"] = anchored_start
+                span["end_char"] = anchored_start + len(exact_text)
+                changes.append(
+                    f"/component_patches/{patch_index}/replacement_components/"
+                    f"{component_index}/spans/{span_index}/offsets"
+                )
     if findings:
         raise BatchResolutionError(findings)
     return payload, sorted(changes)
 
 
-RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v1"
+RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v2"
 
 
 class FindingDisposition(StrictBatchModel):
@@ -1496,28 +1546,220 @@ class FindingDisposition(StrictBatchModel):
     reason: str = Field(min_length=1)
 
 
-class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
-    """The proposer's single answer to reviewer findings.
+class ComponentCorrectionPatch(StrictBatchModel):
+    """One correction to one reviewer-flagged component.
 
-    It carries a whole revised proposal so the result stays one self-contained
-    artifact, but only components the reviewer actually flagged may differ.
-    Everything else must come back byte-identical.
+    A replacement may contain zero components (delete), one component
+    (replace), or several components (split).  ``merge_into_component_index``
+    is the narrow structural exception used when the reviewer asks for the
+    flagged component's exact spans to be attached to an otherwise unchanged
+    sibling.  The deterministic merger performs that attachment; the model
+    never re-emits or edits the sibling.
     """
 
-    schema_version: Literal["wang_canonical_viewpoint_reconsideration_v1"] = (
+    claim_id: str
+    component_index: int = Field(ge=0)
+    replacement_components: list[ProposedComponent] | None = None
+    merge_into_component_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "ComponentCorrectionPatch":
+        if (self.replacement_components is None) == (
+            self.merge_into_component_index is None
+        ):
+            raise ValueError(
+                "a component patch supplies exactly one of replacement_components "
+                "or merge_into_component_index"
+            )
+        if self.merge_into_component_index == self.component_index:
+            raise ValueError("a component cannot merge into itself")
+        return self
+
+
+class CandidateCorrectionPatch(StrictBatchModel):
+    """Upsert or delete a candidate reachable from a flagged component."""
+
+    local_key: str = Field(min_length=1)
+    action: Literal["upsert", "delete"]
+    candidate: NewViewpointCandidate | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "CandidateCorrectionPatch":
+        if self.action == "upsert":
+            if self.candidate is None or self.candidate.local_key != self.local_key:
+                raise ValueError("candidate upsert must carry the same local_key")
+        elif self.candidate is not None:
+            raise ValueError("candidate delete does not carry a candidate payload")
+        return self
+
+
+class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
+    """The proposer's single, patch-only answer to reviewer findings."""
+
+    schema_version: Literal["wang_canonical_viewpoint_reconsideration_v2"] = (
         RECONSIDERATION_VERSION
     )
     proposal_sha256: str
     review_sha256: str
     finding_dispositions: list[FindingDisposition] = Field(min_length=1)
-    revised_proposal: CanonicalViewpointProposalResponse
+    component_patches: list[ComponentCorrectionPatch] = Field(default_factory=list)
+    candidate_patches: list[CandidateCorrectionPatch] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_reconsideration(self) -> "CanonicalViewpointReconsiderationResponse":
         keys = [(item.claim_id, item.component_index) for item in self.finding_dispositions]
         if len(keys) != len(set(keys)):
             raise ValueError("finding dispositions must be unique")
+        patch_keys = [(item.claim_id, item.component_index) for item in self.component_patches]
+        if len(patch_keys) != len(set(patch_keys)):
+            raise ValueError("component patches must be unique")
+        candidate_keys = [item.local_key for item in self.candidate_patches]
+        if len(candidate_keys) != len(set(candidate_keys)):
+            raise ValueError("candidate patches must be unique")
         return self
+
+
+def apply_reconsideration_patches(
+    *,
+    reconsideration: CanonicalViewpointReconsiderationResponse,
+    proposal: CanonicalViewpointProposalResponse,
+    review: CanonicalViewpointReviewResponse,
+) -> CanonicalViewpointProposalResponse:
+    """Apply only reviewer-authorized patches to the immutable proposal.
+
+    This function, not the model, copies every unflagged Claim decision and
+    candidate.  Consequently collateral edits are impossible by construction
+    rather than merely detected after an expensive full-proposal rewrite.
+    """
+
+    findings: list[str] = []
+    flagged = {
+        (item.claim_id, item.component_index)
+        for item in review.change_reviews
+        if item.decision == "correct"
+    }
+    accepted = {
+        (item.claim_id, item.component_index)
+        for item in reconsideration.finding_dispositions
+        if item.disposition == "accepted"
+    }
+    patches = {
+        (item.claim_id, item.component_index): item
+        for item in reconsideration.component_patches
+    }
+    for missing in sorted(accepted - set(patches)):
+        findings.append(f"{missing[0]}#{missing[1]}: accepted finding has no patch")
+    for extra in sorted(set(patches) - accepted):
+        findings.append(f"{extra[0]}#{extra[1]}: patch is not an accepted finding")
+    if not set(patches) <= flagged:
+        findings.append("component patches must be confined to reviewer findings")
+
+    payload = proposal.model_dump(mode="json")
+    decisions = {item["claim_id"]: item for item in payload["claim_decisions"]}
+    affected_candidate_keys: set[str] = set()
+    candidate_referrers: dict[str, set[tuple[str, int]]] = {}
+    for decision in proposal.claim_decisions:
+        for index, component in enumerate(decision.components):
+            if component.local_new_viewpoint_key:
+                candidate_referrers.setdefault(
+                    component.local_new_viewpoint_key, set()
+                ).add((decision.claim_id, index))
+    for claim_id, component_index in sorted(accepted):
+        decision = decisions.get(claim_id)
+        if decision is None or component_index >= len(decision["components"]):
+            findings.append(f"{claim_id}#{component_index}: patch target does not exist")
+            continue
+        original = decision["components"][component_index]
+        if original.get("local_new_viewpoint_key"):
+            affected_candidate_keys.add(str(original["local_new_viewpoint_key"]))
+
+    patches_by_claim: dict[str, dict[int, ComponentCorrectionPatch]] = {}
+    for key, patch in patches.items():
+        patches_by_claim.setdefault(key[0], {})[key[1]] = patch
+
+    for claim_id, claim_patches in patches_by_claim.items():
+        decision = decisions.get(claim_id)
+        if decision is None:
+            continue
+        original_components = decision["components"]
+        replacements: dict[int, list[dict[str, Any]]] = {}
+        merge_spans: dict[int, list[dict[str, Any]]] = {}
+        for component_index, patch in claim_patches.items():
+            if component_index >= len(original_components):
+                continue
+            if patch.replacement_components is not None:
+                replacements[component_index] = [
+                    item.model_dump(mode="json")
+                    for item in patch.replacement_components
+                ]
+                for item in patch.replacement_components:
+                    if item.local_new_viewpoint_key:
+                        affected_candidate_keys.add(item.local_new_viewpoint_key)
+                continue
+            target = patch.merge_into_component_index
+            if target is None or target >= len(original_components):
+                findings.append(
+                    f"{claim_id}#{component_index}: merge target does not exist"
+                )
+                continue
+            if target in claim_patches:
+                findings.append(
+                    f"{claim_id}#{component_index}: merge target must be an unpatched sibling"
+                )
+                continue
+            replacements[component_index] = []
+            merge_spans.setdefault(target, []).extend(
+                deepcopy(original_components[component_index]["spans"])
+            )
+
+        revised_components: list[dict[str, Any]] = []
+        for index, original in enumerate(original_components):
+            if index in replacements:
+                revised_components.extend(replacements[index])
+                continue
+            copied = deepcopy(original)
+            if index in merge_spans:
+                copied["spans"] = sorted(
+                    [*copied["spans"], *merge_spans[index]],
+                    key=lambda item: (item["start_char"], item["end_char"]),
+                )
+            revised_components.append(copied)
+        decision["components"] = revised_components
+
+    candidates = {
+        item["local_key"]: item for item in payload["new_viewpoint_candidates"]
+    }
+    for patch in reconsideration.candidate_patches:
+        if patch.local_key not in affected_candidate_keys:
+            findings.append(
+                f"{patch.local_key}: candidate patch is not reachable from an accepted finding"
+            )
+            continue
+        unflagged_referrers = candidate_referrers.get(patch.local_key, set()) - accepted
+        if unflagged_referrers:
+            rendered = ", ".join(
+                f"{claim_id}#{component_index}"
+                for claim_id, component_index in sorted(unflagged_referrers)
+            )
+            findings.append(
+                f"{patch.local_key}: candidate patch would alter unflagged referrers {rendered}"
+            )
+            continue
+        if patch.action == "delete":
+            candidates.pop(patch.local_key, None)
+        else:
+            assert patch.candidate is not None
+            candidates[patch.local_key] = patch.candidate.model_dump(mode="json")
+    payload["new_viewpoint_candidates"] = [
+        candidates[key] for key in sorted(candidates)
+    ]
+
+    if findings:
+        raise BatchResolutionError(findings)
+    try:
+        return CanonicalViewpointProposalResponse.model_validate(payload)
+    except ValueError as exc:
+        raise BatchResolutionError([f"patch application produced invalid proposal: {exc}"]) from exc
 
 
 def validate_reconsideration(
@@ -1555,90 +1797,14 @@ def validate_reconsideration(
     for extra in sorted(answered - flagged):
         findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
 
-    before_by_claim = {
-        decision.claim_id: [item.model_dump(mode="json") for item in decision.components]
-        for decision in proposal.claim_decisions
-    }
-    after_by_claim = {
-        decision.claim_id: [item.model_dump(mode="json") for item in decision.components]
-        for decision in reconsideration.revised_proposal.claim_decisions
-    }
-    flagged_by_claim: dict[str, set[int]] = {}
-    for claim_id, component_index in flagged:
-        flagged_by_claim.setdefault(claim_id, set()).add(component_index)
-    for claim_id, before_components in before_by_claim.items():
-        after_components = after_by_claim.get(claim_id)
-        if after_components is None:
-            findings.append(f"{claim_id}: Claim decision disappeared during reconsideration")
-            continue
-        claim_flags = flagged_by_claim.get(claim_id, set())
-        if not claim_flags:
-            if before_components != after_components:
-                findings.append(
-                    f"{claim_id}: unflagged Claim decision changed during reconsideration"
-                )
-            continue
-        # Corrected components may be merged, split, replaced or deleted when
-        # the reviewer explicitly asks for it. Every component the reviewer
-        # passed must still survive byte-identically somewhere in the revised
-        # Claim; matching by original index would make an authorized merge
-        # shift later components and falsely report that they changed.
-        remaining = list(after_components)
-        flagged_spans = {
-            sha256_json(span)
-            for index in claim_flags
-            if index < len(before_components)
-            for span in before_components[index].get("spans", [])
-        }
-        for index, component in enumerate(before_components):
-            if index in claim_flags:
-                continue
-            try:
-                matched = remaining.index(component)
-            except ValueError:
-                # A reviewer can flag one component and require its span to be
-                # merged into a neighbouring component that otherwise passed.
-                # Permit only that exact structural operation: every non-span
-                # field remains byte-identical and every added span belonged to
-                # a flagged component in the immutable original proposal.
-                original_without_spans = {
-                    key: value for key, value in component.items() if key != "spans"
-                }
-                original_spans = {
-                    sha256_json(span)
-                    for span in component.get("spans", [])
-                }
-                merge_match = None
-                for candidate_index, candidate in enumerate(remaining):
-                    candidate_without_spans = {
-                        key: value for key, value in candidate.items() if key != "spans"
-                    }
-                    candidate_spans = {
-                        sha256_json(span)
-                        for span in candidate.get("spans", [])
-                    }
-                    added_spans = candidate_spans - original_spans
-                    if (
-                        candidate_without_spans == original_without_spans
-                        and original_spans <= candidate_spans
-                        and added_spans
-                        and added_spans <= flagged_spans
-                    ):
-                        merge_match = candidate_index
-                        break
-                if merge_match is None:
-                    findings.append(
-                        f"{claim_id}#{index}: unflagged component changed or disappeared "
-                        "during reconsideration"
-                    )
-                else:
-                    remaining.pop(merge_match)
-            else:
-                remaining.pop(matched)
-    for extra_claim_id in sorted(set(after_by_claim) - set(before_by_claim)):
-        findings.append(
-            f"{extra_claim_id}: Claim decision was added during reconsideration"
-        )
+    if findings:
+        raise BatchResolutionError(findings)
+
+    effective_proposal = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+    )
 
     escalations = sorted(
         f"{item.claim_id}#{item.component_index}:{item.disposition}"
@@ -1659,7 +1825,7 @@ def validate_reconsideration(
     }
     revised_new_viewpoint_claim_ids = {
         decision.claim_id
-        for decision in reconsideration.revised_proposal.claim_decisions
+        for decision in effective_proposal.claim_decisions
         if any(item.disposition == "new_viewpoint" for item in decision.components)
     }
     accepted_novelty_claim_ids = {
@@ -1699,6 +1865,9 @@ def validate_reconsideration(
         ),
         "resolved_novelty_claim_ids": resolved_novelty_claim_ids,
         "unresolved_novelty_claim_ids": unresolved_novelty_claim_ids,
+        "effective_proposal_sha256": sha256_json(
+            effective_proposal.model_dump(mode="json")
+        ),
         "escalations": escalations,
         # Fail closed: a rebutted or deferred finding, or a novelty miss, is a
         # human judgment. The system never re-asks until the models agree.
