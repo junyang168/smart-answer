@@ -1349,6 +1349,7 @@ _SET_FIELDS = (
     "claim_ids",
     "claim_component_keys",
     "evidence_step_ids",
+    "evidence_claim_component_keys",
     "finding_codes",
     "inference_method_codes",
     "missed_claim_ids",

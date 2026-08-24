@@ -965,6 +965,28 @@ def test_review_canonicalization_sorts_and_deduplicates_nonsemantic_codes():
     CanonicalViewpointReviewResponse.model_validate(canonical)
 
 
+def test_review_canonicalization_sorts_cvp_rereview_evidence_keys():
+    raw = {
+        "cvp_re_review_exceptions": [{
+            "viewpoint_revision_id": "CVR-1",
+            "finding_code": "possible_false_split",
+            "reason": "需要回到 CVP 阶段复核",
+            "triggering_target_kind": "route",
+            "triggering_target_key": "R1",
+            "evidence_claim_component_keys": ["CCK-b", "CCK-a", "CCK-b"],
+        }]
+    }
+
+    canonical, changed_paths = canonicalize_review(raw)
+
+    assert canonical["cvp_re_review_exceptions"][0][
+        "evidence_claim_component_keys"
+    ] == ["CCK-a", "CCK-b"]
+    assert changed_paths == [
+        "/cvp_re_review_exceptions/0/evidence_claim_component_keys"
+    ]
+
+
 def test_modality_finding_routes_the_batch_to_reconsideration():
     # The blind POC collapsed "更可能是基督……而不是彼得个人" into a categorical
     # member; the reviewer catching that must stop the batch, not soften it.
