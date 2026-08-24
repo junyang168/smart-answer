@@ -53,6 +53,9 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.viewpoint_route_queue import (
+    FileRouteResolutionQueue,
+)
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import (
     ReviewClaim,
@@ -1224,6 +1227,7 @@ def main() -> int:
     }
     registry_context = list(scope_packet.get("registry_context") or [])
     store = PostgresKnowledgeStore(args.database_url)
+    route_queue = FileRouteResolutionQueue(args.output_dir / "route-queue")
     enqueued_route_jobs: list[dict[str, Any]] = []
     awaiting_cvp_apply = False
     master_data_mutations = 0
@@ -1506,10 +1510,7 @@ def main() -> int:
             route_policy_fingerprint_sha256=route_policy_fingerprint,
         )
         route_job_payload = route_job.model_dump(mode="json")
-        _write_immutable(
-            args.output_dir / "route-queue" / "jobs" / f"{route_job.job_id}.json",
-            route_job_payload,
-        )
+        route_queue.enqueue(route_job)
         enqueued_route_jobs.append(route_job_payload)
         _write_current_state(
             batch_dir,

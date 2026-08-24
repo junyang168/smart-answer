@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     validate_review,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_route_queue import (
+    FileRouteResolutionQueue,
+)
 from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
@@ -221,6 +225,99 @@ def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
     ] == [("CV-1", "CVR-2"), ("CV-2", "CVR-3")]
     assert work.superseded_job_ids == [jobs[0].job_id]
     assert work.source_job_ids == sorted({item.job_id for item in jobs})
+
+
+def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path: Path):
+    old_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    new_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-2",
+        cvp_changeset_id="KCS-2",
+        cvp_changeset_sha256="changeset-2",
+        expected_current_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        observed_current_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+    )
+    jobs = [
+        build_route_resolution_job(
+            receipt=receipt,
+            evidence_scope_sha256="evidence-scope-sha",
+            route_policy_fingerprint_sha256="route-policy-sha",
+        )
+        for receipt in (old_receipt, new_receipt)
+    ]
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    for job in jobs:
+        queue.enqueue(job, enqueued_at="2026-08-24T12:00:00+00:00")
+    # Re-enqueue is idempotent and must not create another state event.
+    queue.enqueue(jobs[1], enqueued_at="2026-08-24T12:01:00+00:00")
+    started = datetime(2026, 8, 24, 13, 0, tzinfo=timezone.utc)
+    work = queue.claim(
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        now=started,
+        lease_seconds=60,
+    )
+
+    assert work is not None
+    assert work.superseded_job_ids == [jobs[0].job_id]
+    assert queue.claim(
+        worker_id="worker-b",
+        current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        now=started + timedelta(seconds=30),
+    ) is None
+    recovered = queue.claim(
+        worker_id="worker-b",
+        current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        now=started + timedelta(seconds=61),
+    )
+    assert recovered is not None
+    with pytest.raises(ValueError, match="does not own"):
+        queue.finish(recovered, worker_id="worker-a", status="resolved")
+    queue.finish(recovered, worker_id="worker-b", status="resolved")
+
+    old_state = json.loads(
+        (tmp_path / "queue" / "states" / f"{jobs[0].job_id}.json").read_text()
+    )
+    new_state = json.loads(
+        (tmp_path / "queue" / "states" / f"{jobs[1].job_id}.json").read_text()
+    )
+    assert old_state["status"] == "superseded"
+    assert new_state["status"] == "resolved"
+    assert new_state["attempt"] == 2
+
+
+def test_file_route_queue_refuses_to_invent_missing_current_revision_job(tmp_path: Path):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-old"},
+        observed_current_revisions={"CV-1": "CVR-old"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job)
+
+    with pytest.raises(ValueError, match="has no committed enqueue job"):
+        queue.claim(
+            worker_id="worker-a",
+            current_viewpoint_revisions={"CV-1": "CVR-current"},
+        )
 
 
 def test_passing_batch_compiles_component_bound_cvp_master_records():
