@@ -20,4 +20,6 @@
 
 任何跨来源拼接都将 `cross_source_composition_found` 设为 true，对应 attestation 不得 pass。
 
+如果路线证据使你怀疑 approved CVP 本身错误合并、错误拆分或结论边界错误，不要在 Route workflow 中改写 CVP。另填 `cvp_re_review_exceptions`，绑定 `viewpoint_revision_id`、触发这一判断的 target、一个稳定 finding code，以及支持该判断的 `evidence_claim_component_keys`。没有这种问题时返回空数组。这个 exception 不替代对应 target 的正常 `change_reviews` 决定。
+
 原样回传 `route_proposal_sha256` 和 `route_evidence_packet_sha256`。用中文写理由。

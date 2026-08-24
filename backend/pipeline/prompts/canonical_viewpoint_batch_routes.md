@@ -84,4 +84,6 @@ C1              conclusion    → 指向某个已定结论
 
 `approved_viewpoint_revision_ids` 必须原样、按字符串排序返回。每个 approved CVP 必须至少被一条 route 作为 conclusion，或进入 `viewpoints_with_no_route`，填 `no_attested_route / evidence_insufficient / deferred` 之一和具体理由。
 
+`membership_ledger.out_of_scope_members` 是 Registry 中存在、但正文不属于本 evidence scope 的 CVP members；它们只用于完整性记账，不可被当作本轮论证证据。`unattestable_in_scope_members` 在本 scope 内但缺少 exact evidence bindings，也不可静默当作已证明。这里的 no-route 只表示 `no_attested_route_in_this_evidence_scope`，绝不表示该 CVP 在全库没有论证。
+
 用中文写 `route_label`、`normalized_proposition` 和理由。

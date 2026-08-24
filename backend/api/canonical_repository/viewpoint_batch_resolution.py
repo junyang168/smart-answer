@@ -152,6 +152,7 @@ class RouteResolutionWorkUnit(StrictBatchModel):
     )
     scope_label: str = Field(min_length=1)
     scope_manifest_sha256: str = Field(min_length=1)
+    route_policy_fingerprint_sha256: str = Field(min_length=1)
     source_job_ids: list[str] = Field(min_length=1)
     current_viewpoint_revisions: list[CommittedViewpointRevision] = Field(min_length=1)
     superseded_job_ids: list[str] = Field(default_factory=list)
@@ -276,9 +277,16 @@ def coalesce_route_resolution_jobs(
     if not jobs:
         raise ValueError("cannot coalesce an empty route queue")
     jobs = list({item.job_id: item for item in jobs}.values())
-    scope_keys = {(item.scope_label, item.scope_manifest_sha256) for item in jobs}
+    scope_keys = {
+        (
+            item.scope_label,
+            item.scope_manifest_sha256,
+            item.route_policy_fingerprint_sha256,
+        )
+        for item in jobs
+    }
     if len(scope_keys) != 1:
-        raise ValueError("one route work unit cannot cross scope manifests")
+        raise ValueError("one route work unit cannot cross scope manifests or policies")
     requested = sorted(
         {viewpoint_id for item in jobs for viewpoint_id in item.logical_viewpoint_ids}
     )
@@ -306,11 +314,12 @@ def coalesce_route_resolution_jobs(
             )
         )
     )
-    scope_label, scope_manifest_sha256 = next(iter(scope_keys))
+    scope_label, scope_manifest_sha256, route_policy_sha256 = next(iter(scope_keys))
     body = {
         "schema_version": ROUTE_WORK_UNIT_VERSION,
         "scope_label": scope_label,
         "scope_manifest_sha256": scope_manifest_sha256,
+        "route_policy_fingerprint_sha256": route_policy_sha256,
         "source_job_ids": sorted({item.job_id for item in jobs}),
         "current_viewpoint_revisions": current,
         "superseded_job_ids": superseded,
@@ -1349,6 +1358,12 @@ _ORDERED_LISTS = {
         str(item.get("target_key") or item.get("claim_id") or ""),
         int(item.get("component_index") or 0),
     ),
+    "cvp_re_review_exceptions": lambda item: (
+        str(item.get("viewpoint_revision_id") or ""),
+        str(item.get("finding_code") or ""),
+        str(item.get("triggering_target_kind") or ""),
+        str(item.get("triggering_target_key") or ""),
+    ),
     "argument_route_candidates": lambda item: str(item.get("local_route_key", "")),
     "source_route_attestations": lambda item: str(item.get("local_attestation_key", "")),
     "viewpoints_with_no_route": lambda item: str(item.get("viewpoint_revision_id", "")),
@@ -1743,11 +1758,31 @@ class ReviewedRouteChange(StrictBatchModel):
         return self
 
 
+class CvpReReviewException(StrictBatchModel):
+    """Route review evidence that questions an approved CVP identity."""
+
+    viewpoint_revision_id: str = Field(min_length=1)
+    finding_code: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    triggering_target_kind: Literal["route", "attestation", "no_route"]
+    triggering_target_key: str = Field(min_length=1)
+    evidence_claim_component_keys: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_exception(self) -> "CvpReReviewException":
+        if self.evidence_claim_component_keys != sorted(
+            set(self.evidence_claim_component_keys)
+        ):
+            raise ValueError("CVP re-review evidence keys must be sorted and unique")
+        return self
+
+
 class ArgumentRouteReviewResponse(StrictBatchModel):
     schema_version: Literal["wang_argument_route_review_v1"] = ROUTE_REVIEW_VERSION
     route_proposal_sha256: str
     route_evidence_packet_sha256: str
     change_reviews: list[ReviewedRouteChange] = Field(min_length=1)
+    cvp_re_review_exceptions: list[CvpReReviewException] = Field(default_factory=list)
     cross_source_composition_found: bool
     reason: str = Field(min_length=1)
 
@@ -1756,6 +1791,17 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
         keys = [(item.target_kind, item.target_key) for item in self.change_reviews]
         if len(keys) != len(set(keys)):
             raise ValueError("route review changes must be unique")
+        exception_keys = [
+            (
+                item.viewpoint_revision_id,
+                item.finding_code,
+                item.triggering_target_kind,
+                item.triggering_target_key,
+            )
+            for item in self.cvp_re_review_exceptions
+        ]
+        if len(exception_keys) != len(set(exception_keys)):
+            raise ValueError("CVP re-review exceptions must be unique")
         if self.cross_source_composition_found and all(
             item.decision == "pass" for item in self.change_reviews
         ):
@@ -1868,6 +1914,7 @@ def validate_route_review(
     route_proposal_sha256: str,
     route_evidence_packet_sha256: str,
     expected_targets: set[tuple[str, str]] | None = None,
+    allowed_claim_component_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Require exact review coverage and bind it to both semantic inputs."""
 
@@ -1894,6 +1941,25 @@ def validate_route_review(
         findings.append(f"{kind}:{key}: no route review decision")
     for kind, key in sorted(reviewed - expected):
         findings.append(f"{kind}:{key}: review points at no proposed route change")
+    approved_revisions = set(proposal.approved_viewpoint_revision_ids)
+    for item in review.cvp_re_review_exceptions:
+        if item.viewpoint_revision_id not in approved_revisions:
+            findings.append(
+                f"CVP re-review names unapproved revision {item.viewpoint_revision_id}"
+            )
+        if (item.triggering_target_kind, item.triggering_target_key) not in reviewed:
+            findings.append(
+                "CVP re-review trigger is not a decision target in this review: "
+                f"{item.triggering_target_kind}:{item.triggering_target_key}"
+            )
+        if allowed_claim_component_keys is not None:
+            unknown = sorted(
+                set(item.evidence_claim_component_keys) - allowed_claim_component_keys
+            )
+            if unknown:
+                findings.append(
+                    "CVP re-review cites unknown Claim components: " + ", ".join(unknown)
+                )
     if findings:
         raise BatchResolutionError(findings)
     counts = {

@@ -11,7 +11,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.postgres_store import (
+    ChangeSetConflict,
+    PostgresKnowledgeStore,
+    record_content_sha,
+)
 from backend.api.canonical_repository.viewpoint_batch_resolution import RouteResolutionWorkUnit
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
@@ -19,12 +23,14 @@ from backend.api.canonical_repository.viewpoint_route_changeset import (
     compile_argument_route_package,
 )
 from backend.api.canonical_repository.viewpoint_route_queue import FileRouteResolutionQueue
-from backend.pipeline.viewpoint_batch_resolution_runner import (
+from backend.pipeline.viewpoint_resolution_runtime import (
     PROJECT_ROOT,
-    _read,
-    _stable_decided_at,
-    _write_derived,
-    _write_immutable,
+    read_artifact as _read,
+    stable_decided_at as _stable_decided_at,
+    write_derived as _write_derived,
+    write_immutable as _write_immutable,
+)
+from backend.pipeline.viewpoint_route_resolution import (
     build_registry_route_packet,
     build_route_proposer,
     build_route_reconsiderer,
@@ -34,6 +40,12 @@ from backend.pipeline.viewpoint_batch_resolution_runner import (
 from backend.pipeline.viewpoint_scope_packet_runner import (
     SCOPE_PACKET_VERSION,
     registry_context,
+)
+from backend.pipeline.viewpoint_route_policy import (
+    DEFAULT_ROUTE_POLICY_PATH,
+    load_route_policy,
+    route_policy_fingerprint,
+    route_policy_prompt_sha256s,
 )
 
 
@@ -68,6 +80,68 @@ def _existing_route_context(store: PostgresKnowledgeStore) -> list[dict[str, Any
     ]
 
 
+def build_route_apply_readback_receipt(
+    *,
+    route_work_unit_sha256: str,
+    route_packet_sha256: str,
+    route_proposal_sha256: str,
+    route_review_sha256: str,
+    changeset_fingerprint_sha256: str,
+    expected_current_viewpoint_revisions: dict[str, str],
+    observed_current_viewpoint_revisions: dict[str, str | None],
+    expected_records: list[tuple[str, str, dict[str, Any]]],
+    observed_records: dict[tuple[str, str], dict[str, Any] | None],
+) -> tuple[dict[str, Any], list[str]]:
+    """Build an auditable receipt and report every semantic mismatch."""
+
+    record_readbacks = []
+    mismatches = []
+    for collection, object_id, expected_payload in expected_records:
+        observed = observed_records.get((collection, object_id))
+        expected_sha = record_content_sha(expected_payload)
+        observed_sha = record_content_sha(observed) if observed is not None else None
+        record_readbacks.append(
+            {
+                "collection": collection,
+                "object_id": object_id,
+                "expected_content_sha256": expected_sha,
+                "observed_content_sha256": observed_sha,
+            }
+        )
+        if expected_sha != observed_sha:
+            mismatches.append(f"{collection}:{object_id}")
+    after_cut = {
+        key: observed_current_viewpoint_revisions.get(key)
+        for key in expected_current_viewpoint_revisions
+    }
+    if after_cut != expected_current_viewpoint_revisions:
+        mismatches.extend(
+            f"canonical_viewpoints:{key}:expected={value}:observed={after_cut.get(key)}"
+            for key, value in sorted(expected_current_viewpoint_revisions.items())
+            if after_cut.get(key) != value
+        )
+    receipt = {
+        "schema_version": "wang_argument_route_apply_readback_receipt_v1",
+        "route_work_unit_sha256": route_work_unit_sha256,
+        "route_packet_sha256": route_packet_sha256,
+        "route_proposal_sha256": route_proposal_sha256,
+        "route_review_sha256": route_review_sha256,
+        "changeset_fingerprint_sha256": changeset_fingerprint_sha256,
+        "before_current_viewpoint_revisions": dict(
+            sorted(expected_current_viewpoint_revisions.items())
+        ),
+        "after_current_viewpoint_revisions": dict(sorted(after_cut.items())),
+        "approved_cvps_unchanged": after_cut == expected_current_viewpoint_revisions,
+        "record_readbacks": sorted(
+            record_readbacks,
+            key=lambda item: (item["collection"], item["object_id"]),
+        ),
+        "readback_status": "verified" if not mismatches else "mismatch",
+    }
+    receipt["artifact_sha256"] = sha256_json(receipt)
+    return receipt, mismatches
+
+
 def process_work_unit(
     *,
     work: RouteResolutionWorkUnit,
@@ -78,6 +152,8 @@ def process_work_unit(
     reviewer: Any,
     reconsiderer: Any,
     apply: bool,
+    review_targets_per_batch: int = 12,
+    call_timeout_seconds: float = 900.0,
 ) -> dict[str, Any]:
     """Run one claimed unit; database mutation remains an explicit option."""
 
@@ -115,14 +191,14 @@ def process_work_unit(
     report = run_route_scope(
         scope_label=work.scope_label,
         claims=claims,
-        approved_viewpoints=approved,
-        effective_proposals=None,
         existing_routes=existing_routes,
         output_dir=output_dir,
         proposer=proposer,
         reviewer=reviewer,
         reconsiderer=reconsiderer,
         route_packet=packet,
+        review_targets_per_batch=review_targets_per_batch,
+        call_timeout_seconds=call_timeout_seconds,
     )
     if not report["passing_route_keys"]:
         result = {
@@ -173,18 +249,38 @@ def process_work_unit(
             },
             expected_current_viewpoint_revisions=expected,
         )
-        missing = []
+        expected_records = []
+        observed_records = {}
         for collection, id_field in (
             ("argument_routes", "argument_route_id"),
             ("argument_route_revisions", "argument_route_revision_id"),
             ("argument_route_attestations", "argument_route_attestation_id"),
         ):
             for item in package.get(collection) or []:
-                if store.get_record(collection, str(item[id_field])) is None:
-                    missing.append(f"{collection}:{item[id_field]}")
-        if missing:
-            raise ValueError("Route authority readback missing: " + ", ".join(missing))
-        result |= {"status": "applied", "apply_result": applied}
+                object_id = str(item[id_field])
+                observed = store.get_record(collection, object_id)
+                expected_records.append((collection, object_id, item))
+                observed_records[(collection, object_id)] = observed
+        observed_current = _current_viewpoint_revisions(store)
+        receipt, mismatches = build_route_apply_readback_receipt(
+            route_work_unit_sha256=work.artifact_sha256,
+            route_packet_sha256=packet["packet_sha256"],
+            route_proposal_sha256=report["effective_route_proposal_sha256"],
+            route_review_sha256=report["route_review_sha256"],
+            changeset_fingerprint_sha256=plan.fingerprint_sha256,
+            expected_current_viewpoint_revisions=expected,
+            observed_current_viewpoint_revisions=observed_current,
+            expected_records=expected_records,
+            observed_records=observed_records,
+        )
+        _write_immutable(output_dir / "route-apply-readback-receipt.json", receipt)
+        if mismatches:
+            raise ValueError("Route authority readback mismatch: " + ", ".join(mismatches))
+        result |= {
+            "status": "applied",
+            "apply_result": applied,
+            "readback_receipt_sha256": receipt["artifact_sha256"],
+        }
     result["artifact_sha256"] = sha256_json(result)
     _write_derived(output_dir / "route-worker-result.json", result)
     return result
@@ -199,10 +295,7 @@ def main() -> int:
     parser.add_argument("--database-url")
     parser.add_argument("--worker-id", default=f"{socket.gethostname()}:{os.getpid()}")
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--proposal-model", default="gpt-5.6-sol")
-    parser.add_argument("--proposal-effort", default="high")
-    parser.add_argument("--review-model", default="claude-opus-5")
-    parser.add_argument("--review-effort", default="high")
+    parser.add_argument("--route-policy", type=Path, default=DEFAULT_ROUTE_POLICY_PATH)
     args = parser.parse_args()
 
     store = PostgresKnowledgeStore(args.database_url)
@@ -215,6 +308,26 @@ def main() -> int:
         print(json.dumps({"status": "idle"}, ensure_ascii=False))
         return 0
     jobs = queue.jobs_for_work_unit(work)
+    policy = load_route_policy(args.route_policy)
+    policy_sha256 = route_policy_fingerprint(
+        policy,
+        prompt_sha256s=route_policy_prompt_sha256s(
+            policy,
+            prompt_dir=Path(__file__).resolve().parent / "prompts",
+        ),
+    )
+    queued_policy_shas = {item.route_policy_fingerprint_sha256 for item in jobs}
+    if (
+        queued_policy_shas != {policy_sha256}
+        or work.route_policy_fingerprint_sha256 != policy_sha256
+    ):
+        queue.finish(
+            work,
+            worker_id=args.worker_id,
+            status="exception",
+            detail="Route policy SHA mismatch",
+        )
+        raise SystemExit("queued Route job does not bind the supplied Route policy")
     scope_packet = _read(args.packet)
     evidence_shas = {item.evidence_scope_sha256 for item in jobs}
     if evidence_shas != {str(scope_packet.get("packet_sha256"))}:
@@ -227,11 +340,63 @@ def main() -> int:
             scope_packet=scope_packet,
             output_dir=run_dir,
             store=store,
-            proposer=build_route_proposer(args.proposal_model, args.proposal_effort, provider="codex"),
-            reviewer=build_route_reviewer(args.review_model, args.review_effort, provider="claude"),
-            reconsiderer=build_route_reconsiderer(args.proposal_model, args.proposal_effort, provider="codex"),
+            proposer=build_route_proposer(
+                str(policy["proposal"]["model"]),
+                str(policy["proposal"]["effort"]),
+                provider=str(policy["proposal"]["provider"]),
+                prompt_file=str(policy["prompts"]["proposal"]),
+                timeout_seconds=float(policy["call_timeout_seconds"]),
+            ),
+            reviewer=build_route_reviewer(
+                str(policy["review"]["model"]),
+                str(policy["review"]["effort"]),
+                provider=str(policy["review"]["provider"]),
+                prompt_file=str(policy["prompts"]["review"]),
+                timeout_seconds=float(policy["call_timeout_seconds"]),
+            ),
+            reconsiderer=build_route_reconsiderer(
+                str(policy["correction"]["model"]),
+                str(policy["correction"]["effort"]),
+                provider=str(policy["correction"]["provider"]),
+                prompt_file=str(policy["prompts"]["correction"]),
+                timeout_seconds=float(policy["call_timeout_seconds"]),
+            ),
+            review_targets_per_batch=int(policy["review"]["targets_per_batch"]),
+            call_timeout_seconds=float(policy["call_timeout_seconds"]),
             apply=args.apply,
         )
+    except ChangeSetConflict as exc:
+        current = _current_viewpoint_revisions(store)
+        stale = {
+            item.viewpoint_id: {
+                "expected": item.viewpoint_revision_id,
+                "current": current.get(item.viewpoint_id),
+            }
+            for item in work.current_viewpoint_revisions
+            if current.get(item.viewpoint_id) != item.viewpoint_revision_id
+        }
+        if not stale:
+            queue.finish(work, worker_id=args.worker_id, status="exception", detail=str(exc))
+            raise
+        missing_successors = sorted(
+            viewpoint_id
+            for viewpoint_id, revisions in stale.items()
+            if revisions["current"] is None
+            or not queue.has_queued_current_revision(
+                viewpoint_id, str(revisions["current"])
+            )
+        )
+        detail = "Route conclusion cut superseded: " + json.dumps(
+            stale, ensure_ascii=False, sort_keys=True
+        )
+        queue.supersede(work, worker_id=args.worker_id, detail=detail)
+        if missing_successors:
+            raise RuntimeError(
+                "superseded Route work has no durable successor enqueue for: "
+                + ", ".join(missing_successors)
+            ) from exc
+        print(json.dumps({"status": "superseded", "detail": detail}, ensure_ascii=False))
+        return 0
     except Exception as exc:
         queue.finish(work, worker_id=args.worker_id, status="exception", detail=str(exc))
         raise

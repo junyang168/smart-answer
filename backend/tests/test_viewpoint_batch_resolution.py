@@ -32,11 +32,8 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
-from backend.pipeline.viewpoint_batch_resolution_runner import (
-    _stable_decided_at,
-    build_registry_route_packet,
-    run_batch,
-)
+from backend.pipeline.viewpoint_batch_resolution_runner import _stable_decided_at, run_batch
+from backend.pipeline.viewpoint_route_resolution import build_registry_route_packet
 
 ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
 MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
@@ -193,6 +190,66 @@ def test_verified_readback_builds_an_idempotent_route_job():
     assert first.cvp_readback_sha256 == receipt.artifact_sha256
 
 
+def test_versioned_route_policy_fingerprint_binds_prompt_content():
+    from backend.pipeline.viewpoint_route_policy import (
+        DEFAULT_ROUTE_POLICY_PATH,
+        load_route_policy,
+        route_policy_fingerprint,
+    )
+
+    policy = load_route_policy(DEFAULT_ROUTE_POLICY_PATH)
+    first = route_policy_fingerprint(policy, prompt_sha256s={"proposal": "prompt-a"})
+    second = route_policy_fingerprint(policy, prompt_sha256s={"proposal": "prompt-a"})
+    changed = route_policy_fingerprint(policy, prompt_sha256s={"proposal": "prompt-b"})
+
+    assert first == second
+    assert first != changed
+    assert policy["review"]["targets_per_batch"] == 12
+
+
+def test_route_apply_readback_compares_content_and_cvp_cut():
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        build_route_apply_readback_receipt,
+    )
+
+    expected_record = {"argument_route_id": "AR-1", "route_status": "active"}
+    verified, findings = build_route_apply_readback_receipt(
+        route_work_unit_sha256="work-sha",
+        route_packet_sha256="packet-sha",
+        route_proposal_sha256="proposal-sha",
+        route_review_sha256="review-sha",
+        changeset_fingerprint_sha256="changeset-sha",
+        expected_current_viewpoint_revisions={"CV-1": "CVR-1"},
+        observed_current_viewpoint_revisions={"CV-1": "CVR-1"},
+        expected_records=[("argument_routes", "AR-1", expected_record)],
+        observed_records={
+            ("argument_routes", "AR-1"): expected_record | {"revision": 7}
+        },
+    )
+    assert findings == []
+    assert verified["readback_status"] == "verified"
+    assert verified["approved_cvps_unchanged"] is True
+
+    mismatch, findings = build_route_apply_readback_receipt(
+        route_work_unit_sha256="work-sha",
+        route_packet_sha256="packet-sha",
+        route_proposal_sha256="proposal-sha",
+        route_review_sha256="review-sha",
+        changeset_fingerprint_sha256="changeset-sha",
+        expected_current_viewpoint_revisions={"CV-1": "CVR-1"},
+        observed_current_viewpoint_revisions={"CV-1": "CVR-2"},
+        expected_records=[("argument_routes", "AR-1", expected_record)],
+        observed_records={
+            ("argument_routes", "AR-1"): expected_record
+            | {"route_status": "retired"}
+        },
+    )
+    assert "argument_routes:AR-1" in findings
+    assert any(item.startswith("canonical_viewpoints:CV-1") for item in findings)
+    assert mismatch["readback_status"] == "mismatch"
+    assert mismatch["approved_cvps_unchanged"] is False
+
+
 def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
     old_receipt = build_cvp_batch_readback_receipt(
         scope_label="matthew-16",
@@ -232,6 +289,17 @@ def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
     ] == [("CV-1", "CVR-2"), ("CV-2", "CVR-3")]
     assert work.superseded_job_ids == [jobs[0].job_id]
     assert work.source_job_ids == sorted({item.job_id for item in jobs})
+
+    another_policy = build_route_resolution_job(
+        receipt=new_receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-v2-sha",
+    )
+    with pytest.raises(ValueError, match="cannot cross scope manifests or policies"):
+        coalesce_route_resolution_jobs(
+            [jobs[1], another_policy],
+            current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        )
 
 
 def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path: Path):
@@ -357,6 +425,38 @@ def test_plan_only_route_worker_releases_its_lease(tmp_path: Path):
         current_viewpoint_revisions={"CV-1": "CVR-1"},
     )
     assert reclaimed is not None
+
+
+def test_route_queue_can_supersede_owned_work_immediately(tmp_path: Path):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job)
+    work = queue.claim(
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+    )
+    assert work is not None
+
+    queue.supersede(work, worker_id="worker-a", detail="CVR-2 became current")
+
+    state = json.loads(
+        (tmp_path / "queue" / "states" / f"{job.job_id}.json").read_text()
+    )
+    assert state["status"] == "superseded"
+    assert state["lease_expires_at"] is None
 
 
 def test_passing_batch_compiles_component_bound_cvp_master_records():
@@ -1811,6 +1911,89 @@ def test_registry_route_packet_keeps_unlinked_bridge_claim():
     assert background[0]["statement_component"] == MODAL_STATEMENT
 
 
+def test_registry_route_packet_accounts_for_members_it_cannot_attest():
+    member = _claim("C1", ROCK_STATEMENT)
+    external = _claim("C9", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member],
+        viewpoint_claim_links=[
+            _registry_link(member),
+            _registry_link(
+                external,
+                viewpoint_claim_link_id="VCL-OUTSIDE",
+            ),
+            _registry_link(
+                member,
+                viewpoint_claim_link_id="VCL-NO-BINDINGS",
+                evidence_bindings=[],
+            ),
+        ],
+        existing_routes=[],
+    )
+
+    ledger = packet["membership_ledger"]
+    assert [item["claim_id"] for item in ledger["out_of_scope_members"]] == ["C9"]
+    assert [
+        item["viewpoint_claim_link_id"]
+        for item in ledger["unattestable_in_scope_members"]
+    ] == ["VCL-NO-BINDINGS"]
+    assert ledger["no_route_semantics"] == "no_attested_route_in_this_evidence_scope"
+
+
+def test_route_review_can_open_a_structured_cvp_re_review_exception():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+        validate_route_review,
+    )
+
+    binding = _route_component_binding()
+    review = ArgumentRouteReviewResponse.model_validate(
+        {
+            "route_proposal_sha256": "proposal-sha",
+            "route_evidence_packet_sha256": "packet-sha",
+            "change_reviews": [
+                {
+                    "target_kind": "route",
+                    "target_key": "ROUTE-GREEK",
+                    "decision": "defer",
+                    "finding_codes": ["cvp_identity_may_be_overmerged"],
+                    "reason": "结论边界似乎合并了两个不同判断",
+                },
+                {
+                    "target_kind": "attestation",
+                    "target_key": "ATTEST-1",
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "来源绑定本身成立",
+                },
+            ],
+            "cvp_re_review_exceptions": [
+                {
+                    "viewpoint_revision_id": "CVR-1",
+                    "finding_code": "identity_may_be_overmerged",
+                    "reason": "两组证据支持不同强度的结论",
+                    "triggering_target_kind": "route",
+                    "triggering_target_key": "ROUTE-GREEK",
+                    "evidence_claim_component_keys": [binding.claim_component_key],
+                }
+            ],
+            "cross_source_composition_found": False,
+            "reason": "Route 不改写 CVP，只升级复核",
+        }
+    )
+
+    report = validate_route_review(
+        review=review,
+        proposal=_routes(),
+        route_proposal_sha256="proposal-sha",
+        route_evidence_packet_sha256="packet-sha",
+        allowed_claim_component_keys={binding.claim_component_key},
+    )
+    assert report["outcome"] == "findings"
+
+
 def test_registry_route_packet_rejects_stale_claim_link():
     claim = _claim("C1", ROCK_STATEMENT)
     with pytest.raises(ValueError, match="stale Claim revision"):
@@ -1873,7 +2056,7 @@ def test_routes_validate_against_settled_conclusions():
 
 
 def test_route_review_batches_bound_targets_and_cover_them_exactly_once():
-    from backend.pipeline.viewpoint_batch_resolution_runner import (
+    from backend.pipeline.viewpoint_route_resolution import (
         build_route_review_batches,
     )
 
@@ -2032,91 +2215,6 @@ def test_cross_source_composition_can_never_be_a_pass():
                 "reason": "发现跨来源拼接",
             }
         )
-
-
-def test_route_packet_requires_applied_cvps_and_keeps_non_bearing_components():
-    from backend.pipeline.viewpoint_batch_resolution_runner import build_route_packet
-
-    proposal = _proposal(
-        claim_decisions=[
-            {
-                "claim_id": "C1",
-                "components": [
-                    _component(
-                        ROCK_STATEMENT,
-                        "磐石不是彼得这个人",
-                        "new_viewpoint",
-                        local_new_viewpoint_key="ROCK-NOT-PETER",
-                    ),
-                    _component(ROCK_STATEMENT, "而是彼得所承认的信仰", "no_registry_assertion"),
-                ],
-            }
-        ]
-    )
-    with pytest.raises(ValueError, match="unapplied local CVP candidates"):
-        build_route_packet(
-            scope_label="matt16-13-18",
-            approved_viewpoints=[
-                {"viewpoint_revision_id": "CVR-1", "core_proposition": "太16:18 的磐石不指彼得本人"}
-            ],
-            effective_proposals=[proposal],
-            claims=[_claim("C1", ROCK_STATEMENT)],
-            existing_routes=[],
-        )
-
-    mapped = build_route_packet(
-        scope_label="matt16-13-18",
-        approved_viewpoints=[
-            {"viewpoint_revision_id": "CVR-NEW", "core_proposition": "太16:18 的磐石不指彼得本人"}
-        ],
-        effective_proposals=[proposal],
-        claims=[_claim("C1", ROCK_STATEMENT)],
-        existing_routes=[],
-        local_candidate_revision_map={
-            "CVB-test-001:ROCK-NOT-PETER": "CVR-NEW"
-        },
-    )
-    mapped_member = next(
-        item for item in mapped["claim_components"] if item["disposition"] == "member_existing"
-    )
-    assert mapped_member["target_viewpoint_revision_id"] == "CVR-NEW"
-
-    applied = _proposal(
-        claim_decisions=[
-            {
-                "claim_id": "C1",
-                "components": [
-                    _component(
-                        ROCK_STATEMENT,
-                        "磐石不是彼得这个人",
-                        "member_existing",
-                        target_viewpoint_revision_id="CVR-1",
-                    ),
-                    _component(
-                        ROCK_STATEMENT,
-                        "而是彼得所承认的信仰",
-                        "no_registry_assertion",
-                    ),
-                ],
-            }
-        ],
-        new_viewpoint_candidates=[],
-    )
-    packet = build_route_packet(
-        scope_label="matt16-13-18",
-        approved_viewpoints=[
-            {"viewpoint_revision_id": "CVR-1", "core_proposition": "太16:18 的磐石不指彼得本人"}
-        ],
-        effective_proposals=[applied],
-        claims=[_claim("C1", ROCK_STATEMENT)],
-        existing_routes=[],
-    )
-    assert packet["approved_viewpoint_revision_ids"] == ["CVR-1"]
-    assert {item["disposition"] for item in packet["claim_components"]} == {
-        "member_existing",
-        "no_registry_assertion",
-    }
-    assert "single_source_note" in packet
 
 
 def test_a_route_may_not_target_a_conclusion_the_batch_never_settled():
@@ -2340,60 +2438,8 @@ def test_attestation_component_keys_are_resolved_not_trusted():
         _check_routes(routes, [_claim("C1", ROCK_STATEMENT)])
 
 
-def test_route_packet_recombines_components_across_intelligent_batches():
-    from backend.pipeline.viewpoint_batch_resolution_runner import build_route_packet
-
-    first = _proposal(
-        claim_decisions=[
-            {
-                "claim_id": "C1",
-                "components": [
-                    _component(
-                        ROCK_STATEMENT,
-                        "磐石不是彼得这个人",
-                        "member_existing",
-                        target_viewpoint_revision_id="CVR-1",
-                    )
-                ],
-            }
-        ],
-        new_viewpoint_candidates=[],
-    )
-    second = _proposal(
-        batch_id="CVB-test-002",
-        claim_decisions=[
-            {
-                "claim_id": "C2",
-                "components": [
-                    _component(
-                        MODAL_STATEMENT,
-                        MODAL_STATEMENT,
-                        "no_registry_assertion",
-                        claim_id="C2",
-                    )
-                ],
-            }
-        ],
-        new_viewpoint_candidates=[],
-    )
-    packet = build_route_packet(
-        scope_label="matt16-13-18",
-        approved_viewpoints=[
-            {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
-        ],
-        effective_proposals=[first, second],
-        claims=[_claim("C1", ROCK_STATEMENT), _claim("C2", MODAL_STATEMENT)],
-        existing_routes=[],
-    )
-    assert {item["claim_id"] for item in packet["claim_components"]} == {"C1", "C2"}
-    assert {item["claim_id"] for item in packet["claims"]} == {"C1", "C2"}
-
-
 def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
-    from backend.pipeline.viewpoint_batch_resolution_runner import (
-        build_route_packet,
-        run_route_scope,
-    )
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
 
     effective = _proposal(
         claim_decisions=[
@@ -2415,11 +2461,11 @@ def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
         {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
     ]
     claims = [_claim("C1", ROCK_STATEMENT)]
-    packet = build_route_packet(
+    packet = build_registry_route_packet(
         scope_label="matt16-13-18",
-        approved_viewpoints=approved,
-        effective_proposals=[effective],
+        approved_viewpoints=[_approved_viewpoint()],
         claims=claims,
+        viewpoint_claim_links=[_registry_link(claims[0])],
         existing_routes=[],
     )
     route_payload = _routes().model_dump(mode="json")
@@ -2452,9 +2498,8 @@ def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
     kwargs = {
         "scope_label": "matt16-13-18",
         "claims": claims,
-        "approved_viewpoints": approved,
-        "effective_proposals": [effective],
         "existing_routes": [],
+        "route_packet": packet,
         "output_dir": tmp_path / "routes",
         "proposer": proposer,
         "reviewer": reviewer,
@@ -2584,10 +2629,7 @@ def test_route_correction_is_confined_to_flagged_objects():
 
 
 def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
-    from backend.pipeline.viewpoint_batch_resolution_runner import (
-        build_route_packet,
-        run_route_scope,
-    )
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
 
     effective = _proposal(
         claim_decisions=[
@@ -2609,11 +2651,11 @@ def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
         {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
     ]
     claims = [_claim("C1", ROCK_STATEMENT)]
-    packet = build_route_packet(
+    packet = build_registry_route_packet(
         scope_label="matt16-13-18",
-        approved_viewpoints=approved,
-        effective_proposals=[effective],
+        approved_viewpoints=[_approved_viewpoint()],
         claims=claims,
+        viewpoint_claim_links=[_registry_link(claims[0])],
         existing_routes=[],
     )
     route_payload = _routes().model_dump(mode="json")
@@ -2643,50 +2685,13 @@ def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
     report = run_route_scope(
         scope_label="matt16-13-18",
         claims=claims,
-        approved_viewpoints=approved,
-        effective_proposals=[effective],
         existing_routes=[],
+        route_packet=packet,
         output_dir=tmp_path / "routes",
         proposer=_StubAdapter(route_payload),
         reviewer=_StubAdapter(review_payload),
     )
-    assert report["approved_cvps_unchanged"] is True
+    assert report["cvp_mutations_proposed"] == 0
     assert report["passing_route_keys"] == []
     assert "attestation:ATTEST-1:reject" in report["exceptions"]
     assert "route:ROUTE-GREEK:no_passing_attestation" in report["exceptions"]
-
-
-def test_approved_viewpoint_cut_is_sha_bound(tmp_path: Path):
-    from backend.pipeline.viewpoint_batch_resolution_runner import (
-        load_approved_viewpoint_cut,
-    )
-
-    body = {
-        "schema_version": "wang_approved_viewpoint_scope_cut_v1",
-        "scope_label": "matt16-13-18",
-        "approved_viewpoints": [
-            {"viewpoint_revision_id": "CVR-NEW", "core_proposition": "磐石不指彼得本人"}
-        ],
-        "candidate_revision_bindings": [
-            {
-                "batch_id": "CVB-test-001",
-                "local_new_viewpoint_key": "ROCK-NOT-PETER",
-                "viewpoint_revision_id": "CVR-NEW",
-            }
-        ],
-    }
-    path = tmp_path / "approved-cut.json"
-    path.write_text(
-        json.dumps({**body, "artifact_sha256": sha256_json(body)}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    cut = load_approved_viewpoint_cut(path, scope_label="matt16-13-18")
-    assert cut["local_candidate_revision_map"] == {
-        "CVB-test-001:ROCK-NOT-PETER": "CVR-NEW"
-    }
-
-    tampered = json.loads(path.read_text(encoding="utf-8"))
-    tampered["scope_label"] = "another-scope"
-    path.write_text(json.dumps(tampered), encoding="utf-8")
-    with pytest.raises(ValueError):
-        load_approved_viewpoint_cut(path, scope_label="matt16-13-18")

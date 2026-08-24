@@ -182,12 +182,22 @@ class FileRouteResolutionQueue:
                 return None
 
             first_scope = min(
-                (item.scope_label, item.scope_manifest_sha256) for item in available
+                (
+                    item.scope_label,
+                    item.scope_manifest_sha256,
+                    item.route_policy_fingerprint_sha256,
+                )
+                for item in available
             )
             available = [
                 item
                 for item in available
-                if (item.scope_label, item.scope_manifest_sha256) == first_scope
+                if (
+                    item.scope_label,
+                    item.scope_manifest_sha256,
+                    item.route_policy_fingerprint_sha256,
+                )
+                == first_scope
             ]
 
             work = coalesce_route_resolution_jobs(
@@ -259,17 +269,7 @@ class FileRouteResolutionQueue:
             raise ValueError("route work may finish only as resolved or exception")
         timestamp = finished_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for job_id in work.source_job_ids:
-                if job_id in work.superseded_job_ids:
-                    continue
-                current = self._state(job_id)
-                if (
-                    current is None
-                    or current["status"] != "running"
-                    or current.get("worker_id") != worker_id
-                    or current.get("work_unit_sha256") != work.artifact_sha256
-                ):
-                    raise ValueError(f"worker does not own route job {job_id}")
+            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
                 self._transition(
                     job_id,
                     status=status,
@@ -291,17 +291,7 @@ class FileRouteResolutionQueue:
 
         timestamp = released_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for job_id in work.source_job_ids:
-                if job_id in work.superseded_job_ids:
-                    continue
-                current = self._state(job_id)
-                if (
-                    current is None
-                    or current["status"] != "running"
-                    or current.get("worker_id") != worker_id
-                    or current.get("work_unit_sha256") != work.artifact_sha256
-                ):
-                    raise ValueError(f"worker does not own route job {job_id}")
+            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
                 self._transition(
                     job_id,
                     status="queued",
@@ -309,3 +299,69 @@ class FileRouteResolutionQueue:
                     attempt=int(current["attempt"]),
                     detail=detail,
                 )
+
+    def supersede(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        worker_id: str,
+        detail: str,
+        superseded_at: str | None = None,
+    ) -> None:
+        """Immediately retire owned work whose conclusion cut lost its CAS."""
+
+        timestamp = superseded_at or datetime.now(timezone.utc).isoformat()
+        with self._lock():
+            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
+                self._transition(
+                    job_id,
+                    status="superseded",
+                    occurred_at=timestamp,
+                    attempt=int(current["attempt"]),
+                    work_unit_sha256=work.artifact_sha256,
+                    detail=detail,
+                )
+
+    def _owned_running_jobs(
+        self, work: RouteResolutionWorkUnit, *, worker_id: str
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Return the live source jobs after enforcing one ownership guard."""
+
+        owned: list[tuple[str, dict[str, Any]]] = []
+        for job_id in work.source_job_ids:
+            if job_id in work.superseded_job_ids:
+                continue
+            current = self._state(job_id)
+            if (
+                current is None
+                or current["status"] != "running"
+                or current.get("worker_id") != worker_id
+                or current.get("work_unit_sha256") != work.artifact_sha256
+            ):
+                raise ValueError(f"worker does not own route job {job_id}")
+            owned.append((job_id, current))
+        return owned
+
+    def has_queued_current_revision(
+        self, viewpoint_id: str, viewpoint_revision_id: str
+    ) -> bool:
+        """Check that a committed successor produced its own durable enqueue."""
+
+        with self._lock():
+            for path in sorted(self.jobs_dir.glob("RRJ-*.json")):
+                job = RouteResolutionJob.model_validate(_read(path))
+                pairs = set(
+                    zip(
+                        job.logical_viewpoint_ids,
+                        job.enqueued_viewpoint_revision_ids,
+                        strict=True,
+                    )
+                )
+                state = self._state(job.job_id)
+                if (
+                    (viewpoint_id, viewpoint_revision_id) in pairs
+                    and state is not None
+                    and state["status"] in {"queued", "running", "resolved"}
+                ):
+                    return True
+        return False
