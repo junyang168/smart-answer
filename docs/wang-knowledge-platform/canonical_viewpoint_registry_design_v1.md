@@ -1,9 +1,9 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
-> 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、projection、只读 UI 与首个太 16:18 master record 已实现。#206 将 resolution 明确为两个协作 job：同一 scope 的 CVP batches 严格串行，每个 batch 完成 atomic apply/readback 后提交 RouteResolutionJob；Route worker 可与下一 CVP batch 并行，并从完整 scope evidence 为该 job 的 current approved CVPs 批量生成、审核和写入 ArgumentRoutes。Claim grouping 不得成为 route 的语义边界。旧 recall/signature/atomic promotion artifacts 只保留为历史诊断与语义 regression fixtures，不再是生产必经的领域状态。本文件不授权内容生成或部署。
+> 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、projection、只读 UI 与太 16:18 磐石 POC Registry 已实现。#206 将 resolution 明确为两个协作 job：同一 scope 的 CVP batches 严格串行，每个 batch 完成 atomic apply/readback 后提交 RouteResolutionJob；Route worker 可与下一 CVP batch 并行，并从完整 scope evidence 为该 job 的 current approved CVPs 批量生成、审核和写入 ArgumentRoutes。#209 明确 Topic taxonomy、CVP identity、ArgumentRoute 与来源证据是四种不同关系；Topic grouping 不裁定 CVP identity，经文范围也不冒充 TopicNode。Claim grouping 不得成为 route 或 Topic 的语义边界。旧 recall/signature/atomic promotion artifacts 只保留为历史诊断与语义 regression fixtures，不再是生产必经的领域状态。本文件不授权内容生成或部署。
 > 版本：v1
-> 日期：2026-08-23
-> 追踪：GitHub issue #165（WKP-F02.7）、#181（WKP-F02.15 scalability revision）、#204（WKP-F02.21 simplified batch resolution）、#206（model-role、route-queue 与 recovery-state revision）
+> 日期：2026-08-24
+> 追踪：GitHub issue #165（WKP-F02.7）、#181（WKP-F02.15 scalability revision）、#204（WKP-F02.21 simplified batch resolution）、#206（model-role、route-queue 与 recovery-state revision）、#209（Topic／CVP／Argument boundary revision）
 > 权威边界：PostgreSQL 继续是 authoring authority；来源局部 `Claim`、`EvidenceStep`、`SourceFragment` 与 Canonical Citation 继续是可追溯事实的权威。
 
 ## 1. 决策摘要
@@ -32,6 +32,10 @@
 18. reviewer findings 只允许触发一次 proposer finding-only correction；持续分歧、split/merge/supersedes、无法验证的证据或实质 scope 冲突进入 exception。不得增加 promotion proposal、finalization bundle、score-gap review 或重复 full review 来追求表面一致。
 19. `CVPResolutionJob` 在同一 scope 内严格串行：下一 batch 必须在上一 batch 的全部 CVP changes 完成 atomic apply/readback 后才读取最新 Registry。每个成功 CVP batch 随即提交一个 `RouteResolutionJob`；Route worker 可与下一 CVP batch 并行，但只消费已提交的 CVP revisions。一个 Route job 可批量处理该触发 batch 的全部 approved/affected CVPs，并从完整 scope 重新编译 Claims、Claim components、EvidenceSteps 与 SourceFragments，不得只读原 CVP batch 的 Claims。新 CVP revision 必须 supersede 尚未 apply 的旧 revision route work；Route apply 前再次验证 conclusion revision 仍为 current。
 20. CVP batch 只有在 proposal、independent review、必要的一次 correction、deterministic validation、ChangeSet apply 与 authority readback 全部通过后，才算完成；通过的 CVP 直接成为 Registry master data，不引入 `PendingCandidate` 或 `ProvisionalCanonicalViewpoint`。Route 阶段对每条 route/attestation 独立 validation、review、correction 和 apply；一条 route 失败不撤销 approved CVP，也不阻止其他已通过 routes 写入 Registry。
+21. Topic grouping 是独立的 knowledge-organization operation，不是 CVP merge。`TopicNode` 使用稳定主题身份与 primary-parent hierarchy；一个 CVP 通过显式 `ViewpointTopicAssignment` 拥有一个 primary research home、零到多个 secondary cross-links，或明确保持 unassigned。assignment 改变不产生 ViewpointRevision，也不改变 CVP identity。
+22. `scripture_scope`、`knowledge_role`、时间与来源是检索 facets，不自动成为 TopicNode。UI 可以把 passage facet、Topic hierarchy、CVP 与 ArgumentRoute 连续展开，但必须显示关系类型，不能把这张阅读树保存成一条混合的 master-data parent chain。
+23. Topic 与 CVP 解决不同问题：Topic 回答“讨论什么研究问题”，CVP 回答“王教授主张什么”，ArgumentRoute 回答“为什么得出这个结论”，RouteAttestation／Evidence 回答“在哪一篇来源中怎样说”。只有同一真值条件才允许 CVP merge；同一 Topic、同一经文或同一结论方向都不足以证明 identity。
+24. 本分层是 standards-informed domain architecture，不是一个名为 `Topic → CVP → ArgumentRoute` 的外部标准。SKOS 提供 Topic concept scheme 与 broader/narrower/related 的知识组织语义；AIF 类论证模型提供 premise／inference／conclusion 分离；PROV 提供派生与来源责任链。`CanonicalViewpoint`、`ViewpointTopicAssignment`、source-local RouteAttestation 以及它们的 gate 是本平台的领域选择，必须以真实数据和 regression 校准，不能以“best practice”代替证据。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -212,6 +216,177 @@ flowchart LR
 
 因此 `CanonicalViewpoint` 不设 canonical `parent_viewpoint_id`。UI 可以从 typed graph 生成树状阅读投影，但该投影是可重建导航，不是 identity authority。
 
+### 3.4 方法论来源与本平台选择
+
+本设计不是声称存在一个外部标准规定 `Topic → CanonicalViewpoint → ArgumentRoute`。它把三个成熟建模原则应用到王教授知识平台，并明确保留本项目自己的判断责任：
+
+| 设计问题 | standards-informed basis | 本平台的具体选择 | 标准没有替我们决定什么 |
+|---|---|---|---|
+| 主题怎样组织 | W3C SKOS `ConceptScheme`、`broader`、`narrower`、`related` | `TopicNode` 是稳定主题身份；现有 `parent_topic_id` 保存唯一 primary parent，cross-link 不伪装成第二 parent | 主题名称、粒度、父子边界及王教授材料怎样归类 |
+| 观点怎样成为 master identity | registry-style MDM 的 source-record／crosswalk／master-identity 分离 | `Claim → ViewpointClaimLink → CanonicalViewpoint`，保留全部来源措辞 | 哪些 Claims 真值条件相同、应 merge 或 split |
+| 论证怎样表达 | Argument Interchange Format 一类模型对 information、inference、premise、conclusion 的分离 | `ArgumentRouteRevision.ordered_inference_nodes` 指向一个 current CVP revision | 某一推论是否成立、两条路线是否 materially equivalent |
+| 来源怎样追溯 | W3C PROV 的 entity／activity／derivation 与 primary-source chain | RouteAttestation 严格 source-local，并逐步绑定 Claim component、EvidenceStep、SourceFragment | 编辑归一化是否忠实、哪段原文足以承担某一步 |
+
+规范参考：
+
+- W3C, *SKOS Simple Knowledge Organization System Reference*: https://www.w3.org/TR/skos-reference/
+- W3C, *PROV-O: The PROV Ontology*: https://www.w3.org/TR/prov-o/
+- Rahwan et al., *Laying the foundations for a World Wide Argument Web*（AIF）：https://doi.org/10.1016/j.artint.2007.10.015
+
+这些参考只支持 separation of concerns 和关系语义，不为本库的 theology ontology、CVP 粒度或自动批准背书。实现和设计 review 必须把“标准明确规定”“从标准借鉴”“本项目自行选择”分开陈述。
+
+### 3.5 四层关系不是一条 master-data 树
+
+```mermaid
+flowchart TB
+    subgraph F["检索 facets；不是 Topic parent"]
+        P["Passage scope: Matt 16:18"]
+        K["knowledge_role: passage_interpretation"]
+    end
+    subgraph T["Topic concept scheme"]
+        T0["磐石与教会根基"] -->|"broader / narrower"| T1["磐石的所指"]
+        T0 -->|"broader / narrower"| T2["彼得与教皇权"]
+        T0 -->|"broader / narrower"| T3["释经方法"]
+    end
+    T1 -->|"ViewpointTopicAssignment"| V["CVP：磐石不是彼得本人"]
+    P -.->|"scope filter"| V
+    K -.->|"classification filter"| V
+    R1["ArgumentRoute：Petrus／Petra 形态差异"] -->|"concludes"| V
+    R2["ArgumentRoute：彼得受责备与不可靠性"] -->|"concludes"| V
+    A1["source-local RouteAttestation"] -->|"attests"| R1
+    A2["source-local RouteAttestation"] -->|"attests"| R2
+    E["Claim component → EvidenceStep → SourceFragment"] -->|"grounds"| A1
+    E -->|"grounds"| A2
+```
+
+图的纵向排版只帮助阅读，不产生一个通用 `parent_id`：
+
+- TopicNode 之间才有 taxonomy parent；
+- TopicNode 与 CVP 之间是 reviewed assignment；
+- ArgumentRoute 与 CVP 之间是 directed conclusion binding；
+- attestation／evidence 与 route 之间是 provenance grounding；
+- passage、knowledge role、时间和来源只作为 facets 过滤，不与 Topic hierarchy 混存。
+
+因此先前把“马太福音 16:18”直接画成 Topic 根节点只是一种 UI scope header，不是默认 master-data 分类。若编辑确实需要建立一个名为“马太福音 16:18”的 TopicNode，必须像任何新 Topic 一样经过 topic identity reconciliation；经文引用本身不能自动创建它。
+
+### 3.6 ViewpointTopicAssignment
+
+现有 `TopicNode` 已有稳定 ID 与 primary-parent hierarchy，但未来若把 `topic_ids` 直接嵌入 `ViewpointRevision`，或只在 projection 中临时拼出 `topic_ids`，都不能承担可审核归属。正式 boundary 使用独立 crosswalk；建议 schema：
+
+```json
+{
+  "schema_version": "wang_viewpoint_topic_assignment_v1",
+  "viewpoint_topic_assignment_id": "VTA-opaque",
+  "viewpoint_id": "CV-opaque",
+  "validated_against_viewpoint_revision_id": "CVR-opaque",
+  "topic_id": "TOPIC-opaque",
+  "validated_against_topic_revision": 3,
+  "assignment_role": "primary_home",
+  "rationale": "该观点直接回答磐石正面所指的研究问题",
+  "decision_artifact_sha256": "...",
+  "effective_state": "active",
+  "review_status": "system_approved",
+  "revision": 1
+}
+```
+
+`assignment_role` 只允许：
+
+- `primary_home`：该 concept scheme 中最直接的研究问题；每个 active CVP 至多一个；
+- `secondary_cross_link`：另一个合理入口，不改变 primary home；可以有多个；
+- `unassigned` 不写伪 Topic link，而在 assignment coverage ledger 中显式记账。
+
+规则：
+
+1. assignment 是多对多 crosswalk，不是 identity member；它不能创建、合并、redirect 或 revise CVP；
+2. Topic label、父节点或 assignment 调整只产生 Topic／assignment revision；除非 CVP 真值条件也改变，否则不得生成新 ViewpointRevision；
+3. CVP semantic revision 若改变 truth condition 或 scope，相关 assignments 必须重新验证；只改 canonical wording 且 assignment rationale 仍成立时可以机械 carry-forward，但必须产生 receipt；
+4. TopicNode merge／split／redirect 必须沿 assignments 产生 impact preview；不得按标题相似度自动重写 topic_id；
+5. assignment proposal 可以读取 CVP core、scope、代表性 member 与现有 Topic definitions，但不得读取 ArgumentRoute 后反向把“用了某种论法”当成观点主题身份；route methods 是检索 facets，不是 Topic membership proof；
+6. `topic_ids` 在 `ViewpointKnowledgeProjection` 中是 active assignments 的派生值，必须同时输出 assignment IDs、roles 与 pinned Topic revisions；消费者不得只保存一个无 provenance 的字符串数组。
+
+### 3.7 Topic grouping 不替代 CVP consolidation
+
+把多条 CVP 放进同一 Topic 只证明它们回答相近研究问题。以下 pairs 即使同 Topic 也不得自动 merge：
+
+- “磐石不是彼得本人”与“磐石更可能是基督本人”：前者是否定边界，后者是正面所指；
+- “磐石与彼得有关”与“磐石不是彼得本人”：可以同时为真；
+- “彼得不是第一任教皇”与“只强调彼得的解释错误”：相关但 truth conditions 不同。
+
+反过来，Topic assignment 也不能掩盖 false split。“磐石可以表述为彼得领受并传下来的真理”与“教会建立在彼得领受并传下来的真理上”若经 evidence-bound identity review 判定只是同一断言的两个从句，仍应合并 CVP；不能因为 UI 已把两条都放进同一 Topic 就认为问题解决。Topic calibration 与 CVP identity consolidation 是两个独立 job、两份 decisions、两个 ChangeSets。
+
+### 3.8 Topic assignment workflow 与质量 invariant
+
+Topic assignment 在 approved CVP 后异步运行，不阻塞 CVP identity 或 ArgumentRoute apply：
+
+```mermaid
+flowchart LR
+    V["current approved CVPs"] --> P["Topic assignment proposal"]
+    T["current TopicNode definitions + hierarchy"] --> P
+    P --> D["deterministic checks"]
+    D --> R["independent assignment review"]
+    R -->|"pass"| C["ViewpointTopicAssignment ChangeSet"]
+    R -->|"correctable"| X["one finding-only correction"]
+    X --> D
+    R -->|"ambiguous topic identity / hierarchy"| E["Topic exception inbox"]
+    C --> A["atomic apply + readback"]
+    A --> Q["rebuild Topic/CVP projection"]
+```
+
+为了单人维护，模型负责 proposal，程序负责 exact coverage、外键、revision、single-primary 与 cycle checks；独立 review 检查研究问题是否匹配、是否被 wording anchoring 误导以及是否漏掉 cross-link。只有 Topic identity／父子边界含糊、review 持续分歧或高影响 Topic merge/split 才进入人工。最低 invariants：
+
+1. 输入 manifest 中每个 CVP exact-once 得到 `assigned / unassigned / deferred` disposition；
+2. 每个 active assignment 的 CVP revision、Topic revision 和 decision artifact 都可解析；
+3. 一个 CVP 在同一 concept scheme 至多一个 active `primary_home`，secondary links exact de-dup；
+4. Topic primary-parent chain 无 cycle、无 dangling parent；
+5. assignment ChangeSet 的 CVP mutations 恒为 0；若 proposal 要求 merge/split CVP，只能建立 CVP re-review exception；
+6. grouping 前后的 active CVP 数、member Claim links 与 ArgumentRoutes 必须不变；变化只允许发生在另一个已批准的 CVP ChangeSet；
+7. UI 和 projection 对 unassigned／deferred 有可见分母，不能用“没有 Topic”暗示“没有观点”。
+
+### 3.9 太 16:18 worked example：先校准 identity，再批准 Topic assignments
+
+2026-08-24 共享 POC Registry 的 `rock_referent_not_peter` batch 输入 13 条 Claims、拆出 27 个可定位 components；加上原有 identity 后当前为 14 个 active CVPs、27 条 Claim links。这个结果证明一条 Claim 可以包含多个 CVP components，也证明当前 CVP 数不能直接当作“14 个彼此独立的观点”。Route review 已发现至少两组 possible false split；Topic assignment 前必须保留这些 CVP re-review exceptions。
+
+下面是 navigation proposal，不是已批准的 Topic master data，也不创建 Topic IDs：
+
+```text
+passage facet：Matt 16:18                         ← scripture_scope，不是 TopicNode
+
+Topic candidate：磐石与教会根基
+├── Subtopic candidate：磐石的所指与彼得的关系
+│   ├── CVP：磐石不是彼得本人
+│   │   ├── Route：由 Petrus／Petra 的形态差异排除彼得本人
+│   │   └── Route：由彼得受责备及不可靠性反证磐石不是彼得本人
+│   ├── CVP：磐石与彼得有关联
+│   └── CVP：磐石更可能是基督耶稣本人
+├── Subtopic candidate：教会建立的根基
+│   ├── CVP：教会的根基是使徒和先知
+│   ├── CVP：教会根基涉及整个教会而不只彼得一人
+│   ├── CVP：教会建立在彼得的准确信仰告白上
+│   ├── CVP：教会建立在彼得的信心上                 ← identity review
+│   ├── CVP：教会建立在彼得所具有的一个特征上       ← possible false split
+│   ├── CVP：磐石可表述为彼得领受并传下来的真理     ← possible false split
+│   └── CVP：教会建立在彼得领受并传下来的真理上     ← possible false split
+├── Subtopic candidate：彼得与教皇权
+│   ├── CVP：彼得不是第一任教皇
+│   └── CVP：只强调彼得并称其为第一任教皇的解释错误
+└── Subtopic candidate：释经文本与方法
+    ├── CVP：应以受圣灵带领写成的正典希腊文为准
+    └── CVP：不能用耶稣可能说亚兰文消除 Petrus／Petra 差异
+```
+
+这个例子有三种不同 decision：
+
+| 情形 | 正确动作 | 错误动作 |
+|---|---|---|
+| “不是彼得”与“更可能是基督” | 保留两个 CVP；同 Topic；可用 `supports/extends` 等 typed relation | 因主题相同而 merge |
+| “与彼得有关”与“不是彼得本人” | 保留两个可同时为真的 CVP；同 Topic | 把 negation 误当 contradiction 或 duplicate |
+| “某个特征／信心／信仰告白”及“传下来的真理”两组 | 先做 evidence-bound CVP identity consolidation；决定 merge、generalizes/specializes 或继续独立 | 先分进 Topic 后关闭 duplicate 问题 |
+
+只有 identity consolidation 完成，Topic proposal 才可把 current CVP revisions 分配到 candidate／existing TopicNodes。为了避免循环，Topic Reviewer 可以建立 CVP re-review exception，却不能在 assignment ChangeSet 中合并 CVP；CVP merge/split 完成后，过期 assignment work 按 revision mismatch 作废并重跑。
+
+“磐石不是彼得本人”的两条路线说明 ArgumentRoute 层为何不能并入 Topic：它们回答同一结论的不同“为什么”，其中一条使用 morphology／contrast elimination，另一条使用 literary context／反证。每条路线再由多篇讲道或母本分别 attested。Topic 页面只列出路线摘要；逐步 premise、bridge、conclusion 与逐字来源必须进入 CVP route view 展开。
+
 ## 4. 对象语义与归属边界
 
 | 对象 | identity owner | reader-visible wording owner | 可否表示教授自己的观点 | 可否表示外部立场 | 可否建立层级 |
@@ -220,6 +395,7 @@ flowchart LR
 | `CanonicalViewpoint` | viewpoint registry | 编辑规范化，必须显式标记 | 是，表示被来源支持的教授观点身份 | 否 | 否，使用 graph |
 | `PositionNode` | argument layer | 来源所呈现的外部立场 | 否 | 是 | 否 |
 | `TopicNode` | Canonical Repository | 编辑主题命名 | 否，它是研究主题身份 | 否 | 是 |
+| `ViewpointTopicAssignment` | Canonical Repository／viewpoint adapter | 无独立 reader wording；只保存归属理由 | 否，只连接 Topic 与教授观点 | 否 | 否，它不是 parent edge |
 | `EditorialSynthesis` | editorial layer | 编辑 | 只能说明它综合了教授哪些观点，不能冒充教授断言 | 可比较多个立场 | 可由产品组织，但不拥有 canonical topic hierarchy |
 | `ArgumentRoute` | viewpoint registry | 编辑规范化 route signature | 表示教授实际使用过的推理类型，须有 source-local attestation | 不用于保存外部立场本身 | 否 |
 
@@ -2109,6 +2285,13 @@ Independent Editorial Review 与 Final Delta Review 不接收 `ViewpointKnowledg
 - qualifications、applications 与 tensions；
 - 尚未覆盖的 corpus 范围。
 
+Topic adapter 必须从 active `ViewpointTopicAssignment` 编译两种分开的结构：
+
+1. `topic_navigation`：TopicNode primary-parent hierarchy、definitions、aliases、revision 与 assignment coverage；
+2. `topic_viewpoints`：每个 Topic 下的 CVP revision、assignment role、typed ViewpointRelations、ArgumentRoute synopsis 与来源覆盖。
+
+它不得生成一个混合 `children` 数组把 Topic、CVP 和 Route 当作同类节点，也不得按 embedding 或标题临时补 membership。passage/topic 联合查询先用 `scripture_scope` facet 取得 passage cut，再用 assignment 取得 thematic cut；两者求交而不是把 passage 自动写成 TopicNode。Topic 页面显示的 CVP 数、route 数和 source 数全部由 pinned projection 计算。
+
 CompositionPlan 必须 pin `ViewpointKnowledgeProjection`、viewpoint semantic revision、registry snapshot 和实际使用的 Claim/Evidence/Citation dependencies。作者不能仅凭 canonical wording 写正文而丢失来源。
 
 ### 13.9 Search 与 QA
@@ -2150,6 +2333,8 @@ reader-facing renderer 必须采用 attribution-aware template：
 
 工作台属于现有 `/admin/wang` 内部编辑界面，与“健康视图”“论证层”“来源覆盖”“马太进度”使用同一 admin auth、导航和视觉系统。新增导航项建议命名为“观点主数据”，路径为：
 
+- `/admin/wang/topics`：Topic hierarchy 与 assignment coverage；
+- `/admin/wang/topics/[topicId]`：一个 Topic 的直属子 Topic、assigned CVPs 与 cross-links；
 - `/admin/wang/viewpoints`：全库观点索引与覆盖总览；
 - `/admin/wang/viewpoints/[viewpointId]`：单一 viewpoint 主数据详情；
 - `/admin/wang/viewpoint-exceptions`：唯一的人工 exception inbox。
@@ -2167,7 +2352,10 @@ reader-facing renderer 必须采用 attribution-aware template：
 ```mermaid
 flowchart LR
     O["观点主数据总览"] --> E["Viewpoint Explorer"]
+    O --> T["Topic Explorer"]
     O --> X["Exception Inbox"]
+    T --> TD["Topic Detail"]
+    TD --> E
     E --> D["Viewpoint Detail"]
     D --> S["来源 Claim / Evidence / Citation"]
     D --> R["Argument Routes"]
@@ -2210,6 +2398,8 @@ detail 同时提供四个非图形视图，避免图形成为唯一入口：
 4. **历史与影响**：revision diff、split/merge/redirect lineage、pinned products 和 pending ImpactEvents。
 
 默认标签使用人能读懂的中文；opaque IDs、SHA、validator/model versions 与 raw JSON 放在 provenance drawer，不占据主阅读面，但必须可复制和深链。
+
+Topic detail 采用“Topic 子节点 + assigned CVP 列表”，不把 ArgumentRoute 画成 Topic child。进入一个 CVP 后才展开 routes；route 下再按来源展开 attestations。页面若从 passage filter 进入，顶部必须写“经文范围”，不能把它显示成 taxonomy breadcrumb。CVP detail 显示 primary topic home、secondary cross-links 与 assignment review status；改变 Topic 导航不能改变同一 CVP 的 stable URL 或 identity。
 
 路线视图必须把三个层次明确分开：页面顶部的当前 `ViewpointRevision` 是结论；每个 `ArgumentRouteRevision.ordered_inference_nodes` 是可复用的论证骨架，按 observation／premise／bridge／objection／response／qualification／application／conclusion 的有向顺序显示；每个 `ArgumentRouteAttestation` 则按单一来源折叠，展开后逐节点显示绑定的 Claim component、EvidenceStep、逐字 SourceFragment、文件名以及讲道／母本深链。不同来源不得在一个 attestation 视觉容器中拼接。没有 legacy `CoverageSnapshot` 时，内部 Registry workbench 可以显示与 current route revision 精确绑定的 active approved attestations，并明确标为 `current_registry`；这不是公开 consumer eligibility，也不能伪造一个 coverage snapshot。浏览器只渲染后端给出的 mode、eligibility 与绑定，不能自行推断。
 
@@ -2409,6 +2599,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | Canonical master data UI、exception inbox、API/write boundary 与 UI 验收 | 第 13.12 节 |
+| Topic、CVP、ArgumentRoute 与 evidence 的关系类型、standards-informed 边界、assignment schema／workflow、太 16:18 worked example | 第 1 节第 21–24 项、第 3.4–3.9、13.8、13.12 节 |
 | Intelligent Batching 只服务串行 CVP batches、batch-commit-triggered RouteResolutionQueue、Sol proposal/correction、Opus review、一次 correction、ChangeSet apply/readback | 第 1.2、5.12、6.2、10.2、11.1、14 节 |
 | bootstrap/incremental、embedding、blind audit 与复杂度 | 第 6.2、10.6、11、14 节 |
 | 实现拆成后续 tickets | 第 16 节 |
@@ -2418,9 +2609,9 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-24）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions。#206 已将模型角色固定为 GPT-5.6 Sol/high proposal/correction 与 Claude Opus 5/high independent review，修复 raw-call 累计观测和 current-state/exception supersession；模型角色和 provider 都进入 generation fingerprint，不允许静默 fallback。scope packet v3 保留 Claim manifest 的 `coverage_snapshot_id`；master `ViewpointComponentLocator` 已改为 canonical Unicode spans，foundation validator 会从 pinned Claim 重算文本与唯一 active owner；passing／resolved-correction proposal 可编译成现有 PostgreSQL store 能计划的 CVP knowledge package。每个新 workflow Claim link 另保存精确 `(EvidenceStep, SourceFragment)` bindings；局部 support/qualification/application 等 link 也保存 span locator。Registry-backed Route packet compiler 已能只从 committed current CVP revisions、active Claim links 与完整 scope Claims 重建 CCK 和 component evidence，并保留未形成 Registry assertion 的 bridge／objection／context Claim，不再读取旧 CVP proposal。verified CVP readback receipt、idempotent `RouteResolutionJob` 与 latest-revision queue coalescing 已有程序 contract 和测试。runner 默认生成 ChangeSet plan 后以 `awaiting_cvp_apply` fail-stop；只有显式 `--apply` 才执行 atomic apply，authority readback exact-match 后写入 immutable Route job，并在进入下一 CVP batch 前重新读取 Registry。单机 durable queue 已实现 immutable enqueue、append-only state events、current pointers、cross-process lock、lease expiry recovery、supersession 与 current-revision enqueue completeness check。worker CLI、route v2 ChangeSet builder 与 apply transaction 的 current-revision CAS 已接通；下一项验证是对一个实际 committed 的磐石 CVP batch 执行 no-apply integration POC。该实现尚未修改 DB 或已发布 viewpoint。
+历史实现检查点（2026-08-24、#206 E2E 之前，已由本文件后文的 apply/readback 结果 supersede）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions。#206 已将模型角色固定为 GPT-5.6 Sol/high proposal/correction 与 Claude Opus 5/high independent review，修复 raw-call 累计观测和 current-state/exception supersession；模型角色和 provider 都进入 generation fingerprint，不允许静默 fallback。scope packet v3 保留 Claim manifest 的 `coverage_snapshot_id`；master `ViewpointComponentLocator` 已改为 canonical Unicode spans，foundation validator 会从 pinned Claim 重算文本与唯一 active owner；passing／resolved-correction proposal 可编译成现有 PostgreSQL store 能计划的 CVP knowledge package。每个新 workflow Claim link 另保存精确 `(EvidenceStep, SourceFragment)` bindings；局部 support/qualification/application 等 link 也保存 span locator。Registry-backed Route packet compiler 已能只从 committed current CVP revisions、active Claim links 与完整 scope Claims 重建 CCK 和 component evidence，并保留未形成 Registry assertion 的 bridge／objection／context Claim，不再读取旧 CVP proposal。verified CVP readback receipt、idempotent `RouteResolutionJob` 与 latest-revision queue coalescing 已有程序 contract 和测试。runner 默认生成 ChangeSet plan 后以 `awaiting_cvp_apply` fail-stop；只有显式 `--apply` 才执行 atomic apply，authority readback exact-match 后写入 immutable Route job，并在进入下一 CVP batch 前重新读取 Registry。单机 durable queue 已实现 immutable enqueue、append-only state events、current pointers、cross-process lock、lease expiry recovery、supersession 与 current-revision enqueue completeness check。worker CLI、route v2 ChangeSet builder 与 apply transaction 的 current-revision CAS 已接通；该检查点尚未运行后续已完成的磐石 apply POC。
 
-#206 后续实现已接通独立 worker CLI：claim/coalesce queue 后从 Registry current cut 编译 v2 packet，执行 Sol proposal／Opus review／至多一次 Sol correction，编译 `wang_argument_route_revision_v2` 与 `wang_argument_route_attestation_v2` package，并生成 PostgreSQL ChangeSet plan。显式 apply 在同一 transaction 中先 `FOR UPDATE` 锁定 conclusion CVPs 并执行 current-revision compare-and-swap；成功后逐 record authority readback，plan-only 则释放 lease 回 queued。2026-08-24 的只读 inventory 为 0 active ArgumentRoute、0 active ArgumentRouteRevision、0 active ArgumentRouteAttestation，因此按 5.7 的 cutover 规则不需要 v1/v2 dual reader。尚需用一个已实际 committed 的磐石 CVP batch 做 worker no-apply integration POC；在该 POC 前仍不得开启生产 apply。本实现至此仍为 0 master-data mutations。
+#206 后续历史检查点已接通独立 worker CLI：claim/coalesce queue 后从 Registry current cut 编译 v2 packet，执行 Sol proposal／Opus review／至多一次 Sol correction，编译 `wang_argument_route_revision_v2` 与 `wang_argument_route_attestation_v2` package，并生成 PostgreSQL ChangeSet plan。显式 apply 在同一 transaction 中先 `FOR UPDATE` 锁定 conclusion CVPs 并执行 current-revision compare-and-swap；成功后逐 record authority readback，plan-only 则释放 lease 回 queued。当时的只读 inventory 为 0 active ArgumentRoute、0 active ArgumentRouteRevision、0 active ArgumentRouteAttestation，因此按 5.7 的 cutover 规则不需要 v1/v2 dual reader；该零记录状态已由后文记录的共享 POC apply supersede。
 
 2026-08-24 simplification/correctness review 后，proposal-derived Route runner 入口与旧 packet builder 已退役；CVP runner 只负责 CVP 与 durable enqueue，独立 `viewpoint_route_resolution` service 只接受 Registry-backed packet，worker 是唯一 Route execution entry。versioned policy 文件替代 route CLI flag 拼装并成为 work-unit coalescing boundary。packet 显式记录 out-of-scope/unattestable members；review 可输出结构化 CVP re-review exception；CAS revision drift 当场 supersede；apply readback 逐 record 比较 semantic SHA 并验证 CVP pre/post cut。queue 采用 claim-time opportunistic coalescing，不再宣称未实现的 waiting window。
 
@@ -2447,7 +2638,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 10. **Matthew authoring downstream integration**
    先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；文章 section 除 `viewpoint_revision_ids_used` 外，还要在实际采用一条规范论证时记录 `argument_route_revision_ids_used` 与 attestation/evidence dependencies。保持 source-local legacy path 与 Editorial Reviewer packet 边界。
 11. **QA、Search 与 Topic Discovery adapters**
-   让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
+   让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并实现第 3.6 节的 `ViewpointTopicAssignment`、assignment coverage/readback 与 Topic Explorer。Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge，不把 passage facet 写成 TopicNode，也不以 Topic grouping 代替 CVP consolidation。
 12. **受控十九篇 bootstrap 与风险审核**
    在前述基础设施通过后另行授权，冻结最新 20 项显式选择中实际成功应用的 19 篇 source manifest，运行正式观点解析；失败项不进入 cohort。低风险项按第 10 节自动决定，只有 exception queue 进入人工，不要求单人 editor 逐条审核全部候选；不得作为本设计卡的隐藏步骤。
 
@@ -2467,6 +2658,9 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 - 不建立一棵“王教授思想唯一层级树”；
 - 不用 viewpoint 替代 TopicNode；
+- 不把 passage、knowledge role、route method 或 IntelligentBatchingPlan 冒充 TopicNode；
+- 不因多个 CVP 属于同一 Topic 而 merge，也不以同 Topic 掩盖 false split；
+- 不把 UI 中连续展开的 Topic／CVP／Route 保存为同一种 parent-child relation；
 - 不用 canonical wording 替代教授逐字引文；
 - 不把 `PositionNode` 复用为教授自己的观点；
 - 不把 `EditorialSynthesis` 重命名后冒充 viewpoint identity；
@@ -2479,4 +2673,4 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 ## 18. 最终定义
 
-> Canonical Viewpoint Registry 是一层保留来源的跨讲观点—论证系统：它用严格串行的 CVP batches 把经过审核、真值条件等价的来源局部 Claims 解析到稳定观点身份；每个 CVP batch 完整 commit/readback 后即提交 RouteResolutionJob，异步 worker 以完整 scope evidence 为输入，批量识别到达这些 current approved conclusions 的 ArgumentRoutes。Intelligent Batching 只服务 CVP identity，不构成 route 边界。每条 route 的 attestations 始终 source-local，逐步绑定 Claim components、EvidenceSteps 与精确 SourceFragments，绝不跨来源拼造完整论证。同一结论的不同推理保存为不同 routes，同一路线在不同来源的出现保存为 full/partial attestations。CVP 与 Route 各自通过 proposal、independent review、最多一次同类 correction 和确定性 ChangeSet；Route 失败不撤销 approved CVP 或阻止其他通过 routes，过期 conclusion revision 的 route work 在 apply 前被 supersede。文章、QA、搜索和专题编排只消费 SHA-bound ViewpointKnowledgeProjection，因此既能回答“王教授主张什么”，也能回答“他为什么这样主张”。单人 editor 只在 exception inbox 处理高风险 decisions；规范措辞不冒充教授逐字原话，也不裁定观点或论证的神学正确性。
+> Canonical Viewpoint Registry 是一层保留来源的跨讲观点—论证系统：它用严格串行的 CVP batches 把经过审核、真值条件等价的来源局部 Claims 解析到稳定观点身份；每个 CVP batch 完整 commit/readback 后即提交 RouteResolutionJob，异步 worker 以完整 scope evidence 为输入，批量识别到达这些 current approved conclusions 的 ArgumentRoutes。TopicNode 另行回答“讨论什么研究问题”，并通过 reviewed ViewpointTopicAssignment 组织 CVP；Topic grouping 不裁定 identity，经文范围也不自动成为 Topic。Intelligent Batching 只服务 CVP identity，不构成 route 或 Topic 边界。每条 route 的 attestations 始终 source-local，逐步绑定 Claim components、EvidenceSteps 与精确 SourceFragments，绝不跨来源拼造完整论证。同一结论的不同推理保存为不同 routes，同一路线在不同来源的出现保存为 full/partial attestations。CVP、Route 与 Topic assignment 各自通过 proposal、independent review、最多一次同类 correction 和确定性 ChangeSet；Route 或 Topic assignment 失败不撤销 approved CVP，过期 conclusion revision 的 route work 在 apply 前被 supersede。文章、QA、搜索和专题编排只消费 SHA-bound ViewpointKnowledgeProjection，因此分别回答“在讨论什么”“王教授主张什么”“他为什么这样主张”以及“在哪篇来源中怎样说”。单人 editor 只在 exception inbox 处理高风险 decisions；规范措辞不冒充教授逐字原话，也不裁定观点或论证的神学正确性。
