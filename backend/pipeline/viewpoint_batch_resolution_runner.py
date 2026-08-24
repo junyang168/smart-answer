@@ -317,7 +317,14 @@ def run_batch(
         "apply_allowed": False,
     }
     report["artifact_sha256"] = sha256_json(report)
-    _write_immutable(output_dir / "batch-run.json", report)
+    # Rewritten, not immutable. The batch's semantic artifacts — packet,
+    # proposal, review, reconsideration — are the immutable record; this file
+    # is wholly derived from them. Freezing a derived summary means any change
+    # to its shape blocks reruns of batches whose model calls are all cached,
+    # which is how adding the reconsideration fields broke a completed batch.
+    (output_dir / "batch-run.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
     # Wall time and call counts decide the real batch ceiling, so they must be
     # recorded — but they differ every execution, which is exactly why they are
@@ -389,6 +396,11 @@ def main() -> int:
         "--max-batches",
         type=int,
         help="stop after this many batches; 0 groups the scope and stops",
+    )
+    parser.add_argument(
+        "--no-reconsider",
+        action="store_true",
+        help="stop after review instead of giving the proposer its one revision",
     )
     parser.add_argument(
         "--group",
@@ -567,7 +579,10 @@ def main() -> int:
         "apply_allowed": False,
     }
     summary["artifact_sha256"] = sha256_json(summary)
-    _write_immutable(args.output_dir / "scope-run.json", summary)
+    # Derived from the batch reports, same as batch-run.json: rewritten.
+    (args.output_dir / "scope-run.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

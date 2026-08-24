@@ -850,3 +850,56 @@ def test_every_finding_needs_a_disposition():
             proposal_sha256="proposal-sha",
             review_sha256="review-sha",
         )
+
+
+def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
+    # batch-run.json is wholly derived from the immutable artifacts. Freezing it
+    # meant that adding reconsideration fields to the report blocked a rerun of
+    # a batch whose model calls were all cached.
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    proposal_payload = _proposal().model_dump(mode="json")
+    review_payload = {
+        "schema_version": "wang_canonical_viewpoint_review_v1",
+        "proposal_sha256": sha256_json(proposal_payload),
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": index,
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "判断成立",
+            }
+            for index in (0, 1)
+        ],
+        "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+    }
+    kwargs: dict[str, Any] = {
+        "batch_id": "CVB-test-001",
+        "scope_label": "matt16-13-18",
+        "claims": claims,
+        "registry_context": [{"viewpoint_revision_id": "CVR-1"}],
+        "pending_candidates": [],
+        "output_dir": tmp_path / "batch-001",
+        "proposer": _StubAdapter(proposal_payload),
+        "reviewer": _StubAdapter(review_payload),
+    }
+    run_batch(**kwargs)
+
+    # Simulate the report shape changing under a completed batch.
+    path = tmp_path / "batch-001" / "batch-run.json"
+    stale = json.loads(path.read_text(encoding="utf-8"))
+    stale.pop("escalations", None)
+    stale["removed_field"] = "from an older runner"
+    path.write_text(json.dumps(stale, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    again = run_batch(**kwargs)
+    assert again["outcome"] == "pass"
+    assert "removed_field" not in json.loads(path.read_text(encoding="utf-8"))
+
+    # The semantic artifacts stay immutable — those are the real record.
+    proposal_path = tmp_path / "batch-001" / "raw-proposal.json"
+    tampered = json.loads(proposal_path.read_text(encoding="utf-8"))
+    tampered["response"]["batch_id"] = "CVB-somewhere-else"
+    proposal_path.write_text(json.dumps(tampered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(BatchResolutionError):
+        run_batch(**kwargs)
