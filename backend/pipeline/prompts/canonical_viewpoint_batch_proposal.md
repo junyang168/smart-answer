@@ -60,3 +60,75 @@
 `reason` 写清判断依据。`member_existing`、`support_existing`、`no_registry_assertion` 这类直白判断一两句即可；`new_viewpoint`、`tension_existing`、`deferred` 要写完整论证，`new_viewpoint` 另需在候选里说明它与哪些现有 viewpoint 相近、为什么仍是独立命题。
 
 用中文。术语（Claim、viewpoint、disposition 等）保持英文。
+
+---
+
+# 第二部分：论证路线
+
+判完观点，还要回答**教授怎么推出这些结论的**。
+
+## 两样东西，分开填
+
+**`argument_route_candidates`：论证骨架**（跨来源可复用）
+
+一条路线是一串有序节点：
+
+```
+route_step_key  role          normalized_proposition
+P1              observation   Petrus 是阳性、petra 是阴性
+P2              premise       两词形式不同，所指不同
+C1              conclusion    → 指向某个观点
+```
+
+- `role` 只能用这些值：`observation`、`premise`、`bridge`、`objection`、`response`、`qualification`、`conclusion`、`application`
+- 最后一个节点必须是 `conclusion`，且只能有一个
+- `required_for_full_attestation` 标出哪些节点是这条路线不可缺的
+- `normalized_proposition` 是编辑归一化的措辞，不冒充教授原话；conclusion 节点不填它，改填 `conclusion_ref`
+
+**`source_route_attestations`：某一篇里实际讲了哪几步**（严格单来源）
+
+```
+route_step_key  绑定到该篇的 claim_component / EvidenceStep / SourceFragment
+                attestation_status: attested / missing / ambiguous
+```
+
+## 最重要的一条
+
+**一个 attestation 的所有 Claim、EvidenceStep、SourceFragment 必须来自同一篇来源。**
+
+绝不能从 A 篇取前提、B 篇取推论，拼出一条谁都没讲完整的论证。教授在 A 篇只讲了半截，那就是半截。
+
+`completeness`：
+
+- `full` —— 这篇里每个 `required_for_full_attestation` 的节点都有 `attested` 绑定，且有一个 component 说出了结论（填 `terminal_claim_component_key`）
+- `partial` —— 其余情况
+
+半截不是缺陷，是事实。不要为了凑成 `full` 而补一个这篇没有的步骤。
+
+## `inference_method_codes` 只从这个表里选
+
+`lexical_semantics`、`morphology`、`syntax`、`literary_context`、`historical_context`、`cross_scripture`、`contrast_elimination`、`analogy_typology`、`causal_reasoning`、`theological_synthesis`、`pastoral_application`、`other`
+
+用 `other` 必须写 `inference_method_note`。
+
+**这些 code 是宽粒度的检索标签，不是路线的身份。** 同一个 code 下可以有很多条不同路线；同一条路线也可以有几个 code。不要指望靠 code 相同来判断两条路线是同一条。
+
+**输入里 EvidenceStep 上的 `discourse_role` 是抽取时写的自由文本**（各篇写法不一，比如「希臘文詞形論證」和「原文詞形論證」其实是一回事）。它只是参考，**不要把它当成 role，也不要把它 slug 化后当成 method code**。
+
+## 匹配已有路线还是新建
+
+`proposed_action`：
+
+- `match_existing` —— 跟输入里某条现有路线是同一条，必须填 `target_argument_route_revision_id`
+- `create_new` —— 新路线
+- `defer` —— 拿不准
+
+**判断依据是有序的语义骨架**：同一个结论 + 实质等价的必需命题 + 相同的节点角色和顺序 + 兼容的方法。
+
+结论相同**不足以**说明是同一条路线。换掉一个承重前提、改变推理方式、或者从另一个理由到达同一结论——那是另一条路线。
+
+`identity_comparison` 写清你是怎么比的。
+
+## 覆盖
+
+每条提出的路线至少要有一个 attestation。没有任何一篇讲过的路线，不要提。

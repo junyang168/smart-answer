@@ -42,3 +42,44 @@ finding code 用简短的下划线小写标识，如 `modality_collapsed`、`mem
 宁可标出问题让人来看，也不要为了让批次通过而放行有疑问的判断。
 
 用中文。术语（Claim、viewpoint、component、disposition 等）保持英文。
+
+---
+
+# 论证路线的复核
+
+proposal 里除了 component，还有 `argument_route_candidates` 和 `source_route_attestations`。**每一条都要有自己的 `change_reviews`**，用 `target_key` 填它的 batch-local key。批次级的 `route_review` 是覆盖情况汇总，**不能代替逐条判断**。
+
+## 首要检查：有没有跨来源拼接
+
+一个 attestation 的 Claim、EvidenceStep、SourceFragment 必须全部来自同一篇来源。
+
+从 A 篇取前提、B 篇取推论拼出来的论证，是教授在任何一篇都没有讲过的东西。发现这种情况，`route_review.cross_source_composition_found` 填 `true`，并把相应 attestation 判为 `reject`。
+
+## 逐条要看什么
+
+**路线骨架**
+
+- 节点顺序是不是真的推理顺序，还是只是同段共现被说成了推理
+- 有没有省掉会改变论证有效性的承重步骤
+- `required_for_full_attestation` 标得合不合理——标少了会让半截论证冒充完整
+- 每个 `role` 是不是受控词表里的值，用得对不对
+- `inference_method_codes` 是否符合实际推理方法；用了 `other` 有没有写 note
+
+**`match_existing` 判得对不对**
+
+必须基于**有序的语义骨架**比对，不能靠 `route_label` 相同、`inference_method_code` 相同或任何自由文本相等。
+
+两种典型错误都要抓：
+
+- **假拆**：两篇讲的是同一条论证，只因为抽取时 `discourse_role` 写法不同（「希臘文詞形論證」vs「原文詞形論證」）就判成两条
+- **假合**：两条骨架其实不同，只因为都标了 `premise` 或都用了同一个 method code 就判成一条
+
+`EvidenceStep.discourse_role` 是抽取层的自由文本，**不参与身份判断**。
+
+**attestation**
+
+- `step_bindings` 里引用的证据是不是真的支持那个节点，还是只是同段出现
+- `full` 判得对不对：每个必需节点都有 `attested` 绑定了吗，`terminal_claim_component_key` 真的说出了结论吗
+- 该判 `partial` 的有没有被抬成 `full`
+
+**component 作为前提被用，不等于它就是该观点的 member。**这两件事分开判。

@@ -18,10 +18,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
-from backend.pipeline.viewpoint_batch_resolution_runner import (
-    pending_synopsis,
-    run_batch,
-)
+from backend.pipeline.viewpoint_batch_resolution_runner import run_batch
 
 ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
 MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
@@ -386,12 +383,6 @@ def test_packet_tells_the_proposer_the_registry_is_open():
     )
     assert "开放参考集" in packet["registry_completeness_warning"]
     assert packet["packet_sha256"]
-
-
-def test_pending_synopsis_is_blocker_context_not_membership():
-    pending = pending_synopsis(_proposal(), "CVB-test-001")
-    assert [item["usage"] for item in pending] == ["blocker_context_only"]
-    assert [item["status"] for item in pending] == ["pending_not_applied"]
 
 
 class _StubAdapter:
@@ -903,3 +894,235 @@ def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
     proposal_path.write_text(json.dumps(tampered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with pytest.raises(BatchResolutionError):
         run_batch(**kwargs)
+
+
+def _route(**overrides: Any) -> dict[str, Any]:
+    return {
+        "local_route_key": "ROUTE-GREEK",
+        "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+        "proposed_action": "create_new",
+        "route_label": "以 Petrus／petra 的性别差异论证磐石不指彼得本人",
+        "inference_method_codes": ["morphology"],
+        "ordered_inference_nodes": [
+            {
+                "route_step_key": "P1",
+                "role": "observation",
+                "normalized_proposition": "Petrus 是阳性、petra 是阴性",
+                "required_for_full_attestation": True,
+            },
+            {
+                "route_step_key": "C1",
+                "role": "conclusion",
+                "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+                "required_for_full_attestation": True,
+            },
+        ],
+        "identity_comparison": "Registry 中无同一骨架的路线",
+        **overrides,
+    }
+
+
+def _attestation(**overrides: Any) -> dict[str, Any]:
+    return {
+        "local_attestation_key": "ATTEST-1",
+        "route_ref": {"local_route_key": "ROUTE-GREEK"},
+        "source_id": "S1",
+        "claim_ids": ["C1"],
+        "step_bindings": [
+            {
+                "route_step_key": "P1",
+                "evidence_step_ids": ["C1-E1"],
+                "source_fragment_ids": ["C1-F1"],
+                "attestation_status": "attested",
+            },
+            {
+                "route_step_key": "C1",
+                "evidence_step_ids": ["C1-E1"],
+                "source_fragment_ids": ["C1-F1"],
+                "attestation_status": "attested",
+            },
+        ],
+        "terminal_claim_component_key": "CCK-1",
+        "completeness": "full",
+        "reason": "本篇给了前提也讲出结论",
+        **overrides,
+    }
+
+
+def _routed_proposal(**overrides: Any) -> CanonicalViewpointProposalResponse:
+    payload = _proposal().model_dump(mode="json")
+    payload["argument_route_candidates"] = [_route()]
+    payload["source_route_attestations"] = [_attestation()]
+    payload.update(overrides)
+    return CanonicalViewpointProposalResponse.model_validate(payload)
+
+
+def test_routes_validate_alongside_viewpoints():
+    report = validate_proposal(
+        proposal=_routed_proposal(),
+        batch_id="CVB-test-001",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_revision_ids=["CVR-1"],
+    )
+    assert report["component_count"] == 2
+
+
+def test_an_attestation_may_not_span_two_sermons():
+    # The one error this layer exists to make impossible: a premise from one
+    # sermon and a conclusion from another is an argument nobody delivered.
+    proposal = _routed_proposal(
+        source_route_attestations=[_attestation(claim_ids=["C1", "C2"])]
+    )
+    with pytest.raises(BatchResolutionError, match="an attestation is one source only"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[
+                _claim("C1", ROCK_STATEMENT),
+                ReviewClaim(
+                    claim_id="C2",
+                    pinned_claim_revision=1,
+                    claim_revision_sha256="sha-C2",
+                    source_id="S2",
+                    statement=MODAL_STATEMENT,
+                    review_status="approved",
+                    evidence=[{**_evidence("C2"), "source_id": "S2"}],
+                ),
+            ],
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_borrowed_evidence_is_caught_even_within_one_batch():
+    proposal = _routed_proposal(
+        source_route_attestations=[
+            _attestation(
+                step_bindings=[
+                    {
+                        "route_step_key": "P1",
+                        "evidence_step_ids": ["C9-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    }
+                ],
+                completeness="partial",
+                terminal_claim_component_key=None,
+            )
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="EvidenceStep C9-E1 is outside this source"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_full_requires_every_required_node_attested():
+    proposal = _routed_proposal(
+        source_route_attestations=[
+            _attestation(
+                step_bindings=[
+                    {
+                        "route_step_key": "P1",
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "missing",
+                    },
+                    {
+                        "route_step_key": "C1",
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                ]
+            )
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="required step P1"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_node_roles_and_method_codes_come_from_the_policy_vocabulary():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import ArgumentRouteCandidate
+
+    # A free-text slug is exactly what route identity must not turn on.
+    with pytest.raises(ValueError, match="not a policy inference method code"):
+        ArgumentRouteCandidate.model_validate(_route(inference_method_codes=["greek_morphology"]))
+    with pytest.raises(ValueError):
+        ArgumentRouteCandidate.model_validate(
+            _route(
+                ordered_inference_nodes=[
+                    {
+                        "route_step_key": "P1",
+                        "role": "希臘文詞形論證",
+                        "normalized_proposition": "x",
+                        "required_for_full_attestation": True,
+                    },
+                    {
+                        "route_step_key": "C1",
+                        "role": "conclusion",
+                        "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+                        "required_for_full_attestation": True,
+                    },
+                ]
+            )
+        )
+    with pytest.raises(ValueError, match="other requires a reviewable note"):
+        ArgumentRouteCandidate.model_validate(_route(inference_method_codes=["other"]))
+
+
+def test_a_route_nobody_preached_is_rejected():
+    with pytest.raises(BatchResolutionError, match="proposed with no source attestation"):
+        validate_proposal(
+            proposal=_routed_proposal(source_route_attestations=[]),
+            batch_id="CVB-test-001",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_review_must_decide_每条_route_and_attestation():
+    proposal = _routed_proposal()
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {
+                    "claim_id": "C1",
+                    "component_index": index,
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "判断成立",
+                }
+                for index in (0, 1)
+            ],
+            "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+            "route_review": {
+                "status": "pass",
+                "cross_source_composition_found": False,
+                "reason": "无跨来源拼接",
+            },
+        }
+    )
+    with pytest.raises(BatchResolutionError, match="ROUTE-GREEK: no review decision"):
+        validate_review(review=review, proposal=proposal, proposal_sha256="proposal-sha")
+
+
+def test_cross_source_composition_can_never_be_a_pass():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import RouteReview
+
+    with pytest.raises(ValueError, match="never a pass"):
+        RouteReview.model_validate(
+            {
+                "status": "pass",
+                "cross_source_composition_found": True,
+                "reason": "发现跨来源拼接",
+            }
+        )

@@ -359,29 +359,6 @@ def run_batch(
     return {**report, "measurements": measurements}
 
 
-def pending_synopsis(proposal: CanonicalViewpointProposalResponse, batch_id: str) -> list[dict[str, Any]]:
-    """Non-authoritative context so the next batch can see unapplied candidates.
-
-    A later batch must not treat these as `member_existing`; they exist so it
-    can notice that its own new candidate may be the same proposition and route
-    that to exception instead of minting a duplicate identity.
-    """
-
-    return [
-        {
-            "origin_batch_id": batch_id,
-            "local_key": item.local_key,
-            "core_proposition": item.core_proposition,
-            "polarity": item.polarity,
-            "modality": item.modality,
-            "scripture_scope": item.scripture_scope,
-            "status": "pending_not_applied",
-            "usage": "blocker_context_only",
-        }
-        for item in proposal.new_viewpoint_candidates
-    ]
-
-
 def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
@@ -521,7 +498,6 @@ def main() -> int:
         None if args.no_reconsider else build_reconsiderer(args.proposal_model, args.proposal_effort)
     )
 
-    pending: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
     for ordinal, batch in enumerate(batches, start=1):
         batch_id = f"CVB-{scope_label}-{ordinal:03d}"
@@ -532,7 +508,7 @@ def main() -> int:
                 scope_label=scope_label,
                 claims=[claims[claim_id] for claim_id in batch],
                 registry_context=registry_context,
-                pending_candidates=pending,
+                pending_candidates=[],
                 output_dir=batch_dir,
                 proposer=proposer,
                 reviewer=reviewer,
@@ -551,12 +527,21 @@ def main() -> int:
             print(json.dumps(exception_bundle, ensure_ascii=False, indent=2))
             return 1
         reports.append(report)
-        # Serial checkpoint: batch N+1 sees batch N's candidates, so the same
-        # truth condition is not minted twice under two local keys.
-        proposal = CanonicalViewpointProposalResponse.model_validate(
-            _read(batch_dir / "proposal.json")["proposal"]
-        )
-        pending.extend(pending_synopsis(proposal, batch_id))
+        # Fail-stop, not a hand-off. A batch shares nothing with the next one
+        # except committed Registry master data, so an unresolved batch stops
+        # the scope instead of passing provisional candidates forward.
+        if report["reconsideration_required"] and report.get("reconsideration_outcome") != "resolved":
+            stop = {
+                "schema_version": "wang_canonical_viewpoint_scope_stop_v1",
+                "batch_id": batch_id,
+                "reason": "batch did not resolve; scope stops here",
+                "escalations": report.get("escalations") or [],
+                "completed_batches": [item["batch_id"] for item in reports[:-1]],
+            }
+            stop["artifact_sha256"] = sha256_json(stop)
+            _write_immutable(batch_dir / "scope-stop.json", stop)
+            print(json.dumps(stop, ensure_ascii=False, indent=2))
+            return 1
 
     summary = {
         "schema_version": "wang_canonical_viewpoint_scope_run_v1",
@@ -568,7 +553,6 @@ def main() -> int:
         "batches_needing_reconsideration": [
             item["batch_id"] for item in reports if item["reconsideration_required"]
         ],
-        "pending_candidate_count": len(pending),
         "proposal_wall_seconds_total": round(
             sum(item["measurements"]["proposal_wall_seconds"] for item in reports), 3
         ),
