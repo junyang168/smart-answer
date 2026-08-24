@@ -637,6 +637,13 @@ class ViewpointComponentLocator(BaseModel):
         return self
 
 
+class ViewpointClaimEvidenceBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_step_id: str = Field(min_length=1)
+    source_fragment_id: str = Field(min_length=1)
+
+
 class ViewpointClaimLinkRecord(StrictViewpointRecord):
     viewpoint_claim_link_id: str
     schema_version: Literal["wang_viewpoint_claim_link_v1"] = "wang_viewpoint_claim_link_v1"
@@ -656,6 +663,7 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
     ]
     component_locator: Optional[ViewpointComponentLocator] = None
     supporting_relation_ids: list[str] = Field(default_factory=list)
+    evidence_bindings: list[ViewpointClaimEvidenceBinding] = Field(default_factory=list)
     occurrence_refs: list[str] = Field(default_factory=list)
     decision_id: str
     effective_state: Literal["active", "invalidated", "retired"] = "active"
@@ -666,6 +674,12 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
             raise ValueError("supporting_relation_ids must be sorted and unique")
         if self.occurrence_refs != sorted(set(self.occurrence_refs)):
             raise ValueError("occurrence_refs must be sorted and unique")
+        bindings = [
+            (item.evidence_step_id, item.source_fragment_id)
+            for item in self.evidence_bindings
+        ]
+        if bindings != sorted(set(bindings)):
+            raise ValueError("evidence_bindings must be sorted and unique")
         if self.link_type == "equivalent_component" and not self.component_locator:
             raise ValueError("equivalent_component requires component_locator")
         if self.link_type != "equivalent_component" and self.component_locator is not None:

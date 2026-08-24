@@ -329,6 +329,28 @@ def compile_cvp_batch_package(
                     }
                 ),
             }
+            selected_steps = {
+                value
+                for component in claim_components
+                for value in component.evidence_step_ids
+            }
+            selected_fragments = {
+                value
+                for component in claim_components
+                for value in component.source_fragment_ids
+            }
+            evidence_bindings = sorted(
+                {
+                    (item.evidence_step_id, item.source_fragment_id)
+                    for item in claim.evidence
+                    if item.evidence_step_id in selected_steps
+                    and item.source_fragment_id in selected_fragments
+                }
+            )
+            if not evidence_bindings:
+                raise CvpBatchChangeSetError(
+                    f"{claim_id}: component has no exact EvidenceStep/SourceFragment pair"
+                )
             link_seed = {
                 "viewpoint_id": viewpoint_id,
                 "viewpoint_revision_id": revision_id,
@@ -345,6 +367,13 @@ def compile_cvp_batch_package(
                 pinned_claim_revision=claim.pinned_claim_revision,
                 link_type=durable_link_type,
                 component_locator=locator,
+                evidence_bindings=[
+                    {
+                        "evidence_step_id": step_id,
+                        "source_fragment_id": fragment_id,
+                    }
+                    for step_id, fragment_id in evidence_bindings
+                ],
                 occurrence_refs=[f"OCC-{sha256_json(occurrence_seed)[:20]}"],
                 decision_id=decision_id,
                 effective_state="active",

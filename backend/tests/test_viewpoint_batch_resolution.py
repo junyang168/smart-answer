@@ -383,6 +383,9 @@ def test_passing_batch_compiles_component_bound_cvp_master_records():
     assert link["component_locator"]["canonical_spans"] == [
         _span(ROCK_STATEMENT, "磐石不是彼得这个人")
     ]
+    assert link["evidence_bindings"] == [
+        {"evidence_step_id": "C1-E1", "source_fragment_id": "C1-F1"}
+    ]
     repeated = compile_cvp_batch_package(
         proposal=proposal,
         review=review,

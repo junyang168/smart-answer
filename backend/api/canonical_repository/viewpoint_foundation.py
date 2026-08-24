@@ -1029,6 +1029,21 @@ def validate_foundation_change_set(
                 rebuilt.append(exact_text)
             if "".join(rebuilt) != component.get("statement_component"):
                 findings.append(f"{link_id}: component locator text mismatch")
+        for binding in link.get("evidence_bindings") or []:
+            step_id = str(binding.get("evidence_step_id") or "")
+            fragment_id = str(binding.get("source_fragment_id") or "")
+            step = evidence_steps.get(step_id)
+            fragment = source_fragments.get(fragment_id)
+            if not step or step_id not in set(claim.get("evidence_step_ids") or []):
+                findings.append(f"{link_id}: evidence binding has invalid step {step_id}")
+            elif fragment_id not in evidence_fragment_ids(step):
+                findings.append(
+                    f"{link_id}: EvidenceStep {step_id} does not bind fragment {fragment_id}"
+                )
+            if not fragment:
+                findings.append(
+                    f"{link_id}: evidence binding has missing fragment {fragment_id}"
+                )
         for relation_id in link.get("supporting_relation_ids") or []:
             if str(relation_id) not in claim_relations:
                 findings.append(f"{link_id}: missing supporting relation {relation_id}")
