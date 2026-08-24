@@ -84,6 +84,79 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _write_derived(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically replace a derived summary or current-state pointer."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".partial")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)
+
+
+def _recorded_model_executions(
+    output_dir: Path, *, raw_artifacts: dict[str, str]
+) -> dict[str, Any]:
+    """Derive cumulative call facts from immutable raw response artifacts.
+
+    Execution logs can be absent when a later validator stops the run. A raw
+    response artifact, however, proves that the call happened and records its
+    wall time. Resumes therefore report these totals independently from the
+    zero-call facts of the latest execution.
+    """
+
+    stages: dict[str, Any] = {}
+    for stage, filename in raw_artifacts.items():
+        path = output_dir / filename
+        if not path.exists():
+            stages[stage] = {"calls_recorded": 0, "wall_seconds_recorded": 0.0}
+            continue
+        artifact = _read(path)
+        body = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+        if artifact.get("artifact_sha256") != sha256_json(body):
+            raise ValueError(f"raw response artifact SHA mismatch: {path}")
+        stages[stage] = {
+            "calls_recorded": 1,
+            "wall_seconds_recorded": round(float(artifact["wall_seconds"]), 3),
+            "backend": artifact.get("backend"),
+            "model_id": artifact.get("model_id"),
+            "artifact_sha256": artifact["artifact_sha256"],
+        }
+    return {
+        "stages": stages,
+        "calls_recorded_total": sum(item["calls_recorded"] for item in stages.values()),
+        "wall_seconds_recorded_total": round(
+            sum(item["wall_seconds_recorded"] for item in stages.values()), 3
+        ),
+    }
+
+
+def _write_current_state(
+    output_dir: Path,
+    *,
+    schema_version: str,
+    identity: dict[str, str],
+    status: str,
+    authoritative_artifact: str,
+    authoritative_artifact_sha256: str,
+    superseded_artifacts: list[str] | None = None,
+) -> dict[str, Any]:
+    """Publish one deterministic pointer without rewriting immutable history."""
+
+    state = {
+        "schema_version": schema_version,
+        **identity,
+        "status": status,
+        "authoritative_artifact": authoritative_artifact,
+        "authoritative_artifact_sha256": authoritative_artifact_sha256,
+        "superseded_artifacts": sorted(set(superseded_artifacts or [])),
+    }
+    state["artifact_sha256"] = sha256_json(state)
+    _write_derived(output_dir / "current-state.json", state)
+    return state
+
+
 def _subscription_client(
     provider: str, model: str, reasoning_effort: str
 ) -> ClaudeSubscriptionClient | CodexSubscriptionClient:
@@ -635,6 +708,14 @@ def run_batch(
             },
         )
 
+    recorded_model_executions = _recorded_model_executions(
+        output_dir,
+        raw_artifacts={
+            "proposal": "raw-proposal.json",
+            "review": "raw-review.json",
+            "reconsideration": "raw-reconsideration.json",
+        },
+    )
     report = {
         "schema_version": "wang_canonical_viewpoint_batch_run_v1",
         "batch_id": batch_id,
@@ -661,6 +742,7 @@ def run_batch(
         "escalations": (
             reconsideration_report["escalations"] if reconsideration_report else []
         ),
+        "recorded_model_executions": recorded_model_executions,
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
@@ -670,8 +752,25 @@ def run_batch(
     # is wholly derived from them. Freezing a derived summary means any change
     # to its shape blocks reruns of batches whose model calls are all cached,
     # which is how adding the reconsideration fields broke a completed batch.
-    (output_dir / "batch-run.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    _write_derived(output_dir / "batch-run.json", report)
+    superseded = []
+    if (output_dir / "exception.json").exists():
+        superseded.append("exception.json")
+    superseded.extend(
+        str(path.relative_to(output_dir))
+        for path in sorted((output_dir / "exceptions").glob("*.json"))
+    )
+    resolved = not review_validation["reconsideration_required"] or bool(
+        reconsideration_report and reconsideration_report["outcome"] == "resolved"
+    )
+    _write_current_state(
+        output_dir,
+        schema_version="wang_canonical_viewpoint_batch_current_state_v1",
+        identity={"batch_id": batch_id},
+        status="resolved" if resolved else "requires_exception",
+        authoritative_artifact="batch-run.json",
+        authoritative_artifact_sha256=report["artifact_sha256"],
+        superseded_artifacts=superseded if resolved else [],
     )
 
     # Wall time and call counts decide the real batch ceiling, so they must be
@@ -935,6 +1034,14 @@ def run_route_scope(
     orphaned_routes = sorted(candidate_routes - attested_routes)
     exceptions.extend(f"route:{key}:no_passing_attestation" for key in orphaned_routes)
     passing_routes = sorted(candidate_routes - set(orphaned_routes))
+    recorded_model_executions = _recorded_model_executions(
+        output_dir,
+        raw_artifacts={
+            "proposal": "raw-route-proposal.json",
+            "review": "raw-route-review.json",
+            "reconsideration": "raw-route-reconsideration.json",
+        },
+    )
     report = {
         "schema_version": "wang_argument_route_scope_run_v1",
         "scope_label": scope_label,
@@ -954,12 +1061,27 @@ def run_route_scope(
         "reconsideration_outcome": (
             reconsideration_report["outcome"] if reconsideration_report else None
         ),
+        "recorded_model_executions": recorded_model_executions,
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
     report["artifact_sha256"] = sha256_json(report)
-    (output_dir / "route-scope-run.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    _write_derived(output_dir / "route-scope-run.json", report)
+    superseded = []
+    if (output_dir / "exception.json").exists():
+        superseded.append("exception.json")
+    superseded.extend(
+        str(path.relative_to(output_dir))
+        for path in sorted((output_dir / "exceptions").glob("*.json"))
+    )
+    _write_current_state(
+        output_dir,
+        schema_version="wang_argument_route_scope_current_state_v1",
+        identity={"scope_label": scope_label},
+        status="resolved" if not report["exceptions"] else "completed_with_exceptions",
+        authoritative_artifact="route-scope-run.json",
+        authoritative_artifact_sha256=report["artifact_sha256"],
+        superseded_artifacts=superseded,
     )
     measurements = {
         "proposal_calls_executed": proposal_calls,
@@ -1185,7 +1307,16 @@ def main() -> int:
                 "master_data_mutations": 0,
             }
             exception_bundle["artifact_sha256"] = sha256_json(exception_bundle)
-            _write_immutable(batch_dir / "exception.json", exception_bundle)
+            exception_name = f"exceptions/{exception_bundle['artifact_sha256']}.json"
+            _write_immutable(batch_dir / exception_name, exception_bundle)
+            _write_current_state(
+                batch_dir,
+                schema_version="wang_canonical_viewpoint_batch_current_state_v1",
+                identity={"batch_id": batch_id},
+                status="exception",
+                authoritative_artifact=exception_name,
+                authoritative_artifact_sha256=exception_bundle["artifact_sha256"],
+            )
             print(json.dumps(exception_bundle, ensure_ascii=False, indent=2))
             return 1
         reports.append(report)
@@ -1274,6 +1405,14 @@ def main() -> int:
             }
             route_stage["artifact_sha256"] = sha256_json(route_stage)
             _write_immutable(route_dir / "route-stage-deferred.json", route_stage)
+            _write_current_state(
+                route_dir,
+                schema_version="wang_argument_route_scope_current_state_v1",
+                identity={"scope_label": scope_label},
+                status="awaiting_approved_cvp_apply",
+                authoritative_artifact="route-stage-deferred.json",
+                authoritative_artifact_sha256=route_stage["artifact_sha256"],
+            )
         except BatchResolutionError as exc:
             exception = {
                 "schema_version": "wang_argument_route_scope_exception_v1",
@@ -1283,7 +1422,16 @@ def main() -> int:
                 "master_data_mutations": 0,
             }
             exception["artifact_sha256"] = sha256_json(exception)
-            _write_immutable(route_dir / "exception.json", exception)
+            exception_name = f"exceptions/{exception['artifact_sha256']}.json"
+            _write_immutable(route_dir / exception_name, exception)
+            _write_current_state(
+                route_dir,
+                schema_version="wang_argument_route_scope_current_state_v1",
+                identity={"scope_label": scope_label},
+                status="exception",
+                authoritative_artifact=exception_name,
+                authoritative_artifact_sha256=exception["artifact_sha256"],
+            )
             print(json.dumps(exception, ensure_ascii=False, indent=2))
             return 1
 
@@ -1297,11 +1445,22 @@ def main() -> int:
         "batches_needing_reconsideration": [
             item["batch_id"] for item in reports if item["reconsideration_required"]
         ],
-        "proposal_wall_seconds_total": round(
+        "latest_execution_proposal_wall_seconds_total": round(
             sum(item["measurements"]["proposal_wall_seconds"] for item in reports), 3
         ),
-        "review_wall_seconds_total": round(
+        "latest_execution_review_wall_seconds_total": round(
             sum(item["measurements"]["review_wall_seconds"] for item in reports), 3
+        ),
+        "cvp_model_calls_recorded_total": sum(
+            item["recorded_model_executions"]["calls_recorded_total"]
+            for item in reports
+        ),
+        "cvp_model_wall_seconds_recorded_total": round(
+            sum(
+                item["recorded_model_executions"]["wall_seconds_recorded_total"]
+                for item in reports
+            ),
+            3,
         ),
         "route_stage": route_stage,
         "master_data_mutations": 0,
@@ -1309,9 +1468,7 @@ def main() -> int:
     }
     summary["artifact_sha256"] = sha256_json(summary)
     # Derived from the batch reports, same as batch-run.json: rewritten.
-    (args.output_dir / "scope-run.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_derived(args.output_dir / "scope-run.json", summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 

@@ -515,7 +515,16 @@ def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
     assert report["apply_allowed"] is False
     assert report["measurements"]["proposal_calls_executed"] == 1
     assert report["measurements"]["review_calls_executed"] == 1
-    for name in ("batch-packet.json", "raw-proposal.json", "proposal.json", "raw-review.json", "review.json", "batch-run.json"):
+    assert report["recorded_model_executions"]["calls_recorded_total"] == 2
+    for name in (
+        "batch-packet.json",
+        "raw-proposal.json",
+        "proposal.json",
+        "raw-review.json",
+        "review.json",
+        "batch-run.json",
+        "current-state.json",
+    ):
         assert (tmp_path / "batch-001" / name).exists()
 
     # Rerunning reuses the cached calls, which is what makes a partly finished
@@ -525,9 +534,55 @@ def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
     assert proposer.calls == 1
     assert reviewer.calls == 1
     assert again["measurements"]["proposal_calls_executed"] == 0
+    assert again["recorded_model_executions"]["calls_recorded_total"] == 2
     assert again["artifact_sha256"] == report["artifact_sha256"]
     log = json.loads((tmp_path / "batch-001" / "measurements.json").read_text(encoding="utf-8"))
     assert len(log["executions"]) == 2
+    current = json.loads(
+        (tmp_path / "batch-001" / "current-state.json").read_text(encoding="utf-8")
+    )
+    assert current["status"] == "resolved"
+    assert current["authoritative_artifact"] == "batch-run.json"
+
+
+def test_successful_resume_marks_legacy_exception_as_superseded(tmp_path: Path):
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    proposal_payload = _proposal().model_dump(mode="json")
+    review_payload = {
+        "schema_version": "wang_canonical_viewpoint_review_v1",
+        "proposal_sha256": sha256_json(proposal_payload),
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": index,
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "判断成立",
+            }
+            for index in (0, 1)
+        ],
+        "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+    }
+    batch_dir = tmp_path / "batch-001"
+    batch_dir.mkdir(parents=True)
+    (batch_dir / "exception.json").write_text(
+        json.dumps({"historical": True}), encoding="utf-8"
+    )
+
+    run_batch(
+        batch_id="CVB-test-001",
+        scope_label="matt16-13-20",
+        claims=claims,
+        registry_context=[{"viewpoint_revision_id": "CVR-1"}],
+        pending_candidates=[],
+        output_dir=batch_dir,
+        proposer=_StubAdapter(proposal_payload),
+        reviewer=_StubAdapter(review_payload),
+    )
+
+    current = json.loads((batch_dir / "current-state.json").read_text(encoding="utf-8"))
+    assert current["status"] == "resolved"
+    assert current["superseded_artifacts"] == ["exception.json"]
 
 
 def test_run_batch_refuses_a_proposal_that_skips_a_claim(tmp_path: Path):
@@ -1920,10 +1975,14 @@ def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
     assert report["passing_route_keys"] == ["ROUTE-GREEK"]
     assert report["passing_attestation_keys"] == ["ATTEST-1"]
     assert report["master_data_mutations"] == 0
+    assert report["recorded_model_executions"]["calls_recorded_total"] == 2
     again = run_route_scope(**kwargs)
     assert proposer.calls == 1
     assert reviewer.calls == 1
     assert again["measurements"]["proposal_calls_executed"] == 0
+    assert again["recorded_model_executions"]["calls_recorded_total"] == 2
+    current = json.loads((tmp_path / "routes" / "current-state.json").read_text())
+    assert current["status"] == "resolved"
 
 
 def test_reject_and_defer_do_not_trigger_cvp_correction():
