@@ -317,8 +317,18 @@ def main() -> int:
         action="store_true",
         help="ask the model which Claims belong in a batch together, instead of splitting by id",
     )
+    parser.add_argument(
+        "--grouping",
+        type=Path,
+        help="reuse a grouping plan produced earlier for this scope instead of calling again",
+    )
     parser.add_argument("--group-model", default="claude-opus-5")
     parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="medium")
+    parser.add_argument(
+        "--group-key",
+        action="append",
+        help="resolve only these groups; the grouping plan itself still covers the whole scope",
+    )
     args = parser.parse_args()
 
     scope_packet = _read(args.packet)
@@ -331,7 +341,27 @@ def main() -> int:
     }
     registry_context = list(scope_packet.get("registry_context") or [])
 
-    if args.group:
+    if args.grouping:
+        # A grouping plan belongs to the scope, not to one resolution run.
+        # Re-deriving it per run costs a call and yields different group keys,
+        # because the same Claims can be carved into topics more than one way.
+        stored = _read(args.grouping)
+        grouping = ClaimGroupingResponse.model_validate(stored["grouping"])
+        repairs = list(stored.get("coverage_repairs") or [])
+        validate_grouping(
+            grouping=grouping, scope_label=scope_label, claim_ids=list(claims)
+        )
+        batches = batches_from_groups(grouping, batch_size=args.batch_size)
+        if args.group_key:
+            wanted = set(args.group_key)
+            unknown = sorted(wanted - {item.group_key for item in grouping.groups})
+            if unknown:
+                raise SystemExit(f"no such group: {unknown}")
+            grouping = grouping.model_copy(
+                update={"groups": [g for g in grouping.groups if g.group_key in wanted]}
+            )
+            batches = batches_from_groups(grouping, batch_size=args.batch_size)
+    elif args.group:
         # Grouping decides only what is compared together. Its output is a
         # batching plan; the rationale never reaches the proposer, because
         # telling it these Claims were grouped as related is a merge hint.
@@ -379,6 +409,14 @@ def main() -> int:
                 ensure_ascii=False,
             )
         )
+        if args.group_key:
+            wanted = set(args.group_key)
+            unknown = sorted(wanted - {item.group_key for item in grouping.groups})
+            if unknown:
+                raise SystemExit(f"no such group: {unknown}")
+            grouping = grouping.model_copy(
+                update={"groups": [g for g in grouping.groups if g.group_key in wanted]}
+            )
         batches = batches_from_groups(grouping, batch_size=args.batch_size)
     else:
         batches = split_batches(sorted(claims), batch_size=args.batch_size)
