@@ -202,6 +202,11 @@ def build_argument_route_embedding_projection(
     ):
         raise ValueError("argument route conclusion viewpoint revision mismatch")
     signature = revision.route_signature
+    propositions = [
+        item.normalized_proposition
+        for item in revision.ordered_inference_nodes
+        if item.normalized_proposition
+    ]
     return _projection(
         object_kind="argument_route",
         object_id=revision.argument_route_id,
@@ -211,8 +216,8 @@ def build_argument_route_embedding_projection(
         title=revision.route_label,
         lines=[
             f"论证路线：{revision.route_label}",
-            f"前提角色：{_sorted_text(signature.premise_roles)}",
-            f"推理模式：{signature.inference_pattern}",
+            f"推理方法：{_sorted_text(signature.inference_method_codes)}",
+            f"推理节点：{_sorted_text(propositions)}",
             f"结论观点：{conclusion.core_proposition}",
         ],
     )

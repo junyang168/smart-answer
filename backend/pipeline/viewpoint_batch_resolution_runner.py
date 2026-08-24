@@ -542,6 +542,8 @@ def build_registry_route_packet(
             source_id=claim.source_id,
             disposition=disposition,
             target_viewpoint_revision_id=revision_id,
+            viewpoint_claim_link_id=str(raw.get("viewpoint_claim_link_id") or "") or None,
+            occurrence_ref_ids=sorted(str(item) for item in raw.get("occurrence_refs") or []),
             statement_component=statement_component,
             spans=spans,
             evidence_step_ids=sorted({item[0] for item in evidence_pairs}),
@@ -1039,13 +1041,14 @@ def run_route_scope(
     scope_label: str,
     claims: list[ReviewClaim],
     approved_viewpoints: list[dict[str, Any]],
-    effective_proposals: list[CanonicalViewpointProposalResponse],
+    effective_proposals: list[CanonicalViewpointProposalResponse] | None,
     existing_routes: list[dict[str, Any]],
     local_candidate_revision_map: dict[str, str] | None = None,
     output_dir: Path,
     proposer: Any,
     reviewer: Any,
     reconsiderer: Any = None,
+    route_packet: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Propose and review routes after the whole approved CVP set is frozen.
 
@@ -1055,14 +1058,16 @@ def run_route_scope(
     from the already-approved CVPs.
     """
 
-    packet = build_route_packet(
+    packet = route_packet or build_route_packet(
         scope_label=scope_label,
         approved_viewpoints=approved_viewpoints,
-        effective_proposals=effective_proposals,
+        effective_proposals=effective_proposals or [],
         claims=claims,
         existing_routes=existing_routes,
         local_candidate_revision_map=local_candidate_revision_map,
     )
+    if packet.get("scope_label") != scope_label:
+        raise ValueError("prebuilt Route packet belongs to another scope")
     _write_immutable(output_dir / "route-packet.json", packet)
     raw_proposal, proposal_calls, proposal_seconds = _call(
         proposer, packet, output_dir / "raw-route-proposal.json"
@@ -1314,7 +1319,12 @@ def run_route_scope(
         "reconsideration_wall_seconds": reconsideration_seconds,
         "call_timeout_seconds": CALL_TIMEOUT_SECONDS,
     }
-    return {**report, "measurements": measurements}
+    return {
+        **report,
+        "measurements": measurements,
+        "_effective_proposal": effective_proposal,
+        "_route_packet": packet,
+    }
 
 
 def main() -> int:

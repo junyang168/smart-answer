@@ -45,6 +45,9 @@ TERMINAL_DISPOSITIONS = frozenset(
     {"new_viewpoint", "no_registry_assertion", "deferred"}
 )
 DISPOSITIONS = EXISTING_DISPOSITIONS | TERMINAL_DISPOSITIONS
+ROUTE_TARGETED_DISPOSITIONS = EXISTING_DISPOSITIONS | {
+    "extension_existing", "application_existing"
+}
 
 
 class BatchResolutionError(ValueError):
@@ -604,6 +607,8 @@ class RouteComponentBinding(StrictBatchModel):
         "deferred",
     ]
     target_viewpoint_revision_id: str | None = None
+    viewpoint_claim_link_id: str | None = None
+    occurrence_ref_ids: list[str] = Field(default_factory=list)
     statement_component: str = Field(min_length=1)
     spans: list[ProposedSpan] = Field(min_length=1)
     evidence_step_ids: list[str] = Field(default_factory=list)
@@ -611,7 +616,9 @@ class RouteComponentBinding(StrictBatchModel):
 
     @model_validator(mode="after")
     def validate_target(self) -> "RouteComponentBinding":
-        if self.disposition in EXISTING_DISPOSITIONS:
+        if self.occurrence_ref_ids != sorted(set(self.occurrence_ref_ids)):
+            raise ValueError("occurrence_ref_ids must be sorted and unique")
+        if self.disposition in ROUTE_TARGETED_DISPOSITIONS:
             if not self.target_viewpoint_revision_id:
                 raise ValueError(f"{self.disposition} requires a target viewpoint revision")
         elif self.target_viewpoint_revision_id:
@@ -735,15 +742,24 @@ def component_key_from_spans(
     *,
     claim_id: str,
     claim_revision_sha256: str,
-    canonical_spans: Sequence[Mapping[str, Any]],
+    canonical_spans: Sequence[Mapping[str, Any] | Sequence[Any]],
 ) -> str:
     """Transport key shared by proposal and Registry-backed Route packets."""
+
+    normalized = []
+    for item in canonical_spans:
+        if isinstance(item, Mapping):
+            normalized.append(
+                [int(item["start_char"]), int(item["end_char"]), str(item["exact_text"])]
+            )
+        else:
+            normalized.append([int(item[0]), int(item[1]), str(item[2])])
 
     return "CCK-" + sha256_json(
         {
             "claim_id": claim_id,
             "claim_revision_sha256": claim_revision_sha256,
-            "canonical_spans": list(canonical_spans),
+            "canonical_spans": normalized,
         }
     )
 

@@ -818,13 +818,16 @@ class AdminViewpointProjectionCompiler:
                 ],
                 key=lambda item: item.argument_route_attestation_id,
             )
-            evidence_step_ids = [
-                step_id for item in attestations for step_id in item.ordered_evidence_step_ids
-            ]
+            evidence_step_ids = sorted({
+                step_id
+                for item in attestations
+                for binding in item.step_bindings
+                for step_id in binding.evidence_step_ids
+            })
             routes.append({
                 "route_id": route.argument_route_id,
                 "route_type": route_revision.route_label if route_revision else "推理路线",
-                "claim_id": attestations[0].claim_id if attestations else None,
+                "claim_id": attestations[0].claim_ids[0] if attestations else None,
                 "evidence_step_ids": evidence_step_ids,
                 "route": _dump(route),
                 "revision": _dump(route_revision) if route_revision else None,

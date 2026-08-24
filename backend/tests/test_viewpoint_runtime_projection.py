@@ -124,10 +124,13 @@ def test_route_snapshots_keep_distinct_routes_and_count_only_full_sources():
     )
     store.records["argument_route_attestations"].append(ArgumentRouteAttestationRecord(
         argument_route_attestation_id="ARA-PETER-B", argument_route_id="AR-PETER",
-        validated_against_argument_route_revision_id="ARR-PETER-1", source_id="SRC-16-B",
-        claim_id="CL-PETER", occurrence_ref_id="FR-ROCK-B",
-        ordered_evidence_step_ids=["EV-ROCK-B"], terminal_claim_link_id="VCL-PETER",
-        completeness="partial", scripture_refs=["Matt 16:18"], review_status="system_approved",
+        validated_against_route_revision_id="ARR-PETER-1", source_id="SRC-16-B",
+        source_revision_sha256="b" * 64, claim_ids=["CL-PETER"], occurrence_ref_id="FR-ROCK-B",
+        step_bindings=[{"route_step_key": "P1", "claim_component_keys": ["CCK-fixture"],
+                        "evidence_step_ids": ["EV-ROCK-B"], "source_fragment_ids": ["FR-ROCK-B"],
+                        "attestation_status": "attested"}], terminal_claim_link_id="VCL-PETER",
+        completeness="partial", scripture_refs_derived=["Matt 16:18"],
+        review_artifact_sha256="d" * 64, review_status="system_approved",
     ))
     store.records["argument_routes"].append(ArgumentRouteRecord(
         argument_route_id="AR-PETER-SECOND", conclusion_viewpoint_id="CV-PETER",
@@ -137,9 +140,15 @@ def test_route_snapshots_keep_distinct_routes_and_count_only_full_sources():
         argument_route_revision_id="ARR-PETER-SECOND-1", argument_route_id="AR-PETER-SECOND",
         revision_number=1, validated_against_conclusion_viewpoint_revision_id="CVR-PETER-1",
         route_label="第二条独立路线", route_signature={
-            "premise_roles": ["context"], "inference_pattern": "contextual_inference",
+            "inference_method_codes": ["literary_context"],
             "conclusion_viewpoint_id": "CV-PETER",
-        }, review_artifact_sha256="e" * 64, approved_by="system:viewpoint-resolution",
+        }, ordered_inference_nodes=[
+            {"route_step_key": "P1", "role": "premise",
+             "normalized_proposition": "上下文支持结论", "required_for_full_attestation": True},
+            {"route_step_key": "C1", "role": "conclusion",
+             "conclusion_viewpoint_revision_id": "CVR-PETER-1",
+             "required_for_full_attestation": True},
+        ], review_artifact_sha256="e" * 64, approved_by="system:viewpoint-resolution",
         approved_at="2026-08-22T12:00:00Z", review_status="system_approved",
     ))
 
@@ -157,7 +166,7 @@ def test_authoring_graph_rejects_cross_source_and_stale_attestation():
     graph = _serialized(store)
     attestation = graph["argument_route_attestations"]["ARA-PETER"]
     attestation["source_id"] = "SRC-OTHER"
-    attestation["validated_against_argument_route_revision_id"] = "ARR-OLD"
+    attestation["validated_against_route_revision_id"] = "ARR-OLD"
 
     findings = validate_runtime_authoring_graph(graph)
 
@@ -169,7 +178,7 @@ def test_snapshot_compiler_rejects_stale_active_attestation():
     store = _fixture()
     store.records["argument_route_attestations"][0] = store.records[
         "argument_route_attestations"
-    ][0].model_copy(update={"validated_against_argument_route_revision_id": "ARR-OLD"})
+    ][0].model_copy(update={"validated_against_route_revision_id": "ARR-OLD"})
 
     with pytest.raises(ViewpointRuntimeProjectionError, match="stale attestations"):
         ViewpointRuntimeCompiler(store.records, store.citations).compile_route_snapshots("CVS-16")

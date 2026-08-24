@@ -90,6 +90,7 @@ class ReviewEvidence(StrictArtifact):
     media_time: float | None = None
     evidence_statement: str
     discourse_role: str | None = None
+    scripture_refs: list[str] = Field(default_factory=list)
     verbatim_excerpt: str
     citation_id: str
     citation_revision: int = Field(ge=1)
@@ -102,6 +103,8 @@ class ReviewEvidence(StrictArtifact):
 
     @model_validator(mode="after")
     def validate_eligibility(self) -> "ReviewEvidence":
+        if self.scripture_refs != sorted(set(self.scripture_refs)):
+            raise ValueError("review evidence scripture refs must be sorted and unique")
         citation_valid = bool(
             self.source_sha256
             and self.citation_status == "approved"
@@ -781,6 +784,7 @@ def compile_review_claim(
                 media_time=fragment.media_time,
                 evidence_statement=evidence.statement,
                 discourse_role=evidence.discourse_role,
+                scripture_refs=sorted({_scripture_ref(value) for value in evidence.scripture_refs}),
                 verbatim_excerpt=fragment.verbatim_excerpt,
                 citation_id=citation_id,
                 citation_revision=citation.revision if citation else 1,

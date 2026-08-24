@@ -178,17 +178,30 @@ def _fixture() -> FakeStore:
         argument_route_revision_id="ARR-PETER-1", argument_route_id="AR-PETER",
         revision_number=1, validated_against_conclusion_viewpoint_revision_id="CVR-PETER-1",
         route_label="文本—认信—代表性角色", route_signature={
-            "premise_roles": ["text", "confession"], "inference_pattern": "textual_inference",
+            "inference_method_codes": ["theological_synthesis"],
             "conclusion_viewpoint_id": "CV-PETER",
-        }, review_artifact_sha256="d" * 64, approved_by="system:viewpoint-resolution",
+        }, ordered_inference_nodes=[
+            {"route_step_key": "P1", "role": "premise",
+             "normalized_proposition": "文本与认信共同说明彼得的代表性角色",
+             "required_for_full_attestation": True},
+            {"route_step_key": "C1", "role": "conclusion",
+             "conclusion_viewpoint_revision_id": "CVR-PETER-1",
+             "required_for_full_attestation": True},
+        ], review_artifact_sha256="d" * 64, approved_by="system:viewpoint-resolution",
         approved_at="2026-08-22T12:00:00Z", review_status="system_approved",
     )
     attestation = ArgumentRouteAttestationRecord(
         argument_route_attestation_id="ARA-PETER", argument_route_id="AR-PETER",
-        validated_against_argument_route_revision_id="ARR-PETER-1", source_id="SRC-16",
-        claim_id="CL-PETER", occurrence_ref_id="FR-ROCK",
-        ordered_evidence_step_ids=["EV-ROCK"], terminal_claim_link_id="VCL-PETER",
-        completeness="full", scripture_refs=["Matt 16:18"], review_status="system_approved",
+        validated_against_route_revision_id="ARR-PETER-1", source_id="SRC-16",
+        source_revision_sha256="s" * 64, claim_ids=["CL-PETER"], occurrence_ref_id="FR-ROCK",
+        step_bindings=[
+            {"route_step_key": key, "claim_component_keys": ["CCK-fixture"],
+             "evidence_step_ids": ["EV-ROCK"], "source_fragment_ids": ["FR-ROCK"],
+             "attestation_status": "attested"}
+            for key in ("P1", "C1")
+        ], terminal_claim_link_id="VCL-PETER",
+        completeness="full", scripture_refs_derived=["Matt 16:18"],
+        review_artifact_sha256="d" * 64, review_status="system_approved",
     )
     viewpoint_relation = ViewpointRelationRecord(
         viewpoint_relation_id="VPR-PETER-ROCK", source_viewpoint_id="CV-PETER",

@@ -80,6 +80,17 @@ class FileRouteResolutionQueue:
         path = self._state_path(job_id)
         return _read(path) if path.exists() else None
 
+    def jobs_for_work_unit(
+        self, work: RouteResolutionWorkUnit
+    ) -> list[RouteResolutionJob]:
+        jobs = []
+        for job_id in work.source_job_ids:
+            path = self.jobs_dir / f"{job_id}.json"
+            if not path.exists():
+                raise ValueError(f"missing immutable route job {job_id}")
+            jobs.append(RouteResolutionJob.model_validate(_read(path)))
+        return jobs
+
     def _transition(
         self,
         job_id: str,
@@ -265,5 +276,36 @@ class FileRouteResolutionQueue:
                     occurred_at=timestamp,
                     attempt=int(current["attempt"]),
                     work_unit_sha256=work.artifact_sha256,
+                    detail=detail,
+                )
+
+    def release(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        worker_id: str,
+        detail: str,
+        released_at: str | None = None,
+    ) -> None:
+        """Return an owned plan-only work unit to queued state."""
+
+        timestamp = released_at or datetime.now(timezone.utc).isoformat()
+        with self._lock():
+            for job_id in work.source_job_ids:
+                if job_id in work.superseded_job_ids:
+                    continue
+                current = self._state(job_id)
+                if (
+                    current is None
+                    or current["status"] != "running"
+                    or current.get("worker_id") != worker_id
+                    or current.get("work_unit_sha256") != work.artifact_sha256
+                ):
+                    raise ValueError(f"worker does not own route job {job_id}")
+                self._transition(
+                    job_id,
+                    status="queued",
+                    occurred_at=timestamp,
+                    attempt=int(current["attempt"]),
                     detail=detail,
                 )

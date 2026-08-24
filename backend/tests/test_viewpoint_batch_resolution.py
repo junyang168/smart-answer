@@ -25,6 +25,9 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_route_queue import (
     FileRouteResolutionQueue,
 )
+from backend.api.canonical_repository.viewpoint_route_changeset import (
+    compile_argument_route_package,
+)
 from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
 )
@@ -322,6 +325,38 @@ def test_file_route_queue_refuses_to_invent_missing_current_revision_job(tmp_pat
             worker_id="worker-a",
             current_viewpoint_revisions={"CV-1": "CVR-current"},
         )
+
+
+def test_plan_only_route_worker_releases_its_lease(tmp_path: Path):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job)
+    work = queue.claim(
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+    )
+    assert work is not None
+
+    queue.release(work, worker_id="worker-a", detail="plan-only")
+
+    reclaimed = queue.claim(
+        worker_id="worker-b",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+    )
+    assert reclaimed is not None
 
 
 def test_passing_batch_compiles_component_bound_cvp_master_records():
@@ -1727,6 +1762,7 @@ def _registry_link(claim: ReviewClaim, **overrides: Any) -> dict[str, Any]:
         "evidence_bindings": [
             {"evidence_step_id": "C1-E1", "source_fragment_id": "C1-F1"}
         ],
+        "occurrence_refs": ["OCC-1"],
         "effective_state": "active",
     }
     payload.update(overrides)
@@ -1785,6 +1821,48 @@ def test_registry_route_packet_rejects_stale_claim_link():
             viewpoint_claim_links=[_registry_link(claim, pinned_claim_revision=2)],
             existing_routes=[],
         )
+
+
+def test_route_changeset_compiles_reviewed_v2_master_records():
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    proposal = _routes()
+    package = compile_argument_route_package(
+        proposal=proposal,
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha",
+        review_artifact_sha256="review-sha",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+    assert len(package["argument_routes"]) == 1
+    revision = package["argument_route_revisions"][0]
+    assert revision["schema_version"] == "wang_argument_route_revision_v2"
+    assert revision["route_signature"]["inference_method_codes"] == ["morphology"]
+    assert revision["ordered_inference_nodes"][-1] == {
+        "route_step_key": "C1",
+        "role": "conclusion",
+        "normalized_proposition": None,
+        "conclusion_viewpoint_revision_id": "CVR-1",
+        "required_for_full_attestation": True,
+    }
+    attestation = package["argument_route_attestations"][0]
+    assert attestation["schema_version"] == "wang_argument_route_attestation_v2"
+    assert attestation["terminal_claim_link_id"] == "VCL-1"
+    assert attestation["claim_ids"] == ["C1"]
+    assert attestation["step_bindings"][0]["claim_component_keys"][0].startswith("CCK-")
 
 
 def test_routes_validate_against_settled_conclusions():
