@@ -2241,6 +2241,37 @@ def test_route_review_can_open_a_structured_cvp_re_review_exception():
     assert report["outcome"] == "findings"
 
 
+def test_deterministic_route_target_isolation_removes_orphan_route():
+    from backend.pipeline.viewpoint_route_resolution import (
+        isolate_deterministically_invalid_route_targets,
+    )
+
+    proposal = _routes()
+    filtered, exceptions = isolate_deterministically_invalid_route_targets(
+        proposal,
+        ["attestation ATTEST-1: terminal Claim component has no positive Registry link"],
+    )
+
+    assert filtered.argument_route_candidates == []
+    assert filtered.source_route_attestations == []
+    assert exceptions == [
+        "deterministic_reject:attestation ATTEST-1: terminal Claim component has no positive Registry link",
+        "route:ROUTE-GREEK:no_valid_attestation_after_deterministic_validation",
+    ]
+
+
+def test_deterministic_route_target_isolation_rejects_global_findings():
+    from backend.pipeline.viewpoint_route_resolution import (
+        isolate_deterministically_invalid_route_targets,
+    )
+
+    with pytest.raises(BatchResolutionError, match="approved viewpoint"):
+        isolate_deterministically_invalid_route_targets(
+            _routes(),
+            ["CVR-1: approved viewpoint has no route or no-route disposition"],
+        )
+
+
 def test_registry_route_packet_rejects_stale_claim_link():
     claim = _claim("C1", ROCK_STATEMENT)
     with pytest.raises(ValueError, match="stale Claim revision"):

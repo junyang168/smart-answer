@@ -8,6 +8,7 @@ SHA-bound Route artifacts.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,66 @@ _REGISTRY_LINK_DISPOSITIONS = {
 
 class RouteStageNotReadyError(ValueError):
     """Committed Registry state cannot yet form a formal Route input cut."""
+
+
+_TARGET_FINDING = re.compile(r"^(attestation|route) ([^:]+):")
+
+
+def isolate_deterministically_invalid_route_targets(
+    proposal: ArgumentRouteProposalResponse, findings: list[str]
+) -> tuple[ArgumentRouteProposalResponse, list[str]]:
+    """Remove only explicitly targeted invalid objects; never repair semantics."""
+
+    invalid_attestations: set[str] = set()
+    invalid_routes: set[str] = set()
+    for finding in findings:
+        match = _TARGET_FINDING.match(finding)
+        if match is None:
+            raise BatchResolutionError(findings)
+        target_kind, target_key = match.groups()
+        if target_kind == "attestation":
+            invalid_attestations.add(target_key)
+        else:
+            invalid_routes.add(target_key)
+
+    retained_attestations = [
+        item
+        for item in proposal.source_route_attestations
+        if item.local_attestation_key not in invalid_attestations
+        and item.route_ref.local_route_key not in invalid_routes
+    ]
+    referenced_routes = {
+        item.route_ref.local_route_key for item in retained_attestations
+    }
+    orphaned_routes = {
+        item.local_route_key
+        for item in proposal.argument_route_candidates
+        if item.local_route_key not in referenced_routes
+    }
+    invalid_routes |= orphaned_routes
+    retained_attestations = [
+        item
+        for item in retained_attestations
+        if item.route_ref.local_route_key not in invalid_routes
+    ]
+    filtered = proposal.model_copy(
+        update={
+            "argument_route_candidates": [
+                item
+                for item in proposal.argument_route_candidates
+                if item.local_route_key not in invalid_routes
+            ],
+            "source_route_attestations": retained_attestations,
+        }
+    )
+    exceptions = [
+        f"deterministic_reject:{finding}" for finding in sorted(set(findings))
+    ]
+    exceptions.extend(
+        f"route:{key}:no_valid_attestation_after_deterministic_validation"
+        for key in sorted(orphaned_routes)
+    )
+    return filtered, sorted(set(exceptions))
 
 
 def build_route_proposer(
@@ -525,25 +586,34 @@ def run_route_scope(
         RouteComponentBinding.model_validate(item)
         for item in packet["claim_components"]
     ]
-    validation = validate_route_proposal(
-        routes=proposal,
-        scope_label=scope_label,
-        claims=claims,
-        approved_viewpoint_revision_ids=packet["approved_viewpoint_revision_ids"],
-        known_route_revision_ids=[
+    validation_kwargs = {
+        "scope_label": scope_label,
+        "claims": claims,
+        "approved_viewpoint_revision_ids": packet["approved_viewpoint_revision_ids"],
+        "known_route_revision_ids": [
             str(item.get("route_revision_id") or item.get("argument_route_revision_id"))
             for item in existing_routes
             if item.get("route_revision_id") or item.get("argument_route_revision_id")
         ],
-        known_route_conclusions={
+        "known_route_conclusions": {
             str(item.get("route_revision_id") or item.get("argument_route_revision_id")): str(
                 item.get("conclusion_viewpoint_revision_id") or ""
             )
             for item in existing_routes
             if item.get("route_revision_id") or item.get("argument_route_revision_id")
         },
-        component_bindings=component_bindings,
-    )
+        "component_bindings": component_bindings,
+    }
+    deterministic_exceptions: list[str] = []
+    try:
+        validation = validate_route_proposal(routes=proposal, **validation_kwargs)
+    except BatchResolutionError as exc:
+        proposal, deterministic_exceptions = (
+            isolate_deterministically_invalid_route_targets(proposal, exc.findings)
+        )
+        # Isolation is allowed only when the complete remaining proposal still
+        # satisfies every global, coverage, and reference invariant.
+        validation = validate_route_proposal(routes=proposal, **validation_kwargs)
     proposal_payload = proposal.model_dump(mode="json")
     proposal_sha = sha256_json(proposal_payload)
     _write_immutable(
@@ -555,6 +625,7 @@ def run_route_scope(
             "route_proposal_sha256": proposal_sha,
             "proposal": proposal_payload,
             "validation_report": validation,
+            "deterministic_exceptions": deterministic_exceptions,
             "normalization": {
                 "raw_response_sha256": sha256_json(dict(raw_proposal)),
                 "changed_paths": normalization_changes,
@@ -784,7 +855,7 @@ def run_route_scope(
     }
     if correction_resolved:
         passed |= corrected
-    exceptions = sorted(
+    exceptions = deterministic_exceptions + sorted(
         f"{item.target_kind}:{item.target_key}:{item.decision}"
         for item in review.change_reviews
         if item.decision in {"reject", "defer"}
