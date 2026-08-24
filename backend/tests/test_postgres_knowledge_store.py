@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.api.canonical_repository.postgres_store import (
+    ChangeSetConflict,
     SOURCE_KEYS,
     PostgresKnowledgeStore,
     build_active_snapshot,
@@ -550,6 +551,17 @@ def test_apply_records_which_fields_an_update_removed() -> None:
     assert result["summary"]["removals"] == [
         {"collection": "source_documents", "object_id": "SRC-1", "fields": ["project_id"]}
     ]
+
+
+def test_route_apply_cas_rejects_a_stale_conclusion_revision() -> None:
+    cursor = _RecordingCursor(("CVR-NEW",))
+
+    with pytest.raises(ChangeSetConflict, match="expected current revision CVR-OLD"):
+        PostgresKnowledgeStore._assert_current_viewpoint_revisions(
+            cursor, {"CV-1": "CVR-OLD"}
+        )
+
+    assert any("FOR UPDATE" in sql for sql, _ in cursor.statements)
 
 
 def test_a_preserved_review_field_is_not_reported_as_removed() -> None:

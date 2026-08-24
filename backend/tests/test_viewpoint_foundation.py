@@ -10,6 +10,7 @@ from backend.api.canonical_repository.models import Citation
 from backend.api.canonical_repository.knowledge_models import (
     CanonicalViewpointRecord,
     ViewpointClaimLinkRecord,
+    ViewpointComponentLocator,
     ViewpointCoverageSnapshotRecord,
     ViewpointIdentityDecisionRecord,
     ViewpointQualityReportRecord,
@@ -251,6 +252,25 @@ def test_ledger_rejects_duplicates_extras_and_sha_substitution() -> None:
 
 
 def test_source_ineligible_and_component_membership_cannot_be_faked() -> None:
+    locator = ViewpointComponentLocator(
+        statement_component="磐石彼得",
+        claim_sha256="claim-sha",
+        canonical_spans=[
+            {"start_char": 0, "end_char": 2, "exact_text": "磐石"},
+            {"start_char": 4, "end_char": 6, "exact_text": "彼得"},
+        ],
+    )
+    assert locator.statement_component == "磐石彼得"
+    with pytest.raises(ValidationError, match="does not match canonical spans"):
+        ViewpointComponentLocator(
+            statement_component="磐石不是彼得",
+            claim_sha256="claim-sha",
+            canonical_spans=[
+                {"start_char": 0, "end_char": 2, "exact_text": "磐石"},
+                {"start_char": 4, "end_char": 6, "exact_text": "彼得"},
+            ],
+        )
+
     with pytest.raises(ValidationError, match="closed reason code"):
         ViewpointResolutionRow(
             claim_id="CL-1",
@@ -586,6 +606,32 @@ def _foundation_package() -> tuple[dict, dict]:
         "ledger": ledger,
         "quality": quality,
     }
+
+
+def test_batch_candidate_can_bind_scope_manifest_without_legacy_coverage() -> None:
+    package, _ = _foundation_package()
+    candidate = dict(package["viewpoint_identity_candidates"][0])
+    candidate["coverage_snapshot_id"] = None
+    candidate["scope_manifest_sha256"] = "scope-manifest-sha"
+    identity = {
+        "claims": candidate["candidate_claim_ids"],
+        "viewpoints": candidate["candidate_viewpoint_ids"],
+        "relations": candidate["seed_relation_ids"],
+        "action": candidate["proposed_action"],
+        "blockers": candidate["blocker_codes"],
+        "coverage_snapshot_id": None,
+        "generation_fingerprint": candidate["generation_fingerprint"],
+        "scope_manifest_sha256": "scope-manifest-sha",
+    }
+    candidate_id = f"VIC-{sha256_json(identity)[:20]}"
+    candidate["identity_candidate_id"] = candidate_id
+    package["viewpoint_identity_candidates"] = [candidate]
+    package["viewpoint_identity_decisions"][0]["identity_candidate_id"] = candidate_id
+    package["canonical_viewpoints"][0]["created_from_candidate_id"] = candidate_id
+
+    plan = build_change_set_plan(package, {})
+
+    assert plan.operations
 
 
 def test_foundation_package_is_registered_and_plans_one_viewpoint_edge() -> None:

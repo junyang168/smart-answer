@@ -178,17 +178,30 @@ def _fixture() -> FakeStore:
         argument_route_revision_id="ARR-PETER-1", argument_route_id="AR-PETER",
         revision_number=1, validated_against_conclusion_viewpoint_revision_id="CVR-PETER-1",
         route_label="文本—认信—代表性角色", route_signature={
-            "premise_roles": ["text", "confession"], "inference_pattern": "textual_inference",
+            "inference_method_codes": ["theological_synthesis"],
             "conclusion_viewpoint_id": "CV-PETER",
-        }, review_artifact_sha256="d" * 64, approved_by="system:viewpoint-resolution",
+        }, ordered_inference_nodes=[
+            {"route_step_key": "P1", "role": "premise",
+             "normalized_proposition": "文本与认信共同说明彼得的代表性角色",
+             "required_for_full_attestation": True},
+            {"route_step_key": "C1", "role": "conclusion",
+             "conclusion_viewpoint_revision_id": "CVR-PETER-1",
+             "required_for_full_attestation": True},
+        ], review_artifact_sha256="d" * 64, approved_by="system:viewpoint-resolution",
         approved_at="2026-08-22T12:00:00Z", review_status="system_approved",
     )
     attestation = ArgumentRouteAttestationRecord(
         argument_route_attestation_id="ARA-PETER", argument_route_id="AR-PETER",
-        validated_against_argument_route_revision_id="ARR-PETER-1", source_id="SRC-16",
-        claim_id="CL-PETER", occurrence_ref_id="FR-ROCK",
-        ordered_evidence_step_ids=["EV-ROCK"], terminal_claim_link_id="VCL-PETER",
-        completeness="full", scripture_refs=["Matt 16:18"], review_status="system_approved",
+        validated_against_route_revision_id="ARR-PETER-1", source_id="SRC-16",
+        source_revision_sha256="s" * 64, claim_ids=["CL-PETER"], occurrence_ref_id="FR-ROCK",
+        step_bindings=[
+            {"route_step_key": key, "claim_component_keys": ["CCK-fixture"],
+             "evidence_step_ids": ["EV-ROCK"], "source_fragment_ids": ["FR-ROCK"],
+             "attestation_status": "attested"}
+            for key in ("P1", "C1")
+        ], terminal_claim_link_id="VCL-PETER",
+        completeness="full", scripture_refs_derived=["Matt 16:18"],
+        review_artifact_sha256="d" * 64, review_status="system_approved",
     )
     viewpoint_relation = ViewpointRelationRecord(
         viewpoint_relation_id="VPR-PETER-ROCK", source_viewpoint_id="CV-PETER",
@@ -298,6 +311,48 @@ def test_detail_drills_to_evidence_citation_and_source_locator():
         "paragraph_key": "p16",
         "media_time": 618.0,
     }
+
+
+def test_detail_expands_route_nodes_and_source_local_evidence():
+    detail = AdminViewpointProjectionCompiler(_fixture()).detail("CV-PETER")
+    route = detail["data"]["routes"][0]
+
+    assert route["coverage"] == {
+        "mode": "coverage_snapshot",
+        "eligibility": "approved_evidence_ready",
+        "full_attestation_count": 1,
+        "partial_attestation_count": 0,
+    }
+    displayed = route["attestations"][0]
+    assert displayed["source"]["source_id"] == "SRC-16"
+    assert [item["node"]["role"] for item in displayed["bindings"]] == [
+        "premise", "conclusion",
+    ]
+    route_evidence = displayed["bindings"][0]["evidence"][0]
+    assert route_evidence["evidence_step"]["evidence_step_id"] == "EV-ROCK"
+    assert route_evidence["fragments"][0]["source_fragment"]["fragment_id"] == "FR-ROCK"
+    assert route_evidence["fragments"][0]["locator"]["source_admin_url"].endswith(
+        "source=SRC-16&fragment=FR-ROCK"
+    )
+
+
+def test_detail_uses_current_registry_attestations_without_legacy_coverage():
+    store = _fixture()
+    store.records["viewpoint_coverage_snapshots"] = []
+    store.records["viewpoint_resolution_ledgers"] = []
+    store.records["viewpoint_quality_reports"] = []
+
+    route = AdminViewpointProjectionCompiler(store).detail("CV-PETER")["data"]["routes"][0]
+
+    assert route["snapshot"] is None
+    assert route["coverage"] == {
+        "mode": "current_registry",
+        "eligibility": "approved_evidence_ready",
+        "full_attestation_count": 1,
+        "partial_attestation_count": 0,
+    }
+    assert route["evidence_step_ids"] == ["EV-ROCK"]
+    assert len(route["attestations"]) == 1
 
 
 def test_cursor_and_requested_snapshot_fail_closed():

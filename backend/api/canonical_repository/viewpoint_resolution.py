@@ -89,6 +89,8 @@ class ReviewEvidence(StrictArtifact):
     paragraph_key: str | int | None = None
     media_time: float | None = None
     evidence_statement: str
+    discourse_role: str | None = None
+    scripture_refs: list[str] = Field(default_factory=list)
     verbatim_excerpt: str
     citation_id: str
     citation_revision: int = Field(ge=1)
@@ -101,6 +103,8 @@ class ReviewEvidence(StrictArtifact):
 
     @model_validator(mode="after")
     def validate_eligibility(self) -> "ReviewEvidence":
+        if self.scripture_refs != sorted(set(self.scripture_refs)):
+            raise ValueError("review evidence scripture refs must be sorted and unique")
         citation_valid = bool(
             self.source_sha256
             and self.citation_status == "approved"
@@ -712,6 +716,107 @@ def _strict_json_schema(value: Mapping[str, Any]) -> dict[str, Any]:
     return schema
 
 
+def compile_review_claim(
+    *,
+    claim: ClaimRecord,
+    evidence_index: Mapping[str, EvidenceStepRecord],
+    fragment_index: Mapping[str, SourceFragmentRecord],
+    citation_index: Mapping[str, Citation],
+    coverage_source_sha256: Mapping[str, str],
+    attestation_sha: str | None,
+    active_full_viewpoint_id: str | None = None,
+) -> tuple[ReviewClaim | None, list[str]]:
+    """Assemble one evidence-bound ``ReviewClaim`` from pinned master records.
+
+    Returns the Claim and any findings.  A Claim whose evidence spans more than
+    one source is rejected rather than repaired: identity review reasons over
+    source-local arguments, so a Claim stitched across sources would let a
+    premise from one sermon support a conclusion in another.
+    """
+
+    findings: list[str] = []
+    evidence_rows: list[ReviewEvidence] = []
+    source_ids: set[str] = set()
+    claim_id = claim.claim_id
+    for evidence_id in claim.evidence_step_ids:
+        evidence = evidence_index.get(evidence_id)
+        if not evidence or not evidence_fragment_ids(evidence):
+            findings.append(f"{claim_id}: missing evidence {evidence_id}")
+            continue
+        for fragment_id in evidence_fragment_ids(evidence):
+            fragment = fragment_index.get(fragment_id)
+            if not fragment:
+                findings.append(
+                    f"{claim_id}: evidence {evidence_id} has no source fragment {fragment_id}"
+                )
+                continue
+            source_ids.add(fragment.source_id)
+            expected_source_sha = coverage_source_sha256.get(fragment.source_id)
+            citation_id = str(fragment.citation_id or "")
+            citation = citation_index.get(citation_id)
+            source_matches = bool(
+                expected_source_sha and expected_source_sha == fragment.source_sha256
+            )
+            citation_valid = bool(
+                source_matches
+                and evidence.support_eligibility in VALID_EVIDENCE_STATES
+                and fragment.anchor_state in VALID_ANCHOR_STATES
+                and citation_id
+                and citation_id in evidence.citation_ids
+                and citation
+                and citation.status == "approved"
+                and citation.source_id == fragment.source_id
+                and citation.source_sha256 == fragment.source_sha256
+                and evidence.evidence_step_id in citation.evidence_ids
+            )
+            attestation_valid = bool(
+                source_matches
+                and attestation_sha
+                and evidence.support_eligibility
+                in VALID_EVIDENCE_STATES | {"eligible_candidate"}
+                and fragment.anchor_state in VALID_ANCHOR_STATES
+            )
+            evidence_rows.append(ReviewEvidence(
+                evidence_step_id=evidence.evidence_step_id,
+                source_fragment_id=fragment.fragment_id,
+                source_id=fragment.source_id,
+                paragraph_key=fragment.paragraph_key,
+                media_time=fragment.media_time,
+                evidence_statement=evidence.statement,
+                discourse_role=evidence.discourse_role,
+                scripture_refs=sorted({_scripture_ref(value) for value in evidence.scripture_refs}),
+                verbatim_excerpt=fragment.verbatim_excerpt,
+                citation_id=citation_id,
+                citation_revision=citation.revision if citation else 1,
+                citation_status=citation.status if citation else "unresolved",
+                source_sha256=str(fragment.source_sha256 or ""),
+                support_eligibility=evidence.support_eligibility,
+                anchor_state=fragment.anchor_state,
+                source_eligibility_attestation_sha256=attestation_sha,
+                valid_for_identity_review=citation_valid or attestation_valid,
+            ))
+    if len(source_ids) != 1:
+        findings.append(f"{claim_id}: Claim evidence is not source-local")
+        return None, findings
+    evidence_rows.sort(key=lambda item: (item.evidence_step_id, item.source_fragment_id))
+    return (
+        ReviewClaim(
+            claim_id=claim.claim_id,
+            pinned_claim_revision=claim.revision,
+            claim_revision_sha256=semantic_record_sha(claim),
+            source_id=next(iter(source_ids)),
+            statement=claim.statement,
+            attribution=claim.attribution,
+            scripture_refs=sorted({_scripture_ref(value) for value in claim.scripture_refs}),
+            review_status=claim.review_status,
+            source_eligibility_attestation_sha256=attestation_sha,
+            active_full_viewpoint_id=active_full_viewpoint_id,
+            evidence=evidence_rows,
+        ),
+        findings,
+    )
+
+
 def build_identity_review_packet(
     *,
     candidate: Mapping[str, Any] | ViewpointIdentityCandidateRecord,
@@ -812,89 +917,25 @@ def build_identity_review_packet(
         ):
             findings.append(f"{claim_id}: stale Claim revision or SHA")
             continue
-        evidence_rows: list[ReviewEvidence] = []
         attestation_sha = eligibility_attestations.get(claim_id)
-        source_ids: set[str] = set()
-        for evidence_id in claim.evidence_step_ids:
-            evidence = evidence_index.get(evidence_id)
-            if not evidence or not evidence_fragment_ids(evidence):
-                findings.append(f"{claim_id}: missing evidence {evidence_id}")
-                continue
-            for fragment_id in evidence_fragment_ids(evidence):
-                fragment = fragment_index.get(fragment_id)
-                if not fragment:
-                    findings.append(
-                        f"{claim_id}: evidence {evidence_id} has no source fragment {fragment_id}"
-                    )
-                    continue
-                source_ids.add(fragment.source_id)
-                coverage_source = coverage_sources.get(fragment.source_id)
-                citation_id = str(fragment.citation_id or "")
-                citation = citation_index.get(citation_id)
-                citation_valid = bool(
-                    coverage_source
-                    and coverage_source.source_sha256 == fragment.source_sha256
-                    and evidence.support_eligibility in VALID_EVIDENCE_STATES
-                    and fragment.anchor_state in VALID_ANCHOR_STATES
-                    and citation_id
-                    and citation_id in evidence.citation_ids
-                    and citation
-                    and citation.status == "approved"
-                    and citation.source_id == fragment.source_id
-                    and citation.source_sha256 == fragment.source_sha256
-                    and evidence.evidence_step_id in citation.evidence_ids
-                )
-                attestation_valid = bool(
-                    coverage_source
-                    and coverage_source.source_sha256 == fragment.source_sha256
-                    and attestation_sha
-                    and evidence.support_eligibility
-                    in VALID_EVIDENCE_STATES | {"eligible_candidate"}
-                    and fragment.anchor_state in VALID_ANCHOR_STATES
-                )
-                evidence_rows.append(ReviewEvidence(
-                    evidence_step_id=evidence.evidence_step_id,
-                    source_fragment_id=fragment.fragment_id,
-                    source_id=fragment.source_id,
-                    paragraph_key=fragment.paragraph_key,
-                    media_time=fragment.media_time,
-                    evidence_statement=evidence.statement,
-                    verbatim_excerpt=fragment.verbatim_excerpt,
-                    citation_id=citation_id,
-                    citation_revision=citation.revision if citation else 1,
-                    citation_status=citation.status if citation else "unresolved",
-                    source_sha256=str(fragment.source_sha256 or ""),
-                    support_eligibility=evidence.support_eligibility,
-                    anchor_state=fragment.anchor_state,
-                    source_eligibility_attestation_sha256=attestation_sha,
-                    valid_for_identity_review=citation_valid or attestation_valid,
-                ))
-        if len(source_ids) != 1:
-            findings.append(f"{claim_id}: Claim evidence is not source-local")
+        review_claim, claim_findings = compile_review_claim(
+            claim=claim,
+            evidence_index=evidence_index,
+            fragment_index=fragment_index,
+            citation_index=citation_index,
+            coverage_source_sha256={
+                source_id: str(item.source_sha256 or "")
+                for source_id, item in coverage_sources.items()
+            },
+            attestation_sha=attestation_sha,
+            active_full_viewpoint_id=next(
+                iter(active_owners.get(claim.claim_id, set())), None
+            ),
+        )
+        findings.extend(claim_findings)
+        if review_claim is None:
             continue
-        evidence_rows.sort(
-            key=lambda item: (item.evidence_step_id, item.source_fragment_id)
-        )
-        source_id = next(iter(source_ids))
-        review_claims.append(
-            ReviewClaim(
-                claim_id=claim.claim_id,
-                pinned_claim_revision=claim.revision,
-                claim_revision_sha256=semantic_record_sha(claim),
-                source_id=source_id,
-                statement=claim.statement,
-                attribution=claim.attribution,
-                scripture_refs=sorted(
-                    {_scripture_ref(value) for value in claim.scripture_refs}
-                ),
-                review_status=claim.review_status,
-                source_eligibility_attestation_sha256=attestation_sha,
-                active_full_viewpoint_id=next(
-                    iter(active_owners.get(claim.claim_id, set())), None
-                ),
-                evidence=evidence_rows,
-            )
-        )
+        review_claims.append(review_claim)
         if claim.review_status not in APPROVED_STATUSES and not attestation_sha:
             blockers.append(
                 DeterministicBlocker(
@@ -911,7 +952,7 @@ def build_identity_review_packet(
                     detail="Claim attribution is not the professor.",
                 )
             )
-        if not evidence_rows or not all(item.valid_for_identity_review for item in evidence_rows):
+        if not all(item.valid_for_identity_review for item in review_claim.evidence):
             blockers.append(
                 DeterministicBlocker(
                     code="evidence_invalid",

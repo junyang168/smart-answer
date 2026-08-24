@@ -66,6 +66,50 @@ function Sources({ members }: { members: Member[] }) {
 
 function Empty({ text }: { text: string }) { return <p className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">{text}</p>; }
 
+const routeRoleLabels: Record<string, string> = {
+  observation: "观察", premise: "前提", bridge: "推论桥梁", objection: "反方意见",
+  response: "回应", qualification: "限定", conclusion: "结论", application: "应用",
+};
+
+function SourceLink({ locator }: { locator: { source_admin_url: string | null; source_url: string | null; source_type: string | null } }) {
+  const text = locator.source_type === "notes_manuscript" ? "打开母本" : "打开讲道";
+  if (locator.source_admin_url) return <Link href={locator.source_admin_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-indigo-700">{text}<ArrowUpRight className="h-3 w-3" /></Link>;
+  if (locator.source_url) return <a href={locator.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-indigo-700">打开来源<ArrowUpRight className="h-3 w-3" /></a>;
+  return null;
+}
+
+function ArgumentRoutes({ detail }: { detail: Detail }) {
+  if (!detail.routes.length) return <Empty text="当前 Registry 没有已审核的 source-local ArgumentRoute；不会把平铺经文伪装成完整路线。" />;
+  return <section className="space-y-5">{detail.routes.map((route) => {
+    const nodes = route.revision?.ordered_inference_nodes ?? [];
+    return <article key={route.route_id} className="overflow-hidden rounded-2xl border border-indigo-200 bg-white">
+      <header className="border-b border-indigo-100 bg-indigo-50 p-5">
+        <div className="flex flex-wrap items-center gap-2"><Route className="h-4 w-4 text-indigo-600" /><h3 className="font-black text-slate-950">{route.route_type}</h3><StatusBadge value={route.coverage.eligibility} /></div>
+        <p className="mt-2 text-xs text-slate-600">{route.coverage.full_attestation_count} 篇完整论证 · {route.coverage.partial_attestation_count} 篇局部论证 · {route.coverage.mode === "current_registry" ? "当前 Registry" : "coverage snapshot"}</p>
+        <div className="mt-3 flex flex-wrap gap-2">{route.revision?.route_signature.inference_method_codes.map((method) => <span key={method} className="rounded-full bg-white px-2.5 py-1 font-mono text-[10px] text-indigo-700 shadow-sm">{method}</span>)}</div>
+      </header>
+      <div className="p-5">
+        <p className="text-xs font-black uppercase tracking-wide text-slate-500">论证骨架</p>
+        <ol className="mt-3 space-y-0">{nodes.map((node, index) => <li key={node.route_step_key} className="relative grid grid-cols-[2rem_minmax(0,1fr)] gap-3 pb-5 last:pb-0">
+          {index < nodes.length - 1 ? <span className="absolute bottom-0 left-[0.95rem] top-8 w-px bg-indigo-200" /> : null}
+          <span className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${node.role === "conclusion" ? "bg-indigo-700 text-white" : "bg-indigo-100 text-indigo-800"}`}>{index + 1}</span>
+          <div className={`rounded-xl border p-3 ${node.role === "conclusion" ? "border-indigo-300 bg-indigo-50" : "border-slate-200"}`}><p className="text-[11px] font-black text-indigo-700">{routeRoleLabels[node.role] ?? node.role} · {node.route_step_key}</p><p className="mt-1 text-sm font-semibold leading-6 text-slate-900">{node.role === "conclusion" ? detail.revision.core_proposition : node.normalized_proposition}</p></div>
+        </li>)}</ol>
+        <div className="my-5 flex items-center gap-3"><span className="h-px flex-1 bg-slate-200" /><span className="text-xs font-black text-slate-500">各篇来源怎样论证</span><span className="h-px flex-1 bg-slate-200" /></div>
+        <div className="space-y-3">{route.attestations.map((item) => {
+          const firstLocator = item.bindings.flatMap((binding) => binding.evidence).flatMap((evidence) => evidence.fragments)[0]?.locator;
+          const fileName = firstLocator?.source_file_name;
+          return <details key={item.attestation.argument_route_attestation_id} className="rounded-xl border border-slate-200 bg-slate-50 p-4" open={route.attestations.length === 1}>
+            <summary className="cursor-pointer list-none"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-bold text-slate-950">{fileName ?? item.source?.title ?? item.attestation.source_id}</p><p className="mt-1 text-xs text-slate-500">{item.attestation.completeness === "full" ? "完整论证" : "局部论证"} · {item.bindings.filter((binding) => binding.binding.attestation_status === "attested").length} 个有证据步骤</p></div><div className="flex items-center gap-2"><StatusBadge value={item.attestation.review_status} />{firstLocator ? <SourceLink locator={firstLocator} /> : null}</div></div></summary>
+            <div className="mt-4 space-y-4 border-t border-slate-200 pt-4">{item.bindings.map((binding) => <section key={binding.binding.route_step_key} className="grid gap-3 lg:grid-cols-[11rem_minmax(0,1fr)]"><div><p className="text-xs font-black text-indigo-700">{routeRoleLabels[binding.node?.role ?? ""] ?? binding.node?.role ?? "步骤"}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{binding.binding.route_step_key}</p><StatusBadge value={binding.binding.attestation_status} /></div><div className="space-y-3">{binding.evidence.length ? binding.evidence.map((evidence, evidenceIndex) => <div key={evidence.evidence_step?.evidence_step_id ?? evidenceIndex}><p className="text-sm font-semibold leading-6 text-slate-800">{evidence.evidence_step?.statement ?? "缺少 EvidenceStep"}</p>{evidence.fragments.map((fragment) => <blockquote key={fragment.source_fragment.fragment_id} className="mt-2 rounded-xl border-l-4 border-indigo-400 bg-white p-4 text-sm leading-6 text-slate-700"><Quote className="mb-2 h-4 w-4 text-indigo-400" />{fragment.source_fragment.verbatim_excerpt}<footer className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{fragment.locator.source_file_name ?? item.source?.title ?? item.attestation.source_id} · ¶{String(fragment.locator.paragraph_key ?? "?")}{fragment.locator.media_time != null ? ` · ${Math.floor(fragment.locator.media_time / 60)}:${String(Math.floor(fragment.locator.media_time % 60)).padStart(2, "0")}` : ""}</span><SourceLink locator={fragment.locator} /></footer></blockquote>)}</div>) : <p className="text-xs text-slate-500">此步骤在这篇来源中标为 {binding.binding.attestation_status}。</p>}</div></section>)}</div>
+          </details>;
+        })}</div>
+        <p className="mt-4 break-all font-mono text-[10px] text-slate-400">{route.route_id}</p>
+      </div>
+    </article>;
+  })}</section>;
+}
+
 export function ViewpointDetail() {
   const routeParams = useParams<{ viewpointId: string }>();
   const search = useSearchParams(); const router = useRouter();
@@ -98,7 +142,7 @@ export function ViewpointDetail() {
       <nav className="flex overflow-x-auto border-b border-slate-200" aria-label="观点详情视图">{tabs.map(([value, text]) => <button key={value} onClick={() => setTab(value)} aria-current={tab === value ? "page" : undefined} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-bold ${tab === value ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-900"}`}>{text}</button>)}</nav>
       {tab === "graph" && <BoundedGraph detail={d} />}
       {tab === "sources" && <Sources members={d.members} />}
-      {tab === "routes" && <section className="space-y-3">{d.routes.length ? d.routes.map((route) => <article key={route.route_id} className="rounded-2xl border border-indigo-200 bg-white p-5"><div className="flex items-center gap-2"><Route className="h-4 w-4 text-indigo-600" /><h3 className="font-bold text-slate-950">{route.route_type}</h3><StatusBadge value={route.snapshot?.eligibility ?? "candidate_only"} /></div><p className="mt-2 text-sm text-slate-600">{route.claim_id ? `终点 Claim ${route.claim_id} · ` : ""}{route.evidence_step_ids.length} 个按来源顺序保存的 EvidenceStep</p><p className="mt-1 text-xs text-slate-500">{route.snapshot ? `完整来源 ${route.snapshot.full_attestation_count} · 局部来源 ${route.snapshot.partial_attestation_count}` : "当前 coverage 无 route snapshot"}</p><p className="mt-2 font-mono text-[11px] text-slate-400">{route.route_id}</p></article>) : <Empty text="当前快照没有已审核的 source-local ArgumentRoute；不会把平铺经文伪装成完整路线。" />}</section>}
+      {tab === "routes" && <ArgumentRoutes detail={d} />}
       {tab === "relations" && <section className="space-y-3">{d.relations.length ? d.relations.map((relation) => <article key={relation.relation_id} className={`rounded-2xl border p-5 ${relation.relation_type === "tensions_with" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}><div className="flex flex-wrap items-center gap-2"><GitBranch className="h-4 w-4" /><strong>{label(relation.relation_type)}</strong><StatusBadge value={relation.review_status} /></div><p className="mt-3 text-sm leading-6 text-slate-800">{relation.claim_statement ?? relation.claim_id}</p><p className="mt-2 font-mono text-[11px] text-slate-500">{relation.from_viewpoint_id} → {relation.to_viewpoint_id}</p></article>) : <Empty text="当前快照没有直接 typed relation 或 unresolved tension。" />}</section>}
       {tab === "history" && <div className="grid gap-5 lg:grid-cols-2"><section><h2 className="mb-3 font-black text-slate-950">语义修订历史</h2><div className="space-y-3">{d.history.map((revision) => <article key={revision.viewpoint_revision_id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex justify-between gap-3"><strong>Revision {revision.revision_number}</strong><StatusBadge value={revision.review_status} /></div><p className="mt-2 text-sm leading-6">{revision.core_proposition}</p><p className="mt-2 font-mono text-[10px] text-slate-400">{revision.viewpoint_revision_id}</p></article>)}</div></section><section><h2 className="mb-3 font-black text-slate-950">产品影响</h2>{d.impact.dependencies.length || d.impact.events.length ? <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-200">{JSON.stringify(d.impact, null, 2)}</pre> : <Empty text="当前没有 pinned product dependency 或 pending ImpactEvent。" />}</section></div>}
       <details className="rounded-xl border border-slate-200 bg-slate-50 p-4"><summary className="cursor-pointer text-sm font-bold text-slate-700">Provenance 与 raw projection</summary><pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-all text-[11px] text-slate-600">{JSON.stringify({ authority: payload.authority, as_of: payload.as_of, projection_sha256: payload.projection_sha256, viewpoint: d.viewpoint, revision: d.revision }, null, 2)}</pre></details>

@@ -185,8 +185,8 @@ def validate_runtime_authoring_graph(
     for attestation_id, attestation in attestations.items():
         route_id = str(attestation["argument_route_id"])
         route = routes.get(route_id)
-        revision_id = str(attestation["validated_against_argument_route_revision_id"])
-        claim_id = str(attestation["claim_id"])
+        revision_id = str(attestation["validated_against_route_revision_id"])
+        claim_ids = [str(value) for value in attestation.get("claim_ids") or []]
         link = links.get(str(attestation["terminal_claim_link_id"]))
         if not route:
             findings.append(f"{attestation_id}: missing argument route {route_id}")
@@ -196,28 +196,60 @@ def validate_runtime_authoring_graph(
             findings.append(f"{attestation_id}: missing route revision {revision_id}")
         if str(attestation["source_id"]) not in sources:
             findings.append(f"{attestation_id}: missing source {attestation['source_id']}")
-        if claim_id not in claims:
-            findings.append(f"{attestation_id}: missing terminal Claim {claim_id}")
-        if not link or link.get("claim_id") != claim_id:
+        for claim_id in claim_ids:
+            if claim_id not in claims:
+                findings.append(f"{attestation_id}: missing Claim {claim_id}")
+        if not link or str(link.get("claim_id")) not in claim_ids:
             findings.append(f"{attestation_id}: terminal Claim link mismatch")
         elif route and link.get("viewpoint_id") != route.get("conclusion_viewpoint_id"):
             findings.append(f"{attestation_id}: terminal Claim link concludes another viewpoint")
         elif link.get("effective_state") != "active":
             findings.append(f"{attestation_id}: terminal Claim link is not active")
         derived_refs: set[str] = set()
-        for step_id in attestation.get("ordered_evidence_step_ids") or []:
-            step = evidence.get(str(step_id))
-            if not step:
-                findings.append(f"{attestation_id}: missing evidence step {step_id}")
-                continue
-            bound = [fragments.get(value) for value in evidence_fragment_ids(step)]
-            if not bound or any(
-                not fragment or fragment.get("source_id") != attestation.get("source_id")
+        route_revision = route_revisions.get(revision_id) or {}
+        node_keys = {
+            str(item.get("route_step_key"))
+            for item in route_revision.get("ordered_inference_nodes") or []
+        }
+        required_keys = {
+            str(item.get("route_step_key"))
+            for item in route_revision.get("ordered_inference_nodes") or []
+            if item.get("required_for_full_attestation")
+        }
+        attested_keys: set[str] = set()
+        for binding in attestation.get("step_bindings") or []:
+            step_key = str(binding.get("route_step_key") or "")
+            if step_key not in node_keys:
+                findings.append(f"{attestation_id}: unknown route step {step_key}")
+            if binding.get("attestation_status") == "attested":
+                attested_keys.add(step_key)
+            selected_fragment_ids = {
+                str(value) for value in binding.get("source_fragment_ids") or []
+            }
+            allowed_fragment_union: set[str] = set()
+            for step_id in binding.get("evidence_step_ids") or []:
+                step = evidence.get(str(step_id))
+                if not step:
+                    findings.append(f"{attestation_id}: missing evidence step {step_id}")
+                    continue
+                allowed_fragment_ids = set(evidence_fragment_ids(step))
+                allowed_fragment_union |= allowed_fragment_ids
+                if not selected_fragment_ids & allowed_fragment_ids:
+                    findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
+                derived_refs.update(str(value) for value in step.get("scripture_refs") or [])
+            if not selected_fragment_ids or not selected_fragment_ids <= allowed_fragment_union:
+                findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
+            bound = [fragments.get(value) for value in selected_fragment_ids]
+            if any(
+                not fragment
+                or fragment.get("source_id") != attestation.get("source_id")
+                or fragment.get("source_sha256") != attestation.get("source_revision_sha256")
                 for fragment in bound
             ):
-                findings.append(f"{attestation_id}: evidence step {step_id} is not source-local")
-            derived_refs.update(str(value) for value in step.get("scripture_refs") or [])
-        if sorted(derived_refs) != list(attestation.get("scripture_refs") or []):
+                findings.append(f"{attestation_id}: route binding is not source-local")
+        if attestation.get("completeness") == "full" and not required_keys <= attested_keys:
+            findings.append(f"{attestation_id}: full attestation misses required route steps")
+        if sorted(derived_refs) != list(attestation.get("scripture_refs_derived") or []):
             findings.append(f"{attestation_id}: derived scripture refs mismatch")
 
     for relation_id, relation in relations.items():
@@ -300,7 +332,7 @@ class ViewpointRuntimeCompiler:
                 and item.effective_state == "active"
                 and item.source_id in covered_sources
             ], key=lambda item: item.argument_route_attestation_id)
-            stale = [item.argument_route_attestation_id for item in attestations if item.validated_against_argument_route_revision_id != route.current_revision_id]
+            stale = [item.argument_route_attestation_id for item in attestations if item.validated_against_route_revision_id != route.current_revision_id]
             if stale:
                 raise ViewpointRuntimeProjectionError([f"{route.argument_route_id}: stale attestations {', '.join(stale)}"])
             full = [item for item in attestations if item.completeness == "full"]

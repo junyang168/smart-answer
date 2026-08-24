@@ -36,6 +36,23 @@ def subscription_environment(source: Mapping[str, str] | None = None) -> dict[st
     return values
 
 
+def _resolve_executable(override: str | None = None) -> str:
+    """Find the claude CLI: explicit override, then CLAUDE_EXECUTABLE, then PATH.
+
+    The CLI ships inside application bundles that are not on PATH, so a
+    machine can have it installed and still fail `shutil.which`. CLAUDE_EXECUTABLE
+    lets a checkout record where this machine keeps it instead of every caller
+    reconstructing a PATH.
+    """
+
+    if override:
+        return override
+    configured = os.environ.get("CLAUDE_EXECUTABLE", "").strip()
+    if configured:
+        return configured
+    return shutil.which("claude") or "claude"
+
+
 def _diagnostic(completed: subprocess.CompletedProcess[str]) -> str:
     detail = (completed.stderr or completed.stdout or "no diagnostic output").strip()
     return detail[-4000:]
@@ -62,7 +79,7 @@ class ClaudeSubscriptionClient:
         # Kept for the shared reviewer fingerprint. Claude Code does not expose
         # an output-token ceiling flag; its schema-constrained turn owns that.
         self.max_output_tokens = max_output_tokens
-        self.executable = executable or shutil.which("claude") or "claude"
+        self.executable = _resolve_executable(executable)
         self.environment = subscription_environment(environment)
         # Subscription calls are not API-billed per invocation. Feeding their
         # token metadata to API pricing would invent a dollar charge.

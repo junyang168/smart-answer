@@ -1078,7 +1078,35 @@ class PostgresKnowledgeStore:
             str(payload["relation_type"]),
         )
 
-    def apply_plan(self, plan: ChangeSetPlan, *, metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    @staticmethod
+    def _assert_current_viewpoint_revisions(
+        cursor: Any, expected: Mapping[str, str]
+    ) -> None:
+        """Lock conclusions and perform the Route apply compare-and-swap."""
+
+        for viewpoint_id, revision_id in sorted(expected.items()):
+            cursor.execute(
+                """SELECT payload->>'current_revision_id'
+                   FROM wang_knowledge.objects
+                   WHERE collection='canonical_viewpoints' AND object_id=%s
+                     AND retired_at IS NULL FOR UPDATE""",
+                (viewpoint_id,),
+            )
+            row = cursor.fetchone()
+            observed = str(row[0]) if row and row[0] is not None else None
+            if observed != revision_id:
+                raise ChangeSetConflict(
+                    f"Route conclusion {viewpoint_id} expected current revision "
+                    f"{revision_id}, found {observed or 'missing'}"
+                )
+
+    def apply_plan(
+        self,
+        plan: ChangeSetPlan,
+        *,
+        metadata: Optional[dict[str, Any]] = None,
+        expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
+    ) -> dict[str, Any]:
         with self.connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -1088,6 +1116,10 @@ class PostgresKnowledgeStore:
                 prior = cursor.fetchone()
                 if prior and prior[0] == "applied":
                     return {"status": "already_applied", "change_set_id": plan.change_set_id, "summary": prior[1]}
+
+                self._assert_current_viewpoint_revisions(
+                    cursor, expected_current_viewpoint_revisions or {}
+                )
 
                 summary = plan.as_dict()["summary"]
                 cursor.execute(

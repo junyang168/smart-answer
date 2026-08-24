@@ -41,6 +41,23 @@ def subscription_environment(source: Mapping[str, str] | None = None) -> dict[st
     return values
 
 
+def _resolve_executable(override: str | None = None) -> str:
+    """Find the codex CLI: explicit override, then CODEX_EXECUTABLE, then PATH.
+
+    The CLI ships inside application bundles that are not on PATH, so a
+    machine can have it installed and still fail `shutil.which`. CODEX_EXECUTABLE
+    lets a checkout record where this machine keeps it instead of every caller
+    reconstructing a PATH.
+    """
+
+    if override:
+        return override
+    configured = os.environ.get("CODEX_EXECUTABLE", "").strip()
+    if configured:
+        return configured
+    return shutil.which("codex") or "codex"
+
+
 def _diagnostic(completed: subprocess.CompletedProcess[str]) -> str:
     detail = (completed.stderr or completed.stdout or "no diagnostic output").strip()
     return detail[-4000:]
@@ -72,7 +89,7 @@ class CodexSubscriptionClient:
         self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_output_tokens = max_output_tokens
-        self.executable = executable or shutil.which("codex") or "codex"
+        self.executable = _resolve_executable(executable)
         self.environment = subscription_environment(environment)
         self.last_usage: Any = None
         self._authenticated = False

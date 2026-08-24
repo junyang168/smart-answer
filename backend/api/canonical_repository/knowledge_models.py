@@ -599,12 +599,49 @@ class ViewpointRevisionRecord(StrictViewpointRecord):
         return self
 
 
+class ViewpointComponentSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    exact_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_span(self) -> "ViewpointComponentSpan":
+        if self.end_char <= self.start_char:
+            raise ValueError("component span is empty or reversed")
+        if len(self.exact_text) != self.end_char - self.start_char:
+            raise ValueError("component span exact_text length does not match its range")
+        return self
+
+
 class ViewpointComponentLocator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     statement_component: str = Field(min_length=1)
     claim_sha256: str
-    json_pointer: str = Field(min_length=1)
+    canonical_spans: list[ViewpointComponentSpan] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_spans(self) -> "ViewpointComponentLocator":
+        spans = [(item.start_char, item.end_char) for item in self.canonical_spans]
+        if spans != sorted(set(spans)):
+            raise ValueError("component spans must be sorted and unique")
+        for earlier, later in zip(spans, spans[1:], strict=False):
+            if later[0] < earlier[1]:
+                raise ValueError("component spans overlap")
+        if self.statement_component != "".join(
+            item.exact_text for item in self.canonical_spans
+        ):
+            raise ValueError("statement_component does not match canonical spans")
+        return self
+
+
+class ViewpointClaimEvidenceBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_step_id: str = Field(min_length=1)
+    source_fragment_id: str = Field(min_length=1)
 
 
 class ViewpointClaimLinkRecord(StrictViewpointRecord):
@@ -626,6 +663,7 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
     ]
     component_locator: Optional[ViewpointComponentLocator] = None
     supporting_relation_ids: list[str] = Field(default_factory=list)
+    evidence_bindings: list[ViewpointClaimEvidenceBinding] = Field(default_factory=list)
     occurrence_refs: list[str] = Field(default_factory=list)
     decision_id: str
     effective_state: Literal["active", "invalidated", "retired"] = "active"
@@ -636,10 +674,16 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
             raise ValueError("supporting_relation_ids must be sorted and unique")
         if self.occurrence_refs != sorted(set(self.occurrence_refs)):
             raise ValueError("occurrence_refs must be sorted and unique")
+        bindings = [
+            (item.evidence_step_id, item.source_fragment_id)
+            for item in self.evidence_bindings
+        ]
+        if bindings != sorted(set(bindings)):
+            raise ValueError("evidence_bindings must be sorted and unique")
         if self.link_type == "equivalent_component" and not self.component_locator:
             raise ValueError("equivalent_component requires component_locator")
-        if self.link_type != "equivalent_component" and self.component_locator is not None:
-            raise ValueError("component_locator is only valid for equivalent_component")
+        if self.link_type == "equivalent_full" and self.component_locator is not None:
+            raise ValueError("equivalent_full spans the whole Claim and has no locator")
         if self.effective_state == "active" and self.review_status not in {
             "system_approved",
             "human_approved",
@@ -945,9 +989,44 @@ class ViewpointAutomatedPromotionDecisionRecord(StrictViewpointRecord):
 class ArgumentRouteSignature(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    premise_roles: list[str] = Field(min_length=1)
-    inference_pattern: str = Field(min_length=1)
+    inference_method_codes: list[str] = Field(min_length=1)
+    inference_method_note: Optional[str] = None
     conclusion_viewpoint_id: str
+
+    @model_validator(mode="after")
+    def validate_methods(self) -> "ArgumentRouteSignature":
+        if self.inference_method_codes != sorted(set(self.inference_method_codes)):
+            raise ValueError("inference_method_codes must be sorted and unique")
+        if "other" in self.inference_method_codes and not self.inference_method_note:
+            raise ValueError("other inference method requires a note")
+        return self
+
+
+class ArgumentRouteInferenceNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route_step_key: str = Field(min_length=1)
+    role: Literal[
+        "observation", "premise", "bridge", "objection", "response",
+        "qualification", "conclusion", "application",
+    ]
+    normalized_proposition: Optional[str] = None
+    conclusion_viewpoint_revision_id: Optional[str] = None
+    required_for_full_attestation: bool
+
+    @model_validator(mode="after")
+    def validate_node(self) -> "ArgumentRouteInferenceNode":
+        if self.role == "conclusion":
+            if not self.conclusion_viewpoint_revision_id:
+                raise ValueError("conclusion node requires viewpoint revision")
+            if self.normalized_proposition is not None:
+                raise ValueError("conclusion node does not duplicate normalized proposition")
+        else:
+            if not self.normalized_proposition:
+                raise ValueError(f"{self.role} node requires normalized proposition")
+            if self.conclusion_viewpoint_revision_id is not None:
+                raise ValueError("only conclusion node carries viewpoint revision")
+        return self
 
 
 class ArgumentRouteRecord(StrictViewpointRecord):
@@ -969,12 +1048,13 @@ class ArgumentRouteRecord(StrictViewpointRecord):
 
 class ArgumentRouteRevisionRecord(StrictViewpointRecord):
     argument_route_revision_id: str
-    schema_version: Literal["wang_argument_route_revision_v1"] = "wang_argument_route_revision_v1"
+    schema_version: Literal["wang_argument_route_revision_v2"] = "wang_argument_route_revision_v2"
     argument_route_id: str
     revision_number: int = Field(ge=1)
     validated_against_conclusion_viewpoint_revision_id: str
     route_label: str = Field(min_length=1)
     route_signature: ArgumentRouteSignature
+    ordered_inference_nodes: list[ArgumentRouteInferenceNode] = Field(min_length=2)
     representation_kind: Literal["editorial_normalization_of_attested_arguments"] = (
         "editorial_normalization_of_attested_arguments"
     )
@@ -990,29 +1070,70 @@ class ArgumentRouteRevisionRecord(StrictViewpointRecord):
         if self.review_status in {"system_approved", "human_approved", "approved"}:
             if not self.approved_by or not self.approved_at:
                 raise ValueError("approved route revision requires approved_by and approved_at")
+        keys = [item.route_step_key for item in self.ordered_inference_nodes]
+        if keys != list(dict.fromkeys(keys)):
+            raise ValueError("route step keys must be unique")
+        conclusions = [item for item in self.ordered_inference_nodes if item.role == "conclusion"]
+        if len(conclusions) != 1 or self.ordered_inference_nodes[-1].role != "conclusion":
+            raise ValueError("route must end in exactly one conclusion node")
+        if (
+            conclusions[0].conclusion_viewpoint_revision_id
+            != self.validated_against_conclusion_viewpoint_revision_id
+        ):
+            raise ValueError("route conclusion node revision mismatch")
+        return self
+
+
+class ArgumentRouteStepBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route_step_key: str = Field(min_length=1)
+    claim_component_keys: list[str] = Field(default_factory=list)
+    evidence_step_ids: list[str] = Field(default_factory=list)
+    source_fragment_ids: list[str] = Field(default_factory=list)
+    attestation_status: Literal["attested", "missing", "ambiguous"]
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> "ArgumentRouteStepBinding":
+        for values, label in (
+            (self.claim_component_keys, "claim_component_keys"),
+            (self.evidence_step_ids, "evidence_step_ids"),
+            (self.source_fragment_ids, "source_fragment_ids"),
+        ):
+            if values != sorted(set(values)):
+                raise ValueError(f"{label} must be sorted and unique")
+        if self.attestation_status == "attested" and not (
+            self.claim_component_keys and self.evidence_step_ids and self.source_fragment_ids
+        ):
+            raise ValueError("attested route step requires component, evidence and fragment")
         return self
 
 
 class ArgumentRouteAttestationRecord(StrictViewpointRecord):
     argument_route_attestation_id: str
-    schema_version: Literal["wang_argument_route_attestation_v1"] = "wang_argument_route_attestation_v1"
+    schema_version: Literal["wang_argument_route_attestation_v2"] = "wang_argument_route_attestation_v2"
     argument_route_id: str
-    validated_against_argument_route_revision_id: str
+    validated_against_route_revision_id: str
     source_id: str
-    claim_id: str
+    source_revision_sha256: str = Field(min_length=1)
+    claim_ids: list[str] = Field(min_length=1)
     occurrence_ref_id: str
-    ordered_evidence_step_ids: list[str] = Field(min_length=1)
+    step_bindings: list[ArgumentRouteStepBinding] = Field(min_length=1)
     terminal_claim_link_id: str
     completeness: Literal["full", "partial"]
-    scripture_refs: list[str] = Field(default_factory=list)
+    scripture_refs_derived: list[str] = Field(default_factory=list)
+    review_artifact_sha256: str = Field(min_length=1)
     effective_state: Literal["active", "invalidated", "retired"] = "active"
 
     @model_validator(mode="after")
     def validate_ordered_ids(self) -> "ArgumentRouteAttestationRecord":
-        if len(self.ordered_evidence_step_ids) != len(set(self.ordered_evidence_step_ids)):
-            raise ValueError("ordered_evidence_step_ids must be unique")
-        if self.scripture_refs != sorted(set(self.scripture_refs)):
-            raise ValueError("scripture_refs must be sorted and unique")
+        if self.claim_ids != sorted(set(self.claim_ids)):
+            raise ValueError("claim_ids must be sorted and unique")
+        keys = [item.route_step_key for item in self.step_bindings]
+        if len(keys) != len(set(keys)):
+            raise ValueError("step_bindings must bind each route node at most once")
+        if self.scripture_refs_derived != sorted(set(self.scripture_refs_derived)):
+            raise ValueError("scripture_refs_derived must be sorted and unique")
         if self.effective_state == "active" and self.review_status not in {
             "system_approved", "human_approved", "approved"
         }:
@@ -1073,7 +1194,8 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
     seed_relation_ids: list[str] = Field(default_factory=list)
     proposed_action: Literal["match_existing", "create_new", "defer"]
     proposed_proposition_signature: Optional[ViewpointPropositionSignature] = None
-    coverage_snapshot_id: str
+    coverage_snapshot_id: Optional[str] = None
+    scope_manifest_sha256: Optional[str] = None
     blocker_codes: list[ViewpointBlockerCode] = Field(default_factory=list)
     generation_fingerprint: str
     review_status: Literal["candidate"] = "candidate"
@@ -1092,6 +1214,10 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
             raise ValueError("match_existing requires a candidate viewpoint")
         if self.blocker_codes and self.proposed_action != "defer":
             raise ValueError("blocked candidate must be deferred")
+        if bool(self.coverage_snapshot_id) == bool(self.scope_manifest_sha256):
+            raise ValueError(
+                "identity candidate requires exactly one legacy coverage or scope manifest binding"
+            )
         return self
 
 

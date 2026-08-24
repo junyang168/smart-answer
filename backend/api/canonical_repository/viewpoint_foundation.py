@@ -972,6 +972,7 @@ def validate_foundation_change_set(
 
     active_full: dict[tuple[str, int], set[str]] = defaultdict(set)
     active_link_keys: dict[tuple[str, str, int, str], list[str]] = defaultdict(list)
+    active_component_owners: dict[str, set[str]] = defaultdict(set)
     for link_id, link in links.items():
         claim_id = str(link["claim_id"])
         viewpoint_id = str(link["viewpoint_id"])
@@ -1014,6 +1015,35 @@ def validate_foundation_change_set(
         component = link.get("component_locator")
         if component and claim and component.get("claim_sha256") != semantic_record_sha(claim):
             findings.append(f"{link_id}: component locator Claim SHA mismatch")
+        if component and claim:
+            statement = str(claim.get("statement") or "")
+            rebuilt: list[str] = []
+            for span in component.get("canonical_spans") or []:
+                start = int(span.get("start_char", -1))
+                end = int(span.get("end_char", -1))
+                exact_text = str(span.get("exact_text") or "")
+                if start < 0 or end > len(statement) or statement[start:end] != exact_text:
+                    findings.append(
+                        f"{link_id}: component span {start}-{end} does not match pinned Claim"
+                    )
+                rebuilt.append(exact_text)
+            if "".join(rebuilt) != component.get("statement_component"):
+                findings.append(f"{link_id}: component locator text mismatch")
+        for binding in link.get("evidence_bindings") or []:
+            step_id = str(binding.get("evidence_step_id") or "")
+            fragment_id = str(binding.get("source_fragment_id") or "")
+            step = evidence_steps.get(step_id)
+            fragment = source_fragments.get(fragment_id)
+            if not step or step_id not in set(claim.get("evidence_step_ids") or []):
+                findings.append(f"{link_id}: evidence binding has invalid step {step_id}")
+            elif fragment_id not in evidence_fragment_ids(step):
+                findings.append(
+                    f"{link_id}: EvidenceStep {step_id} does not bind fragment {fragment_id}"
+                )
+            if not fragment:
+                findings.append(
+                    f"{link_id}: evidence binding has missing fragment {fragment_id}"
+                )
         for relation_id in link.get("supporting_relation_ids") or []:
             if str(relation_id) not in claim_relations:
                 findings.append(f"{link_id}: missing supporting relation {relation_id}")
@@ -1024,6 +1054,33 @@ def validate_foundation_change_set(
             ].append(link_id)
             if link.get("link_type") == "equivalent_full":
                 active_full[(claim_id, int(link["pinned_claim_revision"]))].add(viewpoint_id)
+            if link.get("link_type") in {"equivalent_full", "equivalent_component"} and claim:
+                canonical_spans = (
+                    [
+                        [
+                            int(span["start_char"]),
+                            int(span["end_char"]),
+                            str(span["exact_text"]),
+                        ]
+                        for span in component.get("canonical_spans") or []
+                    ]
+                    if component
+                    else [
+                        [
+                            0,
+                            len(str(claim.get("statement") or "")),
+                            str(claim.get("statement") or ""),
+                        ]
+                    ]
+                )
+                component_identity = sha256_json(
+                    {
+                        "claim_id": claim_id,
+                        "claim_revision_sha256": semantic_record_sha(claim),
+                        "canonical_spans": canonical_spans,
+                    }
+                )
+                active_component_owners[component_identity].add(viewpoint_id)
     for key, link_ids in active_link_keys.items():
         if len(link_ids) > 1:
             findings.append(
@@ -1033,6 +1090,12 @@ def validate_foundation_change_set(
     for key, owners in active_full.items():
         if len(owners) > 1:
             findings.append(f"{key[0]}@{key[1]}: multiple active equivalent_full memberships")
+    for component_identity, owners in active_component_owners.items():
+        if len(owners) > 1:
+            findings.append(
+                f"Claim component {component_identity}: multiple active viewpoint owners "
+                + ", ".join(sorted(owners))
+            )
 
     for unit_id, unit in proposition_units.items():
         claim_id = str(unit["parent_claim_id"])
@@ -1289,6 +1352,10 @@ def validate_foundation_change_set(
             "coverage_snapshot_id": candidate.get("coverage_snapshot_id"),
             "generation_fingerprint": candidate.get("generation_fingerprint"),
         }
+        if candidate.get("scope_manifest_sha256"):
+            candidate_identity["scope_manifest_sha256"] = candidate.get(
+                "scope_manifest_sha256"
+            )
         if candidate_id != f"VIC-{sha256_json(candidate_identity)[:20]}":
             findings.append(f"{candidate_id}: unstable identity candidate id")
         for claim_id in candidate.get("candidate_claim_ids") or []:
@@ -1297,8 +1364,14 @@ def validate_foundation_change_set(
         for viewpoint_id in candidate.get("candidate_viewpoint_ids") or []:
             if str(viewpoint_id) not in viewpoints:
                 findings.append(f"{candidate_id}: missing viewpoint {viewpoint_id}")
-        if str(candidate["coverage_snapshot_id"]) not in coverages:
+        if candidate.get("coverage_snapshot_id") and str(
+            candidate["coverage_snapshot_id"]
+        ) not in coverages:
             findings.append(f"{candidate_id}: missing coverage snapshot")
+        if not candidate.get("coverage_snapshot_id") and not candidate.get(
+            "scope_manifest_sha256"
+        ):
+            findings.append(f"{candidate_id}: missing scope manifest binding")
         for relation_id in candidate.get("seed_relation_ids") or []:
             relation = claim_relations.get(str(relation_id))
             if not relation:

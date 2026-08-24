@@ -38,6 +38,8 @@
 26. [來源逐句對帳與 claim 層完整性 v1](./source_to_claim_layer_ledger_v1.md)
 27. [王教授文庫營運總表 v1](./operational_dashboard_v1.md)
 
+CanonicalViewpoint Registry 的 feature introduction 位于 [#200](https://github.com/junyang168/smart-answer/issues/200)。2026-08-23 的 production batch resolution 简化决策由 [#204](https://github.com/junyang168/smart-answer/issues/204) 追踪；规范流程为 Opus 5/high 在同一个 proposal 中联合提出 viewpoints、ArgumentRoutes 与 source-local attestations，经过确定性 validation、GPT-5.6 sol/high independent review、最多一次 finding-only reconsideration 后生成原子 Registry ChangeSet。旧 recall/signature/promotion artifacts 保留为历史诊断，不再是每批必经流程。
+
 共享知识模型已经开始正式落地：类型定义、关系验证、幂等迁移和版本保护位于 `backend/api/canonical_repository/knowledge_models.py`、`knowledge_importer.py` 与 `store.py`。`$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json` 仍是 legacy 候选交换包，不等于 PostgreSQL authoring authority，也不会直接进入公开文库。
 
 ## 当前实施进度（2026-08-15）

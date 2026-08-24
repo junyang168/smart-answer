@@ -29,6 +29,7 @@ from .knowledge_models import (
     ViewpointQualityReportRecord,
     ViewpointResolutionLedgerRecord,
     ViewpointRevisionRecord,
+    evidence_fragment_ids,
 )
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 from .viewpoint_resolution import ViewpointExceptionQueueArtifact
@@ -814,22 +815,123 @@ class AdminViewpointProjectionCompiler:
             attestations = sorted(
                 [
                     item for item in route_attestations
-                    if snapshot and item.argument_route_attestation_id in snapshot.active_attestation_ids
+                    if (
+                        item.argument_route_id == route.argument_route_id
+                        and item.effective_state == "active"
+                        and item.validated_against_route_revision_id == route.current_revision_id
+                        and (
+                            not snapshot
+                            or item.argument_route_attestation_id
+                            in snapshot.active_attestation_ids
+                        )
+                    )
                 ],
                 key=lambda item: item.argument_route_attestation_id,
             )
-            evidence_step_ids = [
-                step_id for item in attestations for step_id in item.ordered_evidence_step_ids
+            evidence_step_ids = sorted({
+                step_id
+                for item in attestations
+                for binding in item.step_bindings
+                for step_id in binding.evidence_step_ids
+            })
+            approved_statuses = {"system_approved", "human_approved", "approved"}
+            full_attestations = [
+                item for item in attestations if item.completeness == "full"
             ]
+            current_registry_ready = bool(
+                route_revision
+                and route_revision.review_status in approved_statuses
+                and full_attestations
+                and all(
+                    item.review_status in approved_statuses
+                    for item in full_attestations
+                )
+            )
+            display_attestations = []
+            nodes_by_key = {
+                item.route_step_key: item
+                for item in (route_revision.ordered_inference_nodes if route_revision else [])
+            }
+            for attestation in attestations:
+                source = sources.get(attestation.source_id)
+                bindings = []
+                for binding in attestation.step_bindings:
+                    evidence_items = []
+                    for evidence_id in binding.evidence_step_ids:
+                        step = evidence.get(evidence_id)
+                        bound_fragment_ids = (
+                            set(evidence_fragment_ids(step))
+                            & set(binding.source_fragment_ids)
+                            if step else set()
+                        )
+                        evidence_items.append({
+                            "evidence_step": _dump(step) if step else None,
+                            "fragments": [
+                                {
+                                    "source_fragment": _dump(fragments[fragment_id]),
+                                    "locator": {
+                                        "source_url": (
+                                            fragments[fragment_id].source_url
+                                            or (source.source_url if source else None)
+                                        ),
+                                        "source_admin_url": (
+                                            f"/admin/wang/source-coverage?source={quote(attestation.source_id)}"
+                                            f"&fragment={quote(fragment_id)}"
+                                        ),
+                                        "source_file_name": (
+                                            Path(getattr(source, "source_path", "")).name
+                                            if source and getattr(source, "source_path", "")
+                                            else None
+                                        ),
+                                        "source_type": source.source_type if source else None,
+                                        "paragraph_key": fragments[fragment_id].paragraph_key,
+                                        "media_time": fragments[fragment_id].media_time,
+                                    },
+                                }
+                                for fragment_id in sorted(bound_fragment_ids)
+                                if fragment_id in fragments
+                            ],
+                        })
+                    bindings.append({
+                        "binding": _dump(binding),
+                        "node": (
+                            _dump(nodes_by_key[binding.route_step_key])
+                            if binding.route_step_key in nodes_by_key else None
+                        ),
+                        "evidence": evidence_items,
+                    })
+                display_attestations.append({
+                    "attestation": _dump(attestation),
+                    "source": _dump(source) if source else None,
+                    "bindings": bindings,
+                })
+            coverage = (
+                {
+                    "mode": "coverage_snapshot",
+                    "eligibility": snapshot.eligibility,
+                    "full_attestation_count": snapshot.full_attestation_count,
+                    "partial_attestation_count": snapshot.partial_attestation_count,
+                }
+                if snapshot else {
+                    "mode": "current_registry",
+                    "eligibility": (
+                        "approved_evidence_ready"
+                        if current_registry_ready else "candidate_only"
+                    ),
+                    "full_attestation_count": len(full_attestations),
+                    "partial_attestation_count": len(attestations) - len(full_attestations),
+                }
+            )
             routes.append({
                 "route_id": route.argument_route_id,
                 "route_type": route_revision.route_label if route_revision else "推理路线",
-                "claim_id": attestations[0].claim_id if attestations else None,
+                "claim_id": attestations[0].claim_ids[0] if attestations else None,
                 "evidence_step_ids": evidence_step_ids,
                 "route": _dump(route),
                 "revision": _dump(route_revision) if route_revision else None,
-                "attestations": [_dump(item) for item in attestations],
+                "attestations": display_attestations,
                 "snapshot": snapshot.model_dump(mode="json") if snapshot else None,
+                "coverage": coverage,
             })
         revisions = sorted(
             [_dump(item) for item in self.records["viewpoint_revisions"] if item.viewpoint_id == viewpoint_id],

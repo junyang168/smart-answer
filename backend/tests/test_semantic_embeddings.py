@@ -79,10 +79,17 @@ def _route() -> ArgumentRouteRevisionRecord:
         validated_against_conclusion_viewpoint_revision_id="CVR-1",
         route_label="从天父启示的认信理解磐石",
         route_signature={
-            "premise_roles": ["revelation", "confession"],
-            "inference_pattern": "由启示所产生的认信辨明教会根基",
+            "inference_method_codes": ["theological_synthesis"],
             "conclusion_viewpoint_id": "CV-1",
         },
+        ordered_inference_nodes=[
+            {"route_step_key": "P1", "role": "premise",
+             "normalized_proposition": "天父启示产生彼得的认信",
+             "required_for_full_attestation": True},
+            {"route_step_key": "C1", "role": "conclusion",
+             "conclusion_viewpoint_revision_id": "CVR-1",
+             "required_for_full_attestation": True},
+        ],
         review_artifact_sha256="route-review-sha",
     )
 
