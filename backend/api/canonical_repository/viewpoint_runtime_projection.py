@@ -223,26 +223,30 @@ def validate_runtime_authoring_graph(
                 findings.append(f"{attestation_id}: unknown route step {step_key}")
             if binding.get("attestation_status") == "attested":
                 attested_keys.add(step_key)
+            selected_fragment_ids = {
+                str(value) for value in binding.get("source_fragment_ids") or []
+            }
+            allowed_fragment_union: set[str] = set()
             for step_id in binding.get("evidence_step_ids") or []:
                 step = evidence.get(str(step_id))
                 if not step:
                     findings.append(f"{attestation_id}: missing evidence step {step_id}")
                     continue
                 allowed_fragment_ids = set(evidence_fragment_ids(step))
-                selected_fragment_ids = {
-                    str(value) for value in binding.get("source_fragment_ids") or []
-                }
-                if not selected_fragment_ids or not selected_fragment_ids <= allowed_fragment_ids:
+                allowed_fragment_union |= allowed_fragment_ids
+                if not selected_fragment_ids & allowed_fragment_ids:
                     findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
-                bound = [fragments.get(value) for value in selected_fragment_ids]
-                if any(
-                    not fragment
-                    or fragment.get("source_id") != attestation.get("source_id")
-                    or fragment.get("source_sha256") != attestation.get("source_revision_sha256")
-                    for fragment in bound
-                ):
-                    findings.append(f"{attestation_id}: evidence step {step_id} is not source-local")
                 derived_refs.update(str(value) for value in step.get("scripture_refs") or [])
+            if not selected_fragment_ids or not selected_fragment_ids <= allowed_fragment_union:
+                findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
+            bound = [fragments.get(value) for value in selected_fragment_ids]
+            if any(
+                not fragment
+                or fragment.get("source_id") != attestation.get("source_id")
+                or fragment.get("source_sha256") != attestation.get("source_revision_sha256")
+                for fragment in bound
+            ):
+                findings.append(f"{attestation_id}: route binding is not source-local")
         if attestation.get("completeness") == "full" and not required_keys <= attested_keys:
             findings.append(f"{attestation_id}: full attestation misses required route steps")
         if sorted(derived_refs) != list(attestation.get("scripture_refs_derived") or []):

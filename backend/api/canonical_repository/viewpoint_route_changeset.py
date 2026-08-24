@@ -51,7 +51,11 @@ def compile_argument_route_package(
         str(item["claim_component_key"]): dict(item)
         for item in route_packet.get("claim_components") or []
     }
-    claim_index = {item.claim_id: item for item in claims}
+    evidence_index = {
+        evidence.evidence_step_id: evidence
+        for claim in claims
+        for evidence in claim.evidence
+    }
     existing_revision_index: dict[str, dict[str, Any]] = {}
     for raw in existing_routes:
         item = dict(raw)
@@ -188,10 +192,8 @@ def compile_argument_route_package(
         scripture_refs = sorted(
             {
                 ref
-                for claim_id in attestation.claim_ids
-                for evidence in claim_index[claim_id].evidence
-                if evidence.evidence_step_id in evidence_ids
-                for ref in evidence.scripture_refs
+                for evidence_id in evidence_ids
+                for ref in evidence_index[evidence_id].scripture_refs
             }
         )
         attestation_seed = {

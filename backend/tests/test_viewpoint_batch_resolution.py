@@ -39,7 +39,9 @@ ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
 MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
 
 
-def _evidence(claim_id: str, *, eligible: bool = True) -> dict[str, Any]:
+def _evidence(
+    claim_id: str, *, eligible: bool = True, scripture_refs: list[str] | None = None
+) -> dict[str, Any]:
     return {
         "evidence_step_id": f"{claim_id}-E1",
         "source_fragment_id": f"{claim_id}-F1",
@@ -53,10 +55,17 @@ def _evidence(claim_id: str, *, eligible: bool = True) -> dict[str, Any]:
         "support_eligibility": "eligible" if eligible else "eligible_candidate",
         "anchor_state": "source_version_bound",
         "valid_for_identity_review": eligible,
+        "scripture_refs": scripture_refs or [],
     }
 
 
-def _claim(claim_id: str, statement: str, *, eligible: bool = True) -> ReviewClaim:
+def _claim(
+    claim_id: str,
+    statement: str,
+    *,
+    eligible: bool = True,
+    scripture_refs: list[str] | None = None,
+) -> ReviewClaim:
     return ReviewClaim(
         claim_id=claim_id,
         pinned_claim_revision=1,
@@ -64,7 +73,13 @@ def _claim(claim_id: str, statement: str, *, eligible: bool = True) -> ReviewCla
         source_id="S1",
         statement=statement,
         review_status="approved",
-        evidence=[_evidence(claim_id, eligible=eligible)],
+        evidence=[
+            _evidence(
+                claim_id,
+                eligible=eligible,
+                scripture_refs=scripture_refs,
+            )
+        ],
     )
 
 
@@ -2323,7 +2338,58 @@ def test_route_changeset_compiles_reviewed_v2_master_records():
     assert attestation["schema_version"] == "wang_argument_route_attestation_v2"
     assert attestation["terminal_claim_link_id"] == "VCL-1"
     assert attestation["claim_ids"] == ["C1"]
-    assert attestation["step_bindings"][0]["claim_component_keys"][0].startswith("CCK-")
+    assert attestation["step_bindings"][0]["claim_component_keys"][0].startswith(
+        "CCK-"
+    )
+
+
+def test_route_changeset_derives_scripture_from_sibling_claim_evidence():
+    member = _claim("C1", ROCK_STATEMENT, scripture_refs=["Matt.16.18"])
+    sibling = _claim("C2", MODAL_STATEMENT, scripture_refs=["Eph.2.20"])
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, sibling],
+        viewpoint_claim_links=[_registry_link(member)],
+        existing_routes=[],
+    )
+    binding = _route_component_binding()
+    sibling_step_bindings = [
+        {
+            "route_step_key": step_key,
+            "claim_component_keys": [binding.claim_component_key],
+            "evidence_step_ids": ["C2-E1"],
+            "source_fragment_ids": ["C2-F1"],
+            "attestation_status": "attested",
+        }
+        for step_key in ("P1", "C1")
+    ]
+    proposal = _routes(
+        source_route_attestations=[
+            _attestation(
+                claim_ids=["C1"],
+                step_bindings=sibling_step_bindings,
+            )
+        ]
+    )
+
+    package = compile_argument_route_package(
+        proposal=proposal,
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[member, sibling],
+        proposal_artifact_sha256="proposal-sha",
+        review_artifact_sha256="review-sha",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+    assert package["argument_route_attestations"][0][
+        "scripture_refs_derived"
+    ] == ["Eph.2.20"]
 
 
 def test_routes_validate_against_settled_conclusions():

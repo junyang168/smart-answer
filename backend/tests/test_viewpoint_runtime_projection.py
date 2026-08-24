@@ -80,6 +80,41 @@ def test_projection_and_route_validation_accept_plural_fragment_binding():
     assert validate_runtime_authoring_graph(_serialized(store)) == []
 
 
+def test_route_binding_accepts_aggregate_fragments_for_multiple_evidence_steps():
+    store = _fixture()
+    source = store.records["source_documents"][0]
+    store.records["source_fragments"].append(
+        SourceFragmentRecord(
+            fragment_id="FR-ROCK-2",
+            source_id=source.source_id,
+            verbatim_excerpt="第二个论证片段",
+            source_sha256=source.source_sha256,
+            anchor_state="source_version_bound",
+            review_status="approved",
+        )
+    )
+    store.records["evidence_steps"].append(
+        EvidenceStepRecord(
+            evidence_step_id="EV-ROCK-2",
+            source_fragment_id="FR-ROCK-2",
+            statement="跨经文前提",
+            scripture_refs=["Eph 2:20"],
+            support_eligibility="eligible",
+            review_status="approved",
+        )
+    )
+    attestation = store.records["argument_route_attestations"][0]
+    payload = attestation.model_dump(mode="json")
+    payload["step_bindings"][0]["evidence_step_ids"] = ["EV-ROCK", "EV-ROCK-2"]
+    payload["step_bindings"][0]["source_fragment_ids"] = ["FR-ROCK", "FR-ROCK-2"]
+    payload["scripture_refs_derived"] = ["Eph 2:20", "Matt 16:18"]
+    store.records["argument_route_attestations"][0] = (
+        ArgumentRouteAttestationRecord.model_validate(payload)
+    )
+
+    assert validate_runtime_authoring_graph(_serialized(store)) == []
+
+
 def test_projection_sha_changes_when_citation_changes_and_public_fails_closed():
     store = _fixture()
     compiler = ViewpointRuntimeCompiler(store.records, store.citations)
