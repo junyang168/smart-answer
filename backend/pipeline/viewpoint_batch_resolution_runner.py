@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
@@ -614,12 +615,20 @@ def main() -> int:
                 reviewer=reviewer,
                 reconsiderer=reconsiderer,
             )
-        except BatchResolutionError as exc:
+        except (BatchResolutionError, ValidationError) as exc:
+            findings = (
+                exc.findings
+                if isinstance(exc, BatchResolutionError)
+                else [
+                    f"model_response_schema_invalid:{item['loc']}:{item['msg']}"
+                    for item in exc.errors(include_url=False)
+                ]
+            )
             exception_bundle = {
                 "schema_version": "wang_canonical_viewpoint_batch_exception_v1",
                 "batch_id": batch_id,
                 "claim_ids": batch,
-                "findings": exc.findings,
+                "findings": findings,
                 "master_data_mutations": 0,
             }
             exception_bundle["artifact_sha256"] = sha256_json(exception_bundle)

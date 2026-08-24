@@ -28,6 +28,12 @@
 
 如果你认为复核员给的修正标准本身不合适、需要用别的方式修，那不是 `accepted`——那是 `rebutted`，说明理由。程序不会把「用我自己的方式改了」当作已解决。
 
+## target contract 不能变通
+
+带 `_existing` 的 disposition（`member_existing / support_existing / qualification_existing / tension_existing`）只能指向输入 packet 中已经存在的 Registry revision，必须填写非空 `target_viewpoint_revision_id`，并且不得填写 `local_new_viewpoint_key`。
+
+当前 schema 不支持 `qualification_existing` 或其他 `_existing` disposition 指向本批 `new_viewpoint` candidate。若复核员的 correction 同时给出「指向本批 candidate」和一个明确的 schema-valid fallback，必须采用 fallback；通常是把该 component 改为 `new_viewpoint` 并填写 `local_new_viewpoint_key`。不要输出 `target_viewpoint_revision_id=null` 的 `_existing` component。
+
 ## 输出
 
 `revised_proposal` 是**完整的一份 proposal**，格式与你上次输出的完全相同：每条 Claim 恰好一次，component 的 span 用字符位置，`exact_text` 与原文逐字相同。
