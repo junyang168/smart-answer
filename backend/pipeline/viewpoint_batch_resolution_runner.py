@@ -75,6 +75,7 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 #: The 62-Claim POC ran over ten minutes against this ceiling; batches are
 #: sized so a single call stays far below it.
 CALL_TIMEOUT_SECONDS = 900.0
+DEFAULT_ROUTE_REVIEW_TARGETS_PER_BATCH = 12
 
 
 class RouteStageNotReadyError(ValueError):
@@ -131,7 +132,7 @@ def _recorded_model_executions(
         if artifact.get("artifact_sha256") != sha256_json(body):
             raise ValueError(f"raw response artifact SHA mismatch: {path}")
         stages[stage] = {
-            "calls_recorded": 1,
+            "calls_recorded": int(artifact.get("calls_recorded") or 1),
             "wall_seconds_recorded": round(float(artifact["wall_seconds"]), 3),
             "backend": artifact.get("backend"),
             "model_id": artifact.get("model_id"),
@@ -500,7 +501,9 @@ def build_registry_route_packet(
         claim_id = str(raw.get("claim_id") or "")
         claim = claim_index.get(claim_id)
         if claim is None:
-            raise ValueError(f"active Registry link references Claim outside scope: {claim_id}")
+            # The Registry is corpus-wide while this packet is one evidence
+            # scope. A current viewpoint may have valid members elsewhere.
+            continue
         if int(raw.get("pinned_claim_revision") or 0) != claim.pinned_claim_revision:
             raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: stale Claim revision")
 
@@ -529,7 +532,11 @@ def build_registry_route_packet(
         allowed_pairs = {
             (item.evidence_step_id, item.source_fragment_id) for item in claim.evidence
         }
-        if not evidence_pairs or any(pair not in allowed_pairs for pair in evidence_pairs):
+        if not evidence_pairs:
+            # Pre-v2 links cannot prove component evidence. They remain master
+            # provenance but are not silently upgraded into Route evidence.
+            continue
+        if any(pair not in allowed_pairs for pair in evidence_pairs):
             raise ValueError(f"{raw.get('viewpoint_claim_link_id')}: invalid evidence binding")
         key = component_key_from_spans(
             claim_id=claim.claim_id,
@@ -1036,6 +1043,153 @@ def run_batch(
     }
 
 
+def build_route_review_batches(
+    *,
+    proposal: ArgumentRouteProposalResponse,
+    route_packet: dict[str, Any],
+    route_proposal_sha256: str,
+    max_targets: int = DEFAULT_ROUTE_REVIEW_TARGETS_PER_BATCH,
+) -> list[dict[str, Any]]:
+    """Create exact-once bounded review targets with sufficient read context."""
+
+    if max_targets < 1:
+        raise ValueError("Route review batch size must be positive")
+    attestations_by_route: dict[str, list[Any]] = {}
+    for item in proposal.source_route_attestations:
+        attestations_by_route.setdefault(item.route_ref.key(), []).append(item)
+    ordered_targets: list[tuple[str, str]] = []
+    for route in proposal.argument_route_candidates:
+        ordered_targets.append(("route", route.local_route_key))
+        ordered_targets.extend(
+            ("attestation", item.local_attestation_key)
+            for item in sorted(
+                attestations_by_route.get(route.local_route_key, []),
+                key=lambda value: value.local_attestation_key,
+            )
+        )
+    ordered_targets.extend(
+        ("no_route", item.viewpoint_revision_id)
+        for item in proposal.viewpoints_with_no_route
+    )
+    if len(ordered_targets) != len(set(ordered_targets)):
+        raise ValueError("Route review targets must be unique")
+
+    routes = {item.local_route_key: item for item in proposal.argument_route_candidates}
+    attestations = {
+        item.local_attestation_key: item for item in proposal.source_route_attestations
+    }
+    no_routes = {
+        item.viewpoint_revision_id: item for item in proposal.viewpoints_with_no_route
+    }
+    packet_components = {
+        str(item["claim_component_key"]): dict(item)
+        for item in route_packet["claim_components"]
+    }
+    packet_claims = {str(item["claim_id"]): dict(item) for item in route_packet["claims"]}
+    packet_viewpoints = {
+        str(item["viewpoint_revision_id"]): dict(item)
+        for item in route_packet["approved_viewpoints"]
+    }
+
+    batches = []
+    for offset in range(0, len(ordered_targets), max_targets):
+        targets = ordered_targets[offset : offset + max_targets]
+        target_set = set(targets)
+        context_route_keys = {
+            key for kind, key in targets if kind == "route"
+        } | {
+            attestations[key].route_ref.key()
+            for kind, key in targets
+            if kind == "attestation"
+        }
+        context_routes = [routes[key] for key in sorted(context_route_keys)]
+        context_attestations = {
+            key: value
+            for key, value in attestations.items()
+            if ("attestation", key) in target_set
+            or (
+                value.route_ref.key() in context_route_keys
+                and ("route", value.route_ref.key()) in target_set
+            )
+        }
+        target_no_routes = [
+            no_routes[key] for kind, key in targets if kind == "no_route"
+        ]
+        component_keys = {
+            component_key_value
+            for item in context_attestations.values()
+            for binding in item.step_bindings
+            for component_key_value in binding.claim_component_keys
+        } | {
+            str(item.terminal_claim_component_key)
+            for item in context_attestations.values()
+            if item.terminal_claim_component_key
+        }
+        claim_ids = {
+            claim_id
+            for item in context_attestations.values()
+            for claim_id in item.claim_ids
+        }
+        # A no-route decision is a claim about the complete scope, so it alone
+        # receives the complete evidence context. Route/attestation batches are
+        # sliced to the exact source-local objects they inspect.
+        complete_evidence = bool(target_no_routes)
+        selected_claims = (
+            list(packet_claims.values())
+            if complete_evidence
+            else [packet_claims[key] for key in sorted(claim_ids)]
+        )
+        selected_components = (
+            list(packet_components.values())
+            if complete_evidence
+            else [packet_components[key] for key in sorted(component_keys)]
+        )
+        viewpoint_revision_ids = {
+            item.conclusion_ref.key() for item in context_routes
+        } | {item.viewpoint_revision_id for item in target_no_routes}
+        evidence_context = {
+            "schema_version": "wang_argument_route_review_evidence_context_v1",
+            "scope_label": route_packet["scope_label"],
+            "approved_viewpoints": [
+                packet_viewpoints[key] for key in sorted(viewpoint_revision_ids)
+            ],
+            "claim_components": selected_components,
+            "claims": selected_claims,
+            "source_revisions": {
+                source_id: source_sha
+                for source_id, source_sha in route_packet["source_revisions"].items()
+                if complete_evidence
+                or any(item["source_id"] == source_id for item in selected_claims)
+            },
+            "existing_routes": route_packet["existing_routes"],
+        }
+        batch = {
+            "schema_version": "wang_argument_route_review_batch_v1",
+            "batch_id": f"RRB-{offset // max_targets + 1:03d}",
+            "route_proposal_sha256": route_proposal_sha256,
+            "route_evidence_packet_sha256": route_packet["packet_sha256"],
+            "review_targets": [
+                {"target_kind": kind, "target_key": key} for kind, key in targets
+            ],
+            "route_proposal_context": {
+                "argument_route_candidates": [
+                    item.model_dump(mode="json") for item in context_routes
+                ],
+                "source_route_attestations": [
+                    context_attestations[key].model_dump(mode="json")
+                    for key in sorted(context_attestations)
+                ],
+                "viewpoints_with_no_route": [
+                    item.model_dump(mode="json") for item in target_no_routes
+                ],
+            },
+            "route_evidence_context": evidence_context,
+        }
+        batch["batch_sha256"] = sha256_json(batch)
+        batches.append(batch)
+    return batches
+
+
 def run_route_scope(
     *,
     scope_label: str,
@@ -1117,18 +1271,68 @@ def run_route_scope(
         },
     )
 
-    review_packet = {
-        "scope_label": scope_label,
-        "route_evidence_packet_sha256": packet["packet_sha256"],
-        "route_evidence_packet": packet,
-        "route_proposal_sha256": proposal_sha,
-        "route_proposal": proposal_payload,
-    }
-    raw_review, review_calls, review_seconds = _call(
-        reviewer, review_packet, output_dir / "raw-route-review.json"
+    review_batches = build_route_review_batches(
+        proposal=proposal,
+        route_packet=packet,
+        route_proposal_sha256=proposal_sha,
     )
-    canonical_review, review_normalization_changes = canonicalize_review(raw_review)
-    review = ArgumentRouteReviewResponse.model_validate(canonical_review)
+    _write_immutable(
+        output_dir / "route-review-batches.json",
+        {
+            "schema_version": "wang_argument_route_review_batch_manifest_v1",
+            "route_proposal_sha256": proposal_sha,
+            "route_evidence_packet_sha256": packet["packet_sha256"],
+            "max_targets_per_batch": DEFAULT_ROUTE_REVIEW_TARGETS_PER_BATCH,
+            "batches": review_batches,
+        },
+    )
+    review_parts = []
+    review_calls = 0
+    review_seconds = 0.0
+    review_normalization_changes: list[str] = []
+    raw_review_shas = []
+    for index, review_packet in enumerate(review_batches, start=1):
+        raw_review_path = output_dir / f"raw-route-review-{index:03d}.json"
+        raw_review, calls, seconds = _call(
+            reviewer,
+            review_packet,
+            raw_review_path,
+        )
+        review_calls += calls
+        review_seconds += seconds
+        raw_review_shas.append(str(_read(raw_review_path)["artifact_sha256"]))
+        canonical_review, changed = canonicalize_review(raw_review)
+        review_normalization_changes.extend(
+            f"batch-{index:03d}:{path}" for path in changed
+        )
+        part = ArgumentRouteReviewResponse.model_validate(canonical_review)
+        expected_targets = {
+            (str(item["target_kind"]), str(item["target_key"]))
+            for item in review_packet["review_targets"]
+        }
+        validate_route_review(
+            review=part,
+            proposal=proposal,
+            route_proposal_sha256=proposal_sha,
+            route_evidence_packet_sha256=packet["packet_sha256"],
+            expected_targets=expected_targets,
+        )
+        review_parts.append(part)
+    review = ArgumentRouteReviewResponse(
+        route_proposal_sha256=proposal_sha,
+        route_evidence_packet_sha256=packet["packet_sha256"],
+        change_reviews=sorted(
+            [item for part in review_parts for item in part.change_reviews],
+            key=lambda item: (item.target_kind, item.target_key),
+        ),
+        cross_source_composition_found=any(
+            part.cross_source_composition_found for part in review_parts
+        ),
+        reason="；".join(
+            f"{review_batches[index]['batch_id']}：{part.reason}"
+            for index, part in enumerate(review_parts)
+        ),
+    )
     review_validation = validate_route_review(
         review=review,
         proposal=proposal,
@@ -1137,6 +1341,32 @@ def run_route_scope(
     )
     review_payload = review.model_dump(mode="json")
     review_sha = sha256_json(review_payload)
+    recorded_review_wall_seconds = round(
+        sum(
+            float(_read(output_dir / f"raw-route-review-{index:03d}.json")["wall_seconds"])
+            for index in range(1, len(review_batches) + 1)
+        ),
+        3,
+    )
+    raw_review_manifest_body = {
+        "schema_version": "wang_argument_route_raw_review_manifest_v1",
+        "request_payload_sha256": sha256_json(
+            [item["batch_sha256"] for item in review_batches]
+        ),
+        "model_id": reviewer.model_id,
+        "backend": reviewer.backend,
+        "prompt_sha256": reviewer.prompt_sha256,
+        "generation_config_sha256": reviewer.generation_config_sha256,
+        "wall_seconds": recorded_review_wall_seconds,
+        "calls_recorded": len(raw_review_shas),
+        "raw_batch_artifact_sha256s": raw_review_shas,
+        "response_sha256": review_sha,
+    }
+    _write_immutable(
+        output_dir / "raw-route-review-manifest.json",
+        raw_review_manifest_body
+        | {"artifact_sha256": sha256_json(raw_review_manifest_body)},
+    )
     _write_immutable(
         output_dir / "route-review.json",
         {
@@ -1148,7 +1378,7 @@ def run_route_scope(
             "review": review_payload,
             "validation_report": review_validation,
             "normalization": {
-                "raw_response_sha256": sha256_json(dict(raw_review)),
+                "raw_response_sha256": sha256_json(raw_review_shas),
                 "changed_paths": review_normalization_changes,
                 "reader_visible_text_changed": False,
                 "truth_conditions_changed": False,
@@ -1265,7 +1495,7 @@ def run_route_scope(
         output_dir,
         raw_artifacts={
             "proposal": "raw-route-proposal.json",
-            "review": "raw-route-review.json",
+            "review": "raw-route-review-manifest.json",
             "reconsideration": "raw-route-reconsideration.json",
         },
     )

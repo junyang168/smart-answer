@@ -1872,6 +1872,38 @@ def test_routes_validate_against_settled_conclusions():
     assert report["inference_method_codes"] == ["morphology"]
 
 
+def test_route_review_batches_bound_targets_and_cover_them_exactly_once():
+    from backend.pipeline.viewpoint_batch_resolution_runner import (
+        build_route_review_batches,
+    )
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    batches = build_route_review_batches(
+        proposal=_routes(),
+        route_packet=packet,
+        route_proposal_sha256="proposal-sha",
+        max_targets=1,
+    )
+
+    targets = [
+        (item["target_kind"], item["target_key"])
+        for batch in batches
+        for item in batch["review_targets"]
+    ]
+    assert targets == [("route", "ROUTE-GREEK"), ("attestation", "ATTEST-1")]
+    assert all(len(batch["review_targets"]) <= 1 for batch in batches)
+    # The route-target batch sees its attestation as context but does not grant
+    # the reviewer a second decision for it.
+    assert len(batches[0]["route_proposal_context"]["source_route_attestations"]) == 1
+
+
 def test_an_attestation_may_not_span_two_sermons():
     # The one error this layer exists to make impossible: a premise from one
     # sermon and a conclusion from another is an argument nobody delivered.

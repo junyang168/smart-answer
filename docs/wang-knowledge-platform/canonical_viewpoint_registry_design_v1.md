@@ -1129,12 +1129,12 @@ queue 可以在 bounded waiting window 内合并多个已提交 CVP batch 的 jo
 1. approved CVP revision set 与 scope cut exact-set 一致，route conclusion 不得指向 local、candidate 或未批准 CVP；
 2. `claim_component_keys` 由 pinned Claim revision 与 exact spans 重算，不接受模型自定义 key；
 3. route ref、step key、component、EvidenceStep 与 SourceFragment exact-one 解析，且 attestation 内全部 source-local、revision-pinned；
-4. `full` 覆盖所有 required nodes，terminal component 已是该 conclusion CVP 的 approved member；missing/ambiguous 只能是 `partial`；
+4. `full` 覆盖所有 required nodes，terminal component 必须有指向该 conclusion CVP 的正向 active Registry link；`support / extends / qualifies / applies` 只证明关联，不机械证明它与 conclusion 等价，必须由 Route Reviewer 检查原文是否真的说出了 conclusion；missing/ambiguous 只能是 `partial`；
 5. node role 与 inference method code 来自当前 vocabulary，source-local `discourse_role` 不参与 route identity；
 6. `match_existing` pin 当前 route revision，且 materially equivalent ordered skeleton 与 conclusion 均一致；
 7. Route Proposal fingerprint 绑定 queue job ids、triggering ChangeSet/readback、approved CVP set、完整 route packet、prompt、schema、model/provider/effort 与 validator version。
 
-Opus Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。其 response 必须绑定 Route Proposal SHA，不得复用 CVP review 的 component-key uniqueness contract。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Sol 做最多一次 route-only correction。
+Opus Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。Review 采用确定性 fixed-size batching，默认每批最多 12 个 decision targets；同一 route/attestation/no-route target 在全部 batches 中恰好出现一次。为理解 target 所需的 route、attestation 与 source-local evidence 可以作为只读 context 重复出现，但 reviewer 不得为 context-only 对象再次输出 decision。no-route 是对完整 scope 的否定判断，因此其 batch 必须看到完整 scope evidence，不能使用局部 evidence slice。每批 response 都绑定同一个全局 Route Proposal SHA 与 evidence packet SHA；程序合并后再次验证全局 exact-once coverage，才允许进入 correction。batch 大小只控制 reviewer 负担，不改变 Route identity、source-local attestation 或 ChangeSet 边界。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Sol 做最多一次 route-only correction。
 
 通过的 routes/attestations 分别进入可幂等 Route ChangeSet。apply 前必须 compare-and-set 验证每个 conclusion viewpoint revision 仍是 current；若后续 CVP batch 已产生 successor revision，旧 route work 标为 `superseded`、不得 apply，并为最新 revision 重新 enqueue。成功 apply 后 readback。一条 route 失败只产生 route exception，不撤销 approved CVP，也不阻止同次 proposal 中其他通过 routes 写入 Registry。若 route review 发现 CVP identity 可能错误，它只建立 CVP re-review exception，不在 Route workflow 中直接改写 CVP。
 
@@ -2353,7 +2353,7 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 1. incremental CVP 阶段用 scripture/topic filters 与 CVP embedding 取得 relevant active viewpoint synopsis；Route 阶段再为 approved CVP set 取得 active route synopses；approved constraints 只阻断其明确适用范围内的误配；
 2. scope 超限时先生成一次 SHA-bound IntelligentBatchingPlan；plan 只决定 bounded batch composition，batching rationale 不进入 proposer packet，也不产生 identity evidence；
 3. CVP proposer packet 包含本 batch Claims、EvidenceSteps、必要 fragments 与**调用开始时重新读取**的 relevant CVPs，保留 `new_viewpoint`；Route packet 另行包含完整 scope evidence、当前 queue work unit 的 approved CVPs 与 relevant routes，保留 `create_new` route；
-4. 每个 CVP batch 为一次 Sol CVP proposal + 一次 Opus CVP review；该 batch apply/readback 后才 enqueue Route work，正常为每个 capacity work unit 一次 Sol batch call + 一次 Opus route review；两类 job 都只在 findings 存在时增加一次由 Sol 完成的同类 correction；
+4. 每个 CVP batch 为一次 Sol CVP proposal + 一次 Opus CVP review；该 batch apply/readback 后才 enqueue Route work。每个 Route capacity work unit 为一次 Sol batch proposal，加上按固定 decision-target 上限切分的一个或多个 Opus review calls；所有 review targets 全局 exact-once，合并为一个 review artifact。两类 job 都只在 findings 存在时增加一次由 Sol 完成的同类 correction；
 5. 同一 scope 不并行处理 semantic batches，不传递前批 Claims、proposal 或 pending candidates；跨批共享只通过已提交的 Registry master data；
 6. generation fingerprint 绑定 Claim/viewpoint/route revisions、Registry slice、evidence expansion、prompt、model/provider/effort、schema 与 validator version；相同 fingerprint 才能复用；
 7. 每个 planned CVP batch 产生至多一个 CVP delta ChangeSet；Route Proposal 可产生多个相互独立的 route ChangeSets，只失效受影响索引条目、snapshot 与 consumer dependency；

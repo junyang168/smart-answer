@@ -912,8 +912,12 @@ def _route_findings(
                 )
             elif terminal.source_id != attestation.source_id:
                 findings.append(f"{where}: terminal Claim component is outside this source")
-            elif terminal.disposition != "member_existing":
-                findings.append(f"{where}: terminal Claim component is not an approved member")
+            elif terminal.disposition not in ROUTE_TARGETED_DISPOSITIONS - {
+                "tension_existing"
+            }:
+                findings.append(
+                    f"{where}: terminal Claim component has no positive Registry link"
+                )
             elif route is not None and (
                 terminal.target_viewpoint_revision_id != route.conclusion_ref.key()
             ):
@@ -1849,7 +1853,7 @@ def validate_route_proposal(
             "attestation_is_single_source",
             "evidence_belongs_to_the_source",
             "full_requires_every_required_node",
-            "full_terminal_is_conclusion_member",
+            "full_terminal_has_positive_conclusion_link",
             "no_route_without_an_attestation",
         ],
     }
@@ -1863,6 +1867,7 @@ def validate_route_review(
     proposal: ArgumentRouteProposalResponse,
     route_proposal_sha256: str,
     route_evidence_packet_sha256: str,
+    expected_targets: set[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Require exact review coverage and bind it to both semantic inputs."""
 
@@ -1871,7 +1876,7 @@ def validate_route_review(
         findings.append("route review is bound to a different proposal")
     if review.route_evidence_packet_sha256 != route_evidence_packet_sha256:
         findings.append("route review is bound to a different evidence packet")
-    expected = {
+    full_expected = {
         ("route", item.local_route_key)
         for item in proposal.argument_route_candidates
     } | {
@@ -1881,6 +1886,9 @@ def validate_route_review(
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
     }
+    expected = expected_targets if expected_targets is not None else full_expected
+    if not expected <= full_expected:
+        findings.append("route review batch contains target outside the proposal")
     reviewed = {(item.target_kind, item.target_key) for item in review.change_reviews}
     for kind, key in sorted(expected - reviewed):
         findings.append(f"{kind}:{key}: no route review decision")
