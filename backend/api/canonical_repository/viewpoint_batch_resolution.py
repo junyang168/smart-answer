@@ -201,19 +201,17 @@ ATTESTATION_STATUSES = ("attested", "missing", "ambiguous")
 
 
 class ConclusionRef(StrictBatchModel):
-    """Either an existing viewpoint revision or a batch-local new candidate."""
+    """A route conclusion is an already-approved ViewpointRevision.
 
-    target_viewpoint_revision_id: str | None = None
-    local_new_viewpoint_key: str | None = None
+    Route generation begins only after the CVP phase has committed and read
+    back the scope's viewpoints.  A batch-local candidate is therefore never a
+    legal route conclusion.
+    """
 
-    @model_validator(mode="after")
-    def validate_ref(self) -> "ConclusionRef":
-        if bool(self.target_viewpoint_revision_id) == bool(self.local_new_viewpoint_key):
-            raise ValueError("a conclusion names exactly one of existing revision or local key")
-        return self
+    target_viewpoint_revision_id: str = Field(min_length=1)
 
     def key(self) -> str:
-        return str(self.target_viewpoint_revision_id or self.local_new_viewpoint_key)
+        return self.target_viewpoint_revision_id
 
 
 class InferenceNode(StrictBatchModel):
@@ -291,8 +289,11 @@ class StepBinding(StrictBatchModel):
 
     @model_validator(mode="after")
     def validate_binding(self) -> "StepBinding":
-        if self.attestation_status == "attested" and not self.evidence_step_ids:
-            raise ValueError("an attested step must bind at least one EvidenceStep")
+        if self.attestation_status == "attested":
+            if not self.claim_component_keys:
+                raise ValueError("an attested step must bind at least one Claim component")
+            if not self.evidence_step_ids:
+                raise ValueError("an attested step must bind at least one EvidenceStep")
         return self
 
 
@@ -302,6 +303,7 @@ class SourceRouteAttestation(StrictBatchModel):
     local_attestation_key: str = Field(min_length=1)
     route_ref: RouteRef
     source_id: str
+    source_revision_sha256: str = Field(min_length=1)
     claim_ids: list[str] = Field(min_length=1)
     step_bindings: list[StepBinding] = Field(min_length=1)
     terminal_claim_component_key: str | None = None
@@ -315,6 +317,36 @@ class SourceRouteAttestation(StrictBatchModel):
             raise ValueError("an attestation binds each route step at most once")
         if self.completeness == "full" and not self.terminal_claim_component_key:
             raise ValueError("a full attestation names the component stating the conclusion")
+        return self
+
+
+class RouteComponentBinding(StrictBatchModel):
+    """Deterministically compiled component available to the Route phase."""
+
+    claim_component_key: str = Field(pattern=r"^CCK-[0-9a-f]{64}$")
+    claim_id: str
+    source_id: str
+    disposition: Literal[
+        "member_existing",
+        "support_existing",
+        "qualification_existing",
+        "tension_existing",
+        "no_registry_assertion",
+        "deferred",
+    ]
+    target_viewpoint_revision_id: str | None = None
+    statement_component: str = Field(min_length=1)
+    spans: list[ProposedSpan] = Field(min_length=1)
+    evidence_step_ids: list[str] = Field(default_factory=list)
+    source_fragment_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "RouteComponentBinding":
+        if self.disposition in EXISTING_DISPOSITIONS:
+            if not self.target_viewpoint_revision_id:
+                raise ValueError(f"{self.disposition} requires a target viewpoint revision")
+        elif self.target_viewpoint_revision_id:
+            raise ValueError(f"{self.disposition} may not carry a viewpoint target")
         return self
 
 
@@ -342,15 +374,10 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
 
 
 class ReviewedChange(StrictBatchModel):
-    """One decision about one proposed semantic change.
+    """One decision about one proposed CVP component."""
 
-    A change is either a Claim component (``claim_id`` + ``component_index``) or
-    a route/attestation named by its batch-local key.
-    """
-
-    claim_id: str | None = None
-    component_index: int | None = Field(default=None, ge=0)
-    target_key: str | None = None
+    claim_id: str
+    component_index: int = Field(ge=0)
     decision: Literal["pass", "correct", "reject", "defer"]
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
@@ -358,9 +385,6 @@ class ReviewedChange(StrictBatchModel):
 
     @model_validator(mode="after")
     def validate_change(self) -> "ReviewedChange":
-        component = self.claim_id is not None and self.component_index is not None
-        if component == bool(self.target_key):
-            raise ValueError("a change names either a Claim component or a route/attestation key")
         if self.finding_codes != sorted(set(self.finding_codes)):
             raise ValueError("finding codes must be sorted and unique")
         if self.decision == "pass":
@@ -389,32 +413,11 @@ class NoveltyReview(StrictBatchModel):
         return self
 
 
-class RouteReview(StrictBatchModel):
-    """Exact-coverage summary over routes and attestations.
-
-    A summary, not a substitute: every route and attestation still needs its own
-    pointer decision in ``change_reviews``.
-    """
-
-    status: Literal["pass", "findings"]
-    reviewed_route_keys: list[str] = Field(default_factory=list)
-    reviewed_attestation_keys: list[str] = Field(default_factory=list)
-    cross_source_composition_found: bool
-    reason: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_route_review(self) -> "RouteReview":
-        if self.cross_source_composition_found and self.status != "findings":
-            raise ValueError("cross-source composition is a finding, never a pass")
-        return self
-
-
 class CanonicalViewpointReviewResponse(StrictBatchModel):
     schema_version: Literal["wang_canonical_viewpoint_review_v1"] = REVIEW_VERSION
     proposal_sha256: str
     change_reviews: list[ReviewedChange] = Field(min_length=1)
     novelty_review: NoveltyReview
-    route_review: RouteReview | None = None
 
     @model_validator(mode="after")
     def validate_review(self) -> "CanonicalViewpointReviewResponse":
@@ -425,8 +428,6 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
 
     def outcome(self) -> str:
         if self.novelty_review.status != "pass":
-            return "findings"
-        if self.route_review is not None and self.route_review.status != "pass":
             return "findings"
         if any(item.decision != "pass" for item in self.change_reviews):
             return "findings"
@@ -454,7 +455,7 @@ def component_key(claim: ReviewClaim, component: ProposedComponent) -> str:
     key instead lets both link types share the single-active-owner invariant.
     """
 
-    return sha256_json(
+    return "CCK-" + sha256_json(
         {
             "claim_id": claim.claim_id,
             "claim_revision_sha256": claim.claim_revision_sha256,
@@ -465,10 +466,12 @@ def component_key(claim: ReviewClaim, component: ProposedComponent) -> str:
 
 def _route_findings(
     *,
-    proposal: "CanonicalViewpointProposalResponse",
+    proposal: "ArgumentRouteProposalResponse",
     claims: Sequence[ReviewClaim],
-    known_revisions: set[str],
-    candidate_keys: set[str],
+    approved_revisions: set[str],
+    known_route_revisions: set[str],
+    known_route_conclusions: Mapping[str, str],
+    component_bindings: Mapping[str, RouteComponentBinding],
 ) -> list[str]:
     """Check routes and attestations, above all for cross-source composition.
 
@@ -485,11 +488,23 @@ def _route_findings(
     for route in proposal.argument_route_candidates:
         where = f"route {route.local_route_key}"
         conclusion = route.conclusion_ref.key()
-        if route.conclusion_ref.target_viewpoint_revision_id:
-            if conclusion not in known_revisions:
-                findings.append(f"{where}: conclusion revision {conclusion} was not in the packet")
-        elif conclusion not in candidate_keys:
-            findings.append(f"{where}: conclusion key {conclusion} has no new viewpoint candidate")
+        if conclusion not in approved_revisions:
+            findings.append(f"{where}: conclusion revision {conclusion} is not approved in this scope")
+        if (
+            route.proposed_action == "match_existing"
+            and route.target_argument_route_revision_id not in known_route_revisions
+        ):
+            findings.append(
+                f"{where}: existing route revision "
+                f"{route.target_argument_route_revision_id} was not in the packet"
+            )
+        elif route.proposed_action == "match_existing" and (
+            known_route_conclusions.get(str(route.target_argument_route_revision_id))
+            != conclusion
+        ):
+            findings.append(
+                f"{where}: existing route revision belongs to another conclusion viewpoint"
+            )
         for node in route.ordered_inference_nodes:
             if node.role == "conclusion" and node.conclusion_ref.key() != conclusion:
                 findings.append(f"{where}: conclusion node reaches a different viewpoint")
@@ -500,7 +515,12 @@ def _route_findings(
         route_key = attestation.route_ref.key()
         referenced_routes.add(route_key)
         route = routes.get(route_key) if attestation.route_ref.local_route_key else None
-        if attestation.route_ref.local_route_key and route is None:
+        if not attestation.route_ref.local_route_key:
+            findings.append(
+                f"{where}: attestation must reference a proposal-local route key; "
+                "existing identity is carried by the route candidate"
+            )
+        elif route is None:
             findings.append(f"{where}: names local route {route_key}, which was not proposed")
 
         source_ids = set()
@@ -525,6 +545,17 @@ def _route_findings(
             if claim.source_id == attestation.source_id
             for item in claim.evidence
         }
+        source_shas = {
+            item.source_sha256
+            for claim in claims
+            if claim.source_id == attestation.source_id
+            for item in claim.evidence
+        }
+        if attestation.source_revision_sha256 not in source_shas:
+            findings.append(
+                f"{where}: source revision {attestation.source_revision_sha256} "
+                "does not match the pinned source evidence"
+            )
         if len(source_ids) > 1:
             findings.append(
                 f"{where}: Claims span {sorted(source_ids)}; an attestation is one source only"
@@ -544,6 +575,22 @@ def _route_findings(
             for fragment_id in binding.source_fragment_ids:
                 if fragment_id not in allowed_fragments:
                     findings.append(f"{where}: SourceFragment {fragment_id} is outside this source")
+            for component_key_value in binding.claim_component_keys:
+                component = component_bindings.get(component_key_value)
+                if component is None:
+                    findings.append(
+                        f"{where}: Claim component {component_key_value} is not in the route packet"
+                    )
+                    continue
+                if component.source_id != attestation.source_id:
+                    findings.append(
+                        f"{where}: Claim component {component_key_value} is outside this source"
+                    )
+                if component.claim_id not in attestation.claim_ids:
+                    findings.append(
+                        f"{where}: Claim component {component_key_value} belongs to unlisted "
+                        f"Claim {component.claim_id}"
+                    )
             if binding.attestation_status == "attested":
                 bound_steps.add(binding.route_step_key)
 
@@ -556,6 +603,42 @@ def _route_findings(
             for unmet in sorted(required - bound_steps):
                 findings.append(
                     f"{where}: full requires an attested binding for required step {unmet}"
+                )
+            terminal = component_bindings.get(str(attestation.terminal_claim_component_key))
+            if terminal is None:
+                findings.append(
+                    f"{where}: terminal Claim component "
+                    f"{attestation.terminal_claim_component_key} is not in the route packet"
+                )
+            elif terminal.source_id != attestation.source_id:
+                findings.append(f"{where}: terminal Claim component is outside this source")
+            elif terminal.disposition != "member_existing":
+                findings.append(f"{where}: terminal Claim component is not an approved member")
+            elif route is not None and (
+                terminal.target_viewpoint_revision_id != route.conclusion_ref.key()
+            ):
+                findings.append(
+                    f"{where}: terminal Claim component belongs to another conclusion viewpoint"
+                )
+            elif terminal.claim_id not in attestation.claim_ids:
+                findings.append(f"{where}: terminal Claim is not listed by the attestation")
+            conclusion_key = next(
+                node.route_step_key
+                for node in route.ordered_inference_nodes
+                if node.role == "conclusion"
+            )
+            conclusion_bindings = [
+                binding
+                for binding in attestation.step_bindings
+                if binding.route_step_key == conclusion_key
+                and binding.attestation_status == "attested"
+            ]
+            if not any(
+                attestation.terminal_claim_component_key in binding.claim_component_keys
+                for binding in conclusion_bindings
+            ):
+                findings.append(
+                    f"{where}: conclusion binding does not contain the terminal Claim component"
                 )
 
     for unused in sorted(set(routes) - referenced_routes):
@@ -699,7 +782,6 @@ def validate_review(
     review: CanonicalViewpointReviewResponse,
     proposal: CanonicalViewpointProposalResponse,
     proposal_sha256: str,
-    routes: "ArgumentRouteProposalResponse | None" = None,
 ) -> dict[str, Any]:
     """Require the reviewer to have answered every proposed change."""
 
@@ -715,29 +797,11 @@ def validate_review(
     reviewed = sorted(
         (item.claim_id, item.component_index)
         for item in review.change_reviews
-        if item.claim_id is not None
     )
     for missing in sorted(set(expected) - set(reviewed)):
         findings.append(f"{missing[0]}#{missing[1]}: no review decision")
     for extra in sorted(set(reviewed) - set(expected)):
         findings.append(f"{extra[0]}#{extra[1]}: review points at no proposed change")
-
-    # Routes and attestations are proposed semantic changes too; a batch-level
-    # route summary is not a decision about any of them.
-    expected_keys: set[str] = set()
-    if routes is not None:
-        expected_keys = {item.local_route_key for item in routes.argument_route_candidates} | {
-            item.local_attestation_key for item in routes.source_route_attestations
-        }
-    reviewed_keys = {
-        item.target_key for item in review.change_reviews if item.target_key is not None
-    }
-    for missing_key in sorted(expected_keys - reviewed_keys):
-        findings.append(f"{missing_key}: no review decision")
-    for extra_key in sorted(reviewed_keys - expected_keys):
-        findings.append(f"{extra_key}: review points at no proposed route or attestation")
-    if expected_keys and review.route_review is None:
-        findings.append("proposal contains routes but the review has no route_review")
 
     claim_ids = {item.claim_id for item in proposal.claim_decisions}
     for claim_id in review.novelty_review.missed_claim_ids:
@@ -751,13 +815,7 @@ def validate_review(
     report = {
         "schema_version": "wang_canonical_viewpoint_review_validation_v1",
         "proposal_sha256": proposal_sha256,
-        "reviewed_change_count": len(reviewed) + len(reviewed_keys),
-        "reviewed_route_change_count": len(reviewed_keys),
-        "cross_source_composition_found": (
-            review.route_review.cross_source_composition_found
-            if review.route_review is not None
-            else False
-        ),
+        "reviewed_change_count": len(reviewed),
         "outcome": outcome,
         "decision_counts": {
             name: sum(1 for item in review.change_reviews if item.decision == name)
@@ -765,6 +823,9 @@ def validate_review(
         },
         "novelty_status": review.novelty_review.status,
         "reconsideration_required": outcome != "pass",
+        "correction_required": any(
+            item.decision == "correct" for item in review.change_reviews
+        ),
     }
     report["artifact_sha256"] = sha256_json(report)
     return report
@@ -960,7 +1021,10 @@ def batches_from_groups(
 #: Fields whose order carries no meaning. The model emits them in narrative
 #: order; rejecting that would throw away a ten-minute call over presentation.
 _SET_FIELDS = (
+    "approved_viewpoint_revision_ids",
+    "claim_component_keys",
     "evidence_step_ids",
+    "inference_method_codes",
     "source_fragment_ids",
     "scripture_scope",
     "conditions",
@@ -973,7 +1037,14 @@ _ORDERED_LISTS = {
     "claim_decisions": lambda item: str(item.get("claim_id", "")),
     "new_viewpoint_candidates": lambda item: str(item.get("local_key", "")),
     "spans": lambda item: (int(item.get("start_char", 0)), int(item.get("end_char", 0))),
-    "change_reviews": lambda item: (str(item.get("claim_id", "")), int(item.get("component_index", 0))),
+    "change_reviews": lambda item: (
+        str(item.get("target_kind") or "component"),
+        str(item.get("target_key") or item.get("claim_id") or ""),
+        int(item.get("component_index") or 0),
+    ),
+    "argument_route_candidates": lambda item: str(item.get("local_route_key", "")),
+    "source_route_attestations": lambda item: str(item.get("local_attestation_key", "")),
+    "viewpoints_with_no_route": lambda item: str(item.get("viewpoint_revision_id", "")),
     "groups": lambda item: str(item.get("group_key", "")),
     "claim_ids": lambda item: str(item),
     "missed_claim_ids": lambda item: str(item),
@@ -1085,7 +1156,7 @@ def validate_reconsideration(
     flagged = {
         (item.claim_id, item.component_index)
         for item in review.change_reviews
-        if item.decision != "pass"
+        if item.decision == "correct"
     }
     answered = {
         (item.claim_id, item.component_index) for item in reconsideration.finding_dispositions
@@ -1112,6 +1183,13 @@ def validate_reconsideration(
         for item in reconsideration.finding_dispositions
         if item.disposition != "accepted"
     )
+    escalations.extend(
+        sorted(
+            f"{item.claim_id}#{item.component_index}:{item.decision}"
+            for item in review.change_reviews
+            if item.decision in {"reject", "defer"}
+        )
+    )
     if review.novelty_review.status != "pass":
         escalations.append(f"novelty:{review.novelty_review.status}")
 
@@ -1135,64 +1213,157 @@ def validate_reconsideration(
     return report
 
 
-ROUTE_PROPOSAL_VERSION = "wang_canonical_viewpoint_route_proposal_v1"
+ROUTE_PROPOSAL_VERSION = "wang_argument_route_proposal_v1"
+ROUTE_REVIEW_VERSION = "wang_argument_route_review_v1"
+ROUTE_RECONSIDERATION_VERSION = "wang_argument_route_reconsideration_v1"
+
+
+class NoRouteDisposition(StrictBatchModel):
+    viewpoint_revision_id: str = Field(min_length=1)
+    reason_code: Literal["no_attested_route", "evidence_insufficient", "deferred"]
+    reason: str = Field(min_length=1)
 
 
 class ArgumentRouteProposalResponse(StrictBatchModel):
-    """How the professor reached conclusions this batch already established.
+    """Routes for the exact approved-CVP set of one scope."""
 
-    Asked as its own call: proposing viewpoints and routes in one response blew
-    the 900s ceiling on a 14-Claim batch that took 6.3 minutes for viewpoints
-    alone.  Splitting also makes the question easier — the conclusions are given,
-    so this pass only answers which steps reach them, in what order, and whether
-    any one source delivered the whole argument.
-    """
-
-    schema_version: Literal["wang_canonical_viewpoint_route_proposal_v1"] = (
-        ROUTE_PROPOSAL_VERSION
-    )
-    batch_id: str
+    schema_version: Literal["wang_argument_route_proposal_v1"] = ROUTE_PROPOSAL_VERSION
+    scope_label: str
+    approved_viewpoint_revision_ids: list[str] = Field(min_length=1)
     argument_route_candidates: list[ArgumentRouteCandidate] = Field(default_factory=list)
     source_route_attestations: list[SourceRouteAttestation] = Field(default_factory=list)
+    viewpoints_with_no_route: list[NoRouteDisposition] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "ArgumentRouteProposalResponse":
+        if self.approved_viewpoint_revision_ids != sorted(
+            set(self.approved_viewpoint_revision_ids)
+        ):
+            raise ValueError("approved viewpoint revision ids must be sorted and unique")
         route_keys = [item.local_route_key for item in self.argument_route_candidates]
         if len(route_keys) != len(set(route_keys)):
             raise ValueError("route candidates must be unique")
         attest_keys = [item.local_attestation_key for item in self.source_route_attestations]
         if len(attest_keys) != len(set(attest_keys)):
             raise ValueError("attestations must be unique")
+        no_route = [item.viewpoint_revision_id for item in self.viewpoints_with_no_route]
+        if len(no_route) != len(set(no_route)):
+            raise ValueError("no-route dispositions must be unique")
+        return self
+
+
+class ReviewedRouteChange(StrictBatchModel):
+    target_key: str = Field(min_length=1)
+    target_kind: Literal["route", "attestation", "no_route"]
+    decision: Literal["pass", "correct", "reject", "defer"]
+    finding_codes: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    correction: str | None = None
+
+    @model_validator(mode="after")
+    def validate_change(self) -> "ReviewedRouteChange":
+        if self.finding_codes != sorted(set(self.finding_codes)):
+            raise ValueError("finding codes must be sorted and unique")
+        if self.decision == "pass":
+            if self.finding_codes or self.correction:
+                raise ValueError("a passing route change carries no finding or correction")
+        elif not self.finding_codes:
+            raise ValueError(f"{self.decision} requires at least one finding code")
+        if self.decision == "correct" and not self.correction:
+            raise ValueError("correct requires route correction acceptance criteria")
+        return self
+
+
+class ArgumentRouteReviewResponse(StrictBatchModel):
+    schema_version: Literal["wang_argument_route_review_v1"] = ROUTE_REVIEW_VERSION
+    route_proposal_sha256: str
+    route_evidence_packet_sha256: str
+    change_reviews: list[ReviewedRouteChange] = Field(min_length=1)
+    cross_source_composition_found: bool
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_response(self) -> "ArgumentRouteReviewResponse":
+        keys = [(item.target_kind, item.target_key) for item in self.change_reviews]
+        if len(keys) != len(set(keys)):
+            raise ValueError("route review changes must be unique")
+        if self.cross_source_composition_found and all(
+            item.decision == "pass" for item in self.change_reviews
+        ):
+            raise ValueError("cross-source composition is never a passing review")
+        return self
+
+
+class RouteFindingDisposition(StrictBatchModel):
+    target_key: str = Field(min_length=1)
+    target_kind: Literal["route", "attestation", "no_route"]
+    disposition: Literal["accepted", "rebutted", "deferred"]
+    reason: str = Field(min_length=1)
+
+
+class ArgumentRouteReconsiderationResponse(StrictBatchModel):
+    schema_version: Literal["wang_argument_route_reconsideration_v1"] = (
+        ROUTE_RECONSIDERATION_VERSION
+    )
+    route_proposal_sha256: str
+    route_review_sha256: str
+    finding_dispositions: list[RouteFindingDisposition] = Field(min_length=1)
+    revised_proposal: ArgumentRouteProposalResponse
+
+    @model_validator(mode="after")
+    def validate_response(self) -> "ArgumentRouteReconsiderationResponse":
+        keys = [(item.target_kind, item.target_key) for item in self.finding_dispositions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("route finding dispositions must be unique")
         return self
 
 
 def validate_route_proposal(
     *,
     routes: ArgumentRouteProposalResponse,
-    batch_id: str,
+    scope_label: str,
     claims: Sequence[ReviewClaim],
-    known_revisions: Sequence[str],
-    settled_conclusion_keys: Sequence[str],
+    approved_viewpoint_revision_ids: Sequence[str],
+    known_route_revision_ids: Sequence[str],
+    known_route_conclusions: Mapping[str, str] | None = None,
+    component_bindings: Sequence[RouteComponentBinding],
 ) -> dict[str, Any]:
-    """Check routes against the conclusions the viewpoint pass already settled."""
+    """Check routes against the scope's exact approved viewpoint set."""
 
     findings: list[str] = []
-    if routes.batch_id != batch_id:
-        findings.append(f"route proposal is for {routes.batch_id}, not {batch_id}")
+    if routes.scope_label != scope_label:
+        findings.append(f"route proposal is for {routes.scope_label}, not {scope_label}")
+    approved = sorted(set(approved_viewpoint_revision_ids))
+    if routes.approved_viewpoint_revision_ids != approved:
+        findings.append("route proposal approved viewpoint set differs from the scope cut")
+    component_index = {item.claim_component_key: item for item in component_bindings}
+    if len(component_index) != len(component_bindings):
+        findings.append("route component bindings contain duplicate component keys")
     findings.extend(
         _route_findings(
             proposal=routes,
             claims=claims,
-            known_revisions=set(known_revisions),
-            candidate_keys=set(settled_conclusion_keys),
+            approved_revisions=set(approved),
+            known_route_revisions=set(known_route_revision_ids),
+            known_route_conclusions=known_route_conclusions or {},
+            component_bindings=component_index,
         )
     )
+    routed = {item.conclusion_ref.key() for item in routes.argument_route_candidates}
+    no_route = {item.viewpoint_revision_id for item in routes.viewpoints_with_no_route}
+    for duplicate in sorted(routed & no_route):
+        findings.append(f"{duplicate}: both routed and declared to have no route")
+    for missing in sorted(set(approved) - routed - no_route):
+        findings.append(f"{missing}: approved viewpoint has no route or no-route disposition")
+    for extra in sorted((routed | no_route) - set(approved)):
+        findings.append(f"{extra}: route coverage names a viewpoint outside the approved set")
     if findings:
         raise BatchResolutionError(findings)
 
     report = {
-        "schema_version": "wang_canonical_viewpoint_route_validation_v1",
-        "batch_id": batch_id,
+        "schema_version": "wang_argument_route_validation_v1",
+        "scope_label": scope_label,
+        "approved_viewpoint_count": len(approved),
         "route_count": len(routes.argument_route_candidates),
         "attestation_count": len(routes.source_route_attestations),
         "full_count": sum(
@@ -1206,12 +1377,162 @@ def validate_route_proposal(
             {code for item in routes.argument_route_candidates for code in item.inference_method_codes}
         ),
         "checks_passed": [
-            "conclusion_settled_by_viewpoint_pass",
+            "approved_viewpoint_exact_coverage",
+            "conclusion_is_approved_revision",
+            "existing_route_revision_in_packet",
+            "claim_component_key_recomputed",
             "attestation_is_single_source",
             "evidence_belongs_to_the_source",
             "full_requires_every_required_node",
+            "full_terminal_is_conclusion_member",
             "no_route_without_an_attestation",
         ],
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
+
+
+def validate_route_review(
+    *,
+    review: ArgumentRouteReviewResponse,
+    proposal: ArgumentRouteProposalResponse,
+    route_proposal_sha256: str,
+    route_evidence_packet_sha256: str,
+) -> dict[str, Any]:
+    """Require exact review coverage and bind it to both semantic inputs."""
+
+    findings: list[str] = []
+    if review.route_proposal_sha256 != route_proposal_sha256:
+        findings.append("route review is bound to a different proposal")
+    if review.route_evidence_packet_sha256 != route_evidence_packet_sha256:
+        findings.append("route review is bound to a different evidence packet")
+    expected = {
+        ("route", item.local_route_key)
+        for item in proposal.argument_route_candidates
+    } | {
+        ("attestation", item.local_attestation_key)
+        for item in proposal.source_route_attestations
+    } | {
+        ("no_route", item.viewpoint_revision_id)
+        for item in proposal.viewpoints_with_no_route
+    }
+    reviewed = {(item.target_kind, item.target_key) for item in review.change_reviews}
+    for kind, key in sorted(expected - reviewed):
+        findings.append(f"{kind}:{key}: no route review decision")
+    for kind, key in sorted(reviewed - expected):
+        findings.append(f"{kind}:{key}: review points at no proposed route change")
+    if findings:
+        raise BatchResolutionError(findings)
+    counts = {
+        name: sum(1 for item in review.change_reviews if item.decision == name)
+        for name in ("pass", "correct", "reject", "defer")
+    }
+    report = {
+        "schema_version": "wang_argument_route_review_validation_v1",
+        "route_proposal_sha256": route_proposal_sha256,
+        "route_evidence_packet_sha256": route_evidence_packet_sha256,
+        "reviewed_change_count": len(reviewed),
+        "decision_counts": counts,
+        "cross_source_composition_found": review.cross_source_composition_found,
+        "outcome": "pass" if counts == {"pass": len(reviewed), "correct": 0, "reject": 0, "defer": 0} else "findings",
+        "reconsideration_required": any(
+            item.decision == "correct" for item in review.change_reviews
+        ),
+        "exception_keys": sorted(
+            f"{item.target_kind}:{item.target_key}"
+            for item in review.change_reviews
+            if item.decision in {"reject", "defer"}
+        ),
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
+
+
+def _route_change_payloads(
+    proposal: ArgumentRouteProposalResponse,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    return {
+        **{
+            ("route", item.local_route_key): item.model_dump(mode="json")
+            for item in proposal.argument_route_candidates
+        },
+        **{
+            ("attestation", item.local_attestation_key): item.model_dump(mode="json")
+            for item in proposal.source_route_attestations
+        },
+        **{
+            ("no_route", item.viewpoint_revision_id): item.model_dump(mode="json")
+            for item in proposal.viewpoints_with_no_route
+        },
+    }
+
+
+def validate_route_reconsideration(
+    *,
+    reconsideration: ArgumentRouteReconsiderationResponse,
+    proposal: ArgumentRouteProposalResponse,
+    review: ArgumentRouteReviewResponse,
+    route_proposal_sha256: str,
+    route_review_sha256: str,
+) -> dict[str, Any]:
+    """Confine the one Route correction to reviewer-flagged objects."""
+
+    findings: list[str] = []
+    if reconsideration.route_proposal_sha256 != route_proposal_sha256:
+        findings.append("route reconsideration is bound to a different proposal")
+    if reconsideration.route_review_sha256 != route_review_sha256:
+        findings.append("route reconsideration is bound to a different review")
+    if reconsideration.revised_proposal.scope_label != proposal.scope_label:
+        findings.append("route reconsideration changed the scope")
+    if (
+        reconsideration.revised_proposal.approved_viewpoint_revision_ids
+        != proposal.approved_viewpoint_revision_ids
+    ):
+        findings.append("route reconsideration changed the approved viewpoint set")
+
+    flagged = {
+        (item.target_kind, item.target_key)
+        for item in review.change_reviews
+        if item.decision == "correct"
+    }
+    answered = {
+        (item.target_kind, item.target_key)
+        for item in reconsideration.finding_dispositions
+    }
+    for kind, key in sorted(flagged - answered):
+        findings.append(f"{kind}:{key}: route finding has no disposition")
+    for kind, key in sorted(answered - flagged):
+        findings.append(f"{kind}:{key}: disposition answers no correctable finding")
+
+    before = _route_change_payloads(proposal)
+    after = _route_change_payloads(reconsideration.revised_proposal)
+    if set(before) != set(after):
+        findings.append("route reconsideration changed proposal object keys")
+    for key in sorted(set(before) & set(after)):
+        if key not in flagged and before[key] != after[key]:
+            findings.append(
+                f"{key[0]}:{key[1]}: unflagged route object changed during reconsideration"
+            )
+
+    escalations = sorted(
+        f"{item.target_kind}:{item.target_key}:{item.disposition}"
+        for item in reconsideration.finding_dispositions
+        if item.disposition != "accepted"
+    )
+    if findings:
+        raise BatchResolutionError(findings)
+    report = {
+        "schema_version": "wang_argument_route_reconsideration_validation_v1",
+        "route_proposal_sha256": route_proposal_sha256,
+        "route_review_sha256": route_review_sha256,
+        "finding_count": len(flagged),
+        "accepted_count": sum(
+            1
+            for item in reconsideration.finding_dispositions
+            if item.disposition == "accepted"
+        ),
+        "escalations": escalations,
+        "outcome": "resolved" if not escalations else "exception",
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

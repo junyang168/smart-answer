@@ -89,6 +89,7 @@ class ReviewEvidence(StrictArtifact):
     paragraph_key: str | int | None = None
     media_time: float | None = None
     evidence_statement: str
+    discourse_role: str | None = None
     verbatim_excerpt: str
     citation_id: str
     citation_revision: int = Field(ge=1)
@@ -779,6 +780,7 @@ def compile_review_claim(
                 paragraph_key=fragment.paragraph_key,
                 media_time=fragment.media_time,
                 evidence_statement=evidence.statement,
+                discourse_role=evidence.discourse_role,
                 verbatim_excerpt=fragment.verbatim_excerpt,
                 citation_id=citation_id,
                 citation_revision=citation.revision if citation else 1,

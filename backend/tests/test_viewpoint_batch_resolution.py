@@ -892,14 +892,14 @@ def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
     tampered = json.loads(proposal_path.read_text(encoding="utf-8"))
     tampered["response"]["batch_id"] = "CVB-somewhere-else"
     proposal_path.write_text(json.dumps(tampered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(BatchResolutionError):
+    with pytest.raises(ValueError, match="cached response SHA mismatch"):
         run_batch(**kwargs)
 
 
 def _route(**overrides: Any) -> dict[str, Any]:
     return {
         "local_route_key": "ROUTE-GREEK",
-        "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+        "conclusion_ref": {"target_viewpoint_revision_id": "CVR-1"},
         "proposed_action": "create_new",
         "route_label": "以 Petrus／petra 的性别差异论证磐石不指彼得本人",
         "inference_method_codes": ["morphology"],
@@ -913,7 +913,7 @@ def _route(**overrides: Any) -> dict[str, Any]:
             {
                 "route_step_key": "C1",
                 "role": "conclusion",
-                "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+                "conclusion_ref": {"target_viewpoint_revision_id": "CVR-1"},
                 "required_for_full_attestation": True,
             },
         ],
@@ -923,26 +923,30 @@ def _route(**overrides: Any) -> dict[str, Any]:
 
 
 def _attestation(**overrides: Any) -> dict[str, Any]:
+    binding = _route_component_binding()
     return {
         "local_attestation_key": "ATTEST-1",
         "route_ref": {"local_route_key": "ROUTE-GREEK"},
         "source_id": "S1",
+        "source_revision_sha256": "source-sha",
         "claim_ids": ["C1"],
         "step_bindings": [
             {
                 "route_step_key": "P1",
+                "claim_component_keys": [binding.claim_component_key],
                 "evidence_step_ids": ["C1-E1"],
                 "source_fragment_ids": ["C1-F1"],
                 "attestation_status": "attested",
             },
             {
                 "route_step_key": "C1",
+                "claim_component_keys": [binding.claim_component_key],
                 "evidence_step_ids": ["C1-E1"],
                 "source_fragment_ids": ["C1-F1"],
                 "attestation_status": "attested",
             },
         ],
-        "terminal_claim_component_key": "CCK-1",
+        "terminal_claim_component_key": binding.claim_component_key,
         "completeness": "full",
         "reason": "本篇给了前提也讲出结论",
         **overrides,
@@ -955,9 +959,11 @@ def _routes(**overrides: Any) -> Any:
     )
 
     payload: dict[str, Any] = {
-        "batch_id": "CVB-test-001",
+        "scope_label": "matt16-13-18",
+        "approved_viewpoint_revision_ids": ["CVR-1"],
         "argument_route_candidates": [_route()],
         "source_route_attestations": [_attestation()],
+        "viewpoints_with_no_route": [],
     }
     payload.update(overrides)
     return ArgumentRouteProposalResponse.model_validate(payload)
@@ -970,10 +976,38 @@ def _check_routes(routes: Any, claims: list[ReviewClaim]) -> dict[str, Any]:
 
     return validate_route_proposal(
         routes=routes,
-        batch_id="CVB-test-001",
+        scope_label="matt16-13-18",
         claims=claims,
-        known_revisions=["CVR-1"],
-        settled_conclusion_keys=["ROCK-NOT-PETER"],
+        approved_viewpoint_revision_ids=["CVR-1"],
+        known_route_revision_ids=[],
+        component_bindings=[_route_component_binding()],
+    )
+
+
+def _route_component_binding() -> Any:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding,
+    )
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    component = ProposedComponent.model_validate(
+        _component(
+            ROCK_STATEMENT,
+            "磐石不是彼得这个人",
+            "member_existing",
+            target_viewpoint_revision_id="CVR-1",
+        )
+    )
+    return RouteComponentBinding(
+        claim_component_key=component_key(claim, component),
+        claim_id="C1",
+        source_id="S1",
+        disposition="member_existing",
+        target_viewpoint_revision_id="CVR-1",
+        statement_component=component.statement_component(),
+        spans=component.spans,
+        evidence_step_ids=component.evidence_step_ids,
+        source_fragment_ids=component.source_fragment_ids,
     )
 
 
@@ -1013,6 +1047,7 @@ def test_borrowed_evidence_is_caught_even_within_one_batch():
                 step_bindings=[
                     {
                         "route_step_key": "P1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C9-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "attested",
@@ -1034,12 +1069,14 @@ def test_full_requires_every_required_node_attested():
                 step_bindings=[
                     {
                         "route_step_key": "P1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C1-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "missing",
                     },
                     {
                         "route_step_key": "C1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C1-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "attested",
@@ -1071,7 +1108,7 @@ def test_node_roles_and_method_codes_come_from_the_policy_vocabulary():
                     {
                         "route_step_key": "C1",
                         "role": "conclusion",
-                        "conclusion_ref": {"local_new_viewpoint_key": "ROCK-NOT-PETER"},
+                        "conclusion_ref": {"target_viewpoint_revision_id": "CVR-1"},
                         "required_for_full_attestation": True,
                     },
                 ]
@@ -1087,19 +1124,31 @@ def test_a_route_nobody_preached_is_rejected():
 
 
 def test_cross_source_composition_can_never_be_a_pass():
-    from backend.api.canonical_repository.viewpoint_batch_resolution import RouteReview
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+    )
 
-    with pytest.raises(ValueError, match="never a pass"):
-        RouteReview.model_validate(
+    with pytest.raises(ValueError, match="never a passing review"):
+        ArgumentRouteReviewResponse.model_validate(
             {
-                "status": "pass",
+                "route_proposal_sha256": "proposal-sha",
+                "route_evidence_packet_sha256": "packet-sha",
+                "change_reviews": [
+                    {
+                        "target_kind": "route",
+                        "target_key": "ROUTE-GREEK",
+                        "decision": "pass",
+                        "finding_codes": [],
+                        "reason": "错误地放行",
+                    }
+                ],
                 "cross_source_composition_found": True,
                 "reason": "发现跨来源拼接",
             }
         )
 
 
-def test_route_packet_carries_settled_conclusions_and_drops_non_bearing():
+def test_route_packet_requires_applied_cvps_and_keeps_non_bearing_components():
     from backend.pipeline.viewpoint_batch_resolution_runner import build_route_packet
 
     proposal = _proposal(
@@ -1118,62 +1167,126 @@ def test_route_packet_carries_settled_conclusions_and_drops_non_bearing():
             }
         ]
     )
-    packet = build_route_packet(
-        batch_id="CVB-test-001",
-        proposal=proposal,
+    with pytest.raises(ValueError, match="unapplied local CVP candidates"):
+        build_route_packet(
+            scope_label="matt16-13-18",
+            approved_viewpoints=[
+                {"viewpoint_revision_id": "CVR-1", "core_proposition": "太16:18 的磐石不指彼得本人"}
+            ],
+            effective_proposals=[proposal],
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            existing_routes=[],
+        )
+
+    mapped = build_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[
+            {"viewpoint_revision_id": "CVR-NEW", "core_proposition": "太16:18 的磐石不指彼得本人"}
+        ],
+        effective_proposals=[proposal],
         claims=[_claim("C1", ROCK_STATEMENT)],
-        registry_context=[{"viewpoint_revision_id": "CVR-1", "core_proposition": "太16:18 的磐石不指彼得本人"}],
+        existing_routes=[],
+        local_candidate_revision_map={
+            "CVB-test-001:ROCK-NOT-PETER": "CVR-NEW"
+        },
     )
-    # The conclusion arrives with its wording; the route pass is not asked to
-    # re-decide identity, only how the professor reached it.
-    assert packet["settled_conclusions"] == [
-        {"conclusion_key": "ROCK-NOT-PETER", "core_proposition": "太16:18 的磐石不指彼得本人"}
-    ]
-    # A component that asserts nothing has no conclusion to argue toward.
-    assert [item["disposition"] for item in packet["route_bearing_components"]] == ["new_viewpoint"]
+    mapped_member = next(
+        item for item in mapped["claim_components"] if item["disposition"] == "member_existing"
+    )
+    assert mapped_member["target_viewpoint_revision_id"] == "CVR-NEW"
+
+    applied = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    ),
+                    _component(
+                        ROCK_STATEMENT,
+                        "而是彼得所承认的信仰",
+                        "no_registry_assertion",
+                    ),
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[],
+    )
+    packet = build_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[
+            {"viewpoint_revision_id": "CVR-1", "core_proposition": "太16:18 的磐石不指彼得本人"}
+        ],
+        effective_proposals=[applied],
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        existing_routes=[],
+    )
+    assert packet["approved_viewpoint_revision_ids"] == ["CVR-1"]
+    assert {item["disposition"] for item in packet["claim_components"]} == {
+        "member_existing",
+        "no_registry_assertion",
+    }
     assert "single_source_note" in packet
 
 
 def test_a_route_may_not_target_a_conclusion_the_batch_never_settled():
     routes = _routes(
         argument_route_candidates=[
-            _route(conclusion_ref={"local_new_viewpoint_key": "NEVER-PROPOSED"})
+            _route(
+                conclusion_ref={"target_viewpoint_revision_id": "CVR-NEVER"},
+                ordered_inference_nodes=[
+                    _route()["ordered_inference_nodes"][0],
+                    {
+                        "route_step_key": "C1",
+                        "role": "conclusion",
+                        "conclusion_ref": {
+                            "target_viewpoint_revision_id": "CVR-NEVER"
+                        },
+                        "required_for_full_attestation": True,
+                    },
+                ],
+            )
         ],
         source_route_attestations=[],
     )
-    with pytest.raises(BatchResolutionError, match="NEVER-PROPOSED"):
+    with pytest.raises(BatchResolutionError, match="CVR-NEVER"):
         _check_routes(routes, [_claim("C1", ROCK_STATEMENT)])
 
 
 def test_review_must_decide_every_route_and_attestation():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+        validate_route_review,
+    )
+
     routes = _routes()
-    review = CanonicalViewpointReviewResponse.model_validate(
+    review = ArgumentRouteReviewResponse.model_validate(
         {
-            "proposal_sha256": "proposal-sha",
+            "route_proposal_sha256": "proposal-sha",
+            "route_evidence_packet_sha256": "packet-sha",
             "change_reviews": [
                 {
-                    "claim_id": "C1",
-                    "component_index": index,
+                    "target_kind": "attestation",
+                    "target_key": "ATTEST-1",
                     "decision": "pass",
                     "finding_codes": [],
                     "reason": "判断成立",
                 }
-                for index in (0, 1)
             ],
-            "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
-            "route_review": {
-                "status": "pass",
-                "cross_source_composition_found": False,
-                "reason": "无跨来源拼接",
-            },
+            "cross_source_composition_found": False,
+            "reason": "无跨来源拼接",
         }
     )
-    with pytest.raises(BatchResolutionError, match="ROUTE-GREEK: no review decision"):
-        validate_review(
+    with pytest.raises(BatchResolutionError, match="route:ROUTE-GREEK"):
+        validate_route_review(
             review=review,
-            proposal=_proposal(),
-            proposal_sha256="proposal-sha",
-            routes=routes,
+            proposal=routes,
+            route_proposal_sha256="proposal-sha",
+            route_evidence_packet_sha256="packet-sha",
         )
 
 
@@ -1197,12 +1310,14 @@ def test_a_sibling_claim_in_the_same_sermon_is_not_cross_source():
                 step_bindings=[
                     {
                         "route_step_key": "P1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C1-E1", "C2-E1"],
                         "source_fragment_ids": ["C1-F1", "C2-F1"],
                         "attestation_status": "attested",
                     },
                     {
                         "route_step_key": "C1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C1-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "attested",
@@ -1230,12 +1345,14 @@ def test_a_sibling_claim_in_the_same_sermon_is_not_cross_source():
                 step_bindings=[
                     {
                         "route_step_key": "P1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C3-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "attested",
                     },
                     {
                         "route_step_key": "C1",
+                        "claim_component_keys": [_route_component_binding().claim_component_key],
                         "evidence_step_ids": ["C1-E1"],
                         "source_fragment_ids": ["C1-F1"],
                         "attestation_status": "attested",
@@ -1246,3 +1363,440 @@ def test_a_sibling_claim_in_the_same_sermon_is_not_cross_source():
     )
     with pytest.raises(BatchResolutionError, match="EvidenceStep C3-E1 is outside this source"):
         _check_routes(borrowed, [_claim("C1", ROCK_STATEMENT), other_sermon])
+
+
+def test_route_review_accepts_multiple_route_objects_without_component_key_collision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+        validate_route_review,
+    )
+
+    proposal = _routes()
+    review = ArgumentRouteReviewResponse.model_validate(
+        {
+            "route_proposal_sha256": "proposal-sha",
+            "route_evidence_packet_sha256": "packet-sha",
+            "change_reviews": [
+                {
+                    "target_kind": "route",
+                    "target_key": "ROUTE-GREEK",
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "骨架成立",
+                },
+                {
+                    "target_kind": "attestation",
+                    "target_key": "ATTEST-1",
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "来源绑定成立",
+                },
+            ],
+            "cross_source_composition_found": False,
+            "reason": "逐项通过",
+        }
+    )
+    report = validate_route_review(
+        review=review,
+        proposal=proposal,
+        route_proposal_sha256="proposal-sha",
+        route_evidence_packet_sha256="packet-sha",
+    )
+    assert report["outcome"] == "pass"
+    assert report["reviewed_change_count"] == 2
+
+
+def test_every_approved_viewpoint_gets_a_route_or_closed_no_route_disposition():
+    empty = _routes(argument_route_candidates=[], source_route_attestations=[])
+    with pytest.raises(BatchResolutionError, match="CVR-1: approved viewpoint has no route"):
+        _check_routes(empty, [_claim("C1", ROCK_STATEMENT)])
+
+    closed = _routes(
+        argument_route_candidates=[],
+        source_route_attestations=[],
+        viewpoints_with_no_route=[
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "reason_code": "no_attested_route",
+                "reason": "scope 中只有结论，没有可辨识的推理链",
+            }
+        ],
+    )
+    assert _check_routes(closed, [_claim("C1", ROCK_STATEMENT)])["route_count"] == 0
+
+
+def test_attestation_component_keys_are_resolved_not_trusted():
+    fake = "CCK-" + "0" * 64
+    routes = _routes(
+        source_route_attestations=[
+            _attestation(
+                step_bindings=[
+                    {
+                        "route_step_key": "P1",
+                        "claim_component_keys": [fake],
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                    {
+                        "route_step_key": "C1",
+                        "claim_component_keys": [fake],
+                        "evidence_step_ids": ["C1-E1"],
+                        "source_fragment_ids": ["C1-F1"],
+                        "attestation_status": "attested",
+                    },
+                ],
+                terminal_claim_component_key=fake,
+            )
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="is not in the route packet"):
+        _check_routes(routes, [_claim("C1", ROCK_STATEMENT)])
+
+
+def test_route_packet_recombines_components_across_intelligent_batches():
+    from backend.pipeline.viewpoint_batch_resolution_runner import build_route_packet
+
+    first = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[],
+    )
+    second = _proposal(
+        batch_id="CVB-test-002",
+        claim_decisions=[
+            {
+                "claim_id": "C2",
+                "components": [
+                    _component(
+                        MODAL_STATEMENT,
+                        MODAL_STATEMENT,
+                        "no_registry_assertion",
+                        claim_id="C2",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[],
+    )
+    packet = build_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[
+            {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
+        ],
+        effective_proposals=[first, second],
+        claims=[_claim("C1", ROCK_STATEMENT), _claim("C2", MODAL_STATEMENT)],
+        existing_routes=[],
+    )
+    assert {item["claim_id"] for item in packet["claim_components"]} == {"C1", "C2"}
+    assert {item["claim_id"] for item in packet["claims"]} == {"C1", "C2"}
+
+
+def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
+    from backend.pipeline.viewpoint_batch_resolution_runner import (
+        build_route_packet,
+        run_route_scope,
+    )
+
+    effective = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[],
+    )
+    approved = [
+        {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
+    ]
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    packet = build_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=approved,
+        effective_proposals=[effective],
+        claims=claims,
+        existing_routes=[],
+    )
+    route_payload = _routes().model_dump(mode="json")
+    route_sha = sha256_json(route_payload)
+    review_payload = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": route_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "骨架成立",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "来源绑定成立",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "全部通过",
+    }
+    proposer = _StubAdapter(route_payload)
+    reviewer = _StubAdapter(review_payload)
+    kwargs = {
+        "scope_label": "matt16-13-18",
+        "claims": claims,
+        "approved_viewpoints": approved,
+        "effective_proposals": [effective],
+        "existing_routes": [],
+        "output_dir": tmp_path / "routes",
+        "proposer": proposer,
+        "reviewer": reviewer,
+    }
+    report = run_route_scope(**kwargs)
+    assert report["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert report["passing_attestation_keys"] == ["ATTEST-1"]
+    assert report["master_data_mutations"] == 0
+    again = run_route_scope(**kwargs)
+    assert proposer.calls == 1
+    assert reviewer.calls == 1
+    assert again["measurements"]["proposal_calls_executed"] == 0
+
+
+def test_reject_and_defer_do_not_trigger_cvp_correction():
+    proposal = _proposal()
+    review = _review("reject", "pass")
+    report = validate_review(
+        review=review,
+        proposal=proposal,
+        proposal_sha256="proposal-sha",
+    )
+    assert report["reconsideration_required"] is True
+    assert report["correction_required"] is False
+
+
+def test_existing_route_must_reach_the_same_conclusion_viewpoint():
+    routes = _routes(
+        argument_route_candidates=[
+            _route(
+                proposed_action="match_existing",
+                target_argument_route_revision_id="ARR-1",
+            )
+        ]
+    )
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    with pytest.raises(BatchResolutionError, match="another conclusion viewpoint"):
+        validate_route_proposal(
+            routes=routes,
+            scope_label="matt16-13-18",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            approved_viewpoint_revision_ids=["CVR-1"],
+            known_route_revision_ids=["ARR-1"],
+            known_route_conclusions={"ARR-1": "CVR-OTHER"},
+            component_bindings=[_route_component_binding()],
+        )
+
+
+def test_route_correction_is_confined_to_flagged_objects():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReconsiderationResponse,
+        ArgumentRouteReviewResponse,
+        validate_route_reconsideration,
+    )
+
+    proposal = _routes()
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = ArgumentRouteReviewResponse.model_validate(
+        {
+            "route_proposal_sha256": proposal_sha,
+            "route_evidence_packet_sha256": "packet-sha",
+            "change_reviews": [
+                {
+                    "target_kind": "route",
+                    "target_key": "ROUTE-GREEK",
+                    "decision": "correct",
+                    "finding_codes": ["route_label_overstates"],
+                    "reason": "label 把形态观察说成绝对证明",
+                    "correction": "将 label 改为较保守的形态差异论证",
+                },
+                {
+                    "target_kind": "attestation",
+                    "target_key": "ATTEST-1",
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "来源绑定成立",
+                },
+            ],
+            "cross_source_composition_found": False,
+            "reason": "只有 label 需要修正",
+        }
+    )
+    review_sha = sha256_json(review.model_dump(mode="json"))
+    revised = proposal.model_dump(mode="json")
+    revised["argument_route_candidates"][0]["route_label"] = "以词形差异支持磐石不指彼得本人"
+    reconsideration = ArgumentRouteReconsiderationResponse.model_validate(
+        {
+            "route_proposal_sha256": proposal_sha,
+            "route_review_sha256": review_sha,
+            "finding_dispositions": [
+                {
+                    "target_kind": "route",
+                    "target_key": "ROUTE-GREEK",
+                    "disposition": "accepted",
+                    "reason": "已按标准收窄 label",
+                }
+            ],
+            "revised_proposal": revised,
+        }
+    )
+    report = validate_route_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        route_proposal_sha256=proposal_sha,
+        route_review_sha256=review_sha,
+    )
+    assert report["outcome"] == "resolved"
+
+    tampered = reconsideration.model_dump(mode="json")
+    tampered["revised_proposal"]["source_route_attestations"][0]["reason"] = "偷偷改 attestation"
+    with pytest.raises(BatchResolutionError, match="unflagged route object changed"):
+        validate_route_reconsideration(
+            reconsideration=ArgumentRouteReconsiderationResponse.model_validate(tampered),
+            proposal=proposal,
+            review=review,
+            route_proposal_sha256=proposal_sha,
+            route_review_sha256=review_sha,
+        )
+
+
+def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
+    from backend.pipeline.viewpoint_batch_resolution_runner import (
+        build_route_packet,
+        run_route_scope,
+    )
+
+    effective = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[],
+    )
+    approved = [
+        {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不指彼得本人"}
+    ]
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    packet = build_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=approved,
+        effective_proposals=[effective],
+        claims=claims,
+        existing_routes=[],
+    )
+    route_payload = _routes().model_dump(mode="json")
+    review_payload = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": sha256_json(route_payload),
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "骨架成立",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "reject",
+                "finding_codes": ["evidence_does_not_support_node"],
+                "reason": "该证据不足以支持 premise",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "路线可能成立，但本 occurrence 不成立",
+    }
+    report = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=claims,
+        approved_viewpoints=approved,
+        effective_proposals=[effective],
+        existing_routes=[],
+        output_dir=tmp_path / "routes",
+        proposer=_StubAdapter(route_payload),
+        reviewer=_StubAdapter(review_payload),
+    )
+    assert report["approved_cvps_unchanged"] is True
+    assert report["passing_route_keys"] == []
+    assert "attestation:ATTEST-1:reject" in report["exceptions"]
+    assert "route:ROUTE-GREEK:no_passing_attestation" in report["exceptions"]
+
+
+def test_approved_viewpoint_cut_is_sha_bound(tmp_path: Path):
+    from backend.pipeline.viewpoint_batch_resolution_runner import (
+        load_approved_viewpoint_cut,
+    )
+
+    body = {
+        "schema_version": "wang_approved_viewpoint_scope_cut_v1",
+        "scope_label": "matt16-13-18",
+        "approved_viewpoints": [
+            {"viewpoint_revision_id": "CVR-NEW", "core_proposition": "磐石不指彼得本人"}
+        ],
+        "candidate_revision_bindings": [
+            {
+                "batch_id": "CVB-test-001",
+                "local_new_viewpoint_key": "ROCK-NOT-PETER",
+                "viewpoint_revision_id": "CVR-NEW",
+            }
+        ],
+    }
+    path = tmp_path / "approved-cut.json"
+    path.write_text(
+        json.dumps({**body, "artifact_sha256": sha256_json(body)}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    cut = load_approved_viewpoint_cut(path, scope_label="matt16-13-18")
+    assert cut["local_candidate_revision_map"] == {
+        "CVB-test-001:ROCK-NOT-PETER": "CVR-NEW"
+    }
+
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["scope_label"] = "another-scope"
+    path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_approved_viewpoint_cut(path, scope_label="matt16-13-18")

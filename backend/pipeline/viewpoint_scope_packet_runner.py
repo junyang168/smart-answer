@@ -21,6 +21,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.knowledge_models import (
+    ArgumentRouteRecord,
+    ArgumentRouteRevisionRecord,
     CanonicalViewpointRecord,
     ClaimRecord,
     EvidenceStepRecord,
@@ -40,7 +42,7 @@ from backend.api.canonical_repository.viewpoint_source_attestation import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v1"
+SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v2"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -115,6 +117,39 @@ def registry_context(
         )
     context.sort(key=lambda item: item["viewpoint_id"])
     return context
+
+
+def route_registry_context(
+    routes: list[dict[str, Any]], revisions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Active route synopses, kept separate from CVP identity retrieval."""
+
+    revision_index = {
+        item.argument_route_revision_id: item
+        for item in (
+            ArgumentRouteRevisionRecord.model_validate(row) for row in revisions
+        )
+    }
+    context: list[dict[str, Any]] = []
+    for row in routes:
+        route = ArgumentRouteRecord.model_validate(row)
+        if route.route_status != "active":
+            continue
+        revision = revision_index.get(route.current_revision_id)
+        if revision is None:
+            continue
+        context.append(
+            {
+                "route_id": route.argument_route_id,
+                "route_revision_id": revision.argument_route_revision_id,
+                "conclusion_viewpoint_revision_id": (
+                    revision.validated_against_conclusion_viewpoint_revision_id
+                ),
+                "route_label": revision.route_label,
+                "route_signature": revision.route_signature.model_dump(mode="json"),
+            }
+        )
+    return sorted(context, key=lambda item: item["route_revision_id"])
 
 
 def build_scope_packet(
@@ -245,6 +280,10 @@ def build_scope_packet(
             store.list_records("canonical_viewpoints"),
             store.list_records("viewpoint_revisions"),
         ),
+        "route_registry_context": route_registry_context(
+            store.list_records("argument_routes"),
+            store.list_records("argument_route_revisions"),
+        ),
         "blocked_claims": blocked,
         "statistics": {
             "scope_claim_count": len(in_scope),
@@ -293,6 +332,7 @@ def main() -> int:
             {
                 **packet["statistics"],
                 "registry_context_count": len(packet["registry_context"]),
+                "route_registry_context_count": len(packet["route_registry_context"]),
                 "packet_sha256": packet["packet_sha256"],
                 "blocked": packet["blocked_claims"],
             },

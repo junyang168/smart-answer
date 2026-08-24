@@ -1,4 +1,4 @@
-"""Run one CanonicalViewpoint batch: propose, validate, review.
+"""Resolve one CanonicalViewpoint scope, then its approved ArgumentRoutes.
 
 Batches are resumable at batch granularity: a finished batch writes immutable
 artifacts and a rerun reuses them without spending a call.  Within a batch a
@@ -23,20 +23,25 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReconsiderationResponse,
+    ArgumentRouteReconsiderationResponse,
     ArgumentRouteProposalResponse,
-    EXISTING_DISPOSITIONS,
+    ArgumentRouteReviewResponse,
     CanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
+    RouteComponentBinding,
     batches_from_groups,
     build_batch_packet,
     canonicalize_proposal,
+    component_key,
     repair_grouping,
     split_batches,
     validate_grouping,
     validate_proposal,
     validate_reconsideration,
+    validate_route_reconsideration,
     validate_route_proposal,
+    validate_route_review,
     validate_review,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -54,6 +59,10 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 #: The 62-Claim POC ran over ten minutes against this ceiling; batches are
 #: sized so a single call stays far below it.
 CALL_TIMEOUT_SECONDS = 900.0
+
+
+class RouteStageNotReadyError(ValueError):
+    """CVP apply/readback has not yet produced the formal Route input cut."""
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -142,93 +151,260 @@ def build_route_proposer(model: str, reasoning_effort: str) -> StructuredJsonRev
         ),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_routes.md").read_text(encoding="utf-8"),
         response_model=ArgumentRouteProposalResponse,
-        schema_name="wang_canonical_viewpoint_route_proposal_v1",
+        schema_name="wang_argument_route_proposal_v1",
+    )
+
+
+def build_route_reviewer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=CodexSubscriptionClient(
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=CALL_TIMEOUT_SECONDS,
+        ),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_route_review.md").read_text(
+            encoding="utf-8"
+        ),
+        response_model=ArgumentRouteReviewResponse,
+        schema_name="wang_argument_route_review_v1",
+    )
+
+
+def build_route_reconsiderer(
+    model: str, reasoning_effort: str
+) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=ClaudeSubscriptionClient(
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=CALL_TIMEOUT_SECONDS,
+        ),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_route_reconsideration.md").read_text(
+            encoding="utf-8"
+        ),
+        response_model=ArgumentRouteReconsiderationResponse,
+        schema_name="wang_argument_route_reconsideration_v1",
     )
 
 
 def build_route_packet(
     *,
-    batch_id: str,
-    proposal: CanonicalViewpointProposalResponse,
+    scope_label: str,
+    approved_viewpoints: list[dict[str, Any]],
+    effective_proposals: list[CanonicalViewpointProposalResponse],
     claims: list[ReviewClaim],
-    registry_context: list[dict[str, Any]],
+    existing_routes: list[dict[str, Any]],
+    local_candidate_revision_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """The route pass sees settled conclusions, not the identity question again.
+    """Compile complete scope evidence for all explicitly approved CVPs.
 
-    Only route-bearing components come through: a component ruled
-    ``no_registry_assertion`` or ``deferred`` has no conclusion to argue toward.
+    Intelligent Claim groups end at CVP approval.  This compiler walks every
+    effective CVP proposal and every Claim in the scope again, retaining even
+    background/objection/connective components that may carry an argument step.
+    New local viewpoint keys are rejected: the caller must apply/read back CVPs
+    before Route generation can begin.
     """
 
-    bearing = EXISTING_DISPOSITIONS | {"new_viewpoint"}
-    labels = {
-        item.local_key: item.core_proposition for item in proposal.new_viewpoint_candidates
-    }
-    for item in registry_context:
+    approved_index: dict[str, dict[str, Any]] = {}
+    for item in approved_viewpoints:
         revision_id = str(item.get("viewpoint_revision_id") or "")
-        if revision_id:
-            labels[revision_id] = str(item.get("core_proposition") or revision_id)
+        if not revision_id:
+            raise ValueError("approved viewpoint context is missing viewpoint_revision_id")
+        if revision_id in approved_index:
+            raise ValueError(f"duplicate approved viewpoint revision {revision_id}")
+        approved_index[revision_id] = dict(item)
+    if not approved_index:
+        raise RouteStageNotReadyError(
+            "Route Proposal requires at least one approved viewpoint revision"
+        )
 
-    conclusions: dict[str, dict[str, Any]] = {}
-    components: list[dict[str, Any]] = []
+    resolved_local = local_candidate_revision_map or {}
+    components: dict[str, RouteComponentBinding] = {}
     claim_index = {item.claim_id: item for item in claims}
-    for decision in proposal.claim_decisions:
-        claim = claim_index.get(decision.claim_id)
-        if claim is None:
-            continue
-        for index, component in enumerate(decision.components):
-            if component.disposition not in bearing:
-                continue
-            key = str(
-                component.target_viewpoint_revision_id or component.local_new_viewpoint_key
-            )
-            conclusions.setdefault(
-                key, {"conclusion_key": key, "core_proposition": labels.get(key, key)}
-            )
-            components.append(
-                {
-                    "claim_component_key": f"{decision.claim_id}#{index}",
-                    "claim_id": decision.claim_id,
-                    "source_id": claim.source_id,
-                    "component_text": component.statement_component(),
-                    "disposition": component.disposition,
-                    "conclusion_key": key,
-                    "evidence_step_ids": component.evidence_step_ids,
-                    "source_fragment_ids": component.source_fragment_ids,
-                }
-            )
+    unresolved_local_candidates: list[str] = []
+    all_local_candidates: set[str] = set()
+    for proposal in effective_proposals:
+        for item in proposal.new_viewpoint_candidates:
+            map_key = f"{proposal.batch_id}:{item.local_key}"
+            all_local_candidates.add(map_key)
+            if map_key not in resolved_local:
+                unresolved_local_candidates.append(map_key)
+        for decision in proposal.claim_decisions:
+            claim = claim_index.get(decision.claim_id)
+            if claim is None:
+                raise ValueError(f"effective proposal references Claim outside scope: {decision.claim_id}")
+            for component in decision.components:
+                disposition = component.disposition
+                target_revision = component.target_viewpoint_revision_id
+                if disposition == "new_viewpoint":
+                    map_key = f"{proposal.batch_id}:{component.local_new_viewpoint_key}"
+                    target_revision = resolved_local.get(map_key)
+                    if not target_revision:
+                        continue
+                    if target_revision not in approved_index:
+                        raise ValueError(
+                            f"mapped viewpoint revision {target_revision} is absent from approved cut"
+                        )
+                    disposition = "member_existing"
+                binding = RouteComponentBinding(
+                    claim_component_key=component_key(claim, component),
+                    claim_id=claim.claim_id,
+                    source_id=claim.source_id,
+                    disposition=disposition,
+                    target_viewpoint_revision_id=target_revision,
+                    statement_component=component.statement_component(),
+                    spans=component.spans,
+                    evidence_step_ids=component.evidence_step_ids,
+                    source_fragment_ids=component.source_fragment_ids,
+                )
+                prior = components.get(binding.claim_component_key)
+                if prior is not None and prior != binding:
+                    raise ValueError(
+                        f"Claim component key collision: {binding.claim_component_key}"
+                    )
+                components[binding.claim_component_key] = binding
+    if unresolved_local_candidates:
+        raise RouteStageNotReadyError(
+            "Route Proposal cannot use unapplied local CVP candidates: "
+            + ", ".join(sorted(set(unresolved_local_candidates)))
+        )
+    extra_mappings = sorted(set(resolved_local) - all_local_candidates)
+    if extra_mappings:
+        raise ValueError(
+            "approved viewpoint cut maps no local candidate: "
+            + ", ".join(extra_mappings)
+        )
+
+    source_revisions = {
+        claim.source_id: sorted(
+            {
+                evidence.source_sha256
+                for scoped_claim in claims
+                if scoped_claim.source_id == claim.source_id
+                for evidence in scoped_claim.evidence
+            }
+        )
+        for claim in claims
+    }
+    ambiguous_sources = {
+        source_id: values
+        for source_id, values in source_revisions.items()
+        if len(values) != 1
+    }
+    if ambiguous_sources:
+        raise ValueError(
+            "Route scope does not pin exactly one revision per source: "
+            + json.dumps(ambiguous_sources, ensure_ascii=False, sort_keys=True)
+        )
 
     packet = {
-        "schema_version": "wang_canonical_viewpoint_route_packet_v1",
-        "batch_id": batch_id,
+        "schema_version": "wang_argument_route_scope_packet_v1",
+        "scope_label": scope_label,
+        "approved_viewpoint_revision_ids": sorted(approved_index),
+        "approved_viewpoint_set_sha256": sha256_json(
+            [approved_index[key] for key in sorted(approved_index)]
+        ),
         "single_source_note": (
             "每个 attestation 的 Claim、EvidenceStep、SourceFragment 必须同属一篇来源。"
             "不得从两篇拼出一条谁都没讲完整的论证。"
         ),
-        "settled_conclusions": [conclusions[key] for key in sorted(conclusions)],
-        "route_bearing_components": components,
-        "claims": [
-            {
-                "claim_id": claim.claim_id,
-                "source_id": claim.source_id,
-                "statement": claim.statement,
-                "evidence": [
-                    {
-                        "evidence_step_id": item.evidence_step_id,
-                        "source_fragment_id": item.source_fragment_id,
-                        "evidence_statement": item.evidence_statement,
-                        "verbatim_excerpt": item.verbatim_excerpt,
-                        "paragraph_key": item.paragraph_key,
-                    }
-                    for item in claim.evidence
-                ],
-            }
-            for claim in claims
-            if claim.claim_id in {item["claim_id"] for item in components}
+        "approved_viewpoints": [approved_index[key] for key in sorted(approved_index)],
+        "claim_components": [
+            components[key].model_dump(mode="json") for key in sorted(components)
         ],
-        "existing_routes": [dict(item) for item in registry_context if item.get("route_revision_id")],
+        "claims": [claim.model_dump(mode="json") for claim in sorted(claims, key=lambda x: x.claim_id)],
+        "source_revisions": {
+            source_id: values[0] for source_id, values in source_revisions.items()
+        },
+        "existing_routes": sorted(
+            [dict(item) for item in existing_routes],
+            key=lambda item: str(item.get("route_revision_id") or ""),
+        ),
     }
     packet["packet_sha256"] = sha256_json(packet)
     return packet
+
+
+def approved_viewpoints_for_route(
+    *,
+    effective_proposals: list[CanonicalViewpointProposalResponse],
+    registry_context: list[dict[str, Any]],
+    approved_cut: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Select the approved CVPs actually established as identities in scope.
+
+    `registry_context` is an open retrieval set and may contain many merely
+    nearby viewpoints.  Only revisions receiving an approved member component
+    belong to this Route run.  New local candidates remain visible to
+    `build_route_packet`, which defers until their formal revisions exist.
+    """
+
+    if approved_cut is not None:
+        return [dict(item) for item in approved_cut["approved_viewpoints"]]
+
+    local_candidates = sorted(
+        {
+            item.local_key
+            for proposal in effective_proposals
+            for item in proposal.new_viewpoint_candidates
+        }
+    )
+    if local_candidates:
+        raise RouteStageNotReadyError(
+            "Route Proposal cannot use unapplied local CVP candidates: "
+            + ", ".join(local_candidates)
+        )
+    revision_ids = {
+        str(component.target_viewpoint_revision_id)
+        for proposal in effective_proposals
+        for decision in proposal.claim_decisions
+        for component in decision.components
+        if component.disposition == "member_existing"
+        and component.target_viewpoint_revision_id
+    }
+    context = {
+        str(item.get("viewpoint_revision_id") or ""): dict(item)
+        for item in registry_context
+        if item.get("viewpoint_revision_id")
+    }
+    missing = sorted(revision_ids - set(context))
+    if missing:
+        raise ValueError(
+            "member revisions are absent from Registry context: " + ", ".join(missing)
+        )
+    return [context[key] for key in sorted(revision_ids)]
+
+
+def load_approved_viewpoint_cut(path: Path, *, scope_label: str) -> dict[str, Any]:
+    """Validate the apply/readback bridge from local keys to formal CVR ids."""
+
+    payload = _read(path)
+    if payload.get("schema_version") != "wang_approved_viewpoint_scope_cut_v1":
+        raise ValueError(f"{path} is not a wang_approved_viewpoint_scope_cut_v1")
+    if payload.get("scope_label") != scope_label:
+        raise ValueError(f"approved viewpoint cut belongs to {payload.get('scope_label')}")
+    body = {key: value for key, value in payload.items() if key != "artifact_sha256"}
+    if payload.get("artifact_sha256") != sha256_json(body):
+        raise ValueError("approved viewpoint cut SHA mismatch")
+    viewpoints = list(payload.get("approved_viewpoints") or [])
+    revision_ids = [str(item.get("viewpoint_revision_id") or "") for item in viewpoints]
+    if not revision_ids or revision_ids != sorted(set(revision_ids)):
+        raise ValueError("approved viewpoint cut revisions must be nonempty, sorted and unique")
+    bindings = list(payload.get("candidate_revision_bindings") or [])
+    mapping: dict[str, str] = {}
+    for item in bindings:
+        key = f"{item.get('batch_id')}:{item.get('local_new_viewpoint_key')}"
+        revision_id = str(item.get("viewpoint_revision_id") or "")
+        if key in mapping:
+            raise ValueError(f"duplicate approved candidate binding {key}")
+        if revision_id not in revision_ids:
+            raise ValueError(f"candidate binding {key} targets revision outside approved cut")
+        mapping[key] = revision_id
+    return {
+        "approved_viewpoints": viewpoints,
+        "local_candidate_revision_map": mapping,
+        "artifact_sha256": payload["artifact_sha256"],
+    }
 
 
 def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str, Any], int, float]:
@@ -238,8 +414,18 @@ def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str,
     finished scope resumable.
     """
 
+    request_sha = sha256_json(payload)
     if cache.exists():
-        return _read(cache)["response"], 0, 0.0
+        artifact = _read(cache)
+        if artifact.get("request_payload_sha256") != request_sha:
+            raise ValueError(f"cached response belongs to another request payload: {cache}")
+        response = dict(artifact.get("response") or {})
+        if artifact.get("response_sha256") != sha256_json(response):
+            raise ValueError(f"cached response SHA mismatch: {cache}")
+        body = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+        if artifact.get("artifact_sha256") != sha256_json(body):
+            raise ValueError(f"cached response artifact SHA mismatch: {cache}")
+        return response, 0, 0.0
     started = time.monotonic()
     raw = dict(adapter.generate(payload))
     elapsed = round(time.monotonic() - started, 3)
@@ -249,7 +435,7 @@ def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str,
         "backend": adapter.backend,
         "prompt_sha256": adapter.prompt_sha256,
         "generation_config_sha256": adapter.generation_config_sha256,
-        "request_payload_sha256": sha256_json(payload),
+        "request_payload_sha256": request_sha,
         "wall_seconds": elapsed,
         "response_sha256": sha256_json(raw),
         "response": raw,
@@ -270,7 +456,6 @@ def run_batch(
     proposer: Any,
     reviewer: Any,
     reconsiderer: Any = None,
-    route_proposer: Any = None,
 ) -> dict[str, Any]:
     packet = build_batch_packet(
         batch_id=batch_id,
@@ -316,59 +501,11 @@ def run_batch(
         },
     )
 
-    # Routes are a second call against settled conclusions. Asking for both in
-    # one response timed out at 900s on this same 14-Claim batch.
-    route_report: dict[str, Any] | None = None
-    route_calls = 0
-    route_seconds = 0.0
-    route_payload: dict[str, Any] | None = None
-    if route_proposer is not None:
-        route_packet = build_route_packet(
-            batch_id=batch_id,
-            proposal=proposal,
-            claims=claims,
-            registry_context=registry_context,
-        )
-        _write_immutable(output_dir / "route-packet.json", route_packet)
-        raw_routes, route_calls, route_seconds = _call(
-            route_proposer, route_packet, output_dir / "raw-routes.json"
-        )
-        routes = ArgumentRouteProposalResponse.model_validate(
-            canonicalize_proposal(raw_routes)[0]
-        )
-        route_report = validate_route_proposal(
-            routes=routes,
-            batch_id=batch_id,
-            claims=claims,
-            known_revisions=[
-                str(item["viewpoint_revision_id"])
-                for item in registry_context
-                if item.get("viewpoint_revision_id")
-            ],
-            settled_conclusion_keys=[
-                str(item["conclusion_key"]) for item in route_packet["settled_conclusions"]
-            ],
-        )
-        route_payload = routes.model_dump(mode="json")
-        _write_immutable(
-            output_dir / "routes.json",
-            {
-                "schema_version": "wang_canonical_viewpoint_route_envelope_v1",
-                "batch_id": batch_id,
-                "route_packet_sha256": route_packet["packet_sha256"],
-                "proposal_sha256": proposal_sha,
-                "routes_sha256": sha256_json(route_payload),
-                "routes": route_payload,
-                "validation_report": route_report,
-            },
-        )
-
     review_packet = {
         "batch_id": batch_id,
         "packet": packet,
         "proposal_sha256": proposal_sha,
         "proposal": proposal_payload,
-        "routes": route_payload,
     }
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
@@ -378,7 +515,6 @@ def run_batch(
         review=review,
         proposal=proposal,
         proposal_sha256=proposal_sha,
-        routes=routes if route_proposer is not None else None,
     )
     review_payload = review.model_dump(mode="json")
     _write_immutable(
@@ -397,7 +533,8 @@ def run_batch(
     reconsideration_report: dict[str, Any] | None = None
     reconsideration_calls = 0
     reconsideration_seconds = 0.0
-    if review_validation["reconsideration_required"] and reconsiderer is not None:
+    effective_proposal = proposal
+    if review_validation["correction_required"] and reconsiderer is not None:
         reconsider_packet = {
             "batch_id": batch_id,
             "packet": packet,
@@ -432,6 +569,8 @@ def run_batch(
                 if item.get("viewpoint_revision_id")
             ],
         )
+        if reconsideration_report["outcome"] == "resolved":
+            effective_proposal = reconsideration.revised_proposal
         _write_immutable(
             output_dir / "reconsideration.json",
             {
@@ -453,9 +592,6 @@ def run_batch(
         "component_count": validation["component_count"],
         "disposition_counts": validation["disposition_counts"],
         "new_viewpoint_candidate_count": validation["new_viewpoint_candidate_count"],
-        "route_count": route_report["route_count"] if route_report else 0,
-        "attestation_count": route_report["attestation_count"] if route_report else 0,
-        "full_attestation_count": route_report["full_count"] if route_report else 0,
         "outcome": review_validation["outcome"],
         "reconsideration_required": review_validation["reconsideration_required"],
         "novelty_status": review_validation["novelty_status"],
@@ -463,6 +599,9 @@ def run_batch(
         "packet_sha256": packet["packet_sha256"],
         "proposal_sha256": proposal_sha,
         "review_sha256": review_sha,
+        "effective_proposal_sha256": sha256_json(
+            effective_proposal.model_dump(mode="json")
+        ),
         "reconsideration_outcome": (
             reconsideration_report["outcome"] if reconsideration_report else None
         ),
@@ -488,8 +627,6 @@ def run_batch(
     measurements = {
         "proposal_calls_executed": proposal_calls,
         "proposal_wall_seconds": proposal_seconds,
-        "route_calls_executed": route_calls,
-        "route_wall_seconds": route_seconds,
         "review_calls_executed": review_calls,
         "review_wall_seconds": review_seconds,
         "reconsideration_calls_executed": reconsideration_calls,
@@ -514,6 +651,265 @@ def run_batch(
         + "\n",
         encoding="utf-8",
     )
+    return {
+        **report,
+        "measurements": measurements,
+        # In-memory orchestration input only. The immutable proposal and
+        # reconsideration envelopes above remain the auditable artifacts.
+        "_effective_proposal": effective_proposal,
+    }
+
+
+def run_route_scope(
+    *,
+    scope_label: str,
+    claims: list[ReviewClaim],
+    approved_viewpoints: list[dict[str, Any]],
+    effective_proposals: list[CanonicalViewpointProposalResponse],
+    existing_routes: list[dict[str, Any]],
+    local_candidate_revision_map: dict[str, str] | None = None,
+    output_dir: Path,
+    proposer: Any,
+    reviewer: Any,
+    reconsiderer: Any = None,
+) -> dict[str, Any]:
+    """Propose and review routes after the whole approved CVP set is frozen.
+
+    This function deliberately has no Registry writer.  It compiles validated,
+    review-bound no-apply artifacts; a production ChangeSet builder can consume
+    only the passing object keys reported here.  Route exceptions are isolated
+    from the already-approved CVPs.
+    """
+
+    packet = build_route_packet(
+        scope_label=scope_label,
+        approved_viewpoints=approved_viewpoints,
+        effective_proposals=effective_proposals,
+        claims=claims,
+        existing_routes=existing_routes,
+        local_candidate_revision_map=local_candidate_revision_map,
+    )
+    _write_immutable(output_dir / "route-packet.json", packet)
+    raw_proposal, proposal_calls, proposal_seconds = _call(
+        proposer, packet, output_dir / "raw-route-proposal.json"
+    )
+    canonical, normalization_changes = canonicalize_proposal(raw_proposal)
+    proposal = ArgumentRouteProposalResponse.model_validate(canonical)
+    component_bindings = [
+        RouteComponentBinding.model_validate(item)
+        for item in packet["claim_components"]
+    ]
+    validation = validate_route_proposal(
+        routes=proposal,
+        scope_label=scope_label,
+        claims=claims,
+        approved_viewpoint_revision_ids=packet["approved_viewpoint_revision_ids"],
+        known_route_revision_ids=[
+            str(item.get("route_revision_id") or item.get("argument_route_revision_id"))
+            for item in existing_routes
+            if item.get("route_revision_id") or item.get("argument_route_revision_id")
+        ],
+        known_route_conclusions={
+            str(item.get("route_revision_id") or item.get("argument_route_revision_id")): str(
+                item.get("conclusion_viewpoint_revision_id") or ""
+            )
+            for item in existing_routes
+            if item.get("route_revision_id") or item.get("argument_route_revision_id")
+        },
+        component_bindings=component_bindings,
+    )
+    proposal_payload = proposal.model_dump(mode="json")
+    proposal_sha = sha256_json(proposal_payload)
+    _write_immutable(
+        output_dir / "route-proposal.json",
+        {
+            "schema_version": "wang_argument_route_proposal_envelope_v1",
+            "scope_label": scope_label,
+            "route_evidence_packet_sha256": packet["packet_sha256"],
+            "route_proposal_sha256": proposal_sha,
+            "proposal": proposal_payload,
+            "validation_report": validation,
+            "normalization": {
+                "raw_response_sha256": sha256_json(dict(raw_proposal)),
+                "changed_paths": normalization_changes,
+                "reader_visible_text_changed": False,
+                "truth_conditions_changed": False,
+            },
+        },
+    )
+
+    review_packet = {
+        "scope_label": scope_label,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "route_evidence_packet": packet,
+        "route_proposal_sha256": proposal_sha,
+        "route_proposal": proposal_payload,
+    }
+    raw_review, review_calls, review_seconds = _call(
+        reviewer, review_packet, output_dir / "raw-route-review.json"
+    )
+    review = ArgumentRouteReviewResponse.model_validate(raw_review)
+    review_validation = validate_route_review(
+        review=review,
+        proposal=proposal,
+        route_proposal_sha256=proposal_sha,
+        route_evidence_packet_sha256=packet["packet_sha256"],
+    )
+    review_payload = review.model_dump(mode="json")
+    review_sha = sha256_json(review_payload)
+    _write_immutable(
+        output_dir / "route-review.json",
+        {
+            "schema_version": "wang_argument_route_review_envelope_v1",
+            "scope_label": scope_label,
+            "route_evidence_packet_sha256": packet["packet_sha256"],
+            "route_proposal_sha256": proposal_sha,
+            "route_review_sha256": review_sha,
+            "review": review_payload,
+            "validation_report": review_validation,
+        },
+    )
+
+    effective_proposal = proposal
+    reconsideration_report: dict[str, Any] | None = None
+    reconsideration_calls = 0
+    reconsideration_seconds = 0.0
+    if review_validation["reconsideration_required"] and reconsiderer is not None:
+        reconsider_packet = {
+            "scope_label": scope_label,
+            "route_evidence_packet_sha256": packet["packet_sha256"],
+            "route_evidence_packet": packet,
+            "route_proposal_sha256": proposal_sha,
+            "route_proposal": proposal_payload,
+            "route_review_sha256": review_sha,
+            "route_review": review_payload,
+        }
+        raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
+            reconsiderer,
+            reconsider_packet,
+            output_dir / "raw-route-reconsideration.json",
+        )
+        reconsideration = ArgumentRouteReconsiderationResponse.model_validate(
+            canonicalize_proposal(raw_reconsideration)[0]
+        )
+        reconsideration_report = validate_route_reconsideration(
+            reconsideration=reconsideration,
+            proposal=proposal,
+            review=review,
+            route_proposal_sha256=proposal_sha,
+            route_review_sha256=review_sha,
+        )
+        revised_validation = validate_route_proposal(
+            routes=reconsideration.revised_proposal,
+            scope_label=scope_label,
+            claims=claims,
+            approved_viewpoint_revision_ids=packet["approved_viewpoint_revision_ids"],
+            known_route_revision_ids=[
+                str(item.get("route_revision_id") or item.get("argument_route_revision_id"))
+                for item in existing_routes
+                if item.get("route_revision_id") or item.get("argument_route_revision_id")
+            ],
+            known_route_conclusions={
+                str(item.get("route_revision_id") or item.get("argument_route_revision_id")): str(
+                    item.get("conclusion_viewpoint_revision_id") or ""
+                )
+                for item in existing_routes
+                if item.get("route_revision_id") or item.get("argument_route_revision_id")
+            },
+            component_bindings=component_bindings,
+        )
+        if reconsideration_report["outcome"] == "resolved":
+            effective_proposal = reconsideration.revised_proposal
+        _write_immutable(
+            output_dir / "route-reconsideration.json",
+            {
+                "schema_version": "wang_argument_route_reconsideration_envelope_v1",
+                "scope_label": scope_label,
+                "route_proposal_sha256": proposal_sha,
+                "route_review_sha256": review_sha,
+                "reconsideration": reconsideration.model_dump(mode="json"),
+                "validation_report": reconsideration_report,
+                "revised_validation_report": revised_validation,
+            },
+        )
+
+    corrected = {
+        (item.target_kind, item.target_key)
+        for item in review.change_reviews
+        if item.decision == "correct"
+    }
+    correction_resolved = bool(
+        reconsideration_report and reconsideration_report["outcome"] == "resolved"
+    )
+    passed = {
+        (item.target_kind, item.target_key)
+        for item in review.change_reviews
+        if item.decision == "pass"
+    }
+    if correction_resolved:
+        passed |= corrected
+    exceptions = sorted(
+        f"{item.target_kind}:{item.target_key}:{item.decision}"
+        for item in review.change_reviews
+        if item.decision in {"reject", "defer"}
+    )
+    if corrected and not correction_resolved:
+        exceptions.extend(sorted(f"{kind}:{key}:unresolved" for kind, key in corrected))
+
+    route_for_attestation = {
+        item.local_attestation_key: item.route_ref.local_route_key
+        for item in effective_proposal.source_route_attestations
+    }
+    candidate_routes = {key for kind, key in passed if kind == "route"}
+    candidate_attestations = {
+        key for kind, key in passed if kind == "attestation"
+    }
+    passing_attestations = sorted(
+        key
+        for key in candidate_attestations
+        if route_for_attestation.get(key) in candidate_routes
+    )
+    attested_routes = {
+        str(route_for_attestation[key]) for key in passing_attestations
+    }
+    orphaned_routes = sorted(candidate_routes - attested_routes)
+    exceptions.extend(f"route:{key}:no_passing_attestation" for key in orphaned_routes)
+    passing_routes = sorted(candidate_routes - set(orphaned_routes))
+    report = {
+        "schema_version": "wang_argument_route_scope_run_v1",
+        "scope_label": scope_label,
+        "approved_viewpoint_count": len(packet["approved_viewpoint_revision_ids"]),
+        "route_count": len(effective_proposal.argument_route_candidates),
+        "attestation_count": len(effective_proposal.source_route_attestations),
+        "passing_route_keys": passing_routes,
+        "passing_attestation_keys": passing_attestations,
+        "exceptions": sorted(set(exceptions)),
+        "approved_cvps_unchanged": True,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "route_proposal_sha256": proposal_sha,
+        "route_review_sha256": review_sha,
+        "effective_route_proposal_sha256": sha256_json(
+            effective_proposal.model_dump(mode="json")
+        ),
+        "reconsideration_outcome": (
+            reconsideration_report["outcome"] if reconsideration_report else None
+        ),
+        "master_data_mutations": 0,
+        "apply_allowed": False,
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    (output_dir / "route-scope-run.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    measurements = {
+        "proposal_calls_executed": proposal_calls,
+        "proposal_wall_seconds": proposal_seconds,
+        "review_calls_executed": review_calls,
+        "review_wall_seconds": review_seconds,
+        "reconsideration_calls_executed": reconsideration_calls,
+        "reconsideration_wall_seconds": reconsideration_seconds,
+        "call_timeout_seconds": CALL_TIMEOUT_SECONDS,
+    }
     return {**report, "measurements": measurements}
 
 
@@ -536,6 +932,14 @@ def main() -> int:
         "--no-routes",
         action="store_true",
         help="stop after viewpoints instead of asking how he argued them",
+    )
+    parser.add_argument(
+        "--approved-viewpoint-cut",
+        type=Path,
+        help=(
+            "SHA-bound apply/readback manifest mapping local CVP keys to formal "
+            "ViewpointRevision ids before Route Proposal"
+        ),
     )
     parser.add_argument("--route-effort", choices=("high", "xhigh", "max"), default="high")
     parser.add_argument(
@@ -566,6 +970,13 @@ def main() -> int:
     if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
         raise SystemExit(f"{args.packet} is not a {SCOPE_PACKET_VERSION}")
     scope_label = str(scope_packet["scope_label"])
+    approved_cut = (
+        load_approved_viewpoint_cut(
+            args.approved_viewpoint_cut, scope_label=scope_label
+        )
+        if args.approved_viewpoint_cut
+        else None
+    )
     claims = {
         item["claim_id"]: ReviewClaim.model_validate(item)
         for item in scope_packet["claims"]
@@ -651,6 +1062,7 @@ def main() -> int:
         batches = batches_from_groups(grouping, batch_size=args.batch_size)
     else:
         batches = split_batches(sorted(claims), batch_size=args.batch_size)
+    planned_batch_count = len(batches)
     if args.max_batches is not None:
         # 0 is meaningful: group the scope and stop, so the plan can be read
         # before any proposal call is spent against it.
@@ -660,9 +1072,6 @@ def main() -> int:
     reviewer = build_reviewer(args.review_model, args.review_effort)
     reconsiderer = (
         None if args.no_reconsider else build_reconsiderer(args.proposal_model, args.proposal_effort)
-    )
-    route_proposer = (
-        None if args.no_routes else build_route_proposer(args.proposal_model, args.route_effort)
     )
 
     reports: list[dict[str, Any]] = []
@@ -680,7 +1089,6 @@ def main() -> int:
                 proposer=proposer,
                 reviewer=reviewer,
                 reconsiderer=reconsiderer,
-                route_proposer=route_proposer,
             )
         except BatchResolutionError as exc:
             exception_bundle = {
@@ -711,6 +1119,78 @@ def main() -> int:
             print(json.dumps(stop, ensure_ascii=False, indent=2))
             return 1
 
+    route_stage: dict[str, Any]
+    if args.no_routes:
+        route_stage = {"status": "disabled"}
+    elif args.group_key or len(reports) != planned_batch_count:
+        route_stage = {
+            "status": "not_started",
+            "reason": "CVP scope is incomplete; Route Proposal requires all approved CVPs",
+        }
+    else:
+        route_dir = args.output_dir / "routes"
+        try:
+            effective_proposals = [
+                item["_effective_proposal"] for item in reports
+            ]
+            route_stage = run_route_scope(
+                scope_label=scope_label,
+                claims=[claims[key] for key in sorted(claims)],
+                approved_viewpoints=approved_viewpoints_for_route(
+                    effective_proposals=effective_proposals,
+                    registry_context=registry_context,
+                    approved_cut=approved_cut,
+                ),
+                effective_proposals=effective_proposals,
+                existing_routes=list(scope_packet.get("route_registry_context") or []),
+                local_candidate_revision_map=(
+                    approved_cut["local_candidate_revision_map"]
+                    if approved_cut
+                    else None
+                ),
+                output_dir=route_dir,
+                proposer=build_route_proposer(args.proposal_model, args.route_effort),
+                reviewer=build_route_reviewer(args.review_model, args.review_effort),
+                reconsiderer=(
+                    None
+                    if args.no_reconsider
+                    else build_route_reconsiderer(
+                        args.proposal_model, args.route_effort
+                    )
+                ),
+            )
+            route_status = (
+                "completed_with_exceptions"
+                if route_stage.get("exceptions")
+                else "completed"
+            )
+            route_stage = {
+                key: value
+                for key, value in route_stage.items()
+                if key != "measurements"
+            } | {"status": route_status}
+        except RouteStageNotReadyError as exc:
+            # The no-apply POC cannot turn a local new-viewpoint key into a
+            # formal CVR id. Preserve that boundary instead of fabricating one.
+            route_stage = {
+                "status": "awaiting_approved_cvp_apply",
+                "reason": str(exc),
+            }
+            route_stage["artifact_sha256"] = sha256_json(route_stage)
+            _write_immutable(route_dir / "route-stage-deferred.json", route_stage)
+        except BatchResolutionError as exc:
+            exception = {
+                "schema_version": "wang_argument_route_scope_exception_v1",
+                "scope_label": scope_label,
+                "findings": exc.findings,
+                "approved_cvps_unchanged": True,
+                "master_data_mutations": 0,
+            }
+            exception["artifact_sha256"] = sha256_json(exception)
+            _write_immutable(route_dir / "exception.json", exception)
+            print(json.dumps(exception, ensure_ascii=False, indent=2))
+            return 1
+
     summary = {
         "schema_version": "wang_canonical_viewpoint_scope_run_v1",
         "scope_label": scope_label,
@@ -727,6 +1207,7 @@ def main() -> int:
         "review_wall_seconds_total": round(
             sum(item["measurements"]["review_wall_seconds"] for item in reports), 3
         ),
+        "route_stage": route_stage,
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
