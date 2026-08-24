@@ -42,7 +42,7 @@ from backend.api.canonical_repository.viewpoint_source_attestation import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v2"
+SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v3"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -174,6 +174,9 @@ def build_scope_packet(
         raise ValueError("scope packet requires a valid Claim manifest")
     if source_attestation.claim_manifest_sha256 != manifest_sha:
         raise ValueError("source attestation belongs to another Claim manifest")
+    coverage_snapshot_id = str(claim_manifest.get("coverage_snapshot_id") or "")
+    if not coverage_snapshot_id:
+        raise ValueError("Claim manifest is not bound to a coverage snapshot")
 
     in_scope = scope_claim_ids(scope, passage_unit_ids)
     if not in_scope:
@@ -274,6 +277,7 @@ def build_scope_packet(
         "passage_unit_ids": sorted(set(passage_unit_ids)),
         "scope_artifact_sha256": scope_sha,
         "claim_manifest_sha256": manifest_sha,
+        "coverage_snapshot_id": coverage_snapshot_id,
         "source_attestation_artifact_sha256": source_attestation.artifact_sha256,
         "claims": [item.model_dump(mode="json") for item in review_claims],
         "registry_context": registry_context(

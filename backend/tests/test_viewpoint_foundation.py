@@ -10,6 +10,7 @@ from backend.api.canonical_repository.models import Citation
 from backend.api.canonical_repository.knowledge_models import (
     CanonicalViewpointRecord,
     ViewpointClaimLinkRecord,
+    ViewpointComponentLocator,
     ViewpointCoverageSnapshotRecord,
     ViewpointIdentityDecisionRecord,
     ViewpointQualityReportRecord,
@@ -251,6 +252,25 @@ def test_ledger_rejects_duplicates_extras_and_sha_substitution() -> None:
 
 
 def test_source_ineligible_and_component_membership_cannot_be_faked() -> None:
+    locator = ViewpointComponentLocator(
+        statement_component="磐石彼得",
+        claim_sha256="claim-sha",
+        canonical_spans=[
+            {"start_char": 0, "end_char": 2, "exact_text": "磐石"},
+            {"start_char": 4, "end_char": 6, "exact_text": "彼得"},
+        ],
+    )
+    assert locator.statement_component == "磐石彼得"
+    with pytest.raises(ValidationError, match="does not match canonical spans"):
+        ViewpointComponentLocator(
+            statement_component="磐石不是彼得",
+            claim_sha256="claim-sha",
+            canonical_spans=[
+                {"start_char": 0, "end_char": 2, "exact_text": "磐石"},
+                {"start_char": 4, "end_char": 6, "exact_text": "彼得"},
+            ],
+        )
+
     with pytest.raises(ValidationError, match="closed reason code"):
         ViewpointResolutionRow(
             claim_id="CL-1",

@@ -778,28 +778,13 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 ```json
 {
   "schema_version": "wang_canonical_viewpoint_proposal_v1",
-  "proposal_id": "CVP-PROPOSAL-opaque",
   "batch_id": "CVB-opaque",
-  "input_claim_manifest_sha256": "...",
-  "registry_context_sha256": "...",
-  "evidence_packet_sha256": "...",
-  "producer": {
-    "backend": "claude_subscription",
-    "model": "claude-opus-5",
-    "reasoning_effort": "high"
-  },
   "claim_decisions": [
     {
       "claim_id": "DK-...-CL...",
-      "pinned_claim_revision": 2,
-      "claim_revision_sha256": "...",
       "components": [
         {
-          "component_locator": {
-            "statement_component": "...",
-            "claim_sha256": "...",
-            "spans": [{"start_char": 0, "end_char": 10, "exact_text": "..."}]
-          },
+          "spans": [{"start_char": 0, "end_char": 10, "exact_text": "..."}],
           "disposition": "member_existing",
           "target_viewpoint_revision_id": "CVR-...",
           "local_new_viewpoint_key": null,
@@ -810,18 +795,25 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
       ]
     }
   ],
-  "new_viewpoint_candidates": [],
-  "coverage": {
-    "input_claim_count": 0,
-    "resolved_claim_count": 0,
-    "deferred_claim_count": 0
-  },
-  "generation_fingerprint_sha256": "...",
-  "artifact_sha256": "..."
+  "new_viewpoint_candidates": [
+    {
+      "local_key": "ROCK-NOT-PETER",
+      "core_proposition": "...",
+      "subject": "...",
+      "predicate": "...",
+      "object": "...",
+      "polarity": "denied",
+      "modality": "教授的释经判断",
+      "scripture_scope": ["Matt.16.18"],
+      "conditions": [],
+      "population_scope": [],
+      "novelty_comparison": "..."
+    }
+  ]
 }
 ```
 
-`claim_decisions` 对 input manifest exact-once；一个 Claim row 内可以有多个 components。`component_locator` 使用第 5.4 节的 span 形式，模型只输出 spans 与拼接后的 `statement_component`，`claim_sha256` 由程序填入并核对。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的单一 span。`new_viewpoint_candidates` 只使用 batch-local keys；正式 opaque IDs 由 CVP ChangeSet builder 分配。CVP Proposal 不包含 route candidates 或 attestations。
+proposal 的外层 envelope 另行绑定 batch packet、Claim manifest、Registry context、generation fingerprint 与 producer；生产默认 producer 是 Codex Subscription `gpt-5.6-sol/high`。`claim_decisions` 对 batch Claim cut exact-once；一个 Claim row 内可以有多个 components。模型只输出 canonical Unicode spans，`statement_component` 与 `claim_sha256` 由 ChangeSet builder 从 pinned Claim 重建并核对。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的单一 span。`new_viewpoint_candidates` 必须分别输出 `predicate` 与 `object`，不得合成一个无法确定性写入 `ViewpointPropositionSignature` 的自由文本字段；无宾语命题（例如“该论证成立”）的 `object` 可以为空，不能为了 schema 人造宾语。它只使用 batch-local keys，正式 opaque IDs 由 CVP ChangeSet builder 分配。CVP Proposal 不包含 route candidates 或 attestations。
 
 #### 5.12.2 `CanonicalViewpointReview`
 
@@ -2336,6 +2328,8 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 
 #206 在同一 `rock_referent_not_peter` intelligent group 上完成角色反转 POC：输入 13 条 Claims 与现有 active CVP，由 Codex Subscription `gpt-5.6-sol/high` proposal（322.905 秒）、Claude Subscription `claude-opus-5/high` independent review（237.354 秒）、有 findings 时同一 Sol proposer 做唯一 correction（187.568 秒）。Opus 对 30 个原始 components 给出 26 pass、4 correct，并识别 1 个被 qualification 掩盖的 novelty；Sol 接受并满足全部 4 项，最终为 29 个有效 components、12 个 new-viewpoint candidates、0 unresolved novelty、0 escalations。review raw output 中两处 finding-code order 只做有记录的无语义 canonical sorting；一次 flagged-span merge 依前述窄规则验证。零调用恢复从 immutable raw artifacts 正确重建累计 3 calls／747.827 秒；batch current-state 为 `resolved`，指向 batch-run SHA `2d93aba3c3a038bfab73f985811964ad5018bf7f55cf177af86bf28f35f6556a`，并明确 supersede 历史 `exception.json`。scope-run SHA-256 为 `c8918c402e4384201b6a4a7e710136ec8cfb4d1e809b7376692826da2cfa6ed9`，`apply_allowed=false`、0 master-data mutations。该实测将 #204 的 Opus-proposal/Sol-review 结论 supersede 为本设计的 Sol-proposal/correction、Opus-review 生产默认；旧 POC 仍作为历史证据保留。
 
+在 master schema 与 ChangeSet compiler 接通后，同一 13-Claim group 又以 scope packet v3 重跑：Sol/high proposal 372.560 秒，Opus/high review 530.428 秒，Sol/high correction 195.885 秒。初稿 29 components／15 new candidates；Opus 给出 26 pass、3 correct、0 reject/defer、novelty pass，三项 correction 全部 accepted，最终仍为 29 components／15 new candidates、0 escalation。该轮同时证明 `subject / predicate / object` 可无人工拆字段写入正式 signature；其中“该论证成立”暴露无宾语命题必须允许空 `object`，不能为 schema 人造宾语。compiler 生成 16 个 audit candidates、16 个 approved decisions、15 个新 CV、15 个 CVR 与 27 个 span-bound Claim links；现有 PostgreSQL planner 全部 foundation invariants 通过，得到 no-apply ChangeSet `KCS-53b4620332d39c4b80e3`：89 create、0 update、0 retire、0 removed fields。scope-run SHA-256 为 `22d253d98ab234b9325ab81963568dcd2e56a4b2e0166010b6a33db4b1f112f6`，batch current-state SHA-256 为 `d3ae660ae5a5a4c04f67670e451dc5d4fc25f19a8921646c413b5dbb8160a963`；全程 0 master-data mutations。
+
 62-Claim POC 也只证明 Opus 可以在该规模发现观点，不代表所有 passage/topic scope 都应塞入一次调用。生产 runner 把超过全链路预算的 Claim scope 交给 Intelligent Batching；每个 CVP batch 通过后直接写入 Registry，下一批只读取更新后的 CVP master data，不读取上一批 Claims。这里没有 pending/provisional 状态，也没有 scope-end CVP reconciliation：任一 CVP batch 失败即停止 CVP scope，保留前序已完成 transactions，修正后从失败批恢复。#204 当时规定等待所有 CVPs approved 后才开始 Route Proposal；#206 已由 batch-commit-triggered RouteResolutionQueue 取代这一 scope-wide barrier。
 
 这两次 POC 是 architecture evidence，不是新的 master approval，也没有保存成 Registry record。正式实施必须以 regression fixture 重现其输入 manifest 与期望 boundary；不能从本段自然语言反向创建 member links。
@@ -2404,7 +2398,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 本卡只交付设计。建议按依赖顺序拆分：
 
-实现状态（2026-08-24）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions。#206 已将模型角色固定为 GPT-5.6 Sol/high proposal/correction 与 Claude Opus 5/high independent review，修复 raw-call 累计观测和 current-state/exception supersession；模型角色和 provider 都进入 generation fingerprint，不允许静默 fallback。本次新增的 batch-commit-triggered `RouteResolutionQueue` 是规范与后续实现 contract，当前 no-apply POC runner 仍保留 scope-end route 调用方式，尚未创建 queue store/worker。该实现不修改 DB 或已发布 viewpoint。
+实现状态（2026-08-24）：1–4 已由 #167/#169 落地；8 的只读 workbench 由 #171 落地；#173 将 5–7 合并实现为同一个原子数据层，包含 first-class `ArgumentRoute`/attestation/`ViewpointRelation` authoring records、不可变 route/registry snapshots、统一 `ViewpointKnowledgeProjection`、三档 eligibility 与扩展后的 dependency pins。#177–#187 建立 scheduler、blocking、embedding、SemanticSignature、RecallGraph 与 group-discovery calibration；这些 artifacts 继续作为检索／诊断历史，不是 #204 之后的 mandatory production path。#194 已完成第一个 end-to-end 释经 CanonicalViewpoint、PostgreSQL ChangeSet apply、master UI 回读、active-master composition projection 与 Matthew authoring consumption ledger。#204 根据 7-Claim targeted identity POC 与 62-Claim blind discovery POC，把后续 scope 规范改为 Intelligent Batching 后的串行 transactions。#206 已将模型角色固定为 GPT-5.6 Sol/high proposal/correction 与 Claude Opus 5/high independent review，修复 raw-call 累计观测和 current-state/exception supersession；模型角色和 provider 都进入 generation fingerprint，不允许静默 fallback。scope packet v3 保留 Claim manifest 的 `coverage_snapshot_id`；master `ViewpointComponentLocator` 已改为 canonical Unicode spans，foundation validator 会从 pinned Claim 重算文本与唯一 active owner；passing／resolved-correction proposal 可编译成现有 PostgreSQL store 能计划的 CVP knowledge package。verified CVP readback receipt、idempotent `RouteResolutionJob` 与 latest-revision queue coalescing 已有程序 contract 和合成测试。当前 no-apply runner 尚未接通真实 ChangeSet apply/readback 与持久 queue store/worker，仍保留 scope-end route 调用方式；在这些缺口完成前不得对生产 Registry 打开 apply。该实现不修改 DB 或已发布 viewpoint。
 
 1. **Viewpoint registry schema 与 store integrity**
    增加 Pydantic records、semantic revision/snapshot 分离、collections、edges、ChangeSet validation、derived occurrence refs、数据库 migration 与 importer/exporter；只用合成 fixture 测试。

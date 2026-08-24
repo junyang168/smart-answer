@@ -24,6 +24,9 @@ BATCH_PACKET_VERSION = "wang_canonical_viewpoint_batch_packet_v1"
 PROPOSAL_VERSION = "wang_canonical_viewpoint_proposal_v1"
 REVIEW_VERSION = "wang_canonical_viewpoint_review_v1"
 VALIDATION_VERSION = "wang_canonical_viewpoint_batch_validation_v1"
+CVP_READBACK_VERSION = "wang_cvp_batch_readback_receipt_v1"
+ROUTE_JOB_VERSION = "wang_route_resolution_job_v1"
+ROUTE_WORK_UNIT_VERSION = "wang_route_resolution_work_unit_v1"
 
 #: Claims per batch.  The 62-Claim POC ran over ten minutes against a 900s
 #: subprocess ceiling, and the reviewer emits more than the proposer does, so
@@ -52,6 +55,266 @@ class BatchResolutionError(ValueError):
 
 class StrictBatchModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class CommittedViewpointRevision(StrictBatchModel):
+    """One logical viewpoint revision proven current by authority readback."""
+
+    viewpoint_id: str = Field(min_length=1)
+    viewpoint_revision_id: str = Field(min_length=1)
+
+
+class CvpBatchReadbackReceipt(StrictBatchModel):
+    """Authority proof required before route work may be enqueued.
+
+    This is deliberately not a model approval artifact.  It records that the
+    deterministic CVP ChangeSet was applied and that a fresh Registry read saw
+    the exact revisions the ChangeSet intended to make current.
+    """
+
+    schema_version: Literal["wang_cvp_batch_readback_receipt_v1"] = (
+        CVP_READBACK_VERSION
+    )
+    scope_label: str = Field(min_length=1)
+    scope_manifest_sha256: str = Field(min_length=1)
+    triggering_cvp_batch_id: str = Field(min_length=1)
+    cvp_changeset_id: str = Field(min_length=1)
+    cvp_changeset_sha256: str = Field(min_length=1)
+    committed_viewpoint_revisions: list[CommittedViewpointRevision] = Field(
+        min_length=1
+    )
+    readback_status: Literal["verified"] = "verified"
+    artifact_sha256: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_receipt(self) -> "CvpBatchReadbackReceipt":
+        pairs = [
+            (item.viewpoint_id, item.viewpoint_revision_id)
+            for item in self.committed_viewpoint_revisions
+        ]
+        if pairs != sorted(set(pairs)):
+            raise ValueError("committed viewpoint revisions must be sorted and unique")
+        if len({item.viewpoint_id for item in self.committed_viewpoint_revisions}) != len(
+            self.committed_viewpoint_revisions
+        ):
+            raise ValueError("readback may name only one current revision per viewpoint")
+        body = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != sha256_json(body):
+            raise ValueError("CVP readback receipt SHA mismatch")
+        return self
+
+
+class RouteResolutionJob(StrictBatchModel):
+    """Immutable enqueue artifact created only from a verified CVP readback."""
+
+    schema_version: Literal["wang_route_resolution_job_v1"] = ROUTE_JOB_VERSION
+    job_id: str = Field(min_length=1)
+    scope_label: str = Field(min_length=1)
+    scope_manifest_sha256: str = Field(min_length=1)
+    triggering_cvp_batch_id: str = Field(min_length=1)
+    cvp_changeset_sha256: str = Field(min_length=1)
+    cvp_readback_sha256: str = Field(min_length=1)
+    logical_viewpoint_ids: list[str] = Field(min_length=1)
+    enqueued_viewpoint_revision_ids: list[str] = Field(min_length=1)
+    evidence_scope_sha256: str = Field(min_length=1)
+    enqueue_reason: Literal["created_or_revised"] = "created_or_revised"
+    route_policy_fingerprint_sha256: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1)
+    status: Literal["queued"] = "queued"
+    artifact_sha256: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_job(self) -> "RouteResolutionJob":
+        if self.logical_viewpoint_ids != sorted(set(self.logical_viewpoint_ids)):
+            raise ValueError("logical_viewpoint_ids must be sorted and unique")
+        if len(self.enqueued_viewpoint_revision_ids) != len(
+            set(self.enqueued_viewpoint_revision_ids)
+        ):
+            raise ValueError("enqueued_viewpoint_revision_ids must be unique")
+        if len(self.logical_viewpoint_ids) != len(
+            self.enqueued_viewpoint_revision_ids
+        ):
+            raise ValueError("route job viewpoint and revision cuts must have equal size")
+        body = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != sha256_json(body):
+            raise ValueError("RouteResolutionJob SHA mismatch")
+        return self
+
+
+class RouteResolutionWorkUnit(StrictBatchModel):
+    """Derived current queue cut; original enqueue jobs remain immutable."""
+
+    schema_version: Literal["wang_route_resolution_work_unit_v1"] = (
+        ROUTE_WORK_UNIT_VERSION
+    )
+    scope_label: str = Field(min_length=1)
+    scope_manifest_sha256: str = Field(min_length=1)
+    source_job_ids: list[str] = Field(min_length=1)
+    current_viewpoint_revisions: list[CommittedViewpointRevision] = Field(min_length=1)
+    superseded_job_ids: list[str] = Field(default_factory=list)
+    artifact_sha256: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_work_unit(self) -> "RouteResolutionWorkUnit":
+        for field_name in ("source_job_ids", "superseded_job_ids"):
+            values = getattr(self, field_name)
+            if values != sorted(set(values)):
+                raise ValueError(f"{field_name} must be sorted and unique")
+        pairs = [
+            (item.viewpoint_id, item.viewpoint_revision_id)
+            for item in self.current_viewpoint_revisions
+        ]
+        if pairs != sorted(set(pairs)) or len({item[0] for item in pairs}) != len(pairs):
+            raise ValueError("work unit current revisions must be sorted and unique")
+        body = self.model_dump(mode="json", exclude={"artifact_sha256"})
+        if self.artifact_sha256 != sha256_json(body):
+            raise ValueError("RouteResolutionWorkUnit SHA mismatch")
+        return self
+
+
+def build_cvp_batch_readback_receipt(
+    *,
+    scope_label: str,
+    scope_manifest_sha256: str,
+    triggering_cvp_batch_id: str,
+    cvp_changeset_id: str,
+    cvp_changeset_sha256: str,
+    expected_current_revisions: Mapping[str, str],
+    observed_current_revisions: Mapping[str, str],
+) -> CvpBatchReadbackReceipt:
+    """Build a receipt only when authority readback exactly matches intent."""
+
+    expected = dict(expected_current_revisions)
+    observed = {key: observed_current_revisions.get(key) for key in expected}
+    if not expected:
+        raise BatchResolutionError(["CVP ChangeSet affected no viewpoint revisions"])
+    if expected != observed:
+        findings = [
+            f"{viewpoint_id}: expected current {revision_id}, observed "
+            f"{observed.get(viewpoint_id)}"
+            for viewpoint_id, revision_id in sorted(expected.items())
+            if observed.get(viewpoint_id) != revision_id
+        ]
+        raise BatchResolutionError(findings)
+    body = {
+        "schema_version": CVP_READBACK_VERSION,
+        "scope_label": scope_label,
+        "scope_manifest_sha256": scope_manifest_sha256,
+        "triggering_cvp_batch_id": triggering_cvp_batch_id,
+        "cvp_changeset_id": cvp_changeset_id,
+        "cvp_changeset_sha256": cvp_changeset_sha256,
+        "committed_viewpoint_revisions": [
+            {
+                "viewpoint_id": viewpoint_id,
+                "viewpoint_revision_id": revision_id,
+            }
+            for viewpoint_id, revision_id in sorted(expected.items())
+        ],
+        "readback_status": "verified",
+    }
+    return CvpBatchReadbackReceipt.model_validate(
+        body | {"artifact_sha256": sha256_json(body)}
+    )
+
+
+def build_route_resolution_job(
+    *,
+    receipt: CvpBatchReadbackReceipt,
+    evidence_scope_sha256: str,
+    route_policy_fingerprint_sha256: str,
+) -> RouteResolutionJob:
+    """Derive one idempotent enqueue artifact from verified committed CVPs."""
+
+    viewpoint_ids = sorted(
+        item.viewpoint_id for item in receipt.committed_viewpoint_revisions
+    )
+    revisions_by_viewpoint = {
+        item.viewpoint_id: item.viewpoint_revision_id
+        for item in receipt.committed_viewpoint_revisions
+    }
+    revision_ids = [revisions_by_viewpoint[key] for key in viewpoint_ids]
+    identity = {
+        "scope_manifest_sha256": receipt.scope_manifest_sha256,
+        "cvp_readback_sha256": receipt.artifact_sha256,
+        "logical_viewpoint_ids": viewpoint_ids,
+        "enqueued_viewpoint_revision_ids": revision_ids,
+        "evidence_scope_sha256": evidence_scope_sha256,
+        "route_policy_fingerprint_sha256": route_policy_fingerprint_sha256,
+    }
+    idempotency_key = sha256_json(identity)
+    body = {
+        "schema_version": ROUTE_JOB_VERSION,
+        "job_id": f"RRJ-{idempotency_key[:20]}",
+        "scope_label": receipt.scope_label,
+        "scope_manifest_sha256": receipt.scope_manifest_sha256,
+        "triggering_cvp_batch_id": receipt.triggering_cvp_batch_id,
+        "cvp_changeset_sha256": receipt.cvp_changeset_sha256,
+        "cvp_readback_sha256": receipt.artifact_sha256,
+        "logical_viewpoint_ids": viewpoint_ids,
+        "enqueued_viewpoint_revision_ids": revision_ids,
+        "evidence_scope_sha256": evidence_scope_sha256,
+        "enqueue_reason": "created_or_revised",
+        "route_policy_fingerprint_sha256": route_policy_fingerprint_sha256,
+        "idempotency_key": idempotency_key,
+        "status": "queued",
+    }
+    return RouteResolutionJob.model_validate(
+        body | {"artifact_sha256": sha256_json(body)}
+    )
+
+
+def coalesce_route_resolution_jobs(
+    jobs: Sequence[RouteResolutionJob],
+    *,
+    current_viewpoint_revisions: Mapping[str, str],
+) -> RouteResolutionWorkUnit:
+    """Replace queued stale revisions with the Registry's current revision cut."""
+
+    if not jobs:
+        raise ValueError("cannot coalesce an empty route queue")
+    jobs = list({item.job_id: item for item in jobs}.values())
+    scope_keys = {(item.scope_label, item.scope_manifest_sha256) for item in jobs}
+    if len(scope_keys) != 1:
+        raise ValueError("one route work unit cannot cross scope manifests")
+    requested = sorted(
+        {viewpoint_id for item in jobs for viewpoint_id in item.logical_viewpoint_ids}
+    )
+    missing = [key for key in requested if not current_viewpoint_revisions.get(key)]
+    if missing:
+        raise BatchResolutionError(
+            [f"{key}: no current Registry revision at queue cut" for key in missing]
+        )
+    current = [
+        {
+            "viewpoint_id": key,
+            "viewpoint_revision_id": current_viewpoint_revisions[key],
+        }
+        for key in requested
+    ]
+    superseded = sorted(
+        item.job_id
+        for item in jobs
+        if any(
+            current_viewpoint_revisions[viewpoint_id] != revision_id
+            for viewpoint_id, revision_id in zip(
+                item.logical_viewpoint_ids,
+                item.enqueued_viewpoint_revision_ids,
+                strict=True,
+            )
+        )
+    )
+    scope_label, scope_manifest_sha256 = next(iter(scope_keys))
+    body = {
+        "schema_version": ROUTE_WORK_UNIT_VERSION,
+        "scope_label": scope_label,
+        "scope_manifest_sha256": scope_manifest_sha256,
+        "source_job_ids": sorted({item.job_id for item in jobs}),
+        "current_viewpoint_revisions": current,
+        "superseded_job_ids": superseded,
+    }
+    return RouteResolutionWorkUnit.model_validate(
+        body | {"artifact_sha256": sha256_json(body)}
+    )
 
 
 class ProposedSpan(StrictBatchModel):
@@ -157,7 +420,10 @@ class NewViewpointCandidate(StrictBatchModel):
     local_key: str = Field(min_length=1)
     core_proposition: str = Field(min_length=1)
     subject: str = Field(min_length=1)
-    predicate_object: str = Field(min_length=1)
+    predicate: str = Field(min_length=1)
+    # Intransitive/copular signatures such as "该论证成立" have no object.
+    # Empty is semantically preferable to inventing a filler noun phrase.
+    object: str
     polarity: Literal["affirmed", "denied"]
     modality: str = Field(min_length=1)
     scripture_scope: list[str] = Field(default_factory=list)

@@ -599,12 +599,42 @@ class ViewpointRevisionRecord(StrictViewpointRecord):
         return self
 
 
+class ViewpointComponentSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    exact_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_span(self) -> "ViewpointComponentSpan":
+        if self.end_char <= self.start_char:
+            raise ValueError("component span is empty or reversed")
+        if len(self.exact_text) != self.end_char - self.start_char:
+            raise ValueError("component span exact_text length does not match its range")
+        return self
+
+
 class ViewpointComponentLocator(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     statement_component: str = Field(min_length=1)
     claim_sha256: str
-    json_pointer: str = Field(min_length=1)
+    canonical_spans: list[ViewpointComponentSpan] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_spans(self) -> "ViewpointComponentLocator":
+        spans = [(item.start_char, item.end_char) for item in self.canonical_spans]
+        if spans != sorted(set(spans)):
+            raise ValueError("component spans must be sorted and unique")
+        for earlier, later in zip(spans, spans[1:], strict=False):
+            if later[0] < earlier[1]:
+                raise ValueError("component spans overlap")
+        if self.statement_component != "".join(
+            item.exact_text for item in self.canonical_spans
+        ):
+            raise ValueError("statement_component does not match canonical spans")
+        return self
 
 
 class ViewpointClaimLinkRecord(StrictViewpointRecord):
@@ -1073,7 +1103,8 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
     seed_relation_ids: list[str] = Field(default_factory=list)
     proposed_action: Literal["match_existing", "create_new", "defer"]
     proposed_proposition_signature: Optional[ViewpointPropositionSignature] = None
-    coverage_snapshot_id: str
+    coverage_snapshot_id: Optional[str] = None
+    scope_manifest_sha256: Optional[str] = None
     blocker_codes: list[ViewpointBlockerCode] = Field(default_factory=list)
     generation_fingerprint: str
     review_status: Literal["candidate"] = "candidate"
@@ -1092,6 +1123,10 @@ class ViewpointIdentityCandidateRecord(StrictViewpointRecord):
             raise ValueError("match_existing requires a candidate viewpoint")
         if self.blocker_codes and self.proposed_action != "defer":
             raise ValueError("blocked candidate must be deferred")
+        if bool(self.coverage_snapshot_id) == bool(self.scope_manifest_sha256):
+            raise ValueError(
+                "identity candidate requires exactly one legacy coverage or scope manifest binding"
+            )
         return self
 
 

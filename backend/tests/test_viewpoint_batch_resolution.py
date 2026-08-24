@@ -11,13 +11,19 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ProposedComponent,
     ProposedSpan,
     build_batch_packet,
+    build_cvp_batch_readback_receipt,
+    build_route_resolution_job,
     canonicalize_review,
+    coalesce_route_resolution_jobs,
     component_key,
     split_batches,
     validate_proposal,
     validate_review,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_batch_changeset import (
+    compile_cvp_batch_package,
+)
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
 from backend.pipeline.viewpoint_batch_resolution_runner import run_batch
 
@@ -89,7 +95,8 @@ def _candidate(local_key: str) -> dict[str, Any]:
         "local_key": local_key,
         "core_proposition": "太16:18 的磐石不指彼得本人",
         "subject": "太16:18 的磐石",
-        "predicate_object": "指向彼得本人",
+        "predicate": "指向",
+        "object": "彼得本人",
         "polarity": "denied",
         "modality": "教授的释经判断",
         "scripture_scope": ["Matt.16.18"],
@@ -122,6 +129,153 @@ def test_split_batches_defaults_to_twenty_and_stays_ordered():
     batches = split_batches(claim_ids)
     assert [len(batch) for batch in batches] == [20, 20, 5]
     assert [claim for batch in batches for claim in batch] == sorted(claim_ids)
+
+
+def test_route_job_requires_exact_cvp_authority_readback():
+    with pytest.raises(BatchResolutionError, match="observed CVR-old"):
+        build_cvp_batch_readback_receipt(
+            scope_label="matthew-16",
+            scope_manifest_sha256="scope-sha",
+            triggering_cvp_batch_id="CVB-matthew-16-001",
+            cvp_changeset_id="KCS-1",
+            cvp_changeset_sha256="changeset-sha",
+            expected_current_revisions={"CV-1": "CVR-2"},
+            observed_current_revisions={"CV-1": "CVR-old"},
+        )
+
+
+def test_verified_readback_builds_an_idempotent_route_job():
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-matthew-16-001",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-sha",
+        expected_current_revisions={"CV-2": "CVR-A", "CV-1": "CVR-Z"},
+        observed_current_revisions={"CV-1": "CVR-Z", "CV-2": "CVR-A"},
+    )
+    first = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    second = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+
+    assert first == second
+    assert first.logical_viewpoint_ids == ["CV-1", "CV-2"]
+    # Revision ids stay positionally aligned to the sorted logical ids; they
+    # must not be independently sorted or the queue would route the wrong CVP.
+    assert first.enqueued_viewpoint_revision_ids == ["CVR-Z", "CVR-A"]
+    assert first.cvp_readback_sha256 == receipt.artifact_sha256
+
+
+def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
+    old_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-matthew-16-001",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1-sha",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    new_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-matthew-16-002",
+        cvp_changeset_id="KCS-2",
+        cvp_changeset_sha256="changeset-2-sha",
+        expected_current_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+        observed_current_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+    )
+    jobs = [
+        build_route_resolution_job(
+            receipt=receipt,
+            evidence_scope_sha256="evidence-scope-sha",
+            route_policy_fingerprint_sha256="route-policy-sha",
+        )
+        for receipt in (old_receipt, new_receipt)
+    ]
+
+    work = coalesce_route_resolution_jobs(
+        jobs,
+        current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
+    )
+
+    assert [
+        (item.viewpoint_id, item.viewpoint_revision_id)
+        for item in work.current_viewpoint_revisions
+    ] == [("CV-1", "CVR-2"), ("CV-2", "CVR-3")]
+    assert work.superseded_job_ids == [jobs[0].job_id]
+
+
+def test_passing_batch_compiles_component_bound_cvp_master_records():
+    proposal = CanonicalViewpointProposalResponse.model_validate(
+        {
+            "batch_id": "CVB-test-001",
+            "claim_decisions": [
+                {
+                    "claim_id": "C1",
+                    "components": [
+                        _component(
+                            ROCK_STATEMENT,
+                            "磐石不是彼得这个人",
+                            "new_viewpoint",
+                            local_new_viewpoint_key="ROCK-NOT-PETER",
+                        )
+                    ],
+                }
+            ],
+            "new_viewpoint_candidates": [_candidate("ROCK-NOT-PETER")],
+        }
+    )
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": proposal_sha,
+            "change_reviews": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "decision": "pass",
+                    "reason": "语义与证据绑定均通过",
+                }
+            ],
+            "novelty_review": {
+                "status": "pass",
+                "reason": "没有遗漏的新观点",
+            },
+        }
+    )
+
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=[],
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+    assert len(package["canonical_viewpoints"]) == 1
+    assert len(package["viewpoint_revisions"]) == 1
+    assert len(package["viewpoint_identity_candidates"]) == 1
+    assert len(package["viewpoint_identity_decisions"]) == 1
+    link = package["viewpoint_claim_links"][0]
+    assert link["link_type"] == "equivalent_component"
+    assert link["component_locator"]["statement_component"] == "磐石不是彼得这个人"
+    assert link["component_locator"]["canonical_spans"] == [
+        _span(ROCK_STATEMENT, "磐石不是彼得这个人")
+    ]
 
 
 def test_proposal_component_rejects_derived_and_conflicting_fields():
