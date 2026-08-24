@@ -1881,6 +1881,36 @@ def test_patch_merge_preserves_passed_component_metadata_byte_for_byte():
     }
 
 
+def test_patch_merge_can_update_the_candidate_owned_by_its_merge_target():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import apply_reconsideration_patches
+
+    proposal = _proposal()
+    changed_candidate = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    changed_candidate["core_proposition"] = "合并 span 后的完整观点"
+    # Make component 0 the flagged member and component 1 the candidate-owning
+    # merge target, mirroring the real CHRIST-MORE-LIKELY-ROCK correction.
+    payload = proposal.model_dump(mode="json")
+    payload["claim_decisions"][0]["components"].reverse()
+    proposal = CanonicalViewpointProposalResponse.model_validate(payload)
+    reconsideration = _reconsideration(
+        "accepted",
+        component_patches=[{
+            "claim_id": "C1", "component_index": 0,
+            "merge_into_component_index": 1,
+        }],
+        candidate_patches=[{
+            "local_key": "ROCK-NOT-PETER", "action": "upsert",
+            "candidate": changed_candidate,
+        }],
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+    assert effective.new_viewpoint_candidates[0].core_proposition == "合并 span 后的完整观点"
+
+
 def test_reconsideration_preserves_an_unflagged_component_after_index_shift():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 

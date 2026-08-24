@@ -1643,6 +1643,7 @@ def apply_reconsideration_patches(
         for item in reconsideration.finding_dispositions
         if item.disposition == "accepted"
     }
+    authorized_candidate_referrers = set(accepted)
     patches = {
         (item.claim_id, item.component_index): item
         for item in reconsideration.component_patches
@@ -1707,6 +1708,12 @@ def apply_reconsideration_patches(
                     f"{claim_id}#{component_index}: merge target must be an unpatched sibling"
                 )
                 continue
+            authorized_candidate_referrers.add((claim_id, target))
+            target_candidate_key = original_components[target].get(
+                "local_new_viewpoint_key"
+            )
+            if target_candidate_key:
+                affected_candidate_keys.add(str(target_candidate_key))
             replacements[component_index] = []
             merge_spans.setdefault(target, []).extend(
                 deepcopy(original_components[component_index]["spans"])
@@ -1735,7 +1742,10 @@ def apply_reconsideration_patches(
                 f"{patch.local_key}: candidate patch is not reachable from an accepted finding"
             )
             continue
-        unflagged_referrers = candidate_referrers.get(patch.local_key, set()) - accepted
+        unflagged_referrers = (
+            candidate_referrers.get(patch.local_key, set())
+            - authorized_candidate_referrers
+        )
         if unflagged_referrers:
             rendered = ", ".join(
                 f"{claim_id}#{component_index}"
