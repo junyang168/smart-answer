@@ -695,3 +695,122 @@ def canonicalize_proposal(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[
         return node
 
     return walk(dict(raw), ""), sorted(changes)
+
+
+RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v1"
+
+
+class FindingDisposition(StrictBatchModel):
+    claim_id: str
+    component_index: int = Field(ge=0)
+    disposition: Literal["accepted", "rebutted", "deferred"]
+    reason: str = Field(min_length=1)
+
+
+class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
+    """The proposer's single answer to reviewer findings.
+
+    It carries a whole revised proposal so the result stays one self-contained
+    artifact, but only components the reviewer actually flagged may differ.
+    Everything else must come back byte-identical.
+    """
+
+    schema_version: Literal["wang_canonical_viewpoint_reconsideration_v1"] = (
+        RECONSIDERATION_VERSION
+    )
+    proposal_sha256: str
+    review_sha256: str
+    finding_dispositions: list[FindingDisposition] = Field(min_length=1)
+    revised_proposal: CanonicalViewpointProposalResponse
+
+    @model_validator(mode="after")
+    def validate_reconsideration(self) -> "CanonicalViewpointReconsiderationResponse":
+        keys = [(item.claim_id, item.component_index) for item in self.finding_dispositions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("finding dispositions must be unique")
+        return self
+
+
+def _component_payloads(
+    proposal: CanonicalViewpointProposalResponse,
+) -> dict[tuple[str, int], dict[str, Any]]:
+    return {
+        (decision.claim_id, index): component.model_dump(mode="json")
+        for decision in proposal.claim_decisions
+        for index, component in enumerate(decision.components)
+    }
+
+
+def validate_reconsideration(
+    *,
+    reconsideration: CanonicalViewpointReconsiderationResponse,
+    proposal: CanonicalViewpointProposalResponse,
+    review: CanonicalViewpointReviewResponse,
+    proposal_sha256: str,
+    review_sha256: str,
+) -> dict[str, Any]:
+    """Confine the revision to what the reviewer asked for.
+
+    A reconsideration is not a second chance at the whole batch.  Anything the
+    reviewer passed must come back unchanged, and any finding the proposer
+    rebuts or defers goes to a human rather than being re-argued until the two
+    models agree.
+    """
+
+    findings: list[str] = []
+    if reconsideration.proposal_sha256 != proposal_sha256:
+        findings.append("reconsideration is bound to a different proposal")
+    if reconsideration.review_sha256 != review_sha256:
+        findings.append("reconsideration is bound to a different review")
+
+    flagged = {
+        (item.claim_id, item.component_index)
+        for item in review.change_reviews
+        if item.decision != "pass"
+    }
+    answered = {
+        (item.claim_id, item.component_index) for item in reconsideration.finding_dispositions
+    }
+    for missing in sorted(flagged - answered):
+        findings.append(f"{missing[0]}#{missing[1]}: finding has no disposition")
+    for extra in sorted(answered - flagged):
+        findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
+
+    before = _component_payloads(proposal)
+    after = _component_payloads(reconsideration.revised_proposal)
+    for key in sorted(set(before) & set(after)):
+        if key in flagged:
+            continue
+        if before[key] != after[key]:
+            findings.append(
+                f"{key[0]}#{key[1]}: unflagged component changed during reconsideration"
+            )
+    for gone in sorted(set(before) - set(after)):
+        findings.append(f"{gone[0]}#{gone[1]}: component disappeared during reconsideration")
+
+    escalations = sorted(
+        f"{item.claim_id}#{item.component_index}:{item.disposition}"
+        for item in reconsideration.finding_dispositions
+        if item.disposition != "accepted"
+    )
+    if review.novelty_review.status != "pass":
+        escalations.append(f"novelty:{review.novelty_review.status}")
+
+    if findings:
+        raise BatchResolutionError(findings)
+
+    report = {
+        "schema_version": "wang_canonical_viewpoint_reconsideration_validation_v1",
+        "proposal_sha256": proposal_sha256,
+        "review_sha256": review_sha256,
+        "finding_count": len(flagged),
+        "accepted_count": sum(
+            1 for item in reconsideration.finding_dispositions if item.disposition == "accepted"
+        ),
+        "escalations": escalations,
+        # Fail closed: a rebutted or deferred finding, or a novelty miss, is a
+        # human judgment. The system never re-asks until the models agree.
+        "outcome": "resolved" if not escalations else "exception",
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report

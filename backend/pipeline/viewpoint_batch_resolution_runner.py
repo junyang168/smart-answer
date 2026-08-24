@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
+    CanonicalViewpointReconsiderationResponse,
     CanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
@@ -32,6 +33,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     split_batches,
     validate_grouping,
     validate_proposal,
+    validate_reconsideration,
     validate_review,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -113,6 +115,21 @@ def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAd
     )
 
 
+def build_reconsiderer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=ClaudeSubscriptionClient(
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=CALL_TIMEOUT_SECONDS,
+        ),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
+            encoding="utf-8"
+        ),
+        response_model=CanonicalViewpointReconsiderationResponse,
+        schema_name="wang_canonical_viewpoint_reconsideration_v1",
+    )
+
+
 def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str, Any], int, float]:
     """Return (raw response, calls executed, wall seconds).
 
@@ -151,6 +168,7 @@ def run_batch(
     output_dir: Path,
     proposer: Any,
     reviewer: Any,
+    reconsiderer: Any = None,
 ) -> dict[str, Any]:
     packet = build_batch_packet(
         batch_id=batch_id,
@@ -222,6 +240,58 @@ def run_batch(
         },
     )
 
+    review_sha = sha256_json(review_payload)
+    reconsideration_report: dict[str, Any] | None = None
+    reconsideration_calls = 0
+    reconsideration_seconds = 0.0
+    if review_validation["reconsideration_required"] and reconsiderer is not None:
+        reconsider_packet = {
+            "batch_id": batch_id,
+            "packet": packet,
+            "proposal_sha256": proposal_sha,
+            "proposal": proposal_payload,
+            "review_sha256": review_sha,
+            "review": review_payload,
+        }
+        raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
+            reconsiderer, reconsider_packet, output_dir / "raw-reconsideration.json"
+        )
+        reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+            canonicalize_proposal(raw_reconsideration)[0]
+        )
+        reconsideration_report = validate_reconsideration(
+            reconsideration=reconsideration,
+            proposal=proposal,
+            review=review,
+            proposal_sha256=proposal_sha,
+            review_sha256=review_sha,
+        )
+        # The revision faces the same deterministic gates as the first pass;
+        # accepting a finding cannot smuggle a bad span or a stale target past
+        # checks the original proposal had to clear.
+        revised_validation = validate_proposal(
+            proposal=reconsideration.revised_proposal,
+            batch_id=batch_id,
+            claims=claims,
+            registry_revision_ids=[
+                str(item["viewpoint_revision_id"])
+                for item in registry_context
+                if item.get("viewpoint_revision_id")
+            ],
+        )
+        _write_immutable(
+            output_dir / "reconsideration.json",
+            {
+                "schema_version": "wang_canonical_viewpoint_reconsideration_envelope_v1",
+                "batch_id": batch_id,
+                "proposal_sha256": proposal_sha,
+                "review_sha256": review_sha,
+                "reconsideration": reconsideration.model_dump(mode="json"),
+                "validation_report": reconsideration_report,
+                "revised_validation_report": revised_validation,
+            },
+        )
+
     report = {
         "schema_version": "wang_canonical_viewpoint_batch_run_v1",
         "batch_id": batch_id,
@@ -236,7 +306,13 @@ def run_batch(
         "review_decision_counts": review_validation["decision_counts"],
         "packet_sha256": packet["packet_sha256"],
         "proposal_sha256": proposal_sha,
-        "review_sha256": sha256_json(review_payload),
+        "review_sha256": review_sha,
+        "reconsideration_outcome": (
+            reconsideration_report["outcome"] if reconsideration_report else None
+        ),
+        "escalations": (
+            reconsideration_report["escalations"] if reconsideration_report else []
+        ),
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
@@ -251,6 +327,8 @@ def run_batch(
         "proposal_wall_seconds": proposal_seconds,
         "review_calls_executed": review_calls,
         "review_wall_seconds": review_seconds,
+        "reconsideration_calls_executed": reconsideration_calls,
+        "reconsideration_wall_seconds": reconsideration_seconds,
         "call_timeout_seconds": CALL_TIMEOUT_SECONDS,
         "claim_count": len(claims),
         "component_count": validation["component_count"],
@@ -427,6 +505,9 @@ def main() -> int:
 
     proposer = build_proposer(args.proposal_model, args.proposal_effort)
     reviewer = build_reviewer(args.review_model, args.review_effort)
+    reconsiderer = (
+        None if args.no_reconsider else build_reconsiderer(args.proposal_model, args.proposal_effort)
+    )
 
     pending: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
@@ -443,6 +524,7 @@ def main() -> int:
                 output_dir=batch_dir,
                 proposer=proposer,
                 reviewer=reviewer,
+                reconsiderer=reconsiderer,
             )
         except BatchResolutionError as exc:
             exception_bundle = {

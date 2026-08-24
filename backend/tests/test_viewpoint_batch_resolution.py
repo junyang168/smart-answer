@@ -739,3 +739,114 @@ def test_grouping_coverage_is_repaired_not_thrown_away():
 
     # The repaired plan is what gets validated, and it passes.
     validate_grouping(grouping=repaired, scope_label="s", claim_ids=["C1", "C2", "C3", "C4"])
+
+
+def _review(*decisions: str) -> CanonicalViewpointReviewResponse:
+    return CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {
+                    "claim_id": "C1",
+                    "component_index": index,
+                    "decision": decision,
+                    "finding_codes": [] if decision == "pass" else ["modality_collapsed"],
+                    "reason": "理由",
+                    "correction": None if decision != "correct" else "改为 support_existing",
+                }
+                for index, decision in enumerate(decisions)
+            ],
+            "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+        }
+    )
+
+
+def _reconsideration(revised: dict[str, Any], *dispositions: str) -> Any:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+    )
+
+    return CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "review_sha256": "review-sha",
+            "finding_dispositions": [
+                {
+                    "claim_id": "C1",
+                    "component_index": index,
+                    "disposition": disposition,
+                    "reason": "理由",
+                }
+                for index, disposition in enumerate(dispositions)
+            ],
+            "revised_proposal": revised,
+        }
+    )
+
+
+def test_accepted_finding_resolves_the_batch():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    revised["claim_decisions"][0]["components"][0]["disposition"] = "support_existing"
+    revised["claim_decisions"][0]["components"][0]["target_viewpoint_revision_id"] = "CVR-1"
+    revised["claim_decisions"][0]["components"][0]["local_new_viewpoint_key"] = None
+    revised["new_viewpoint_candidates"] = []
+
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(revised, "accepted"),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+    assert report["escalations"] == []
+
+
+def test_rebutted_finding_goes_to_a_human_not_another_round():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(proposal.model_dump(mode="json"), "rebutted"),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "exception"
+    assert report["escalations"] == ["C1#0:rebutted"]
+
+
+def test_reconsideration_cannot_touch_a_component_the_reviewer_passed():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    # Component 1 passed review; quietly rewriting it is not a revision.
+    revised["claim_decisions"][0]["components"][1]["reason"] = "偷偷改掉的理由"
+
+    with pytest.raises(BatchResolutionError, match="unflagged component changed"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(revised, "accepted"),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
+def test_every_finding_needs_a_disposition():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    with pytest.raises(BatchResolutionError, match="C1#1: finding has no disposition"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(proposal.model_dump(mode="json"), "accepted"),
+            proposal=proposal,
+            review=_review("correct", "correct"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
