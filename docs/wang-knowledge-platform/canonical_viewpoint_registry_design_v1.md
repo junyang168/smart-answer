@@ -1,6 +1,6 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
-> 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、projection、只读 UI 与首个太 16:18 master record 已实现。#204 以实际 POC 将后续 batch resolution 的规范主路径简化为 extraction-shaped proposal → deterministic validation → independent review → ChangeSet；旧 recall/signature/atomic promotion artifacts 只保留为历史诊断与语义 regression fixtures，不再是每批必经的领域状态或长期 runtime compatibility surface；#194 的 PropositionUnit active membership 由 batch workflow 重建取代，不做机械迁移。本文件不授权内容生成或部署。
+> 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、projection、只读 UI 与首个太 16:18 master record 已实现。#204 将后续 batch resolution 的规范主路径简化为 extraction-shaped joint viewpoint/ArgumentRoute proposal → deterministic validation → independent review → ChangeSet；旧 recall/signature/atomic promotion artifacts 只保留为历史诊断与语义 regression fixtures，不再是每批必经的领域状态或长期 runtime compatibility surface；#194 的 PropositionUnit active membership 由 batch workflow 重建取代，不做机械迁移。本文件不授权内容生成或部署。
 > 版本：v1
 > 日期：2026-08-23
 > 追踪：GitHub issue #165（WKP-F02.7）、#181（WKP-F02.15 scalability revision）、#204（WKP-F02.21 simplified batch resolution）
@@ -30,6 +30,7 @@
 16. 生产模型策略固定为 Claude Subscription `claude-opus-5` high proposer 与 Codex Subscription `gpt-5.6-sol` high independent reviewer。模型、provider、effort、prompt 或 schema 改变必须形成新 generation fingerprint；不得静默降级或回退 API billing。
 17. reviewer 读取 proposal、相关 active viewpoint boundary、精确 Claim components 与必要 source evidence，专门检查 truth-condition identity、polarity、modality、scope、attribution、novelty 和 typed role。reviewer 不是第二次全库 discovery。
 18. reviewer findings 只允许触发一次 proposer reconsideration；持续分歧、split/merge/supersedes、无法验证的证据或实质 scope 冲突进入 exception。不得增加 promotion proposal、finalization bundle、score-gap review 或重复 full review 来追求表面一致。
+19. 同一次 `CanonicalViewpointProposal` 必须联合提出观点身份与论证结构：`claim_decisions` 回答“教授主张什么”，`argument_route_candidates` 回答“他怎样推出该结论”，`source_route_attestations` 回答“哪一个来源实际出现了哪些步骤”。三者共享 evidence packet，但分别审核、分别落为 master data；模型不得跨来源拼成一条任何来源都没有完整表达的论证。
 
 推荐的整体名称是 **Canonical Viewpoint Registry**；中文可称“规范观点注册表”。这里的 canonical 表示平台确认多个来源断言属于同一观点身份，不表示平台裁定该神学观点正确。
 
@@ -69,7 +70,7 @@
 
 新的领域状态机只有三个 durable semantic artifacts：
 
-1. `CanonicalViewpointProposal`：Opus 5 对一个完整 batch 的语义提案；
+1. `CanonicalViewpointProposal`：Opus 5 对一个完整 batch 的观点、论证路线与 source-local attestations 联合语义提案；
 2. `CanonicalViewpointReview`：GPT-5.6 sol 对 proposal boundary 与 evidence 的独立审核；
 3. `RegistryChangeSet`：程序根据通过的 proposal/review 生成的唯一可 apply 变更。
 
@@ -77,7 +78,7 @@ Evidence packet、retrieval result、budget、schema validation、coverage repor
 
 ```mermaid
 flowchart LR
-    B["reviewed Claim batch + Evidence + relevant active CVPs"] --> P["Opus 5 high CanonicalViewpointProposal"]
+    B["reviewed Claims + Evidence + relevant CVPs/routes"] --> P["Opus 5 high: viewpoints + routes + attestations"]
     P --> D["deterministic validation"]
     D --> R["GPT-5.6 sol high CanonicalViewpointReview"]
     R -->|"pass"| C["RegistryChangeSet"]
@@ -535,6 +536,7 @@ Route revision 保存编辑规范化的 inferential skeleton：
 
 ```json
 {
+  "schema_version": "wang_argument_route_revision_v2",
   "argument_route_revision_id": "ARR-opaque",
   "argument_route_id": "AR-opaque",
   "validated_against_conclusion_viewpoint_revision_id": "CVR-opaque",
@@ -544,6 +546,26 @@ Route revision 保存编辑规范化的 inferential skeleton：
     "inference_pattern": "temporary_guardianship_ends_at_christ",
     "conclusion_viewpoint_id": "CV-opaque"
   },
+  "ordered_inference_nodes": [
+    {
+      "route_step_key": "P1",
+      "role": "premise",
+      "normalized_proposition": "παιδαγωγός 表达具有期限的监护职能",
+      "required_for_full_attestation": true
+    },
+    {
+      "route_step_key": "I1",
+      "role": "inference",
+      "normalized_proposition": "有期限的监护在基督来到后不再继续",
+      "required_for_full_attestation": true
+    },
+    {
+      "route_step_key": "C1",
+      "role": "conclusion",
+      "conclusion_viewpoint_revision_id": "CVR-opaque",
+      "required_for_full_attestation": true
+    }
+  ],
   "representation_kind": "editorial_normalization_of_attested_arguments",
   "review_artifact_sha256": "...",
   "review_status": "human_approved",
@@ -551,7 +573,9 @@ Route revision 保存编辑规范化的 inferential skeleton：
 }
 ```
 
-`ArgumentRouteRevision` 只保存 inferential skeleton。新增同类 source attestation 不产生 route semantic revision。
+`wang_argument_route_revision_v2` 取代现有只含 `route_signature` 的 v1 active contract。`ArgumentRouteRevision` 只保存 inferential skeleton；`ordered_inference_nodes` 是编辑归一化的逻辑角色，不冒充教授逐字原话，非 conclusion node 的 `normalized_proposition` 必须由一个或多个 attestation 的 source-local evidence 支持。新增同类 source attestation 不产生 route semantic revision。
+
+ArgumentRoute identity 由同一个 conclusion viewpoint revision、materially equivalent 的 required premise／bridge roles、节点顺序与 inference pattern 决定。词汇、例证、经文组合或 EvidenceStep IDs 不同可以是同一路线的不同 attestations；增加或替换承重 premise、改变推理形式，或从另一种理由到达同一结论，通常是另一条 ArgumentRoute，而不是同一路线的新 attestation。
 
 ### 5.7 ArgumentRouteAttestation
 
@@ -559,13 +583,30 @@ Route revision 保存编辑规范化的 inferential skeleton：
 
 ```json
 {
+  "schema_version": "wang_argument_route_attestation_v2",
   "argument_route_attestation_id": "ARA-opaque",
   "argument_route_id": "AR-opaque",
   "validated_against_route_revision_id": "ARR-opaque",
   "source_id": "SRC-...",
-  "claim_id": "DK-...-CL...",
+  "source_revision_sha256": "...",
+  "claim_ids": ["DK-...-CL...", "DK-...-CL..."],
   "occurrence_ref_id": "OCC-...",
-  "ordered_evidence_step_ids": ["DK-...-E010", "DK-...-E011"],
+  "step_bindings": [
+    {
+      "route_step_key": "P1",
+      "claim_component_keys": ["CCK-..."],
+      "evidence_step_ids": ["DK-...-E010"],
+      "source_fragment_ids": ["FR-..."],
+      "attestation_status": "attested"
+    },
+    {
+      "route_step_key": "I1",
+      "claim_component_keys": ["CCK-..."],
+      "evidence_step_ids": ["DK-...-E011"],
+      "source_fragment_ids": ["FR-..."],
+      "attestation_status": "attested"
+    }
+  ],
   "terminal_claim_link_id": "VCL-...",
   "completeness": "full",
   "scripture_refs_derived": ["Gal.3.23-Gal.3.25"],
@@ -574,7 +615,9 @@ Route revision 保存编辑规范化的 inferential skeleton：
 }
 ```
 
-`completeness` 可为 `full` 或 `partial`。只有 `full` attestation 计入“该来源使用了这条完整论证路线”；partial 仍可展示，但不得抬高 recurring route count。
+`claim_ids`、step bindings 及 fragments 必须全部来自同一个 pinned source revision。`attestation_status` 可为 `attested / missing / ambiguous`；不得用模型常识补出 source 中没有的 bridge。`completeness=full` 要求 route revision 中每个 `required_for_full_attestation=true` 的 node 都有可验证 binding，且 terminal Claim link 指向 conclusion viewpoint；其余情况只能是 `partial`。只有 `full` attestation 计入“该来源使用了这条完整论证路线”；partial 仍可展示，但不得抬高 recurring route count。
+
+新 workflow 只写 `wang_argument_route_revision_v2` 与 `wang_argument_route_attestation_v2`。上线前 inventory 现有 active v1 rows：若为 0，直接以 v2 为唯一 active contract；若非 0，则用 source-bound evidence 重新 proposal/review 后由 ChangeSet 重建，不能根据旧 `premise_roles` 或 `ordered_evidence_step_ids` 猜造 inference nodes。cutover 后 runtime 不维护 v1/v2 dual-reader；旧 rows retire 并只作历史 provenance。
 
 经文列表从 EvidenceStep 派生。若为了查询物化在 attestation 中，validator 必须逐次重算并拒绝不一致。
 
@@ -743,6 +786,68 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
     }
   ],
   "new_viewpoint_candidates": [],
+  "argument_route_candidates": [
+    {
+      "local_route_key": "ROUTE-LOCAL-1",
+      "conclusion_ref": {
+        "target_viewpoint_revision_id": "CVR-...",
+        "local_new_viewpoint_key": null
+      },
+      "proposed_action": "match_existing",
+      "target_argument_route_revision_id": "ARR-...",
+      "route_label": "...",
+      "inference_pattern": "...",
+      "ordered_inference_nodes": [
+        {
+          "route_step_key": "P1",
+          "role": "premise",
+          "normalized_proposition": "...",
+          "required_for_full_attestation": true
+        },
+        {
+          "route_step_key": "C1",
+          "role": "conclusion",
+          "conclusion_ref": {
+            "target_viewpoint_revision_id": "CVR-...",
+            "local_new_viewpoint_key": null
+          },
+          "required_for_full_attestation": true
+        }
+      ],
+      "identity_comparison": "..."
+    }
+  ],
+  "source_route_attestations": [
+    {
+      "local_attestation_key": "ATTEST-LOCAL-1",
+      "route_ref": {
+        "target_argument_route_revision_id": "ARR-...",
+        "local_route_key": null
+      },
+      "source_id": "SRC-...",
+      "source_revision_sha256": "...",
+      "claim_ids": ["DK-...-CL..."],
+      "step_bindings": [
+        {
+          "route_step_key": "P1",
+          "claim_component_keys": ["CCK-..."],
+          "evidence_step_ids": ["DK-...-E..."],
+          "source_fragment_ids": ["FR-..."],
+          "attestation_status": "attested"
+        },
+        {
+          "route_step_key": "C1",
+          "claim_component_keys": ["CCK-CONCLUSION-..."],
+          "evidence_step_ids": ["DK-...-E..."],
+          "source_fragment_ids": ["FR-..."],
+          "attestation_status": "attested"
+        }
+      ],
+      "terminal_claim_component_key": "CCK-CONCLUSION-...",
+      "completeness": "full",
+      "reason": "..."
+    }
+  ],
   "coverage": {
     "input_claim_count": 0,
     "resolved_claim_count": 0,
@@ -753,7 +858,9 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 }
 ```
 
-`claim_decisions` 对 input manifest exact-once；一个 Claim row 内可以有多个 components。`component_locator` 使用第 5.4 节的 span 形式，模型只输出 spans 与拼接后的 `statement_component`，`claim_sha256` 由程序填入并核对。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的单一 span。`new_viewpoint_candidates` 只使用 batch-local keys；正式 opaque ID 由 ChangeSet builder 分配。
+`claim_decisions` 对 input manifest exact-once；一个 Claim row 内可以有多个 components。`component_locator` 使用第 5.4 节的 span 形式，模型只输出 spans 与拼接后的 `statement_component`，`claim_sha256` 由程序填入并核对。若整条 Claim 只有一个不可再分 truth condition，可以使用覆盖完整 statement 的单一 span。`new_viewpoint_candidates`、new route 与 attestation 只使用 batch-local keys；正式 opaque IDs 由 ChangeSet builder 分配。
+
+route proposal 与 viewpoint proposal 在同一次模型输出中联合生成，但不是同一种 identity。`proposed_action` 允许 `match_existing / create_new / defer`；匹配既有 route 时必须 pin 当前 route revision，创建新 route 时必须引用 existing 或 batch-local conclusion viewpoint。每个 `source_route_attestation` 只能引用一个 source revision；同一条 route 可以有多个 source-local attestations，但不得先把不同来源的 steps 合并，再反向生成一个虚构 attestation。Claim component 即使作为 premise 使用，也不会因此自动成为 CVP member。
 
 #### 5.12.2 `CanonicalViewpointReview`
 
@@ -782,12 +889,19 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
     "status": "pass",
     "missed_claim_ids": []
   },
+  "route_review": {
+    "status": "pass",
+    "reviewed_route_pointers": ["/argument_route_candidates/0"],
+    "reviewed_attestation_pointers": ["/source_route_attestations/0"],
+    "cross_source_composition_found": false,
+    "full_partial_errors": []
+  },
   "outcome": "pass",
   "artifact_sha256": "..."
 }
 ```
 
-`decision` 允许 `pass / correct / reject / defer`。reviewer 必须覆盖 proposal 中每个 proposed semantic change，不能只给 batch-level 总结。若产生 reconsideration，最终 review envelope 绑定原 proposal、finding dispositions 与修正 proposal SHA；不另造 promotion/finalization artifact。
+`decision` 允许 `pass / correct / reject / defer`。reviewer 必须覆盖 proposal 中每个 proposed semantic change，包括每个 viewpoint component、route candidate 和 attestation，不能只给 batch-level 总结。`route_review` 是 exact-coverage summary，不替代逐 pointer decisions。若产生 reconsideration，最终 review envelope 绑定原 proposal、finding dispositions 与修正 proposal SHA；不另造 route-specific promotion/finalization artifact。
 
 #### 5.12.3 `RegistryChangeSet`
 
@@ -808,9 +922,11 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
 }
 ```
 
-ChangeSet builder 只接收 review-pass 的最终 proposal。它可以生成现有 `CanonicalViewpoint`、`ViewpointRevision`、`ViewpointClaimLink`、`ArgumentRoute`、`ViewpointRelation` 与必要的历史 audit records；这些 master records 仍遵守本文件其余 schema。`apply_allowed` 由程序重算，模型不能输出或修改。
+ChangeSet builder 只接收 review-pass 的最终 proposal。它可以在同一事务中生成 `CanonicalViewpoint`、`ViewpointRevision`、`ViewpointClaimLink`、`ArgumentRoute`、`ArgumentRouteRevision`、`ArgumentRouteAttestation`、`ViewpointRelation` 与必要的历史 audit records；route conclusion、terminal Claim link 与 batch-local keys 必须在 builder 分配正式 IDs 后完整解析。这些 master records 仍遵守本文件其余 schema。`apply_allowed` 由程序重算，模型不能输出或修改。
 
 batch workflow 只用 `ViewpointClaimLink`（`equivalent_full` 或带 span locator 的 `equivalent_component`）表示 active 成员资格。唯一 component key 为 `(claim_id, claim_revision_sha256, canonical_spans)`；`canonical_spans` 是按序排列的 `(start_char, end_char, exact_text)`，`equivalent_full` 在计算该 key 时视为覆盖完整 statement 的单一 span。该 key 是 validator 的派生值，不落库，因此不与「`component_locator` 只对 `equivalent_component` 有效」冲突。invariant 是：同一 component key 至多一个 active viewpoint owner。
+
+proposal 与 route attestation 需要引用 component 时，使用同一 tuple 机械生成的 transport key `CCK-<sha256-prefix>`；validator 必须从 pinned Claim 与 spans 重算，模型不能自定义其身份。`claim_component_keys` 只是跨 proposal sections 的稳定引用，不建立新的 PropositionUnit master object。
 
 #194 已 apply 的 `CV-59fdfc87534d1f17fc9f` 用 19 个 `ViewpointPropositionUnitRecord` 加 8 个 `ViewpointPropositionUnitLinkRecord` 表示成员。这批 master data 是 pilot 的 reference，不是必须保全的生产资产：它不做机械转换，而是先整体导出为不可变 baseline，再由 batch workflow 重跑太 16 并与 baseline 比对。#204 的定向 POC 已经证明，只给 7 条 Claim 与证据、不给现有 CVP，模型能直接产出等价 core proposition 并找回同一 7/7 Claim set，因此重建比维护两套成员表示便宜，也顺带给新流程一次真实的对照测试。
 
@@ -857,7 +973,7 @@ active composition projection `78ed881b…`（v14）随之作废：它内嵌 8 �
 flowchart LR
     S["1. Scope reviewed Claim batch"] --> I["2. Retrieve relevant active CVPs"]
     I --> E["3. Compile Claim + Evidence packet"]
-    E --> P["4. Opus 5 high proposal"]
+    E --> P["4. Opus: CVPs + routes + source attestations"]
     P --> D["5. Deterministic validation"]
     D --> R["6. GPT-5.6 sol high review"]
     R -->|"pass"| C["8. RegistryChangeSet"]
@@ -890,7 +1006,7 @@ batch size 的实际安全上限取全链路最紧的限制：proposer input、p
 
 #### 6.2.2 Step 2 — relevant Registry context
 
-增量 batch 必须把相关 active CanonicalViewpoints 传给 proposer。检索顺序为：
+增量 batch 必须把相关 active CanonicalViewpoints 及其 active ArgumentRoute synopses 传给 proposer。检索顺序为：
 
 1. scripture scope exact/overlap；
 2. TopicNode／knowledge classification filter；
@@ -898,7 +1014,7 @@ batch size 的实际安全上限取全链路最紧的限制：proposer input、p
 4. 已批准 relation/negative constraint；
 5. operator 明确 pin 的 passage Registry slice。
 
-每个 retrieved viewpoint synopsis 至少含 viewpoint/revision IDs、core proposition、truth-condition signature、scope、modality、material qualifications/tensions、代表性 member components 和 source coverage。它是开放参考集，packet 必须明确声明“Registry 可能不完整”；低 embedding score 或没有 retrieved viewpoint 都不能否决 `new_viewpoint`。
+每个 retrieved viewpoint synopsis 至少含 viewpoint/revision IDs、core proposition、truth-condition signature、scope、modality、material qualifications/tensions、代表性 member components 和 source coverage。每个 route synopsis 至少含 route/revision IDs、pinned conclusion viewpoint revision、required inference nodes、inference pattern、代表性 full/partial attestation IDs 与 source coverage。它们都是开放参考集，packet 必须明确声明“Registry 可能不完整”；低 embedding score 或没有 retrieved viewpoint/route 都不能否决 `new_viewpoint` 或 `create_new` route。
 
 bootstrap 在某 passage 尚无 active Registry 时，relevant viewpoint list 可以为空；Opus 仍直接从完整 batch 发现 CVP candidates。首次建库不要求先构造 Claim-pair graph。
 
@@ -907,7 +1023,7 @@ bootstrap 在某 passage 尚无 active Registry 时，relevant viewpoint list �
 proposal 的默认 packet 包含全部 Claim statements 与 EvidenceStep statements。为避免把同一逐字片段重复数百次，SourceFragment 采用 progressive expansion：
 
 - Claim/Evidence 足以作出明确 proposal 时，保存引用的 fragment IDs；
-- 成为 `member`、`support`、`qualification`、`tension` 或 reviewer 标为 ambiguous 的 component，必须在 review 前展开精确 verbatim fragments；
+- 成为 `member`、`support`、`qualification`、`tension`、route step binding 或 reviewer 标为 ambiguous 的 component，必须在 review 前展开精确 verbatim fragments；
 - expansion 只能读取同一 source revision 的有界上下文，不得跨来源拼出一条不存在的论证；
 - evidence 不足时输出 `deferred:evidence_insufficient`，不能靠模型常识补齐。
 
@@ -931,6 +1047,17 @@ proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它
 
 每个 `new_viewpoint` candidate 至少包含 conservative canonical wording、atomic truth condition、polarity、modality、scope、attribution、member components、typed related components 与 novelty comparison。它不得因相关 CVP 已传入就把所有剩余 Claim 强行匹配。
 
+完成 viewpoint dispositions 后，同一次 proposal 必须检查 evidence 中是否存在“一个或多个 premises／observations／objection-response，通过可辨识 inference 到达某个 proposed conclusion viewpoint”的论证。对每条可辨识路线：
+
+1. 先把 conclusion 绑定 existing 或 batch-local viewpoint；
+2. 再判断与 retrieved active route 是 `match_existing` 还是 `create_new`；
+3. 输出保守的 ordered inference nodes 与 inference pattern；
+4. 按来源分别生成 attestation，不把跨来源共现当作一条 source-local route；
+5. 每个 step binding 精确引用 Claim component、EvidenceStep 与必要 SourceFragment；
+6. source 缺少 required bridge 或 conclusion 时标 `partial`，证据无法判断时 `defer`，不能补写隐含步骤来凑成 `full`。
+
+不是每个 support Claim 都形成 ArgumentRoute。孤立理由、例证或背景可以只保留 `support_existing`；只有 evidence 显示它与其他步骤构成可复用的 inferential skeleton 时才提 route。反过来，作为 route premise 的 Claim component 也不因参与论证而自动获得 CVP identity。
+
 #### 6.2.5 Step 5 — deterministic validation
 
 程序在 reviewer 调用前 fail closed 检查：
@@ -944,6 +1071,11 @@ proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它
 7. proposal 没有把模型 confidence、embedding score 或 recurrence 当作 identity approval；
 8. canonical wording 没有被标成 direct quotation；
 9. generation fingerprint 绑定 input manifest、Registry slice、expanded evidence、prompt、schema、model/provider/effort 与 validator version。
+10. 每个 route conclusion ref、route ref、route step key 与 Claim component key 在 existing context 或 batch-local proposal 中 exact-one 解析；
+11. 每个 attestation 的 Claims、EvidenceSteps、SourceFragments、occurrence 与 source revision 全部 source-local、revision-pinned，且 step 顺序无重复；
+12. `completeness=full` 时所有 required inference nodes 均有 `attested` binding、terminal Claim link 指向同一 conclusion viewpoint；缺少或 ambiguous node 时程序强制降为 `partial` 或 fail；
+13. `match_existing` route pin 的是当前 route revision，且 conclusion viewpoint revision 与 proposal conclusion 一致；
+14. route/attestation exact coverage、local keys、identity comparisons 与 generation fingerprint 完整；模型没有分配正式 route/attestation IDs 或 derived counts。
 
 这些 checks 可以保存为 proposal envelope 的 validation report，但不生成新的语义 workflow stage。
 
@@ -963,24 +1095,36 @@ reviewer 对每项 proposed change 检查：
 - evidence 是否真正 entail proposed component，而非只因同段共现；
 - proposal 是否把未归入既有 CVP 的 Claim 认真检查为新观点。
 
+对于 proposed ArgumentRoute 与 attestation，reviewer 另外检查：
+
+- conclusion 是否真由该路线支持，并绑定正确的 viewpoint revision；
+- ordered premises、bridges、objection/response 与 conclusion 是否忠实反映 source evidence；
+- inference pattern 是否把“同段共现”夸大成推理，或省略改变有效性的承重步骤；
+- `match_existing` 是否真为同一 materially equivalent inferential skeleton，而不只是同一结论；
+- 同一结论的不同理由是否被错误合并，同一路线的措辞／例证变体是否被错误拆分；
+- attestation 是否严格 source-local，是否从不同讲道／母本拼出一条虚构完整路线；
+- `full / partial` 是否正确，missing/ambiguous step 是否被隐藏；
+- route step 的 normalized proposition 是否保守，且没有冒充教授逐字原话。
+
 membership 使用双向反事实测试：若 Claim component 为真而 CVP 可为假，或 CVP 为真而 component 可为假，则它们不是 identity member。特别是 modality 不同的命题不得通过删除“更可能／可以／应当”等词变成 categorical member。
 
-review 输出逐 change `pass / correct / reject / defer`、finding code、精确理由与必要 correction；它不直接写 master records。
+review 输出逐 viewpoint component、route candidate 与 attestation 的 `pass / correct / reject / defer`、finding code、精确理由与必要 correction；它不直接写 master records。viewpoint decisions 全部通过但 route 有 finding 时，只阻断受影响 route/attestation operations；若 route finding 暴露 conclusion identity 本身错误，则同时阻断相应 viewpoint operations。
 
 #### 6.2.7 Step 7 — 一次 reconsideration
 
-review 全部通过时不调用 reconsideration。存在 correctable findings 时，原 Opus proposer只接收 proposal、review findings 与相应 evidence，允许一次结构化 reconsideration；不得重跑全 batch discovery或新增 reviewer 问题。程序再次执行同一 deterministic validation，并要求每个 finding 有 `accepted / rebutted / deferred` disposition。
+review 全部通过时不调用 reconsideration。存在 correctable findings 时，原 Opus proposer 只接收 proposal、review findings 与相应 evidence，允许一次结构化 reconsideration；不得重跑全 batch discovery 或新增 reviewer 问题。程序再次执行同一 deterministic validation，并要求每个 finding 有 `accepted / rebutted / deferred` disposition。
 
 review finding 被接受、且修正严格落在 reviewer 已给出的 correction/acceptance criteria 内时，由 deterministic validator 核对后即可进入 ChangeSet，不再调用 reviewer。proposer 若 rebut finding、提出 reviewer 未预先允许的替代修正，或改变其他语义字段，则不能自动视为解决，直接进入 exception inbox。持续语义分歧、`unknown`、split/merge/supersedes、material scope change 或证据无法验证同样进入 exception。系统不得通过多次重问直到模型同意。
 
 #### 6.2.8 Step 8–10 — ChangeSet、apply 与 readback
 
-只有通过 review 的 decisions 才进入 `RegistryChangeSet`。ChangeSet 包含 expected current revisions、create/update/retire operations、dependency/impact preview、proposal/review SHAs、approval basis 与 idempotency key。正常新增 member 或 evidence 不创建新的 semantic `ViewpointRevision`；只有 canonical truth condition、scope、modality 或 attribution 改变才创建新 semantic revision并触发旧 members/consumers revalidation。
+只有通过 review 的 decisions 才进入 `RegistryChangeSet`。ChangeSet 包含 expected current revisions、create/update/retire operations、dependency/impact preview、proposal/review SHAs、approval basis 与 idempotency key。正常新增 member、route attestation 或 evidence 不创建新的 semantic `ViewpointRevision`／`ArgumentRouteRevision`；只有 canonical truth condition、scope、modality、attribution 或 materially different inferential skeleton 改变才创建相应 semantic revision，并触发旧 members/routes/attestations/consumers revalidation。
 
 apply 必须使用 PostgreSQL 原子事务。失败不会留下部分 viewpoint/link/relation。commit 后用同一 authority API readback，并验证：
 
 - created/updated records 与 ChangeSet canonical payload 一致；
 - rerun 同一 ChangeSet 为 0 operations／already applied；
+- every active route resolves to its pinned conclusion viewpoint revision，且每个 full attestation 的 required nodes、terminal link 与 source-local lineage 回读一致；
 - affected RegistrySnapshot、embedding projection 与 consumer impact 只重建受影响范围；
 - SourceFragment、Claim 与历史 revision 从未被覆盖或删除。
 
@@ -1115,7 +1259,7 @@ embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap�
 | `canonical_viewpoint` | core proposition、truth-condition signature、scope、必要 qualification/tension 与编辑别名 | incremental match、Search、QA |
 | `claim` | source-local statement、claim type、经文范围与 attribution | bootstrap recall、来源下钻 |
 | `claim_signature` | screening-only semantic atoms、polarity/stance、scope、conditions 与 qualifications | bootstrap signature recall；不作为 identity evidence |
-| `argument_route` | route label、premise roles、inference pattern 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
+| `argument_route` | route label、ordered inference nodes、inference pattern、full/partial attestation synopsis 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
 | `evidence` | EvidenceStep statement、step/discourse role、经文范围；需要时绑定 source fragment excerpt | 引文／证据召回 |
 
 每个 object kind 使用独立 `EmbeddingProjectionManifest` 和向量 index，不把四类对象拼进同一个无类型集合。projection 保存 object revision、source record SHA、额外 dependency SHAs、reader-visible-derived text SHA 与 projection SHA；plan 再绑定 provider、model、dimensions、provider contract version、`transport_mode`、use case、batch fingerprints 与 token estimation method。provider 返回数量、object IDs、dimensions、finite/non-zero vector 任一不匹配均 fail closed。transport batch、HTTP request 与异步 provider job 是三个不同计数，预算必须分别按所选 endpoint 的真实行为计算，不能把 SDK 接收的 Python list 大小直接当成 provider call 数。
@@ -1288,11 +1432,12 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 ### 9.4 Route 归属
 
 1. route 只能有一个 conclusion viewpoint identity；若一条论证服务多个结论，分别建立 route-to-viewpoint binding 或显式 entailment，不复制虚构步骤。
-2. attestation 的 EvidenceStep 必须来自同一个 source context；跨来源拼接失败。
+2. attestation 的 Claims、EvidenceSteps、SourceFragments 与 occurrence 必须来自同一个 pinned source revision；跨来源拼接失败。
 3. terminal Claim link 必须属于 route 的 conclusion viewpoint，或明确标为 related/partial terminal。
-4. ordered steps 不得重复未知 ID；顺序是 attestation 的审核事实。
-5. `full` attestation 必须覆盖 route revision 声明的 required premise/inference roles。
+4. route revision 的 `route_step_key` 唯一且有序；attestation step bindings 只能引用这些 keys，每个 binding 的 component/evidence/fragment 引用必须可解析。
+5. `full` attestation 必须覆盖 route revision 声明的全部 required premise/inference/conclusion nodes；missing 或 ambiguous node 只能形成 `partial`。
 6. partial attestation 不计入 recurring route count。
+7. 同一 conclusion 不足以证明 route identity 相同；required premises、节点顺序或 inference pattern materially different 时必须分成不同 routes。
 
 ### 9.5 Semantic revision 与 snapshot 分离
 
@@ -1343,7 +1488,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 | resolution coverage | 输入 Claim 是否有静默遗漏 | ledger exact-once；产品 scope 内 `unprocessed=0`，deferred 被显式阻断或披露 |
 | identity precision | 是否把近似、支持、限定或张力误并为同一观点 | truth-condition fields 全部兼容；无 identity blocker；member decision 完整 |
 | candidate recall | 是否因规则、embedding 或模型发现漏掉可能等价项 | scoped calibration/gold fixtures 与 mutation tests 达标；unmatched/new candidate 队列可解释，不以已发现 member 为分母 |
-| route fidelity | 是否把不同论证压平或跨来源拼接 | ordered source-local attestation、full/partial 与 conclusion binding 全部有效 |
+| route fidelity | 是否把不同论证压平、把共现冒充推理、遗漏承重步骤或跨来源拼接 | route identity、ordered inference nodes、source-local step bindings、full/partial 与 conclusion/terminal binding 全部有效；0 fabricated bridge |
 | temporal correctness | 是否把“较晚出现”误写为“取代早期观点” | supersedes 有方向、时间与教授明确修正证据；否则只保留 tension/sequence |
 | consumer projection integrity | 下游是否丢掉来源、限定、张力或 blocker | projection、packet、ledger、audit 与 dependency SHA 闭环验证 |
 
@@ -1370,13 +1515,13 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 
 平台只有一位 editor，审核设计必须减少人工次数，而不是把每个 Claim pair、member link 和产品使用分别送给同一个人。默认流程是：
 
-1. Claude Subscription `claude-opus-5/high` 对完整 batch 生成一个 `CanonicalViewpointProposal`；
-2. 程序验证 proposal exact Claim coverage、IDs、revisions、component spans 与 evidence lineage；
-3. Codex Subscription `gpt-5.6-sol/high` 读取 proposal 和精确 evidence，逐 change 审核 truth-condition identity、role、novelty 与 boundary；
+1. Claude Subscription `claude-opus-5/high` 对完整 batch 生成一个联合 `CanonicalViewpointProposal`，同时提出 viewpoint identity、ArgumentRoute 与 source-local attestations；
+2. 程序验证 proposal exact Claim coverage、IDs、revisions、component spans、route references、required-node coverage 与 source-local evidence lineage；
+3. Codex Subscription `gpt-5.6-sol/high` 读取同一 proposal 和精确 evidence，逐 change 审核 truth-condition identity、role、novelty、route identity、inferential validity、source locality 与 full/partial boundary；
 4. 全部通过且命中第 10.3 节低风险条件时，直接生成 `system_approved` ChangeSet decision；
 5. 有 finding 时，只允许 Opus proposer 针对 findings reconsider 一次；不重跑 discovery；
 6. 修正后通过则生成 ChangeSet；持续分歧或高风险项进入人工 exception queue；
-7. editor 的一次决定批准 identity boundary、当前 semantic revision、canonical wording 与明确列出的 member/route/relation 集合，后续产品复用该决定，不逐文章重复批准；
+7. editor 的一次决定批准 identity boundary、当前 semantic revisions、canonical wording 与明确列出的 member/route/attestation/relation 集合，后续产品复用该决定，不逐文章重复批准；
 8. 自动与人工决定都保存完整 approval basis、输入 SHA、模型／程序版本、理由和可撤销 lineage。
 
 模型调用 invariant 为：每个 batch 恰好一次 proposer、恰好一次 reviewer；只有存在 reviewer findings 时最多一次 proposer reconsideration。transport/schema failure 可以在同 fingerprint 下做一次无语义 retry，但不能借 retry 修改 prompt、evidence 或结论。不得增加 blind full review、promotion review、finalization review 或其他 ad-hoc stage。`system_approved` 不能显示成同工读过。
@@ -1395,6 +1540,20 @@ flowchart TD
     Q -->|"证据不足"| D["deferred"]
 ```
 
+```mermaid
+flowchart TD
+    E["source-local Claims + EvidenceSteps + Fragments"] --> V["identify conclusion CVP"]
+    V --> A{"存在可辨识的 premise → inference → conclusion？"}
+    A -->|"否"| S["retain support/related disposition only"]
+    A -->|"是"| R{"match existing ArgumentRoute?"}
+    R -->|"是"| M["new source-local attestation"]
+    R -->|"否"| N["new ArgumentRoute candidate + attestation"]
+    M --> F{"required nodes all attested?"}
+    N --> F
+    F -->|"是"| FULL["full"]
+    F -->|"否"| PART["partial / deferred"]
+```
+
 ### 10.3 风险分级与自动批准边界
 
 低风险 candidate 只有同时满足以下条件才可 `system_approved`：
@@ -1406,6 +1565,7 @@ flowchart TD
 - candidate subgraph 中没有 `unrelated`、`contrasts`、`qualifies`、`supersedes`、未决 attribution 或 material scope blocker；
 - canonical wording 只是保守归一化，不增加因果、范围、重要性、时间发展或神学评价；
 - actual Claim/Evidence/Citation dependency 与 coverage disclosure 均可机械编译；
+- 每个自动批准的 route 与 reviewer 对 conclusion、required nodes、node order、inference pattern 和 existing/new route identity 一致；每个 attestation 通过 source-local lineage 与 full/partial gate；
 - batch input manifest 在 proposal coverage 中 exact-once，其中没有会改变当前 identity boundary 的遗漏或 deferred；可选 retrieval provenance 只影响 context disclosure，不成为 approval 条件；
 - 第 9.8 节全部适用质量维度分别达到 minimum，hard failures 为零；
 - 回归测试证明相同输入产生 byte-stable decision 与 snapshot。
@@ -1417,6 +1577,7 @@ flowchart TD
 - 新 qualification 或 tension 可能改变公开表述；
 - `supersedes`、教授立场改变、identity split/merge/retire；
 - canonical wording 无法在不增加真值条件的情况下形成；
+- route 是否省略承重 premise、是否匹配 existing route、推理是否成立、是否跨来源拼接，或 full/partial status 仍有分歧；
 - 自动 reviewer 持续分歧或任何 deterministic gate 无法验证。
 
 太 16:18 是风险分级的回归样例：“教会不是建立在彼得个人身上”的完整重复可成为低风险自动候选；“磐石直接指基督”与“磐石指彼得的认信／真理”的正面所指冲突必须保留为 `tensions_with` 并进入人工 exception queue，不能靠多数票合并。
@@ -1482,8 +1643,9 @@ mutation suite 至少包含：
 主路径评估必须分别报告：
 
 - proposer 的 Claim/component exact coverage、false merge、false split、role error、modality loss 与 unsupported novelty rate；
+- proposer 的 route discovery coverage、existing/new route identity errors、invented bridge、cross-source composition 与 full/partial error rate；
 - reviewer 的 finding precision/recall、与 proposer 的 disagreement rate、reconsideration resolution rate 与 exception rate；
-- deterministic validator 对 span、evidence、revision、SHA、coverage 与 invalid mutation 的阻断结果；
+- deterministic validator 对 span、evidence、revision、SHA、coverage、route reference、required-node/source-locality 与 invalid mutation 的阻断结果；
 - passage bootstrap 与 active-Registry incremental batch 分开的指标；
 - 每个 batch 的 input/output size、模型调用数、人工 exception 数与 apply/readback failures。
 
@@ -1498,8 +1660,8 @@ mutation suite 至少包含：
 ```mermaid
 flowchart LR
     S["new reviewed Claim batch"] --> Q["scripture/topic filter + CVP embedding top-K"]
-    Q --> K["batch Claims + Evidence + relevant active CVPs"]
-    K --> P["Opus proposal: attach / relate / new"]
+    Q --> K["batch Claims + Evidence + relevant active CVPs/routes"]
+    K --> P["Opus: viewpoints + routes + source attestations"]
     P --> V["deterministic validation + Sol review"]
     V -->|"pass"| C["delta RegistryChangeSet"]
     V -->|"persistent finding"| X["exception"]
@@ -1511,7 +1673,7 @@ flowchart LR
 
 - 新 Claim 与候选 viewpoint；
 - 受新 member 影响的 viewpoint registry snapshot；
-- 受新 EvidenceStep 影响的 routes；
+- matched/new routes、受新 EvidenceStep 影响的 source-local attestations 与 route snapshots；
 - 可能变化的 qualification/tension；
 - 依赖这些对象的产品
 
@@ -1519,12 +1681,12 @@ flowchart LR
 
 增量检索按需逐层展开：
 
-1. `CanonicalViewpoint` 检索层：默认只读取 active viewpoint retrieval projection；
+1. `CanonicalViewpoint` 检索层：默认只读取 active viewpoint retrieval projection，并带回其 bounded active route synopses；
 2. representative Claim 层：对 top-K 候选验证真实来源表达与边界；
 3. Evidence/ArgumentRoute 层：只在正式 membership、route、冲突或新观点决策时加载；
 4. bounded Claim fallback：只处理无匹配或高风险边界，不扫描全部历史 Claim。
 
-每条新 Claim 无论是否匹配都必须进入 proposal coverage。top-K 未命中只表示“当前索引未找到候选”，不能自动证明 `create_new`；同一次 Opus proposal 必须检查 residual Claims 并明确提出 `new_viewpoint / no_registry_assertion / deferred`。GPT reviewer 再检查 proposer 是否因已有 Registry context 而强行归类或漏掉 novelty；不需要为 unmatched Claims 固定增加一次 blind discovery call。
+每条新 Claim 无论是否匹配都必须进入 proposal coverage。top-K 未命中只表示“当前索引未找到候选”，不能自动证明 `create_new`；同一次 Opus proposal 必须检查 residual Claims 并明确提出 `new_viewpoint / no_registry_assertion / deferred`，同时检查本来源是否为 existing/new viewpoint 提供 existing/new ArgumentRoute attestation。GPT reviewer 再检查 proposer 是否因已有 Registry context 而强行归类、漏掉 novelty、漏掉论证，或把相同结论误当作相同 route；不需要为 unmatched Claims 固定增加一次 blind discovery call。
 
 已存在的 CVP context 是增量维护的优势，不是污染。生产默认把它传入；blind discovery 只用于 calibration、prompt/model version 变更后的 holdout、以及 periodic novelty audit。audit 发现系统性漏项时撤销相应 policy version 的自动资格，并重跑受影响 batch，而不是让每个正常 batch 永久支付第二次 discovery。
 
@@ -1662,6 +1824,18 @@ Topic Discovery 下一版可以同时读取：
       "required_attribution_template": "editorial_normalization"
     }
   ],
+  "argument_routes": [
+    {
+      "argument_route_id": "AR-...",
+      "argument_route_revision_id": "ARR-...",
+      "argument_route_snapshot_id": "ARS-...",
+      "conclusion_viewpoint_revision_id": "CVR-...",
+      "route_label": "...",
+      "ordered_inference_nodes": [],
+      "source_route_attestations": [],
+      "consumer_eligibility": "composition_eligible"
+    }
+  ],
   "claim_revisions": ["DK-...-CL...@2"],
   "evidence_step_ids": ["DK-...-E..."],
   "citation_ids": ["CIT-..."],
@@ -1670,7 +1844,7 @@ Topic Discovery 下一版可以同时读取：
 }
 ```
 
-projection 必须展开实际会交给消费者的 Claim、EvidenceStep、Citation、qualification 与 tension 内容；上例为身份摘要，不表示 runtime packet 只能含 ID。compiler 验证全部引用、资格、coverage 和 attribution 后，才输出 projection SHA。消费者不得在 projection 外另查更“方便”的 candidate summary 补写内容。
+projection 必须展开实际会交给消费者的 Claim、EvidenceStep、Citation、qualification、tension、selected route inference nodes 与 source-local step bindings；上例为身份摘要，不表示 runtime packet 只能含 ID。每个 route row 必须能够沿 attestation → step binding → Claim component／EvidenceStep／SourceFragment 回到来源。compiler 验证全部引用、source locality、full/partial、资格、coverage 和 attribution 后，才输出 projection SHA。消费者不得在 projection 外另查更“方便”的 candidate summary 补写观点或论证。
 
 ### 13.2 Consumer eligibility
 
@@ -1790,7 +1964,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
     "quality_report_id": "VQR-...",
     "quality_report_sha256": "...",
     "viewpoints": [],
-    "argument_route_snapshots": [],
+    "argument_routes": [],
     "viewpoint_relations": [],
     "coverage_disclosure": {},
     "dependency_manifest_sha256": "..."
@@ -1807,6 +1981,7 @@ consumer eligibility 由 projection compiler 根据 `consumer_kind`、registry e
 
 - 每个 selected viewpoint use 可在 projection 中解析，revision/snapshot 完全相等；
 - 每个 selected route 和 required relation 均属于该 viewpoint revision，并在 projection 中；
+- 每个 selected route 的 ordered inference nodes、full/partial attestations 与 step bindings 完整；packet 不得把多个 partial attestations 合并成一条 full source-local route；
 - decision `claim_ids` 是 projection 允许该 decision 使用的 Claim 子集；
 - Claim revision、EvidenceStep、Citation 与 SourceFragment 均可解析并通过现有锚点／归属门槛；
 - 产品 scope 的 ViewpointResolutionLedger exact-once 且 `unprocessed=0`；quality report 的全部适用维度通过并与 packet payload SHA 一致；
@@ -1824,13 +1999,15 @@ Author 可以用 core proposition 组织段落，但不能只凭 canonical wordi
   "section_id": "AS-...",
   "decision_ids": ["CD-..."],
   "viewpoint_revision_ids_used": ["CVR-..."],
+  "argument_route_revision_ids_used": ["ARR-..."],
   "argument_route_snapshot_ids_used": ["ARS-..."],
+  "argument_route_attestation_ids_used": ["ARA-..."],
   "viewpoint_relation_ids_preserved": ["VREL-..."],
   "claim_ids_used": ["DK-...-CL..."]
 }
 ```
 
-`viewpoint_revision_ids_used` 解释段落的跨讲组织依据，`claim_ids_used` 继续承担逐段 source grounding；前者不能替代后者。若正文呈现 canonical editorial wording，隐藏 provenance 必须绑定 viewpoint revision 和实际 Claim；若逐字引用教授，仍只从 SourceFragment/Citation 取得原话，不从 `core_proposition` 产生引文。
+`viewpoint_revision_ids_used` 解释段落采用什么稳定立场，`argument_route_revision_ids_used` 解释采用哪一种规范推理，`argument_route_attestation_ids_used` 固定本段实际依靠哪些 source-local route occurrences，`claim_ids_used` 继续承担逐段 source grounding；前三者都不能替代 Claim/Evidence。若正文呈现 canonical editorial wording，隐藏 provenance 必须绑定 viewpoint revision 和实际 Claim；若逐字引用教授，仍只从 SourceFragment/Citation 取得原话，不从 core proposition、route label 或 normalized inference node 产生引文。
 
 Revision Agent 接收与初稿相同的最小 projection slice。修改涉及未选 route、新 Claim、未包含的 qualification 或改变 viewpoint role 时，必须返回 `plan_change_required`；不得越出 projection 自行查询 registry。
 
@@ -1839,12 +2016,12 @@ Revision Agent 接收与初稿相同的最小 projection slice。修改涉及未
 Program Audit 在现有 Claim/Evidence/Fragment 检查之外增加以下 hard gates：
 
 1. plan、AuthoringPacket、稿件 ledger、audit manifest 与 publication dependency manifest 的 projection、ViewpointResolutionLedger、quality report ID/SHA 完全一致；
-2. 每个 used viewpoint revision、registry snapshot、route snapshot 与 relation 均在 projection 中且未失效；
+2. 每个 used viewpoint revision、registry snapshot、route revision/snapshot、attestation 与 relation 均在 projection 中且未失效；
 3. 发布时每个实际对外归属的 viewpoint use 达到 `public_attribution_eligible`；只有 `composition_eligible` 的计划可以写内部草稿，但不能据此自动发布；
-4. 每个 viewpoint paragraph 同时具有实际 Claim grounding，禁止 viewpoint-only provenance；
+4. 每个 viewpoint paragraph 同时具有实际 Claim grounding；使用 ArgumentRoute 的段落还必须绑定一个或多个 source-local attestations 及其 step evidence，禁止 viewpoint-only 或 route-skeleton-only provenance；
 5. required `tensions_with`、qualification、coverage disclosure 或 supersedes 没有被静默删除或调和；
 6. canonical wording 使用 editorial-normalization attribution，未被标成 direct quotation；
-7. ProductDependency 同时 pin viewpoint semantic revision、registry/route snapshot、coverage、实际 Claim revisions、Evidence/Citation 与 projection SHA。
+7. ProductDependency 同时 pin viewpoint semantic revision、route revision、registry/route snapshot、实际 route attestations、coverage、Claim revisions、Evidence/Citation 与 projection SHA。
 
 任何一项失败都不得退回 legacy Claim-only audit 后继续发布。已发布产品 pin 旧 snapshot 时保持历史可复现；新 snapshot 不自动改写旧文章，只有第 13.3 节定义的语义或 blocker 变化触发 impact review。
 
@@ -2125,27 +2302,29 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 
 这两次 POC 是 architecture evidence，不是新的 master approval，也没有保存成 Registry record。正式实施必须以 regression fixture 重现其输入 manifest 与期望 boundary；不能从本段自然语言反向创建 member links。
 
+两次 POC 只验证了 viewpoint identity discovery，没有要求模型输出完整 ArgumentRoute，因此不能被引用为“联合观点—论证 proposal 已验证”。实现联合 workflow 前必须用同一太 16:13–19 source-bound fixture 做一次 no-apply route POC：prompt 不预列 Petros/petra、上下文责备、跨经文根基等目标路线，只要求模型从 Claims/Evidence/Fragments 自行提出 routes 和逐来源 attestations；Sol reviewer 再逐项检查 conclusion、required nodes、inference、source locality 与 full/partial。验收不要求命中特定 route 数量，而要求每条被提出的 route 可完整回到一个或多个彼此独立的 source-local attestations、0 cross-source fabricated route，并明确报告 evidence 中存在但 proposer 漏掉的论证。POC 通过仍不写 master data；它成为实现 ticket 的 regression fixture。
+
 ## 14. 性能与可扩展性
 
 205+ 篇不能每次对所有 Claim 做全对全比较，也不能反复把全库塞给模型。扩展目标按运行模式定义：
 
 | 模式 | 主索引 | 允许的比较 | 复杂度目标 | 触发频率 |
 |---|---|---|---|---|
-| passage bootstrap | scoped Claim batch | batch-level direct discovery；无 active CVP 时 context 可为空 | `O(N)` model input，按完整 batch 分片 | 初次建立某 passage/topic Registry |
-| incremental | active CanonicalViewpoint | new Claim batch + relevant top-K viewpoints | `O(ΔN × Kv)` retrieval，单次 batch proposal/review | 每批新审核来源 |
-| global audit | registry/Claim indexes | drift、near-duplicate、split/merge risk | 离线有预算上限 | 定期或 policy/model 变更后 |
+| passage bootstrap | scoped Claim batch | joint viewpoint/route discovery；无 active CVP/route 时 context 可为空 | `O(N)` model input，按完整 batch 分片 | 初次建立某 passage/topic Registry |
+| incremental | active CanonicalViewpoint + ArgumentRoute | new Claim batch + relevant top-K viewpoints 及 bounded route synopses | `O(ΔN × (Kv + Kr))` retrieval，单次联合 proposal/review | 每批新审核来源 |
+| global audit | registry/route/Claim indexes | viewpoint drift、near-duplicate、route split/merge、missing attestation risk | 离线有预算上限 | 定期或 policy/model 变更后 |
 
-`N` 是一个 passage/topic bootstrap batch 的 Claim 数，`ΔN` 是本轮新增或修订 Claim 数，`Kv` 是 retrieved active viewpoints 的配置化上限。模型不是对每个 Claim×viewpoint pair 分别调用；一个 bounded packet 内由 proposer统一作 disposition。实现不得以“模型上下文够大”为理由取消 item/byte/output 上限，也不得为维持历史 pair scheduler 把一次 batch重新展开成数百次语义调用。
+`N` 是一个 passage/topic bootstrap batch 的 Claim 数，`ΔN` 是本轮新增或修订 Claim 数，`Kv` 是 retrieved active viewpoints 的配置化上限，`Kr` 是随这些 viewpoints 带回的 route synopses 上限。模型不是对每个 Claim×viewpoint 或 Claim×route pair 分别调用；一个 bounded packet 内由 proposer 统一作 viewpoint dispositions、route proposals 与 attestations。实现不得以“模型上下文够大”为理由取消 item/byte/output 上限，也不得为维持历史 pair scheduler 把一次 batch重新展开成数百次语义调用。
 
 执行要求：
 
-1. incremental 用 scripture/topic filters 与 CVP embedding 取得 relevant active viewpoint synopsis；approved constraints 只阻断其明确适用范围内的误配；
-2. proposer packet 同时包含新 Claims、EvidenceSteps、必要 fragments 与 relevant CVPs；现有 Registry 不是封闭 taxonomy；
+1. incremental 用 scripture/topic filters 与 CVP embedding 取得 relevant active viewpoint synopsis，再随 viewpoint 取得 bounded active route synopses；approved constraints 只阻断其明确适用范围内的误配；
+2. proposer packet 同时包含新 Claims、EvidenceSteps、必要 fragments 与 relevant CVPs/routes；现有 Registry 不是封闭 taxonomy，既要保留 `new_viewpoint` 也要保留 `create_new` route；
 3. 每个 batch 正常调用数为一次 Opus proposal + 一次 Sol review；只有 review findings 才增加一次 Opus reconsideration；
-4. generation fingerprint 绑定 Claim/viewpoint revisions、Registry slice、evidence expansion、prompt、model/provider/effort、schema 与 validator version；相同 fingerprint 才能复用；
+4. generation fingerprint 绑定 Claim/viewpoint/route revisions、Registry slice、evidence expansion、prompt、model/provider/effort、schema 与 validator version；相同 fingerprint 才能复用；
 5. 每次新来源只产生一个 delta ChangeSet；只失效受影响索引条目、snapshot 与 consumer dependency；
-6. 模型调用前预算报告列 input Claims、retrieved CVPs、input/output byte/token estimate、最大 packet、reuse 与 oversize/exception；blind-call budget只在明确 audit run 中出现；
-7. metrics 分开报告 proposal dispositions、review corrections/rejections、reconsideration、persistent disagreement、novelty audit misses、apply 与 human exceptions；
+6. 模型调用前预算报告列 input Claims、retrieved CVPs/routes、预计 route/attestation items、input/output byte/token estimate、最大 packet、reuse 与 oversize/exception；blind-call budget 只在明确 audit run 中出现；
+7. metrics 分开报告 viewpoint dispositions、route match/create、full/partial attestations、invented/cross-source route blockers、review corrections/rejections、reconsideration、persistent disagreement、novelty audit misses、apply 与 human exceptions；
 8. 定期 blind/global audit 检测 Registry anchoring、近义膨胀、过宽观点、低证据 singleton、split/merge risk 与新旧冲突，但不阻塞无关增量 ingest。
 
 性能优化不能降低 identity gate。embedding score、模型置信度、共享经文数、duplicate degree 或某观点已有 member 数都只是召回/排序信号。系统优先减少重复计算和无意义上下文，不以减少证据、隐藏 qualification/tension 或放宽 truth-condition equivalence 换取吞吐量。
@@ -2176,7 +2355,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 | cross_sermon_relation 与 topic_structure_discovery 接入、兼容迁移 | 第 12 节 |
 | 文章、QA、搜索的 runtime projection、eligibility 与依赖失效 | 第 13 节 |
 | Canonical master data UI、exception inbox、API/write boundary 与 UI 验收 | 第 13.12 节 |
-| extraction-shaped batch flow、Opus proposal、Sol review、一次 reconsideration 与 ChangeSet | 第 1.2、6.2、10.2、11.1 节 |
+| extraction-shaped joint viewpoint/route batch flow、Opus proposal、Sol review、一次 reconsideration 与 ChangeSet | 第 1.2、5.6–5.7、6.2、10.2、11.1 节 |
 | bootstrap/incremental、embedding、blind audit 与复杂度 | 第 6.2、10.6、11、14 节 |
 | 实现拆成后续 tickets | 第 16 节 |
 | 不调用内容模型、不迁移正式数据、不部署 | 文件状态、2.1、8、12.4 节 |
@@ -2193,12 +2372,12 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
    建立 SHA-bound source/Claim manifests、三层来源覆盖统计、Claim exact-once resolution、closed exclusion/blocker vocabulary、逐维 minimum/hard failure report、derived counts 与 active snapshot manifest；禁止目录扫描计数或以生成结果为覆盖分母。
 3. **Identity candidate projection**
    从现有 ClaimRelation/constraint 图确定性地产生 candidate seeds，验证 duplicate component 非传递、blocking recall、unmatched/new-viewpoint disposition、blockers 与 stable fingerprints；不调用内容模型。
-4. **Viewpoint batch resolution workflow**
-   定义 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet`；实现 Opus 5/high proposer、Sol/high proposal-aware reviewer、deterministic exact-coverage/span/evidence gates、一次 finding-only reconsideration、可恢复 runner、风险抽样监测与 machine-readable exception bundles。旧 blind/group/promotion/finalization runners 只作为只读历史诊断，不能进入默认状态机或长期 runtime compatibility surface。
+4. **ArgumentRoute 与 source-local attestation contract**
+   扩展 route revision 的 ordered inference nodes、required-node semantics 与 route identity rule；实现 source-local step bindings、multi-Claim attestation、terminal viewpoint binding、full/partial gate、跨来源拼接阻断、route/attestation projection 和合成 fixture。该 schema 是联合模型 workflow 的前置条件，不另建模型 pipeline。
+5. **Joint Viewpoint／ArgumentRoute batch resolution workflow**
+   定义 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet`；实现 Opus 5/high 在一次 proposal 中联合输出 viewpoint decisions、route candidates 与 source-local attestations，Sol/high 对三者逐项 proposal-aware review，程序执行 exact-coverage/span/evidence/route/source-local gates，只允许一次 finding-only reconsideration，并提供可恢复 runner、风险抽样监测与 machine-readable exception bundles。旧 blind/group/promotion/finalization runners 只作为只读历史诊断，不能进入默认状态机或长期 runtime compatibility surface。
 
-   本项有三个必须先完成的前置条件：span-only component 契约与 Unicode code-point 校验落地（`viewpoint_claim_links` 为 0 行，不存在迁移，只需正确定义与 round-trip fixture），#194 master data 已导出为 baseline 并在重建后完成语义边界比对，readback 证明 runtime authority 只剩 span-based Claim links；以全链路实测定出 batch 上限并分别配置 proposer/reviewer/reconsideration 的 `max_output_tokens`；runner 强制同一 scope 内 batch 经过 applied-readback 或 exception-recorded checkpoint，并把 pending candidate synopsis 传给后续 batch（第 6.2.1 节）。三者任一缺失都会让 exact-span 校验落不了地、让 batch 在任一模型阶段截断，或让分批执行造出重复身份。
-5. **ArgumentRoute 与 source-local attestation**
-   实现 route schema、ordered EvidenceStep validation、full/partial gate 与九篇 fixture 回归。
+   本项必须先完成：span-only component 契约与 Unicode code-point 校验（`viewpoint_claim_links` 当前为 0 行，只需正确定义与 round-trip fixture）；第 13.14.1 节的 no-apply route POC；#194 master data baseline 与重建后的语义边界／route regression；全链路 batch 上限及 proposer/reviewer/reconsideration 各自 `max_output_tokens`；同一 scope 的 applied-readback 或 exception-recorded checkpoint。缺一即不能打开 `--apply`。
 6. **Split/merge、revision 与 impact propagation**
    建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
 7. **ViewpointKnowledgeProjection compiler 与 eligibility**
@@ -2208,7 +2387,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 9. **Viewpoint exception inbox 与 ChangeSet decisions**
    实现风险排序的唯一人工队列、proposal/reviewer field diff、source evidence、impact preview、editor decision bundle 与 validated ChangeSet submit/apply；禁止浏览器直写 records，并覆盖 auth、CSRF、idempotency、optimistic concurrency 与 audit lineage。
 10. **Matthew authoring downstream integration**
-   先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；保持 source-local legacy path 与 Editorial Reviewer packet 边界。
+   先修复 ClaimRelation `from_id / to_id` PostgreSQL round-trip，再扩展 CompositionPlan binding、AuthoringPacket、Author/Revision ledger、Program Audit、publisher dependency 与太 16:18 golden regression；文章 section 除 `viewpoint_revision_ids_used` 外，还要在实际采用一条规范论证时记录 `argument_route_revision_ids_used` 与 attestation/evidence dependencies。保持 source-local legacy path 与 Editorial Reviewer packet 边界。
 11. **QA、Search 与 Topic Discovery adapters**
    让三类 consumer 使用同一 projection contract；实现 attribution-aware viewpoint card、按 route 展开、时间比较、citation drill-down，并让 Topic Discovery 保留原 Claim coverage 守门，不从相似度临时 merge。
 12. **受控十九篇 bootstrap 与风险审核**
@@ -2218,7 +2397,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
    preflight 是 fail-closed 的只读步骤：它验证 singular/plural `source_fragment_id(s)`、source-local Evidence、Claim denominator 和 lineage，编译 deterministic batch packet 与 relevant active-CVP context，但始终保持 `apply_allowed=false`。packet 中每条 eligible Claim 都须 exact-once 出现；source-ineligible、超大或缺失证据的 Claim 也必须以明确 exception disposition 留在 coverage 分母中。
 
-   正式语义流程按第 6.2 节运行：一个 bounded packet 交给 Opus 5/high proposer；确定性 validator 检查 exact coverage、span、evidence、ID、revision 与 ChangeSet 完整性；GPT-5.6 sol/high 对 proposal 逐项独立复核；只有 reviewer findings 时允许一次 Opus finding-only reconsideration。通过后编译一个原子的 `RegistryChangeSet`，apply 后做 authority readback；持续分歧和高风险 split/merge/supersedes 进入 exception inbox。相同输入、模型配置与 policy version 必须产生可追踪 fingerprint，Claim/CVP revision 或 evidence SHA 改变必须使受影响 reuse key 失效。
+   正式语义流程按第 6.2 节运行：一个 bounded packet 交给 Opus 5/high proposer，联合提出 viewpoints、ArgumentRoutes 与 source-local attestations；确定性 validator 检查 exact coverage、span、evidence、route refs、required nodes、source locality、ID、revision 与 ChangeSet 完整性；GPT-5.6 sol/high 对三类 proposal changes 逐项独立复核；只有 reviewer findings 时允许一次 Opus finding-only reconsideration。通过后编译一个原子的 `RegistryChangeSet`，apply 后做 authority readback；持续分歧和高风险 split/merge/supersedes、route identity 或跨来源论证问题进入 exception inbox。相同输入、模型配置与 policy version 必须产生可追踪 fingerprint，Claim/CVP/route revision 或 evidence SHA 改变必须使受影响 reuse key 失效。
 
    embedding、规则 blocking、SemanticSignature、RecallGraph 和 blind discovery 不再是这 19 篇 bootstrap 的 mandatory gates。batch 超过上下文预算时，embedding/scripture/topic retrieval 只负责选出 relevant active CVPs 与组织 bounded packets；它不裁定 identity。旧 scheduler artifacts 可用于 scoped regression、漏项审计和 periodic blind novelty audit，任何 audit finding 都必须重新进入同一 Proposal → Review → ChangeSet contract，不能直接写 master data。
 13. **逐步扩展至 corpus universe**
@@ -2242,4 +2421,4 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 
 ## 18. 最终定义
 
-> Canonical Viewpoint Registry 是一层保留来源的跨讲观点身份系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，同时保留每条 Claim、occurrence、EvidenceStep、精确引文与历史 revision；它把到达同一结论的不同推理保存为独立 ArgumentRoute，把扩展、限定、应用、张力与后期修正保存为 typed graph。每批语义生产只有 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet` 三个 durable semantic artifacts；CoverageSnapshot、ViewpointResolutionLedger 与 ViewpointQualityReport 由它们和 deterministic checks 编译，分别说明来源范围、逐项归宿与逐维质量，而不是要求 operator 推动的额外阶段。文章、QA、搜索和专题编排只消费绑定这些不可变 facts 的 SHA-bound ViewpointKnowledgeProjection；单人 editor 则通过 `/admin/wang` 的 Canonical master data workbench 浏览同一批 compiled facts，并只在 exception inbox 处理高风险 decision bundles。任何 consumer 都不直接读取 registry 或本设计文档。该 registry 是王教授释经神学思想整理的中心知识层，但其规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点的神学正确性。
+> Canonical Viewpoint Registry 是一层保留来源的跨讲观点—论证系统：它把经过审核、真值条件等价的来源局部 Claim 解析到稳定的观点身份，并在同一次联合 proposal 中识别到达这些结论的 ArgumentRoutes；每条 route 的 attestations 始终 source-local，逐步绑定 Claim components、EvidenceSteps 与精确 SourceFragments，绝不跨来源拼造完整论证。同一结论的不同推理保存为不同 routes，同一路线在不同来源的出现保存为 full/partial attestations；扩展、限定、应用、张力与后期修正保存为 typed graph。每批语义生产仍只有 `CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet` 三个 durable semantic artifacts；CoverageSnapshot、ViewpointResolutionLedger 与 ViewpointQualityReport 由它们和 deterministic checks 编译。文章、QA、搜索和专题编排只消费绑定这些不可变 facts 的 SHA-bound ViewpointKnowledgeProjection，因此既能回答“王教授主张什么”，也能回答“他为什么这样主张”。单人 editor 只在 exception inbox 处理高风险 identity、route 或 evidence decisions。任何 consumer 都不直接读取 registry 或本设计文档；规范措辞始终属于编辑归一化，不冒充教授逐字原话，也不裁定观点或论证的神学正确性。
