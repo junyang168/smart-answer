@@ -11,6 +11,7 @@ slicing, the coverage arithmetic and the fail-closed comparisons.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
@@ -1087,6 +1088,63 @@ def canonicalize_proposal(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[
     return walk(dict(raw), ""), sorted(changes)
 
 
+def anchor_proposal_spans(
+    raw: Mapping[str, Any], *, claim_statements: Mapping[str, str]
+) -> tuple[dict[str, Any], list[str]]:
+    """Recompute model-supplied offsets only when the exact quote is unique.
+
+    Offsets are transport metadata, not a semantic model judgment. Models can
+    count one Unicode code point incorrectly even when ``exact_text`` is
+    byte-for-byte present in the pinned Claim. A unique exact match is safe to
+    anchor deterministically; missing or ambiguous quotes fail closed.
+    """
+
+    payload = deepcopy(dict(raw))
+    proposal = payload.get("revised_proposal", payload)
+    findings: list[str] = []
+    changes: list[str] = []
+    prefix = "/revised_proposal" if proposal is not payload else ""
+    for decision_index, decision in enumerate(proposal.get("claim_decisions") or []):
+        claim_id = str(decision.get("claim_id") or "")
+        statement = claim_statements.get(claim_id)
+        if statement is None:
+            continue
+        for component_index, component in enumerate(decision.get("components") or []):
+            for span_index, span in enumerate(component.get("spans") or []):
+                exact_text = span.get("exact_text")
+                start = span.get("start_char")
+                end = span.get("end_char")
+                if (
+                    not isinstance(exact_text, str)
+                    or not isinstance(start, int)
+                    or not isinstance(end, int)
+                ):
+                    continue
+                if end - start == len(exact_text) and statement[start:end] == exact_text:
+                    continue
+                occurrences: list[int] = []
+                cursor = statement.find(exact_text)
+                while cursor >= 0:
+                    occurrences.append(cursor)
+                    cursor = statement.find(exact_text, cursor + 1)
+                where = f"{claim_id}#{component_index}/span-{span_index}"
+                if len(occurrences) != 1:
+                    findings.append(
+                        f"{where}: exact_text has {len(occurrences)} matches in the pinned statement"
+                    )
+                    continue
+                anchored_start = occurrences[0]
+                span["start_char"] = anchored_start
+                span["end_char"] = anchored_start + len(exact_text)
+                changes.append(
+                    f"{prefix}/claim_decisions/{decision_index}/components/"
+                    f"{component_index}/spans/{span_index}/offsets"
+                )
+    if findings:
+        raise BatchResolutionError(findings)
+    return payload, sorted(changes)
+
+
 RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v1"
 
 
@@ -1119,16 +1177,6 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         if len(keys) != len(set(keys)):
             raise ValueError("finding dispositions must be unique")
         return self
-
-
-def _component_payloads(
-    proposal: CanonicalViewpointProposalResponse,
-) -> dict[tuple[str, int], dict[str, Any]]:
-    return {
-        (decision.claim_id, index): component.model_dump(mode="json")
-        for decision in proposal.claim_decisions
-        for index, component in enumerate(decision.components)
-    }
 
 
 def validate_reconsideration(
@@ -1166,17 +1214,51 @@ def validate_reconsideration(
     for extra in sorted(answered - flagged):
         findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
 
-    before = _component_payloads(proposal)
-    after = _component_payloads(reconsideration.revised_proposal)
-    for key in sorted(set(before) & set(after)):
-        if key in flagged:
+    before_by_claim = {
+        decision.claim_id: [item.model_dump(mode="json") for item in decision.components]
+        for decision in proposal.claim_decisions
+    }
+    after_by_claim = {
+        decision.claim_id: [item.model_dump(mode="json") for item in decision.components]
+        for decision in reconsideration.revised_proposal.claim_decisions
+    }
+    flagged_by_claim: dict[str, set[int]] = {}
+    for claim_id, component_index in flagged:
+        flagged_by_claim.setdefault(claim_id, set()).add(component_index)
+    for claim_id, before_components in before_by_claim.items():
+        after_components = after_by_claim.get(claim_id)
+        if after_components is None:
+            findings.append(f"{claim_id}: Claim decision disappeared during reconsideration")
             continue
-        if before[key] != after[key]:
-            findings.append(
-                f"{key[0]}#{key[1]}: unflagged component changed during reconsideration"
-            )
-    for gone in sorted(set(before) - set(after)):
-        findings.append(f"{gone[0]}#{gone[1]}: component disappeared during reconsideration")
+        claim_flags = flagged_by_claim.get(claim_id, set())
+        if not claim_flags:
+            if before_components != after_components:
+                findings.append(
+                    f"{claim_id}: unflagged Claim decision changed during reconsideration"
+                )
+            continue
+        # Corrected components may be merged, split, replaced or deleted when
+        # the reviewer explicitly asks for it. Every component the reviewer
+        # passed must still survive byte-identically somewhere in the revised
+        # Claim; matching by original index would make an authorized merge
+        # shift later components and falsely report that they changed.
+        remaining = list(after_components)
+        for index, component in enumerate(before_components):
+            if index in claim_flags:
+                continue
+            try:
+                matched = remaining.index(component)
+            except ValueError:
+                findings.append(
+                    f"{claim_id}#{index}: unflagged component changed or disappeared "
+                    "during reconsideration"
+                )
+            else:
+                remaining.pop(matched)
+    for extra_claim_id in sorted(set(after_by_claim) - set(before_by_claim)):
+        findings.append(
+            f"{extra_claim_id}: Claim decision was added during reconsideration"
+        )
 
     escalations = sorted(
         f"{item.claim_id}#{item.component_index}:{item.disposition}"

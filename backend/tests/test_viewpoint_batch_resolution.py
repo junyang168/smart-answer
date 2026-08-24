@@ -386,17 +386,40 @@ def test_packet_tells_the_proposer_the_registry_is_open():
 
 
 class _StubAdapter:
-    def __init__(self, response: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        response: dict[str, Any],
+        *,
+        model_id: str = "stub-model",
+        backend: str = "stub_subscription",
+    ) -> None:
         self._response = response
         self.calls = 0
-        self.model_id = "stub-model"
-        self.backend = "stub_subscription"
+        self.model_id = model_id
+        self.backend = backend
         self.prompt_sha256 = "prompt-sha"
         self.generation_config_sha256 = "config-sha"
 
     def generate(self, payload: Any) -> dict[str, Any]:
         self.calls += 1
         return self._response
+
+
+def test_cached_call_is_bound_to_provider_and_model(tmp_path: Path):
+    from backend.pipeline.viewpoint_batch_resolution_runner import _call
+
+    cache = tmp_path / "raw.json"
+    _call(
+        _StubAdapter({"ok": True}, model_id="gpt-5.6-sol", backend="codex_subscription"),
+        {"input": "same"},
+        cache,
+    )
+    with pytest.raises(ValueError, match="model_id, backend"):
+        _call(
+            _StubAdapter({"ok": True}, model_id="claude-opus-5", backend="claude_subscription"),
+            {"input": "same"},
+            cache,
+        )
 
 
 def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
@@ -649,6 +672,61 @@ def test_canonicalization_reorders_without_touching_meaning():
     assert canonical["claim_decisions"][1]["components"][0]["evidence_step_id"] == "x"
 
 
+def test_span_offsets_are_reanchored_from_one_unique_exact_quote():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        anchor_proposal_spans,
+    )
+
+    raw = {
+        "claim_decisions": [
+            {
+                "claim_id": "C1",
+                "components": [
+                    {
+                        "spans": [
+                            {
+                                "start_char": 0,
+                                "end_char": 4,
+                                "exact_text": "磐石不是彼得",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    anchored, changes = anchor_proposal_spans(
+        raw, claim_statements={"C1": "太16说磐石不是彼得本人"}
+    )
+    span = anchored["claim_decisions"][0]["components"][0]["spans"][0]
+    assert span == {"start_char": 4, "end_char": 10, "exact_text": "磐石不是彼得"}
+    assert changes == ["/claim_decisions/0/components/0/spans/0/offsets"]
+    assert raw["claim_decisions"][0]["components"][0]["spans"][0]["end_char"] == 4
+
+
+def test_span_reanchoring_fails_closed_when_exact_quote_is_ambiguous():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        anchor_proposal_spans,
+    )
+
+    raw = {
+        "claim_decisions": [
+            {
+                "claim_id": "C1",
+                "components": [
+                    {
+                        "spans": [
+                            {"start_char": 1, "end_char": 2, "exact_text": "彼得"}
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    with pytest.raises(BatchResolutionError, match="exact_text has 2 matches"):
+        anchor_proposal_spans(raw, claim_statements={"C1": "彼得不是彼得"})
+
+
 def test_grouping_must_cover_every_claim_exactly_once():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         ClaimGroupingResponse,
@@ -829,6 +907,42 @@ def test_reconsideration_cannot_touch_a_component_the_reviewer_passed():
         )
 
 
+def test_reconsideration_can_merge_components_the_reviewer_flagged():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    revised["claim_decisions"][0]["components"] = [
+        revised["claim_decisions"][0]["components"][0]
+    ]
+
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(revised, "accepted", "accepted"),
+        proposal=proposal,
+        review=_review("correct", "correct"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+
+def test_reconsideration_preserves_an_unflagged_component_after_index_shift():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    revised = proposal.model_dump(mode="json")
+    revised["claim_decisions"][0]["components"].pop(0)
+
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(revised, "accepted"),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+
 def test_every_finding_needs_a_disposition():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
@@ -894,6 +1008,59 @@ def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
     proposal_path.write_text(json.dumps(tampered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="cached response SHA mismatch"):
         run_batch(**kwargs)
+
+
+def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_sha = sha256_json(proposal_payload)
+    review_payload = {
+        "schema_version": "wang_canonical_viewpoint_review_v1",
+        "proposal_sha256": proposal_sha,
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": index,
+                "decision": "correct",
+                "finding_codes": ["merge_components"],
+                "reason": "两个成分需要合并",
+                "correction": "合并为一个成分",
+            }
+            for index in (0, 1)
+        ],
+        "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+    }
+    revised = json.loads(json.dumps(proposal_payload))
+    revised["claim_decisions"][0]["components"].pop(1)
+    reconsideration_payload = {
+        "schema_version": "wang_canonical_viewpoint_reconsideration_v1",
+        "proposal_sha256": proposal_sha,
+        "review_sha256": sha256_json(review_payload),
+        "finding_dispositions": [
+            {
+                "claim_id": "C1",
+                "component_index": index,
+                "disposition": "accepted",
+                "reason": "已按要求合并",
+            }
+            for index in (0, 1)
+        ],
+        "revised_proposal": revised,
+    }
+
+    report = run_batch(
+        batch_id="CVB-test-001",
+        scope_label="matt16-13-18",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=[{"viewpoint_revision_id": "CVR-1"}],
+        pending_candidates=[],
+        output_dir=tmp_path / "batch-001",
+        proposer=_StubAdapter(proposal_payload),
+        reviewer=_StubAdapter(review_payload),
+        reconsiderer=_StubAdapter(reconsideration_payload),
+    )
+    assert report["component_count"] == 1
+    assert report["disposition_counts"]["new_viewpoint"] == 1
+    assert report["reconsideration_outcome"] == "resolved"
 
 
 def _route(**overrides: Any) -> dict[str, Any]:

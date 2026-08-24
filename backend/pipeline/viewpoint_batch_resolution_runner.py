@@ -30,6 +30,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
     RouteComponentBinding,
+    anchor_proposal_spans,
     batches_from_groups,
     build_batch_packet,
     canonicalize_proposal,
@@ -82,13 +83,27 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def build_proposer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def _proposal_client(
+    provider: str, model: str, reasoning_effort: str
+) -> ClaudeSubscriptionClient | CodexSubscriptionClient:
+    client_type = {
+        "claude": ClaudeSubscriptionClient,
+        "codex": CodexSubscriptionClient,
+    }.get(provider)
+    if client_type is None:
+        raise ValueError(f"unsupported proposal provider: {provider}")
+    return client_type(
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=CALL_TIMEOUT_SECONDS,
+    )
+
+
+def build_proposer(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_proposal_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_proposal.md").read_text(
             encoding="utf-8"
         ),
@@ -127,13 +142,11 @@ def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAd
     )
 
 
-def build_reconsiderer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def build_reconsiderer(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_proposal_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
             encoding="utf-8"
         ),
@@ -142,13 +155,11 @@ def build_reconsiderer(model: str, reasoning_effort: str) -> StructuredJsonRevie
     )
 
 
-def build_route_proposer(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def build_route_proposer(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_proposal_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_routes.md").read_text(encoding="utf-8"),
         response_model=ArgumentRouteProposalResponse,
         schema_name="wang_argument_route_proposal_v1",
@@ -171,14 +182,10 @@ def build_route_reviewer(model: str, reasoning_effort: str) -> StructuredJsonRev
 
 
 def build_route_reconsiderer(
-    model: str, reasoning_effort: str
+    model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_proposal_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_route_reconsideration.md").read_text(
             encoding="utf-8"
         ),
@@ -419,6 +426,22 @@ def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str,
         artifact = _read(cache)
         if artifact.get("request_payload_sha256") != request_sha:
             raise ValueError(f"cached response belongs to another request payload: {cache}")
+        expected_generation = {
+            "model_id": adapter.model_id,
+            "backend": adapter.backend,
+            "prompt_sha256": adapter.prompt_sha256,
+            "generation_config_sha256": adapter.generation_config_sha256,
+        }
+        mismatched = [
+            key
+            for key, expected in expected_generation.items()
+            if artifact.get(key) != expected
+        ]
+        if mismatched:
+            raise ValueError(
+                f"cached response belongs to another generation config "
+                f"({', '.join(mismatched)}): {cache}"
+            )
         response = dict(artifact.get("response") or {})
         if artifact.get("response_sha256") != sha256_json(response):
             raise ValueError(f"cached response SHA mismatch: {cache}")
@@ -470,6 +493,11 @@ def run_batch(
         proposer, packet, output_dir / "raw-proposal.json"
     )
     canonical_proposal, normalization_changes = canonicalize_proposal(raw_proposal)
+    canonical_proposal, span_changes = anchor_proposal_spans(
+        canonical_proposal,
+        claim_statements={item.claim_id: item.statement for item in claims},
+    )
+    normalization_changes = sorted({*normalization_changes, *span_changes})
     proposal = CanonicalViewpointProposalResponse.model_validate(canonical_proposal)
     validation = validate_proposal(
         proposal=proposal,
@@ -534,6 +562,7 @@ def run_batch(
     reconsideration_calls = 0
     reconsideration_seconds = 0.0
     effective_proposal = proposal
+    effective_validation = validation
     if review_validation["correction_required"] and reconsiderer is not None:
         reconsider_packet = {
             "batch_id": batch_id,
@@ -546,8 +575,15 @@ def run_batch(
         raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
             reconsiderer, reconsider_packet, output_dir / "raw-reconsideration.json"
         )
+        canonical_reconsideration, reconsideration_normalization = canonicalize_proposal(
+            raw_reconsideration
+        )
+        canonical_reconsideration, reconsideration_span_changes = anchor_proposal_spans(
+            canonical_reconsideration,
+            claim_statements={item.claim_id: item.statement for item in claims},
+        )
         reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
-            canonicalize_proposal(raw_reconsideration)[0]
+            canonical_reconsideration
         )
         reconsideration_report = validate_reconsideration(
             reconsideration=reconsideration,
@@ -571,6 +607,7 @@ def run_batch(
         )
         if reconsideration_report["outcome"] == "resolved":
             effective_proposal = reconsideration.revised_proposal
+            effective_validation = revised_validation
         _write_immutable(
             output_dir / "reconsideration.json",
             {
@@ -581,6 +618,16 @@ def run_batch(
                 "reconsideration": reconsideration.model_dump(mode="json"),
                 "validation_report": reconsideration_report,
                 "revised_validation_report": revised_validation,
+                "normalization": {
+                    "changed_paths": sorted(
+                        {
+                            *reconsideration_normalization,
+                            *reconsideration_span_changes,
+                        }
+                    ),
+                    "reader_visible_text_changed": False,
+                    "truth_conditions_changed": False,
+                },
             },
         )
 
@@ -589,9 +636,11 @@ def run_batch(
         "batch_id": batch_id,
         "scope_label": scope_label,
         "claim_count": len(claims),
-        "component_count": validation["component_count"],
-        "disposition_counts": validation["disposition_counts"],
-        "new_viewpoint_candidate_count": validation["new_viewpoint_candidate_count"],
+        "component_count": effective_validation["component_count"],
+        "disposition_counts": effective_validation["disposition_counts"],
+        "new_viewpoint_candidate_count": effective_validation[
+            "new_viewpoint_candidate_count"
+        ],
         "outcome": review_validation["outcome"],
         "reconsideration_required": review_validation["reconsideration_required"],
         "novelty_status": review_validation["novelty_status"],
@@ -919,6 +968,12 @@ def main() -> int:
     parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument(
+        "--proposal-provider",
+        choices=("claude", "codex"),
+        default="claude",
+        help="subscription CLI used for CVP/Route proposal and correction; never falls back",
+    )
     parser.add_argument("--proposal-model", default="claude-opus-5")
     parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="xhigh")
     parser.add_argument("--review-model", default="gpt-5.6-sol")
@@ -1068,10 +1123,20 @@ def main() -> int:
         # before any proposal call is spent against it.
         batches = batches[: args.max_batches]
 
-    proposer = build_proposer(args.proposal_model, args.proposal_effort)
+    proposer = build_proposer(
+        args.proposal_model,
+        args.proposal_effort,
+        provider=args.proposal_provider,
+    )
     reviewer = build_reviewer(args.review_model, args.review_effort)
     reconsiderer = (
-        None if args.no_reconsider else build_reconsiderer(args.proposal_model, args.proposal_effort)
+        None
+        if args.no_reconsider
+        else build_reconsiderer(
+            args.proposal_model,
+            args.proposal_effort,
+            provider=args.proposal_provider,
+        )
     )
 
     reports: list[dict[str, Any]] = []
@@ -1149,13 +1214,19 @@ def main() -> int:
                     else None
                 ),
                 output_dir=route_dir,
-                proposer=build_route_proposer(args.proposal_model, args.route_effort),
+                proposer=build_route_proposer(
+                    args.proposal_model,
+                    args.route_effort,
+                    provider=args.proposal_provider,
+                ),
                 reviewer=build_route_reviewer(args.review_model, args.review_effort),
                 reconsiderer=(
                     None
                     if args.no_reconsider
                     else build_route_reconsiderer(
-                        args.proposal_model, args.route_effort
+                        args.proposal_model,
+                        args.route_effort,
+                        provider=args.proposal_provider,
                     )
                 ),
             )
