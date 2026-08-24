@@ -103,15 +103,12 @@ class ProposedComponent(StrictBatchModel):
     @model_validator(mode="after")
     def validate_component(self) -> "ProposedComponent":
         keys = [(item.start_char, item.end_char) for item in self.spans]
-        if keys != sorted(set(keys)):
-            raise ValueError("component spans must be range-sorted and unique")
+        if len(keys) != len(set(keys)):
+            raise ValueError("component spans must be unique")
+        keys = sorted(keys)
         for earlier, later in zip(keys, keys[1:], strict=False):
             if later[0] < earlier[1]:
                 raise ValueError("component spans overlap")
-        if self.evidence_step_ids != sorted(set(self.evidence_step_ids)):
-            raise ValueError("evidence step ids must be sorted and unique")
-        if self.source_fragment_ids != sorted(set(self.source_fragment_ids)):
-            raise ValueError("source fragment ids must be sorted and unique")
         if self.disposition in EXISTING_DISPOSITIONS:
             if not self.target_viewpoint_revision_id:
                 raise ValueError(f"{self.disposition} requires a target viewpoint revision")
@@ -167,13 +164,6 @@ class NewViewpointCandidate(StrictBatchModel):
     population_scope: list[str] = Field(default_factory=list)
     novelty_comparison: str = Field(min_length=1)
 
-    @model_validator(mode="after")
-    def validate_candidate(self) -> "NewViewpointCandidate":
-        for name in ("scripture_scope", "conditions", "population_scope"):
-            values = getattr(self, name)
-            if values != sorted(set(values)):
-                raise ValueError(f"{name} must be sorted and unique")
-        return self
 
 
 class CanonicalViewpointProposalResponse(StrictBatchModel):
@@ -191,11 +181,11 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
     @model_validator(mode="after")
     def validate_response(self) -> "CanonicalViewpointProposalResponse":
         claim_ids = [item.claim_id for item in self.claim_decisions]
-        if claim_ids != sorted(set(claim_ids)):
-            raise ValueError("proposal claim decisions must be id-sorted and unique")
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("proposal claim decisions must be unique")
         keys = [item.local_key for item in self.new_viewpoint_candidates]
-        if keys != sorted(set(keys)):
-            raise ValueError("new viewpoint candidates must be key-sorted and unique")
+        if len(keys) != len(set(keys)):
+            raise ValueError("new viewpoint candidates must be unique")
         return self
 
 
@@ -246,8 +236,8 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
     @model_validator(mode="after")
     def validate_review(self) -> "CanonicalViewpointReviewResponse":
         keys = [(item.claim_id, item.component_index) for item in self.change_reviews]
-        if keys != sorted(set(keys)):
-            raise ValueError("change reviews must be pointer-sorted and unique")
+        if len(keys) != len(set(keys)):
+            raise ValueError("change reviews must be unique")
         return self
 
     def outcome(self) -> str:
@@ -354,15 +344,27 @@ def validate_proposal(
                     findings.append(
                         f"{where}: local key {component.local_new_viewpoint_key} has no candidate"
                     )
-            pairs = set(zip(component.evidence_step_ids, component.source_fragment_ids, strict=False))
+            claim_steps = {pair[0] for pair in evidence_pairs}
+            claim_fragments = {pair[1] for pair in evidence_pairs}
             for step_id in component.evidence_step_ids:
-                if not any(step_id == pair[0] for pair in evidence_pairs):
+                if step_id not in claim_steps:
                     findings.append(f"{where}: EvidenceStep {step_id} does not belong to the Claim")
             for fragment_id in component.source_fragment_ids:
-                if not any(fragment_id == pair[1] for pair in evidence_pairs):
+                if fragment_id not in claim_fragments:
                     findings.append(f"{where}: SourceFragment {fragment_id} does not belong to the Claim")
+            # The two lists are independent sets, not positional pairs — one
+            # EvidenceStep may bind several fragments. The real pairs are the
+            # Claim's own, restricted to what this component referenced.
+            referenced = {
+                pair
+                for pair in evidence_pairs
+                if pair[0] in set(component.evidence_step_ids)
+                and pair[1] in set(component.source_fragment_ids)
+            }
             if component.disposition in EXISTING_DISPOSITIONS | {"new_viewpoint"}:
-                if pairs and not (pairs & eligible_pairs):
+                if not referenced:
+                    findings.append(f"{where}: referenced evidence forms no real (step, fragment) pair")
+                elif not (referenced & eligible_pairs):
                     findings.append(f"{where}: no identity-eligible evidence pair")
             key = component_key(claim, component)
             if component.disposition in {"member_existing", "new_viewpoint"}:
@@ -483,3 +485,164 @@ def build_batch_packet(
     }
     packet["packet_sha256"] = sha256_json(packet)
     return packet
+
+
+GROUPING_VERSION = "wang_canonical_viewpoint_claim_grouping_v1"
+
+
+class ProposedClaimGroup(StrictBatchModel):
+    group_key: str = Field(min_length=1)
+    claim_ids: list[str] = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_group(self) -> "ProposedClaimGroup":
+        if len(self.claim_ids) != len(set(self.claim_ids)):
+            raise ValueError("group claim ids must be unique")
+        return self
+
+
+class ClaimGroupingResponse(StrictBatchModel):
+    """Which Claims are worth comparing together — never which are the same.
+
+    Grouping decides batch composition only.  If it were allowed to decide
+    identity, a cheap unreviewed call would be making the judgment the whole
+    proposal/review contract exists to govern.  Its errors are therefore
+    recoverable by construction: a split pair falls back to the pending-candidate
+    path, and a wrongly merged pair is simply two viewpoints proposed in one
+    batch, which is the normal case.
+    """
+
+    schema_version: Literal["wang_canonical_viewpoint_claim_grouping_v1"] = GROUPING_VERSION
+    scope_label: str
+    groups: list[ProposedClaimGroup] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_grouping(self) -> "ClaimGroupingResponse":
+        keys = [item.group_key for item in self.groups]
+        if len(keys) != len(set(keys)):
+            raise ValueError("groups must be unique")
+        return self
+
+
+def validate_grouping(
+    *,
+    grouping: ClaimGroupingResponse,
+    scope_label: str,
+    claim_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Require exact-once coverage; grouping may reorder work, never drop it."""
+
+    findings: list[str] = []
+    if grouping.scope_label != scope_label:
+        findings.append(f"grouping is for scope {grouping.scope_label}, not {scope_label}")
+
+    expected = set(claim_ids)
+    seen: dict[str, str] = {}
+    for group in grouping.groups:
+        for claim_id in group.claim_ids:
+            if claim_id not in expected:
+                findings.append(f"{claim_id}: grouped Claim is not in this scope")
+            owner = seen.get(claim_id)
+            if owner is not None:
+                findings.append(f"{claim_id}: in both group {owner} and {group.group_key}")
+            else:
+                seen[claim_id] = group.group_key
+    for missing in sorted(expected - set(seen)):
+        findings.append(f"{missing}: Claim was not assigned to any group")
+
+    if findings:
+        raise BatchResolutionError(findings)
+
+    report = {
+        "schema_version": "wang_canonical_viewpoint_grouping_validation_v1",
+        "scope_label": scope_label,
+        "claim_count": len(expected),
+        "group_count": len(grouping.groups),
+        "group_sizes": sorted(len(item.claim_ids) for item in grouping.groups),
+        "checks_passed": ["exact_once_group_coverage", "no_foreign_claim"],
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
+
+
+def batches_from_groups(
+    grouping: ClaimGroupingResponse, *, batch_size: int = DEFAULT_BATCH_SIZE
+) -> list[list[str]]:
+    """Order groups into batches, splitting any group past the size ceiling.
+
+    A group larger than the ceiling is split in Claim-id order rather than
+    resized by the model: the ceiling exists because of call latency, and
+    letting a semantic call negotiate it would mix the two concerns.  The split
+    parts stay adjacent, so the serial checkpoint carries the first part's
+    candidates into the second.
+    """
+
+    if batch_size < 1:
+        raise ValueError("batch size must be positive")
+    ordered = sorted(grouping.groups, key=lambda item: (item.claim_ids[0], item.group_key))
+    batches: list[list[str]] = []
+    for group in ordered:
+        claim_ids = group.claim_ids
+        for index in range(0, len(claim_ids), batch_size):
+            batches.append(claim_ids[index : index + batch_size])
+    return batches
+
+
+#: Fields whose order carries no meaning. The model emits them in narrative
+#: order; rejecting that would throw away a ten-minute call over presentation.
+_SET_FIELDS = (
+    "evidence_step_ids",
+    "source_fragment_ids",
+    "scripture_scope",
+    "conditions",
+    "population_scope",
+)
+
+
+#: Object lists whose order carries no meaning, and the key they sort by.
+_ORDERED_LISTS = {
+    "claim_decisions": lambda item: str(item.get("claim_id", "")),
+    "new_viewpoint_candidates": lambda item: str(item.get("local_key", "")),
+    "spans": lambda item: (int(item.get("start_char", 0)), int(item.get("end_char", 0))),
+    "change_reviews": lambda item: (str(item.get("claim_id", "")), int(item.get("component_index", 0))),
+    "groups": lambda item: str(item.get("group_key", "")),
+    "claim_ids": lambda item: str(item),
+    "missed_claim_ids": lambda item: str(item),
+}
+
+
+def canonicalize_proposal(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Sort and de-duplicate order-free list fields, recording what changed.
+
+    Returns the canonical payload and a change log.  Only ordering and exact
+    duplicates are touched: no id is added, removed or rewritten, so no
+    reader-visible text and no truth condition can move.
+    """
+
+    changes: list[str] = []
+
+    def walk(node: Any, path: str) -> Any:
+        if isinstance(node, Mapping):
+            result = {}
+            for key, value in node.items():
+                where = f"{path}/{key}"
+                if key in _SET_FIELDS and isinstance(value, list):
+                    canonical = sorted({str(item) for item in value})
+                    if canonical != list(value):
+                        changes.append(where)
+                    result[key] = canonical
+                elif key in _ORDERED_LISTS and isinstance(value, list):
+                    walked = [walk(item, f"{where}/{index}") for index, item in enumerate(value)]
+                    canonical = sorted(walked, key=_ORDERED_LISTS[key])
+                    if canonical != walked:
+                        changes.append(where)
+                    result[key] = canonical
+                else:
+                    result[key] = walk(value, where)
+            return result
+        if isinstance(node, list):
+            return [walk(item, f"{path}/{index}") for index, item in enumerate(node)]
+        return node
+
+    return walk(dict(raw), ""), sorted(changes)

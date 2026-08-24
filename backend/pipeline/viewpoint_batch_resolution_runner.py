@@ -23,9 +23,13 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReviewResponse,
+    ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
+    batches_from_groups,
     build_batch_packet,
+    canonicalize_proposal,
     split_batches,
+    validate_grouping,
     validate_proposal,
     validate_review,
 )
@@ -93,6 +97,21 @@ def build_reviewer(model: str, reasoning_effort: str) -> StructuredJsonReviewerA
     )
 
 
+def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=ClaudeSubscriptionClient(
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=CALL_TIMEOUT_SECONDS,
+        ),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_claim_grouping.md").read_text(
+            encoding="utf-8"
+        ),
+        response_model=ClaimGroupingResponse,
+        schema_name="wang_canonical_viewpoint_claim_grouping_v1",
+    )
+
+
 def _call(adapter: Any, payload: dict[str, Any], cache: Path) -> tuple[dict[str, Any], int, float]:
     """Return (raw response, calls executed, wall seconds).
 
@@ -144,7 +163,8 @@ def run_batch(
     raw_proposal, proposal_calls, proposal_seconds = _call(
         proposer, packet, output_dir / "raw-proposal.json"
     )
-    proposal = CanonicalViewpointProposalResponse.model_validate(raw_proposal)
+    canonical_proposal, normalization_changes = canonicalize_proposal(raw_proposal)
+    proposal = CanonicalViewpointProposalResponse.model_validate(canonical_proposal)
     validation = validate_proposal(
         proposal=proposal,
         batch_id=batch_id,
@@ -166,6 +186,12 @@ def run_batch(
             "proposal_sha256": proposal_sha,
             "proposal": proposal_payload,
             "validation_report": validation,
+            "normalization": {
+                "raw_response_sha256": sha256_json(dict(raw_proposal)),
+                "changed_paths": normalization_changes,
+                "reader_visible_text_changed": False,
+                "truth_conditions_changed": False,
+            },
         },
     )
 
@@ -281,6 +307,13 @@ def main() -> int:
     parser.add_argument("--review-model", default="gpt-5.6-sol")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")
     parser.add_argument("--max-batches", type=int, help="stop after this many batches")
+    parser.add_argument(
+        "--group",
+        action="store_true",
+        help="ask the model which Claims belong in a batch together, instead of splitting by id",
+    )
+    parser.add_argument("--group-model", default="claude-opus-5")
+    parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="medium")
     args = parser.parse_args()
 
     scope_packet = _read(args.packet)
@@ -293,7 +326,54 @@ def main() -> int:
     }
     registry_context = list(scope_packet.get("registry_context") or [])
 
-    batches = split_batches(sorted(claims), batch_size=args.batch_size)
+    if args.group:
+        # Grouping decides only what is compared together. Its output is a
+        # batching plan; the rationale never reaches the proposer, because
+        # telling it these Claims were grouped as related is a merge hint.
+        grouper = build_grouper(args.group_model, args.group_effort)
+        grouping_payload = {
+            "scope_label": scope_label,
+            "claims": [
+                {
+                    "claim_id": item.claim_id,
+                    "statement": item.statement,
+                    "source_id": item.source_id,
+                    "scripture_refs": item.scripture_refs,
+                }
+                for item in claims.values()
+            ],
+        }
+        raw_grouping, grouping_calls, grouping_seconds = _call(
+            grouper, grouping_payload, args.output_dir / "raw-grouping.json"
+        )
+        grouping = ClaimGroupingResponse.model_validate(
+            canonicalize_proposal(raw_grouping)[0]
+        )
+        grouping_report = validate_grouping(
+            grouping=grouping, scope_label=scope_label, claim_ids=list(claims)
+        )
+        _write_immutable(
+            args.output_dir / "grouping.json",
+            {
+                "schema_version": "wang_canonical_viewpoint_grouping_envelope_v1",
+                "scope_label": scope_label,
+                "grouping": grouping.model_dump(mode="json"),
+                "validation_report": grouping_report,
+            },
+        )
+        print(
+            json.dumps(
+                {
+                    "grouping_calls_executed": grouping_calls,
+                    "grouping_wall_seconds": grouping_seconds,
+                    **{k: grouping_report[k] for k in ("group_count", "group_sizes")},
+                },
+                ensure_ascii=False,
+            )
+        )
+        batches = batches_from_groups(grouping, batch_size=args.batch_size)
+    else:
+        batches = split_batches(sorted(claims), batch_size=args.batch_size)
     if args.max_batches:
         batches = batches[: args.max_batches]
 

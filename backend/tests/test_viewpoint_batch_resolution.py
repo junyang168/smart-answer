@@ -547,3 +547,160 @@ def test_registry_context_carries_boundaries_not_member_sets():
     # Member sets are deliberately absent: the proposer compares propositions.
     assert "members" not in context[0]
     assert "claim_ids" not in context[0]
+
+
+def test_evidence_lists_are_independent_sets_not_positional_pairs():
+    # One EvidenceStep legitimately binds several SourceFragments, so the two
+    # lists have different lengths. Zipping them would invent pairs the model
+    # never stated and silently drop the rest.
+    claim = ReviewClaim(
+        claim_id="C1",
+        pinned_claim_revision=1,
+        claim_revision_sha256="sha-C1",
+        source_id="S1",
+        statement=ROCK_STATEMENT,
+        review_status="approved",
+        evidence=[
+            {**_evidence("C1"), "evidence_step_id": "E1", "source_fragment_id": "F1"},
+            {**_evidence("C1"), "evidence_step_id": "E1", "source_fragment_id": "F2"},
+            {**_evidence("C1"), "evidence_step_id": "E2", "source_fragment_id": "F3"},
+        ],
+    )
+    proposal = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "new_viewpoint",
+                        local_new_viewpoint_key="ROCK-NOT-PETER",
+                        evidence_step_ids=["E1", "E2"],
+                        source_fragment_ids=["F1", "F2", "F3"],
+                    )
+                ],
+            }
+        ]
+    )
+    report = validate_proposal(
+        proposal=proposal,
+        batch_id="CVB-test-001",
+        claims=[claim],
+        registry_revision_ids=["CVR-1"],
+    )
+    assert report["component_count"] == 1
+
+
+def test_referenced_evidence_must_form_a_real_pair():
+    claim = ReviewClaim(
+        claim_id="C1",
+        pinned_claim_revision=1,
+        claim_revision_sha256="sha-C1",
+        source_id="S1",
+        statement=ROCK_STATEMENT,
+        review_status="approved",
+        evidence=[
+            {**_evidence("C1"), "evidence_step_id": "E1", "source_fragment_id": "F1"},
+            {**_evidence("C1"), "evidence_step_id": "E2", "source_fragment_id": "F2"},
+        ],
+    )
+    # E1 and F2 both belong to the Claim, but never together.
+    proposal = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "new_viewpoint",
+                        local_new_viewpoint_key="ROCK-NOT-PETER",
+                        evidence_step_ids=["E1"],
+                        source_fragment_ids=["F2"],
+                    )
+                ],
+            }
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="forms no real"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[claim],
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_canonicalization_reorders_without_touching_meaning():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import canonicalize_proposal
+
+    # A real proposer emits these in narrative order. Rejecting that would
+    # throw away a ten-minute call over presentation.
+    raw = {
+        "batch_id": "CVB-test-001",
+        "claim_decisions": [
+            {"claim_id": "C2", "components": [{"evidence_step_id": "x", "evidence_step_ids": ["E2", "E1"]}]},
+            {"claim_id": "C1", "components": []},
+        ],
+        "new_viewpoint_candidates": [
+            {"local_key": "Z", "scripture_scope": ["Matt.16.19", "Matt.16.18"]},
+            {"local_key": "A"},
+        ],
+    }
+    canonical, changes = canonicalize_proposal(raw)
+    assert [item["claim_id"] for item in canonical["claim_decisions"]] == ["C1", "C2"]
+    assert [item["local_key"] for item in canonical["new_viewpoint_candidates"]] == ["A", "Z"]
+    assert canonical["claim_decisions"][1]["components"][0]["evidence_step_ids"] == ["E1", "E2"]
+    assert canonical["new_viewpoint_candidates"][1]["scripture_scope"] == ["Matt.16.18", "Matt.16.19"]
+    assert "/claim_decisions" in changes
+    # Text fields are never touched.
+    assert canonical["claim_decisions"][1]["components"][0]["evidence_step_id"] == "x"
+
+
+def test_grouping_must_cover_every_claim_exactly_once():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        batches_from_groups,
+        validate_grouping,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matt16-13-18",
+            "groups": [
+                {"group_key": "keys_authority", "claim_ids": ["C3"], "rationale": "钥匙"},
+                {"group_key": "rock_referent", "claim_ids": ["C1", "C2"], "rationale": "磐石"},
+            ],
+        }
+    )
+    report = validate_grouping(grouping=grouping, scope_label="matt16-13-18", claim_ids=["C1", "C2", "C3"])
+    assert report["group_count"] == 2
+
+    with pytest.raises(BatchResolutionError, match="C4: Claim was not assigned"):
+        validate_grouping(
+            grouping=grouping, scope_label="matt16-13-18", claim_ids=["C1", "C2", "C3", "C4"]
+        )
+
+    # Grouping decides composition; the size ceiling stays the program's call.
+    assert batches_from_groups(grouping, batch_size=20) == [["C1", "C2"], ["C3"]]
+    assert batches_from_groups(grouping, batch_size=1) == [["C1"], ["C2"], ["C3"]]
+
+
+def test_a_claim_in_two_groups_is_rejected():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        validate_grouping,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "s",
+            "groups": [
+                {"group_key": "a", "claim_ids": ["C1"], "rationale": "r"},
+                {"group_key": "b", "claim_ids": ["C1"], "rationale": "r"},
+            ],
+        }
+    )
+    with pytest.raises(BatchResolutionError, match="in both group"):
+        validate_grouping(grouping=grouping, scope_label="s", claim_ids=["C1"])
