@@ -549,20 +549,19 @@ Route revision 保存编辑规范化的 inferential skeleton：
   "validated_against_conclusion_viewpoint_revision_id": "CVR-opaque",
   "route_label": "以 παιδαγωγός 的阶段性职能论证律法管辖已经结束",
   "route_signature": {
-    "premise_roles": ["historical_semantics", "textual_observation"],
-    "inference_pattern": "temporary_guardianship_ends_at_christ",
+    "inference_method_codes": ["historical_context", "lexical_semantics"],
     "conclusion_viewpoint_id": "CV-opaque"
   },
   "ordered_inference_nodes": [
     {
       "route_step_key": "P1",
-      "role": "premise",
+      "role": "observation",
       "normalized_proposition": "παιδαγωγός 表达具有期限的监护职能",
       "required_for_full_attestation": true
     },
     {
       "route_step_key": "I1",
-      "role": "inference",
+      "role": "bridge",
       "normalized_proposition": "有期限的监护在基督来到后不再继续",
       "required_for_full_attestation": true
     },
@@ -582,7 +581,11 @@ Route revision 保存编辑规范化的 inferential skeleton：
 
 `wang_argument_route_revision_v2` 取代现有只含 `route_signature` 的 v1 active contract。`ArgumentRouteRevision` 只保存 inferential skeleton；`ordered_inference_nodes` 是编辑归一化的逻辑角色，不冒充教授逐字原话，非 conclusion node 的 `normalized_proposition` 必须由一个或多个 attestation 的 source-local evidence 支持。新增同类 source attestation 不产生 route semantic revision。
 
-ArgumentRoute identity 由同一个 conclusion viewpoint revision、materially equivalent 的 required premise／bridge roles、节点顺序与 inference pattern 决定。词汇、例证、经文组合或 EvidenceStep IDs 不同可以是同一路线的不同 attestations；增加或替换承重 premise、改变推理形式，或从另一种理由到达同一结论，通常是另一条 ArgumentRoute，而不是同一路线的新 attestation。
+`EvidenceStep.discourse_role` 是 extraction layer 的 source-local annotation，历史数据中允许自由文本；它既不是 route node role，也不是 `ArgumentRoute` identity field。系统不得把现有几十种 discourse-role 字符串用 slug、同义词表或字符串相似度机械归一化后用于 route matching。route node 的 `role` 另用版本化受控值：`observation / premise / bridge / objection / response / qualification / conclusion / application`。一个 attestation 通过 `claim_component_keys + evidence_step_ids + source_fragment_ids` 把来源中的实际步骤映射到 canonical route node；这项 mapping 属于 proposal/review 的语义判断。原始 `discourse_role` 仍从 pinned EvidenceStep 解析并在 provenance 中展示，改变时必须使 attestation reuse key 失效，但它不要求与 canonical node role 字符串相等。
+
+同理，模型不得再自由生成一个 snake-case `inference_pattern` 并把字符串相等当作 route identity。`route_signature.inference_method_codes` 只从版本化小词表选择宽粒度方法，例如 `lexical_semantics / morphology / syntax / literary_context / historical_context / cross_scripture / contrast_elimination / analogy_typology / causal_reasoning / theological_synthesis / pastoral_application / other`。这些 codes 用于 retrieval、解释和明显不兼容的 blocker，不单独建立或合并 route；`other` 必须带 reviewable method note。路线的可读名称由 `route_label` 提供，不另造一个伪稳定的 pattern slug。
+
+ArgumentRoute identity 由同一个 conclusion viewpoint revision、materially equivalent 的 required normalized propositions、受控 node roles、节点顺序与兼容的 inference method codes 决定；它不是任何自由文本字段的 exact match。proposer 必须把一个来源的 source-local skeleton 与 retrieved active route skeleton 做语义比较，reviewer 再检查 `match_existing / create_new`。词汇、例证、经文组合、EvidenceStep IDs 或 extraction discourse-role 写法不同可以是同一路线的不同 attestations；增加或替换承重 premise、改变推理形式，或从另一种理由到达同一结论，通常是另一条 ArgumentRoute，而不是同一路线的新 attestation。
 
 ### 5.7 ArgumentRouteAttestation
 
@@ -803,7 +806,8 @@ Route snapshot 只收录 `validated_against_route_revision_id` 等于当前 rout
       "proposed_action": "match_existing",
       "target_argument_route_revision_id": "ARR-...",
       "route_label": "...",
-      "inference_pattern": "...",
+      "inference_method_codes": ["lexical_semantics"],
+      "inference_method_note": null,
       "ordered_inference_nodes": [
         {
           "route_step_key": "P1",
@@ -1035,7 +1039,7 @@ batch size 的实际安全上限取全链路最紧的限制：proposer input、p
 4. 已批准 relation/negative constraint；
 5. operator 明确 pin 的 passage Registry slice。
 
-每个 retrieved viewpoint synopsis 至少含 viewpoint/revision IDs、core proposition、truth-condition signature、scope、modality、material qualifications/tensions、代表性 member components 和 source coverage。每个 route synopsis 至少含 route/revision IDs、pinned conclusion viewpoint revision、required inference nodes、inference pattern、代表性 full/partial attestation IDs 与 source coverage。它们都是开放参考集，packet 必须明确声明“Registry 可能不完整”；低 embedding score 或没有 retrieved viewpoint/route 都不能否决 `new_viewpoint` 或 `create_new` route。
+每个 retrieved viewpoint synopsis 至少含 viewpoint/revision IDs、core proposition、truth-condition signature、scope、modality、material qualifications/tensions、代表性 member components 和 source coverage。每个 route synopsis 至少含 route/revision IDs、pinned conclusion viewpoint revision、required normalized inference nodes、受控 node roles、inference method codes、代表性 full/partial attestation IDs 与 source coverage。它们都是开放参考集，packet 必须明确声明“Registry 可能不完整”；低 embedding score 或没有 retrieved viewpoint/route 都不能否决 `new_viewpoint` 或 `create_new` route。
 
 bootstrap 在某 passage 尚无 active Registry 时，第一个 batch 的 relevant viewpoint list 可以为空；Opus 仍直接从该 batch 发现 CVP candidates。它完全通过并写入 Registry 后，第二个及后续 batch 必须看见这些新 active CVPs。首次建库不要求先构造 Claim-pair graph。
 
@@ -1072,7 +1076,7 @@ proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它
 
 1. 先把 conclusion 绑定 existing 或 batch-local viewpoint；
 2. 再判断与 retrieved active route 是 `match_existing` 还是 `create_new`；
-3. 输出保守的 ordered inference nodes 与 inference pattern；
+3. 输出保守的 ordered normalized inference nodes、受控 node roles 与 inference method codes；
 4. 按来源分别生成 attestation，不把跨来源共现当作一条 source-local route；
 5. 每个 step binding 精确引用 Claim component、EvidenceStep 与必要 SourceFragment；
 6. source 缺少 required bridge 或 conclusion 时标 `partial`，证据无法判断时 `defer`，不能补写隐含步骤来凑成 `full`。
@@ -1096,7 +1100,8 @@ proposal model 固定为 Claude Subscription `claude-opus-5`、high effort。它
 11. 每个 attestation 的 Claims、EvidenceSteps、SourceFragments、occurrence 与 source revision 全部 source-local、revision-pinned，且 step 顺序无重复；
 12. `completeness=full` 时所有 required inference nodes 均有 `attested` binding、terminal Claim link 指向同一 conclusion viewpoint；缺少或 ambiguous node 时程序强制降为 `partial` 或 fail；
 13. `match_existing` route pin 的是当前 route revision，且 conclusion viewpoint revision 与 proposal conclusion 一致；
-14. route/attestation exact coverage、local keys、identity comparisons 与 generation fingerprint 完整；模型没有分配正式 route/attestation IDs 或 derived counts。
+14. 每个 route node role 与 inference method code 都来自当前 policy vocabulary；`other` 有 method note；任何自由文本 `EvidenceStep.discourse_role` 都只通过 pinned EvidenceStep 保留，不被 validator 字符串归一化或当作 route identity；
+15. route/attestation exact coverage、local keys、identity comparisons 与 generation fingerprint 完整；模型没有分配正式 route/attestation IDs 或 derived counts。
 
 这些 checks 可以保存为 proposal envelope 的 validation report，但不生成新的语义 workflow stage。
 
@@ -1120,7 +1125,9 @@ reviewer 对每项 proposed change 检查：
 
 - conclusion 是否真由该路线支持，并绑定正确的 viewpoint revision；
 - ordered premises、bridges、objection/response 与 conclusion 是否忠实反映 source evidence；
-- inference pattern 是否把“同段共现”夸大成推理，或省略改变有效性的承重步骤；
+- ordered semantic skeleton 是否把“同段共现”夸大成推理，或省略改变有效性的承重步骤；
+- source-local `discourse_role` 到 canonical route node role 的 mapping 是否忠实，是否因两篇来源使用不同自由文本标签而 false-split，或因标签相同而 false-merge；
+- `inference_method_codes` 是否符合实际推理方法；`match_existing` 是否基于有序 semantic skeleton，而不是 route label、method code 或自由文本 pattern 相同；
 - `match_existing` 是否真为同一 materially equivalent inferential skeleton，而不只是同一结论；
 - 同一结论的不同理由是否被错误合并，同一路线的措辞／例证变体是否被错误拆分；
 - attestation 是否严格 source-local，是否从不同讲道／母本拼出一条虚构完整路线；
@@ -1282,7 +1289,7 @@ embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap�
 | `canonical_viewpoint` | core proposition、truth-condition signature、scope、必要 qualification/tension 与编辑别名 | incremental match、Search、QA |
 | `claim` | source-local statement、claim type、经文范围与 attribution | bootstrap recall、来源下钻 |
 | `claim_signature` | screening-only semantic atoms、polarity/stance、scope、conditions 与 qualifications | bootstrap signature recall；不作为 identity evidence |
-| `argument_route` | route label、ordered inference nodes、inference pattern、full/partial attestation synopsis 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
+| `argument_route` | route label、ordered normalized inference nodes、受控 node roles／method codes、full/partial attestation synopsis 与 SHA-bound conclusion viewpoint revision | “为什么”检索与答案组织 |
 | `evidence` | EvidenceStep statement、step/discourse role、经文范围；需要时绑定 source fragment excerpt | 引文／证据召回 |
 
 每个 object kind 使用独立 `EmbeddingProjectionManifest` 和向量 index，不把四类对象拼进同一个无类型集合。projection 保存 object revision、source record SHA、额外 dependency SHAs、reader-visible-derived text SHA 与 projection SHA；plan 再绑定 provider、model、dimensions、provider contract version、`transport_mode`、use case、batch fingerprints 与 token estimation method。provider 返回数量、object IDs、dimensions、finite/non-zero vector 任一不匹配均 fail closed。transport batch、HTTP request 与异步 provider job 是三个不同计数，预算必须分别按所选 endpoint 的真实行为计算，不能把 SDK 接收的 Python list 大小直接当成 provider call 数。
@@ -1320,13 +1327,15 @@ embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap�
 
 同一 route 不是“引用了同一节经文”或“用了相同关键词”，而是具有兼容的：
 
-- premise roles；
-- textual/historical observations；
-- inference bridge；
+- 受控 node roles 与 required-node 顺序；
+- materially equivalent 的 normalized observations／premises；
+- materially equivalent 的 inference bridge；
 - conclusion viewpoint；
-- scope 与关键 qualification。
+- scope、关键 qualification 与兼容的 inference method codes。
 
 若两讲都引用加拉太书，但一讲以 `παιδαγωγός` 的历史职能论证阶段性，另一讲以“后裔”单数和期限论证，是否同一 route 必须依 inferential skeleton 审核，不能只看经文相同。
+
+`EvidenceStep.discourse_role` 不参与字符串 identity。两篇讲道可以分别写成“由原文字义推出结论”“文本观察”“own_reasoning”，只要它们实际绑定到 materially equivalent 的 canonical observation／premise／bridge nodes，就可以成为同一 route 的不同 attestations。反过来，两步都叫 `premise` 或 `refutation` 也不能证明它们是同一路线。`inference_method_codes` 同样只是受控的 broad method facets，不是 route ID；同 code 可以有多条 routes，同一路线也可以由多个兼容 codes 描述。
 
 ### 7.2 Route 与 EvidenceStep
 
@@ -1402,7 +1411,7 @@ embedding 不是 viewpoint registry 私有能力。CanonicalViewpoint bootstrap�
    - EvidenceStep：`DK-502c7f478854-E002`
    - occurrence：`S0002`，media time 24
 
-Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 inference pattern，因此必须是两个 routes，不能因为结论相同而去重。
+Route A 与 Route B 指向同一个候选结论，却具有不同 required premises、bridges 与 inference method，因此必须是两个 routes，不能因为结论相同而去重。
 
 ### 8.4 本映射验证的设计事实
 
@@ -1460,7 +1469,8 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 premises 和 i
 4. route revision 的 `route_step_key` 唯一且有序；attestation step bindings 只能引用这些 keys，每个 binding 的 component/evidence/fragment 引用必须可解析。
 5. `full` attestation 必须覆盖 route revision 声明的全部 required premise/inference/conclusion nodes；missing 或 ambiguous node 只能形成 `partial`。
 6. partial attestation 不计入 recurring route count。
-7. 同一 conclusion 不足以证明 route identity 相同；required premises、节点顺序或 inference pattern materially different 时必须分成不同 routes。
+7. 同一 conclusion 不足以证明 route identity 相同；required normalized propositions、canonical node roles、节点顺序或推理方法 materially different 时必须分成不同 routes。
+8. source `discourse_role` 的自由文本值不得复制进 route signature、slug 化后充当 method code，或通过字符串 equality 决定 match；它只由 pinned EvidenceStep 保留，并由 reviewed step binding 映射到 route node。
 
 ### 9.5 Semantic revision 与 snapshot 分离
 
@@ -1589,7 +1599,7 @@ flowchart TD
 - candidate subgraph 中没有 `unrelated`、`contrasts`、`qualifies`、`supersedes`、未决 attribution 或 material scope blocker；
 - canonical wording 只是保守归一化，不增加因果、范围、重要性、时间发展或神学评价；
 - actual Claim/Evidence/Citation dependency 与 coverage disclosure 均可机械编译；
-- 每个自动批准的 route 与 reviewer 对 conclusion、required nodes、node order、inference pattern 和 existing/new route identity 一致；每个 attestation 通过 source-local lineage 与 full/partial gate；
+- 每个自动批准的 route 与 reviewer 对 conclusion、required normalized nodes、canonical node roles、node order、inference method codes 和 existing/new route identity 一致；每个 attestation 通过 source-local lineage 与 full/partial gate；
 - batch input manifest 在 proposal coverage 中 exact-once，其中没有会改变当前 identity boundary 的遗漏或 deferred；可选 retrieval provenance 只影响 context disclosure，不成为 approval 条件；
 - 第 9.8 节全部适用质量维度分别达到 minimum，hard failures 为零；
 - 回归测试证明相同输入产生 byte-stable decision 与 snapshot。
@@ -1659,6 +1669,8 @@ mutation suite 至少包含：
 6. 从 ViewpointResolutionLedger 删除一行、重复一行、把 `unprocessed` 伪装成 `source_ineligible`，预期 coverage gate fail；
 7. 在 projection 中删除一个 material qualification/tension/blocker，或只保留 canonical wording 不带来源，预期 consumer gate fail；
 8. 在 ClaimRelation PostgreSQL round-trip 中互换或丢失 endpoint aliases，预期 compatibility test fail。
+9. 用两个来源表达同一推理骨架，但给 EvidenceSteps 不同的自由文本 `discourse_role`，预期匹配同一 route；再给两个不同骨架相同 `discourse_role`／method code，预期不得自动合并。
+10. 改变一个 required node 的 normalized proposition、role 或顺序，同时保持 conclusion 与 method code 不变，预期 route identity gate 拒绝 `match_existing`。
 
 每次改变 proposer/reviewer model、prompt、schema、eligibility policy、component locator、review logic 或 projection compiler version，都必须运行适用 fixture。启用或修改可选 retrieval／audit channel 时，再运行该 channel 的 recall fixtures。测试输出保存每个维度的结果与 artifact SHA；不得只保存一个总 pass rate。
 
@@ -2410,7 +2422,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 5. **Intelligent Batching 与 Joint Viewpoint／ArgumentRoute resolution workflow**
    定义 SHA-bound `IntelligentBatchingPlan`、`CanonicalViewpointProposal`、`CanonicalViewpointReview` 与 `RegistryChangeSet`。planner 只负责 exact-once coverage、bounded capacity 与相关 Claims 共批，不产生 identity evidence，并且不把 rationale 传给 proposer。每个 planned batch 串行执行：重新读取最新 relevant Registry；Opus 5/high 在一次 proposal 中联合输出 viewpoint decisions、route candidates 与 source-local attestations；Sol/high 对三者逐项 proposal-aware review；程序执行 exact-coverage/span/evidence/route/source-local gates；有 finding 时只允许一次 finding-only correction。完全通过后立即生成一个 ChangeSet、原子 apply/readback，再进入下一批；失败则记录 exception 并停止 scope。不得引入 pending candidate、provisional CVP 或 scope-end reconciliation。旧 blind/group/promotion/finalization runners只作为只读历史诊断，不能进入默认状态机或长期 runtime compatibility surface。
 
-   本项必须先完成：span-only component 契约与 Unicode code-point 校验（`viewpoint_claim_links` 当前为 0 行，只需正确定义与 round-trip fixture）；第 13.14.1 节的 no-apply route POC；#194 master data baseline 与重建后的语义边界／route regression；全链路 batch 上限及 proposer/reviewer/correction 各自 `max_output_tokens`；batching plan 对 Claim manifest SHA 的绑定；每批 effective proposal、atomic apply/readback、idempotent resume 与 fail-stop exception checkpoint。缺一即不能打开 `--apply`。
+   本项必须先完成：span-only component 契约与 Unicode code-point 校验（`viewpoint_claim_links` 当前为 0 行，只需正确定义与 round-trip fixture）；canonical route node-role enum 与 versioned inference-method vocabulary；自由文本 `EvidenceStep.discourse_role` 到 route node 的 reviewed binding contract；移除自由文本 `inference_pattern` 的 identity 作用；第 13.14.1 节的 no-apply route POC；#194 master data baseline 与重建后的语义边界／route regression；全链路 batch 上限及 proposer/reviewer/correction 各自 `max_output_tokens`；batching plan 对 Claim manifest SHA 的绑定；每批 effective proposal、atomic apply/readback、idempotent resume 与 fail-stop exception checkpoint。缺一即不能打开 `--apply`。
 6. **Split/merge、revision 与 impact propagation**
    建立 lineage、redirect、successor、viewpoint/route snapshot dependency manifest、ProductDependency/ImpactEvent 扩展、search/QA invalidation 与恢复测试。
 7. **ViewpointKnowledgeProjection compiler 与 eligibility**
