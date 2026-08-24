@@ -313,6 +313,48 @@ def test_detail_drills_to_evidence_citation_and_source_locator():
     }
 
 
+def test_detail_expands_route_nodes_and_source_local_evidence():
+    detail = AdminViewpointProjectionCompiler(_fixture()).detail("CV-PETER")
+    route = detail["data"]["routes"][0]
+
+    assert route["coverage"] == {
+        "mode": "coverage_snapshot",
+        "eligibility": "approved_evidence_ready",
+        "full_attestation_count": 1,
+        "partial_attestation_count": 0,
+    }
+    displayed = route["attestations"][0]
+    assert displayed["source"]["source_id"] == "SRC-16"
+    assert [item["node"]["role"] for item in displayed["bindings"]] == [
+        "premise", "conclusion",
+    ]
+    route_evidence = displayed["bindings"][0]["evidence"][0]
+    assert route_evidence["evidence_step"]["evidence_step_id"] == "EV-ROCK"
+    assert route_evidence["fragments"][0]["source_fragment"]["fragment_id"] == "FR-ROCK"
+    assert route_evidence["fragments"][0]["locator"]["source_admin_url"].endswith(
+        "source=SRC-16&fragment=FR-ROCK"
+    )
+
+
+def test_detail_uses_current_registry_attestations_without_legacy_coverage():
+    store = _fixture()
+    store.records["viewpoint_coverage_snapshots"] = []
+    store.records["viewpoint_resolution_ledgers"] = []
+    store.records["viewpoint_quality_reports"] = []
+
+    route = AdminViewpointProjectionCompiler(store).detail("CV-PETER")["data"]["routes"][0]
+
+    assert route["snapshot"] is None
+    assert route["coverage"] == {
+        "mode": "current_registry",
+        "eligibility": "approved_evidence_ready",
+        "full_attestation_count": 1,
+        "partial_attestation_count": 0,
+    }
+    assert route["evidence_step_ids"] == ["EV-ROCK"]
+    assert len(route["attestations"]) == 1
+
+
 def test_cursor_and_requested_snapshot_fail_closed():
     compiler = AdminViewpointProjectionCompiler(_fixture())
 

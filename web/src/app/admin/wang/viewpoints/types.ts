@@ -113,8 +113,55 @@ export type ViewpointDetail = {
   members: Member[];
   routes: Array<Record<string, unknown> & {
     route_id: string; route_type: string; claim_id: string | null; evidence_step_ids: string[];
-    attestations: Array<Record<string, unknown>>;
+    revision: null | Record<string, unknown> & {
+      route_label: string;
+      route_signature: { inference_method_codes: string[]; inference_method_note?: string | null };
+      ordered_inference_nodes: Array<{
+        route_step_key: string;
+        role: "observation" | "premise" | "bridge" | "objection" | "response" | "qualification" | "conclusion" | "application";
+        normalized_proposition: string | null;
+        conclusion_viewpoint_revision_id: string | null;
+        required_for_full_attestation: boolean;
+      }>;
+    };
+    attestations: Array<{
+      attestation: Record<string, unknown> & {
+        argument_route_attestation_id: string; completeness: "full" | "partial";
+        review_status: string; source_id: string;
+      };
+      source: null | Record<string, unknown> & {
+        source_id: string; title?: string; source_type?: string; source_path?: string;
+      };
+      bindings: Array<{
+        binding: {
+          route_step_key: string; claim_component_keys: string[];
+          attestation_status: "attested" | "missing" | "ambiguous";
+        };
+        node: null | {
+          route_step_key: string; role: string; normalized_proposition: string | null;
+        };
+        evidence: Array<{
+          evidence_step: null | Record<string, unknown> & {
+            evidence_step_id: string; statement: string; speaker?: string; stance?: string;
+          };
+          fragments: Array<{
+            source_fragment: Record<string, unknown> & {
+              fragment_id: string; verbatim_excerpt: string;
+            };
+            locator: {
+              source_url: string | null; source_admin_url: string | null;
+              source_file_name: string | null; source_type: string | null;
+              paragraph_key: string | number | null; media_time: number | null;
+            };
+          }>;
+        }>;
+      }>;
+    }>;
     snapshot: null | Record<string, unknown> & { eligibility: string; full_attestation_count: number; partial_attestation_count: number };
+    coverage: {
+      mode: "coverage_snapshot" | "current_registry"; eligibility: string;
+      full_attestation_count: number; partial_attestation_count: number;
+    };
   }>;
   relations: Array<{
     relation_id: string; relation_type: string; from_viewpoint_id: string; to_viewpoint_id: string | null;
