@@ -1272,7 +1272,38 @@ def validate_reconsideration(
             if item.decision in {"reject", "defer"}
         )
     )
-    if review.novelty_review.status != "pass":
+    accepted = {
+        (item.claim_id, item.component_index)
+        for item in reconsideration.finding_dispositions
+        if item.disposition == "accepted"
+    }
+    revised_new_viewpoint_claim_ids = {
+        decision.claim_id
+        for decision in reconsideration.revised_proposal.claim_decisions
+        if any(item.disposition == "new_viewpoint" for item in decision.components)
+    }
+    accepted_novelty_claim_ids = {
+        claim_id
+        for claim_id in review.novelty_review.missed_claim_ids
+        if any(
+            flagged_key in accepted
+            for flagged_key in flagged
+            if flagged_key[0] == claim_id
+        )
+    }
+    for claim_id in sorted(
+        accepted_novelty_claim_ids - revised_new_viewpoint_claim_ids
+    ):
+        findings.append(
+            f"{claim_id}: accepted novelty correction produced no new_viewpoint"
+        )
+    resolved_novelty_claim_ids = sorted(
+        accepted_novelty_claim_ids & revised_new_viewpoint_claim_ids
+    )
+    unresolved_novelty_claim_ids = sorted(
+        set(review.novelty_review.missed_claim_ids) - set(resolved_novelty_claim_ids)
+    )
+    if unresolved_novelty_claim_ids:
         escalations.append(f"novelty:{review.novelty_review.status}")
 
     if findings:
@@ -1286,6 +1317,8 @@ def validate_reconsideration(
         "accepted_count": sum(
             1 for item in reconsideration.finding_dispositions if item.disposition == "accepted"
         ),
+        "resolved_novelty_claim_ids": resolved_novelty_claim_ids,
+        "unresolved_novelty_claim_ids": unresolved_novelty_claim_ids,
         "escalations": escalations,
         # Fail closed: a rebutted or deferred finding, or a novelty miss, is a
         # human judgment. The system never re-asks until the models agree.

@@ -874,6 +874,80 @@ def test_accepted_finding_resolves_the_batch():
     assert report["escalations"] == []
 
 
+def _missed_novelty_review() -> CanonicalViewpointReviewResponse:
+    return CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "decision": "correct",
+                    "finding_codes": ["missed_novelty"],
+                    "reason": "该成分是独立新观点",
+                    "correction": "改为 new_viewpoint 并新增候选",
+                },
+                {
+                    "claim_id": "C1",
+                    "component_index": 1,
+                    "decision": "pass",
+                    "finding_codes": [],
+                    "reason": "判断成立",
+                },
+            ],
+            "novelty_review": {
+                "status": "missed_novelty",
+                "missed_claim_ids": ["C1"],
+                "reason": "漏掉一个新观点",
+            },
+        }
+    )
+
+
+def test_accepted_novelty_correction_resolves_when_revised_claim_creates_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    revised = _proposal()
+    original_payload = revised.model_dump(mode="json")
+    original_payload["claim_decisions"][0]["components"][0]["disposition"] = "support_existing"
+    original_payload["claim_decisions"][0]["components"][0]["target_viewpoint_revision_id"] = "CVR-1"
+    original_payload["claim_decisions"][0]["components"][0]["local_new_viewpoint_key"] = None
+    original_payload["new_viewpoint_candidates"] = []
+    original = CanonicalViewpointProposalResponse.model_validate(original_payload)
+
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(revised.model_dump(mode="json"), "accepted"),
+        proposal=original,
+        review=_missed_novelty_review(),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+    assert report["resolved_novelty_claim_ids"] == ["C1"]
+    assert report["unresolved_novelty_claim_ids"] == []
+
+
+def test_accepted_novelty_correction_must_actually_create_a_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    payload = proposal.model_dump(mode="json")
+    payload["claim_decisions"][0]["components"][0]["disposition"] = "support_existing"
+    payload["claim_decisions"][0]["components"][0]["target_viewpoint_revision_id"] = "CVR-1"
+    payload["claim_decisions"][0]["components"][0]["local_new_viewpoint_key"] = None
+    payload["new_viewpoint_candidates"] = []
+    original = CanonicalViewpointProposalResponse.model_validate(payload)
+
+    with pytest.raises(BatchResolutionError, match="produced no new_viewpoint"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(payload, "accepted"),
+            proposal=original,
+            review=_missed_novelty_review(),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
 def test_rebutted_finding_goes_to_a_human_not_another_round():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
