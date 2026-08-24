@@ -479,3 +479,71 @@ def test_run_batch_refuses_a_proposal_that_skips_a_claim(tmp_path: Path):
         )
     assert reviewer.calls == 0
     assert not (tmp_path / "batch-001" / "review.json").exists()
+
+
+def test_scope_selects_core_claims_without_a_target_proposition():
+    from backend.pipeline.viewpoint_scope_packet_runner import scope_claim_ids
+
+    scope = {
+        "claims": [
+            {"claim_id": "C1", "lane": "core", "passage_unit_ids": ["16:13-18"]},
+            {"claim_id": "C2", "lane": "core", "passage_unit_ids": ["16:19"]},
+            {"claim_id": "C3", "lane": "source_context_candidate", "passage_unit_ids": ["16:13-18"]},
+            {"claim_id": "C4", "lane": "core", "passage_unit_ids": ["16:13-18", "16:19"]},
+        ]
+    }
+    # A unit takes every core Claim assigned to it — the selection is the
+    # passage, not a viewpoint someone named in advance.
+    assert scope_claim_ids(scope, ["16:13-18"]) == ["C1", "C4"]
+    # Cross-unit Claims appear in both units they were assigned to.
+    assert scope_claim_ids(scope, ["16:19"]) == ["C2", "C4"]
+    # No unit filter means the whole core lane; the context lane never enters.
+    assert scope_claim_ids(scope, []) == ["C1", "C2", "C4"]
+
+
+def test_registry_context_carries_boundaries_not_member_sets():
+    from backend.pipeline.viewpoint_scope_packet_runner import registry_context
+
+    revision = {
+        "viewpoint_revision_id": "CVR-1",
+        "viewpoint_id": "CV-1",
+        "revision_number": 1,
+        "revision": 1,
+        "core_proposition": "太16:18 的磐石不指彼得本人",
+        "proposition_signature": {
+            "subject": "太16:18 的磐石",
+            "predicate": "指向",
+            "object": "彼得本人",
+            "polarity": "denied",
+            "modality": "教授的释经判断",
+        },
+        "scope": {"scripture_scope": ["Matt.16.18"]},
+        "provenance": {"basis_identity_decision_ids": ["VID-1"], "review_artifact_sha256": "sha"},
+        "review_status": "system_approved",
+        "approved_by": "system",
+        "approved_at": "2026-08-23T00:00:00Z",
+    }
+    viewpoints = [
+        {
+            "viewpoint_id": "CV-1",
+            "current_revision_id": "CVR-1",
+            "identity_status": "active",
+            "created_from_candidate_id": "VIC-1",
+            "review_status": "system_approved",
+            "revision": 1,
+        },
+        {
+            "viewpoint_id": "CV-2",
+            "current_revision_id": "CVR-2",
+            "identity_status": "retired",
+            "created_from_candidate_id": "VIC-2",
+            "review_status": "system_approved",
+            "revision": 1,
+        },
+    ]
+    context = registry_context(viewpoints, [revision])
+    assert [item["viewpoint_id"] for item in context] == ["CV-1"]
+    assert context[0]["core_proposition"] == "太16:18 的磐石不指彼得本人"
+    # Member sets are deliberately absent: the proposer compares propositions.
+    assert "members" not in context[0]
+    assert "claim_ids" not in context[0]

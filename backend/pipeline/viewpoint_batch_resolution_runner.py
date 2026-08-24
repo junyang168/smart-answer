@@ -33,8 +33,8 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import (
     ReviewClaim,
     StructuredJsonReviewerAdapter,
-    ViewpointIdentityReviewPacket,
 )
+from backend.pipeline.viewpoint_scope_packet_runner import SCOPE_PACKET_VERSION
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
@@ -273,10 +273,8 @@ def pending_synopsis(proposal: CanonicalViewpointProposalResponse, batch_id: str
 def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--packet", type=Path, required=True, help="identity review packet with the scope Claims")
-    parser.add_argument("--scope-label", required=True)
+    parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--registry-context", type=Path, help="active CanonicalViewpoint synopses")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--proposal-model", default="claude-opus-5")
     parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="xhigh")
@@ -285,9 +283,15 @@ def main() -> int:
     parser.add_argument("--max-batches", type=int, help="stop after this many batches")
     args = parser.parse_args()
 
-    packet = ViewpointIdentityReviewPacket.model_validate(_read(args.packet))
-    claims = {item.claim_id: item for item in packet.claims}
-    registry_context = _read(args.registry_context)["viewpoints"] if args.registry_context else []
+    scope_packet = _read(args.packet)
+    if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
+        raise SystemExit(f"{args.packet} is not a {SCOPE_PACKET_VERSION}")
+    scope_label = str(scope_packet["scope_label"])
+    claims = {
+        item["claim_id"]: ReviewClaim.model_validate(item)
+        for item in scope_packet["claims"]
+    }
+    registry_context = list(scope_packet.get("registry_context") or [])
 
     batches = split_batches(sorted(claims), batch_size=args.batch_size)
     if args.max_batches:
@@ -299,12 +303,12 @@ def main() -> int:
     pending: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
     for ordinal, batch in enumerate(batches, start=1):
-        batch_id = f"CVB-{args.scope_label}-{ordinal:03d}"
+        batch_id = f"CVB-{scope_label}-{ordinal:03d}"
         batch_dir = args.output_dir / f"batch-{ordinal:03d}"
         try:
             report = run_batch(
                 batch_id=batch_id,
-                scope_label=args.scope_label,
+                scope_label=scope_label,
                 claims=[claims[claim_id] for claim_id in batch],
                 registry_context=registry_context,
                 pending_candidates=pending,
@@ -334,7 +338,7 @@ def main() -> int:
 
     summary = {
         "schema_version": "wang_canonical_viewpoint_scope_run_v1",
-        "scope_label": args.scope_label,
+        "scope_label": scope_label,
         "batch_size": args.batch_size,
         "batch_count": len(reports),
         "claim_count": sum(item["claim_count"] for item in reports),
