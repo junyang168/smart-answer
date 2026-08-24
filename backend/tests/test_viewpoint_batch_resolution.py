@@ -207,13 +207,29 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
     assert policy["review"]["targets_per_batch"] == 12
 
 
+def test_route_policy_rejects_an_unimplemented_validator(tmp_path: Path):
+    from backend.pipeline.viewpoint_route_policy import (
+        DEFAULT_ROUTE_POLICY_PATH,
+        load_route_policy,
+    )
+
+    policy = json.loads(DEFAULT_ROUTE_POLICY_PATH.read_text(encoding="utf-8"))
+    policy["validator_version"] = "future-validator"
+    path = tmp_path / "route-policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="validator_version"):
+        load_route_policy(path)
+
+
 def test_route_apply_readback_compares_content_and_cvp_cut():
     from backend.pipeline.viewpoint_route_resolution_worker import (
         build_route_apply_readback_receipt,
+        classify_route_apply_readback,
     )
 
     expected_record = {"argument_route_id": "AR-1", "route_status": "active"}
-    verified, findings = build_route_apply_readback_receipt(
+    verified, record_findings, cvp_findings = build_route_apply_readback_receipt(
         route_work_unit_sha256="work-sha",
         route_packet_sha256="packet-sha",
         route_proposal_sha256="proposal-sha",
@@ -226,11 +242,12 @@ def test_route_apply_readback_compares_content_and_cvp_cut():
             ("argument_routes", "AR-1"): expected_record | {"revision": 7}
         },
     )
-    assert findings == []
+    assert record_findings == []
+    assert cvp_findings == []
     assert verified["readback_status"] == "verified"
     assert verified["approved_cvps_unchanged"] is True
 
-    mismatch, findings = build_route_apply_readback_receipt(
+    mismatch, record_findings, cvp_findings = build_route_apply_readback_receipt(
         route_work_unit_sha256="work-sha",
         route_packet_sha256="packet-sha",
         route_proposal_sha256="proposal-sha",
@@ -244,10 +261,21 @@ def test_route_apply_readback_compares_content_and_cvp_cut():
             | {"route_status": "retired"}
         },
     )
-    assert "argument_routes:AR-1" in findings
-    assert any(item.startswith("canonical_viewpoints:CV-1") for item in findings)
+    assert "argument_routes:AR-1" in record_findings
+    assert any(item.startswith("canonical_viewpoints:CV-1") for item in cvp_findings)
     assert mismatch["readback_status"] == "mismatch"
     assert mismatch["approved_cvps_unchanged"] is False
+    assert classify_route_apply_readback(
+        record_mismatches=record_findings,
+        cvp_cut_mismatches=cvp_findings,
+    ) == "applied_with_readback_error"
+    assert classify_route_apply_readback(
+        record_mismatches=[],
+        cvp_cut_mismatches=cvp_findings,
+    ) == "applied_then_superseded"
+    assert classify_route_apply_readback(
+        record_mismatches=[], cvp_cut_mismatches=[]
+    ) == "applied"
 
 
 def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
@@ -289,13 +317,14 @@ def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
     ] == [("CV-1", "CVR-2"), ("CV-2", "CVR-3")]
     assert work.superseded_job_ids == [jobs[0].job_id]
     assert work.source_job_ids == sorted({item.job_id for item in jobs})
+    assert work.evidence_scope_sha256 == "evidence-scope-sha"
 
     another_policy = build_route_resolution_job(
         receipt=new_receipt,
         evidence_scope_sha256="evidence-scope-sha",
         route_policy_fingerprint_sha256="route-policy-v2-sha",
     )
-    with pytest.raises(ValueError, match="cannot cross scope manifests or policies"):
+    with pytest.raises(ValueError, match="cannot cross scope manifests"):
         coalesce_route_resolution_jobs(
             [jobs[1], another_policy],
             current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
@@ -457,6 +486,183 @@ def test_route_queue_can_supersede_owned_work_immediately(tmp_path: Path):
     )
     assert state["status"] == "superseded"
     assert state["lease_expires_at"] is None
+
+
+def test_route_queue_claim_filters_before_taking_ownership(tmp_path: Path):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job)
+
+    assert queue.claim(
+        worker_id="wrong-worker",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        evidence_scope_sha256="packet-b",
+        route_policy_fingerprint_sha256="policy-a",
+    ) is None
+    state = json.loads(
+        (tmp_path / "queue" / "states" / f"{job.job_id}.json").read_text()
+    )
+    assert state["status"] == "queued"
+
+
+def test_route_queue_requires_an_exact_successor_before_superseding(tmp_path: Path):
+    old_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-old",
+        cvp_changeset_id="KCS-old",
+        cvp_changeset_sha256="changeset-old",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    wrong_scope_receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-17",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-new",
+        cvp_changeset_id="KCS-new",
+        cvp_changeset_sha256="changeset-new",
+        expected_current_revisions={"CV-1": "CVR-2"},
+        observed_current_revisions={"CV-1": "CVR-2"},
+    )
+    old_job = build_route_resolution_job(
+        receipt=old_receipt,
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    wrong_scope_job = build_route_resolution_job(
+        receipt=wrong_scope_receipt,
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(old_job)
+    work = queue.claim(
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+        scope_label="matthew-16",
+    )
+    assert work is not None
+    queue.enqueue(wrong_scope_job)
+
+    transition = queue.resolve_supersession(
+        work,
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-2"},
+        detail="CVP advanced",
+    )
+
+    assert transition["status"] == "exception"
+    assert transition["missing_viewpoint_ids"] == ["CV-1"]
+    state = json.loads(
+        (tmp_path / "queue" / "states" / f"{old_job.job_id}.json").read_text()
+    )
+    assert state["status"] == "exception"
+
+
+def test_route_queue_supersedes_when_exact_successor_is_durable(tmp_path: Path):
+    def receipt(revision: str, suffix: str):
+        return build_cvp_batch_readback_receipt(
+            scope_label="matthew-16",
+            scope_manifest_sha256="scope-sha",
+            triggering_cvp_batch_id=f"CVB-{suffix}",
+            cvp_changeset_id=f"KCS-{suffix}",
+            cvp_changeset_sha256=f"changeset-{suffix}",
+            expected_current_revisions={"CV-1": revision},
+            observed_current_revisions={"CV-1": revision},
+        )
+
+    old_job = build_route_resolution_job(
+        receipt=receipt("CVR-1", "old"),
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    successor_job = build_route_resolution_job(
+        receipt=receipt("CVR-2", "new"),
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(old_job)
+    work = queue.claim(
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-1"},
+    )
+    assert work is not None
+    queue.enqueue(successor_job)
+
+    transition = queue.resolve_supersession(
+        work,
+        worker_id="worker-a",
+        current_viewpoint_revisions={"CV-1": "CVR-2"},
+        detail="CVP advanced",
+    )
+
+    assert transition == {
+        "status": "superseded",
+        "missing_viewpoint_ids": [],
+        "successor_job_ids": {"CV-1": successor_job.job_id},
+    }
+
+
+def test_cvp_re_review_exception_is_content_addressed_and_durable(tmp_path: Path):
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        _persist_cvp_re_review_exceptions,
+    )
+
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="packet-a",
+        route_policy_fingerprint_sha256="policy-a",
+    )
+    work = coalesce_route_resolution_jobs(
+        [job], current_viewpoint_revisions={"CV-1": "CVR-1"}
+    )
+    report = {
+        "route_review_sha256": "review-sha",
+        "cvp_re_review_exceptions": [
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "finding_code": "identity_may_be_overmerged",
+                "reason": "边界需要复核",
+                "triggering_target_kind": "route",
+                "triggering_target_key": "ROUTE-1",
+                "evidence_claim_component_keys": ["CCK-1"],
+            }
+        ],
+    }
+
+    artifact_sha = _persist_cvp_re_review_exceptions(
+        output_dir=tmp_path, work=work, report=report
+    )
+
+    artifact_path = tmp_path / "exceptions" / f"cvp-rereview-{artifact_sha}.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["status"] == "open"
+    assert artifact["exceptions"] == report["cvp_re_review_exceptions"]
 
 
 def test_passing_batch_compiles_component_bound_cvp_master_records():
@@ -1939,6 +2145,47 @@ def test_registry_route_packet_accounts_for_members_it_cannot_attest():
         item["viewpoint_claim_link_id"]
         for item in ledger["unattestable_in_scope_members"]
     ] == ["VCL-NO-BINDINGS"]
+    assert ledger["no_route_semantics"] == "no_attested_route_in_this_evidence_scope"
+
+
+def test_no_route_reviewer_receives_the_membership_ledger():
+    from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
+
+    member = _claim("C1", ROCK_STATEMENT)
+    external = _claim("C9", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member],
+        viewpoint_claim_links=[
+            _registry_link(member),
+            _registry_link(
+                external,
+                viewpoint_claim_link_id="VCL-OUTSIDE",
+            ),
+        ],
+        existing_routes=[],
+    )
+    proposal = _routes(
+        argument_route_candidates=[],
+        source_route_attestations=[],
+        viewpoints_with_no_route=[
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "reason_code": "evidence_insufficient",
+                "reason": "本 scope 不能完整重建论证",
+            }
+        ],
+    )
+
+    batches = build_route_review_batches(
+        proposal=proposal,
+        route_packet=packet,
+        route_proposal_sha256="proposal-sha",
+    )
+
+    ledger = batches[0]["route_evidence_context"]["membership_ledger"]
+    assert [item["claim_id"] for item in ledger["out_of_scope_members"]] == ["C9"]
     assert ledger["no_route_semantics"] == "no_attested_route_in_this_evidence_scope"
 
 

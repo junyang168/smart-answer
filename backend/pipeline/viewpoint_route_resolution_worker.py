@@ -91,11 +91,11 @@ def build_route_apply_readback_receipt(
     observed_current_viewpoint_revisions: dict[str, str | None],
     expected_records: list[tuple[str, str, dict[str, Any]]],
     observed_records: dict[tuple[str, str], dict[str, Any] | None],
-) -> tuple[dict[str, Any], list[str]]:
-    """Build an auditable receipt and report every semantic mismatch."""
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    """Build a receipt and distinguish master-record drift from CVP-cut drift."""
 
     record_readbacks = []
-    mismatches = []
+    record_mismatches = []
     for collection, object_id, expected_payload in expected_records:
         observed = observed_records.get((collection, object_id))
         expected_sha = record_content_sha(expected_payload)
@@ -109,13 +109,14 @@ def build_route_apply_readback_receipt(
             }
         )
         if expected_sha != observed_sha:
-            mismatches.append(f"{collection}:{object_id}")
+            record_mismatches.append(f"{collection}:{object_id}")
     after_cut = {
         key: observed_current_viewpoint_revisions.get(key)
         for key in expected_current_viewpoint_revisions
     }
+    cvp_cut_mismatches = []
     if after_cut != expected_current_viewpoint_revisions:
-        mismatches.extend(
+        cvp_cut_mismatches.extend(
             f"canonical_viewpoints:{key}:expected={value}:observed={after_cut.get(key)}"
             for key, value in sorted(expected_current_viewpoint_revisions.items())
             if after_cut.get(key) != value
@@ -136,10 +137,51 @@ def build_route_apply_readback_receipt(
             record_readbacks,
             key=lambda item: (item["collection"], item["object_id"]),
         ),
-        "readback_status": "verified" if not mismatches else "mismatch",
+        "record_mismatches": record_mismatches,
+        "cvp_cut_mismatches": cvp_cut_mismatches,
+        "readback_status": (
+            "verified"
+            if not record_mismatches and not cvp_cut_mismatches
+            else "mismatch"
+        ),
     }
     receipt["artifact_sha256"] = sha256_json(receipt)
-    return receipt, mismatches
+    return receipt, record_mismatches, cvp_cut_mismatches
+
+
+def _persist_cvp_re_review_exceptions(
+    *, output_dir: Path, work: RouteResolutionWorkUnit, report: dict[str, Any]
+) -> str | None:
+    exceptions = list(report.get("cvp_re_review_exceptions") or [])
+    if not exceptions:
+        return None
+    body = {
+        "schema_version": "wang_cvp_re_review_exception_inbox_v1",
+        "route_work_unit_sha256": work.artifact_sha256,
+        "route_review_sha256": report["route_review_sha256"],
+        "exceptions": exceptions,
+        "status": "open",
+    }
+    artifact = body | {"artifact_sha256": sha256_json(body)}
+    _write_immutable(
+        output_dir
+        / "exceptions"
+        / f"cvp-rereview-{artifact['artifact_sha256']}.json",
+        artifact,
+    )
+    return str(artifact["artifact_sha256"])
+
+
+def classify_route_apply_readback(
+    *, record_mismatches: list[str], cvp_cut_mismatches: list[str]
+) -> str:
+    """Name the post-commit state without pretending an applied write failed."""
+
+    if record_mismatches:
+        return "applied_with_readback_error"
+    if cvp_cut_mismatches:
+        return "applied_then_superseded"
+    return "applied"
 
 
 def process_work_unit(
@@ -163,6 +205,8 @@ def process_work_unit(
         raise ValueError("Route work and evidence packet scope differ")
     if scope_packet.get("claim_manifest_sha256") != work.scope_manifest_sha256:
         raise ValueError("Route work and Claim manifest differ")
+    if scope_packet.get("packet_sha256") != work.evidence_scope_sha256:
+        raise ValueError("Route work and evidence packet SHA differ")
 
     claims = [ReviewClaim.model_validate(item) for item in scope_packet["claims"]]
     all_context = registry_context(
@@ -200,12 +244,17 @@ def process_work_unit(
         review_targets_per_batch=review_targets_per_batch,
         call_timeout_seconds=call_timeout_seconds,
     )
+    cvp_exception_artifact_sha256 = _persist_cvp_re_review_exceptions(
+        output_dir=output_dir, work=work, report=report
+    )
     if not report["passing_route_keys"]:
         result = {
             "status": "no_passing_routes",
             "change_set_id": None,
             "change_count": 0,
             "exceptions": report["exceptions"] or ["no_passing_routes"],
+            "cvp_re_review_exceptions": report["cvp_re_review_exceptions"],
+            "cvp_re_review_exception_artifact_sha256": cvp_exception_artifact_sha256,
         }
         result["artifact_sha256"] = sha256_json(result)
         _write_derived(output_dir / "route-worker-result.json", result)
@@ -238,6 +287,8 @@ def process_work_unit(
         "change_set_id": plan.change_set_id,
         "change_count": len(plan.operations),
         "exceptions": report["exceptions"],
+        "cvp_re_review_exceptions": report["cvp_re_review_exceptions"],
+        "cvp_re_review_exception_artifact_sha256": cvp_exception_artifact_sha256,
     }
     if apply:
         applied = store.apply_plan(
@@ -262,7 +313,11 @@ def process_work_unit(
                 expected_records.append((collection, object_id, item))
                 observed_records[(collection, object_id)] = observed
         observed_current = _current_viewpoint_revisions(store)
-        receipt, mismatches = build_route_apply_readback_receipt(
+        (
+            receipt,
+            record_mismatches,
+            cvp_cut_mismatches,
+        ) = build_route_apply_readback_receipt(
             route_work_unit_sha256=work.artifact_sha256,
             route_packet_sha256=packet["packet_sha256"],
             route_proposal_sha256=report["effective_route_proposal_sha256"],
@@ -274,12 +329,16 @@ def process_work_unit(
             observed_records=observed_records,
         )
         _write_immutable(output_dir / "route-apply-readback-receipt.json", receipt)
-        if mismatches:
-            raise ValueError("Route authority readback mismatch: " + ", ".join(mismatches))
         result |= {
-            "status": "applied",
+            "status": classify_route_apply_readback(
+                record_mismatches=record_mismatches,
+                cvp_cut_mismatches=cvp_cut_mismatches,
+            ),
             "apply_result": applied,
             "readback_receipt_sha256": receipt["artifact_sha256"],
+            "record_mismatches": record_mismatches,
+            "cvp_cut_mismatches": cvp_cut_mismatches,
+            "observed_current_viewpoint_revisions": observed_current,
         }
     result["artifact_sha256"] = sha256_json(result)
     _write_derived(output_dir / "route-worker-result.json", result)
@@ -298,16 +357,6 @@ def main() -> int:
     parser.add_argument("--route-policy", type=Path, default=DEFAULT_ROUTE_POLICY_PATH)
     args = parser.parse_args()
 
-    store = PostgresKnowledgeStore(args.database_url)
-    queue = FileRouteResolutionQueue(args.queue_dir)
-    work = queue.claim(
-        worker_id=args.worker_id,
-        current_viewpoint_revisions=_current_viewpoint_revisions(store),
-    )
-    if work is None:
-        print(json.dumps({"status": "idle"}, ensure_ascii=False))
-        return 0
-    jobs = queue.jobs_for_work_unit(work)
     policy = load_route_policy(args.route_policy)
     policy_sha256 = route_policy_fingerprint(
         policy,
@@ -316,25 +365,42 @@ def main() -> int:
             prompt_dir=Path(__file__).resolve().parent / "prompts",
         ),
     )
-    queued_policy_shas = {item.route_policy_fingerprint_sha256 for item in jobs}
-    if (
-        queued_policy_shas != {policy_sha256}
-        or work.route_policy_fingerprint_sha256 != policy_sha256
-    ):
-        queue.finish(
-            work,
-            worker_id=args.worker_id,
-            status="exception",
-            detail="Route policy SHA mismatch",
-        )
-        raise SystemExit("queued Route job does not bind the supplied Route policy")
     scope_packet = _read(args.packet)
-    evidence_shas = {item.evidence_scope_sha256 for item in jobs}
-    if evidence_shas != {str(scope_packet.get("packet_sha256"))}:
-        queue.finish(work, worker_id=args.worker_id, status="exception", detail="evidence scope SHA mismatch")
-        raise SystemExit("queued Route job does not bind the supplied evidence packet")
+    if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
+        raise SystemExit("supplied packet is not a current viewpoint scope packet")
+    for field_name in ("scope_label", "claim_manifest_sha256", "packet_sha256"):
+        if not scope_packet.get(field_name):
+            raise SystemExit(f"supplied packet has no {field_name}")
+    packet_body = {
+        key: value for key, value in scope_packet.items() if key != "packet_sha256"
+    }
+    if sha256_json(packet_body) != scope_packet["packet_sha256"]:
+        raise SystemExit("supplied viewpoint scope packet SHA mismatch")
+
+    store = PostgresKnowledgeStore(args.database_url)
+    queue = FileRouteResolutionQueue(args.queue_dir)
+    work = queue.claim(
+        worker_id=args.worker_id,
+        current_viewpoint_revisions=_current_viewpoint_revisions(store),
+        scope_label=str(scope_packet["scope_label"]),
+        scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
+        evidence_scope_sha256=str(scope_packet["packet_sha256"]),
+        route_policy_fingerprint_sha256=policy_sha256,
+    )
+    if work is None:
+        print(json.dumps({"status": "idle"}, ensure_ascii=False))
+        return 0
     run_dir = args.output_dir / work.artifact_sha256
     try:
+        jobs = queue.jobs_for_work_unit(work)
+        if {
+            item.route_policy_fingerprint_sha256 for item in jobs
+        } != {policy_sha256} or work.route_policy_fingerprint_sha256 != policy_sha256:
+            raise ValueError("claimed Route work does not bind its selected policy")
+        if {item.evidence_scope_sha256 for item in jobs} != {
+            str(scope_packet["packet_sha256"])
+        } or work.evidence_scope_sha256 != str(scope_packet["packet_sha256"]):
+            raise ValueError("claimed Route work does not bind its selected evidence packet")
         result = process_work_unit(
             work=work,
             scope_packet=scope_packet,
@@ -378,34 +444,48 @@ def main() -> int:
         if not stale:
             queue.finish(work, worker_id=args.worker_id, status="exception", detail=str(exc))
             raise
-        missing_successors = sorted(
-            viewpoint_id
-            for viewpoint_id, revisions in stale.items()
-            if revisions["current"] is None
-            or not queue.has_queued_current_revision(
-                viewpoint_id, str(revisions["current"])
-            )
-        )
         detail = "Route conclusion cut superseded: " + json.dumps(
             stale, ensure_ascii=False, sort_keys=True
         )
-        queue.supersede(work, worker_id=args.worker_id, detail=detail)
-        if missing_successors:
-            raise RuntimeError(
-                "superseded Route work has no durable successor enqueue for: "
-                + ", ".join(missing_successors)
-            ) from exc
-        print(json.dumps({"status": "superseded", "detail": detail}, ensure_ascii=False))
-        return 0
+        transition = queue.resolve_supersession(
+            work,
+            worker_id=args.worker_id,
+            current_viewpoint_revisions=current,
+            detail=detail,
+        )
+        print(json.dumps(transition | {"detail": detail}, ensure_ascii=False))
+        return 0 if transition["status"] == "superseded" else 1
     except Exception as exc:
         queue.finish(work, worker_id=args.worker_id, status="exception", detail=str(exc))
         raise
-    if args.apply:
+    if args.apply and result["status"] == "applied_then_superseded":
+        detail = "Route applied, then conclusion cut advanced"
+        transition = queue.resolve_supersession(
+            work,
+            worker_id=args.worker_id,
+            current_viewpoint_revisions=result[
+                "observed_current_viewpoint_revisions"
+            ],
+            detail=detail,
+        )
+        result["queue_transition"] = transition
+        result["artifact_sha256"] = sha256_json(
+            {key: value for key, value in result.items() if key != "artifact_sha256"}
+        )
+        _write_derived(run_dir / "route-worker-result.json", result)
+    elif args.apply:
+        attention = list(result["exceptions"])
+        attention.extend(
+            item.get("reason", "CVP re-review requested")
+            for item in result["cvp_re_review_exceptions"]
+        )
+        if result["status"] == "applied_with_readback_error":
+            attention.extend(result["record_mismatches"])
         queue.finish(
             work,
             worker_id=args.worker_id,
-            status="exception" if result["exceptions"] else "resolved",
-            detail="; ".join(result["exceptions"]) if result["exceptions"] else "applied and read back",
+            status="exception" if attention else "resolved",
+            detail="; ".join(attention) if attention else "applied and read back",
         )
     else:
         queue.release(work, worker_id=args.worker_id, detail="plan-only run; no master mutation")

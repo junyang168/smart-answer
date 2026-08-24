@@ -94,12 +94,12 @@ flowchart TD
     C --> A["atomic CVP batch apply + readback"]
     A -->|"more CVP batches: strictly serial"| N
     A --> Q["enqueue RouteResolutionJob + route-policy SHA"]
-    Q --> E["coalesce same-scope/same-policy current revisions"]
+    Q --> E["claim exact scope + manifest + evidence + policy; coalesce current revisions"]
     E --> CE["compile Registry packet + membership ledger"]
     CE --> RP["GPT-5.6 sol high: batched ArgumentRouteProposal"]
     RP --> RD["per-route deterministic validation"]
     RD --> RR["Opus 5 high: ArgumentRouteReview"]
-    RR -->|"CVP identity concern"| CX["structured CVP re-review exception"]
+    RR -->|"CVP identity concern"| CX["durable CVP re-review exception inbox"]
     RR -->|"pass"| RC["route RegistryChangeSet"]
     RR -->|"correctable"| RO["one Sol route correction"]
     RO --> RV["validate route correction"]
@@ -107,9 +107,11 @@ flowchart TD
     RV -->|"unresolved"| RX["route exception; keep approved CVPs"]
     RC --> CC["verify conclusion revisions still current"]
     CC -->|"current"| RA["apply passing routes + readback"]
-    CC -->|"superseded"| SQ["finish superseded; verify successor enqueue"]
+    CC -->|"superseded"| SQ["atomically prove exact successor enqueue or retain exception"]
     RA --> RB["content-SHA + CVP-cut readback receipt"]
-    RB --> Z["Route job complete; CVP resolver remains independent"]
+    RB -->|"exact"| Z["Route job complete; CVP resolver remains independent"]
+    RB -->|"record mismatch"| RE["applied_with_readback_error"]
+    RB -->|"CVP cut advanced"| AS["applied_then_superseded + exact successor proof"]
 ```
 
 该流程与 extraction layer 同构：上游 source-bound records 进入模型 proposal，程序验证引用和覆盖，独立模型审核语义质量，只有通过的 package 才写 PostgreSQL。CVP layer 不重做 extraction；只有 reviewer 遇到 modality、复合 Claim、指涉、范围或证据不足时，才沿 EvidenceStep 调出同一来源 revision 的精确 SourceFragment。
@@ -1124,13 +1126,13 @@ readback 通过即完成本 CVP batch；其通过的 `CanonicalViewpoint`、revi
 
 Route 只有一条生产执行路径：`CVP apply/readback → RouteResolutionJob → queue worker → Registry-backed packet → proposal/review/correction → ChangeSet/readback`。CVP runner 不直接调用 Route Proposal，也不从先前的 CVP model proposal 编译 Route packet。只读 POC 同样 claim 一个正式 queue work unit，以 `apply=false` 运行 worker；不得保留第二个 proposal-derived Route CLI 入口。
 
-Route 模型配置来自 versioned `wang_route_resolution_policy_v1` 文件，而不是在 enqueue 与 worker 两端分别拼 CLI flags。policy 绑定 proposal/review/correction provider、model、effort、review target batch size、prompt、validator 与 call limit；enqueue 保存其 fingerprint，worker 必须用同一文件重算并与所有 source jobs exact-match，否则 fail closed。
+Route 模型配置来自 versioned `wang_route_resolution_policy_v1` 文件，而不是在 enqueue 与 worker 两端分别拼 CLI flags。policy 绑定 proposal/review/correction provider、model、effort、review target batch size、prompt、validator 与 call limit；loader 必须确认 `validator_version` 等于当前可执行 validator 常量，不能只把它当作 fingerprint 装饰字段。enqueue 保存其 fingerprint，worker 必须用同一文件重算并与所有 source jobs exact-match，否则 fail closed。
 
 Route worker 忽略 `IntelligentBatchingPlan` 的 group 边界，从完整 scope 重新编译 route evidence。每个证据单元以 `source_id + source_revision_sha256 + conclusion_viewpoint_revision_id` 为 key，包含该来源中可能支持该结论的全部 Claims、确定性 `claim_component_keys`、EvidenceSteps、SourceFragments 与相关 active route synopses。`support_existing`、`no_registry_assertion`、外部立场、背景观察、objection 和 connective Claim 都不得仅因未成为 CVP member 而从 route evidence 中删除。
 
 Registry 是 corpus-wide，而一次 Route job 的 evidence scope 有边界。属于目标 CVP、但 Claim 不在本 scope 的 active links 必须进入 `membership_ledger.out_of_scope_members`，只记录 identity/revision/link 元数据，不把 scope 外正文偷渡成证据。scope 内但缺少 exact v2 evidence bindings 的 active members 进入 `unattestable_in_scope_members`。两类都不得静默 `continue`。`no_route` 的规范含义是 `no_attested_route_in_this_evidence_scope`，不是宣称该 CVP 在全库没有论证。
 
-worker 在每次 claim 时 opportunistically 合并当时已经 queued、且属于同一 scope manifest 与同一 route-policy fingerprint 的多个 CVP batch jobs，并按 logical viewpoint id 保留最新 current revision；它不 sleep，也不承诺额外的 waiting window。同一 revision 的重复 enqueue 以 idempotency key 去重。Sol 一次 `ArgumentRouteProposal` 可处理该 work unit 的全部 approved CVPs 并输出多条 routes/attestations。这是效率 batch，不是 route identity；每条 route 仍独立绑定一个 approved conclusion revision，每个 attestation 仍严格 source-local。只有超出已测定的模型 input/output 容量时才可拆成多个 capacity batches；拆分后仍必须对 queue work unit 的 approved CVP set exact-once coverage，且不得沿用 Claim grouping。
+worker 在 claim **之前**先加载并验证本次 scope packet、versioned policy 与 prompt SHAs；claim 只选择同时 exact-match `scope_label + scope_manifest_sha256 + evidence_scope_sha256 + route_policy_fingerprint_sha256` 的 queued jobs。错误或过期的 CLI packet/policy 因此只得到 idle／输入错误，不能夺取并污染其他合法 job 的 lease。worker opportunistically 合并 claim 当下已经 queued、且四项边界完全相同的多个 CVP batch jobs，并按 logical viewpoint id 保留最新 current revision；它不 sleep，也不承诺额外的 waiting window。同一 revision 的重复 enqueue 以 idempotency key 去重。Sol 一次 `ArgumentRouteProposal` 可处理该 work unit 的全部 approved CVPs 并输出多条 routes/attestations。这是效率 batch，不是 route identity；每条 route 仍独立绑定一个 approved conclusion revision，每个 attestation 仍严格 source-local。只有超出已测定的模型 input/output 容量时才可拆成多个 capacity batches；拆分后仍必须对 queue work unit 的 approved CVP set exact-once coverage，且不得沿用 Claim grouping。
 
 程序在 Route Review 前逐条 fail closed 验证：
 
@@ -1142,9 +1144,11 @@ worker 在每次 claim 时 opportunistically 合并当时已经 queued、且属�
 6. `match_existing` pin 当前 route revision，且 materially equivalent ordered skeleton 与 conclusion 均一致；
 7. Route Proposal fingerprint 绑定 queue job ids、triggering ChangeSet/readback、approved CVP set、完整 route packet、prompt、schema、model/provider/effort 与 validator version。
 
-Opus Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。Review 采用确定性 fixed-size batching，默认每批最多 12 个 decision targets；同一 route/attestation/no-route target 在全部 batches 中恰好出现一次。为理解 target 所需的 route、attestation 与 source-local evidence 可以作为只读 context 重复出现，但 reviewer 不得为 context-only 对象再次输出 decision。no-route 是对完整 scope 的否定判断，因此其 batch 必须看到完整 scope evidence，不能使用局部 evidence slice。每批 response 都绑定同一个全局 Route Proposal SHA 与 evidence packet SHA；程序合并后再次验证全局 exact-once coverage，才允许进入 correction。batch 大小只控制 reviewer 负担，不改变 Route identity、source-local attestation 或 ChangeSet 边界。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Sol 做最多一次 route-only correction。
+Opus Route Reviewer 逐 route/attestation 检查 conclusion binding、premises/bridges/objection-response、ordered semantic skeleton、method codes、existing-route identity、source locality、full/partial 与 conservative normalization。Review 采用确定性 fixed-size batching，默认每批最多 12 个 decision targets；同一 route/attestation/no-route target 在全部 batches 中恰好出现一次。为理解 target 所需的 route、attestation 与 source-local evidence 可以作为只读 context 重复出现，但 reviewer 不得为 context-only 对象再次输出 decision。每个 review batch 都携带 packet 的 `membership_ledger`，使 reviewer 能看见 out-of-scope 与 unattestable members；no-route 是对完整 scope 的否定判断，因此其 batch 还必须看到完整 scope evidence，不能使用局部 evidence slice。每批 response 都绑定同一个全局 Route Proposal SHA 与 evidence packet SHA；程序合并后再次验证全局 exact-once coverage，才允许进入 correction。batch 大小只控制 reviewer 负担，不改变 Route identity、source-local attestation 或 ChangeSet 边界。有 finding 时只将受影响 route、findings 和必要 evidence 交给 Sol 做最多一次 route-only correction。
 
-通过的 routes/attestations 分别进入可幂等 Route ChangeSet。apply 前必须 compare-and-set 验证每个 conclusion viewpoint revision 仍是 current；若后续 CVP batch 已产生 successor revision，worker 当场将旧 work 标为 `superseded`、不得 apply，并验证最新 revision 已有由其 CVP readback 创建的 durable successor enqueue，不等待 lease expiry，也不得自行伪造缺少 readback authority 的 job。成功 apply 后生成 immutable `wang_argument_route_apply_readback_receipt_v1`：逐 record 比较 expected/observed semantic content SHA，并比较 apply 前后 conclusion CVP current revision cut；只有 exact-match 才能声明 `approved_cvps_unchanged=true`。proposal report 只能声明 `cvp_mutations_proposed=0`，不得写死数据库状态。一条 route 失败只产生 route exception，不撤销 approved CVP，也不阻止同次 proposal 中其他通过 routes 写入 Registry。若 route review 发现 CVP identity 可能错误，它输出结构化 `cvp_re_review_exceptions`，绑定 affected viewpoint revision、trigger target、finding code 与 evidence `claim_component_keys`；Route workflow 不直接改写 CVP。
+通过的 routes/attestations 分别进入可幂等 Route ChangeSet。apply 前必须 compare-and-set 验证每个 conclusion viewpoint revision 仍是 current；若后续 CVP batch 已产生 successor revision，worker 必须在同一个 queue lock 内验证 successor job 同时匹配 logical viewpoint/current revision、scope label、scope manifest、evidence scope、policy fingerprint、非空 CVP readback provenance 与 live state。全部存在才把旧 work 标为 `superseded`；任一缺失则旧 work 直接进入 durable `exception`，不能先 supersede 再抛错，也不等待 lease expiry 或自行伪造 job。
+
+成功 apply 后生成 immutable `wang_argument_route_apply_readback_receipt_v1`，分别记录 `record_mismatches` 与 `cvp_cut_mismatches`。逐 record semantic content SHA 不一致时状态是 `applied_with_readback_error`；records 一致但 commit 后 conclusion cut 前进时状态是 `applied_then_superseded`，并执行上述 exact successor proof；两类都不得伪装成未 apply 的普通 failure。只有两组 mismatch 都为空才能声明 `approved_cvps_unchanged=true`。proposal report 只能声明 `cvp_mutations_proposed=0`，不得写死数据库状态。一条 route 失败只产生 route exception，不撤销 approved CVP，也不阻止同次 proposal 中其他通过 routes 写入 Registry。若 route review 发现 CVP identity 可能错误，它输出结构化 `cvp_re_review_exceptions`，绑定 affected viewpoint revision、trigger target、finding code 与 evidence `claim_component_keys`；worker 将其写成 content-addressed durable CVP re-review inbox artifact，并让 queue 进入 attention/exception 状态，即使同批 passing routes 已成功 apply。Route workflow 不直接改写 CVP。
 
 #### 6.2.10 可选 retrieval 与 audit channels
 

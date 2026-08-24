@@ -27,6 +27,7 @@ VALIDATION_VERSION = "wang_canonical_viewpoint_batch_validation_v1"
 CVP_READBACK_VERSION = "wang_cvp_batch_readback_receipt_v1"
 ROUTE_JOB_VERSION = "wang_route_resolution_job_v1"
 ROUTE_WORK_UNIT_VERSION = "wang_route_resolution_work_unit_v1"
+ROUTE_VALIDATION_VERSION = "wang_argument_route_validation_v1"
 
 #: Claims per batch.  The 62-Claim POC ran over ten minutes against a 900s
 #: subprocess ceiling, and the reviewer emits more than the proposer does, so
@@ -152,6 +153,7 @@ class RouteResolutionWorkUnit(StrictBatchModel):
     )
     scope_label: str = Field(min_length=1)
     scope_manifest_sha256: str = Field(min_length=1)
+    evidence_scope_sha256: str = Field(min_length=1)
     route_policy_fingerprint_sha256: str = Field(min_length=1)
     source_job_ids: list[str] = Field(min_length=1)
     current_viewpoint_revisions: list[CommittedViewpointRevision] = Field(min_length=1)
@@ -281,12 +283,15 @@ def coalesce_route_resolution_jobs(
         (
             item.scope_label,
             item.scope_manifest_sha256,
+            item.evidence_scope_sha256,
             item.route_policy_fingerprint_sha256,
         )
         for item in jobs
     }
     if len(scope_keys) != 1:
-        raise ValueError("one route work unit cannot cross scope manifests or policies")
+        raise ValueError(
+            "one route work unit cannot cross scope manifests, evidence scopes, or policies"
+        )
     requested = sorted(
         {viewpoint_id for item in jobs for viewpoint_id in item.logical_viewpoint_ids}
     )
@@ -314,11 +319,17 @@ def coalesce_route_resolution_jobs(
             )
         )
     )
-    scope_label, scope_manifest_sha256, route_policy_sha256 = next(iter(scope_keys))
+    (
+        scope_label,
+        scope_manifest_sha256,
+        evidence_scope_sha256,
+        route_policy_sha256,
+    ) = next(iter(scope_keys))
     body = {
         "schema_version": ROUTE_WORK_UNIT_VERSION,
         "scope_label": scope_label,
         "scope_manifest_sha256": scope_manifest_sha256,
+        "evidence_scope_sha256": evidence_scope_sha256,
         "route_policy_fingerprint_sha256": route_policy_sha256,
         "source_job_ids": sorted({item.job_id for item in jobs}),
         "current_viewpoint_revisions": current,
@@ -1876,7 +1887,7 @@ def validate_route_proposal(
         raise BatchResolutionError(findings)
 
     report = {
-        "schema_version": "wang_argument_route_validation_v1",
+        "schema_version": ROUTE_VALIDATION_VERSION,
         "scope_label": scope_label,
         "approved_viewpoint_count": len(approved),
         "route_count": len(routes.argument_route_candidates),

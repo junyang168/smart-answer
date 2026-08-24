@@ -156,6 +156,10 @@ class FileRouteResolutionQueue:
         *,
         worker_id: str,
         current_viewpoint_revisions: Mapping[str, str],
+        scope_label: str | None = None,
+        scope_manifest_sha256: str | None = None,
+        evidence_scope_sha256: str | None = None,
+        route_policy_fingerprint_sha256: str | None = None,
         now: datetime | None = None,
         lease_seconds: int = 900,
     ) -> RouteResolutionWorkUnit | None:
@@ -168,6 +172,24 @@ class FileRouteResolutionQueue:
             available: list[RouteResolutionJob] = []
             for path in sorted(self.jobs_dir.glob("RRJ-*.json")):
                 job = RouteResolutionJob.model_validate(_read(path))
+                if scope_label is not None and job.scope_label != scope_label:
+                    continue
+                if (
+                    scope_manifest_sha256 is not None
+                    and job.scope_manifest_sha256 != scope_manifest_sha256
+                ):
+                    continue
+                if (
+                    evidence_scope_sha256 is not None
+                    and job.evidence_scope_sha256 != evidence_scope_sha256
+                ):
+                    continue
+                if (
+                    route_policy_fingerprint_sha256 is not None
+                    and job.route_policy_fingerprint_sha256
+                    != route_policy_fingerprint_sha256
+                ):
+                    continue
                 state = self._state(job.job_id)
                 if state is None:
                     continue
@@ -185,6 +207,7 @@ class FileRouteResolutionQueue:
                 (
                     item.scope_label,
                     item.scope_manifest_sha256,
+                    item.evidence_scope_sha256,
                     item.route_policy_fingerprint_sha256,
                 )
                 for item in available
@@ -195,6 +218,7 @@ class FileRouteResolutionQueue:
                 if (
                     item.scope_label,
                     item.scope_manifest_sha256,
+                    item.evidence_scope_sha256,
                     item.route_policy_fingerprint_sha256,
                 )
                 == first_scope
@@ -342,26 +366,80 @@ class FileRouteResolutionQueue:
             owned.append((job_id, current))
         return owned
 
-    def has_queued_current_revision(
-        self, viewpoint_id: str, viewpoint_revision_id: str
-    ) -> bool:
-        """Check that a committed successor produced its own durable enqueue."""
+    def resolve_supersession(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        worker_id: str,
+        current_viewpoint_revisions: Mapping[str, str],
+        detail: str,
+        resolved_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically prove exact successor enqueues or retain work as exception."""
 
+        timestamp = resolved_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for path in sorted(self.jobs_dir.glob("RRJ-*.json")):
-                job = RouteResolutionJob.model_validate(_read(path))
-                pairs = set(
-                    zip(
-                        job.logical_viewpoint_ids,
-                        job.enqueued_viewpoint_revision_ids,
-                        strict=True,
+            owned = self._owned_running_jobs(work, worker_id=worker_id)
+            successors: dict[str, str] = {}
+            missing: list[str] = []
+            for item in work.current_viewpoint_revisions:
+                current_revision = current_viewpoint_revisions.get(item.viewpoint_id)
+                if not current_revision:
+                    missing.append(item.viewpoint_id)
+                    continue
+                if current_revision == item.viewpoint_revision_id:
+                    continue
+                successor_job_id = None
+                for path in sorted(self.jobs_dir.glob("RRJ-*.json")):
+                    job = RouteResolutionJob.model_validate(_read(path))
+                    if job.job_id in work.source_job_ids:
+                        continue
+                    if (
+                        job.scope_label != work.scope_label
+                        or job.scope_manifest_sha256 != work.scope_manifest_sha256
+                        or job.evidence_scope_sha256 != work.evidence_scope_sha256
+                        or job.route_policy_fingerprint_sha256
+                        != work.route_policy_fingerprint_sha256
+                        or not job.cvp_readback_sha256
+                    ):
+                        continue
+                    pairs = set(
+                        zip(
+                            job.logical_viewpoint_ids,
+                            job.enqueued_viewpoint_revision_ids,
+                            strict=True,
+                        )
                     )
+                    state = self._state(job.job_id)
+                    if (
+                        (item.viewpoint_id, current_revision) in pairs
+                        and state is not None
+                        and state["status"] in {"queued", "running", "resolved"}
+                    ):
+                        successor_job_id = job.job_id
+                        break
+                if successor_job_id is None:
+                    missing.append(item.viewpoint_id)
+                else:
+                    successors[item.viewpoint_id] = successor_job_id
+
+            status = "exception" if missing else "superseded"
+            transition_detail = detail
+            if missing:
+                transition_detail += "; missing exact successor enqueue: " + ", ".join(
+                    sorted(missing)
                 )
-                state = self._state(job.job_id)
-                if (
-                    (viewpoint_id, viewpoint_revision_id) in pairs
-                    and state is not None
-                    and state["status"] in {"queued", "running", "resolved"}
-                ):
-                    return True
-        return False
+            for job_id, current in owned:
+                self._transition(
+                    job_id,
+                    status=status,
+                    occurred_at=timestamp,
+                    attempt=int(current["attempt"]),
+                    work_unit_sha256=work.artifact_sha256,
+                    detail=transition_detail,
+                )
+            return {
+                "status": status,
+                "missing_viewpoint_ids": sorted(missing),
+                "successor_job_ids": dict(sorted(successors.items())),
+            }

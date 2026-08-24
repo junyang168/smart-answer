@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_batch_resolution import (
+    ROUTE_VALIDATION_VERSION,
+)
 
 ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v1"
 DEFAULT_ROUTE_POLICY_PATH = (
@@ -35,6 +38,10 @@ def load_route_policy(path: Path) -> dict[str, Any]:
             "Route policy fields differ: "
             f"missing={sorted(required_top - set(policy))}, "
             f"extra={sorted(set(policy) - required_top)}"
+        )
+    if policy["validator_version"] != ROUTE_VALIDATION_VERSION:
+        raise ValueError(
+            "Route policy validator_version must be " + ROUTE_VALIDATION_VERSION
         )
     for role in ("proposal", "correction"):
         if set(policy[role]) != {"provider", "model", "effort"}:

@@ -1,4 +1,4 @@
-"""Resolve one CanonicalViewpoint scope, then its approved ArgumentRoutes.
+"""Resolve one CanonicalViewpoint scope and enqueue committed CVPs for Route work.
 
 Batches are resumable at batch granularity: a finished batch writes immutable
 artifacts and a rerun reuses them without spending a call.  Within a batch a
@@ -417,7 +417,7 @@ def main() -> int:
         "--proposal-provider",
         choices=("claude", "codex"),
         default="codex",
-        help="subscription CLI used for CVP/Route proposal and correction; never falls back",
+        help="subscription CLI used for CVP proposal and correction; never falls back",
     )
     parser.add_argument("--proposal-model", default="gpt-5.6-sol")
     parser.add_argument("--proposal-effort", choices=("high", "xhigh", "max"), default="high")
@@ -425,7 +425,7 @@ def main() -> int:
         "--review-provider",
         choices=("claude", "codex"),
         default="claude",
-        help="subscription CLI used for CVP/Route review; never falls back",
+        help="subscription CLI used for CVP review; never falls back",
     )
     parser.add_argument("--review-model", default="claude-opus-5")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")

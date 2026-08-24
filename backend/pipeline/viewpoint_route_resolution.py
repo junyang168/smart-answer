@@ -462,6 +462,7 @@ def build_route_review_batches(
                 or any(item["source_id"] == source_id for item in selected_claims)
             },
             "existing_routes": route_packet["existing_routes"],
+            "membership_ledger": route_packet["membership_ledger"],
         }
         batch = {
             "schema_version": "wang_argument_route_review_batch_v1",
