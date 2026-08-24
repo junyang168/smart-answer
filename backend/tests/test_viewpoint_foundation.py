@@ -608,6 +608,32 @@ def _foundation_package() -> tuple[dict, dict]:
     }
 
 
+def test_batch_candidate_can_bind_scope_manifest_without_legacy_coverage() -> None:
+    package, _ = _foundation_package()
+    candidate = dict(package["viewpoint_identity_candidates"][0])
+    candidate["coverage_snapshot_id"] = None
+    candidate["scope_manifest_sha256"] = "scope-manifest-sha"
+    identity = {
+        "claims": candidate["candidate_claim_ids"],
+        "viewpoints": candidate["candidate_viewpoint_ids"],
+        "relations": candidate["seed_relation_ids"],
+        "action": candidate["proposed_action"],
+        "blockers": candidate["blocker_codes"],
+        "coverage_snapshot_id": None,
+        "generation_fingerprint": candidate["generation_fingerprint"],
+        "scope_manifest_sha256": "scope-manifest-sha",
+    }
+    candidate_id = f"VIC-{sha256_json(identity)[:20]}"
+    candidate["identity_candidate_id"] = candidate_id
+    package["viewpoint_identity_candidates"] = [candidate]
+    package["viewpoint_identity_decisions"][0]["identity_candidate_id"] = candidate_id
+    package["canonical_viewpoints"][0]["created_from_candidate_id"] = candidate_id
+
+    plan = build_change_set_plan(package, {})
+
+    assert plan.operations
+
+
 def test_foundation_package_is_registered_and_plans_one_viewpoint_edge() -> None:
     package, records = _foundation_package()
     normalized = normalize_package(package)

@@ -202,7 +202,7 @@ def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
     ]
 
     work = coalesce_route_resolution_jobs(
-        jobs,
+        [jobs[0], jobs[0], jobs[1]],
         current_viewpoint_revisions={"CV-1": "CVR-2", "CV-2": "CVR-3"},
     )
 
@@ -211,6 +211,7 @@ def test_route_queue_coalesces_to_current_revisions_and_marks_stale_jobs():
         for item in work.current_viewpoint_revisions
     ] == [("CV-1", "CVR-2"), ("CV-2", "CVR-3")]
     assert work.superseded_job_ids == [jobs[0].job_id]
+    assert work.source_job_ids == sorted({item.job_id for item in jobs})
 
 
 def test_passing_batch_compiles_component_bound_cvp_master_records():
@@ -276,6 +277,20 @@ def test_passing_batch_compiles_component_bound_cvp_master_records():
     assert link["component_locator"]["canonical_spans"] == [
         _span(ROCK_STATEMENT, "磐石不是彼得这个人")
     ]
+    repeated = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=[],
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert repeated == package
 
 
 def test_proposal_component_rejects_derived_and_conflicting_fields():
