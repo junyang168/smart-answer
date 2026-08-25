@@ -873,12 +873,60 @@ class ReviewedViewpointRevision(StrictBatchModel):
     confirmed_dependent_ids: list[str] = Field(default_factory=list)
 
 
+class ReviewedStructure(StrictBatchModel):
+    """One decision about the centre this batch says its viewpoints add up to.
+
+    The review prompt has always asked whether `central_synthesis` is entailed
+    by the listed focal viewpoints, and the schema had nowhere to record the
+    answer -- so a reviewer that skipped the question passed anyway, and the
+    rule was unenforceable. It is the one object downstream articles quote as
+    what the professor holds.
+    """
+
+    structure_index: int = Field(ge=0)
+    decision: Literal["pass", "correct", "reject", "defer"]
+    finding_codes: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    correction: str | None = None
+    #: Whether `central_synthesis` says only what the listed focal viewpoints
+    #: entail. Asked separately because it is the question the prompt names and
+    #: a free-text reason lets a reviewer answer around it.
+    synthesis_entailed_by_focal: bool
+    #: Material the sources leave open that the synthesis quietly resolved.
+    unresolved_material_omitted: list[str] = Field(default_factory=list)
+
+
+class ReviewedRelation(StrictBatchModel):
+    """One decision about one typed edge, direction included.
+
+    `source applies target` means the source is an application of the target.
+    Nothing verified that, so an edge written backwards committed unchallenged.
+    """
+
+    source_ref: str = Field(min_length=1)
+    target_ref: str = Field(min_length=1)
+    relation_type: str = Field(min_length=1)
+    decision: Literal["pass", "correct", "reject", "defer"]
+    finding_codes: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    correction: str | None = None
+    #: Whether the edge reads correctly source-first. Separated for the same
+    #: reason as the synthesis question: it is the failure that has no other
+    #: check, and prose can slide past it.
+    direction_correct: bool
+
+    def edge(self) -> tuple[str, str, str]:
+        return (self.source_ref, self.target_ref, self.relation_type)
+
+
 class CanonicalViewpointReviewResponse(StrictBatchModel):
     schema_version: Literal["wang_canonical_viewpoint_review_v1"] = REVIEW_VERSION
     proposal_sha256: str
     change_reviews: list[ReviewedChange] = Field(min_length=1)
     novelty_review: NoveltyReview
     revision_reviews: list[ReviewedViewpointRevision] = Field(default_factory=list)
+    structure_reviews: list[ReviewedStructure] = Field(default_factory=list)
+    relation_reviews: list[ReviewedRelation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_review(self) -> "CanonicalViewpointReviewResponse":
@@ -888,6 +936,12 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
         targets = [item.target_viewpoint_revision_id for item in self.revision_reviews]
         if len(targets) != len(set(targets)):
             raise ValueError("revision reviews must be unique")
+        structures = [item.structure_index for item in self.structure_reviews]
+        if len(structures) != len(set(structures)):
+            raise ValueError("structure reviews must be unique")
+        edges = [item.edge() for item in self.relation_reviews]
+        if len(edges) != len(set(edges)):
+            raise ValueError("relation reviews must be unique")
         return self
 
     def outcome(self) -> str:
@@ -896,6 +950,17 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
         if any(item.decision != "pass" for item in self.change_reviews):
             return "findings"
         if any(item.decision != "pass" for item in self.revision_reviews):
+            return "findings"
+        if any(item.decision != "pass" for item in self.structure_reviews):
+            return "findings"
+        if any(item.decision != "pass" for item in self.relation_reviews):
+            return "findings"
+        # A structure whose synthesis is not entailed, or an edge written
+        # backwards, is a finding even when the reviewer typed `pass`: the two
+        # questions exist because prose slides past them.
+        if any(not item.synthesis_entailed_by_focal for item in self.structure_reviews):
+            return "findings"
+        if any(not item.direction_correct for item in self.relation_reviews):
             return "findings"
         return "pass"
 
@@ -1410,6 +1475,35 @@ def validate_review(
     for extra in sorted(reviewed_revisions - proposed_revisions):
         findings.append(f"{extra}: review points at no proposed viewpoint revision")
 
+    # Exact-once, the same as components. A prompt asking for a judgment the
+    # schema does not require is not a rule -- the reviewer that skipped the
+    # structure question passed anyway, which is how 4 structures and 12
+    # relations reached the Registry `system_approved` and unread.
+    proposed_structures = set(range(len(proposal.structures)))
+    reviewed_structures = {item.structure_index for item in review.structure_reviews}
+    for missing in sorted(proposed_structures - reviewed_structures):
+        findings.append(f"structures#{missing}: proposed structure has no review decision")
+    for extra in sorted(reviewed_structures - proposed_structures):
+        findings.append(f"structures#{extra}: review points at no proposed structure")
+
+    proposed_edges = {
+        (
+            str(item.source_viewpoint_revision_id or item.source_local_key),
+            str(item.target_viewpoint_revision_id or item.target_local_key),
+            item.relation_type,
+        )
+        for item in proposal.viewpoint_relations
+    }
+    reviewed_edges = {item.edge() for item in review.relation_reviews}
+    for missing in sorted(proposed_edges - reviewed_edges):
+        findings.append(
+            f"relation {missing[0]} --{missing[2]}--> {missing[1]}: no review decision"
+        )
+    for extra in sorted(reviewed_edges - proposed_edges):
+        findings.append(
+            f"relation {extra[0]} --{extra[2]}--> {extra[1]}: review points at no proposed relation"
+        )
+
     claim_ids = {item.claim_id for item in proposal.claim_decisions}
     for claim_id in review.novelty_review.missed_claim_ids:
         if claim_id not in claim_ids:
@@ -1430,6 +1524,16 @@ def validate_review(
         },
         "novelty_status": review.novelty_review.status,
         "reviewed_revision_count": len(reviewed_revisions),
+        "reviewed_structure_count": len(reviewed_structures),
+        "reviewed_relation_count": len(reviewed_edges),
+        "structure_decision_counts": {
+            name: sum(1 for item in review.structure_reviews if item.decision == name)
+            for name in ("pass", "correct", "reject", "defer")
+        },
+        "relation_decision_counts": {
+            name: sum(1 for item in review.relation_reviews if item.decision == name)
+            for name in ("pass", "correct", "reject", "defer")
+        },
         "revision_decision_counts": {
             name: sum(1 for item in review.revision_reviews if item.decision == name)
             for name in ("pass", "correct", "reject", "defer")

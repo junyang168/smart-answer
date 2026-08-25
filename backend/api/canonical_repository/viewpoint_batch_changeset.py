@@ -19,6 +19,7 @@ from .knowledge_models import (
     ViewpointIdentityCandidateRecord,
     ViewpointIdentityDecisionRecord,
     ViewpointPropositionSignature,
+    ViewpointGraphReviewProvenance,
     ViewpointRelationRecord,
     ViewpointRevisionRecord,
     ViewpointScope,
@@ -547,6 +548,15 @@ def compile_cvp_batch_package(
             f"{key} has no viewpoint in this ChangeSet"
         )
 
+    # The review that approved each one, so the record can answer who did.
+    # `system_approved` with nothing to point at is what #219 is about.
+    graph_provenance = ViewpointGraphReviewProvenance(
+        review_artifact_sha256=review_artifact_sha256,
+        basis_identity_decision_ids=sorted(
+            item["identity_decision_id"] for item in decisions_out
+        ),
+    )
+
     relations_out: list[dict[str, Any]] = []
     for relation in proposal.viewpoint_relations:
         source, target = relation.endpoints()
@@ -570,6 +580,7 @@ def compile_cvp_batch_package(
                 reason=relation.reason,
                 effective_state="active",
                 review_status="system_approved",
+                review_provenance=graph_provenance,
             ).model_dump(mode="json")
         )
 
@@ -610,6 +621,7 @@ def compile_cvp_batch_package(
                 unresolved_items=structure.unresolved_items,
                 scope_manifest_sha256=scope_manifest_sha256,
                 review_status="system_approved",
+                review_provenance=graph_provenance,
             ).model_dump(mode="json")
         )
 

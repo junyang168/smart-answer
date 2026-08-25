@@ -2347,6 +2347,8 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         ],
         "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
         "revision_reviews": [],
+        "structure_reviews": [],
+        "relation_reviews": [],
     }
     reconsideration_payload = {
         "schema_version": "wang_canonical_viewpoint_reconsideration_v3",
@@ -4231,6 +4233,16 @@ def test_relation_may_point_at_a_committed_viewpoint_this_batch_does_not_touch()
                 for index in range(2)
             ],
             "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "relation_reviews": [
+                {
+                    "source_ref": "ROCK-NOT-PETER",
+                    "target_ref": "CVR-untouched",
+                    "relation_type": "specializes",
+                    "decision": "pass",
+                    "reason": "方向正确：候选是既有观点在更窄经文范围上的具体化。",
+                    "direction_correct": True,
+                }
+            ],
         }
     )
     package = compile_cvp_batch_package(
@@ -4539,3 +4551,196 @@ def test_records_written_before_review_existed_still_load():
         }
     )
     assert record.review_provenance is None
+
+
+# --- structures and relations must be reviewed ----------------------------------
+
+def _structure_proposal() -> Any:
+    return _proposal(
+        structures=[
+            {
+                "central_synthesis": "本批共同否定磐石是彼得本人。",
+                "focal": [{"local_key": "ROCK-NOT-PETER", "structure_role": "central_claim"}],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ]
+    )
+
+
+def _review_for(proposal: Any, **overrides: Any) -> Any:
+    payload = {
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "change_reviews": [
+            {"claim_id": "C1", "component_index": index, "decision": "pass", "reason": "通过"}
+            for index in range(len(proposal.claim_decisions[0].components))
+        ],
+        "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+    }
+    payload.update(overrides)
+    return CanonicalViewpointReviewResponse.model_validate(payload)
+
+
+def _validate(proposal: Any, review: Any) -> dict[str, Any]:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_review
+
+    return validate_review(
+        review=review,
+        proposal=proposal,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+    )
+
+
+def test_review_missing_a_structure_decision_is_refused():
+    proposal = _structure_proposal()
+    with pytest.raises(BatchResolutionError, match="structures#0: proposed structure has no review decision"):
+        _validate(proposal, _review_for(proposal))
+
+
+def test_review_missing_a_relation_decision_is_refused():
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点的具体化。",
+            }
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="no review decision"):
+        _validate(proposal, _review_for(proposal))
+
+
+def test_synthesis_not_entailed_by_focal_is_a_finding_even_when_marked_pass():
+    """The prompt has always asked this; the schema had nowhere to put the answer.
+
+    A reviewer that types `pass` while answering the entailment question `false`
+    has said the synthesis claims more than its focal viewpoints support, and
+    that has to stop the batch regardless of the word it chose.
+    """
+
+    proposal = _structure_proposal()
+    review = _review_for(
+        proposal,
+        structure_reviews=[
+            {
+                "structure_index": 0,
+                "decision": "pass",
+                "reason": "中心综合超出了列出的 focal 所能推出的范围。",
+                "synthesis_entailed_by_focal": False,
+                "unresolved_material_omitted": ["材料未统一三种正面识别之间的关系"],
+            }
+        ],
+    )
+    report = _validate(proposal, review)
+    assert report["outcome"] == "findings"
+    assert report["reconsideration_required"] is True
+
+
+def test_relation_written_backwards_is_a_finding_even_when_marked_pass():
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "applies",
+                "reason": "方向写反了。",
+            }
+        ]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "applies",
+                "decision": "pass",
+                "reason": "source applies target 读反了：是既有观点应用本候选，不是相反。",
+                "direction_correct": False,
+            }
+        ],
+    )
+    report = _validate(proposal, review)
+    assert report["outcome"] == "findings"
+
+
+def test_reviewed_structure_and_relation_counts_are_reported():
+    proposal = _structure_proposal()
+    review = _review_for(
+        proposal,
+        structure_reviews=[
+            {
+                "structure_index": 0,
+                "decision": "pass",
+                "reason": "中心综合只说了 focal 推得出的内容。",
+                "synthesis_entailed_by_focal": True,
+            }
+        ],
+    )
+    report = _validate(proposal, review)
+    assert report["outcome"] == "pass"
+    assert report["reviewed_structure_count"] == 1
+    assert report["structure_decision_counts"]["pass"] == 1
+
+
+def test_written_structure_and_relation_name_the_review_that_approved_them():
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点在更窄经文范围上的具体化。",
+            }
+        ],
+        structures=[
+            {
+                "central_synthesis": "本批共同否定磐石是彼得本人。",
+                "focal": [{"local_key": "ROCK-NOT-PETER", "structure_role": "central_claim"}],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    review = _review_for(
+        proposal,
+        structure_reviews=[
+            {
+                "structure_index": 0,
+                "decision": "pass",
+                "reason": "中心综合只说了 focal 推得出的内容。",
+                "synthesis_entailed_by_focal": True,
+            }
+        ],
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "specializes",
+                "decision": "pass",
+                "reason": "方向正确。",
+                "direction_correct": True,
+            }
+        ],
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    for record in (
+        package["viewpoint_relations"][0],
+        package["viewpoint_structure_revisions"][0],
+    ):
+        assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
+        assert record["review_provenance"]["basis_identity_decision_ids"]
