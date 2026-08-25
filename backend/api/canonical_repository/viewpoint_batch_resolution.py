@@ -2919,20 +2919,39 @@ def apply_consolidation(
     ]
 
     for index, structure in enumerate(payload["structures"]):
+        # A proposal can name one viewpoint twice without noticing: once by
+        # citing the committed revision it can see, and once as a candidate it
+        # believes is new. Consolidation catches that the two are one, and the
+        # structure is then holding it in two roles.
+        directly_cited = {
+            str(item.get("viewpoint_revision_id"))
+            for item in structure["focal"]
+            if item.get("viewpoint_revision_id")
+        }
+        surviving_focal: list[dict[str, Any]] = []
         for focal in structure["focal"]:
             key = focal.get("local_key")
             verdict = merges.get(str(key)) if key else None
             if verdict is None:
+                surviving_focal.append(focal)
+                continue
+            target = str(verdict.target_viewpoint_revision_id)
+            if target in directly_cited:
+                # The direct citation is the deliberate placement: it was made
+                # against the committed viewpoint itself. The merged focal's
+                # role was assigned to a viewpoint that turned out not to exist,
+                # so it has no claim on a role here.
                 continue
             focal["local_key"] = None
-            focal["viewpoint_revision_id"] = verdict.target_viewpoint_revision_id
+            focal["viewpoint_revision_id"] = target
+            surviving_focal.append(focal)
+        structure["focal"] = surviving_focal
         seen = [
             (item.get("viewpoint_revision_id"), item.get("local_key"))
-            for item in structure["focal"]
+            for item in surviving_focal
         ]
         if len(seen) != len(set(seen)):
-            # Two focal roles collapsing onto one viewpoint needs a person to
-            # say which role survives.
+            # Two merged focals colliding leaves no basis to prefer either role.
             findings.append(
                 f"structures#{index}: consolidation gave one viewpoint two focal roles"
             )

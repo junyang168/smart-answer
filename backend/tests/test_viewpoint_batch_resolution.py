@@ -4320,3 +4320,81 @@ def test_route_packet_drops_claims_from_sources_holding_no_member():
     assert "C3" not in carried
     assert {item["claim_id"] for item in packet["claims"]} == {"C1", "C2"}
     assert set(packet["source_revisions"]) == {"S1"}
+
+
+def test_merged_focal_yields_to_a_focal_that_already_cited_the_viewpoint():
+    """A proposal can name one viewpoint twice without noticing.
+
+    Round 2's second batch cited the committed "教会执行天上已定的标准" as a
+    focal and, in the same proposal, offered a candidate saying the same thing.
+    Consolidation caught that they are one, and the structure was left holding
+    the viewpoint in two roles. The direct citation was made against the
+    committed viewpoint itself, so it keeps its role; the merged focal's role
+    belonged to a viewpoint that turned out not to exist.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+        structures=[
+            {
+                "central_synthesis": "本批共同界定的中心。",
+                "focal": [
+                    {"viewpoint_revision_id": "CVR-1", "structure_role": "positive_identification"},
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "application"},
+                ],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {
+                "local_key": "ROCK-NOT-PETER",
+                "verdict": "matches_existing",
+                "target_viewpoint_revision_id": "CVR-1",
+                "reason": "与既有观点同一真值条件。",
+            }
+        ),
+        proposal=proposal,
+    )
+
+    focal = folded.structures[0].focal
+    assert len(focal) == 1
+    assert focal[0].viewpoint_revision_id == "CVR-1"
+    assert focal[0].structure_role == "positive_identification"
+
+
+def test_two_merged_focals_colliding_still_stops():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[
+            {
+                "central_synthesis": "本批共同界定的中心。",
+                "focal": [
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "application"},
+                    {"local_key": "SPARE", "structure_role": "qualification"},
+                ],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    with pytest.raises(BatchResolutionError, match="one viewpoint two focal roles"):
+        apply_consolidation(
+            consolidation=_consolidation(
+                {"local_key": "ROCK-NOT-PETER", "verdict": "matches_existing",
+                 "target_viewpoint_revision_id": "CVR-1", "reason": "同一条。"},
+                {"local_key": "SPARE", "verdict": "matches_existing",
+                 "target_viewpoint_revision_id": "CVR-1", "reason": "也是同一条。"},
+            ),
+            proposal=proposal,
+        )
