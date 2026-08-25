@@ -4744,3 +4744,110 @@ def test_written_structure_and_relation_name_the_review_that_approved_them():
     ):
         assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
         assert record["review_provenance"]["basis_identity_decision_ids"]
+
+
+# --- reviewing what was committed before review existed -------------------------
+
+def _backreview_packet() -> dict[str, Any]:
+    from backend.api.canonical_repository.viewpoint_graph_backreview import (
+        build_backreview_packet,
+    )
+
+    return build_backreview_packet(
+        structure_revisions=[
+            {
+                "structure_revision_id": "VSR-1",
+                "central_synthesis": "本批共同否定磐石是彼得本人。",
+                "unresolved_items": [],
+                "focal_viewpoints": [
+                    {"viewpoint_revision_id": "CVR-1", "structure_role": "central_claim"}
+                ],
+            }
+        ],
+        relations=[
+            {
+                "viewpoint_relation_id": "VREL-1",
+                "relation_type": "applies",
+                "reason": "前者是后者的应用。",
+                "validated_source_viewpoint_revision_id": "CVR-1",
+                "validated_target_viewpoint_revision_id": "CVR-2",
+            }
+        ],
+        viewpoint_revisions=[
+            {"viewpoint_revision_id": "CVR-1", "core_proposition": "磐石不是彼得本人。"},
+            {"viewpoint_revision_id": "CVR-2", "core_proposition": "教会的根基是使徒和先知。"},
+        ],
+    )
+
+
+def _backreview(**overrides: Any) -> Any:
+    from backend.api.canonical_repository.viewpoint_graph_backreview import (
+        ViewpointGraphBackReviewResponse,
+    )
+
+    payload = {
+        "structure_reviews": [
+            {
+                "structure_revision_id": "VSR-1",
+                "decision": "pass",
+                "reason": "中心综合只说了 focal 推得出的内容。",
+                "synthesis_entailed_by_focal": True,
+            }
+        ],
+        "relation_reviews": [
+            {
+                "viewpoint_relation_id": "VREL-1",
+                "decision": "pass",
+                "reason": "方向正确。",
+                "direction_correct": True,
+            }
+        ],
+    }
+    payload.update(overrides)
+    return ViewpointGraphBackReviewResponse.model_validate(payload)
+
+
+def test_backreview_packet_spells_out_both_ends_of_every_edge():
+    """Ids cannot be judged; the propositions can."""
+
+    packet = _backreview_packet()
+    relation = packet["relations"][0]
+    assert relation["source"]["core_proposition"] == "磐石不是彼得本人。"
+    assert relation["target"]["core_proposition"] == "教会的根基是使徒和先知。"
+    assert packet["structures"][0]["focal"][0]["core_proposition"] == "磐石不是彼得本人。"
+
+
+def test_backreview_must_rule_on_every_committed_record():
+    from backend.api.canonical_repository.viewpoint_graph_backreview import (
+        validate_backreview,
+    )
+
+    with pytest.raises(BatchResolutionError, match="VREL-1: committed relation has no review decision"):
+        validate_backreview(
+            backreview=_backreview(relation_reviews=[]), packet=_backreview_packet()
+        )
+
+
+def test_backreview_holds_a_record_whose_structured_answer_is_false():
+    """A typed `pass` does not override the question the review exists to ask."""
+
+    from backend.api.canonical_repository.viewpoint_graph_backreview import (
+        validate_backreview,
+    )
+
+    report = validate_backreview(
+        backreview=_backreview(
+            relation_reviews=[
+                {
+                    "viewpoint_relation_id": "VREL-1",
+                    "decision": "pass",
+                    "reason": "读下来是后者应用前者，方向记反了。",
+                    "direction_correct": False,
+                }
+            ]
+        ),
+        packet=_backreview_packet(),
+    )
+    assert report["approved_viewpoint_relation_ids"] == []
+    assert report["held_viewpoint_relation_ids"] == ["VREL-1"]
+    assert report["approved_structure_revision_ids"] == ["VSR-1"]
