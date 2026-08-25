@@ -4931,6 +4931,106 @@ def test_written_structure_and_relation_name_the_review_that_approved_them():
         assert record["review_provenance"]["basis_identity_decision_ids"]
 
 
+def _structure_correction_case(*, entailed: bool):
+    """A structure the reviewer flagged `correct` and the proposer then fixed."""
+
+    proposal = _proposal(
+        structures=[
+            {
+                "central_synthesis": "本批共同否定磐石是彼得本人。",
+                "focal": [{"local_key": "ROCK-NOT-PETER", "structure_role": "central_claim"}],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    review = _review_for(
+        proposal,
+        structure_reviews=[
+            {
+                "structure_index": 0,
+                "decision": "correct",
+                "finding_codes": ["structure_role_mismatch"],
+                "reason": "角色按命题内容的正负标注，而不是按它在结构中的功能。",
+                "correction": "保持 focal 集合与 central_synthesis 不变，只改 structure_role。",
+                "synthesis_entailed_by_focal": entailed,
+            }
+        ],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "review_sha256": sha256_json(review.model_dump(mode="json")),
+            "structure_dispositions": [
+                {
+                    "structure_index": 0,
+                    "disposition": "accepted",
+                    "reason": "同意，角色错标已改。",
+                }
+            ],
+        }
+    )
+    return proposal, review, reconsideration
+
+
+def test_structure_the_proposer_corrected_can_be_written_as_approved():
+    """binding_loosing_meaning, 2026-08-25: a corrected structure had no way in.
+
+    Review flagged the structure -- four word-sense candidates had been given
+    roles by their content's polarity (禁止 / 准许) rather than by their function,
+    all four being the same same-layer identification -- and spelled out the
+    change. The proposer accepted and made exactly that change. The gate asked
+    for `pass`, the review artifact goes on saying `correct`, and there is no
+    second review, so the batch died with 0 mutations on a finding that had been
+    answered. The viewpoint revisions above already take this union.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    record = package["viewpoint_structure_revisions"][0]
+    assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
+
+
+def test_structure_the_reviewer_said_was_not_entailed_stays_unapproved():
+    """A correction answers a finding; it cannot re-answer the structured question.
+
+    Nobody looked at the patched synthesis, so "the focal set does not support
+    this" is still the last word anyone actually gave on it.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=False)
+    with pytest.raises(CvpBatchChangeSetError, match="structures are not reviewer-approved"):
+        compile_cvp_batch_package(
+            proposal=proposal,
+            review=review,
+            reviewed_proposal=proposal,
+            reconsideration=reconsideration,
+            deterministic_validation_sha256="validation-sha",
+            scope_manifest_sha256="scope-manifest-sha",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_context=REGISTRY_CONTEXT_ROCK,
+            proposal_artifact_sha256="proposal-call-sha",
+            review_artifact_sha256="review-call-sha",
+            proposer_model_id="gpt-5.6-sol/high",
+            reviewer_model_id="claude-opus-5/high",
+            decided_at="2026-08-24T12:00:00Z",
+        )
+
+
 # --- reviewing what was committed before review existed -------------------------
 
 def _backreview_packet() -> dict[str, Any]:
