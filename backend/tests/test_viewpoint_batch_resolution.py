@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
+    CanonicalViewpointReconsiderationResponse,
     CanonicalViewpointReviewResponse,
     ProposedComponent,
     ProposedStructureFocal,
@@ -33,6 +34,7 @@ from backend.api.canonical_repository.viewpoint_route_changeset import (
     compile_argument_route_package,
 )
 from backend.api.canonical_repository.viewpoint_batch_changeset import (
+    CvpBatchChangeSetError,
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
@@ -2338,6 +2340,7 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
             for index in (0, 1)
         ],
         "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+        "revision_reviews": [],
     }
     reconsideration_payload = {
         "schema_version": "wang_canonical_viewpoint_reconsideration_v3",
@@ -3608,3 +3611,233 @@ def test_relation_endpoints_must_differ() -> None:
                 "reason": "测试用理由",
             }
         )
+
+
+# --- revising committed wording ------------------------------------------------
+
+REGISTRY_CONTEXT_ROCK = [
+    {
+        "viewpoint_id": "CV-1",
+        "viewpoint_revision_id": "CVR-1",
+        "revision_number": 1,
+        "core_proposition": "彼得不是第一任教皇。",
+        "proposition_signature": {
+            "subject": "彼得",
+            "predicate": "具有",
+            "object": "第一任教皇的身份",
+            "polarity": "denied",
+            "modality": "断言",
+            "conditions": [],
+            "population_scope": ["彼得"],
+            "temporal_scope": [],
+        },
+        "scope": {"scripture_scope": ["馬太福音16:18"], "audience_scope": [], "historical_scope": []},
+    }
+]
+
+
+def _revision(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "target_viewpoint_revision_id": "CVR-1",
+        "core_proposition": "罗马天主教从马太福音16章推出的教皇制解经是错误的。",
+        "subject": "罗马天主教对马太福音16章的教皇制解经",
+        "predicate": "成立",
+        "object": "",
+        "polarity": "denied",
+        "modality": "断言",
+        "scripture_scope": ["馬太福音16:18", "馬太福音16:19"],
+        "conditions": [],
+        "population_scope": ["彼得", "历代教皇"],
+        "revision_reason": "既有措辞只落在彼得的身份上，装不下本批对权柄传承的否定；两者是同一真值条件。",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _member_proposal(**overrides: Any) -> CanonicalViewpointProposalResponse:
+    payload: dict[str, Any] = {
+        "batch_id": "CVB-test-001",
+        "claim_decisions": [
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    )
+                ],
+            }
+        ],
+        "new_viewpoint_candidates": [],
+    }
+    payload.update(overrides)
+    return CanonicalViewpointProposalResponse.model_validate(payload)
+
+
+def _passing_review(proposal: CanonicalViewpointProposalResponse) -> CanonicalViewpointReviewResponse:
+    return CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": item.target_viewpoint_revision_id,
+                    "decision": "pass",
+                    "reason": "同一真值条件，扩写后原有来源仍归得进去。",
+                }
+                for item in proposal.viewpoint_revisions
+            ],
+        }
+    )
+
+
+def _compile(proposal: CanonicalViewpointProposalResponse, review: CanonicalViewpointReviewResponse):
+    return compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+
+def test_approved_revision_supersedes_the_committed_wording():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    package = _compile(proposal, _passing_review(proposal))
+
+    assert len(package["viewpoint_revisions"]) == 1
+    revision = package["viewpoint_revisions"][0]
+    assert revision["viewpoint_id"] == "CV-1"
+    assert revision["revision_number"] == 2
+    assert revision["supersedes_revision_id"] == "CVR-1"
+    assert revision["core_proposition"] == "罗马天主教从马太福音16章推出的教皇制解经是错误的。"
+    # The identity does not move; only the wording it currently points at does.
+    assert [item["viewpoint_id"] for item in package["canonical_viewpoints"]] == ["CV-1"]
+    assert package["canonical_viewpoints"][0]["current_revision_id"] == revision["viewpoint_revision_id"]
+    # Everything this batch writes binds to the new revision, not the superseded one.
+    assert package["viewpoint_claim_links"][0][
+        "validated_against_viewpoint_revision_id"
+    ] == revision["viewpoint_revision_id"]
+
+
+def test_batch_without_a_revision_leaves_the_committed_wording_alone():
+    proposal = _member_proposal()
+    package = _compile(proposal, _passing_review(proposal))
+
+    assert package["viewpoint_revisions"] == []
+    assert package["canonical_viewpoints"] == []
+    assert package["viewpoint_claim_links"][0]["validated_against_viewpoint_revision_id"] == "CVR-1"
+
+
+def test_revision_the_reviewer_did_not_pass_is_not_written():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "decision": "reject",
+                    "finding_codes": ["revision_would_absorb_neighbour"],
+                    "reason": "新措辞会把另一条 viewpoint 一并吞掉。",
+                }
+            ],
+        }
+    )
+    with pytest.raises(CvpBatchChangeSetError):
+        _compile(proposal, review)
+
+
+def test_revision_must_target_a_viewpoint_the_batch_attaches_to():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_proposal
+
+    proposal = _proposal(
+        viewpoint_revisions=[_revision(target_viewpoint_revision_id="CVR-untouched")]
+    )
+    with pytest.raises(BatchResolutionError, match="is not attached to by any component"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_revision_ids=["CVR-1", "CVR-untouched"],
+        )
+
+
+def test_review_must_decide_every_proposed_revision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_review
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": proposal_sha,
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+        }
+    )
+    with pytest.raises(BatchResolutionError, match="proposed viewpoint revision has no review decision"):
+        validate_review(review=review, proposal=proposal, proposal_sha256=proposal_sha)
+
+
+def test_withdrawing_a_flagged_revision_resolves_the_batch():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "decision": "correct",
+                    "finding_codes": ["revision_too_broad"],
+                    "reason": "新措辞过宽。",
+                    "correction": "撤回该修订，或改回只覆盖本批 Claim 的范围。",
+                }
+            ],
+        }
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "review_sha256": "review-sha",
+            "finding_dispositions": [],
+            "revision_dispositions": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "disposition": "accepted",
+                    "reason": "同意过宽，撤回。",
+                }
+            ],
+            "revision_patches": [
+                {"target_viewpoint_revision_id": "CVR-1", "action": "withdraw"}
+            ],
+        }
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.viewpoint_revisions == []

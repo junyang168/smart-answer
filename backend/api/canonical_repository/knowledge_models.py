@@ -568,6 +568,9 @@ class ViewpointRevisionProvenance(BaseModel):
 
     basis_identity_decision_ids: list[str] = Field(min_length=1)
     review_artifact_sha256: str
+    #: Present only on a revision that supersedes committed wording: why the
+    #: previous wording could not hold the batch that produced this one.
+    revision_reason: Optional[str] = None
 
 
 class ViewpointRevisionRecord(StrictViewpointRecord):

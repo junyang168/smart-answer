@@ -50,6 +50,19 @@ proposal 里每一个 component 都必须有一条 `change_reviews`，用 `claim
 
 finding code 用简短的下划线小写标识，如 `modality_collapsed`、`member_is_actually_support`、`component_lost_qualifier`、`duplicate_of_existing_viewpoint`、`evidence_does_not_entail`。
 
+## 修订既有 viewpoint 的复核
+
+proposal 若提出 `viewpoint_revisions`，每一条都要有一个 `revision_reviews`，用 `target_viewpoint_revision_id` 定位。这一项比新建风险高——被改的措辞是别的批次已经匹配过的，改宽了会把邻近 viewpoint 吞掉，改窄了会让已归入的来源落空。
+
+逐条问：
+
+- 提出的新措辞与既有措辞**是不是同一个真值条件**？只是把两个观点焊成一个大命题，就不是修订，是错误合并；
+- 既有措辞是否**真的**装不下这条 Claim，还是 proposer 只是嫌它不够全面？不够全面不是修订理由；
+- 修订后，原来归入该 viewpoint 的来源**是否仍然归得进去**？答不上就是 `correct` 或 `reject`；
+- 新措辞会不会与 Registry 里另一条 viewpoint 变得难以分辨？
+
+`pass` 才会写进库。`correct` 要写明可接受的新措辞是什么；proposer 可以照改，也可以撤回该修订（撤回后既有措辞不动，批次照常通过）。
+
 ## 漏项复核
 
 `novelty_review` 单独回答一个问题：proposal 有没有因为看见了现有 Registry，就把本该是新观点的 Claim 硬归进已有 viewpoint，或者草率地标成 `no_registry_assertion`？

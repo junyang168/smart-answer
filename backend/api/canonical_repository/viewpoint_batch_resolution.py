@@ -470,6 +470,36 @@ class NewViewpointCandidate(StrictBatchModel):
     novelty_comparison: str = Field(min_length=1)
 
 
+class ProposedViewpointRevision(StrictBatchModel):
+    """New wording for a committed viewpoint this batch found too narrow.
+
+    Without this the first batch to touch a topic fixes how it is carved
+    forever: every later Claim can only squeeze into that wording or start a
+    parallel viewpoint, so better evidence arriving second produces a duplicate
+    rather than a correction.  A 2026-08-25 experiment put the choice to both
+    models on a real case and 5 of 8 runs asked to revise; the pipeline offered
+    no such option, so all of them had to create a duplicate instead.
+
+    This revises the *wording* of one identity, never merges two.  Merging
+    committed viewpoints moves Claim links between them and is a separate
+    operation.
+    """
+
+    target_viewpoint_revision_id: str = Field(min_length=1)
+    core_proposition: str = Field(min_length=1)
+    subject: str = Field(min_length=1)
+    predicate: str = Field(min_length=1)
+    object: str
+    polarity: Literal["affirmed", "denied"]
+    modality: str = Field(min_length=1)
+    scripture_scope: list[str] = Field(default_factory=list)
+    conditions: list[str] = Field(default_factory=list)
+    population_scope: list[str] = Field(default_factory=list)
+    #: Why the committed wording cannot hold this batch's Claim, and why the
+    #: new wording is still the same truth condition rather than a broader one
+    #: that would swallow neighbouring viewpoints.
+    revision_reason: str = Field(min_length=1)
+
 
 #: Controlled node roles. Route identity turns on the ordered skeleton, so the
 #: roles must be a fixed vocabulary — a free-text label would let two sermons
@@ -766,6 +796,7 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
     new_viewpoint_candidates: list[NewViewpointCandidate] = Field(default_factory=list)
     viewpoint_relations: list[ProposedViewpointRelation] = Field(default_factory=list)
     structures: list[ProposedViewpointStructure] = Field(default_factory=list)
+    viewpoint_revisions: list[ProposedViewpointRevision] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "CanonicalViewpointProposalResponse":
@@ -775,6 +806,9 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
         keys = [item.local_key for item in self.new_viewpoint_candidates]
         if len(keys) != len(set(keys)):
             raise ValueError("new viewpoint candidates must be unique")
+        targets = [item.target_viewpoint_revision_id for item in self.viewpoint_revisions]
+        if len(targets) != len(set(targets)):
+            raise ValueError("a viewpoint may be revised only once per batch")
         return self
 
 
@@ -818,23 +852,44 @@ class NoveltyReview(StrictBatchModel):
         return self
 
 
+class ReviewedViewpointRevision(StrictBatchModel):
+    """One decision about rewriting one committed viewpoint.
+
+    Kept out of ``change_reviews`` because it is not a decision about a Claim
+    component: it changes wording that other batches already matched against,
+    so it carries its own risk and its own coverage requirement.
+    """
+
+    target_viewpoint_revision_id: str = Field(min_length=1)
+    decision: Literal["pass", "correct", "reject", "defer"]
+    finding_codes: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    correction: str | None = None
+
+
 class CanonicalViewpointReviewResponse(StrictBatchModel):
     schema_version: Literal["wang_canonical_viewpoint_review_v1"] = REVIEW_VERSION
     proposal_sha256: str
     change_reviews: list[ReviewedChange] = Field(min_length=1)
     novelty_review: NoveltyReview
+    revision_reviews: list[ReviewedViewpointRevision] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_review(self) -> "CanonicalViewpointReviewResponse":
         keys = [(item.claim_id, item.component_index) for item in self.change_reviews]
         if len(keys) != len(set(keys)):
             raise ValueError("change reviews must be unique")
+        targets = [item.target_viewpoint_revision_id for item in self.revision_reviews]
+        if len(targets) != len(set(targets)):
+            raise ValueError("revision reviews must be unique")
         return self
 
     def outcome(self) -> str:
         if self.novelty_review.status != "pass":
             return "findings"
         if any(item.decision != "pass" for item in self.change_reviews):
+            return "findings"
+        if any(item.decision != "pass" for item in self.revision_reviews):
             return "findings"
         return "pass"
 
@@ -1179,6 +1234,29 @@ def validate_proposal(
                 else:
                     seen_component_keys[key] = (decision.claim_id, index)
 
+    # Revising committed wording is the one operation that reaches outside this
+    # batch, so it is confined twice: to viewpoints the packet actually offered,
+    # and to viewpoints some component of this batch attaches to. A batch may
+    # not rewrite a viewpoint it merely read about.
+    attached_revision_ids = {
+        str(component.target_viewpoint_revision_id)
+        for decision in proposal.claim_decisions
+        for component in decision.components
+        if component.disposition in EXISTING_DISPOSITIONS
+        and component.target_viewpoint_revision_id
+    }
+    for index, revised in enumerate(proposal.viewpoint_revisions):
+        where = f"viewpoint_revisions#{index}"
+        if revised.target_viewpoint_revision_id not in known_revisions:
+            findings.append(
+                f"{where}: revision {revised.target_viewpoint_revision_id} was not in the packet"
+            )
+        elif revised.target_viewpoint_revision_id not in attached_revision_ids:
+            findings.append(
+                f"{where}: {revised.target_viewpoint_revision_id} is not attached to by any "
+                "component in this batch"
+            )
+
     for index, relation in enumerate(proposal.viewpoint_relations):
         where = f"viewpoint_relations#{index}"
         for kind, key in relation.endpoints():
@@ -1221,6 +1299,7 @@ def validate_proposal(
         "component_count": sum(len(item.components) for item in proposal.claim_decisions),
         "disposition_counts": counts,
         "new_viewpoint_candidate_count": len(proposal.new_viewpoint_candidates),
+        "viewpoint_revision_count": len(proposal.viewpoint_revisions),
         "member_component_keys": sorted(seen_component_keys),
         "checks_passed": [
             "exact_once_claim_coverage",
@@ -1232,6 +1311,7 @@ def validate_proposal(
             "identity_evidence_eligible",
             "member_component_single_owner",
             "candidate_has_member_component",
+            "revision_target_attached_in_batch",
         ],
     }
     report["artifact_sha256"] = sha256_json(report)
@@ -1264,6 +1344,17 @@ def validate_review(
     for extra in sorted(set(reviewed) - set(expected)):
         findings.append(f"{extra[0]}#{extra[1]}: review points at no proposed change")
 
+    proposed_revisions = {
+        item.target_viewpoint_revision_id for item in proposal.viewpoint_revisions
+    }
+    reviewed_revisions = {
+        item.target_viewpoint_revision_id for item in review.revision_reviews
+    }
+    for missing in sorted(proposed_revisions - reviewed_revisions):
+        findings.append(f"{missing}: proposed viewpoint revision has no review decision")
+    for extra in sorted(reviewed_revisions - proposed_revisions):
+        findings.append(f"{extra}: review points at no proposed viewpoint revision")
+
     claim_ids = {item.claim_id for item in proposal.claim_decisions}
     for claim_id in review.novelty_review.missed_claim_ids:
         if claim_id not in claim_ids:
@@ -1283,9 +1374,15 @@ def validate_review(
             for name in ("pass", "correct", "reject", "defer")
         },
         "novelty_status": review.novelty_review.status,
+        "reviewed_revision_count": len(reviewed_revisions),
+        "revision_decision_counts": {
+            name: sum(1 for item in review.revision_reviews if item.decision == name)
+            for name in ("pass", "correct", "reject", "defer")
+        },
         "reconsideration_required": outcome != "pass",
         "correction_required": any(
-            item.decision == "correct" for item in review.change_reviews
+            item.decision == "correct"
+            for item in (*review.change_reviews, *review.revision_reviews)
         ),
     }
     report["artifact_sha256"] = sha256_json(report)
@@ -1684,6 +1781,40 @@ class FindingDisposition(StrictBatchModel):
     reason: str = Field(min_length=1)
 
 
+class RevisionFindingDisposition(StrictBatchModel):
+    """The proposer's answer to one finding about a proposed viewpoint revision."""
+
+    target_viewpoint_revision_id: str = Field(min_length=1)
+    disposition: Literal["accepted", "rebutted", "deferred"]
+    reason: str = Field(min_length=1)
+
+
+class ViewpointRevisionCorrectionPatch(StrictBatchModel):
+    """Rewrite or withdraw one reviewer-flagged viewpoint revision.
+
+    Withdrawing leaves the committed wording untouched and the batch still
+    resolves; that is the correct answer when the reviewer shows the proposed
+    wording would swallow a neighbouring viewpoint.
+    """
+
+    target_viewpoint_revision_id: str = Field(min_length=1)
+    action: Literal["upsert", "withdraw"]
+    revision: ProposedViewpointRevision | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "ViewpointRevisionCorrectionPatch":
+        if self.action == "upsert":
+            if (
+                self.revision is None
+                or self.revision.target_viewpoint_revision_id
+                != self.target_viewpoint_revision_id
+            ):
+                raise ValueError("revision upsert must carry the same target revision id")
+        elif self.revision is not None:
+            raise ValueError("revision withdraw does not carry a revision payload")
+        return self
+
+
 class ComponentCorrectionPatch(StrictBatchModel):
     """One correction to one reviewer-flagged component.
 
@@ -1783,14 +1914,21 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
     )
     proposal_sha256: str
     review_sha256: str
-    finding_dispositions: list[FindingDisposition] = Field(min_length=1)
+    # Not min_length=1: a review whose only finding is on a proposed revision
+    # has no component to dispose of, and requiring one would make that
+    # correction impossible to answer.
+    finding_dispositions: list[FindingDisposition] = Field(default_factory=list)
     component_patches: list[ComponentCorrectionPatch] = Field(default_factory=list)
     candidate_patches: list[CandidateCorrectionPatch] = Field(default_factory=list)
     relation_patches: list[RelationCorrectionPatch] = Field(default_factory=list)
     structure_patches: list[StructureCorrectionPatch] = Field(default_factory=list)
+    revision_dispositions: list[RevisionFindingDisposition] = Field(default_factory=list)
+    revision_patches: list[ViewpointRevisionCorrectionPatch] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_reconsideration(self) -> "CanonicalViewpointReconsiderationResponse":
+        if not self.finding_dispositions and not self.revision_dispositions:
+            raise ValueError("a reconsideration must answer at least one finding")
         keys = [(item.claim_id, item.component_index) for item in self.finding_dispositions]
         if len(keys) != len(set(keys)):
             raise ValueError("finding dispositions must be unique")
@@ -1806,6 +1944,16 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         structure_keys = [item.structure_index for item in self.structure_patches]
         if len(structure_keys) != len(set(structure_keys)):
             raise ValueError("structure patches must be unique")
+        revision_keys = [
+            item.target_viewpoint_revision_id for item in self.revision_dispositions
+        ]
+        if len(revision_keys) != len(set(revision_keys)):
+            raise ValueError("revision dispositions must be unique")
+        revision_patch_keys = [
+            item.target_viewpoint_revision_id for item in self.revision_patches
+        ]
+        if len(revision_patch_keys) != len(set(revision_patch_keys)):
+            raise ValueError("revision patches must be unique")
         return self
 
 
@@ -2019,6 +2167,42 @@ def apply_reconsideration_patches(
         if structure_replacements.get(index, item) is not None
     ]
 
+    flagged_revisions = {
+        item.target_viewpoint_revision_id
+        for item in review.revision_reviews
+        if item.decision == "correct"
+    }
+    accepted_revisions = {
+        item.target_viewpoint_revision_id
+        for item in reconsideration.revision_dispositions
+        if item.disposition == "accepted"
+    }
+    revision_patches = {
+        item.target_viewpoint_revision_id: item
+        for item in reconsideration.revision_patches
+    }
+    for missing in sorted(accepted_revisions - set(revision_patches)):
+        findings.append(f"{missing}: accepted revision finding has no patch")
+    for extra in sorted(set(revision_patches) - accepted_revisions):
+        findings.append(f"{extra}: revision patch is not an accepted finding")
+    if not set(revision_patches) <= flagged_revisions:
+        findings.append("revision patches must be confined to reviewer findings")
+
+    revised_by_target = {
+        item["target_viewpoint_revision_id"]: item
+        for item in payload["viewpoint_revisions"]
+    }
+    for target, patch in revision_patches.items():
+        if target not in revised_by_target:
+            findings.append(f"{target}: patch target is not a proposed revision")
+            continue
+        if patch.action == "withdraw":
+            revised_by_target.pop(target)
+        else:
+            assert patch.revision is not None
+            revised_by_target[target] = patch.revision.model_dump(mode="json")
+    payload["viewpoint_revisions"] = list(revised_by_target.values())
+
     if findings:
         raise BatchResolutionError(findings)
     try:
@@ -2062,6 +2246,20 @@ def validate_reconsideration(
     for extra in sorted(answered - flagged):
         findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
 
+    flagged_revisions = {
+        item.target_viewpoint_revision_id
+        for item in review.revision_reviews
+        if item.decision == "correct"
+    }
+    answered_revisions = {
+        item.target_viewpoint_revision_id
+        for item in reconsideration.revision_dispositions
+    }
+    for missing in sorted(flagged_revisions - answered_revisions):
+        findings.append(f"{missing}: revision finding has no disposition")
+    for extra in sorted(answered_revisions - flagged_revisions):
+        findings.append(f"{extra}: revision disposition answers no finding")
+
     if findings:
         raise BatchResolutionError(findings)
 
@@ -2072,9 +2270,18 @@ def validate_reconsideration(
     )
 
     escalations = sorted(
-        f"{item.claim_id}#{item.component_index}:{item.disposition}"
-        for item in reconsideration.finding_dispositions
-        if item.disposition != "accepted"
+        [
+            *(
+                f"{item.target_viewpoint_revision_id}:{item.disposition}"
+                for item in reconsideration.revision_dispositions
+                if item.disposition != "accepted"
+            ),
+            *(
+                f"{item.claim_id}#{item.component_index}:{item.disposition}"
+                for item in reconsideration.finding_dispositions
+                if item.disposition != "accepted"
+            ),
+        ]
     )
     escalations.extend(
         sorted(

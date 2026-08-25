@@ -52,6 +52,17 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 没被影响的 structure 不要输出，程序会保持原样。
 
+## Viewpoint revision patch
+
+复核员对 `viewpoint_revisions` 的每条 `correct`，都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
+
+`accepted` 必须配一个 `revision_patches`：
+
+- `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
+- `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint 时，撤回后既有措辞不动，批次照常通过，那条 Claim 仍按 component 的 disposition 归入。
+
+没被点名的修订不要输出，程序会保持原样。
+
 ## target contract 不能变通
 
 这一节与提案时的规则完全相同，改稿不另立一套：

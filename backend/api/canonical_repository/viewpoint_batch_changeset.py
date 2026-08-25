@@ -30,6 +30,7 @@ from .viewpoint_batch_resolution import (
     CanonicalViewpointReviewResponse,
     NewViewpointCandidate,
     ProposedComponent,
+    ProposedViewpointRevision,
     apply_reconsideration_patches,
     validate_reconsideration,
     validate_review,
@@ -50,6 +51,24 @@ LINK_TYPES = {
 
 class CvpBatchChangeSetError(ValueError):
     pass
+
+
+def _revision_signature(
+    revised: ProposedViewpointRevision,
+) -> ViewpointPropositionSignature:
+    return ViewpointPropositionSignature(
+        subject=revised.subject,
+        predicate=revised.predicate,
+        object=revised.object,
+        polarity=revised.polarity,
+        modality=revised.modality,
+        conditions=sorted(set(revised.conditions)),
+        population_scope=sorted(set(revised.population_scope)),
+    )
+
+
+def _revision_scope(revised: ProposedViewpointRevision) -> ViewpointScope:
+    return ViewpointScope(scripture_scope=sorted(set(revised.scripture_scope)))
 
 
 def _candidate_signature(candidate: NewViewpointCandidate) -> ViewpointPropositionSignature:
@@ -129,6 +148,18 @@ def compile_cvp_batch_package(
         str(item["viewpoint_revision_id"]): dict(item) for item in registry_context
     }
     new_candidates = {item.local_key: item for item in proposal.new_viewpoint_candidates}
+    # Only revisions the reviewer passed reach master data. A proposal may not
+    # rewrite committed wording on its own say-so.
+    approved_revision_targets = {
+        item.target_viewpoint_revision_id
+        for item in review.revision_reviews
+        if item.decision == "pass"
+    }
+    revisions_by_target = {
+        item.target_viewpoint_revision_id: item
+        for item in proposal.viewpoint_revisions
+        if item.target_viewpoint_revision_id in approved_revision_targets
+    }
 
     # Each target is one identity decision. Multiple components from the same
     # Claim and target are combined into one durable locator.
@@ -212,12 +243,33 @@ def compile_cvp_batch_package(
                     f"target revision {target_key} is absent from Registry context"
                 )
             viewpoint_id = str(context["viewpoint_id"])
-            revision_id = target_key
             candidate_viewpoint_ids = [viewpoint_id]
             action = "match_existing"
-            signature = ViewpointPropositionSignature.model_validate(
-                context["proposition_signature"]
-            )
+            revised = revisions_by_target.get(target_key)
+            if revised is None:
+                revision_id = target_key
+                signature = ViewpointPropositionSignature.model_validate(
+                    context["proposition_signature"]
+                )
+            else:
+                # The identity is unchanged -- same viewpoint_id -- but its
+                # wording moves to a new revision that supersedes the one the
+                # packet offered. Everything this batch writes must then bind to
+                # the new revision, which is why resolved_targets carries it.
+                superseded_number = context.get("revision_number")
+                if superseded_number is None:
+                    raise CvpBatchChangeSetError(
+                        f"Registry context for {target_key} carries no revision_number"
+                    )
+                signature = _revision_signature(revised)
+                revision_seed = {
+                    "viewpoint_id": viewpoint_id,
+                    "revision_number": int(superseded_number) + 1,
+                    "core_proposition": revised.core_proposition,
+                    "proposition_signature": signature.model_dump(mode="json"),
+                    "scope": _revision_scope(revised).model_dump(mode="json"),
+                }
+                revision_id = f"CVR-{sha256_json(revision_seed)[:20]}"
 
         resolved_targets[target] = (viewpoint_id, revision_id)
 
@@ -311,6 +363,43 @@ def compile_cvp_batch_package(
             )
             revisions_out.append(revision.model_dump(mode="json"))
             viewpoints_out.append(viewpoint.model_dump(mode="json"))
+        elif target_key in revisions_by_target:
+            revised = revisions_by_target[target_key]
+            context = registry_by_revision[target_key]
+            revisions_out.append(
+                ViewpointRevisionRecord(
+                    viewpoint_revision_id=revision_id,
+                    viewpoint_id=viewpoint_id,
+                    # The store revision and the semantic revision number are
+                    # one and the same; the record refuses them out of step.
+                    revision=int(context["revision_number"]) + 1,
+                    revision_number=int(context["revision_number"]) + 1,
+                    core_proposition=revised.core_proposition,
+                    proposition_signature=signature,
+                    scope=_revision_scope(revised),
+                    supersedes_revision_id=target_key,
+                    provenance={
+                        "basis_identity_decision_ids": [decision_id],
+                        "review_artifact_sha256": review_artifact_sha256,
+                        "revision_reason": revised.revision_reason,
+                    },
+                    approved_by=CVP_BATCH_CHANGESET_POLICY_VERSION,
+                    approved_at=decided_at,
+                    review_status="system_approved",
+                ).model_dump(mode="json")
+            )
+            # Emitted so the package moves the pointer; the ChangeSet layer
+            # diffs it against the store and renders it as an update.
+            viewpoints_out.append(
+                CanonicalViewpointRecord(
+                    viewpoint_id=viewpoint_id,
+                    current_revision_id=revision_id,
+                    created_from_candidate_id=str(
+                        context.get("created_from_candidate_id") or candidate_id
+                    ),
+                    review_status="system_approved",
+                ).model_dump(mode="json")
+            )
 
         per_claim: dict[tuple[str, str], list[ProposedComponent]] = defaultdict(list)
         for claim, component in components:
