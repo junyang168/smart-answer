@@ -2209,6 +2209,107 @@ def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_componen
         )
 
 
+def test_candidate_signature_can_be_corrected_under_an_unflagged_referrer():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    # The real case (church_and_hades_gates, 2026-08-25): one Claim produced a
+    # support component and a new_viewpoint component pointing at the same
+    # candidate. Review passed the support and flagged the candidate's signature
+    # -- subject/predicate/object read 「只有 A 才 B」 as a sufficient condition
+    # when the sentence states a necessary one. That is the ordinary shape of a
+    # candidate, so refusing every patch with an unflagged referrer left the
+    # finding unanswerable and stopped the batch at zero mutations.
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["claim_decisions"][0]["components"][1] = json.loads(
+        json.dumps(proposal_payload["claim_decisions"][0]["components"][0])
+    )
+    proposal_payload["claim_decisions"][0]["components"][1]["spans"] = [
+        _component(
+            ROCK_STATEMENT,
+            "而是彼得所承认的信仰",
+            "new_viewpoint",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )["spans"][0]
+    ]
+    proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    corrected = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    corrected["subject"], corrected["object"] = corrected["object"], corrected["subject"]
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    reconsideration = _reconsideration(
+        "accepted",
+        component_patches=[{
+            "claim_id": "C1", "component_index": 0,
+            "replacement_components": [component],
+        }],
+        candidate_patches=[{
+            "local_key": "ROCK-NOT-PETER", "action": "upsert",
+            "candidate": corrected,
+        }],
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+    patched = {
+        item.local_key: item for item in effective.new_viewpoint_candidates
+    }["ROCK-NOT-PETER"]
+
+    assert (patched.subject, patched.object) == (corrected["subject"], corrected["object"])
+    # What the unflagged support was passed against is untouched.
+    assert patched.core_proposition == corrected["core_proposition"]
+    assert patched.polarity == corrected["polarity"]
+
+
+def test_candidate_patch_cannot_delete_a_candidate_an_unflagged_component_uses():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["claim_decisions"][0]["components"][1] = json.loads(
+        json.dumps(proposal_payload["claim_decisions"][0]["components"][0])
+    )
+    proposal_payload["claim_decisions"][0]["components"][1]["spans"] = [
+        _component(
+            ROCK_STATEMENT,
+            "而是彼得所承认的信仰",
+            "new_viewpoint",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )["spans"][0]
+    ]
+    proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    # Deleting leaves the unflagged referrer pointing at nothing.
+    with pytest.raises(BatchResolutionError, match="unflagged referrers C1#1"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [component],
+                }],
+                candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
 def test_reconsideration_can_merge_components_the_reviewer_flagged():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
