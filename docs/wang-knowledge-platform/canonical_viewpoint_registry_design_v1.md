@@ -2945,7 +2945,7 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
 ### 16.2 后续实现顺序
 
 1. **第一段产出 CVP + Structure**（本次核心）
-   - schema／migration：`viewpoint_structures`、`viewpoint_structure_revisions`（第 5.13 节），以及 `ViewpointClaimLink` 的 attachment kind 与 target；
+   - 记录类型：`viewpoint_structures`、`viewpoint_structure_revisions`（第 5.13 节），以及 `ViewpointClaimLink` 的 attachment kind 与 target。**不需要 SQL migration** —— `wang_knowledge.objects` 是通用对象表，collection 只是其中一列，集合登记在 `KNOWLEDGE_COLLECTIONS` 这个 Python 映射里；新增记录类型只需 Pydantic 模型、映射条目与 foundation 校验；
    - `ProposedComponent` 校验放开：`member/support/qualification/tension/application/context` 的 target 允许 `local_new_viewpoint_key`，ChangeSet compiler 在事务内解析 local reference（现行校验在 `viewpoint_batch_resolution.py` 明确拒绝这一形态）；
    - proposal prompt：跨 Claim 同一性判断、角色降级、第 13.14.2 节验证过的原子判据；
    - review prompt：新候选之间是否重复、误判角色、structure entailment（第 5.12 节清单）；
