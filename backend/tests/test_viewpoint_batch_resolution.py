@@ -4242,3 +4242,42 @@ def test_relation_may_point_at_a_committed_viewpoint_this_batch_does_not_touch()
     relation = package["viewpoint_relations"][0]
     assert relation["target_viewpoint_id"] == "CV-2"
     assert relation["validated_target_viewpoint_revision_id"] == "CVR-untouched"
+
+
+def test_written_revisions_carry_no_field_older_readers_reject():
+    """Every stored viewpoint model forbids extras, in every deployed version.
+
+    Adding an optional field to `ViewpointRevisionProvenance` put an explicit
+    `"revision_reason": null` on four freshly written revisions -- pydantic
+    serializes optional fields whether or not they carry anything -- and the
+    production Registry views, running code without the field, refused to load
+    the collection at all. Pin the provenance shape so the next addition has to
+    be a deliberate migration rather than a side effect.
+    """
+
+    from backend.api.canonical_repository.knowledge_models import (
+        ViewpointRevisionProvenance,
+    )
+
+    assert set(ViewpointRevisionProvenance.model_fields) == {
+        "basis_identity_decision_ids",
+        "review_artifact_sha256",
+    }
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": []}
+            ]
+        }
+    )
+    package = _compile(proposal, review)
+    for revision in package["viewpoint_revisions"]:
+        assert set(revision["provenance"]) == {
+            "basis_identity_decision_ids",
+            "review_artifact_sha256",
+        }

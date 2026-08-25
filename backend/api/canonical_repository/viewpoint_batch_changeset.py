@@ -420,7 +420,6 @@ def compile_cvp_batch_package(
                     provenance={
                         "basis_identity_decision_ids": [decision_id],
                         "review_artifact_sha256": review_artifact_sha256,
-                        "revision_reason": revised.revision_reason,
                     },
                     approved_by=CVP_BATCH_CHANGESET_POLICY_VERSION,
                     approved_at=decided_at,
