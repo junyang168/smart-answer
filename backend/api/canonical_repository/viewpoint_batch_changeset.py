@@ -572,6 +572,38 @@ def compile_cvp_batch_package(
         for item in review.relation_reviews
         if item.decision == "pass" and item.direction_correct
     }
+    if reconsideration is not None:
+        # The same union the viewpoint revisions above already use, for the same
+        # reason.  Gating the graph on `pass` alone made a corrected structure
+        # permanently unapprovable: the review artifact goes on saying `correct`
+        # and there is no second review, so any structure the reviewer wanted
+        # adjusted killed the batch -- binding_loosing_meaning stopped on a
+        # finding that four word-sense candidates had been given roles by their
+        # content's polarity rather than by their function, which the proposer
+        # then fixed exactly as asked.
+        #
+        # The structured question is not waived.  A correction round answers a
+        # finding; it cannot re-answer whether the synthesis follows from the
+        # focal set or whether an edge points the right way, so a structure the
+        # reviewer said was not entailed stays unapproved however it is patched.
+        entailed = {
+            item.structure_index
+            for item in review.structure_reviews
+            if item.synthesis_entailed_by_focal
+        }
+        approved_structures |= {
+            item.structure_index
+            for item in reconsideration.structure_dispositions
+            if item.disposition == "accepted" and item.structure_index in entailed
+        }
+        directed = {
+            item.edge() for item in review.relation_reviews if item.direction_correct
+        }
+        approved_relations |= {
+            item.edge()
+            for item in reconsideration.relation_dispositions
+            if item.disposition == "accepted" and item.edge() in directed
+        }
     unapproved_structures = sorted(
         set(range(len(proposal.structures))) - approved_structures
     )
