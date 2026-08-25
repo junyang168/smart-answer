@@ -48,6 +48,32 @@ class BackReviewedRelation(StrictBatchModel):
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
     direction_correct: bool
+    #: What to do with a relation that did not pass, in a form a program can
+    #: act on. The first back-review put its recommendations in prose only --
+    #: "建议改为 extends" -- and prose has to be parsed or re-read by a person
+    #: before anything can happen, which is how a rejected edge stays in the
+    #: Registry looking exactly like an approved one.
+    disposition: Literal["keep", "retype", "retire", "needs_human"] = "keep"
+    #: Required by `retype`: the type this edge should carry instead.
+    suggested_relation_type: str | None = None
+
+    @model_validator(mode="after")
+    def validate_disposition(self) -> "BackReviewedRelation":
+        if self.disposition == "retype" and not self.suggested_relation_type:
+            raise ValueError("retype requires the type to use instead")
+        if self.disposition != "retype" and self.suggested_relation_type:
+            raise ValueError("only retype carries a replacement type")
+        if self.decision == "pass" and self.direction_correct:
+            if self.disposition != "keep":
+                raise ValueError("a passing relation is kept as it stands")
+        elif self.disposition == "keep":
+            raise ValueError("a relation that did not pass needs a disposition")
+        # Reversing the ends is not a correction with one answer: it re-decides
+        # how two viewpoints stand to each other, and the type that follows is a
+        # judgment. That belongs to a person, not to a batch.
+        if not self.direction_correct and self.disposition != "needs_human":
+            raise ValueError("a reversed direction is for a person to settle")
+        return self
 
 
 class ViewpointGraphBackReviewResponse(StrictBatchModel):
@@ -163,8 +189,28 @@ def validate_backreview(
         for item in backreview.relation_reviews
         if item.decision == "pass" and item.direction_correct
     )
+    retyped = sorted(
+        (item.viewpoint_relation_id, str(item.suggested_relation_type))
+        for item in backreview.relation_reviews
+        if item.disposition == "retype"
+    )
+    retired = sorted(
+        item.viewpoint_relation_id
+        for item in backreview.relation_reviews
+        if item.disposition == "retire"
+    )
+    needs_human = sorted(
+        item.viewpoint_relation_id
+        for item in backreview.relation_reviews
+        if item.disposition == "needs_human"
+    )
     report = {
         "schema_version": "wang_viewpoint_graph_backreview_validation_v1",
+        "retyped_relations": [
+            {"viewpoint_relation_id": key, "relation_type": value} for key, value in retyped
+        ],
+        "retired_relation_ids": retired,
+        "needs_human_relation_ids": needs_human,
         "packet_sha256": str(packet["packet_sha256"]),
         "structure_count": len(sent_structures),
         "relation_count": len(sent_relations),
