@@ -4931,6 +4931,96 @@ def test_written_structure_and_relation_name_the_review_that_approved_them():
         assert record["review_provenance"]["basis_identity_decision_ids"]
 
 
+def test_relation_the_reviewer_asked_the_correction_to_add_can_be_written():
+    """binding_loosing_meaning, 2026-08-25.
+
+    The reviewer found a historical-linguistics proposition demoted to support
+    -- 「捆綁／釋放是文士、法利賽人所用的術語」 -- told the proposer to raise it to
+    its own viewpoint, and spelled out the two edges to add, naming both
+    endpoints and the type. The proposer added exactly those. The ChangeSet then
+    refused them: approval was read off relation reviews, and an edge created by
+    the correction has no review and never can. RelationCorrectionPatch exists
+    for this case -- without it "the proposer can only rebut the finding".
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal()
+    review = _review_for(
+        proposal,
+        change_reviews=[
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "decision": "correct",
+                "finding_codes": ["historical_usage_proposition_demoted_to_support"],
+                "reason": "这条历史用法命题被降级为 support，等于永不入库。",
+                "correction": "改为 new_viewpoint，并新增一条 applies 边连到既有观点。",
+            },
+            {"claim_id": "C1", "component_index": 1, "decision": "pass", "reason": "通过"},
+        ],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "review_sha256": sha256_json(review.model_dump(mode="json")),
+            "finding_dispositions": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "disposition": "accepted",
+                    "reason": "同意，历史用法命题应独立入库。",
+                }
+            ],
+            "component_patches": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "replacement_components": [
+                        proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+                    ],
+                }
+            ],
+            "relation_patches": [
+                {
+                    "action": "upsert",
+                    "relation": {
+                        "source_local_key": "ROCK-NOT-PETER",
+                        "target_viewpoint_revision_id": "CVR-1",
+                        "relation_type": "applies",
+                        "reason": "复核意见指名要补的这条边。",
+                    },
+                }
+            ],
+        }
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    package = compile_cvp_batch_package(
+        proposal=effective,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert len(package["viewpoint_relations"]) == 1
+    assert (
+        package["viewpoint_relations"][0]["review_provenance"]["review_artifact_sha256"]
+        == "review-call-sha"
+    )
+
+
 def _structure_correction_case(*, entailed: bool):
     """A structure the reviewer flagged `correct` and the proposer then fixed."""
 
