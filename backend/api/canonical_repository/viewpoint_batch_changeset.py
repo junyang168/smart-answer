@@ -190,7 +190,10 @@ def compile_cvp_batch_package(
         unconfirmed = sorted(pinned - confirmed_by_target.get(target, set()))
         if unconfirmed:
             raise CvpBatchChangeSetError(
-                f"{target}: revision strands unconfirmed records: {', '.join(unconfirmed)}"
+                f"{target}: revision strands unconfirmed records: {', '.join(unconfirmed)}. "
+                "A revision the reviewer flagged `correct` cannot land rewritten: the "
+                "reviewer was rejecting that wording, so it confirmed nothing against the "
+                "replacement. Withdraw it in the correction round instead."
             )
 
     # Each target is one identity decision. Multiple components from the same

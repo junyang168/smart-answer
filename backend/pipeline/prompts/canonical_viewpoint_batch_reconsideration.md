@@ -65,6 +65,10 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 不补这条边，整批不通过——留下两条互不相识的近邻，正是这一步要防的事。
 
+**复核员判 `correct` 的修订，通常只能撤回。** 因为它判 `correct` 时正在否定那个措辞，`confirmed_dependent_ids` 必然是空的——没有人对着新措辞确认过被牵动的既有记录（claim link、relation、route revision）。你照要求改好措辞，那些记录仍然无人复核，ChangeSet 会拒绝整批。
+
+只有一种例外：该 viewpoint 根本没有任何既有记录指向它，改写才能落地。你无从判断有没有，所以默认撤回。撤回后既有措辞不动，本批 Claim 仍按 component 的 disposition 归入，批次照常通过。
+
 没被点名的修订不要输出，程序会保持原样。
 
 ## target contract 不能变通
