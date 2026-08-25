@@ -12,6 +12,7 @@ const sections = [
   { href: "/admin/wang/argument-layer", label: "論證層", icon: Network },
   { href: "/admin/wang/source-coverage", label: "來源覆蓋", icon: Highlighter },
   { href: "/admin/wang/viewpoints", label: "观点主数据", icon: DatabaseZap },
+  { href: "/admin/wang/viewpoint-structures", label: "中心结构", icon: Network },
   { href: "/admin/canonical-repository", label: "出版單元", icon: FileCheck2 },
 ];
 

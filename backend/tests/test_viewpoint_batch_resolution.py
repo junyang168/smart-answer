@@ -4,12 +4,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReviewResponse,
     ProposedComponent,
+    ProposedStructureFocal,
+    ProposedViewpointRelation,
+    ProposedViewpointStructure,
     ProposedSpan,
     build_batch_packet,
     build_cvp_batch_readback_receipt,
@@ -3200,3 +3204,111 @@ def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
     assert report["passing_route_keys"] == []
     assert "attestation:ATTEST-1:reject" in report["exceptions"]
     assert "route:ROUTE-GREEK:no_passing_attestation" in report["exceptions"]
+
+
+def test_support_may_target_a_viewpoint_this_batch_creates() -> None:
+    """An argument for a viewpoint the same batch is proposing has somewhere to go.
+
+    Without this the only legal disposition for such a component is
+    ``new_viewpoint``, which turns every supporting argument into its own CVP.
+    """
+    statement = "彼得與盤石的性別不同"
+    component = ProposedComponent.model_validate(
+        _component(
+            statement,
+            statement,
+            "support_existing",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )
+    )
+    assert component.local_new_viewpoint_key == "ROCK-NOT-PETER"
+    assert component.target_viewpoint_revision_id is None
+
+
+def test_support_may_not_target_both_a_revision_and_a_local_key() -> None:
+    statement = "彼得與盤石的性別不同"
+    with pytest.raises(ValidationError, match="may not target both"):
+        ProposedComponent.model_validate(
+            _component(
+                statement,
+                statement,
+                "support_existing",
+                target_viewpoint_revision_id="CVR-1",
+                local_new_viewpoint_key="ROCK-NOT-PETER",
+            )
+        )
+
+
+def test_support_still_needs_some_target() -> None:
+    statement = "彼得與盤石的性別不同"
+    with pytest.raises(ValidationError, match="requires a target viewpoint revision or local key"):
+        ProposedComponent.model_validate(
+            _component(statement, statement, "support_existing")
+        )
+
+
+def test_member_existing_may_not_use_a_local_key() -> None:
+    """Members of a new viewpoint are expressed by sharing its local key on
+    ``new_viewpoint`` components, not by pointing ``member_existing`` at it."""
+    statement = "彼得與盤石的性別不同"
+    with pytest.raises(ValidationError, match="member_existing targets a committed revision"):
+        ProposedComponent.model_validate(
+            _component(
+                statement,
+                statement,
+                "member_existing",
+                local_new_viewpoint_key="ROCK-NOT-PETER",
+            )
+        )
+
+
+def test_structure_focal_needs_exactly_one_endpoint() -> None:
+    with pytest.raises(ValidationError, match="requires a revision id or a local key"):
+        ProposedStructureFocal.model_validate({"structure_role": "central_claim"})
+    with pytest.raises(ValidationError, match="may not carry both"):
+        ProposedStructureFocal.model_validate(
+            {
+                "structure_role": "central_claim",
+                "viewpoint_revision_id": "CVR-1",
+                "local_key": "ROCK-NOT-PETER",
+            }
+        )
+
+
+def test_a_viewpoint_holds_one_role_per_structure() -> None:
+    with pytest.raises(ValidationError, match="only one role"):
+        ProposedViewpointStructure.model_validate(
+            {
+                "central_synthesis": "磐石不是彼得本人",
+                "reason": "测试用理由",
+                "focal": [
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "negative_boundary"},
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "application"},
+                ],
+            }
+        )
+
+
+def test_relation_direction_is_source_first() -> None:
+    """``source applies target`` means source is an application of target."""
+    relation = ProposedViewpointRelation.model_validate(
+        {
+            "source_local_key": "PETER-NOT-FIRST-POPE",
+            "target_local_key": "ROCK-NOT-PETER",
+            "relation_type": "applies",
+            "reason": "由磐石不是彼得本人推出彼得不是第一任教皇",
+        }
+    )
+    assert relation.endpoints() == (("new", "PETER-NOT-FIRST-POPE"), ("new", "ROCK-NOT-PETER"))
+
+
+def test_relation_endpoints_must_differ() -> None:
+    with pytest.raises(ValidationError, match="endpoints must differ"):
+        ProposedViewpointRelation.model_validate(
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_local_key": "ROCK-NOT-PETER",
+                "relation_type": "applies",
+                "reason": "测试用理由",
+            }
+        )

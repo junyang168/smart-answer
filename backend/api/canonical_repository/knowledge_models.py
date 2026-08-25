@@ -1149,6 +1149,73 @@ class ViewpointTemporalAssertion(BaseModel):
     correction_evidence_claim_ids: list[str] = Field(default_factory=list)
 
 
+STRUCTURE_ROLES = (
+    "central_claim",
+    "negative_boundary",
+    "positive_identification",
+    "supporting_conclusion",
+    "qualification",
+    "tension_side",
+    "application",
+    "methodological_boundary",
+)
+
+
+class ViewpointStructureFocal(StrictViewpointRecord):
+    """One approved viewpoint's place in a reviewed centre."""
+
+    viewpoint_revision_id: str
+    structure_role: Literal[STRUCTURE_ROLES]  # type: ignore[valid-type]
+    basis_claim_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_focal(self) -> "ViewpointStructureFocal":
+        if self.basis_claim_ids != sorted(set(self.basis_claim_ids)):
+            raise ValueError("basis_claim_ids must be sorted and unique")
+        return self
+
+
+class ViewpointStructureRecord(StrictViewpointRecord):
+    """Stable identity for one reviewed centre.
+
+    A structure organises approved viewpoints; it never asserts a new one. It
+    is not an identity parent -- a viewpoint may sit in several overlapping
+    structures, and retiring a structure leaves its viewpoints untouched.
+    """
+
+    structure_id: str
+    schema_version: Literal["wang_viewpoint_structure_v1"] = "wang_viewpoint_structure_v1"
+    current_revision_id: str
+    effective_state: Literal["active", "retired"] = "active"
+
+
+class ViewpointStructureRevisionRecord(StrictViewpointRecord):
+    structure_revision_id: str
+    schema_version: Literal["wang_viewpoint_structure_revision_v1"] = (
+        "wang_viewpoint_structure_revision_v1"
+    )
+    structure_id: str
+    revision_number: int = Field(ge=1)
+    central_synthesis: str = Field(min_length=1)
+    representation_kind: Literal["reviewed_editorial_normalization_of_source_claims"] = (
+        "reviewed_editorial_normalization_of_source_claims"
+    )
+    not_a_direct_quote: Literal[True] = True
+    focal_viewpoints: list[ViewpointStructureFocal] = Field(min_length=1)
+    unresolved_items: list[str] = Field(default_factory=list)
+    scope_manifest_sha256: str
+    supersedes_revision_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_structure_revision(self) -> "ViewpointStructureRevisionRecord":
+        revisions = [item.viewpoint_revision_id for item in self.focal_viewpoints]
+        if len(revisions) != len(set(revisions)):
+            raise ValueError("a viewpoint may hold only one role in a structure")
+        if self.supersedes_revision_id == self.structure_revision_id:
+            raise ValueError("structure revision cannot supersede itself")
+        return self
+
+
 class ViewpointRelationRecord(StrictViewpointRecord):
     viewpoint_relation_id: str
     schema_version: Literal["wang_viewpoint_relation_v1"] = "wang_viewpoint_relation_v1"
@@ -1584,6 +1651,11 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
         "coverage_snapshot_id",
     ),
     "canonical_viewpoints": (CanonicalViewpointRecord, "viewpoint_id"),
+    "viewpoint_structures": (ViewpointStructureRecord, "structure_id"),
+    "viewpoint_structure_revisions": (
+        ViewpointStructureRevisionRecord,
+        "structure_revision_id",
+    ),
     "viewpoint_revisions": (ViewpointRevisionRecord, "viewpoint_revision_id"),
     "viewpoint_claim_links": (ViewpointClaimLinkRecord, "viewpoint_claim_link_id"),
     "viewpoint_proposition_units": (

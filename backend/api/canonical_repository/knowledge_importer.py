@@ -59,6 +59,8 @@ class KnowledgePackageImporter:
         "argument_route_revisions": "argument_route_revisions",
         "argument_route_attestations": "argument_route_attestations",
         "viewpoint_relations": "viewpoint_relations",
+        "viewpoint_structures": "viewpoint_structures",
+        "viewpoint_structure_revisions": "viewpoint_structure_revisions",
         "viewpoint_identity_candidates": "viewpoint_identity_candidates",
         "viewpoint_identity_decisions": "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers": "viewpoint_resolution_ledgers",

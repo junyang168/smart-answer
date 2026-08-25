@@ -827,6 +827,8 @@ def validate_foundation_change_set(
         "argument_route_revisions",
         "argument_route_attestations",
         "viewpoint_relations",
+        "viewpoint_structures",
+        "viewpoint_structure_revisions",
         "viewpoint_identity_candidates",
         "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers",
@@ -837,6 +839,7 @@ def validate_foundation_change_set(
 
     immutable_collections = {
         "viewpoint_coverage_snapshots",
+        "viewpoint_structure_revisions",
         "viewpoint_revisions",
         "viewpoint_proposition_units",
         "viewpoint_proposition_unit_links",
@@ -897,7 +900,32 @@ def validate_foundation_change_set(
     decisions = payloads("viewpoint_identity_decisions")
     ledgers = payloads("viewpoint_resolution_ledgers")
     reports = payloads("viewpoint_quality_reports")
+    structures = payloads("viewpoint_structures")
+    structure_revisions = payloads("viewpoint_structure_revisions")
     findings: list[str] = []
+
+    # A structure organises approved viewpoints. Every focal pin must resolve to
+    # a real revision, or the centre would cite something the Registry cannot
+    # show; a structure whose current revision is missing is worse than none.
+    for structure_id, structure in structures.items():
+        current = str(structure.get("current_revision_id") or "")
+        if current not in structure_revisions:
+            findings.append(f"{structure_id}: current structure revision {current} is missing")
+        else:
+            owner = str(structure_revisions[current].get("structure_id") or "")
+            if owner != structure_id:
+                findings.append(
+                    f"{structure_id}: current revision {current} belongs to {owner}"
+                )
+    for revision_id, revision in structure_revisions.items():
+        if str(revision.get("structure_id") or "") not in structures:
+            findings.append(f"{revision_id}: structure {revision.get('structure_id')} is missing")
+        for focal in revision.get("focal_viewpoints") or []:
+            pinned = str(focal.get("viewpoint_revision_id") or "")
+            if pinned not in revisions:
+                findings.append(
+                    f"{revision_id}: focal viewpoint revision {pinned} is not in the Registry"
+                )
 
     for snapshot_id, snapshot in normalized.get("viewpoint_coverage_snapshots", {}).items():
         serialized_sources = list(snapshot.get("sources") or [])

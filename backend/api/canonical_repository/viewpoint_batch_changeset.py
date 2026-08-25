@@ -18,8 +18,11 @@ from .knowledge_models import (
     ViewpointIdentityCandidateRecord,
     ViewpointIdentityDecisionRecord,
     ViewpointPropositionSignature,
+    ViewpointRelationRecord,
     ViewpointRevisionRecord,
     ViewpointScope,
+    ViewpointStructureRecord,
+    ViewpointStructureRevisionRecord,
 )
 from .viewpoint_batch_resolution import (
     CanonicalViewpointProposalResponse,
@@ -135,12 +138,19 @@ def compile_cvp_batch_package(
         for component in decision.components:
             if component.disposition not in LINK_TYPES:
                 continue
-            if component.disposition == "new_viewpoint":
+            # support/qualification/tension may attach to a viewpoint this same
+            # batch is creating, in which case they group under its local key and
+            # resolve to the allocated CVP id in the same transaction.
+            if component.local_new_viewpoint_key:
                 target = ("new", str(component.local_new_viewpoint_key))
             else:
                 target = ("existing", str(component.target_viewpoint_revision_id))
             grouped[target].append((claim, component))
 
+    # local key or existing revision -> the ids this transaction allocates,
+    # so relations and structures can point at viewpoints created in the same
+    # ChangeSet without a second apply.
+    resolved_targets: dict[tuple[str, str], tuple[str, str]] = {}
     candidates_out: list[dict[str, Any]] = []
     decisions_out: list[dict[str, Any]] = []
     viewpoints_out: list[dict[str, Any]] = []
@@ -208,6 +218,8 @@ def compile_cvp_batch_package(
             signature = ViewpointPropositionSignature.model_validate(
                 context["proposition_signature"]
             )
+
+        resolved_targets[target] = (viewpoint_id, revision_id)
 
         candidate_identity = {
             "claims": candidate_claim_ids,
@@ -387,6 +399,80 @@ def compile_cvp_batch_package(
             )
             links_out.append(link.model_dump(mode="json"))
 
+    def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
+        ids = resolved_targets.get(endpoint)
+        if ids is None:
+            raise CvpBatchChangeSetError(
+                f"{endpoint[1]} has no viewpoint in this ChangeSet"
+            )
+        return ids
+
+    relations_out: list[dict[str, Any]] = []
+    for relation in proposal.viewpoint_relations:
+        source, target = relation.endpoints()
+        source_viewpoint_id, source_revision_id = _resolve(source)
+        target_viewpoint_id, target_revision_id = _resolve(target)
+        relation_seed = {
+            "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
+            "batch_id": proposal.batch_id,
+            "source": source_revision_id,
+            "target": target_revision_id,
+            "relation_type": relation.relation_type,
+        }
+        relations_out.append(
+            ViewpointRelationRecord(
+                viewpoint_relation_id=f"VREL-{sha256_json(relation_seed)[:20]}",
+                source_viewpoint_id=source_viewpoint_id,
+                target_viewpoint_id=target_viewpoint_id,
+                validated_source_viewpoint_revision_id=source_revision_id,
+                validated_target_viewpoint_revision_id=target_revision_id,
+                relation_type=relation.relation_type,
+                reason=relation.reason,
+                effective_state="active",
+                review_status="system_approved",
+            ).model_dump(mode="json")
+        )
+
+    structures_out: list[dict[str, Any]] = []
+    structure_revisions_out: list[dict[str, Any]] = []
+    for structure in proposal.structures:
+        focal = [
+            {
+                "viewpoint_revision_id": _resolve(item.endpoint())[1],
+                "structure_role": item.structure_role,
+            }
+            for item in structure.focal
+        ]
+        structure_seed = {
+            "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
+            "batch_id": proposal.batch_id,
+            "central_synthesis": structure.central_synthesis,
+            "focal": focal,
+        }
+        structure_id = f"VS-{sha256_json(structure_seed)[:20]}"
+        revision_seed = {"structure_id": structure_id, **structure_seed}
+        structure_revision_id = f"VSR-{sha256_json(revision_seed)[:20]}"
+        structures_out.append(
+            ViewpointStructureRecord(
+                structure_id=structure_id,
+                current_revision_id=structure_revision_id,
+                effective_state="active",
+                review_status="system_approved",
+            ).model_dump(mode="json")
+        )
+        structure_revisions_out.append(
+            ViewpointStructureRevisionRecord(
+                structure_revision_id=structure_revision_id,
+                structure_id=structure_id,
+                revision_number=1,
+                central_synthesis=structure.central_synthesis,
+                focal_viewpoints=focal,
+                unresolved_items=structure.unresolved_items,
+                scope_manifest_sha256=scope_manifest_sha256,
+                review_status="system_approved",
+            ).model_dump(mode="json")
+        )
+
     package_identity = {
         "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
         "batch_id": proposal.batch_id,
@@ -408,6 +494,15 @@ def compile_cvp_batch_package(
         ),
         "viewpoint_revisions": sorted(
             revisions_out, key=lambda item: item["viewpoint_revision_id"]
+        ),
+        "viewpoint_relations": sorted(
+            relations_out, key=lambda item: item["viewpoint_relation_id"]
+        ),
+        "viewpoint_structures": sorted(
+            structures_out, key=lambda item: item["structure_id"]
+        ),
+        "viewpoint_structure_revisions": sorted(
+            structure_revisions_out, key=lambda item: item["structure_revision_id"]
         ),
         "viewpoint_claim_links": sorted(
             links_out, key=lambda item: item["viewpoint_claim_link_id"]
