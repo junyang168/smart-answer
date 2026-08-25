@@ -59,7 +59,11 @@
 | [母题—子专题—篇章段落自动发现与双模型复核 v1](./20-knowledge/topic_structure_discovery_workflow_v1.md) | 主题层级怎样从主张与关系里长出来 |
 | [PostgreSQL 共享知识主库 v1](./20-knowledge/postgresql_authoring_store_v1.md) | 谁是编辑权威，ChangeSet 怎么写入 |
 | [文库 Functional Specification](./20-knowledge/exegesis_topic_repository_functional_spec.md) | 面向读者的文库：canonical unit、圣经/主题索引、来源可追溯 |
-| [文库 Technical Specification](./20-knowledge/exegesis_topic_repository_tech_spec.md) | 文库的实现架构、schema 与路由 |
+| [文库 Technical Specification](./20-knowledge/repository-tech-spec/README.md) | 文库的实现架构、存储布局与标识符。原为一份 1,994 行文档，已拆成五个： |
+| &nbsp;&nbsp;└ [Data Models](./20-knowledge/repository-tech-spec/data-models.md) | 23 个存储记录类型，开头有速查表 |
+| &nbsp;&nbsp;└ [Compiler & Read Model](./20-knowledge/repository-tech-spec/compiler.md) | 来源怎样变成可查询状态，以及什么会让它失效 |
+| &nbsp;&nbsp;└ [API & UI](./20-knowledge/repository-tech-spec/api-and-ui.md) | 对外暴露的接口、前端、来源定位与权限 |
+| &nbsp;&nbsp;└ [Delivery](./20-knowledge/repository-tech-spec/delivery.md) | 可观察性、测试、实施阶段、部署与验收 |
 
 ## 30-authoring —— 写文章引擎
 
@@ -104,7 +108,7 @@
 
 保留供审计，**不代表当前做法**。详见各文件头部的状态说明。
 
-[候选基线 v2](./archive/candidate_baseline_v2.md)（已由 v3 取代）· [全语料第一遍普查发现 v1](./archive/full_corpus_survey_findings_v1.md)（111 篇阶段的历史结果）· [代表样本普查 v1](./archive/corpus_survey_sample_v1.md) · [205 篇总体设计验证 v1](./archive/full_corpus_205_design_validation_v1.md) · [205 篇 17 个候选归组结构审核 v1](./archive/candidate_group_review_205_v1.md) · [第三、第四讲多用途验证规范 v1](./archive/two_lecture_multi_use_validation_spec_v1.md) · [双轴纵向验证 v1](./archive/dual_axis_vertical_validation_v1.md) · [太16:13-20 写作诊断 v1](./archive/matt16-13-20_writing_diagnostic_v1.md) · [数据权威与路径迁移审计 2026-08-16](./archive/data_authority_and_path_migration_audit_2026-08-16.md) · [实施进度日志 2026-08](./archive/implementation_progress_log_2026-08.md) · [实施验证记录 2026-08](./archive/implementation_validation_notes_2026-08.md)
+[候选基线 v2](./archive/candidate_baseline_v2.md)（已由 v3 取代）· [全语料第一遍普查发现 v1](./archive/full_corpus_survey_findings_v1.md)（111 篇阶段的历史结果）· [代表样本普查 v1](./archive/corpus_survey_sample_v1.md) · [205 篇总体设计验证 v1](./archive/full_corpus_205_design_validation_v1.md) · [205 篇 17 个候选归组结构审核 v1](./archive/candidate_group_review_205_v1.md) · [第三、第四讲多用途验证规范 v1](./archive/two_lecture_multi_use_validation_spec_v1.md) · [双轴纵向验证 v1](./archive/dual_axis_vertical_validation_v1.md) · [太16:13-20 写作诊断 v1](./archive/matt16-13-20_writing_diagnostic_v1.md) · [数据权威与路径迁移审计 2026-08-16](./archive/data_authority_and_path_migration_audit_2026-08-16.md) · [实施进度日志 2026-08](./archive/implementation_progress_log_2026-08.md) · [实施验证记录 2026-08](./archive/implementation_validation_notes_2026-08.md) · [文库 TS 实施状态 2026-08](./archive/repository_tech_spec_implementation_status_2026-08.md)
 
 ## 文档边界
 

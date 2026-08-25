@@ -104,11 +104,11 @@ Functional behavior:
 - Intelligent QA must distinguish the professor's explicit claims, reasoning conclusions, opposed views, editorial synthesis, pending fact checks, and insufficient evidence, and must resolve every public answer to approved exact sources.
 - Detailed specifications live in:
   - `docs/wang-knowledge-platform/README.md`
-  - `docs/wang-knowledge-platform/project_mission_statement.md`
-  - `docs/wang-knowledge-platform/knowledge_platform_design.md`
-  - `docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md`
-  - `docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md`
-  - `docs/wang-knowledge-platform/sermon_search_functional_spec.md`
+  - `docs/wang-knowledge-platform/00-overview/project_mission_statement.md`
+  - `docs/wang-knowledge-platform/00-overview/knowledge_platform_design.md`
+  - `docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_functional_spec.md`
+  - `docs/wang-knowledge-platform/20-knowledge/repository-tech-spec/`
+  - `docs/wang-knowledge-platform/40-qa-search/sermon_search_functional_spec.md`
 
 ## Full Articles
 
@@ -249,7 +249,7 @@ Functional behavior:
 - Current records are delivery metadata only. Target knowledge-managed records link one central question and a minimum complete argument to an approved Composition Plan, active knowledge snapshot, claims, relations, exact citations, and ProductDependencies.
 - Two source modes are supported by the target design: an exact Dr. Wang audio/video excerpt with transcript context, and a clearly attributed editorial synthesis assembled from reviewed claims across one or more sermons.
 - A micro-sermon is not a mechanically truncated manuscript. It must preserve material premises and qualifications, link to the complete sermon and deeper exegesis/topic material, and return to review when an upstream dependency becomes stale or invalidated.
-- Full design and rollout details are documented in `docs/wang-knowledge-platform/micro_sermon_product_use_case.md`.
+- Full design and rollout details are documented in `docs/wang-knowledge-platform/50-micro-sermon/micro_sermon_product_use_case.md`.
 
 ## Depth Of Faith
 
