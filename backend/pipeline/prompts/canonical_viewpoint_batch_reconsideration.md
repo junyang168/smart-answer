@@ -61,9 +61,14 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 - `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
 - `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
 
-**撤回之后必须补一条 relation。** 该候选之所以提出修订，是因为身份复核判定它与那条既有 viewpoint 讲的是同一件事；措辞改不动，不等于这个判断消失了。若该候选最终仍作为独立 viewpoint 留下，就必须在 `relation_patches` 里加一条边，连接它与那条既有 viewpoint（`specializes` 通常合适：候选是既有观点在更窄经文范围上的具体化）。
+**撤回之后必须补一条 relation。** 该候选之所以提出修订，是因为身份复核判定它与那条既有 viewpoint 讲的是同一件事；措辞改不动，不等于这个判断消失了。若该候选最终仍作为独立 viewpoint 留下，就要把这个联系记下来。两条路：
 
-不补这条边，整批不通过——留下两条互不相识的近邻，正是这一步要防的事。
+1. **一条 relation**（`specializes` 常见：候选是既有观点在更窄经文范围上的具体化）；
+2. **同属一个 structure**——把那条既有 viewpoint 也列进本批 structure 的 focal。
+
+**所有 `relation_type` 都是有方向的**（谁应用谁、谁延伸谁）。如果两条其实是同一批评在不同经文论点下的**平行结论**——互为兄弟而非父子——那么没有任何类型说得通，硬挑一个就是编造。这种情形用第 2 条路：structure 才是「这些属于一起」的地方。
+
+两条路都走不通，就让批次停下来交给人判。**不要为了让检查通过而编一条边**——复核会以 `REL_NOT_LOAD_BEARING` 把它扔掉，而那时它已经写进库了。
 
 **复核员判 `correct` 的修订，通常只能撤回。** 因为它判 `correct` 时正在否定那个措辞，`confirmed_dependent_ids` 必然是空的——没有人对着新措辞确认过被牵动的既有记录（claim link、relation、route revision）。你照要求改好措辞，那些记录仍然无人复核，ChangeSet 会拒绝整批。
 
