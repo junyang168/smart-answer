@@ -6,6 +6,27 @@
 > **與代碼對齊**：未核對
 > **權威範圍**：有來源依據的搜索與問答功能規範。
 
+### Contents
+
+- [1. Purpose](#1-purpose)
+- [2. Scope](#2-scope)
+- [3. Users](#3-users)
+- [4. Knowledge and Corpus Model](#4-knowledge-and-corpus-model)
+- [5. Primary Workflows](#5-primary-workflows)
+- [6. UI Requirements](#6-ui-requirements)
+- [7. Search Modes](#7-search-modes)
+- [8. Retrieval Requirements](#8-retrieval-requirements)
+- [9. Answer Generation](#9-answer-generation)
+- [10. Indexing and Storage](#10-indexing-and-storage)
+- [11. API Requirements](#11-api-requirements)
+- [12. Performance Requirements](#12-performance-requirements)
+- [13. Security and Privacy](#13-security-and-privacy)
+- [14. Observability](#14-observability)
+- [15. Acceptance Criteria](#15-acceptance-criteria)
+- [16. Future Enhancements](#16-future-enhancements)
+- [17. Delivery Status and Migration Policy](#17-delivery-status-and-migration-policy)
+
+
 ## 1. Purpose
 
 The Knowledge-Grounded Sermon Search and QA module lets users ask Chinese natural-language questions about Dr. Wang's biblical interpretation and teaching. It returns a direct answer whose attribution, reasoning path, qualifications, and exact original sources can be inspected.
@@ -94,7 +115,7 @@ Important corpus assumptions:
 
 ## 5. Primary Workflows
 
-### 5.1. Topic QA
+### 5.1 Topic QA
 
 Example: `什麼是耶和華的僕人？`
 
@@ -106,7 +127,7 @@ Expected behavior:
 - Render citations as numbered references such as `[1]`, not internal source IDs.
 - Show supporting quotes below the answer.
 
-### 5.2. Passage Interpretation
+### 5.2 Passage Interpretation
 
 Example: `如何解釋太 16:19？`
 
@@ -117,7 +138,7 @@ Expected behavior:
 - Include relevant topical explanation when the passage is discussed theologically.
 - Explain the passage from the sermon manuscript evidence, not from general Bible knowledge alone.
 
-### 5.3. Document or Chapter Coverage
+### 5.3 Document or Chapter Coverage
 
 Example: `教授對 16 章釋經都覆蓋了那些 verses？`
 
@@ -132,15 +153,15 @@ Expected behavior:
   - `16 章 - 彌賽亞的身分、性質與捨己的呼召`
   - `16 章 - 靈、魂、體的整體性`
 
-### 5.4. Example Questions
+### 5.4 Example Questions
 
 The UI may present suggested question chips. Selecting a chip runs the same search flow as typing the question manually.
 
-### 5.5. Refresh and Share
+### 5.5 Refresh and Share
 
 When a user runs a search, the page URL stores the query and mode. Refreshing the page reloads the same search state and reruns the query.
 
-### 5.6. Refresh a Series Index
+### 5.6 Refresh a Series Index
 
 After publishing or editing a manuscript, an Editor can select **Refresh Index** on the Series administration page.
 
@@ -153,7 +174,7 @@ Expected behavior:
 - Only one refresh runs at a time.
 - Successful completion makes newly extracted passage topics available to the public `按章節` view and concept topics available to `按主題`.
 
-### 5.7. Original-Language and Translation QA
+### 5.7 Original-Language and Translation QA
 
 Example: `王教授为什么认为和合本这里翻译错了？`
 
@@ -166,7 +187,7 @@ Expected behavior:
 - Display faithful-representation status and, when available, separate external fact-check status.
 - If no reviewed judgment exists, return manuscript excerpts as provisional search results rather than inventing a linguistic conclusion.
 
-### 5.8. Teaching-Development Comparison
+### 5.8 Teaching-Development Comparison
 
 Example: `王教授在不同讲道中怎样发展“人子”的论述？`
 
@@ -177,7 +198,7 @@ Expected behavior:
 - Avoid manufacturing a change in position merely because wording differs.
 - Cite each stage independently and identify unresolved editorial judgments.
 
-### 5.9. Source-Location Question
+### 5.9 Source-Location Question
 
 Example: `教授在哪些讲道中提到宗主国与附庸国之约？`
 
@@ -187,7 +208,7 @@ Expected behavior:
 - Return sermon or notes titles, exact excerpts, and playable time or page links.
 - Group repeated mentions without hiding distinct contexts.
 
-### 5.10. Insufficient Evidence
+### 5.10 Insufficient Evidence
 
 When the reviewed evidence does not answer the question, the system says so. It may list nearby passages, candidate excerpts, or unanswered questions according to the user's access scope, but it must not convert topical similarity into an answer.
 
@@ -227,7 +248,7 @@ Citation display rules:
 
 ## 7. Search Modes
 
-### 7.1. Normal Mode
+### 7.1 Normal Mode
 
 Normal mode is optimized for interactive use.
 
@@ -245,7 +266,7 @@ Target use cases:
 - Single-passage interpretation questions.
 - Most user-facing searches.
 
-### 7.2. Deep Mode
+### 7.2 Deep Mode
 
 Deep mode is optimized for harder research questions.
 
@@ -266,7 +287,7 @@ Target use cases:
 
 Retrieval is a staged hybrid process. Vector similarity improves recall but cannot establish authorship, truth, review state, or a logical relationship.
 
-### 8.1. Candidate recall
+### 8.1 Candidate recall
 
 The retriever combines:
 
@@ -284,7 +305,7 @@ The retriever combines:
 
 The retriever must not assume every source unit has a passage. Chunks without canonical references remain eligible through topic, keyword, and semantic search.
 
-### 8.2. Claim and argument selection
+### 8.2 Claim and argument selection
 
 After recall, the system:
 
@@ -298,7 +319,7 @@ After recall, the system:
 
 The bundle records selected claim, relation, citation, and unit IDs, attribution labels, unresolved items, access scope, and active knowledge build. The prose model cannot add a new claim to the bundle.
 
-### 8.3. Permission filtering
+### 8.3 Permission filtering
 
 Public retrieval uses approved public records in the active build only. Internal research retrieval may use candidate, unpublished, and editorial records for authenticated editors, but the response visibly labels every non-approved item. Removing a restricted node also removes relations or conclusions that require it; the system must not leave a dangling inference that reveals restricted material.
 
@@ -527,7 +548,7 @@ The trace is primarily for developers and operators; the UI may show it only in 
 
 ## 15. Acceptance Criteria
 
-### Topic QA
+### 15.1 Topic QA
 
 Given the question `什麼是耶和華的僕人？`:
 
@@ -536,7 +557,7 @@ Given the question `什麼是耶和華的僕人？`:
 - No internal source IDs are visible in the final rendered answer.
 - Source cards and quotes are shown.
 
-### Passage QA
+### 15.2 Passage QA
 
 Given the question `如何解釋太 16:19？`:
 
@@ -544,7 +565,7 @@ Given the question `如何解釋太 16:19？`:
 - The answer explains the passage from the manuscript evidence.
 - Sources are visible before the full answer is complete.
 
-### Chapter Coverage
+### 15.3 Chapter Coverage
 
 Given the question `教授對 16 章釋經都覆蓋了那些 verses？`:
 
@@ -553,14 +574,14 @@ Given the question `教授對 16 章釋經都覆蓋了那些 verses？`:
 - The answer includes coverage from the primary chapter document and related topical Matthew 16 documents.
 - Cross references are distinguished from direct Matthew 16 coverage.
 
-### Refresh Persistence
+### 15.4 Refresh Persistence
 
 Given a completed search:
 
 - Refreshing the page restores the query from the URL.
 - The search reruns or restores equivalent visible results.
 
-### Series Index Refresh
+### 15.5 Series Index Refresh
 
 Given a newly checked-in transcript with an empty `bible_verse` field:
 
@@ -569,7 +590,7 @@ Given a newly checked-in transcript with an empty `bible_verse` field:
 - Supporting cross-references are not promoted to primary passage topics.
 - The new manuscript becomes visible in chapter/topic navigation and searchable QA after the job completes.
 
-### Streaming
+### 15.6 Streaming
 
 Given a source result associated with a published canonical unit:
 
@@ -583,7 +604,7 @@ Given a slow LLM response:
 - The browser shows source results before the final answer is complete.
 - Answer text appears incrementally through streaming events.
 
-### Attribution Safety
+### 15.7 Attribution Safety
 
 Given a source passage in which the professor describes and rejects another interpretation:
 
@@ -591,7 +612,7 @@ Given a source passage in which the professor describes and rejects another inte
 - It is not summarized as the professor's own claim.
 - The professor's response and its support are cited separately.
 
-### Unanswered Question
+### 15.8 Unanswered Question
 
 Given a question raised in a sermon without a reviewed answer:
 
@@ -599,7 +620,7 @@ Given a question raised in a sermon without a reviewed answer:
 - Topically similar manuscript text is not promoted into an answer.
 - Internal users may see candidate nearby evidence with its review state; public users do not see unpublished material.
 
-### Original-Language Question
+### 15.9 Original-Language Question
 
 Given a question about a translation the professor criticizes:
 
@@ -607,7 +628,7 @@ Given a question about a translation the professor criticizes:
 - Faithful-representation state and external fact-check state are not conflated.
 - A pending fact check is not displayed as a confirmed linguistic fact.
 
-### Cross-Sermon Comparison
+### 15.10 Cross-Sermon Comparison
 
 Given a question about how a teaching develops over time:
 
@@ -615,14 +636,14 @@ Given a question about how a teaching develops over time:
 - Repetition, extension, qualification, tension, and supersession are distinguished.
 - Different wording alone does not create a false doctrinal change.
 
-### Permission Isolation
+### 15.11 Permission Isolation
 
 Given a public question whose strongest evidence is restricted:
 
 - Restricted claims and citations do not appear in the answer, sources, counts, related questions, or trace.
 - The answer reports insufficient public evidence if the remaining public bundle cannot support a response.
 
-### Evidence Reproducibility
+### 15.12 Evidence Reproducibility
 
 Given the same question, filters, access scope, and active knowledge build:
 
