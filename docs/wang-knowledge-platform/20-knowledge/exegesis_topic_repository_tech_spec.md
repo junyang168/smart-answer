@@ -1,5 +1,11 @@
 # Technical Specification: Exegesis and Topic Repository
 
+> **读者**：Developer
+> **类型**：规范
+> **状态**：当前
+> **与代码对齐**：未核对
+> **权威范围**：文库的实现架构、数据模型、API 与失效规则。
+
 > This specification implements the goals described in the [Project Mission Statement](../00-overview/project_mission_statement.md). The Mission Statement is authoritative for why the repository exists and how original teaching, claims, arguments, recurring thought, exegesis, and topic articles relate.
 >
 > The cross-product claim graph, original-language model, QA contract, permissions, and evolution policy are defined in [王守仁教授释经与思想知识平台设计](../00-overview/knowledge_platform_design.md).

@@ -1,5 +1,11 @@
 # 王守仁教授学术思想整理：核心 Use Case
 
+> **读者**：神学编辑
+> **类型**：说明
+> **状态**：当前
+> **与代码对齐**：不适用
+> **权威范围**：学术思想整理这一 use case 的目标与约束。不表示候选资料已全部通过人工审核。
+
 > 状态：产品目标与设计约束。本文定义“整理王教授学术思想”如何使用共享知识模型；它不是对教授思想内容的预设分类，也不表示当前候选资料已经全部通过人工审核。
 
 本 use case 的观点身份、跨讲 membership、ArgumentRoute、覆盖披露、时间 revision 与产品消费规则，以 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../canonical_viewpoint_registry_design_v1.md) 为 architecture authority。

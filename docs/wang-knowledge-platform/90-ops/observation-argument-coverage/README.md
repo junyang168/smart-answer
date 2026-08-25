@@ -1,5 +1,11 @@
 # observation 進入論證層的覆蓋率
 
+> **讀者**：Developer
+> **類型**：記錄
+> **狀態**：由代碼生成，隨重跑更新
+> **與代碼對齊**：不適用
+> **權威範圍**：無。
+
 報告本身**不進版本控制**：review queue 逐條列出教授的觀察原文，屬於教授材料,依專案規則不得進入 Git。
 
 產出位置：`$DATA_BASE_DIR/wang-knowledge-platform/staging/reports/observation-argument-coverage/`

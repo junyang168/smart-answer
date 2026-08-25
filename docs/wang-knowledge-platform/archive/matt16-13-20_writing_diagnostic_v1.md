@@ -1,5 +1,11 @@
 # 太 16:13–20 現稿寫作診斷 v1
 
+> **讀者**：神學編輯
+> **類型**：記錄
+> **狀態**：歷史記錄，綁定當時的稿件 SHA
+> **與代碼對齊**：不適用
+> **權威範圍**：無。
+
 評估對象：`$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/DRAFT-M16-002-V1/trial-manuscript-matt16-13-20.md` 的現行發布副本（評估時 SHA-256：`f38dacc7ee67ee83b6f6d44b711259d363c497660dd1e37e413153e72574bbaa`）。本診斷以讀者可見段落為單位；隱藏 provenance 註解不列作正文問題。結論只針對寫作與編排，不撤銷既有技術 audit 的通過結果。
 
 ## 一、總評

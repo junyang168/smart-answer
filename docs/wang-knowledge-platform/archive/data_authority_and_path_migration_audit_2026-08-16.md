@@ -1,5 +1,11 @@
 # Wang 数据权威与路径迁移审计（2026-08-16）
 
+> **读者**：Developer
+> **类型**：记录
+> **状态**：历史记录（2026-08-16 一次迁移）
+> **与代码对齐**：不适用
+> **权威范围**：无。
+
 ## 结论
 
 PostgreSQL `smart_answer_knowledge` 是知识编辑主库；`output/claim-layer` 不是完整、可靠或自包含的第二主库。本轮已建立 `$DATA_BASE_DIR/wang-knowledge-platform/`，并以复制方式保存 repository、compiled snapshot、catalog projection 与 staging。在完整对账、部署、归档、恢复演练及用户明确批准后，三个 legacy 范围已永久删除。

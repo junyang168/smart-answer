@@ -1,5 +1,11 @@
 # Matthew exposition current authoring session
 
+> **讀者**：Developer
+> **類型**：記錄
+> **狀態**：當前工作狀態，隨每次交付更新（AGENTS.md 必讀）
+> **與代碼對齊**：不適用
+> **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
+
 Updated: 2026-08-23 (America/Chicago)
 
 ## Project boundary

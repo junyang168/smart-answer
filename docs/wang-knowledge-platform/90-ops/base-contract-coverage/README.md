@@ -1,5 +1,11 @@
 # base contract 對母本覆蓋率
 
+> **讀者**：Developer
+> **類型**：記錄
+> **狀態**：由代碼生成，隨重跑更新
+> **與代碼對齊**：不適用
+> **權威範圍**：無。
+
 報告本身**不進版本控制**：它逐句列出母本內容，屬於教授材料，依專案規則不得進入 Git。
 
 產出位置：`$DATA_BASE_DIR/wang-knowledge-platform/staging/reports/base-contract-coverage/`

@@ -1,5 +1,11 @@
 # Functional Specification: Exegesis and Topic Repository
 
+> **讀者**：Solution architect
+> **類型**：規範
+> **狀態**：當前
+> **與代碼對齊**：未核對
+> **權威範圍**：面向讀者的文庫功能：canonical unit、聖經與主題索引、來源可追溯。受總體設計約束。
+
 > Project mission and plain-language explanation: [王守仁教授釋經與專題講論文庫 Mission Statement](../00-overview/project_mission_statement.md)
 >
 > Cross-product knowledge architecture, argument graph, original-language records, QA contract, permissions, and evolution rules: [王守仁教授释经与思想知识平台设计](../00-overview/knowledge_platform_design.md)

@@ -1,5 +1,11 @@
 # 共享知识模型 v1
 
+> **读者**：Solution architect
+> **类型**：规范
+> **状态**：当前
+> **与代码对齐**：未核对
+> **权威范围**：Claim、EvidenceStep、Relation、TopicNode 等共享对象的意义、边界与审核规则。CanonicalViewpoint 与 ArgumentRoute 见 CVP 设计。
+
 ## 一、目的
 
 本模型保存的是王守仁教授在不同讲道中的问题、观察、主张、证据步骤及其关系。它不是某一篇文章的目录，也不以释经文章、专题文章或问答集中的任何一种为中心。

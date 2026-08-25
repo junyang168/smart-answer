@@ -1,5 +1,11 @@
 # Functional Specification: Knowledge-Grounded Sermon Search and QA
 
+> **讀者**：Solution architect
+> **類型**：規範
+> **狀態**：當前
+> **與代碼對齊**：未核對
+> **權威範圍**：有來源依據的搜索與問答功能規範。
+
 ## 1. Purpose
 
 The Knowledge-Grounded Sermon Search and QA module lets users ask Chinese natural-language questions about Dr. Wang's biblical interpretation and teaching. It returns a direct answer whose attribution, reasoning path, qualifications, and exact original sources can be inspected.

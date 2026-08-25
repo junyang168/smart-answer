@@ -1,5 +1,11 @@
 # 王守仁教授释经与思想知识平台设计
 
+> **读者**：Solution architect
+> **类型**：规范
+> **状态**：当前
+> **与代码对齐**：未核对
+> **权威范围**：平台目标架构、知识边界与不可倒置的上下游治理顺序。实现与本文冲突时先修订设计并记录决定。
+
 > 状态：目标架构与产品设计。本文补充 [Project Mission Statement](./project_mission_statement.md)，并约束 [Exegesis and Topic Repository Functional Specification](../20-knowledge/exegesis_topic_repository_functional_spec.md)、[Technical Specification](../20-knowledge/exegesis_topic_repository_tech_spec.md) 与 [Sermon Search and QA Specification](../40-qa-search/sermon_search_functional_spec.md)。如实现细节与本文的知识边界、来源忠实性或审核原则冲突，应先修订设计并记录决定。
 
 ## 1. 产品定位

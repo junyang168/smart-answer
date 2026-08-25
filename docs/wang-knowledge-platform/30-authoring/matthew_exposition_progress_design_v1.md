@@ -1,5 +1,11 @@
 # 马太福音释经文章处理进度：调查与设计 v1
 
+> **读者**：Developer
+> **类型**：规范
+> **状态**：当前
+> **与代码对齐**：未核对
+> **权威范围**：/admin/wang/matthew-progress 只读进度页的数据模型与边界。
+
 > 状态：第一阶段实现候选，尚未合并或部署。
 > 日期：2026-08-16（America/Chicago）
 > 范围：Wang Knowledge Platform 内部只读管理页面；不生成或修改释经文章正文，不运行 notes-to-sermon fidelity audit，不 push、不 deploy。

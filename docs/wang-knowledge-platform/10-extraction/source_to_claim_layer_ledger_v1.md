@@ -1,5 +1,11 @@
 # 來源逐句對帳與 claim 層完整性 v1
 
+> **讀者**：Developer
+> **類型**：規範
+> **狀態**：當前
+> **與代碼對齊**：未核對
+> **權威範圍**：逐句對帳與 claim 層完整性的定義。本文是該設計的 canonical source。
+
 > 本文件是本設計的 **canonical source**。另有一份排版後的網頁版供分享使用，內容以本文件為準：
 > https://claude.ai/code/artifact/53b1eba7-0b59-4626-a2c5-809396fd076a
 

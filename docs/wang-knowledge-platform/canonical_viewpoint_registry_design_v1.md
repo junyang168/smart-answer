@@ -1,5 +1,11 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
+> **读者**：Solution architect
+> **类型**：规范
+> **状态**：当前（AGENTS.md 必读）
+> **与代码对齐**：未核对
+> **权威范围**：跨讲观点身份、ArgumentRoute、观点关系、覆盖统计及其下游消费行为的 architecture authority。
+
 > 状态：Canonical Viewpoint layer 的规范性 architecture authority；基础 schema、projection、只读 UI 与太 16:18 磐石 POC Registry 已实现。#206 将 resolution 明确为两个协作 job：同一 scope 的 CVP batches 严格串行，每个 batch 完成 atomic apply/readback 后提交 RouteResolutionJob；Route worker 可与下一 CVP batch 并行，并从完整 scope evidence 为该 job 的 current approved CVPs 批量生成、审核和写入 ArgumentRoutes。#209 明确 Topic taxonomy、CVP identity、ArgumentRoute 与来源证据是四种不同关系；Topic grouping 不裁定 CVP identity，经文范围也不冒充 TopicNode。Claim grouping 不得成为 route 或 Topic 的语义边界。旧 recall/signature/atomic promotion artifacts 只保留为历史诊断与语义 regression fixtures，不再是生产必经的领域状态。本文件不授权内容生成或部署。
 > 版本：v1
 > 日期：2026-08-24
