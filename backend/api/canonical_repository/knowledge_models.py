@@ -1211,6 +1211,7 @@ class ViewpointStructureRevisionRecord(StrictViewpointRecord):
     unresolved_items: list[str] = Field(default_factory=list)
     scope_manifest_sha256: str
     supersedes_revision_id: Optional[str] = None
+    review_provenance: Optional[ViewpointGraphReviewProvenance] = None
 
     @model_validator(mode="after")
     def validate_structure_revision(self) -> "ViewpointStructureRevisionRecord":
@@ -1220,6 +1221,33 @@ class ViewpointStructureRevisionRecord(StrictViewpointRecord):
         if self.supersedes_revision_id == self.structure_revision_id:
             raise ValueError("structure revision cannot supersede itself")
         return self
+
+
+class ViewpointGraphReviewProvenance(BaseModel):
+    """Which independent review approved this structure or relation.
+
+    `ViewpointRevisionRecord` has carried this since the beginning; structures
+    and relations were written `system_approved` with nothing to point at, so
+    "who approved this" had no answer for the one object downstream articles
+    quote as what the professor holds.
+
+    Optional on the record, and that is the honest state rather than a gap:
+    a record written before review existed has never been reviewed, and `None`
+    says so. Filling it in is what re-reviewing committed records is for.
+
+    Adding this field is a breaking change for any reader that does not have
+    it, because these models forbid extras and pydantic serializes an optional
+    field as an explicit null -- so the key lands on every newly written record.
+    Twice on 2026-08-25 a field added this way took the production Registry
+    views down. **Merge and deploy this model before anything writes it.**
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_artifact_sha256: str
+    #: The identity decisions this structure or relation was proposed alongside,
+    #: so the batch that produced it is reachable from the record.
+    basis_identity_decision_ids: list[str] = Field(default_factory=list)
 
 
 class ViewpointRelationRecord(StrictViewpointRecord):
@@ -1238,6 +1266,7 @@ class ViewpointRelationRecord(StrictViewpointRecord):
     supporting_claim_ids: list[str] = Field(default_factory=list)
     temporal_assertion: Optional[ViewpointTemporalAssertion] = None
     effective_state: Literal["active", "invalidated", "retired"] = "active"
+    review_provenance: Optional[ViewpointGraphReviewProvenance] = None
 
     @model_validator(mode="after")
     def validate_relation(self) -> "ViewpointRelationRecord":

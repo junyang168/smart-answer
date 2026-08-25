@@ -4490,3 +4490,52 @@ def test_rejected_terminal_component_distinguishes_links_that_reach_elsewhere():
     assert len(findings) == 1
     assert "links only to other viewpoints" in findings[0]
     assert "CVR-OTHER" in findings[0]
+
+
+# --- who approved a structure or relation ---------------------------------------
+
+def test_structure_and_relation_carry_review_provenance():
+    """`system_approved` with nothing to point at answered nobody.
+
+    A structure's `central_synthesis` is what downstream articles quote as the
+    professor's position, and until now the record could not say which review
+    approved it.
+    """
+
+    from backend.api.canonical_repository.knowledge_models import (
+        ViewpointGraphReviewProvenance,
+        ViewpointRelationRecord,
+        ViewpointStructureRevisionRecord,
+    )
+
+    assert "review_provenance" in ViewpointRelationRecord.model_fields
+    assert "review_provenance" in ViewpointStructureRevisionRecord.model_fields
+    assert set(ViewpointGraphReviewProvenance.model_fields) == {
+        "review_artifact_sha256",
+        "basis_identity_decision_ids",
+    }
+
+
+def test_records_written_before_review_existed_still_load():
+    """`None` is the truthful state for them, not a gap to backfill.
+
+    Sixteen structures and relations are committed with no review behind them.
+    A required field would make them unreadable and a fabricated value would
+    claim a review that never happened.
+    """
+
+    from backend.api.canonical_repository.knowledge_models import ViewpointRelationRecord
+
+    record = ViewpointRelationRecord.model_validate(
+        {
+            "viewpoint_relation_id": "VREL-1",
+            "source_viewpoint_id": "CV-1",
+            "target_viewpoint_id": "CV-2",
+            "validated_source_viewpoint_revision_id": "CVR-1",
+            "validated_target_viewpoint_revision_id": "CVR-2",
+            "relation_type": "applies",
+            "reason": "地上执行是天上先定标准的应用。",
+            "review_status": "system_approved",
+        }
+    )
+    assert record.review_provenance is None
