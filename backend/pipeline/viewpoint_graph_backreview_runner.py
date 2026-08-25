@@ -172,16 +172,35 @@ def main() -> int:
         pointer["current_revision_id"] = successor["structure_revision_id"]
         structure_pointer_updates.append(pointer)
 
+    # A relation that did not pass is acted on, not left looking like one that
+    # did. Retyping and retiring are corrections with one answer; a reversed
+    # direction re-decides how two viewpoints stand to each other and stays for
+    # a person.
+    retype = {
+        item["viewpoint_relation_id"]: item["relation_type"]
+        for item in report["retyped_relations"]
+    }
+    retire = set(report["retired_relation_ids"])
+    relations_out: list[dict[str, Any]] = []
+    for item in relations:
+        record_id = str(item["viewpoint_relation_id"])
+        if record_id in approved_relations:
+            relations_out.append({**item, "review_provenance": provenance})
+        elif record_id in retype:
+            relations_out.append(
+                {**item, "relation_type": retype[record_id], "review_provenance": provenance}
+            )
+        elif record_id in retire:
+            relations_out.append(
+                {**item, "effective_state": "retired", "review_provenance": provenance}
+            )
+
     package = {
         "schema_version": "wang_shared_knowledge_v1.3",
         "package_id": f"GRAPH-BACKREVIEW-{report['artifact_sha256'][:20]}",
         "viewpoint_structures": structure_pointer_updates,
         "viewpoint_structure_revisions": structures_out,
-        "viewpoint_relations": [
-            {**item, "review_provenance": provenance}
-            for item in relations
-            if str(item["viewpoint_relation_id"]) in approved_relations
-        ],
+        "viewpoint_relations": relations_out,
     }
     _write_immutable(args.output_dir / "backreview-change-package.json", package)
     plan = store.plan_package(package, source_kind="viewpoint_graph_backreview")
@@ -215,7 +234,12 @@ def main() -> int:
         }
         # Structures are verified at their successor id, which is what the
         # structure now points at; the superseded revision keeps its own state.
-        expected = {str(item["structure_revision_id"]) for item in structures_out} | approved_relations
+        expected = (
+            {str(item["structure_revision_id"]) for item in structures_out}
+            | approved_relations
+            | set(retype)
+            | retire
+        )
         unverified = sorted(
             record_id
             for record_id in expected
@@ -234,6 +258,9 @@ def main() -> int:
         "approved_relations": len(report["approved_viewpoint_relation_ids"]),
         "held_structures": report["held_structure_revision_ids"],
         "held_relations": report["held_viewpoint_relation_ids"],
+        "retyped_relations": report["retyped_relations"],
+        "retired_relations": report["retired_relation_ids"],
+        "needs_human_relations": report["needs_human_relation_ids"],
         "model_calls": calls,
         "wall_seconds": round(seconds, 3),
         "master_data_mutations": mutations,

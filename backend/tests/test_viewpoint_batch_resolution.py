@@ -4843,6 +4843,7 @@ def test_backreview_holds_a_record_whose_structured_answer_is_false():
                     "decision": "pass",
                     "reason": "读下来是后者应用前者，方向记反了。",
                     "direction_correct": False,
+                    "disposition": "needs_human",
                 }
             ]
         ),
@@ -5066,3 +5067,56 @@ def test_sharing_a_structure_counts_as_staying_connected():
     # thing, but I cannot say how" is a person's call, not one to paper over.
     with pytest.raises(BatchResolutionError, match="no relation connects it"):
         validate_consolidation_fallback(consolidation=ruling, proposal=_proposal())
+
+
+def test_backreview_disposition_separates_correction_from_judgment():
+    """Retyping and retiring have one answer; reversing the ends does not.
+
+    The first back-review left its recommendations in prose -- "建议改为
+    extends" -- so nothing could act on them and a rejected edge kept sitting in
+    the Registry looking exactly like an approved one.
+    """
+
+    from backend.api.canonical_repository.viewpoint_graph_backreview import (
+        BackReviewedRelation,
+        validate_backreview,
+    )
+
+    kept = BackReviewedRelation(
+        viewpoint_relation_id="VREL-1",
+        decision="correct",
+        reason="次序没反，但 applies 说不准这条边的内容。",
+        direction_correct=True,
+        disposition="retype",
+        suggested_relation_type="extends",
+    )
+    assert kept.suggested_relation_type == "extends"
+
+    # A reversed direction re-decides how two viewpoints stand to each other,
+    # and the type that follows is a judgment; a batch may not make it.
+    with pytest.raises(Exception, match="reversed direction is for a person"):
+        BackReviewedRelation(
+            viewpoint_relation_id="VREL-2",
+            decision="correct",
+            reason="方向反了。",
+            direction_correct=False,
+            disposition="retype",
+            suggested_relation_type="qualifies",
+        )
+
+    report = validate_backreview(
+        backreview=_backreview(
+            relation_reviews=[
+                {
+                    "viewpoint_relation_id": "VREL-1",
+                    "decision": "reject",
+                    "reason": "不承重，且没有任何准确的类型可换。",
+                    "direction_correct": True,
+                    "disposition": "retire",
+                }
+            ]
+        ),
+        packet=_backreview_packet(),
+    )
+    assert report["retired_relation_ids"] == ["VREL-1"]
+    assert report["approved_viewpoint_relation_ids"] == []
