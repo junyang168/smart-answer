@@ -546,6 +546,19 @@ class AdminViewpointProjectionCompiler:
         for dep in self.records["product_dependencies"]:
             deps_by_claim[dep.claim_id].add((dep.consumer_kind, dep.consumer_id))
         sources_by_claim = self._source_ids_by_claim()
+        structure_revisions = {
+            item.structure_revision_id: item
+            for item in self.records["viewpoint_structure_revisions"]
+        }
+        role_by_revision: dict[str, str] = {}
+        for structure in self.records["viewpoint_structures"]:
+            if structure.effective_state != "active":
+                continue
+            structure_revision = structure_revisions.get(structure.current_revision_id)
+            if structure_revision is None:
+                continue
+            for entry in structure_revision.focal_viewpoints:
+                role_by_revision.setdefault(entry.viewpoint_revision_id, entry.structure_role)
         rows: list[dict[str, Any]] = []
         for viewpoint in self.records["canonical_viewpoints"]:
             revision = revisions.get(viewpoint.current_revision_id)
@@ -616,6 +629,10 @@ class AdminViewpointProjectionCompiler:
                 "viewpoint_id": viewpoint.viewpoint_id,
                 "viewpoint_revision_id": revision.viewpoint_revision_id,
                 "core_proposition": revision.core_proposition,
+                # Without the role the listing is the flat bag of viewpoints this
+                # layer exists to replace: the reader cannot tell the centre from
+                # an argument that only serves it.
+                "structure_role": role_by_revision.get(revision.viewpoint_revision_id),
                 "wording_label": "编辑归一化（非逐字引文）",
                 "identity_status": viewpoint.identity_status,
                 "review_status": revision.review_status,
@@ -631,7 +648,25 @@ class AdminViewpointProjectionCompiler:
                 "product_impact_count": len(products),
                 "quality_blocked": state["quality"].eligibility_decision == "fail" if state["quality"] else None,
             })
-        rows.sort(key=lambda item: (item["core_proposition"], item["viewpoint_id"]))
+        # Centre first, then what identifies it, then what only serves it. Sorting
+        # by proposition text buries the central claim wherever its wording falls.
+        role_rank = {
+            role: index
+            for index, role in enumerate(
+                (
+                    "central_claim", "negative_boundary", "positive_identification",
+                    "supporting_conclusion", "qualification", "tension_side",
+                    "application", "methodological_boundary",
+                )
+            )
+        }
+        rows.sort(
+            key=lambda item: (
+                role_rank.get(item.get("structure_role") or "", len(role_rank)),
+                item["core_proposition"],
+                item["viewpoint_id"],
+            )
+        )
         offset = _read_cursor(cursor, state["registry_snapshot_id"])
         page = rows[offset:offset + limit]
         next_cursor = _cursor(state["registry_snapshot_id"], offset + limit) if offset + limit < len(rows) else None
@@ -800,9 +835,27 @@ class AdminViewpointProjectionCompiler:
             ],
             key=lambda item: item.viewpoint_relation_id,
         ):
+            # A relation reads source-first: "A applies B" means A is an
+            # application of B. Two opaque ids cannot say which end the reader
+            # is standing on, so name the counterpart and this viewpoint's side.
+            outgoing = relation.source_viewpoint_id == viewpoint_id
+            counterpart_id = (
+                relation.target_viewpoint_id if outgoing else relation.source_viewpoint_id
+            )
+            counterpart_revision = (
+                relation.validated_target_viewpoint_revision_id
+                if outgoing
+                else relation.validated_source_viewpoint_revision_id
+            )
+            counterpart = idx["viewpoint_revisions"].get(counterpart_revision)
             relations.append({
                 "relation_id": relation.viewpoint_relation_id,
                 "relation_type": relation.relation_type,
+                "direction": "outgoing" if outgoing else "incoming",
+                "counterpart_viewpoint_id": counterpart_id,
+                "counterpart_core_proposition": (
+                    counterpart.core_proposition if counterpart else None
+                ),
                 "from_viewpoint_id": relation.source_viewpoint_id,
                 "to_viewpoint_id": relation.target_viewpoint_id,
                 "claim_id": relation.supporting_claim_ids[0] if relation.supporting_claim_ids else None,
@@ -977,10 +1030,45 @@ class AdminViewpointProjectionCompiler:
                 *[{"from": viewpoint_id, "to": item["to_viewpoint_id"], "kind": item["relation_type"]} for item in relations if item["to_viewpoint_id"]],
             ],
         }
+        # Which reviewed centre this viewpoint serves, and as what. Without it a
+        # viewpoint page shows a proposition with no sense of the argument it
+        # belongs to -- the centre would live only on the structures page.
+        structures_out = []
+        structure_revisions = {
+            item.structure_revision_id: item
+            for item in self.records["viewpoint_structure_revisions"]
+        }
+        for structure in self.records["viewpoint_structures"]:
+            if structure.effective_state != "active":
+                continue
+            structure_revision = structure_revisions.get(structure.current_revision_id)
+            if structure_revision is None:
+                continue
+            entry = next(
+                (
+                    item
+                    for item in structure_revision.focal_viewpoints
+                    if revision is not None
+                    and item.viewpoint_revision_id == revision.viewpoint_revision_id
+                ),
+                None,
+            )
+            if entry is None:
+                continue
+            structures_out.append({
+                "structure_id": structure.structure_id,
+                "structure_revision_id": structure_revision.structure_revision_id,
+                "central_synthesis": structure_revision.central_synthesis,
+                "structure_role": entry.structure_role,
+                "focal_count": len(structure_revision.focal_viewpoints),
+                "unresolved_items": structure_revision.unresolved_items,
+            })
+
         return self._envelope(
             state,
             {
                 "viewpoint": _dump(viewpoint), "revision": _dump(revision),
+                "structures": sorted(structures_out, key=lambda item: item["structure_id"]),
                 "members": members, "routes": routes, "relations": relations,
                 "history": revisions, "impact": impact, "graph": graph,
                 "quality": _dump(state["quality"]) if state["quality"] else None,
@@ -1053,12 +1141,37 @@ class AdminViewpointProjectionCompiler:
                     "core_proposition": pinned.core_proposition if pinned else None,
                     "counts": {"members": len(claim_ids), "sources": len(source_ids)},
                 })
+            # Typed relations among this structure's focal viewpoints are what
+            # turn a role list into a readable tree: an applied viewpoint hangs
+            # under the one it applies, rather than sitting beside it.
+            in_structure = {
+                entry["viewpoint_revision_id"] for entry in focal
+            }
+            edges = [
+                {
+                    "relation_type": relation.relation_type,
+                    "from_viewpoint_revision_id": relation.validated_source_viewpoint_revision_id,
+                    "to_viewpoint_revision_id": relation.validated_target_viewpoint_revision_id,
+                    "reason": relation.reason,
+                }
+                for relation in self.records["viewpoint_relations"]
+                if relation.effective_state == "active"
+                and relation.validated_source_viewpoint_revision_id in in_structure
+                and relation.validated_target_viewpoint_revision_id in in_structure
+            ]
             items.append({
                 "structure_id": structure.structure_id,
                 "structure_revision_id": revision.structure_revision_id,
                 "central_synthesis": revision.central_synthesis,
                 "wording_label": "编辑归一化（非逐字引文）",
                 "focal": focal,
+                "edges": sorted(
+                    edges,
+                    key=lambda item: (
+                        item["to_viewpoint_revision_id"],
+                        item["from_viewpoint_revision_id"],
+                    ),
+                ),
                 "unresolved_items": revision.unresolved_items,
                 "review_status": revision.review_status,
             })

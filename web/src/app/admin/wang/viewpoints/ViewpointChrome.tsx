@@ -6,6 +6,9 @@ const labels: Record<string, string> = {
   complete: "完整", partial: "部分", unavailable: "尚无资料", pass: "通过", fail: "阻断",
   system_approved: "系统核准", human_approved: "人工例外核准", approved: "已核准", candidate: "候选",
   dual_model_consensus: "双模型共识", human_exception_review: "人工例外", not_approved: "未核准",
+  applies: "应用", extends: "扩展", entails: "蕴含", specializes: "特例",
+  generalizes: "概括", qualifies: "限定", tensions_with: "张力", supersedes: "取代",
+  equivalent_component: "成员", supports: "论据", tension_evidence: "张力证据",
 };
 
 export function label(value: string | null | undefined) {

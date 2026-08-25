@@ -2434,9 +2434,17 @@ def test_deterministic_route_target_isolation_removes_orphan_route():
 
     assert filtered.argument_route_candidates == []
     assert filtered.source_route_attestations == []
+    # Dropping the route leaves its conclusion with no coverage. Coverage
+    # validation refuses that, so isolation has to record the loss or the scope
+    # dead-ends on a viewpoint whose only route happened to be the invalid one.
+    assert [
+        (item.viewpoint_revision_id, item.reason_code)
+        for item in filtered.viewpoints_with_no_route
+    ] == [("CVR-1", "no_attested_route")]
     assert exceptions == [
         "deterministic_reject:attestation ATTEST-1: terminal Claim component has no positive Registry link",
         "route:ROUTE-GREEK:no_valid_attestation_after_deterministic_validation",
+        "viewpoint:CVR-1:no_route_after_deterministic_isolation",
     ]
 
 

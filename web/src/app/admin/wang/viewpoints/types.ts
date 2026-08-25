@@ -27,6 +27,7 @@ export type ViewpointSummary = {
   approval_basis: string;
   scripture_scope: string[];
   topic_ids: string[];
+  structure_role?: string | null;
   counts: { members: number; sources: number; routes: number; tensions: number; related: number };
   product_impact_count: number;
   quality_blocked: boolean | null;
@@ -110,6 +111,10 @@ export type ViewpointDetail = {
     viewpoint_revision_id: string; core_proposition: string; review_status: string;
     representation_kind: string; not_a_direct_quote: true; scope: { scripture_scope: string[] };
   };
+  structures?: Array<{
+    structure_id: string; structure_revision_id: string; central_synthesis: string;
+    structure_role: string; focal_count: number; unresolved_items: string[];
+  }>;
   members: Member[];
   routes: Array<Record<string, unknown> & {
     route_id: string; route_type: string; claim_id: string | null; evidence_step_ids: string[];
@@ -165,6 +170,8 @@ export type ViewpointDetail = {
   }>;
   relations: Array<{
     relation_id: string; relation_type: string; from_viewpoint_id: string; to_viewpoint_id: string | null;
+    direction: "outgoing" | "incoming";
+    counterpart_viewpoint_id: string | null; counterpart_core_proposition: string | null;
     claim_id: string | null; claim_statement: string | null; review_status: string;
   }>;
   history: Array<Record<string, unknown> & { viewpoint_revision_id: string; revision_number: number; core_proposition: string; review_status: string }>;
