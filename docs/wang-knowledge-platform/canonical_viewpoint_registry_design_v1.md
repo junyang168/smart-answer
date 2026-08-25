@@ -1299,7 +1299,9 @@ Opus/high 读取完整 proposal 与对应 source evidence，按第 5.12 节的�
 
 #### 6.2.5 Granularity guard
 
-apply 前程序计算本批 `new_viewpoint` 候选数与 input Claim 数之比。比值达到或超过 policy 阈值（初始 0.8，随 calibration 调整）时，batch 不得 system approve，必须进入 exception 并附候选清单与各自的 Claim/来源计数。
+apply 前程序计算本批 `new_viewpoint` 候选数与 input Claim 数之比。比值达到或超过 policy 阈值时，batch 不得 system approve，必须进入 exception 并附候选清单与各自的 Claim/来源计数。
+
+**阈值尚无数据依据，实现时必须先定出来再启用。** 目前只有一个 scope 的观测：#206 的失败批为 14/13 ≈ 1.08，2026-08-24 校准的三次成功运行为 5/13、6/13、6/13 ≈ 0.38–0.46。单一 scope 不足以定阈值；第 16.2 节第 4 项的多 scope 校准通过前，guard 以观察模式运行——记录比值但不阻断，由 exception 记录累积分布。
 
 这是防回归的护栏，不是身份判据。它只标记「这一批几乎每条 Claim 都变成一个观点」这一已知失败形态（第 13.14.2 节），由 reviewer 或 editor 判断究竟是材料本身如此，还是合并失败。阈值与实际比值都写入 batch run 记录。
 
@@ -2950,7 +2952,9 @@ group-discovery plan 使用 graph-aware overlapping packets：72 calls、3,454 C
    - 第 6.2.5 节 granularity guard 与 batch run 记录；
    - CVP 与 structure 同事务 apply、逐 record readback、idempotent resume。
 
-   验收：在 clean temporary Registry 上用同一 13-Claim rock fixture 重跑，得到显著少于 13 的 CVP 数、跨 6 篇讲道的单一「不是彼得本人」identity、论据／限定／应用／方法均为 attachment 而非 CVP，以及一个 entailed `central_synthesis`。只允许 no-apply 与 temporary Registry；共享 POC apply 另行授权。
+   验收：在 clean temporary Registry 上用同一 13-Claim rock fixture 走完整条路径——proposal、确定性验证、independent review、必要时一次 correction、ChangeSet、apply、readback——得到显著少于 13 的 CVP 数、跨 6 篇讲道的单一「不是彼得本人」identity、论据／限定／应用／方法均为 attachment 而非 CVP，以及一个 entailed `central_synthesis`。只允许 no-apply 与 temporary Registry；共享 POC apply 另行授权。
+
+   **第 13.14.2 节的校准运行不能替代本项验收。** 那些运行只调用模型并人工判读输出，没有经过 validator、review 回路、ChangeSet 或 readback；当前 `ProposedComponent` 校验甚至拒绝本节要求的 `local_new_viewpoint_key` target，因此该形状目前在 schema 中无法表达。本项之前，本文件第 1.2、5.12、6.2 节描述的是设计意图，不是已验证行为。
 
 2. **Projection 与 UI 读取 structure**
    `ViewpointKnowledgeProjection` 增加 `viewpoint_structures`，consumer eligibility、dependency pins 与 admin structure 页面按第 13 节接通。文章／QA 在有 eligible structure 时不得自行从平铺 CVPs 猜中心。
