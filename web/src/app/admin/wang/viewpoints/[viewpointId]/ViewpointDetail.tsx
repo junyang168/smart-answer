@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, ArrowUpRight, GitBranch, Loader2, Quote, Route, ShieldAlert } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowUpRight, GitBranch, Loader2, Network, Quote, Route, ShieldAlert } from "lucide-react";
 import { AsOfStrip, StatusBadge, label } from "../ViewpointChrome";
 import type { Envelope, Member, ViewpointDetail as Detail } from "../types";
 
@@ -31,6 +31,31 @@ function BoundedGraph({ detail }: { detail: Detail }) {
       <p className="text-xs leading-5 text-slate-500">此图只显示当前 viewpoint 的第一圈。逐条来源证据在“来源”中展开；成员、路线和 typed relation 的计数互不混用。</p>
     </div>
   );
+}
+
+// A relation reads source-first, so each type needs a label for the *other*
+// viewpoint written from where the reader is standing. Two opaque ids, or a
+// sentence the reader has to assemble from badges, are both unreadable.
+const STRUCTURE_ROLE_LABELS: Record<string, string> = {
+  central_claim: "中心主张", negative_boundary: "否定面", positive_identification: "正面识别",
+  supporting_conclusion: "支持性结论", qualification: "限定", tension_side: "张力一方",
+  application: "应用", methodological_boundary: "方法边界",
+};
+
+function relationLabel(type: string, direction: "outgoing" | "incoming") {
+  const labels: Record<string, [string, string]> = {
+    applies: ["应用自", "被应用于"],
+    extends: ["扩展自", "被扩展为"],
+    entails: ["蕴含", "被蕴含于"],
+    specializes: ["特例来自", "特例是"],
+    generalizes: ["概括自", "被概括为"],
+    qualifies: ["限定了", "被限定于"],
+    tensions_with: ["张力对方", "张力对方"],
+    supersedes: ["取代了", "被取代于"],
+  };
+  const pair = labels[type];
+  if (!pair) return type;
+  return direction === "outgoing" ? pair[0] : pair[1];
 }
 
 function GraphGroup({ title, detail, tone, nodes, relationEdges = [] }: { title: string; detail: string; tone: "emerald" | "indigo" | "amber"; nodes: Detail["graph"]["nodes"]; relationEdges?: Detail["graph"]["edges"] }) {
@@ -138,12 +163,30 @@ export function ViewpointDetail() {
     <main className="space-y-5 pb-10">
       <Link href={back} className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-indigo-700"><ArrowLeft className="h-4 w-4" />返回观点列表</Link>
       <header className="rounded-3xl bg-slate-950 px-6 py-7 text-white sm:px-9"><div className="flex flex-wrap items-start justify-between gap-4"><div className="max-w-4xl"><div className="flex flex-wrap gap-2"><StatusBadge value={d.revision.review_status} /><span className="rounded-full bg-indigo-400/20 px-2.5 py-1 text-xs font-bold text-indigo-200">编辑归一化 · 非逐字引文</span></div><h1 className="mt-4 text-2xl font-black leading-9">{d.revision.core_proposition}</h1><p className="mt-3 break-all font-mono text-xs text-slate-400">{d.viewpoint.viewpoint_id} · {d.revision.viewpoint_revision_id}</p></div><ShieldAlert className="h-6 w-6 text-indigo-300" /></div></header>
+      {d.structures?.map((structure) => (
+        <section key={structure.structure_id} className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Network className="h-4 w-4 text-indigo-700" />
+            <span className="text-xs font-bold text-indigo-900">本观点在这个中心里的角色</span>
+            <span className="rounded bg-indigo-700 px-2 py-1 text-xs font-bold text-white">{STRUCTURE_ROLE_LABELS[structure.structure_role] ?? structure.structure_role}</span>
+            <Link href={`/admin/wang/viewpoint-structures`} className="ml-auto text-xs font-bold text-indigo-700 hover:underline">看完整结构（{structure.focal_count} 个观点）→</Link>
+          </div>
+          <p className="mt-3 text-xs font-bold text-indigo-900">中心综合</p>
+          <p className="mt-1 text-sm leading-6 text-slate-900">{structure.central_synthesis}</p>
+          {structure.unresolved_items.length > 0 && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-bold text-amber-800">未决 {structure.unresolved_items.length} 项</summary>
+              <ul className="mt-2 space-y-1">{structure.unresolved_items.map((text) => <li key={text} className="text-xs leading-5 text-amber-900">· {text}</li>)}</ul>
+            </details>
+          )}
+        </section>
+      ))}
       <AsOfStrip asOf={payload.as_of} projectionSha={payload.projection_sha256} />
       <nav className="flex overflow-x-auto border-b border-slate-200" aria-label="观点详情视图">{tabs.map(([value, text]) => <button key={value} onClick={() => setTab(value)} aria-current={tab === value ? "page" : undefined} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-bold ${tab === value ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-900"}`}>{text}</button>)}</nav>
       {tab === "graph" && <BoundedGraph detail={d} />}
       {tab === "sources" && <Sources members={d.members} />}
       {tab === "routes" && <ArgumentRoutes detail={d} />}
-      {tab === "relations" && <section className="space-y-3">{d.relations.length ? d.relations.map((relation) => <article key={relation.relation_id} className={`rounded-2xl border p-5 ${relation.relation_type === "tensions_with" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}><div className="flex flex-wrap items-center gap-2"><GitBranch className="h-4 w-4" /><strong>{label(relation.relation_type)}</strong><StatusBadge value={relation.review_status} /></div><p className="mt-3 text-sm leading-6 text-slate-800">{relation.claim_statement ?? relation.claim_id}</p><p className="mt-2 font-mono text-[11px] text-slate-500">{relation.from_viewpoint_id} → {relation.to_viewpoint_id}</p></article>) : <Empty text="当前快照没有直接 typed relation 或 unresolved tension。" />}</section>}
+      {tab === "relations" && <section className="space-y-3">{d.relations.length ? d.relations.map((relation) => <article key={relation.relation_id} className={`rounded-2xl border p-5 ${relation.relation_type === "tensions_with" ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}><div className="flex flex-wrap items-center gap-2"><GitBranch className="h-4 w-4" /><strong>{label(relation.relation_type)}</strong><StatusBadge value={relation.review_status} /></div><div className="mt-3 space-y-2"><div className="flex gap-3"><span className="w-20 shrink-0 text-xs font-bold text-slate-500">本观点</span><span className="text-sm leading-6 text-slate-900">{d.revision.core_proposition}</span></div><div className="flex gap-3"><span className="w-20 shrink-0 text-xs font-bold text-indigo-700">{relationLabel(relation.relation_type, relation.direction)}</span><span className="text-sm leading-6 text-slate-900">{relation.counterpart_viewpoint_id ? <Link href={`/admin/wang/viewpoints/${relation.counterpart_viewpoint_id}`} className="hover:text-indigo-700 hover:underline">{relation.counterpart_core_proposition ?? relation.counterpart_viewpoint_id}</Link> : (relation.counterpart_core_proposition ?? "—")}</span></div></div><p className="mt-3 border-t border-slate-100 pt-2 text-xs leading-5 text-slate-500">{relation.claim_statement}</p></article>) : <Empty text="当前快照没有直接 typed relation 或 unresolved tension。" />}</section>}
       {tab === "history" && <div className="grid gap-5 lg:grid-cols-2"><section><h2 className="mb-3 font-black text-slate-950">语义修订历史</h2><div className="space-y-3">{d.history.map((revision) => <article key={revision.viewpoint_revision_id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex justify-between gap-3"><strong>Revision {revision.revision_number}</strong><StatusBadge value={revision.review_status} /></div><p className="mt-2 text-sm leading-6">{revision.core_proposition}</p><p className="mt-2 font-mono text-[10px] text-slate-400">{revision.viewpoint_revision_id}</p></article>)}</div></section><section><h2 className="mb-3 font-black text-slate-950">产品影响</h2>{d.impact.dependencies.length || d.impact.events.length ? <pre className="overflow-x-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-200">{JSON.stringify(d.impact, null, 2)}</pre> : <Empty text="当前没有 pinned product dependency 或 pending ImpactEvent。" />}</section></div>}
       <details className="rounded-xl border border-slate-200 bg-slate-50 p-4"><summary className="cursor-pointer text-sm font-bold text-slate-700">Provenance 与 raw projection</summary><pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap break-all text-[11px] text-slate-600">{JSON.stringify({ authority: payload.authority, as_of: payload.as_of, projection_sha256: payload.projection_sha256, viewpoint: d.viewpoint, revision: d.revision }, null, 2)}</pre></details>
     </main>

@@ -22,6 +22,25 @@ async function readOptional<T>(url: string): Promise<T | null> {
   return payload as T;
 }
 
+// The role a viewpoint plays in its reviewed centre. Shown on the row because a
+// listing without it is the flat bag of viewpoints this layer replaces.
+const STRUCTURE_ROLE_LABELS: Record<string, string> = {
+  central_claim: "中心主张", negative_boundary: "否定面", positive_identification: "正面识别",
+  supporting_conclusion: "支持性结论", qualification: "限定", tension_side: "张力一方",
+  application: "应用", methodological_boundary: "方法边界",
+};
+
+const STRUCTURE_ROLE_STYLES: Record<string, string> = {
+  central_claim: "bg-slate-900 text-white",
+  negative_boundary: "bg-rose-100 text-rose-800",
+  positive_identification: "bg-emerald-100 text-emerald-800",
+  supporting_conclusion: "bg-emerald-50 text-emerald-700",
+  qualification: "bg-amber-100 text-amber-800",
+  tension_side: "bg-orange-100 text-orange-800",
+  application: "bg-indigo-100 text-indigo-800",
+  methodological_boundary: "bg-sky-100 text-sky-800",
+};
+
 export function ViewpointExplorer() {
   const router = useRouter();
   const params = useSearchParams();
@@ -155,13 +174,13 @@ export function ViewpointExplorer() {
               return (
                 <Link key={item.viewpoint_id} href={`/admin/wang/viewpoints/${encodeURIComponent(item.viewpoint_id)}?snapshot=${encodeURIComponent(listing.as_of.registry_snapshot_id)}&from=${back}`} className="group grid gap-4 p-4 hover:bg-slate-50 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2"><StatusBadge value={item.review_status} /><span className="text-xs font-medium text-indigo-700">{item.wording_label}</span></div>
+                    <div className="flex flex-wrap items-center gap-2">{item.structure_role && <span className={`rounded px-2 py-1 text-xs font-bold ${STRUCTURE_ROLE_STYLES[item.structure_role] ?? "bg-slate-100 text-slate-700"}`}>{STRUCTURE_ROLE_LABELS[item.structure_role] ?? item.structure_role}</span>}<StatusBadge value={item.review_status} /><span className="text-xs font-medium text-indigo-700">{item.wording_label}</span></div>
                     <h3 className="mt-2 text-base font-bold leading-6 text-slate-950 group-hover:text-indigo-700">{item.core_proposition}</h3>
                     <p className="mt-2 break-all font-mono text-[11px] text-slate-400">{item.viewpoint_id} · {item.viewpoint_revision_id}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">{item.scripture_scope.map((ref) => <span key={ref} className="rounded bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">{ref}</span>)}</div>
                   </div>
                   <div className="flex items-center gap-5 text-center text-xs text-slate-500 lg:justify-end">
-                    {([['成员', item.counts.members], ['来源', item.counts.sources], ['路线', item.counts.routes], ['张力', item.counts.tensions]] as const).map(([label, value]) => <span key={label}><strong className="block text-lg text-slate-900">{value}</strong>{label}</span>)}
+                    {([['成员', item.counts.members], ['来源', item.counts.sources], ['关系', item.counts.related], ['路线', item.counts.routes], ['张力', item.counts.tensions]] as const).map(([label, value]) => <span key={label}><strong className="block text-lg text-slate-900">{value}</strong>{label}</span>)}
                     <ChevronRight className="h-5 w-5 text-slate-300 group-hover:text-indigo-600" />
                   </div>
                 </Link>

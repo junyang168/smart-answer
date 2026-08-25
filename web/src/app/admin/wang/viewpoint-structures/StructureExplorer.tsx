@@ -14,12 +14,20 @@ type Focal = {
   counts: { members: number; sources: number };
 };
 
+type Edge = {
+  relation_type: string;
+  from_viewpoint_revision_id: string;
+  to_viewpoint_revision_id: string;
+  reason: string;
+};
+
 type Structure = {
   structure_id: string;
   structure_revision_id: string;
   central_synthesis: string;
   wording_label: string;
   focal: Focal[];
+  edges: Edge[];
   unresolved_items: string[];
   review_status: string;
 };
@@ -57,6 +65,39 @@ const ROLE_STYLES: Record<string, string> = {
   application: "bg-indigo-100 text-indigo-800",
   methodological_boundary: "bg-sky-100 text-sky-800",
 };
+
+const EDGE_LABELS: Record<string, string> = {
+  applies: "应用",
+  extends: "扩展",
+  entails: "蕴含",
+  specializes: "特例",
+  generalizes: "概括",
+  qualifies: "限定",
+  supersedes: "取代",
+};
+
+/** Hang each applied viewpoint under the one it applies; the rest stay at the
+ *  top level in role order. A flat list cannot show which viewpoint is the
+ *  centre and which only serves another. */
+function buildTree(focal: Focal[], edges: Edge[]) {
+  const parentOf = new Map<string, { parent: string; relation: string }>();
+  for (const edge of edges) {
+    if (!parentOf.has(edge.from_viewpoint_revision_id)) {
+      parentOf.set(edge.from_viewpoint_revision_id, {
+        parent: edge.to_viewpoint_revision_id,
+        relation: edge.relation_type,
+      });
+    }
+  }
+  const byRole = (a: Focal, b: Focal) =>
+    ROLE_ORDER.indexOf(a.structure_role) - ROLE_ORDER.indexOf(b.structure_role);
+  const childrenOf = (revisionId: string) =>
+    focal
+      .filter((item) => parentOf.get(item.viewpoint_revision_id)?.parent === revisionId)
+      .sort(byRole);
+  const roots = focal.filter((item) => !parentOf.has(item.viewpoint_revision_id)).sort(byRole);
+  return { roots, childrenOf, parentOf };
+}
 
 async function read<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store" });
@@ -133,28 +174,40 @@ export function StructureExplorer() {
                 <p className="mt-3 text-base font-bold leading-7 text-slate-950">{structure.central_synthesis}</p>
               </div>
 
-              <ul className="divide-y divide-slate-100">
-                {focal.map((item) => (
-                  <li key={item.viewpoint_revision_id} className="flex flex-wrap items-center gap-3 p-4 sm:px-5">
-                    <span className={`rounded px-2 py-1 text-xs font-bold ${ROLE_STYLES[item.structure_role] ?? "bg-slate-100 text-slate-700"}`}>
-                      {ROLE_LABELS[item.structure_role] ?? item.structure_role}
-                    </span>
-                    <span className="min-w-0 flex-1 text-sm font-semibold leading-6 text-slate-900">
-                      {item.viewpoint_id ? (
-                        <Link href={`/admin/wang/viewpoints/${item.viewpoint_id}`} className="hover:text-indigo-700 hover:underline">
-                          {item.core_proposition ?? item.viewpoint_revision_id}
-                        </Link>
-                      ) : (
-                        item.core_proposition ?? item.viewpoint_revision_id
-                      )}
-                    </span>
-                    <span className="shrink-0 text-xs text-slate-500">
-                      <strong className="text-slate-900">{item.counts.members}</strong> 句 ·{" "}
-                      <strong className="text-slate-900">{item.counts.sources}</strong> 篇讲道
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="divide-y divide-slate-100">
+                {(() => {
+                  const { roots, childrenOf, parentOf } = buildTree(focal, structure.edges ?? []);
+                  const row = (item: Focal, depth: number) => (
+                    <div key={item.viewpoint_revision_id}>
+                      <div className="flex flex-wrap items-center gap-3 p-4 sm:px-5" style={{ paddingLeft: `${1.25 + depth * 1.75}rem` }}>
+                        {depth > 0 && (
+                          <span className="shrink-0 text-xs text-slate-400">
+                            └ {EDGE_LABELS[parentOf.get(item.viewpoint_revision_id)?.relation ?? ""] ?? parentOf.get(item.viewpoint_revision_id)?.relation}
+                          </span>
+                        )}
+                        <span className={`rounded px-2 py-1 text-xs font-bold ${ROLE_STYLES[item.structure_role] ?? "bg-slate-100 text-slate-700"}`}>
+                          {ROLE_LABELS[item.structure_role] ?? item.structure_role}
+                        </span>
+                        <span className="min-w-0 flex-1 text-sm font-semibold leading-6 text-slate-900">
+                          {item.viewpoint_id ? (
+                            <Link href={`/admin/wang/viewpoints/${item.viewpoint_id}`} className="hover:text-indigo-700 hover:underline">
+                              {item.core_proposition ?? item.viewpoint_revision_id}
+                            </Link>
+                          ) : (
+                            item.core_proposition ?? item.viewpoint_revision_id
+                          )}
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-500">
+                          <strong className="text-slate-900">{item.counts.members}</strong> 句 ·{" "}
+                          <strong className="text-slate-900">{item.counts.sources}</strong> 篇讲道
+                        </span>
+                      </div>
+                      {childrenOf(item.viewpoint_revision_id).map((child) => row(child, depth + 1))}
+                    </div>
+                  );
+                  return roots.map((item) => row(item, 0));
+                })()}
+              </div>
 
               {structure.unresolved_items.length > 0 && (
                 <div className="border-t border-amber-200 bg-amber-50 p-4 sm:px-5">

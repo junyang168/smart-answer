@@ -290,6 +290,11 @@ def test_peter_and_rock_remain_distinct_and_tension_is_not_membership():
     assert detail["data"]["relations"] == [
         {
             "relation_id": "VPR-PETER-ROCK", "relation_type": "tensions_with",
+            # The reader stands on CV-PETER, so the row names the other end and
+            # which side of the relation this viewpoint is on.
+            "direction": "outgoing",
+            "counterpart_viewpoint_id": "CV-ROCK",
+            "counterpart_core_proposition": "磐石的正面所指不可简化为彼得个人",
             "from_viewpoint_id": "CV-PETER", "to_viewpoint_id": "CV-ROCK",
             "claim_id": "CL-ROCK", "claim_statement": "彼得的代表性角色不等于磐石所指可以简化为彼得个人。",
             "supporting_relation_ids": [], "review_status": "system_approved",

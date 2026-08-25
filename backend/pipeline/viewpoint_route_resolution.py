@@ -17,6 +17,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ArgumentRouteReconsiderationResponse,
     ArgumentRouteProposalResponse,
     ArgumentRouteReviewResponse,
+    NoRouteDisposition,
     RouteComponentBinding,
     canonicalize_proposal,
     canonicalize_review,
@@ -99,14 +100,46 @@ def isolate_deterministically_invalid_route_targets(
         for item in retained_attestations
         if item.route_ref.local_route_key not in invalid_routes
     ]
+    # Dropping a route leaves its conclusion with neither a route nor a
+    # disposition, which the coverage rule refuses -- so isolation would always
+    # dead-end on a viewpoint whose only route was the invalid one. Record the
+    # loss explicitly instead; the exception list still carries why.
+    surviving_routes = [
+        item
+        for item in proposal.argument_route_candidates
+        if item.local_route_key not in invalid_routes
+    ]
+    still_routed = {item.conclusion_ref.key() for item in surviving_routes}
+    already_dispositioned = {
+        item.viewpoint_revision_id for item in proposal.viewpoints_with_no_route
+    }
+    uncovered = sorted(
+        {
+            item.conclusion_ref.key()
+            for item in proposal.argument_route_candidates
+            if item.local_route_key in invalid_routes
+        }
+        - still_routed
+        - already_dispositioned
+    )
     filtered = proposal.model_copy(
         update={
-            "argument_route_candidates": [
-                item
-                for item in proposal.argument_route_candidates
-                if item.local_route_key not in invalid_routes
-            ],
+            "argument_route_candidates": surviving_routes,
             "source_route_attestations": retained_attestations,
+            "viewpoints_with_no_route": [
+                *proposal.viewpoints_with_no_route,
+                *(
+                    NoRouteDisposition(
+                        viewpoint_revision_id=revision_id,
+                        reason_code="no_attested_route",
+                        reason=(
+                            "本 scope 唯一的候选路线未通过确定性校验并被隔离；"
+                            "隔离原因见 route exceptions，不代表全库不存在论证。"
+                        ),
+                    )
+                    for revision_id in uncovered
+                ),
+            ],
         }
     )
     exceptions = [
@@ -115,6 +148,10 @@ def isolate_deterministically_invalid_route_targets(
     exceptions.extend(
         f"route:{key}:no_valid_attestation_after_deterministic_validation"
         for key in sorted(orphaned_routes)
+    )
+    exceptions.extend(
+        f"viewpoint:{revision_id}:no_route_after_deterministic_isolation"
+        for revision_id in uncovered
     )
     return filtered, sorted(set(exceptions))
 
