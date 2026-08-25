@@ -5120,3 +5120,68 @@ def test_backreview_disposition_separates_correction_from_judgment():
     )
     assert report["retired_relation_ids"] == ["VREL-1"]
     assert report["approved_viewpoint_relation_ids"] == []
+
+
+# --- a reversal a person decided ------------------------------------------------
+
+def _committed_relation() -> dict[str, Any]:
+    return {
+        "viewpoint_relation_id": "VREL-old",
+        "source_viewpoint_id": "CV-A",
+        "target_viewpoint_id": "CV-B",
+        "validated_source_viewpoint_revision_id": "CVR-A",
+        "validated_target_viewpoint_revision_id": "CVR-B",
+        "relation_type": "extends",
+        "reason": "登记时认为 A 延伸 B。",
+        "effective_state": "active",
+        "review_status": "system_approved",
+        "revision": 1,
+        "visibility": "internal",
+        "schema_version": "wang_viewpoint_relation_v1",
+        "supporting_claim_ids": [],
+        "supporting_claim_relation_ids": [],
+        "temporal_assertion": None,
+    }
+
+
+def test_reversal_retires_the_old_edge_and_derives_a_new_id():
+    """The id is derived from the edge's own content.
+
+    Keeping it on reversed ends would leave the id contradicting what the
+    record says, so the wrong edge is retired and the corrected one is written
+    under the id its content produces.
+    """
+
+    from backend.pipeline.viewpoint_relation_correction_runner import build_correction
+
+    retired, corrected = build_correction(
+        original=_committed_relation(),
+        relation_type="qualifies",
+        reason="查验义务预设了角色主张，故由 B 限定 A。",
+        review_artifact_sha256="backreview-sha",
+    )
+
+    assert retired["effective_state"] == "retired"
+    assert corrected["viewpoint_relation_id"] != "VREL-old"
+    assert corrected["validated_source_viewpoint_revision_id"] == "CVR-B"
+    assert corrected["validated_target_viewpoint_revision_id"] == "CVR-A"
+    assert corrected["source_viewpoint_id"] == "CV-B"
+    assert corrected["relation_type"] == "qualifies"
+    # The judgment was a person's; the record says so rather than claiming the
+    # batch contract approved it.
+    assert corrected["review_status"] == "human_approved"
+    assert corrected["review_provenance"]["review_artifact_sha256"] == "backreview-sha"
+
+
+def test_reversal_is_stable_for_the_same_decision():
+    from backend.pipeline.viewpoint_relation_correction_runner import build_correction
+
+    first = build_correction(
+        original=_committed_relation(), relation_type="qualifies",
+        reason="同一判定。", review_artifact_sha256="backreview-sha",
+    )[1]
+    second = build_correction(
+        original=_committed_relation(), relation_type="qualifies",
+        reason="措辞不同不改变身份。", review_artifact_sha256="backreview-sha",
+    )[1]
+    assert first["viewpoint_relation_id"] == second["viewpoint_relation_id"]
