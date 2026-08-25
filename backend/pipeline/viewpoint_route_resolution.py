@@ -357,7 +357,19 @@ def build_registry_route_packet(
     # Full Claims are included even when their components have no Registry
     # assertion. This is how the Route model can see source-local bridge,
     # objection and connective material without seeing old CVP proposals.
-    for claim in claims:
+    #
+    # Source-local is the operative word, and it bounds the packet. Every
+    # attestation has to terminate in an active Claim link of the route's own
+    # conclusion viewpoint, so a source holding no member Claim for any of these
+    # viewpoints cannot appear in a legal attestation at all -- its Claims are
+    # cost with no reachable use. Carrying the whole scope instead tied the
+    # packet's size to the corpus rather than to the work: a 190-Claim Matthew 16
+    # scope built a 1.34M-character packet against a 1.05M limit, so the batching
+    # that keeps the CVP stage scoped had no counterpart here and the route job
+    # for a large scope could not run at all.
+    member_sources = {binding.source_id for binding in components.values()}
+    scope_claims = [claim for claim in claims if claim.source_id in member_sources]
+    for claim in scope_claims:
         spans = [{"start_char": 0, "end_char": len(claim.statement), "exact_text": claim.statement}]
         key = component_key_from_spans(
             claim_id=claim.claim_id,
@@ -380,12 +392,12 @@ def build_registry_route_packet(
         claim.source_id: sorted(
             {
                 evidence.source_sha256
-                for scoped_claim in claims
+                for scoped_claim in scope_claims
                 if scoped_claim.source_id == claim.source_id
                 for evidence in scoped_claim.evidence
             }
         )
-        for claim in claims
+        for claim in scope_claims
     }
     ambiguous = {key: value for key, value in source_revisions.items() if len(value) != 1}
     if ambiguous:
@@ -429,7 +441,10 @@ def build_registry_route_packet(
         "claim_components": [
             components[key].model_dump(mode="json") for key in sorted(components)
         ],
-        "claims": [claim.model_dump(mode="json") for claim in sorted(claims, key=lambda item: item.claim_id)],
+        "claims": [
+            claim.model_dump(mode="json")
+            for claim in sorted(scope_claims, key=lambda item: item.claim_id)
+        ],
         "source_revisions": {key: value[0] for key, value in source_revisions.items()},
         "existing_routes": sorted(
             [dict(item) for item in existing_routes],

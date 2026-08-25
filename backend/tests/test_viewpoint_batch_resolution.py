@@ -46,12 +46,16 @@ MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
 
 
 def _evidence(
-    claim_id: str, *, eligible: bool = True, scripture_refs: list[str] | None = None
+    claim_id: str,
+    *,
+    eligible: bool = True,
+    scripture_refs: list[str] | None = None,
+    source_id: str = "S1",
 ) -> dict[str, Any]:
     return {
         "evidence_step_id": f"{claim_id}-E1",
         "source_fragment_id": f"{claim_id}-F1",
-        "source_id": "S1",
+        "source_id": source_id,
         "evidence_statement": "教授在该段落作出的推理步骤",
         "verbatim_excerpt": "逐字片段",
         "citation_id": "CIT-1",
@@ -71,12 +75,13 @@ def _claim(
     *,
     eligible: bool = True,
     scripture_refs: list[str] | None = None,
+    source_id: str = "S1",
 ) -> ReviewClaim:
     return ReviewClaim(
         claim_id=claim_id,
         pinned_claim_revision=1,
         claim_revision_sha256=f"sha-{claim_id}",
-        source_id="S1",
+        source_id=source_id,
         statement=statement,
         review_status="approved",
         evidence=[
@@ -84,6 +89,7 @@ def _claim(
                 claim_id,
                 eligible=eligible,
                 scripture_refs=scripture_refs,
+                source_id=source_id,
             )
         ],
     )
@@ -4281,3 +4287,36 @@ def test_written_revisions_carry_no_field_older_readers_reject():
             "basis_identity_decision_ids",
             "review_artifact_sha256",
         }
+
+
+def test_route_packet_drops_claims_from_sources_holding_no_member():
+    """The packet is bounded by the work, not by the corpus.
+
+    An attestation must terminate in an active Claim link of the route's own
+    conclusion viewpoint, so a source holding no member Claim cannot appear in
+    a legal attestation and its Claims are unreachable cost. Carrying the whole
+    scope tied packet size to how much has been transcribed: a 190-Claim
+    Matthew 16 scope built 1.34M characters against a 1.05M limit, and the route
+    job for that scope could not run at all.
+    """
+
+    member = _claim("C1", ROCK_STATEMENT, source_id="S1")
+    same_source_bridge = _claim("C2", MODAL_STATEMENT, source_id="S1")
+    other_source = _claim("C3", MODAL_STATEMENT, source_id="S2")
+
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, same_source_bridge, other_source],
+        viewpoint_claim_links=[_registry_link(member)],
+        existing_routes=[],
+    )
+
+    carried = {item["claim_id"] for item in packet["claim_components"]}
+    assert "C1" in carried
+    # Bridge and objection material from a source that does hold a member is
+    # exactly what the packet exists to show, and stays.
+    assert "C2" in carried
+    assert "C3" not in carried
+    assert {item["claim_id"] for item in packet["claims"]} == {"C1", "C2"}
+    assert set(packet["source_revisions"]) == {"S1"}
