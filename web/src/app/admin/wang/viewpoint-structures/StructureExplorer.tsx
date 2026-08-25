@@ -78,10 +78,22 @@ const EDGE_LABELS: Record<string, string> = {
 
 /** Hang each applied viewpoint under the one it applies; the rest stay at the
  *  top level in role order. A flat list cannot show which viewpoint is the
- *  centre and which only serves another. */
+ *  centre and which only serves another.
+ *
+ *  The centre never hangs under anything. It is what the other viewpoints are
+ *  arranged around, so an edge leaving it -- a central claim that `extends` a
+ *  qualification, say -- describes the centre without demoting it. Following
+ *  that edge indented the centre under a qualification and read as though the
+ *  qualification were the point. */
 function buildTree(focal: Focal[], edges: Edge[]) {
+  const centres = new Set(
+    focal
+      .filter((item) => item.structure_role === "central_claim")
+      .map((item) => item.viewpoint_revision_id),
+  );
   const parentOf = new Map<string, { parent: string; relation: string }>();
   for (const edge of edges) {
+    if (centres.has(edge.from_viewpoint_revision_id)) continue;
     if (!parentOf.has(edge.from_viewpoint_revision_id)) {
       parentOf.set(edge.from_viewpoint_revision_id, {
         parent: edge.to_viewpoint_revision_id,

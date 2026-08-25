@@ -9,6 +9,7 @@ database; planning/apply/readback remain explicit store operations.
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -30,6 +31,7 @@ from .viewpoint_batch_resolution import (
     CanonicalViewpointReviewResponse,
     NewViewpointCandidate,
     ProposedComponent,
+    ProposedViewpointRevision,
     apply_reconsideration_patches,
     validate_reconsideration,
     validate_review,
@@ -50,6 +52,24 @@ LINK_TYPES = {
 
 class CvpBatchChangeSetError(ValueError):
     pass
+
+
+def _revision_signature(
+    revised: ProposedViewpointRevision,
+) -> ViewpointPropositionSignature:
+    return ViewpointPropositionSignature(
+        subject=revised.subject,
+        predicate=revised.predicate,
+        object=revised.object,
+        polarity=revised.polarity,
+        modality=revised.modality,
+        conditions=sorted(set(revised.conditions)),
+        population_scope=sorted(set(revised.population_scope)),
+    )
+
+
+def _revision_scope(revised: ProposedViewpointRevision) -> ViewpointScope:
+    return ViewpointScope(scripture_scope=sorted(set(revised.scripture_scope)))
 
 
 def _candidate_signature(candidate: NewViewpointCandidate) -> ViewpointPropositionSignature:
@@ -78,6 +98,7 @@ def compile_cvp_batch_package(
     scope_manifest_sha256: str,
     claims: Sequence[ReviewClaim],
     registry_context: Sequence[Mapping[str, Any]],
+    revision_dependents: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
     proposal_artifact_sha256: str,
     review_artifact_sha256: str,
     proposer_model_id: str,
@@ -129,6 +150,51 @@ def compile_cvp_batch_package(
         str(item["viewpoint_revision_id"]): dict(item) for item in registry_context
     }
     new_candidates = {item.local_key: item for item in proposal.new_viewpoint_candidates}
+    # Only reviewed revisions reach master data: passed outright, or flagged
+    # `correct` and then accepted in the one correction round. Gating on `pass`
+    # alone silently dropped a revision the reviewer had asked to reword and the
+    # proposer had reworded, so the batch reported success while writing nothing.
+    approved_revision_targets = {
+        item.target_viewpoint_revision_id
+        for item in review.revision_reviews
+        if item.decision == "pass"
+    }
+    if reconsideration is not None:
+        approved_revision_targets |= {
+            item.target_viewpoint_revision_id
+            for item in reconsideration.revision_dispositions
+            if item.disposition == "accepted"
+        }
+    # The effective proposal is what gets written, so a revision surviving into
+    # it without approval is a contradiction, not something to drop quietly.
+    unapproved = sorted(
+        item.target_viewpoint_revision_id
+        for item in proposal.viewpoint_revisions
+        if item.target_viewpoint_revision_id not in approved_revision_targets
+    )
+    if unapproved:
+        raise CvpBatchChangeSetError(
+            f"viewpoint revisions are not reviewer-approved: {', '.join(unapproved)}"
+        )
+    revisions_by_target = {
+        item.target_viewpoint_revision_id: item
+        for item in proposal.viewpoint_revisions
+    }
+    dependents = {key: list(value) for key, value in (revision_dependents or {}).items()}
+    confirmed_by_target = {
+        item.target_viewpoint_revision_id: set(item.confirmed_dependent_ids)
+        for item in review.revision_reviews
+    }
+    for target in revisions_by_target:
+        pinned = {dependent_id(item) for item in dependents.get(target, [])}
+        unconfirmed = sorted(pinned - confirmed_by_target.get(target, set()))
+        if unconfirmed:
+            raise CvpBatchChangeSetError(
+                f"{target}: revision strands unconfirmed records: {', '.join(unconfirmed)}. "
+                "A revision the reviewer flagged `correct` cannot land rewritten: the "
+                "reviewer was rejecting that wording, so it confirmed nothing against the "
+                "replacement. Withdraw it in the correction round instead."
+            )
 
     # Each target is one identity decision. Multiple components from the same
     # Claim and target are combined into one durable locator.
@@ -151,6 +217,12 @@ def compile_cvp_batch_package(
     # so relations and structures can point at viewpoints created in the same
     # ChangeSet without a second apply.
     resolved_targets: dict[tuple[str, str], tuple[str, str]] = {}
+    # superseded revision id -> the revision replacing it, and the viewpoint it
+    # belongs to, so dependents can be re-pointed once the ids are allocated.
+    resolved_revision_by_target: dict[str, str] = {}
+    viewpoint_id_by_revision: dict[str, str] = {
+        str(key): str(value["viewpoint_id"]) for key, value in registry_by_revision.items()
+    }
     candidates_out: list[dict[str, Any]] = []
     decisions_out: list[dict[str, Any]] = []
     viewpoints_out: list[dict[str, Any]] = []
@@ -212,12 +284,31 @@ def compile_cvp_batch_package(
                     f"target revision {target_key} is absent from Registry context"
                 )
             viewpoint_id = str(context["viewpoint_id"])
-            revision_id = target_key
             candidate_viewpoint_ids = [viewpoint_id]
             action = "match_existing"
-            signature = ViewpointPropositionSignature.model_validate(
-                context["proposition_signature"]
-            )
+            revised = revisions_by_target.get(target_key)
+            if revised is None:
+                revision_id = target_key
+                signature = ViewpointPropositionSignature.model_validate(
+                    context["proposition_signature"]
+                )
+            else:
+                # The identity is unchanged -- same viewpoint_id -- but its
+                # wording moves to a new revision that supersedes the one the
+                # packet offered. Everything this batch writes must then bind to
+                # the new revision, which is why resolved_targets carries it.
+                signature = _revision_signature(revised)
+                revision_seed = {
+                    "viewpoint_id": viewpoint_id,
+                    # Distinguishes this wording from the one it supersedes so
+                    # the derived id differs; not the stored revision number.
+                    "supersedes": target_key,
+                    "core_proposition": revised.core_proposition,
+                    "proposition_signature": signature.model_dump(mode="json"),
+                    "scope": _revision_scope(revised).model_dump(mode="json"),
+                }
+                revision_id = f"CVR-{sha256_json(revision_seed)[:20]}"
+                resolved_revision_by_target[target_key] = revision_id
 
         resolved_targets[target] = (viewpoint_id, revision_id)
 
@@ -311,6 +402,46 @@ def compile_cvp_batch_package(
             )
             revisions_out.append(revision.model_dump(mode="json"))
             viewpoints_out.append(viewpoint.model_dump(mode="json"))
+        elif target_key in revisions_by_target:
+            revised = revisions_by_target[target_key]
+            context = registry_by_revision[target_key]
+            revisions_out.append(
+                ViewpointRevisionRecord(
+                    viewpoint_revision_id=revision_id,
+                    viewpoint_id=viewpoint_id,
+                    # Every revision is its own object, so the store always
+                    # writes it at revision 1 and the record refuses a
+                    # `revision_number` out of step with that. How many times a
+                    # viewpoint has been reworded is carried by the
+                    # `supersedes_revision_id` chain, not by this number --
+                    # writing 2 here produced a row the model could not load and
+                    # took the production Registry views down.
+                    revision_number=1,
+                    core_proposition=revised.core_proposition,
+                    proposition_signature=signature,
+                    scope=_revision_scope(revised),
+                    supersedes_revision_id=target_key,
+                    provenance={
+                        "basis_identity_decision_ids": [decision_id],
+                        "review_artifact_sha256": review_artifact_sha256,
+                    },
+                    approved_by=CVP_BATCH_CHANGESET_POLICY_VERSION,
+                    approved_at=decided_at,
+                    review_status="system_approved",
+                ).model_dump(mode="json")
+            )
+            # Emitted so the package moves the pointer; the ChangeSet layer
+            # diffs it against the store and renders it as an update.
+            viewpoints_out.append(
+                CanonicalViewpointRecord(
+                    viewpoint_id=viewpoint_id,
+                    current_revision_id=revision_id,
+                    created_from_candidate_id=str(
+                        context.get("created_from_candidate_id") or candidate_id
+                    ),
+                    review_status="system_approved",
+                ).model_dump(mode="json")
+            )
 
         per_claim: dict[tuple[str, str], list[ProposedComponent]] = defaultdict(list)
         for claim, component in components:
@@ -401,11 +532,20 @@ def compile_cvp_batch_package(
 
     def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
         ids = resolved_targets.get(endpoint)
-        if ids is None:
-            raise CvpBatchChangeSetError(
-                f"{endpoint[1]} has no viewpoint in this ChangeSet"
-            )
-        return ids
+        if ids is not None:
+            return ids
+        # A relation may point at a committed viewpoint this batch attaches no
+        # Claim to -- drawing the boundary against a neighbour is exactly that
+        # case, and it is the whole point of the edge. The packet already
+        # carries the neighbour, so the endpoint resolves without a component.
+        kind, key = endpoint
+        if kind == "existing":
+            context = registry_by_revision.get(key)
+            if context is not None:
+                return str(context["viewpoint_id"]), key
+        raise CvpBatchChangeSetError(
+            f"{key} has no viewpoint in this ChangeSet"
+        )
 
     relations_out: list[dict[str, Any]] = []
     for relation in proposal.viewpoint_relations:
@@ -473,6 +613,74 @@ def compile_cvp_batch_package(
             ).model_dump(mode="json")
         )
 
+    # Re-point what the superseded wording left behind. Everything here was
+    # named by the reviewer as still holding, so the pointer move records a
+    # reading that happened rather than asserting one that did not.
+    route_revisions_out: list[dict[str, Any]] = []
+    routes_out: list[dict[str, Any]] = []
+    attestations_out: list[dict[str, Any]] = []
+    bumped_route_revisions: dict[str, str] = {}
+    for target, items in sorted(dependents.items()):
+        if target not in revisions_by_target:
+            continue
+        new_revision_id = resolved_revision_by_target.get(target)
+        if new_revision_id is None:
+            continue
+        for item in items:
+            kind = str(item["record_kind"])
+            record = deepcopy(dict(item["record"]))
+            if kind == "viewpoint_claim_link":
+                record["validated_against_viewpoint_revision_id"] = new_revision_id
+                links_out.append(record)
+            elif kind == "viewpoint_relation":
+                for side in ("source", "target"):
+                    if record.get(f"validated_{side}_viewpoint_revision_id") == target:
+                        record[f"validated_{side}_viewpoint_revision_id"] = new_revision_id
+                relations_out.append(record)
+            elif kind == "argument_route_revision":
+                previous_id = str(record["argument_route_revision_id"])
+                record["validated_against_conclusion_viewpoint_revision_id"] = new_revision_id
+                for node in record.get("ordered_inference_nodes") or []:
+                    if node.get("conclusion_viewpoint_revision_id") == target:
+                        node["conclusion_viewpoint_revision_id"] = new_revision_id
+                bumped_number = int(record["revision_number"]) + 1
+                record["revision"] = bumped_number
+                record["revision_number"] = bumped_number
+                record["supersedes_revision_id"] = previous_id
+                seed = {
+                    "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
+                    "argument_route_id": record["argument_route_id"],
+                    "revision_number": bumped_number,
+                    "conclusion_viewpoint_revision_id": new_revision_id,
+                }
+                record["argument_route_revision_id"] = f"ARR-{sha256_json(seed)[:20]}"
+                record["review_artifact_sha256"] = review_artifact_sha256
+                record["approved_by"] = CVP_BATCH_CHANGESET_POLICY_VERSION
+                record["approved_at"] = decided_at
+                bumped_route_revisions[previous_id] = str(record["argument_route_revision_id"])
+                route_revisions_out.append(record)
+                routes_out.append(
+                    {
+                        "argument_route_id": record["argument_route_id"],
+                        "current_revision_id": record["argument_route_revision_id"],
+                        "conclusion_viewpoint_id": viewpoint_id_by_revision[target],
+                        "route_status": "active",
+                        "review_status": "system_approved",
+                        "schema_version": "wang_argument_route_v1",
+                    }
+                )
+            elif kind == "argument_route_attestation":
+                attestations_out.append(record)
+    for record in attestations_out:
+        previous_id = str(record.get("validated_against_route_revision_id"))
+        bumped = bumped_route_revisions.get(previous_id)
+        if bumped is None:
+            raise CvpBatchChangeSetError(
+                f"{record.get('argument_route_attestation_id')}: attestation pins a route "
+                "revision this ChangeSet does not move"
+            )
+        record["validated_against_route_revision_id"] = bumped
+
     package_identity = {
         "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
         "batch_id": proposal.batch_id,
@@ -507,4 +715,112 @@ def compile_cvp_batch_package(
         "viewpoint_claim_links": sorted(
             links_out, key=lambda item: item["viewpoint_claim_link_id"]
         ),
+        "argument_routes": sorted(
+            routes_out, key=lambda item: item["argument_route_id"]
+        ),
+        "argument_route_revisions": sorted(
+            route_revisions_out, key=lambda item: item["argument_route_revision_id"]
+        ),
+        "argument_route_attestations": sorted(
+            attestations_out, key=lambda item: item["argument_route_attestation_id"]
+        ),
     }
+
+
+#: Record kinds that pin themselves to a viewpoint revision and therefore go
+#: stale the moment that revision is superseded.  `viewpoint_runtime_projection`
+#: enforces each of these, so a revision that leaves any of them behind cannot
+#: be applied at all.
+REVISION_DEPENDENT_COLLECTIONS = (
+    "viewpoint_claim_links",
+    "viewpoint_relations",
+    "argument_route_revisions",
+)
+
+
+def load_revision_dependents(
+    *, store: Any, target_revision_ids: Sequence[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Every committed record that pins itself to these viewpoint revisions.
+
+    Superseding a viewpoint's wording strands them all, and the projection
+    validator refuses the write rather than let a record claim it was checked
+    against wording nobody checked it against.  They are loaded so the reviewer
+    can confirm each one still holds; the ChangeSet only re-points what the
+    reviewer confirmed.
+    """
+
+    wanted = set(target_revision_ids)
+    if not wanted:
+        return {}
+
+    found: dict[str, list[dict[str, Any]]] = {key: [] for key in wanted}
+
+    def _add(revision_id: str, kind: str, record: Mapping[str, Any]) -> None:
+        if revision_id in wanted:
+            found[revision_id].append({"record_kind": kind, "record": dict(record)})
+
+    for record in store.list_records("viewpoint_claim_links"):
+        if record.get("effective_state") == "active":
+            _add(
+                str(record.get("validated_against_viewpoint_revision_id")),
+                "viewpoint_claim_link",
+                record,
+            )
+    for record in store.list_records("viewpoint_relations"):
+        if record.get("effective_state") != "active":
+            continue
+        for side in ("source", "target"):
+            _add(
+                str(record.get(f"validated_{side}_viewpoint_revision_id")),
+                "viewpoint_relation",
+                record,
+            )
+    route_revisions = store.list_records("argument_route_revisions")
+    routes = {
+        str(item["argument_route_id"]): item
+        for item in store.list_records("argument_routes")
+    }
+    stale_route_revisions: set[str] = set()
+    for record in route_revisions:
+        route = routes.get(str(record.get("argument_route_id"))) or {}
+        if route.get("current_revision_id") != record.get("argument_route_revision_id"):
+            continue
+        revision_id = str(
+            record.get("validated_against_conclusion_viewpoint_revision_id")
+        )
+        if revision_id in wanted:
+            stale_route_revisions.add(str(record["argument_route_revision_id"]))
+        _add(revision_id, "argument_route_revision", record)
+    # An attestation pins the route revision, so bumping the route to follow the
+    # viewpoint strands the attestation in turn.
+    for record in store.list_records("argument_route_attestations"):
+        route_revision_id = str(record.get("validated_against_route_revision_id"))
+        if route_revision_id not in stale_route_revisions:
+            continue
+        for revision_id, items in found.items():
+            if any(
+                item["record_kind"] == "argument_route_revision"
+                and item["record"].get("argument_route_revision_id") == route_revision_id
+                for item in items
+            ):
+                found[revision_id].append(
+                    {"record_kind": "argument_route_attestation", "record": dict(record)}
+                )
+
+    for items in found.values():
+        items.sort(key=lambda item: (item["record_kind"], sha256_json(item["record"])))
+    return found
+
+
+DEPENDENT_ID_FIELDS = {
+    "viewpoint_claim_link": "viewpoint_claim_link_id",
+    "viewpoint_relation": "viewpoint_relation_id",
+    "argument_route_revision": "argument_route_revision_id",
+    "argument_route_attestation": "argument_route_attestation_id",
+}
+
+
+def dependent_id(item: Mapping[str, Any]) -> str:
+    kind = str(item["record_kind"])
+    return str(item["record"][DEPENDENT_ID_FIELDS[kind]])

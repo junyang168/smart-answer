@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
+    CanonicalViewpointReconsiderationResponse,
     CanonicalViewpointReviewResponse,
     ProposedComponent,
     ProposedStructureFocal,
@@ -33,6 +34,7 @@ from backend.api.canonical_repository.viewpoint_route_changeset import (
     compile_argument_route_package,
 )
 from backend.api.canonical_repository.viewpoint_batch_changeset import (
+    CvpBatchChangeSetError,
     compile_cvp_batch_package,
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
@@ -44,12 +46,16 @@ MODAL_STATEMENT = "根基更可能是基督，而不是彼得个人"
 
 
 def _evidence(
-    claim_id: str, *, eligible: bool = True, scripture_refs: list[str] | None = None
+    claim_id: str,
+    *,
+    eligible: bool = True,
+    scripture_refs: list[str] | None = None,
+    source_id: str = "S1",
 ) -> dict[str, Any]:
     return {
         "evidence_step_id": f"{claim_id}-E1",
         "source_fragment_id": f"{claim_id}-F1",
-        "source_id": "S1",
+        "source_id": source_id,
         "evidence_statement": "教授在该段落作出的推理步骤",
         "verbatim_excerpt": "逐字片段",
         "citation_id": "CIT-1",
@@ -69,12 +75,13 @@ def _claim(
     *,
     eligible: bool = True,
     scripture_refs: list[str] | None = None,
+    source_id: str = "S1",
 ) -> ReviewClaim:
     return ReviewClaim(
         claim_id=claim_id,
         pinned_claim_revision=1,
         claim_revision_sha256=f"sha-{claim_id}",
-        source_id="S1",
+        source_id=source_id,
         statement=statement,
         review_status="approved",
         evidence=[
@@ -82,6 +89,7 @@ def _claim(
                 claim_id,
                 eligible=eligible,
                 scripture_refs=scripture_refs,
+                source_id=source_id,
             )
         ],
     )
@@ -1606,6 +1614,8 @@ def _reconsideration(
     *dispositions: str,
     component_patches: list[dict[str, Any]] | None = None,
     candidate_patches: list[dict[str, Any]] | None = None,
+    relation_patches: list[dict[str, Any]] | None = None,
+    structure_patches: list[dict[str, Any]] | None = None,
 ) -> Any:
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         CanonicalViewpointReconsiderationResponse,
@@ -1626,8 +1636,294 @@ def _reconsideration(
             ],
             "component_patches": component_patches or [],
             "candidate_patches": candidate_patches or [],
+            "relation_patches": relation_patches or [],
+            "structure_patches": structure_patches or [],
         }
     )
+
+
+def _identity_patch() -> dict[str, Any]:
+    """The no-op component patch an accepted finding must still carry."""
+
+    component = _proposal().model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    return {"claim_id": "C1", "component_index": 0, "replacement_components": [component]}
+
+
+def _boundary_relation(**overrides: Any) -> dict[str, Any]:
+    relation = {
+        "source_local_key": "ROCK-NOT-PETER",
+        "target_viewpoint_revision_id": "CVR-1",
+        "relation_type": "specializes",
+        "reason": "把两者的边界写死，未来只讲其中一边的来源才知道匹配哪一条。",
+    }
+    relation.update(overrides)
+    return relation
+
+
+def test_relation_patch_records_a_boundary_the_reviewer_asked_for():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[_identity_patch()],
+            relation_patches=[{"action": "upsert", "relation": _boundary_relation()}],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.relation_type for item in effective.viewpoint_relations] == ["specializes"]
+    assert effective.viewpoint_relations[0].source_local_key == "ROCK-NOT-PETER"
+
+
+def test_relation_patch_needs_only_one_end_in_the_finding():
+    """The neighbour a boundary is drawn against is not itself under review.
+
+    Requiring both endpoints would refuse exactly the edge the finding exists
+    to obtain, which is what left the proposer with nothing to do but rebut.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[_identity_patch()],
+            relation_patches=[
+                {
+                    "action": "upsert",
+                    "relation": _boundary_relation(target_viewpoint_revision_id="CVR-99"),
+                }
+            ],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    assert effective.viewpoint_relations[0].target_viewpoint_revision_id == "CVR-99"
+
+
+def test_relation_patch_unreachable_from_any_finding_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    with pytest.raises(BatchResolutionError, match="not reachable from an accepted finding"):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[_identity_patch()],
+                relation_patches=[
+                    {
+                        "action": "upsert",
+                        "relation": _boundary_relation(
+                            source_local_key=None,
+                            source_viewpoint_revision_id="CVR-98",
+                            target_viewpoint_revision_id="CVR-99",
+                        ),
+                    }
+                ],
+            ),
+            proposal=_proposal(),
+            review=_review("correct", "pass"),
+        )
+
+
+def test_relation_patch_deletes_an_edge_left_dangling_by_a_candidate_delete():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(viewpoint_relations=[_boundary_relation()])
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "support_existing"
+    replacement["target_viewpoint_revision_id"] = "CVR-1"
+    replacement["local_new_viewpoint_key"] = None
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+            relation_patches=[{"action": "delete", "relation": _boundary_relation()}],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert effective.viewpoint_relations == []
+    assert effective.new_viewpoint_candidates == []
+
+
+def test_correction_may_downgrade_a_component_onto_a_batch_local_candidate():
+    """The contract #215 shipped: an argument for a new viewpoint has a home.
+
+    The reconsideration prompt described the pre-#215 rule long after the code
+    changed, so the proposer rebutted this correction as schema-invalid and
+    failed the batch.  Pin the behaviour the prompt has to agree with.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    replacement = _proposal().model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "support_existing"
+    replacement["target_viewpoint_revision_id"] = None
+    replacement["local_new_viewpoint_key"] = "ROCK-NOT-PETER"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    component = effective.claim_decisions[0].components[0]
+    assert component.disposition == "support_existing"
+    assert component.local_new_viewpoint_key == "ROCK-NOT-PETER"
+
+
+def _structure(*local_keys: str, synthesis: str = "本批共同界定权柄的范围。") -> dict[str, Any]:
+    return {
+        "central_synthesis": synthesis,
+        "focal": [
+            {"local_key": key, "structure_role": "central_claim" if index == 0 else "application"}
+            for index, key in enumerate(local_keys)
+        ],
+        "unresolved_items": [],
+        "reason": "这批材料合起来在论证什么。",
+    }
+
+
+def test_structure_patch_rewrites_a_centre_a_candidate_delete_would_strand():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER", "SPARE")],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "new_viewpoint"
+    replacement["local_new_viewpoint_key"] = "SPARE"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+            structure_patches=[
+                {
+                    "structure_index": 0,
+                    "action": "upsert",
+                    "structure": _structure("SPARE", synthesis="只剩下的那个中心。"),
+                }
+            ],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.local_key for item in effective.structures[0].focal] == ["SPARE"]
+    assert effective.structures[0].central_synthesis == "只剩下的那个中心。"
+
+
+def test_structure_patch_untouched_by_the_finding_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER"), _structure("SPARE")],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+
+    with pytest.raises(BatchResolutionError, match="structures#1: structure patch is not reachable"):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[
+                    {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+                ],
+                structure_patches=[
+                    {
+                        "structure_index": 1,
+                        "action": "upsert",
+                        "structure": _structure("SPARE", synthesis="与本次 finding 无关的中心。"),
+                    }
+                ],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+        )
+
+
+def test_structure_delete_does_not_shift_a_later_patch_target():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+        structures=[
+            _structure("ROCK-NOT-PETER", synthesis="第一个中心。"),
+            _structure("ROCK-NOT-PETER", synthesis="第二个中心。"),
+        ],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            structure_patches=[
+                {"structure_index": 0, "action": "delete"},
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER", synthesis="改写过的第二个中心。"),
+                },
+            ],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.central_synthesis for item in effective.structures] == ["改写过的第二个中心。"]
+
+
+def test_unpatched_relations_are_copied_unchanged():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    untouched = _boundary_relation(relation_type="entails", reason="与本次 finding 无关的边。")
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration("accepted", component_patches=[_identity_patch()]),
+        proposal=_proposal(viewpoint_relations=[untouched]),
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.relation_type for item in effective.viewpoint_relations] == ["entails"]
+    assert effective.viewpoint_relations[0].reason == "与本次 finding 无关的边。"
 
 
 def test_accepted_finding_resolves_the_batch():
@@ -2050,9 +2346,10 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
             for index in (0, 1)
         ],
         "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+        "revision_reviews": [],
     }
     reconsideration_payload = {
-        "schema_version": "wang_canonical_viewpoint_reconsideration_v2",
+        "schema_version": "wang_canonical_viewpoint_reconsideration_v3",
         "proposal_sha256": proposal_sha,
         "review_sha256": sha256_json(review_payload),
         "finding_dispositions": [
@@ -3319,4 +3616,786 @@ def test_relation_endpoints_must_differ() -> None:
                 "relation_type": "applies",
                 "reason": "测试用理由",
             }
+        )
+
+
+# --- revising committed wording ------------------------------------------------
+
+REGISTRY_CONTEXT_ROCK = [
+    {
+        "viewpoint_id": "CV-1",
+        "viewpoint_revision_id": "CVR-1",
+        "core_proposition": "彼得不是第一任教皇。",
+        "proposition_signature": {
+            "subject": "彼得",
+            "predicate": "具有",
+            "object": "第一任教皇的身份",
+            "polarity": "denied",
+            "modality": "断言",
+            "conditions": [],
+            "population_scope": ["彼得"],
+            "temporal_scope": [],
+        },
+        "scope": {"scripture_scope": ["馬太福音16:18"], "audience_scope": [], "historical_scope": []},
+    }
+]
+
+
+def _revision(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "target_viewpoint_revision_id": "CVR-1",
+        "core_proposition": "罗马天主教从马太福音16章推出的教皇制解经是错误的。",
+        "subject": "罗马天主教对马太福音16章的教皇制解经",
+        "predicate": "成立",
+        "object": "",
+        "polarity": "denied",
+        "modality": "断言",
+        "scripture_scope": ["馬太福音16:18", "馬太福音16:19"],
+        "conditions": [],
+        "population_scope": ["彼得", "历代教皇"],
+        "revision_reason": "既有措辞只落在彼得的身份上，装不下本批对权柄传承的否定；两者是同一真值条件。",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _member_proposal(**overrides: Any) -> CanonicalViewpointProposalResponse:
+    payload: dict[str, Any] = {
+        "batch_id": "CVB-test-001",
+        "claim_decisions": [
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "member_existing",
+                        target_viewpoint_revision_id="CVR-1",
+                    )
+                ],
+            }
+        ],
+        "new_viewpoint_candidates": [],
+    }
+    payload.update(overrides)
+    return CanonicalViewpointProposalResponse.model_validate(payload)
+
+
+def _passing_review(proposal: CanonicalViewpointProposalResponse) -> CanonicalViewpointReviewResponse:
+    return CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": item.target_viewpoint_revision_id,
+                    "decision": "pass",
+                    "reason": "同一真值条件，扩写后原有来源仍归得进去。",
+                }
+                for item in proposal.viewpoint_revisions
+            ],
+        }
+    )
+
+
+def _compile(proposal: CanonicalViewpointProposalResponse, review: CanonicalViewpointReviewResponse):
+    return compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+
+def test_approved_revision_supersedes_the_committed_wording():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    package = _compile(proposal, _passing_review(proposal))
+
+    assert len(package["viewpoint_revisions"]) == 1
+    revision = package["viewpoint_revisions"][0]
+    assert revision["viewpoint_id"] == "CV-1"
+    # Each revision is its own object, so the store writes it at 1 and the
+    # record refuses anything else; the chain is what records the supersession.
+    assert revision["revision_number"] == 1
+    assert revision["supersedes_revision_id"] == "CVR-1"
+    assert revision["core_proposition"] == "罗马天主教从马太福音16章推出的教皇制解经是错误的。"
+    # The identity does not move; only the wording it currently points at does.
+    assert [item["viewpoint_id"] for item in package["canonical_viewpoints"]] == ["CV-1"]
+    assert package["canonical_viewpoints"][0]["current_revision_id"] == revision["viewpoint_revision_id"]
+    # Everything this batch writes binds to the new revision, not the superseded one.
+    assert package["viewpoint_claim_links"][0][
+        "validated_against_viewpoint_revision_id"
+    ] == revision["viewpoint_revision_id"]
+
+
+def test_batch_without_a_revision_leaves_the_committed_wording_alone():
+    proposal = _member_proposal()
+    package = _compile(proposal, _passing_review(proposal))
+
+    assert package["viewpoint_revisions"] == []
+    assert package["canonical_viewpoints"] == []
+    assert package["viewpoint_claim_links"][0]["validated_against_viewpoint_revision_id"] == "CVR-1"
+
+
+def test_revision_the_reviewer_did_not_pass_is_not_written():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "decision": "reject",
+                    "finding_codes": ["revision_would_absorb_neighbour"],
+                    "reason": "新措辞会把另一条 viewpoint 一并吞掉。",
+                }
+            ],
+        }
+    )
+    with pytest.raises(CvpBatchChangeSetError):
+        _compile(proposal, review)
+
+
+def test_revision_must_target_a_viewpoint_the_batch_attaches_to():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_proposal
+
+    proposal = _proposal(
+        viewpoint_revisions=[_revision(target_viewpoint_revision_id="CVR-untouched")]
+    )
+    with pytest.raises(BatchResolutionError, match="is not attached to by any component"):
+        validate_proposal(
+            proposal=proposal,
+            batch_id="CVB-test-001",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_revision_ids=["CVR-1", "CVR-untouched"],
+        )
+
+
+def test_review_must_decide_every_proposed_revision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_review
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": proposal_sha,
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+        }
+    )
+    with pytest.raises(BatchResolutionError, match="proposed viewpoint revision has no review decision"):
+        validate_review(review=review, proposal=proposal, proposal_sha256=proposal_sha)
+
+
+def test_withdrawing_a_flagged_revision_resolves_the_batch():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"}
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+            "revision_reviews": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "decision": "correct",
+                    "finding_codes": ["revision_too_broad"],
+                    "reason": "新措辞过宽。",
+                    "correction": "撤回该修订，或改回只覆盖本批 Claim 的范围。",
+                }
+            ],
+        }
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "review_sha256": "review-sha",
+            "finding_dispositions": [],
+            "revision_dispositions": [
+                {
+                    "target_viewpoint_revision_id": "CVR-1",
+                    "disposition": "accepted",
+                    "reason": "同意过宽，撤回。",
+                }
+            ],
+            "revision_patches": [
+                {"target_viewpoint_revision_id": "CVR-1", "action": "withdraw"}
+            ],
+        }
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.viewpoint_revisions == []
+
+
+# --- identity consolidation ----------------------------------------------------
+
+def _consolidation(*verdicts: dict[str, Any]) -> Any:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        IdentityConsolidationResponse,
+    )
+
+    return IdentityConsolidationResponse.model_validate({"verdicts": list(verdicts)})
+
+
+def _merge_verdict(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "local_key": "ROCK-NOT-PETER",
+        "verdict": "matches_but_wording_too_narrow",
+        "target_viewpoint_revision_id": "CVR-1",
+        "revised_core_proposition": "罗马天主教据太16章所立的教皇制解经是错误的。",
+        "revised_subject": "罗马天主教对太16章的教皇制解经",
+        "revised_predicate": "成立",
+        "revised_object": "",
+        "revised_polarity": "denied",
+        "revised_modality": "断言",
+        "revised_scripture_scope": ["馬太福音16:18"],
+        "revised_conditions": [],
+        "revised_population_scope": ["彼得", "历代教皇"],
+        "reason": "讲员把整套主张当一个整体否定；既有 signature 只锁在彼得的身份上，装不下本候选。",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_consolidation_folds_a_duplicate_into_the_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal()
+    folded = apply_consolidation(
+        consolidation=_consolidation(_merge_verdict()), proposal=proposal
+    )
+
+    component = folded.claim_decisions[0].components[0]
+    assert component.disposition == "member_existing"
+    assert component.target_viewpoint_revision_id == "CVR-1"
+    assert component.local_new_viewpoint_key is None
+    assert folded.new_viewpoint_candidates == []
+    # The wording that could not hold it becomes the revision the reviewer sees.
+    assert [item.target_viewpoint_revision_id for item in folded.viewpoint_revisions] == ["CVR-1"]
+    assert folded.viewpoint_revisions[0].revision_reason.startswith("讲员把整套主张")
+
+
+def test_consolidation_keeping_the_wording_writes_no_revision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {
+                "local_key": "ROCK-NOT-PETER",
+                "verdict": "matches_existing",
+                "target_viewpoint_revision_id": "CVR-1",
+                "reason": "同一真值条件，既有措辞装得下。",
+            }
+        ),
+        proposal=_proposal(),
+    )
+
+    assert folded.viewpoint_revisions == []
+    assert folded.claim_decisions[0].components[0].disposition == "member_existing"
+
+
+def test_consolidation_leaves_a_genuinely_new_viewpoint_alone():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal()
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {"local_key": "ROCK-NOT-PETER", "verdict": "new", "reason": "库里没有。"}
+        ),
+        proposal=proposal,
+    )
+    assert folded == proposal
+
+
+def test_consolidation_retargets_a_relation_onto_the_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        viewpoint_relations=[
+            {
+                "source_local_key": "SPARE",
+                "target_local_key": "ROCK-NOT-PETER",
+                "relation_type": "applies",
+                "reason": "由前者推出后者。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            _merge_verdict(),
+            {"local_key": "SPARE", "verdict": "new", "reason": "库里没有。"},
+        ),
+        proposal=proposal,
+    )
+    relation = folded.viewpoint_relations[0]
+    assert relation.source_local_key == "SPARE"
+    assert relation.target_viewpoint_revision_id == "CVR-1"
+    assert relation.target_local_key is None
+
+
+def test_consolidation_drops_a_relation_whose_ends_became_one_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        viewpoint_relations=[
+            {
+                "source_local_key": "SPARE",
+                "target_local_key": "ROCK-NOT-PETER",
+                "relation_type": "applies",
+                "reason": "由前者推出后者。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            _merge_verdict(),
+            _merge_verdict(local_key="SPARE", verdict="matches_existing",
+                           revised_core_proposition=None, revised_subject=None,
+                           revised_predicate=None, revised_object=None,
+                           revised_polarity=None, revised_modality=None,
+                           target_viewpoint_revision_id="CVR-2"),
+        ),
+        proposal=proposal,
+    )
+    assert len(folded.viewpoint_relations) == 1
+    folded_same = apply_consolidation(
+        consolidation=_consolidation(
+            {"local_key": "ROCK-NOT-PETER", "verdict": "matches_existing",
+             "target_viewpoint_revision_id": "CVR-1", "reason": "同一条。"},
+            {"local_key": "SPARE", "verdict": "new", "reason": "库里没有。"},
+        ),
+        proposal=_proposal(
+            new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+            viewpoint_relations=[
+                {
+                    "source_viewpoint_revision_id": "CVR-1",
+                    "target_local_key": "ROCK-NOT-PETER",
+                    "relation_type": "applies",
+                    "reason": "两端合并后同一。",
+                }
+            ],
+        ),
+    )
+    assert folded_same.viewpoint_relations == []
+
+
+def test_two_candidates_may_not_claim_one_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")]
+    )
+    with pytest.raises(BatchResolutionError, match="already claimed by"):
+        validate_consolidation(
+            consolidation=_consolidation(
+                _merge_verdict(),
+                _merge_verdict(local_key="SPARE"),
+            ),
+            proposal=proposal,
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_consolidation_must_rule_on_every_candidate():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")]
+    )
+    with pytest.raises(BatchResolutionError, match="SPARE: candidate has no consolidation verdict"):
+        validate_consolidation(
+            consolidation=_consolidation(_merge_verdict()),
+            proposal=proposal,
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+# --- what a revision strands ---------------------------------------------------
+
+def _dependent_link() -> dict[str, Any]:
+    return {
+        "record_kind": "viewpoint_claim_link",
+        "record": {
+            "viewpoint_claim_link_id": "VCL-old",
+            "viewpoint_id": "CV-1",
+            "claim_id": "C-earlier",
+            "link_type": "equivalent_full",
+            "effective_state": "active",
+            "review_status": "system_approved",
+            "validated_against_viewpoint_revision_id": "CVR-1",
+            "decision_id": "VID-earlier",
+            "pinned_claim_revision": 1,
+            "evidence_bindings": [],
+            "occurrence_refs": [],
+        },
+    }
+
+
+def test_revision_repoints_the_records_the_reviewer_confirmed():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": ["VCL-old"]}
+            ]
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        revision_dependents={"CVR-1": [_dependent_link()]},
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    new_revision = package["viewpoint_revisions"][0]["viewpoint_revision_id"]
+    moved = [
+        item for item in package["viewpoint_claim_links"]
+        if item["viewpoint_claim_link_id"] == "VCL-old"
+    ]
+    assert len(moved) == 1
+    assert moved[0]["validated_against_viewpoint_revision_id"] == new_revision
+
+
+def test_revision_that_strands_an_unconfirmed_record_is_refused():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    with pytest.raises(CvpBatchChangeSetError, match="strands unconfirmed records: VCL-old"):
+        compile_cvp_batch_package(
+            proposal=proposal,
+            review=_passing_review(proposal),
+            deterministic_validation_sha256="validation-sha",
+            scope_manifest_sha256="scope-manifest-sha",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_context=REGISTRY_CONTEXT_ROCK,
+            revision_dependents={"CVR-1": [_dependent_link()]},
+            proposal_artifact_sha256="proposal-call-sha",
+            review_artifact_sha256="review-call-sha",
+            proposer_model_id="gpt-5.6-sol/high",
+            reviewer_model_id="claude-opus-5/high",
+            decided_at="2026-08-24T12:00:00Z",
+        )
+
+
+def test_refused_merge_must_leave_the_two_viewpoints_related():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    ruling = _consolidation(_merge_verdict())
+    # The merge did not stick: the candidate is still its own viewpoint.
+    with pytest.raises(BatchResolutionError, match="no relation connects it to a viewpoint this batch proposes"):
+        validate_consolidation_fallback(consolidation=ruling, proposal=_proposal())
+
+    related = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点在更窄经文范围上的具体化。",
+            }
+        ]
+    )
+    report = validate_consolidation_fallback(consolidation=ruling, proposal=related)
+    assert report["unmerged_matches"] == [
+        {"matched_revision_id": "CVR-1", "ruled_local_key": "ROCK-NOT-PETER"}
+    ]
+
+
+def test_renaming_the_candidate_does_not_slip_the_fallback_rule():
+    """The correction round may replace a candidate under a new local key.
+
+    Keying the rule on that key let a rename carry the match out of scope
+    silently, which is how a batch reported the check passing while the edge it
+    requires had only been drawn because the prompt asked nicely.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    renamed = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "new_viewpoint",
+                        local_new_viewpoint_key="RENAMED-AFTER-CORRECTION",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[_candidate("RENAMED-AFTER-CORRECTION")],
+    )
+    with pytest.raises(BatchResolutionError, match="CVR-1: consolidation matched it"):
+        validate_consolidation_fallback(
+            consolidation=_consolidation(_merge_verdict()), proposal=renamed
+        )
+
+
+def test_a_merge_that_stuck_needs_no_fallback_relation():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+        validate_consolidation_fallback,
+    )
+
+    ruling = _consolidation(_merge_verdict())
+    folded = apply_consolidation(consolidation=ruling, proposal=_proposal())
+    report = validate_consolidation_fallback(consolidation=ruling, proposal=folded)
+    assert report["unmerged_matches"] == []
+
+
+def test_relation_may_point_at_a_committed_viewpoint_this_batch_does_not_touch():
+    """Drawing a boundary against a neighbour is precisely this case.
+
+    The neighbour is not under review and holds no Claim from this batch, so
+    requiring a component before its endpoint resolves would refuse the edge
+    the refused-merge rule exists to obtain.
+    """
+
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-untouched",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点在更窄经文范围上的具体化。",
+            }
+        ]
+    )
+    registry = [
+        *REGISTRY_CONTEXT_ROCK,
+        {
+            **REGISTRY_CONTEXT_ROCK[0],
+            "viewpoint_id": "CV-2",
+            "viewpoint_revision_id": "CVR-untouched",
+            "core_proposition": "本批没有任何 component 指向它。",
+        },
+    ]
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": index, "decision": "pass", "reason": "通过"}
+                for index in range(2)
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=registry,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    relation = package["viewpoint_relations"][0]
+    assert relation["target_viewpoint_id"] == "CV-2"
+    assert relation["validated_target_viewpoint_revision_id"] == "CVR-untouched"
+
+
+def test_written_revisions_carry_no_field_older_readers_reject():
+    """Every stored viewpoint model forbids extras, in every deployed version.
+
+    Adding an optional field to `ViewpointRevisionProvenance` put an explicit
+    `"revision_reason": null` on four freshly written revisions -- pydantic
+    serializes optional fields whether or not they carry anything -- and the
+    production Registry views, running code without the field, refused to load
+    the collection at all. Pin the provenance shape so the next addition has to
+    be a deliberate migration rather than a side effect.
+    """
+
+    from backend.api.canonical_repository.knowledge_models import (
+        ViewpointRevisionProvenance,
+    )
+
+    assert set(ViewpointRevisionProvenance.model_fields) == {
+        "basis_identity_decision_ids",
+        "review_artifact_sha256",
+    }
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": []}
+            ]
+        }
+    )
+    package = _compile(proposal, review)
+    for revision in package["viewpoint_revisions"]:
+        assert set(revision["provenance"]) == {
+            "basis_identity_decision_ids",
+            "review_artifact_sha256",
+        }
+
+
+def test_route_packet_drops_claims_from_sources_holding_no_member():
+    """The packet is bounded by the work, not by the corpus.
+
+    An attestation must terminate in an active Claim link of the route's own
+    conclusion viewpoint, so a source holding no member Claim cannot appear in
+    a legal attestation and its Claims are unreachable cost. Carrying the whole
+    scope tied packet size to how much has been transcribed: a 190-Claim
+    Matthew 16 scope built 1.34M characters against a 1.05M limit, and the route
+    job for that scope could not run at all.
+    """
+
+    member = _claim("C1", ROCK_STATEMENT, source_id="S1")
+    same_source_bridge = _claim("C2", MODAL_STATEMENT, source_id="S1")
+    other_source = _claim("C3", MODAL_STATEMENT, source_id="S2")
+
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, same_source_bridge, other_source],
+        viewpoint_claim_links=[_registry_link(member)],
+        existing_routes=[],
+    )
+
+    carried = {item["claim_id"] for item in packet["claim_components"]}
+    assert "C1" in carried
+    # Bridge and objection material from a source that does hold a member is
+    # exactly what the packet exists to show, and stays.
+    assert "C2" in carried
+    assert "C3" not in carried
+    assert {item["claim_id"] for item in packet["claims"]} == {"C1", "C2"}
+    assert set(packet["source_revisions"]) == {"S1"}
+
+
+def test_merged_focal_yields_to_a_focal_that_already_cited_the_viewpoint():
+    """A proposal can name one viewpoint twice without noticing.
+
+    Round 2's second batch cited the committed "教会执行天上已定的标准" as a
+    focal and, in the same proposal, offered a candidate saying the same thing.
+    Consolidation caught that they are one, and the structure was left holding
+    the viewpoint in two roles. The direct citation was made against the
+    committed viewpoint itself, so it keeps its role; the merged focal's role
+    belonged to a viewpoint that turned out not to exist.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+        structures=[
+            {
+                "central_synthesis": "本批共同界定的中心。",
+                "focal": [
+                    {"viewpoint_revision_id": "CVR-1", "structure_role": "positive_identification"},
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "application"},
+                ],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {
+                "local_key": "ROCK-NOT-PETER",
+                "verdict": "matches_existing",
+                "target_viewpoint_revision_id": "CVR-1",
+                "reason": "与既有观点同一真值条件。",
+            }
+        ),
+        proposal=proposal,
+    )
+
+    focal = folded.structures[0].focal
+    assert len(focal) == 1
+    assert focal[0].viewpoint_revision_id == "CVR-1"
+    assert focal[0].structure_role == "positive_identification"
+
+
+def test_two_merged_focals_colliding_still_stops():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[
+            {
+                "central_synthesis": "本批共同界定的中心。",
+                "focal": [
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "application"},
+                    {"local_key": "SPARE", "structure_role": "qualification"},
+                ],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    with pytest.raises(BatchResolutionError, match="one viewpoint two focal roles"):
+        apply_consolidation(
+            consolidation=_consolidation(
+                {"local_key": "ROCK-NOT-PETER", "verdict": "matches_existing",
+                 "target_viewpoint_revision_id": "CVR-1", "reason": "同一条。"},
+                {"local_key": "SPARE", "verdict": "matches_existing",
+                 "target_viewpoint_revision_id": "CVR-1", "reason": "也是同一条。"},
+            ),
+            proposal=proposal,
         )

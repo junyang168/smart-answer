@@ -568,6 +568,12 @@ class ViewpointRevisionProvenance(BaseModel):
 
     basis_identity_decision_ids: list[str] = Field(min_length=1)
     review_artifact_sha256: str
+    # No field is added here for a revision's reason. This model forbids extras,
+    # so every reader running code older than the field rejects the whole
+    # record -- and pydantic serializes an optional field as an explicit null,
+    # so it lands on records that have no reason at all. Adding one took the
+    # production Registry views down on 2026-08-25. The reason lives in the
+    # review artifact `review_artifact_sha256` already binds.
 
 
 class ViewpointRevisionRecord(StrictViewpointRecord):

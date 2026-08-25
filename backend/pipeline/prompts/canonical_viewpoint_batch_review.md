@@ -44,11 +44,39 @@ proposal 里每一个 component 都必须有一条 `change_reviews`，用 `claim
 ## 四种 decision
 
 - `pass`：判断成立。不填 finding code，不填 correction。
-- `correct`：判断有错但可修。必须给 finding code，并在 `correction` 里写明**可接受的修正是什么**——proposer 只被允许照你给的标准改，所以标准要具体（例如「改为 `support_existing`，目标 revision 不变」）。
+- `correct`：判断有错但可修。必须给 finding code，并在 `correction` 里写明**可接受的修正是什么**——proposer 只被允许照你给的标准改，所以标准要具体（例如「改为 `support_existing`，目标 revision 不变」）。proposer 能改的是 component、new viewpoint candidate、`viewpoint_relations` 的边和 `structures`；别的东西它只能 rebut，整批就废了。
 - `reject`：判断不成立且不宜就地修正。必须给 finding code。
 - `defer`：证据或信息不足以复核。必须给 finding code。
 
 finding code 用简短的下划线小写标识，如 `modality_collapsed`、`member_is_actually_support`、`component_lost_qualifier`、`duplicate_of_existing_viewpoint`、`evidence_does_not_entail`。
+
+## 修订既有 viewpoint 的复核
+
+proposal 若提出 `viewpoint_revisions`，每一条都要有一个 `revision_reviews`，用 `target_viewpoint_revision_id` 定位。这一项比新建风险高——被改的措辞是别的批次已经匹配过的，改宽了会把邻近 viewpoint 吞掉，改窄了会让已归入的来源落空。
+
+逐条问：
+
+- 提出的新措辞与既有措辞**是不是同一个真值条件**？只是把两个观点焊成一个大命题，就不是修订，是错误合并；
+- 既有措辞是否**真的**装不下这条 Claim，还是 proposer 只是嫌它不够全面？不够全面不是修订理由；
+- 修订后，原来归入该 viewpoint 的来源**是否仍然归得进去**？答不上就是 `correct` 或 `reject`；
+- 新措辞会不会与 Registry 里另一条 viewpoint 变得难以分辨？
+
+`pass` 才会写进库。`correct` 要写明可接受的新措辞是什么；proposer 可以照改，也可以撤回该修订（撤回后既有措辞不动，批次照常通过）。
+
+### 被牵动的既有记录必须逐条确认
+
+`revision_dependents` 列出了所有**指着旧措辞**的既有记录：claim link、viewpoint relation、argument route revision 及其 attestation。它们当初都是照旧措辞验过的；措辞一改，「验过」就不再成立。
+
+判 `pass` 时，必须在 `confirmed_dependent_ids` 里列出**每一条**记录的 id，表示你逐条看过、它在新措辞下仍然成立。漏一条，ChangeSet 就会拒绝整个修订。
+
+逐类怎么看：
+
+- **claim link**：那条 Claim 在新措辞下还归得进这个 viewpoint 吗？
+- **viewpoint relation**：一端的措辞变了，这条 `applies`／`extends` 还成立吗？
+- **argument route revision**：看它的 `ordered_inference_nodes`。这条路线原本推出的是旧措辞那个结论；**扩写后的结论，它的推理步骤还撑得住吗**？撑不住就不能确认——改判 `correct`，要求把修订收窄到这条路线仍能支持的范围，或 `reject`。
+- **argument route attestation**：它所依附的 route revision 若你确认了，它随之成立。
+
+有任何一条你确认不了，就不要判 `pass`。宁可让修订缩小或撤回，也不要让一条没人验过的记录挂在新措辞下面。
 
 ## 漏项复核
 

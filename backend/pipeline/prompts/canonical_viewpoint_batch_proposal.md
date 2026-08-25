@@ -67,6 +67,25 @@
 
 `new_viewpoint` 填 `local_new_viewpoint_key`（你自己起的批次内短键，如 `KEYS-FUTURE-PERFECT`），并在 `new_viewpoint_candidates` 里给出完整候选。
 
+## 既有 viewpoint 的措辞装不下时，改它，别另起一条
+
+有时一条 Claim 与某个既有 viewpoint 讲的是同一件事，但那条的措辞太窄，`member_existing` 塞不进去。**这时不要新建一个平行观点**——先处理这个题目的那一批只看见了一半材料，它定下的措辞不该把后来更完整的证据挡在外面。
+
+用 `viewpoint_revisions` 提出修订：填 `target_viewpoint_revision_id`（输入里那条 revision ID）、修订后的 `core_proposition` 与完整 signature，并在 `revision_reason` 里写明两件事——
+
+1. 既有措辞为什么装不下这条 Claim；
+2. 修订后**仍是同一个真值条件**，而不是放宽成一个会把邻近 viewpoint 一并吞掉的大命题。
+
+同时该 Claim 的 component 仍照常填 `member_existing` 指向那条 revision。
+
+三条限制：
+
+- 只能改本批**有 component 指向**的 viewpoint，不能改你只是在输入里读到的；
+- 一个 viewpoint 每批只能改一次；
+- 这是改**措辞**，不是合并两个既有 viewpoint。合并是另一回事，本契约做不到，别用修订去变相实现。
+
+判断顺序：先问是不是同一个真值条件。是，且措辞装得下 → `member_existing`。是，但装不下 → `member_existing` 加一条 `viewpoint_revisions`。不是 → `new_viewpoint`。
+
 ## 同一个新观点用同一个 local key
 
 **不同 Claim、不同来源的 component，只要真值条件相同，必须共用同一个 `local_new_viewpoint_key`**，在 `new_viewpoint_candidates` 里只出现一次。
