@@ -78,6 +78,32 @@ proposal 若提出 `viewpoint_revisions`，每一条都要有一个 `revision_re
 
 有任何一条你确认不了，就不要判 `pass`。宁可让修订缩小或撤回，也不要让一条没人验过的记录挂在新措辞下面。
 
+## 中心结构的复核
+
+proposal 若提出 `structures`，每一个都要有一条 `structure_reviews`，用 `structure_index`（数组下标）定位。
+
+这是下游文章与 QA 用来回答「王教授主张什么」的对象，判错的代价比单个 viewpoint 大。
+
+两个问题必须单独回答，不能只写在 reason 里：
+
+**`synthesis_entailed_by_focal`** —— `central_synthesis` 是否**只**说了列出的 focal viewpoints 推得出的内容？多说一句都是 false。常见的多说法：把两个 focal 的结论焊成一个更强的合取；补上材料没有的因果；把「更可能」写成断言。
+
+**`unresolved_material_omitted`** —— 来源里悬而未决、而综合把它悄悄解决掉的内容，逐条列出。没有就留空。
+
+另外逐个 focal 检查 `structure_role` 与它的实际功能是否相符：中心主张被标成应用、或反过来，都要 `correct`。
+
+`synthesis_entailed_by_focal` 填 false 时，即使 decision 写 `pass`，程序也会把批次判为 findings。**这两个问题不是给 reason 做注脚的，是判定本身。**
+
+## 观点关系的复核
+
+proposal 若提出 `viewpoint_relations`，每一条都要有一条 `relation_reviews`，用 `source_ref` + `target_ref` + `relation_type` 定位（两端填 revision id 或 local key，与 proposal 一致）。
+
+**`direction_correct`** —— 方向读法是 source 在前：`source applies target` 意思是 **source 是 target 的一个应用**，不是反过来。`specializes`、`generalizes`、`extends`、`entails` 同理。
+
+方向写反不会被任何其他检查拦下——它在结构上完全合法，只是把推理方向记反了，下游会照着错的方向解释讲员。填 false 时，即使 decision 写 `pass`，批次也判为 findings。
+
+还要问：这条边是否**承重**？两个观点确实相关、但关系类型说不准的，宁可 `correct` 要求换一个更准的类型，也不要放行一条含糊的边。
+
 ## 漏项复核
 
 `novelty_review` 单独回答一个问题：proposal 有没有因为看见了现有 Registry，就把本该是新观点的 Claim 硬归进已有 viewpoint，或者草率地标成 `no_registry_assertion`？
