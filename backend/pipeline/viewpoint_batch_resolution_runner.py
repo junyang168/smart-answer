@@ -780,9 +780,41 @@ def main() -> int:
     )
 
     reports: list[dict[str, Any]] = []
+    completed_batches: list[str] = []
     for ordinal, batch in enumerate(batches, start=1):
         batch_id = f"CVB-{scope_label}-{ordinal:03d}"
         batch_dir = args.output_dir / f"batch-{ordinal:03d}"
+
+        # An applied batch is finished master data, not work to redo. Resume
+        # runs on the model-call cache, and a prompt edit invalidates it -- so
+        # without this, editing a prompt to unblock a later batch re-derives an
+        # earlier one that is already committed, and any drift in the new answer
+        # is written as a second set of records.
+        state_path = batch_dir / "current-state.json"
+        if state_path.exists():
+            state = _read(state_path)
+            if str(state.get("status", "")).startswith("applied"):
+                completed_batches.append(batch_id)
+                # Its records are in the store, and the next batch is entitled
+                # to see them: the serial checkpoint is the whole reason a later
+                # batch can match what an earlier one committed. Skipping the
+                # work must not skip the handoff.
+                registry_context = load_registry_context(
+                    store.list_records("canonical_viewpoints"),
+                    store.list_records("viewpoint_revisions"),
+                )
+                print(
+                    json.dumps(
+                        {
+                            "batch_id": batch_id,
+                            "skipped": "already applied",
+                            "authoritative_artifact": state.get("authoritative_artifact"),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                continue
+
         try:
             report = run_batch(
                 batch_id=batch_id,
@@ -838,7 +870,10 @@ def main() -> int:
                 "batch_id": batch_id,
                 "reason": "batch did not resolve; scope stops here",
                 "escalations": report.get("escalations") or [],
-                "completed_batches": [item["batch_id"] for item in reports[:-1]],
+                "completed_batches": [
+                    *completed_batches,
+                    *(item["batch_id"] for item in reports[:-1]),
+                ],
             }
             stop["artifact_sha256"] = sha256_json(stop)
             _write_immutable(batch_dir / "scope-stop.json", stop)
