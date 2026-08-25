@@ -2814,19 +2814,21 @@ blind POC 找回 active CVP 的原 7 个 member Claims，但额外把 `DK-91b546
 |---|---|---|
 | 一、只问分组 | 「这 13 条里哪些命题是同一个观点」 | Sol 10 组、Opus 8 组；**两者的最大组都是 7 条 Claim／6 篇讲道的「不是彼得本人」** |
 | 二、问角色 | 「哪些组是独立观点，哪些是论据／限定／应用／方法」 | Opus 把 8 组判为 2 个观点加 4 个 attachment，并把正反两面合成一个中心 |
-| 三、原子 CVP + Structure | 一次从原始 Claims 产出原子 CVP、attachments 与 structure | Opus 首轮把「磐石不是彼得本人」与「教会不是建立在彼得本人身上」拆成两个 CVP；补上原子判据后为 7 条／6 篇的单一 CVP。Fable/high 首轮即为 7 条／6 篇 |
+| 三、原子 CVP + Structure | 一次从原始 Claims 产出原子 CVP、attachments 与 structure | Opus/high 首轮把「磐石不是彼得本人」与「教会不是建立在彼得本人身上」拆成两个 CVP；补上原子判据后为 7 条／6 篇。Fable/high 首轮即为 7 条／6 篇。生产 proposer Sol/high 在同一判据下为 5 个 CVP、5 个 attachment，「不是彼得本人」同为 7 条／6 篇 |
 
 结论有三点。
 
-其一，**能力具备，缺的是提问。** 只要显式要求跨 Claim 判断同一性，三个模型都在无 Registry 输入的条件下把 6 篇讲道的同一观点收敛为一个 identity。#206 的 prompt 从不提这个问题，其 disposition 表也只允许指向现有 CVP，因此「一条 Claim 一个 CVP」是契约的必然结果，不是模型判断失误。
+其一，**能力具备，缺的是提问。** 只要显式要求跨 Claim 判断同一性，Sol、Opus 与 Fable 都在无 Registry 输入的条件下把 6 篇讲道的同一观点收敛为一个 identity；其中 Sol 与 Opus 在只问分组时即如此，三者在完整 CVP+Structure 形状下亦如此。#206 的 prompt 从不提这个问题，其 disposition 表也只允许指向现有 CVP，因此「一条 Claim 一个 CVP」是契约的必然结果，不是模型判断失误。
 
 其二，**「原子」必须给出可操作判据。** 测试三首轮只写「不要复合句」，Opus 即把同一真值条件的主动／被动改写拆成两个 CVP；补上「原子指一个真值条件而非一个短句，换主语／换语态／正说反说仍是一个观点，拆开的依据只能是 modality、scope、指称对象、人群或条件不同」之后，同一模型同一输入即得到正确结果。Fable 首轮的更优结果来自它没有遵守含糊的原子指令，**不构成模型能力差异的证据**；模型选择不得引用本节作为依据。
 
-其三，**角色判定比分组更不稳定。** 同一批材料上 Fable 与 Opus 对「信仰告白」给出 `正面识别` 与 `张力一方` 两种 role，对「与彼得有关联」一个当 viewpoint 一个当 attachment。因此 `structure_role` 词表需要判别标准与 review 逐项检查，尤其 `tension_side` 与 `positive_identification` 的界线。
+其三，**角色判定与合并粒度比分组更不稳定。** 同一批材料上三个模型给出三种 role 分配：Sol 把「不是彼得本人」标为 `否定面`、「信仰告白」标为 `中心主张`，Opus 与 Fable 相反；Fable 与 Opus 对「信仰告白」分别给出 `正面识别` 与 `张力一方`；「与彼得有关联」一个当 viewpoint 一个当 attachment。合并粒度同样有分歧：Sol 把「信仰告白」与「所传真理」合为一个 CVP（5 条／3 篇），Opus 与 Fable 保持分开（4 条／3 篇与 2 条／2 篇）；测试二中 Opus 自己指出这一对只因讲员同句并列才可合，若别处分开论证则不应视为同一观点。
 
-calibration artifacts 位于 `$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/matthew16-cvp-structure-calibration-2026-08-24/`，含三个测试脚本与全部 raw outputs；`opus-high.structure.v2.json` SHA-256 `65bc7a50c3c1b98bbce99ed61b72e7a1367637478ae7847b30340dc1ac1f1d87`，`fable-high.structure.json` SHA-256 `963f67c7474dbd9a2e5317027b74219ce91ad94dfb8f043109180ce271ccfec1`，`opus-high.groups.json` SHA-256 `4ce6a736d7b9381d9387169a574591ce91aafefaf046952cbb7f15b320972abf`。
+因此 `structure_role` 词表需要判别标准与 review 逐项检查，尤其 `tension_side` 与 `positive_identification`、`中心主张` 与 `否定面` 的界线；同句并列是否足以支持合并也须在 review 中显式判断，不得由 proposer 单独决定。
 
-这些测试是 architecture evidence，不批准任何 CVP、Route、Structure 或 Topic，0 master-data mutations。它们**未验证**：多 shard scope 的 consolidation、带 Registry context 时的 anchoring 风险、review 与 correction 回路、以及第 6.2.5 节 guard 阈值的取值。这些由第 16.2 节的实现卡在 no-apply 与 clean temporary Registry 条件下验证。
+calibration artifacts 位于 `$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/matthew16-cvp-structure-calibration-2026-08-24/`，含三个测试脚本与全部 raw outputs；`opus-high.structure.v2.json` SHA-256 `65bc7a50c3c1b98bbce99ed61b72e7a1367637478ae7847b30340dc1ac1f1d87`，`fable-high.structure.json` SHA-256 `963f67c7474dbd9a2e5317027b74219ce91ad94dfb8f043109180ce271ccfec1`，`opus-high.groups.json` SHA-256 `4ce6a736d7b9381d9387169a574591ce91aafefaf046952cbb7f15b320972abf`，`sol-high.structure.v2.json` SHA-256 `8eb58a9244e35d1377316480f2f39e4a0bde9072cc1daecbd0483c2c15b0688b`。
+
+这些测试是 architecture evidence，不批准任何 CVP、Route、Structure 或 Topic，0 master-data mutations。每种配置各运行一次，因此模型间差异不排除 run-to-run variance。它们**未验证**：多 shard scope 的 consolidation、带 Registry context 时的 anchoring 风险、review 与 correction 回路、role 与合并粒度的稳定性，以及第 6.2.5 节 guard 阈值的取值。这些由第 16.2 节的实现卡在 no-apply 与 clean temporary Registry 条件下验证。
 
 ## 14. 性能与可扩展性
 
