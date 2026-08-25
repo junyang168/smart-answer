@@ -4399,3 +4399,94 @@ def test_two_merged_focals_colliding_still_stops():
             ),
             proposal=proposal,
         )
+
+
+# --- what a rejected terminal component should tell you -------------------------
+
+def _unlinked_sibling() -> Any:
+    """A second component of the same Claim, wording close, no Registry link.
+
+    This is the shape that stalled a real batch: one Claim carved into several
+    components, two of them reading almost alike, only one carrying the link.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding,
+    )
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    component = ProposedComponent.model_validate(
+        _component(ROCK_STATEMENT, "而是彼得所承认的信仰", "no_registry_assertion")
+    )
+    return RouteComponentBinding(
+        claim_component_key=component_key(claim, component),
+        claim_id="C1",
+        source_id="S1",
+        disposition="no_registry_assertion",
+        statement_component=component.statement_component(),
+        spans=component.spans,
+        evidence_step_ids=component.evidence_step_ids,
+        source_fragment_ids=component.source_fragment_ids,
+    )
+
+
+def _findings_for_terminal(terminal: Any, bindings: list[Any]) -> list[str]:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        _route_findings,
+    )
+
+    payload = dict(_attestation())
+    payload["terminal_claim_component_key"] = terminal.claim_component_key
+    payload["claim_ids"] = ["C1"]
+    routes = _routes(source_route_attestations=[payload])
+    return _route_findings(
+        proposal=routes,
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        approved_revisions={"CVR-1"},
+        known_route_revisions=set(),
+        known_route_conclusions={},
+        component_bindings={item.claim_component_key: item for item in bindings},
+    )
+
+
+def test_rejected_terminal_component_names_the_one_that_would_work():
+    linked, unlinked = _route_component_binding(), _unlinked_sibling()
+    findings = [
+        f for f in _findings_for_terminal(unlinked, [linked, unlinked])
+        if "no positive Registry link" in f
+    ]
+    assert len(findings) == 1
+    # Without the sibling key the reader goes looking in the Registry for a link
+    # that is not missing -- it is on the component next door.
+    assert linked.claim_component_key in findings[0]
+    assert "CVR-1" in findings[0]
+
+
+def test_rejected_terminal_component_says_when_the_claim_has_no_linked_component():
+    unlinked = _unlinked_sibling()
+    findings = [
+        f for f in _findings_for_terminal(unlinked, [unlinked])
+        if "no positive Registry link" in f
+    ]
+    assert len(findings) == 1
+    assert "no component of Claim C1 carries one" in findings[0]
+
+
+def test_rejected_terminal_component_distinguishes_links_that_reach_elsewhere():
+    """"No component carries a link" would be false here, and sends the reader back to the store."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding,
+    )
+
+    linked_elsewhere = _route_component_binding().model_copy(
+        update={"target_viewpoint_revision_id": "CVR-OTHER"}
+    )
+    unlinked = _unlinked_sibling()
+    findings = [
+        f for f in _findings_for_terminal(unlinked, [linked_elsewhere, unlinked])
+        if "no positive Registry link" in f
+    ]
+    assert len(findings) == 1
+    assert "links only to other viewpoints" in findings[0]
+    assert "CVR-OTHER" in findings[0]

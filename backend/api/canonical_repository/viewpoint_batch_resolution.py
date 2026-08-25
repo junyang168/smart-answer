@@ -954,6 +954,45 @@ def component_key_from_spans(
     )
 
 
+def _sibling_hint(
+    component_bindings: Mapping[str, "RouteComponentBinding"],
+    *,
+    claim_id: str,
+    wanted_revision: str | None,
+) -> str:
+    """Name the components on this Claim that the rejected one could have been.
+
+    One Claim is carved into several components, and neighbouring ones can read
+    almost alike while only one carries the Registry link. Saying only that the
+    chosen component has no link reads as though the Registry were missing it,
+    and sends the reader off to check the store -- where the link is, on the
+    component next door. Give the usable keys instead.
+    """
+
+    linked = sorted(
+        (key, item.target_viewpoint_revision_id)
+        for key, item in component_bindings.items()
+        if item.claim_id == claim_id
+        and item.disposition in ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
+    )
+    usable = [
+        (key, revision)
+        for key, revision in linked
+        if wanted_revision is None or revision == wanted_revision
+    ]
+    if usable:
+        rendered = ", ".join(f"{key} -> {revision}" for key, revision in usable)
+        return f"; on this Claim: {rendered}"
+    if linked:
+        # Saying "none carries a link" would be false and would send the reader
+        # to the Registry again; the links exist, they reach elsewhere.
+        rendered = ", ".join(f"{key} -> {revision}" for key, revision in linked)
+        return (
+            f"; Claim {claim_id} links only to other viewpoints: {rendered}"
+        )
+    return f"; no component of Claim {claim_id} carries one"
+
+
 def _route_findings(
     *,
     proposal: "ArgumentRouteProposalResponse",
@@ -1107,12 +1146,22 @@ def _route_findings(
             }:
                 findings.append(
                     f"{where}: terminal Claim component has no positive Registry link"
+                    + _sibling_hint(
+                        component_bindings,
+                        claim_id=terminal.claim_id,
+                        wanted_revision=route.conclusion_ref.key() if route else None,
+                    )
                 )
             elif route is not None and (
                 terminal.target_viewpoint_revision_id != route.conclusion_ref.key()
             ):
                 findings.append(
                     f"{where}: terminal Claim component belongs to another conclusion viewpoint"
+                    + _sibling_hint(
+                        component_bindings,
+                        claim_id=terminal.claim_id,
+                        wanted_revision=route.conclusion_ref.key(),
+                    )
                 )
             elif terminal.claim_id not in attestation.claim_ids:
                 findings.append(f"{where}: terminal Claim is not listed by the attestation")
