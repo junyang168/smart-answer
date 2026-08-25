@@ -110,12 +110,9 @@ def registry_context(
             {
                 "viewpoint_id": viewpoint.viewpoint_id,
                 "viewpoint_revision_id": revision.viewpoint_revision_id,
-                # A batch that revises this viewpoint writes revision N+1, so it
-                # has to be told N. Evidence is deliberately still absent: a
-                # 2026-08-25 experiment gave both models the attested verbatim
-                # and it changed no judgment for Opus and reversed Sol's, so the
-                # context cost buys nothing here.
-                "revision_number": revision.revision_number,
+                # Evidence is deliberately absent: a 2026-08-25 experiment gave
+                # both models the attested verbatim and it changed no judgment
+                # for Opus and reversed Sol's, so the context cost buys nothing.
                 "core_proposition": revision.core_proposition,
                 "proposition_signature": revision.proposition_signature.model_dump(mode="json"),
                 "scope": revision.scope.model_dump(mode="json"),

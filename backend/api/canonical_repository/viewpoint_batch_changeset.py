@@ -297,15 +297,12 @@ def compile_cvp_batch_package(
                 # wording moves to a new revision that supersedes the one the
                 # packet offered. Everything this batch writes must then bind to
                 # the new revision, which is why resolved_targets carries it.
-                superseded_number = context.get("revision_number")
-                if superseded_number is None:
-                    raise CvpBatchChangeSetError(
-                        f"Registry context for {target_key} carries no revision_number"
-                    )
                 signature = _revision_signature(revised)
                 revision_seed = {
                     "viewpoint_id": viewpoint_id,
-                    "revision_number": int(superseded_number) + 1,
+                    # Distinguishes this wording from the one it supersedes so
+                    # the derived id differs; not the stored revision number.
+                    "supersedes": target_key,
                     "core_proposition": revised.core_proposition,
                     "proposition_signature": signature.model_dump(mode="json"),
                     "scope": _revision_scope(revised).model_dump(mode="json"),
@@ -412,10 +409,14 @@ def compile_cvp_batch_package(
                 ViewpointRevisionRecord(
                     viewpoint_revision_id=revision_id,
                     viewpoint_id=viewpoint_id,
-                    # The store revision and the semantic revision number are
-                    # one and the same; the record refuses them out of step.
-                    revision=int(context["revision_number"]) + 1,
-                    revision_number=int(context["revision_number"]) + 1,
+                    # Every revision is its own object, so the store always
+                    # writes it at revision 1 and the record refuses a
+                    # `revision_number` out of step with that. How many times a
+                    # viewpoint has been reworded is carried by the
+                    # `supersedes_revision_id` chain, not by this number --
+                    # writing 2 here produced a row the model could not load and
+                    # took the production Registry views down.
+                    revision_number=1,
                     core_proposition=revised.core_proposition,
                     proposition_signature=signature,
                     scope=_revision_scope(revised),

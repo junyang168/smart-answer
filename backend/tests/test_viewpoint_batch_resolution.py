@@ -3625,7 +3625,6 @@ REGISTRY_CONTEXT_ROCK = [
     {
         "viewpoint_id": "CV-1",
         "viewpoint_revision_id": "CVR-1",
-        "revision_number": 1,
         "core_proposition": "彼得不是第一任教皇。",
         "proposition_signature": {
             "subject": "彼得",
@@ -3725,7 +3724,9 @@ def test_approved_revision_supersedes_the_committed_wording():
     assert len(package["viewpoint_revisions"]) == 1
     revision = package["viewpoint_revisions"][0]
     assert revision["viewpoint_id"] == "CV-1"
-    assert revision["revision_number"] == 2
+    # Each revision is its own object, so the store writes it at 1 and the
+    # record refuses anything else; the chain is what records the supersession.
+    assert revision["revision_number"] == 1
     assert revision["supersedes_revision_id"] == "CVR-1"
     assert revision["core_proposition"] == "罗马天主教从马太福音16章推出的教皇制解经是错误的。"
     # The identity does not move; only the wording it currently points at does.
