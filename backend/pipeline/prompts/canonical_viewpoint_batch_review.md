@@ -44,7 +44,7 @@ proposal 里每一个 component 都必须有一条 `change_reviews`，用 `claim
 ## 四种 decision
 
 - `pass`：判断成立。不填 finding code，不填 correction。
-- `correct`：判断有错但可修。必须给 finding code，并在 `correction` 里写明**可接受的修正是什么**——proposer 只被允许照你给的标准改，所以标准要具体（例如「改为 `support_existing`，目标 revision 不变」）。
+- `correct`：判断有错但可修。必须给 finding code，并在 `correction` 里写明**可接受的修正是什么**——proposer 只被允许照你给的标准改，所以标准要具体（例如「改为 `support_existing`，目标 revision 不变」）。proposer 能改的是 component、new viewpoint candidate、`viewpoint_relations` 的边和 `structures`；别的东西它只能 rebut，整批就废了。
 - `reject`：判断不成立且不宜就地修正。必须给 finding code。
 - `defer`：证据或信息不足以复核。必须给 finding code。
 

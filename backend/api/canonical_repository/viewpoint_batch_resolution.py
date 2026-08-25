@@ -1674,7 +1674,7 @@ def anchor_proposal_spans(
     return payload, sorted(changes)
 
 
-RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v2"
+RECONSIDERATION_VERSION = "wang_canonical_viewpoint_reconsideration_v3"
 
 
 class FindingDisposition(StrictBatchModel):
@@ -1731,10 +1731,54 @@ class CandidateCorrectionPatch(StrictBatchModel):
         return self
 
 
+class RelationCorrectionPatch(StrictBatchModel):
+    """Upsert or delete one typed edge reachable from a flagged component.
+
+    A reviewer who accepts a new viewpoint but calls its boundary against a
+    neighbouring one unclear asks for that boundary to be recorded as a
+    relation.  Without this patch the proposer can only rebut the finding —
+    the correction is unsatisfiable, and one unsatisfiable finding fails the
+    whole batch.
+
+    The edge carries no id of its own, so it is keyed the way
+    :func:`validate_proposal` already keys it: both endpoints plus the type.
+    """
+
+    action: Literal["upsert", "delete"]
+    relation: ProposedViewpointRelation
+
+    def edge(self) -> tuple[Any, ...]:
+        return (*self.relation.endpoints(), self.relation.relation_type)
+
+
+class StructureCorrectionPatch(StrictBatchModel):
+    """Replace or drop one proposed structure reachable from a flagged component.
+
+    Deleting a candidate strands every focal that named it, and a structure
+    whose focal list no longer resolves fails validation with nothing the
+    proposer can do about it.  The whole structure is re-emitted rather than
+    the one focal removed, because ``central_synthesis`` has to be entailed by
+    the focal viewpoints that remain — dropping a focal silently would leave
+    the synthesis asserting a viewpoint the batch no longer holds.
+    """
+
+    structure_index: int = Field(ge=0)
+    action: Literal["upsert", "delete"]
+    structure: ProposedViewpointStructure | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "StructureCorrectionPatch":
+        if self.action == "upsert" and self.structure is None:
+            raise ValueError("structure upsert must carry a structure")
+        if self.action == "delete" and self.structure is not None:
+            raise ValueError("structure delete does not carry a structure payload")
+        return self
+
+
 class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
     """The proposer's single, patch-only answer to reviewer findings."""
 
-    schema_version: Literal["wang_canonical_viewpoint_reconsideration_v2"] = (
+    schema_version: Literal["wang_canonical_viewpoint_reconsideration_v3"] = (
         RECONSIDERATION_VERSION
     )
     proposal_sha256: str
@@ -1742,6 +1786,8 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
     finding_dispositions: list[FindingDisposition] = Field(min_length=1)
     component_patches: list[ComponentCorrectionPatch] = Field(default_factory=list)
     candidate_patches: list[CandidateCorrectionPatch] = Field(default_factory=list)
+    relation_patches: list[RelationCorrectionPatch] = Field(default_factory=list)
+    structure_patches: list[StructureCorrectionPatch] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_reconsideration(self) -> "CanonicalViewpointReconsiderationResponse":
@@ -1754,6 +1800,12 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         candidate_keys = [item.local_key for item in self.candidate_patches]
         if len(candidate_keys) != len(set(candidate_keys)):
             raise ValueError("candidate patches must be unique")
+        relation_keys = [item.edge() for item in self.relation_patches]
+        if len(relation_keys) != len(set(relation_keys)):
+            raise ValueError("relation patches must be unique")
+        structure_keys = [item.structure_index for item in self.structure_patches]
+        if len(structure_keys) != len(set(structure_keys)):
+            raise ValueError("structure patches must be unique")
         return self
 
 
@@ -1803,6 +1855,7 @@ def apply_reconsideration_patches(
                 candidate_referrers.setdefault(
                     component.local_new_viewpoint_key, set()
                 ).add((decision.claim_id, index))
+    affected_revision_ids: set[str] = set()
     for claim_id, component_index in sorted(accepted):
         decision = decisions.get(claim_id)
         if decision is None or component_index >= len(decision["components"]):
@@ -1811,6 +1864,8 @@ def apply_reconsideration_patches(
         original = decision["components"][component_index]
         if original.get("local_new_viewpoint_key"):
             affected_candidate_keys.add(str(original["local_new_viewpoint_key"]))
+        if original.get("target_viewpoint_revision_id"):
+            affected_revision_ids.add(str(original["target_viewpoint_revision_id"]))
 
     patches_by_claim: dict[str, dict[int, ComponentCorrectionPatch]] = {}
     for key, patch in patches.items():
@@ -1834,6 +1889,8 @@ def apply_reconsideration_patches(
                 for item in patch.replacement_components:
                     if item.local_new_viewpoint_key:
                         affected_candidate_keys.add(item.local_new_viewpoint_key)
+                    if item.target_viewpoint_revision_id:
+                        affected_revision_ids.add(item.target_viewpoint_revision_id)
                 continue
             target = patch.merge_into_component_index
             if target is None or target >= len(original_components):
@@ -1900,6 +1957,66 @@ def apply_reconsideration_patches(
             candidates[patch.local_key] = patch.candidate.model_dump(mode="json")
     payload["new_viewpoint_candidates"] = [
         candidates[key] for key in sorted(candidates)
+    ]
+
+    # A relation is authorized by the finding at one of its ends: the reviewer
+    # asking for a boundary names the flagged viewpoint on one side and the
+    # neighbour it is confusable with on the other, and the neighbour is not
+    # itself under review.  Requiring both ends would refuse exactly the edge
+    # the finding exists to obtain.
+    relations = {
+        (*relation.endpoints(), relation.relation_type): item
+        for relation, item in zip(
+            proposal.viewpoint_relations, payload["viewpoint_relations"]
+        )
+    }
+    for patch in reconsideration.relation_patches:
+        endpoints = patch.relation.endpoints()
+        reachable = any(
+            key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
+            for kind, key in endpoints
+        )
+        if not reachable:
+            findings.append(
+                f"{patch.relation.relation_type} {endpoints[0][1]}->{endpoints[1][1]}: "
+                "relation patch is not reachable from an accepted finding"
+            )
+            continue
+        if patch.action == "delete":
+            relations.pop(patch.edge(), None)
+        else:
+            relations[patch.edge()] = patch.relation.model_dump(mode="json")
+    payload["viewpoint_relations"] = list(relations.values())
+
+    # Same reachability rule, read off the structure's own focal list: the
+    # structure a finding strands is the one that named the viewpoint under
+    # review.  Patches are resolved against the original indices and the list
+    # is rebuilt once, so a delete cannot shift a later patch's target.
+    structure_replacements: dict[int, dict[str, Any] | None] = {}
+    for patch in reconsideration.structure_patches:
+        if patch.structure_index >= len(proposal.structures):
+            findings.append(
+                f"structures#{patch.structure_index}: patch target does not exist"
+            )
+            continue
+        original = proposal.structures[patch.structure_index]
+        reachable = any(
+            key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
+            for kind, key in (focal.endpoint() for focal in original.focal)
+        )
+        if not reachable:
+            findings.append(
+                f"structures#{patch.structure_index}: "
+                "structure patch is not reachable from an accepted finding"
+            )
+            continue
+        structure_replacements[patch.structure_index] = (
+            None if patch.action == "delete" else patch.structure.model_dump(mode="json")
+        )
+    payload["structures"] = [
+        structure_replacements.get(index, item)
+        for index, item in enumerate(payload["structures"])
+        if structure_replacements.get(index, item) is not None
     ]
 
     if findings:

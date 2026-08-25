@@ -32,16 +32,43 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 如果 component patch 改用了尚不存在的 local key，必须 upsert 对应 candidate；如果旧 candidate 修正后不再被任何 component 引用，应 delete。其余 candidate 不要输出，程序会保持原样。
 
+## Relation patch
+
+复核员接受一个新观点、但指出它与另一个观点边界不清时，会要求把这条边界记成 `viewpoint_relations`。用 `relation_patches` 给出：
+
+- `action: upsert` 新增或改写一条边，`action: delete` 删除一条边，两者都携带完整 `relation`；
+- 一条边由「两端 + `relation_type`」唯一确定，upsert 同一条边即改写它的 `reason`；
+- 只要求边的**一端**落在本次 accepted finding 触及的观点上（该 finding 的 component 原本或修正后引用的 `local_new_viewpoint_key` 或 `target_viewpoint_revision_id`）。另一端是它要划清界限的邻居，通常并未被复核员点名，这是允许的。
+
+没被要求改的边不要输出，程序会保持原样。因 candidate delete 而失去指向的边，必须一并 delete，否则修正后的 proposal 校验不过。
+
+## Structure patch
+
+删掉一个 candidate，`structures` 里指着它的 focal 就悬空了，整个 proposal 校验不过。用 `structure_patches` 处理：
+
+- 用 `structure_index`（原 proposal `structures` 数组的下标）定位，`action: upsert` 重出整个 structure，`action: delete` 删掉它；
+- 只允许改 focal 里含有本次 accepted finding 所触及观点的那个 structure；
+- 必须重出整个 structure，而不是只删一个 focal —— `central_synthesis` 要由剩下的 focal 蕴含。少了一个观点还留着原来的综合，就是在断言一个本批已经不持有的观点。若剩下的 focal 撑不起原来的中心，改写 `central_synthesis`，或把撑不住的部分写进 `unresolved_items`，不要硬留。
+
+没被影响的 structure 不要输出，程序会保持原样。
+
 ## target contract 不能变通
 
-带 `_existing` 的 disposition（`member_existing / support_existing / qualification_existing / tension_existing`）只能指向输入 packet 中已经存在的 Registry revision，必须填写非空 `target_viewpoint_revision_id`，并且不得填写 `local_new_viewpoint_key`。
+这一节与提案时的规则完全相同，改稿不另立一套：
 
-当前 schema 不支持 `qualification_existing` 或其他 `_existing` disposition 指向本批 `new_viewpoint` candidate。若复核员的 correction 同时给出「指向本批 candidate」和一个明确的 schema-valid fallback，必须采用 fallback；通常是把该 component 改为 `new_viewpoint` 并填写 `local_new_viewpoint_key`。不要输出 `target_viewpoint_revision_id=null` 的 `_existing` component。
+- `member_existing` 只能填 `target_viewpoint_revision_id`，指向输入 packet 中已有的 Registry revision，不得填 `local_new_viewpoint_key`。
+- `support_existing`、`qualification_existing`、`tension_existing` 填 `target_viewpoint_revision_id` **或** `local_new_viewpoint_key`，二选一。**论据、限定、张力可以指向这一批里刚提出的新观点** —— 复核员要求把某个 component 降级为本批某个 candidate 的论据时，就填那个 candidate 的 local key。这是合法的，不要以为 schema 不支持而 rebut。
+- `new_viewpoint` 填 `local_new_viewpoint_key`，不得填 `target_viewpoint_revision_id`。
+- `no_registry_assertion`、`deferred` 两者都不填。
+
+`_existing` 两个 target 字段全空、或两个都填，都是无效 component。
 
 ## 最后检查
 
 - 每个 reviewer `correct` finding 恰好一个 disposition；
 - 每个 accepted disposition 恰好一个同 key component patch；
+- correction 要求的 relation 已在 `relation_patches` 中给出，因 candidate delete 悬空的 relation 与 structure focal 也已一并处理；
+- 没有因为「没有接口」或「schema 不支持」而 rebut —— 先回到上面两节确认一次；
 - rebutted/deferred 没有 patch；
 - 没有任何 pass component patch；
 - 不返回完整 proposal。

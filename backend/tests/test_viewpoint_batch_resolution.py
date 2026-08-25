@@ -1606,6 +1606,8 @@ def _reconsideration(
     *dispositions: str,
     component_patches: list[dict[str, Any]] | None = None,
     candidate_patches: list[dict[str, Any]] | None = None,
+    relation_patches: list[dict[str, Any]] | None = None,
+    structure_patches: list[dict[str, Any]] | None = None,
 ) -> Any:
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         CanonicalViewpointReconsiderationResponse,
@@ -1626,8 +1628,294 @@ def _reconsideration(
             ],
             "component_patches": component_patches or [],
             "candidate_patches": candidate_patches or [],
+            "relation_patches": relation_patches or [],
+            "structure_patches": structure_patches or [],
         }
     )
+
+
+def _identity_patch() -> dict[str, Any]:
+    """The no-op component patch an accepted finding must still carry."""
+
+    component = _proposal().model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    return {"claim_id": "C1", "component_index": 0, "replacement_components": [component]}
+
+
+def _boundary_relation(**overrides: Any) -> dict[str, Any]:
+    relation = {
+        "source_local_key": "ROCK-NOT-PETER",
+        "target_viewpoint_revision_id": "CVR-1",
+        "relation_type": "specializes",
+        "reason": "把两者的边界写死，未来只讲其中一边的来源才知道匹配哪一条。",
+    }
+    relation.update(overrides)
+    return relation
+
+
+def test_relation_patch_records_a_boundary_the_reviewer_asked_for():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[_identity_patch()],
+            relation_patches=[{"action": "upsert", "relation": _boundary_relation()}],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.relation_type for item in effective.viewpoint_relations] == ["specializes"]
+    assert effective.viewpoint_relations[0].source_local_key == "ROCK-NOT-PETER"
+
+
+def test_relation_patch_needs_only_one_end_in_the_finding():
+    """The neighbour a boundary is drawn against is not itself under review.
+
+    Requiring both endpoints would refuse exactly the edge the finding exists
+    to obtain, which is what left the proposer with nothing to do but rebut.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[_identity_patch()],
+            relation_patches=[
+                {
+                    "action": "upsert",
+                    "relation": _boundary_relation(target_viewpoint_revision_id="CVR-99"),
+                }
+            ],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    assert effective.viewpoint_relations[0].target_viewpoint_revision_id == "CVR-99"
+
+
+def test_relation_patch_unreachable_from_any_finding_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    with pytest.raises(BatchResolutionError, match="not reachable from an accepted finding"):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[_identity_patch()],
+                relation_patches=[
+                    {
+                        "action": "upsert",
+                        "relation": _boundary_relation(
+                            source_local_key=None,
+                            source_viewpoint_revision_id="CVR-98",
+                            target_viewpoint_revision_id="CVR-99",
+                        ),
+                    }
+                ],
+            ),
+            proposal=_proposal(),
+            review=_review("correct", "pass"),
+        )
+
+
+def test_relation_patch_deletes_an_edge_left_dangling_by_a_candidate_delete():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(viewpoint_relations=[_boundary_relation()])
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "support_existing"
+    replacement["target_viewpoint_revision_id"] = "CVR-1"
+    replacement["local_new_viewpoint_key"] = None
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+            relation_patches=[{"action": "delete", "relation": _boundary_relation()}],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert effective.viewpoint_relations == []
+    assert effective.new_viewpoint_candidates == []
+
+
+def test_correction_may_downgrade_a_component_onto_a_batch_local_candidate():
+    """The contract #215 shipped: an argument for a new viewpoint has a home.
+
+    The reconsideration prompt described the pre-#215 rule long after the code
+    changed, so the proposer rebutted this correction as schema-invalid and
+    failed the batch.  Pin the behaviour the prompt has to agree with.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    replacement = _proposal().model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "support_existing"
+    replacement["target_viewpoint_revision_id"] = None
+    replacement["local_new_viewpoint_key"] = "ROCK-NOT-PETER"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+        ),
+        proposal=_proposal(),
+        review=_review("correct", "pass"),
+    )
+
+    component = effective.claim_decisions[0].components[0]
+    assert component.disposition == "support_existing"
+    assert component.local_new_viewpoint_key == "ROCK-NOT-PETER"
+
+
+def _structure(*local_keys: str, synthesis: str = "本批共同界定权柄的范围。") -> dict[str, Any]:
+    return {
+        "central_synthesis": synthesis,
+        "focal": [
+            {"local_key": key, "structure_role": "central_claim" if index == 0 else "application"}
+            for index, key in enumerate(local_keys)
+        ],
+        "unresolved_items": [],
+        "reason": "这批材料合起来在论证什么。",
+    }
+
+
+def test_structure_patch_rewrites_a_centre_a_candidate_delete_would_strand():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER", "SPARE")],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    replacement["disposition"] = "new_viewpoint"
+    replacement["local_new_viewpoint_key"] = "SPARE"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
+            structure_patches=[
+                {
+                    "structure_index": 0,
+                    "action": "upsert",
+                    "structure": _structure("SPARE", synthesis="只剩下的那个中心。"),
+                }
+            ],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.local_key for item in effective.structures[0].focal] == ["SPARE"]
+    assert effective.structures[0].central_synthesis == "只剩下的那个中心。"
+
+
+def test_structure_patch_untouched_by_the_finding_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER"), _structure("SPARE")],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+
+    with pytest.raises(BatchResolutionError, match="structures#1: structure patch is not reachable"):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[
+                    {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+                ],
+                structure_patches=[
+                    {
+                        "structure_index": 1,
+                        "action": "upsert",
+                        "structure": _structure("SPARE", synthesis="与本次 finding 无关的中心。"),
+                    }
+                ],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+        )
+
+
+def test_structure_delete_does_not_shift_a_later_patch_target():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+        structures=[
+            _structure("ROCK-NOT-PETER", synthesis="第一个中心。"),
+            _structure("ROCK-NOT-PETER", synthesis="第二个中心。"),
+        ],
+    )
+    replacement = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[
+                {"claim_id": "C1", "component_index": 0, "replacement_components": [replacement]}
+            ],
+            structure_patches=[
+                {"structure_index": 0, "action": "delete"},
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER", synthesis="改写过的第二个中心。"),
+                },
+            ],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.central_synthesis for item in effective.structures] == ["改写过的第二个中心。"]
+
+
+def test_unpatched_relations_are_copied_unchanged():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    untouched = _boundary_relation(relation_type="entails", reason="与本次 finding 无关的边。")
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration("accepted", component_patches=[_identity_patch()]),
+        proposal=_proposal(viewpoint_relations=[untouched]),
+        review=_review("correct", "pass"),
+    )
+
+    assert [item.relation_type for item in effective.viewpoint_relations] == ["entails"]
+    assert effective.viewpoint_relations[0].reason == "与本次 finding 无关的边。"
 
 
 def test_accepted_finding_resolves_the_batch():
@@ -2052,7 +2340,7 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
     }
     reconsideration_payload = {
-        "schema_version": "wang_canonical_viewpoint_reconsideration_v2",
+        "schema_version": "wang_canonical_viewpoint_reconsideration_v3",
         "proposal_sha256": proposal_sha,
         "review_sha256": sha256_json(review_payload),
         "finding_dispositions": [

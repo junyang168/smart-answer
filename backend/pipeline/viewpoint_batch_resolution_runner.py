@@ -128,7 +128,7 @@ def build_reconsiderer(
             encoding="utf-8"
         ),
         response_model=CanonicalViewpointReconsiderationResponse,
-        schema_name="wang_canonical_viewpoint_reconsideration_v2",
+        schema_name="wang_canonical_viewpoint_reconsideration_v3",
     )
 
 
