@@ -104,7 +104,7 @@
 
 保留供审计，**不代表当前做法**。详见各文件头部的状态说明。
 
-[候选基线 v2](./archive/candidate_baseline_v2.md)（已由 v3 取代）· [全语料第一遍普查发现 v1](./archive/full_corpus_survey_findings_v1.md)（111 篇阶段的历史结果）· [代表样本普查 v1](./archive/corpus_survey_sample_v1.md) · [205 篇总体设计验证 v1](./archive/full_corpus_205_design_validation_v1.md) · [205 篇 17 个候选归组结构审核 v1](./archive/candidate_group_review_205_v1.md) · [第三、第四讲多用途验证规范 v1](./archive/two_lecture_multi_use_validation_spec_v1.md) · [双轴纵向验证 v1](./archive/dual_axis_vertical_validation_v1.md) · [太16:13-20 写作诊断 v1](./archive/matt16-13-20_writing_diagnostic_v1.md) · [数据权威与路径迁移审计 2026-08-16](./archive/data_authority_and_path_migration_audit_2026-08-16.md) · [实施进度日志 2026-08](./archive/implementation_progress_log_2026-08.md)
+[候选基线 v2](./archive/candidate_baseline_v2.md)（已由 v3 取代）· [全语料第一遍普查发现 v1](./archive/full_corpus_survey_findings_v1.md)（111 篇阶段的历史结果）· [代表样本普查 v1](./archive/corpus_survey_sample_v1.md) · [205 篇总体设计验证 v1](./archive/full_corpus_205_design_validation_v1.md) · [205 篇 17 个候选归组结构审核 v1](./archive/candidate_group_review_205_v1.md) · [第三、第四讲多用途验证规范 v1](./archive/two_lecture_multi_use_validation_spec_v1.md) · [双轴纵向验证 v1](./archive/dual_axis_vertical_validation_v1.md) · [太16:13-20 写作诊断 v1](./archive/matt16-13-20_writing_diagnostic_v1.md) · [数据权威与路径迁移审计 2026-08-16](./archive/data_authority_and_path_migration_audit_2026-08-16.md) · [实施进度日志 2026-08](./archive/implementation_progress_log_2026-08.md) · [实施验证记录 2026-08](./archive/implementation_validation_notes_2026-08.md)
 
 ## 文档边界
 
