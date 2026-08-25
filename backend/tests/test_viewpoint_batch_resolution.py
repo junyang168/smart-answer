@@ -1590,6 +1590,90 @@ def test_grouping_coverage_is_repaired_not_thrown_away():
     validate_grouping(grouping=repaired, scope_label="s", claim_ids=["C1", "C2", "C3", "C4"])
 
 
+def test_group_coverage_measures_the_plan_not_the_batch():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    # The real case: rock_referent was planned with 14 Claims, the batch ran on
+    # 13, and the run reported 13 of 13. Nothing compared the two sides, so a
+    # part-resolved group read as finished for two days.
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matt16-full",
+            "groups": [
+                {
+                    "group_key": "rock_referent",
+                    "claim_ids": ["C1", "C2", "C14"],
+                    "rationale": "磐石",
+                },
+                {"group_key": "binding_loosing_meaning", "claim_ids": ["C4"], "rationale": "词义"},
+                {"group_key": "future_perfect_grammar", "claim_ids": ["C5"], "rationale": "时态"},
+            ],
+        }
+    )
+    report = group_coverage_report(
+        grouping=grouping, linked_claim_ids=["C1", "C2", "C5"]
+    )
+    by_key = {item["group_key"]: item for item in report["groups"]}
+
+    assert by_key["rock_referent"]["status"] == "partial"
+    assert by_key["rock_referent"]["unlinked_claim_ids"] == ["C14"]
+    assert by_key["future_perfect_grammar"]["status"] == "covered"
+    assert by_key["binding_loosing_meaning"]["status"] == "uncovered"
+    assert report["covered_group_count"] == 1
+    assert report["partial_group_count"] == 1
+    assert report["planned_claim_count"] == 5
+    assert report["linked_claim_count"] == 3
+
+
+def test_group_coverage_names_links_the_plan_does_not_account_for():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "s",
+            "groups": [{"group_key": "a", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    report = group_coverage_report(grouping=grouping, linked_claim_ids=["C1", "C9"])
+
+    # A Claim linked from outside this plan is not counted as coverage, and is
+    # not silently dropped either -- both sides are rebuilt from the scope.
+    assert report["linked_claim_count"] == 1
+    assert report["linked_claims_outside_plan"] == ["C9"]
+
+
+def test_only_active_links_count_as_coverage():
+    from backend.pipeline.viewpoint_group_coverage_runner import active_linked_claim_ids
+
+    def _link(claim_id: str, state: str) -> dict:
+        return {
+            "viewpoint_claim_link_id": f"VCL-{claim_id}-{state}",
+            "viewpoint_id": "CV-1",
+            "validated_against_viewpoint_revision_id": "CVR-1",
+            "claim_id": claim_id,
+            "pinned_claim_revision": 1,
+            "link_type": "equivalent_full",
+            "decision_id": "VID-1",
+            "effective_state": state,
+            # An active link cannot exist under an unapproved review status.
+            "review_status": "system_approved" if state == "active" else "candidate",
+        }
+
+    # Superseding a revision invalidates the links pinned to it. Counting rows
+    # would report those leftovers as coverage the Registry no longer has.
+    assert active_linked_claim_ids(
+        [_link("C1", "active"), _link("C2", "invalidated"), _link("C3", "retired")]
+    ) == ["C1"]
+    # One Claim linked to two viewpoints is one covered Claim, not two.
+    assert active_linked_claim_ids([_link("C1", "active"), _link("C1", "active")]) == ["C1"]
+
+
 def _review(*decisions: str) -> CanonicalViewpointReviewResponse:
     return CanonicalViewpointReviewResponse.model_validate(
         {
