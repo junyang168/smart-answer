@@ -1247,6 +1247,12 @@ class ViewpointGraphReviewProvenance(BaseModel):
     review_artifact_sha256: str
     #: The identity decisions this structure or relation was proposed alongside,
     #: so the batch that produced it is reachable from the record.
+    #:
+    #: Empty where there is no such batch. `ViewpointRevisionProvenance` requires
+    #: at least one because a revision is always produced by a batch; a record
+    #: reviewed after the fact was committed before the review contract reached
+    #: it, and naming a decision that did not rule on it would be a fabricated
+    #: lineage. The review artifact is the anchor either way.
     basis_identity_decision_ids: list[str] = Field(default_factory=list)
 
 

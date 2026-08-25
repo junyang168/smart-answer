@@ -4851,3 +4851,19 @@ def test_backreview_holds_a_record_whose_structured_answer_is_false():
     assert report["approved_viewpoint_relation_ids"] == []
     assert report["held_viewpoint_relation_ids"] == ["VREL-1"]
     assert report["approved_structure_revision_ids"] == ["VSR-1"]
+
+
+def test_backreview_provenance_names_no_identity_decision():
+    """A record reviewed after the fact has no batch decision that ruled on it.
+
+    `ViewpointRevisionProvenance` requires at least one because a revision is
+    always produced by a batch. Borrowing a decision id here would record a
+    lineage that does not exist; the review artifact is the anchor.
+    """
+
+    from backend.api.canonical_repository.knowledge_models import (
+        ViewpointGraphReviewProvenance,
+    )
+
+    provenance = ViewpointGraphReviewProvenance(review_artifact_sha256="review-sha")
+    assert provenance.basis_identity_decision_ids == []

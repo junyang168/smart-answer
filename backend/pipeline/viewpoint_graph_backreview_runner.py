@@ -37,6 +37,7 @@ from backend.pipeline.viewpoint_resolution_runtime import (
     PROJECT_ROOT,
     PROMPT_DIR,
     call_model as _call,
+    read_artifact as _read,
     subscription_client as _subscription_client,
     write_immutable as _write_immutable,
 )
@@ -89,10 +90,11 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     _write_immutable(args.output_dir / "backreview-packet.json", packet)
 
+    raw_path = args.output_dir / "raw-backreview.json"
     raw, calls, seconds = _call(
         build_backreviewer(args.review_model, args.review_effort, provider=args.review_provider),
         packet,
-        args.output_dir / "raw-backreview.json",
+        raw_path,
     )
     backreview = ViewpointGraphBackReviewResponse.model_validate(raw)
     report = validate_backreview(backreview=backreview, packet=packet)
@@ -107,8 +109,12 @@ def main() -> int:
         },
     )
 
+    # The artifact sha lives on the file `call_model` wrote, not on the response
+    # it returned -- reading it off `raw` yields None and silently records a
+    # hash of the response body instead, which points at nothing retrievable.
+    # `viewpoint_batch_resolution_runner` reads it the same way.
     provenance = ViewpointGraphReviewProvenance(
-        review_artifact_sha256=str(raw.get("artifact_sha256") or sha256_json(dict(raw))),
+        review_artifact_sha256=str(_read(raw_path)["artifact_sha256"]),
     ).model_dump(mode="json")
 
     # Attaching provenance goes through the ChangeSet like every other write:
