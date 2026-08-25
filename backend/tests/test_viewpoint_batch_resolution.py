@@ -4151,3 +4151,58 @@ def test_a_merge_that_stuck_needs_no_fallback_relation():
     folded = apply_consolidation(consolidation=ruling, proposal=_proposal())
     report = validate_consolidation_fallback(consolidation=ruling, proposal=folded)
     assert report["unmerged_matches"] == []
+
+
+def test_relation_may_point_at_a_committed_viewpoint_this_batch_does_not_touch():
+    """Drawing a boundary against a neighbour is precisely this case.
+
+    The neighbour is not under review and holds no Claim from this batch, so
+    requiring a component before its endpoint resolves would refuse the edge
+    the refused-merge rule exists to obtain.
+    """
+
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-untouched",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点在更窄经文范围上的具体化。",
+            }
+        ]
+    )
+    registry = [
+        *REGISTRY_CONTEXT_ROCK,
+        {
+            **REGISTRY_CONTEXT_ROCK[0],
+            "viewpoint_id": "CV-2",
+            "viewpoint_revision_id": "CVR-untouched",
+            "core_proposition": "本批没有任何 component 指向它。",
+        },
+    ]
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": index, "decision": "pass", "reason": "通过"}
+                for index in range(2)
+            ],
+            "novelty_review": {"status": "pass", "reason": "没有遗漏的新观点"},
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=registry,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    relation = package["viewpoint_relations"][0]
+    assert relation["target_viewpoint_id"] == "CV-2"
+    assert relation["validated_target_viewpoint_revision_id"] == "CVR-untouched"

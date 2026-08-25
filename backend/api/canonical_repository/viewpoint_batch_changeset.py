@@ -529,11 +529,20 @@ def compile_cvp_batch_package(
 
     def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
         ids = resolved_targets.get(endpoint)
-        if ids is None:
-            raise CvpBatchChangeSetError(
-                f"{endpoint[1]} has no viewpoint in this ChangeSet"
-            )
-        return ids
+        if ids is not None:
+            return ids
+        # A relation may point at a committed viewpoint this batch attaches no
+        # Claim to -- drawing the boundary against a neighbour is exactly that
+        # case, and it is the whole point of the edge. The packet already
+        # carries the neighbour, so the endpoint resolves without a component.
+        kind, key = endpoint
+        if kind == "existing":
+            context = registry_by_revision.get(key)
+            if context is not None:
+                return str(context["viewpoint_id"]), key
+        raise CvpBatchChangeSetError(
+            f"{key} has no viewpoint in this ChangeSet"
+        )
 
     relations_out: list[dict[str, Any]] = []
     for relation in proposal.viewpoint_relations:
