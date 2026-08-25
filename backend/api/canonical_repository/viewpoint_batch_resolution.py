@@ -1746,6 +1746,69 @@ def batches_from_groups(
     return batches
 
 
+GROUP_COVERAGE_VERSION = "wang_canonical_viewpoint_group_coverage_v1"
+
+
+def group_coverage_report(
+    *,
+    grouping: ClaimGroupingResponse,
+    linked_claim_ids: Sequence[str],
+) -> dict[str, Any]:
+    """Measure Registry coverage against the grouping plan, not against a batch.
+
+    A batch reports the Claims it was handed, so a batch that ran on part of a
+    group still reports success, and the group looks finished.  That is how
+    ``rock_referent`` came to hold 13 links for 14 planned Claims with nothing
+    saying so: the run's "13 Claims" came from the batch, and no check ever put
+    the plan on the other side of the comparison.
+
+    The plan is the denominator, active claim links are the numerator, and a
+    group is only ``covered`` when every Claim it plans for has one.  Nothing
+    here decides what a Claim means -- an ``uncovered`` group may well end in a
+    reasoned decision that some Claim carries no viewpoint, but that decision
+    has to be made rather than skipped into.
+    """
+
+    linked = set(linked_claim_ids)
+    groups: list[dict[str, Any]] = []
+    for group in sorted(grouping.groups, key=lambda item: item.group_key):
+        unlinked = sorted(set(group.claim_ids) - linked)
+        covered = len(group.claim_ids) - len(unlinked)
+        if not unlinked:
+            status = "covered"
+        elif covered:
+            status = "partial"
+        else:
+            status = "uncovered"
+        groups.append(
+            {
+                "group_key": group.group_key,
+                "claim_count": len(group.claim_ids),
+                "linked_claim_count": covered,
+                "unlinked_claim_ids": unlinked,
+                "status": status,
+            }
+        )
+
+    planned = {claim_id for group in grouping.groups for claim_id in group.claim_ids}
+    report = {
+        "schema_version": GROUP_COVERAGE_VERSION,
+        "scope_label": grouping.scope_label,
+        "group_count": len(groups),
+        "planned_claim_count": len(planned),
+        "linked_claim_count": len(planned & linked),
+        "covered_group_count": sum(1 for item in groups if item["status"] == "covered"),
+        "partial_group_count": sum(1 for item in groups if item["status"] == "partial"),
+        "groups": groups,
+        # A link to a Claim outside the plan is not this report's business to
+        # fix, but leaving it unnamed would let the two sides drift apart
+        # silently -- the plan is the scope's, and both are rebuilt from it.
+        "linked_claims_outside_plan": sorted(linked - planned),
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
+
+
 #: Fields whose order carries no meaning. The model emits them in narrative
 #: order; rejecting that would throw away a ten-minute call over presentation.
 _SET_FIELDS = (
