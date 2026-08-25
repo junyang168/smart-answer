@@ -63,6 +63,21 @@ proposal 若提出 `viewpoint_revisions`，每一条都要有一个 `revision_re
 
 `pass` 才会写进库。`correct` 要写明可接受的新措辞是什么；proposer 可以照改，也可以撤回该修订（撤回后既有措辞不动，批次照常通过）。
 
+### 被牵动的既有记录必须逐条确认
+
+`revision_dependents` 列出了所有**指着旧措辞**的既有记录：claim link、viewpoint relation、argument route revision 及其 attestation。它们当初都是照旧措辞验过的；措辞一改，「验过」就不再成立。
+
+判 `pass` 时，必须在 `confirmed_dependent_ids` 里列出**每一条**记录的 id，表示你逐条看过、它在新措辞下仍然成立。漏一条，ChangeSet 就会拒绝整个修订。
+
+逐类怎么看：
+
+- **claim link**：那条 Claim 在新措辞下还归得进这个 viewpoint 吗？
+- **viewpoint relation**：一端的措辞变了，这条 `applies`／`extends` 还成立吗？
+- **argument route revision**：看它的 `ordered_inference_nodes`。这条路线原本推出的是旧措辞那个结论；**扩写后的结论，它的推理步骤还撑得住吗**？撑不住就不能确认——改判 `correct`，要求把修订收窄到这条路线仍能支持的范围，或 `reject`。
+- **argument route attestation**：它所依附的 route revision 若你确认了，它随之成立。
+
+有任何一条你确认不了，就不要判 `pass`。宁可让修订缩小或撤回，也不要让一条没人验过的记录挂在新措辞下面。
+
 ## 漏项复核
 
 `novelty_review` 单独回答一个问题：proposal 有没有因为看见了现有 Registry，就把本该是新观点的 Claim 硬归进已有 viewpoint，或者草率地标成 `no_registry_assertion`？

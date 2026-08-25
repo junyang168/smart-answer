@@ -4040,3 +4040,78 @@ def test_consolidation_must_rule_on_every_candidate():
             proposal=proposal,
             registry_revision_ids=["CVR-1"],
         )
+
+
+# --- what a revision strands ---------------------------------------------------
+
+def _dependent_link() -> dict[str, Any]:
+    return {
+        "record_kind": "viewpoint_claim_link",
+        "record": {
+            "viewpoint_claim_link_id": "VCL-old",
+            "viewpoint_id": "CV-1",
+            "claim_id": "C-earlier",
+            "link_type": "equivalent_full",
+            "effective_state": "active",
+            "review_status": "system_approved",
+            "validated_against_viewpoint_revision_id": "CVR-1",
+            "decision_id": "VID-earlier",
+            "pinned_claim_revision": 1,
+            "evidence_bindings": [],
+            "occurrence_refs": [],
+        },
+    }
+
+
+def test_revision_repoints_the_records_the_reviewer_confirmed():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": ["VCL-old"]}
+            ]
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        revision_dependents={"CVR-1": [_dependent_link()]},
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    new_revision = package["viewpoint_revisions"][0]["viewpoint_revision_id"]
+    moved = [
+        item for item in package["viewpoint_claim_links"]
+        if item["viewpoint_claim_link_id"] == "VCL-old"
+    ]
+    assert len(moved) == 1
+    assert moved[0]["validated_against_viewpoint_revision_id"] == new_revision
+
+
+def test_revision_that_strands_an_unconfirmed_record_is_refused():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    with pytest.raises(CvpBatchChangeSetError, match="strands unconfirmed records: VCL-old"):
+        compile_cvp_batch_package(
+            proposal=proposal,
+            review=_passing_review(proposal),
+            deterministic_validation_sha256="validation-sha",
+            scope_manifest_sha256="scope-manifest-sha",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_context=REGISTRY_CONTEXT_ROCK,
+            revision_dependents={"CVR-1": [_dependent_link()]},
+            proposal_artifact_sha256="proposal-call-sha",
+            review_artifact_sha256="review-call-sha",
+            proposer_model_id="gpt-5.6-sol/high",
+            reviewer_model_id="claude-opus-5/high",
+            decided_at="2026-08-24T12:00:00Z",
+        )

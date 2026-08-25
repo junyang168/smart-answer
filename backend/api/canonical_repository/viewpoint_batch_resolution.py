@@ -866,6 +866,11 @@ class ReviewedViewpointRevision(StrictBatchModel):
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
     correction: str | None = None
+    #: Every committed record pinned to the wording being replaced. The store
+    #: refuses a revision that strands one, and re-pointing them without a
+    #: reading would turn "checked against this wording" into bookkeeping, so a
+    #: passing review has to name each one it confirmed still holds.
+    confirmed_dependent_ids: list[str] = Field(default_factory=list)
 
 
 class CanonicalViewpointReviewResponse(StrictBatchModel):

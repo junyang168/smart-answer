@@ -48,6 +48,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
 )
 from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
+    load_revision_dependents,
 )
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.viewpoint_route_queue import (
@@ -218,6 +219,7 @@ def run_batch(
     reviewer: Any,
     reconsiderer: Any = None,
     consolidator: Any = None,
+    dependents_loader: Any = None,
 ) -> dict[str, Any]:
     packet = build_batch_packet(
         batch_id=batch_id,
@@ -312,11 +314,20 @@ def run_batch(
         },
     )
 
+    # A revision supersedes wording other records were checked against. The
+    # reviewer sees those records, because it is the one asserting the truth
+    # condition did not move, and the ChangeSet re-points only what it confirms.
+    revision_dependents: dict[str, Any] = {}
+    if proposal.viewpoint_revisions and dependents_loader is not None:
+        revision_dependents = dependents_loader(
+            [item.target_viewpoint_revision_id for item in proposal.viewpoint_revisions]
+        )
     review_packet = {
         "batch_id": batch_id,
         "packet": packet,
         "proposal_sha256": proposal_sha,
         "proposal": proposal_payload,
+        "revision_dependents": revision_dependents,
     }
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
@@ -534,6 +545,7 @@ def run_batch(
         "_original_proposal": proposal,
         "_review": review,
         "_reconsideration": reconsideration,
+        "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
     }
 def main() -> int:
@@ -772,6 +784,9 @@ def main() -> int:
                 reviewer=reviewer,
                 reconsiderer=reconsiderer,
                 consolidator=consolidator,
+                dependents_loader=lambda targets: load_revision_dependents(
+                    store=store, target_revision_ids=targets
+                ),
             )
         except (BatchResolutionError, ValidationError) as exc:
             findings = (
@@ -840,6 +855,7 @@ def main() -> int:
             scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
             claims=[claims[claim_id] for claim_id in batch],
             registry_context=registry_context,
+            revision_dependents=report["_revision_dependents"],
             proposal_artifact_sha256=str(effective_raw["artifact_sha256"]),
             review_artifact_sha256=str(raw_review["artifact_sha256"]),
             proposer_model_id=str(effective_raw["model_id"]),
