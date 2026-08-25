@@ -4968,3 +4968,101 @@ def test_relation_only_finding_still_asks_for_a_correction():
     assert report["outcome"] == "findings"
     assert report["reconsideration_required"] is True
     assert report["correction_required"] is True
+
+
+def test_backreview_supersedes_a_structure_revision_rather_than_editing_it():
+    """`viewpoint_structure_revisions` is immutable, and for a reason.
+
+    A revision is the snapshot a past decision recorded; editing one to attach
+    a review rewrites that record. `viewpoint_foundation` refuses it outright,
+    so the review lands as a successor revision and the structure's pointer
+    moves -- the same shape a reworded viewpoint uses. Relations are not in the
+    immutable set and take the provenance directly.
+    """
+
+    from backend.api.canonical_repository.viewpoint_foundation import (
+        validate_foundation_change_set,
+    )
+
+    committed = {
+        "structure_revision_id": "VSR-1",
+        "structure_id": "VS-1",
+        "revision": 1,
+        "revision_number": 1,
+        "central_synthesis": "本批共同否定磐石是彼得本人。",
+        "focal_viewpoints": [
+            {"viewpoint_revision_id": "CVR-1", "structure_role": "central_claim"}
+        ],
+        "unresolved_items": [],
+        "scope_manifest_sha256": "scope-sha",
+        "review_status": "system_approved",
+    }
+    existing = {("viewpoint_structure_revisions", "VSR-1"): {"payload": committed, "retired_at": None}}
+
+    def findings_for(payload: dict[str, Any], object_id: str) -> list[str]:
+        try:
+            validate_foundation_change_set(
+                {"viewpoint_structure_revisions": {object_id: payload}}, existing
+            )
+        except Exception as exc:  # the validator raises with every finding at once
+            return str(exc).split(" | ")
+        return []
+
+    edited = {**committed, "review_provenance": {"review_artifact_sha256": "review-sha"}}
+    assert any(
+        "immutable record cannot be updated in place" in item
+        for item in findings_for(edited, "VSR-1")
+    )
+
+    successor = {
+        **committed,
+        "structure_revision_id": "VSR-2",
+        "revision": 2,
+        "revision_number": 2,
+        "supersedes_revision_id": "VSR-1",
+        "review_provenance": {"review_artifact_sha256": "review-sha"},
+    }
+    # The reference findings below are the fixture's thinness, not the point;
+    # what matters is that superseding raises no immutability finding at all.
+    assert not any(
+        "immutable record cannot be updated in place" in item
+        for item in findings_for(successor, "VSR-2")
+    )
+
+
+def test_sharing_a_structure_counts_as_staying_connected():
+    """Every `relation_type` is directed; some pairs are siblings, not parents.
+
+    The rule that a refused merge must leave the two connected accepted only a
+    typed edge, so a batch invented one for two parallel conclusions of the same
+    critique and the review discarded it as `REL_NOT_LOAD_BEARING` -- after it
+    was written. A structure is where "these belong together" lives.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    ruling = _consolidation(_merge_verdict())
+    shared_structure = _proposal(
+        structures=[
+            {
+                "central_synthesis": "两条是同一批评在不同经文论点下的结论。",
+                "focal": [
+                    {"local_key": "ROCK-NOT-PETER", "structure_role": "central_claim"},
+                    {"viewpoint_revision_id": "CVR-1", "structure_role": "application"},
+                ],
+                "unresolved_items": [],
+                "reason": "并列而非父子，故以结构而非有向边记录。",
+            }
+        ]
+    )
+    report = validate_consolidation_fallback(consolidation=ruling, proposal=shared_structure)
+    assert report["unmerged_matches"] == [
+        {"matched_revision_id": "CVR-1", "ruled_local_key": "ROCK-NOT-PETER"}
+    ]
+
+    # Neither an edge nor a shared structure still stops the batch: "the same
+    # thing, but I cannot say how" is a person's call, not one to paper over.
+    with pytest.raises(BatchResolutionError, match="no relation connects it"):
+        validate_consolidation_fallback(consolidation=ruling, proposal=_proposal())

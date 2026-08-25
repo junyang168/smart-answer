@@ -3264,6 +3264,13 @@ def validate_consolidation_fallback(
         if component.disposition == "member_existing"
         and component.target_viewpoint_revision_id
     }
+    # A typed relation is one way to record the connection; sharing a structure
+    # is the other, and for some pairs it is the only honest one. Every
+    # `relation_type` is directed -- one viewpoint applies, extends or
+    # specializes another -- so two parallel conclusions of the same critique
+    # fit none of them. Requiring an edge anyway made a batch invent one, and
+    # the review threw it out as `REL_NOT_LOAD_BEARING`: "互为兄弟而非父子,
+    # 谁应用谁都读不通". A structure is where "these belong together" lives.
     connected_targets = {
         key
         for relation in proposal.viewpoint_relations
@@ -3271,6 +3278,10 @@ def validate_consolidation_fallback(
         if kind == "existing"
         and any(side == "new" for side, _ in relation.endpoints())
     }
+    for structure in proposal.structures:
+        endpoints = [focal.endpoint() for focal in structure.focal]
+        if any(kind == "new" for kind, _ in endpoints):
+            connected_targets |= {key for kind, key in endpoints if kind == "existing"}
     findings: list[str] = []
     unmerged: list[dict[str, str]] = []
     for verdict in consolidation.verdicts:
@@ -3292,7 +3303,7 @@ def validate_consolidation_fallback(
     report = {
         "schema_version": "wang_canonical_viewpoint_consolidation_fallback_v1",
         "unmerged_matches": unmerged,
-        "checks_passed": ["refused_merge_keeps_a_relation"],
+        "checks_passed": ["refused_merge_stays_connected"],
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

@@ -143,14 +143,40 @@ def main() -> int:
     # direct UPDATE is what a production repair looks like, not a review.
     approved_structures = set(report["approved_structure_revision_ids"])
     approved_relations = set(report["approved_viewpoint_relation_ids"])
+
+    # A structure revision is an immutable snapshot -- `viewpoint_foundation`
+    # refuses an in-place edit, and rightly: editing one rewrites what a past
+    # decision recorded. So the review is attached by superseding it, the same
+    # shape a reworded viewpoint uses. Relations are not in that set and take
+    # the provenance directly.
+    structures_out: list[dict[str, Any]] = []
+    structure_pointer_updates: list[dict[str, Any]] = []
+    structures_by_id = {str(item["structure_id"]): item for item in store.list_records("viewpoint_structures")}
+    for item in structures:
+        if str(item["structure_revision_id"]) not in approved_structures:
+            continue
+        superseded = str(item["structure_revision_id"])
+        successor = dict(item)
+        successor["revision_number"] = int(item["revision_number"]) + 1
+        successor["revision"] = successor["revision_number"]
+        successor["supersedes_revision_id"] = superseded
+        successor["review_provenance"] = provenance
+        seed = {
+            "structure_id": item["structure_id"],
+            "supersedes": superseded,
+            "review_artifact_sha256": provenance["review_artifact_sha256"],
+        }
+        successor["structure_revision_id"] = f"VSR-{sha256_json(seed)[:20]}"
+        structures_out.append(successor)
+        pointer = dict(structures_by_id[str(item["structure_id"])])
+        pointer["current_revision_id"] = successor["structure_revision_id"]
+        structure_pointer_updates.append(pointer)
+
     package = {
         "schema_version": "wang_shared_knowledge_v1.3",
         "package_id": f"GRAPH-BACKREVIEW-{report['artifact_sha256'][:20]}",
-        "viewpoint_structure_revisions": [
-            {**item, "review_provenance": provenance}
-            for item in structures
-            if str(item["structure_revision_id"]) in approved_structures
-        ],
+        "viewpoint_structures": structure_pointer_updates,
+        "viewpoint_structure_revisions": structures_out,
         "viewpoint_relations": [
             {**item, "review_provenance": provenance}
             for item in relations
@@ -187,9 +213,12 @@ def main() -> int:
                 for item in store.list_records("viewpoint_relations")
             },
         }
+        # Structures are verified at their successor id, which is what the
+        # structure now points at; the superseded revision keeps its own state.
+        expected = {str(item["structure_revision_id"]) for item in structures_out} | approved_relations
         unverified = sorted(
             record_id
-            for record_id in approved_structures | approved_relations
+            for record_id in expected
             if not (observed.get(record_id) or {}).get("review_provenance")
         )
         if unverified:
