@@ -258,8 +258,8 @@ flowchart LR
 
 ## 六、版本与审核边界
 
-- 本版结构决定来源：[17 个候选归组结构审核 v1](./candidate_group_review_205_v1.md)；
-- 205 篇设计压力测试：[总体设计验证 v1](./full_corpus_205_design_validation_v1.md)；
+- 本版结构决定来源：[17 个候选归组结构审核 v1](../archive/candidate_group_review_205_v1.md)；
+- 205 篇设计压力测试：[总体设计验证 v1](../archive/full_corpus_205_design_validation_v1.md)；
 - 原始机器综合：`$DATA_BASE_DIR/wang-knowledge-platform/staging/corpus-survey/synthesis/full-corpus-205/full-corpus-thought-map-candidate-v1.json`；
 - v2 保留为历史版本，不被删除；
 - 结构批准不改变 claims 的 `candidate` 状态；

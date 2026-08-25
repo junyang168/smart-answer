@@ -1,8 +1,8 @@
 # Functional Specification: Exegesis and Topic Repository
 
-> Project mission and plain-language explanation: [王守仁教授釋經與專題講論文庫 Mission Statement](./project_mission_statement.md)
+> Project mission and plain-language explanation: [王守仁教授釋經與專題講論文庫 Mission Statement](../00-overview/project_mission_statement.md)
 >
-> Cross-product knowledge architecture, argument graph, original-language records, QA contract, permissions, and evolution rules: [王守仁教授释经与思想知识平台设计](./knowledge_platform_design.md)
+> Cross-product knowledge architecture, argument graph, original-language records, QA contract, permissions, and evolution rules: [王守仁教授释经与思想知识平台设计](../00-overview/knowledge_platform_design.md)
 
 ## 1. Purpose
 

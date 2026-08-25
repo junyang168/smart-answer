@@ -53,11 +53,11 @@ The application follows a microservices-like architecture with a Next.js fronten
 ## Wang Knowledge Platform Documentation
 
 - [Documentation index](docs/wang-knowledge-platform/README.md)
-- [Project mission statement](docs/wang-knowledge-platform/project_mission_statement.md)
-- [Shared knowledge platform design](docs/wang-knowledge-platform/knowledge_platform_design.md)
-- [Knowledge-grounded sermon search and QA specification](docs/wang-knowledge-platform/sermon_search_functional_spec.md)
-- [Exegesis and topic repository functional specification](docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md)
-- [Exegesis and topic repository technical specification](docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md)
+- [Project mission statement](docs/wang-knowledge-platform/00-overview/project_mission_statement.md)
+- [Shared knowledge platform design](docs/wang-knowledge-platform/00-overview/knowledge_platform_design.md)
+- [Knowledge-grounded sermon search and QA specification](docs/wang-knowledge-platform/40-qa-search/sermon_search_functional_spec.md)
+- [Exegesis and topic repository functional specification](docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_functional_spec.md)
+- [Exegesis and topic repository technical specification](docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_tech_spec.md)
 
 ## Notes-to-Manuscript Documentation
 

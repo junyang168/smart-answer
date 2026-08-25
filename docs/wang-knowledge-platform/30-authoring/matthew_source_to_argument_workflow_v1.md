@@ -31,7 +31,7 @@ notes-to-manuscript 系列中非 `project_type=transcript` 的 Projects。`trans
 `source_directory` 是去重後的完整來源清單，
 `chapters[].sources` 是按章節使用的來源，`book_level_sources` 則保存尚未明確定章的全書或結構性材料。
 這是一份來源地圖，不是出版目錄或完成率報表；某章有來源，也不表示材料已足以成篇。
-生成規則與重跑命令見[《講道目錄與來源攝取》](./sermon_catalog_ingestion.md)。
+生成規則與重跑命令見[《講道目錄與來源攝取》](../10-extraction/sermon_catalog_ingestion.md)。
 
 ## 二、兩條來源管線
 
@@ -127,7 +127,7 @@ source_sha256: <transcript version hash>
 > **完整性由對帳保證，不由本節保證。** 本節描述來源如何轉換為論證層，但沒有任何機制驗證它轉換得完整。
 > 全庫實測：430 條 observation 中 375 條（87%）從未進入論證層。下游每一道 gate 只讀 claim 層，
 > 因此沒進圖的材料與教授沒說過的材料在系統內無法區分（#64）。
-> 完整性的目標流程見[《來源逐句對帳與 claim 層完整性 v1》](./source_to_claim_layer_ledger_v1.md)。
+> 完整性的目標流程見[《來源逐句對帳與 claim 層完整性 v1》](../10-extraction/source_to_claim_layer_ledger_v1.md)。
 
 两条来源管线最终都进入同一组对象，而不是各自建立一套私有语义：
 

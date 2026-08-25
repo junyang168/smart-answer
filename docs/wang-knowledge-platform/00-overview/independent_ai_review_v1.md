@@ -113,7 +113,7 @@ Claude 必须恰好审每一个输入 claim；OpenAI 必须恰好裁定每一个
 - 仲裁 schema/runner：`backend/pipeline/corpus_ai_adjudication.py`、`corpus_ai_adjudication_runner.py`
 - 测试：`backend/tests/test_corpus_ai_review.py`、`test_corpus_ai_adjudication.py`
 
-单篇逐句详细知识整理、通用共识补丁应用及 `011WSR01` 试运行见 [逐句详细知识整理与双模型复审流程 v1](./detailed_knowledge_extraction_workflow_v1.md)。
+单篇逐句详细知识整理、通用共识补丁应用及 `011WSR01` 试运行见 [逐句详细知识整理与双模型复审流程 v1](../10-extraction/detailed_knowledge_extraction_workflow_v1.md)。
 
 第三、第四讲先做不调用模型的检查，再运行仲裁和重建：
 

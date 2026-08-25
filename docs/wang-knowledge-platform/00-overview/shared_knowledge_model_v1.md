@@ -31,7 +31,7 @@
 | `AIReviewArtifact` | 第二模型对候选抽取的独立复审、问题与风险分流 | 必须绑定来源抽取世代与 reviewer fingerprint；不是批准记录 |
 | `ReviewRecord` | 人工审核结论 | AI 只能提出候选和分流，不能自行批准 |
 
-`CanonicalViewpoint`、`ArgumentRoute`、Coverage/Registry Snapshot 与 `ViewpointKnowledgeProjection` 的规范性 architecture authority 是 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)。正式 schema 尚未实现前，现有 Claim、ClaimRelation 和 EditorialSynthesis 不得被临时改名或静默当作 viewpoint registry。
+`CanonicalViewpoint`、`ArgumentRoute`、Coverage/Registry Snapshot 与 `ViewpointKnowledgeProjection` 的规范性 architecture authority 是 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../canonical_viewpoint_registry_design_v1.md)。正式 schema 尚未实现前，现有 Claim、ClaimRelation 和 EditorialSynthesis 不得被临时改名或静默当作 viewpoint registry。
 
 ## 三、三条不可破坏的边界
 
@@ -50,7 +50,7 @@
 
 ### 已审核派生来源
 
-通过 notes-to-manuscript Fidelity Audit 的讲稿可以作为 `verified_notes_manuscript` 进入结构抽取，因为它已经逐点核对上游笔记；但它仍是 `trusted_editorial_derivative`，不是 `primary_spoken_source`。系统必须保存上游笔记、Project、讲稿 revision、Fidelity artifact 和拆分 Project 的 `derived_from` 谱系。来源已经是可读文章，只能免除重复生成和重复 Fidelity Audit，不能免除进入共享论证层。完整规则见[马太福音来源进入论证层与跨来源整合流程](./matthew_source_to_argument_workflow_v1.md)。
+通过 notes-to-manuscript Fidelity Audit 的讲稿可以作为 `verified_notes_manuscript` 进入结构抽取，因为它已经逐点核对上游笔记；但它仍是 `trusted_editorial_derivative`，不是 `primary_spoken_source`。系统必须保存上游笔记、Project、讲稿 revision、Fidelity artifact 和拆分 Project 的 `derived_from` 谱系。来源已经是可读文章，只能免除重复生成和重复 Fidelity Audit，不能免除进入共享论证层。完整规则见[马太福音来源进入论证层与跨来源整合流程](../30-authoring/matthew_source_to_argument_workflow_v1.md)。
 
 ## 四、问答材料的处理
 
@@ -149,7 +149,7 @@
 
 系统不根据标题相似度自动宣告两个主题相同。所有跨命名空间连接必须来自显式 alias/identity mapping，并由 `knowledge/reconciliation/topic_identity.json` 报告未知 unit topic、未解析 route 和旧搜索投影。当前马太试验建立 55 个 TopicNode；未知 unit topic与未解析专题 route 均为 0。
 
-这一步只是把共享知识从“一个大型试验 JSON”提升为可审核、可版本化、可逐批迁移的正式对象。公开释经、专题、问答和智能问答仍须读取经过批准并编译的 active build，不能直接公开 authoring store 中的 candidate。PostgreSQL 的详细边界、命令及验收结果见 [PostgreSQL 共享知识主库 v1](./postgresql_authoring_store_v1.md)。
+这一步只是把共享知识从“一个大型试验 JSON”提升为可审核、可版本化、可逐批迁移的正式对象。公开释经、专题、问答和智能问答仍须读取经过批准并编译的 active build，不能直接公开 authoring store 中的 candidate。PostgreSQL 的详细边界、命令及验收结果见 [PostgreSQL 共享知识主库 v1](../20-knowledge/postgresql_authoring_store_v1.md)。
 
 ## 十二、抽取世代与反向失效
 

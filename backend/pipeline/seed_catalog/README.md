@@ -25,8 +25,8 @@ repository 的來源追溯要求。正式資料庫還必須把 Evidence 行號�
 
 完整的產品與技術要求見：
 
-- [`docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md`](../../../docs/wang-knowledge-platform/exegesis_topic_repository_functional_spec.md)
-- [`docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md`](../../../docs/wang-knowledge-platform/exegesis_topic_repository_tech_spec.md)
+- [`docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_functional_spec.md`](../../../docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_functional_spec.md)
+- [`docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_tech_spec.md`](../../../docs/wang-knowledge-platform/20-knowledge/exegesis_topic_repository_tech_spec.md)
 
 ## 生成《馬太福音釋經》審閱稿
 

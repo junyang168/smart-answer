@@ -6,11 +6,11 @@ The Knowledge-Grounded Sermon Search and QA module lets users ask Chinese natura
 
 The module is not merely retrieval over generated articles. It combines raw and reviewed source material, generated manuscripts, reviewed canonical units, and the reviewed claim/argument layer. Manuscript search remains an important recall and fallback mechanism while the corpus is being curated, but a fluent manuscript paragraph is not itself proof that a proposition is the professor's explicit view.
 
-The Exegesis and Topic Repository is the reviewed navigation and provenance layer over the same corpus. Search may retrieve repository canonical units and must return repository citation IDs when exact original-source citations are available. The repository requirements are defined in [Functional Specification: Exegesis and Topic Repository](./exegesis_topic_repository_functional_spec.md).
+The Exegesis and Topic Repository is the reviewed navigation and provenance layer over the same corpus. Search may retrieve repository canonical units and must return repository citation IDs when exact original-source citations are available. The repository requirements are defined in [Functional Specification: Exegesis and Topic Repository](../20-knowledge/exegesis_topic_repository_functional_spec.md).
 
-The common knowledge objects, attribution rules, product projections, and evolution policy are defined in [Knowledge Platform Design](./knowledge_platform_design.md). This specification defines the search and QA projection of that platform.
+The common knowledge objects, attribution rules, product projections, and evolution policy are defined in [Knowledge Platform Design](../00-overview/knowledge_platform_design.md). This specification defines the search and QA projection of that platform.
 
-Cross-sermon viewpoint identity, argument-route expansion, coverage disclosure and viewpoint dependency binding are governed by [Canonical Viewpoint Registry and cross-sermon argument-route design v1](./canonical_viewpoint_registry_design_v1.md). Search and QA consume its scoped, SHA-bound `ViewpointKnowledgeProjection`; they do not infer canonical identity from similarity results or read the architecture Markdown at runtime.
+Cross-sermon viewpoint identity, argument-route expansion, coverage disclosure and viewpoint dependency binding are governed by [Canonical Viewpoint Registry and cross-sermon argument-route design v1](../canonical_viewpoint_registry_design_v1.md). Search and QA consume its scoped, SHA-bound `ViewpointKnowledgeProjection`; they do not infer canonical identity from similarity results or read the architecture Markdown at runtime.
 
 ## 2. Scope
 

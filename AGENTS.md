@@ -2,9 +2,9 @@
 
 When the task concerns Matthew exposition articles or Wang repository content production, `docs/wang-knowledge-platform/` is authoritative. Read these files before acting:
 
-1. `docs/wang-knowledge-platform/CURRENT_AUTHORING_SESSION.md`
-2. `docs/wang-knowledge-platform/matthew_exposition_multi_agent_authoring_workflow_v1.md`
-3. `docs/wang-knowledge-platform/fast_passage_editorial_workflow_v1.md`
+1. `docs/wang-knowledge-platform/30-authoring/CURRENT_AUTHORING_SESSION.md`
+2. `docs/wang-knowledge-platform/30-authoring/matthew_exposition_multi_agent_authoring_workflow_v1.md`
+3. `docs/wang-knowledge-platform/30-authoring/fast_passage_editorial_workflow_v1.md`
 4. `docs/wang-knowledge-platform/canonical_viewpoint_registry_design_v1.md`
 
 The Canonical Viewpoint specification governs cross-sermon viewpoint identity,

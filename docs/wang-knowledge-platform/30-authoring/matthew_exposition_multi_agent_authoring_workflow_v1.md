@@ -28,7 +28,7 @@
 - writing quality profile；
 - 所有实际文本片段。packet 不得只给模型一个本机文件路径。
 
-当 CompositionPlan 明确消费跨讲 `CanonicalViewpoint` 或 `ArgumentRoute` 时，runner 还必须接收按 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md) 编译的 `ViewpointKnowledgeProjection`，并在计划、knowledge snapshot、AuthoringPacket 与 Program Audit manifest 中绑定 projection SHA、viewpoint semantic revision、registry snapshot、实际 Claim/Evidence/Citation dependencies。Author 与 Revision 不读取整份 architecture 文档，也不得自行遍历 registry；它们只读取当前篇章的最小 projection 切片。Editorial Reviewer 继续遵守本文件 3.1/3.2 的独立 packet 边界，不接收 knowledge projection。未使用 viewpoint 层的来源局部文章不因此增加虚假输入。
+当 CompositionPlan 明确消费跨讲 `CanonicalViewpoint` 或 `ArgumentRoute` 时，runner 还必须接收按 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../canonical_viewpoint_registry_design_v1.md) 编译的 `ViewpointKnowledgeProjection`，并在计划、knowledge snapshot、AuthoringPacket 与 Program Audit manifest 中绑定 projection SHA、viewpoint semantic revision、registry snapshot、实际 Claim/Evidence/Citation dependencies。Author 与 Revision 不读取整份 architecture 文档，也不得自行遍历 registry；它们只读取当前篇章的最小 projection 切片。Editorial Reviewer 继续遵守本文件 3.1/3.2 的独立 packet 边界，不接收 knowledge projection。未使用 viewpoint 层的来源局部文章不因此增加虚假输入。
 
 对马太福音 1–16 章，补充材料只允许 `corroborate`、`extend`、`qualify`、`tension`、`route_out`；不得用补充讲道取代母本框架。契约每个 section 的 `allowed_operations` 与 `ineligible_operations` 由程序执行：author ledger 的 `applied_operations` 必须落在 `allowed_operations` 之内，任何被列为 `ineligible_operations` 的操作（无论申报在 `applied_operations` 还是 `integration_operations`）都直接判交稿失败，不进 review。
 

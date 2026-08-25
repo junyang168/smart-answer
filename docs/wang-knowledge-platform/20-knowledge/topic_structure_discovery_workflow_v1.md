@@ -32,7 +32,7 @@ flowchart LR
 
 这三层都是**编辑综合候选**，不是新增的教授主张。教授主张仍由 `Claim` 保存，原始讲道与精确引文仍由 `SourceFragment` 和证据步骤保存。
 
-Topic Discovery 接入跨讲观点身份时，必须遵守 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](./canonical_viewpoint_registry_design_v1.md)：`TopicNode` 继续拥有层级，`CanonicalViewpoint` 不成为另一棵主题树；runner 只消费 scoped、SHA-bound `ViewpointKnowledgeProjection`，并继续以原 Claim graph 验证无遗漏。
+Topic Discovery 接入跨讲观点身份时，必须遵守 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../canonical_viewpoint_registry_design_v1.md)：`TopicNode` 继续拥有层级，`CanonicalViewpoint` 不成为另一棵主题树；runner 只消费 scoped、SHA-bound `ViewpointKnowledgeProjection`，并继续以原 Claim graph 验证无遗漏。
 
 ## 三、硬性守门规则
 

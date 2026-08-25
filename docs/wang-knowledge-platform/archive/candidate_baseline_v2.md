@@ -3,7 +3,7 @@
 > 状态：`candidate baseline v2`。本文件最初根据 111 篇 published transcript 建立，现已用 205 篇 published + reviewed transcript 完成压力测试。它尚未经过人工正式批准，不代表一套封闭或最终的教授思想体系。
 >
 > 历史状态：本版已由 205 篇结构审核后的
-> [candidate baseline v3](./candidate_baseline_v3.md) 取代；保留本文件用于审计结构如何变化。
+> [candidate baseline v3](../10-extraction/candidate_baseline_v3.md) 取代；保留本文件用于审计结构如何变化。
 
 ## 一、为什么从 v1 更新到 v2
 
