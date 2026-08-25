@@ -2971,3 +2971,53 @@ def apply_consolidation(
         raise BatchResolutionError(
             [f"consolidation produced an invalid proposal: {exc}"]
         ) from exc
+
+
+def validate_consolidation_fallback(
+    *,
+    consolidation: IdentityConsolidationResponse,
+    proposal: CanonicalViewpointProposalResponse,
+) -> dict[str, Any]:
+    """A refused merge must still leave the two viewpoints connected.
+
+    Consolidation ruling a candidate the same viewpoint as a committed one is a
+    finding about the material, and it survives the merge being refused: the
+    reviewer may show the wording cannot widen without stranding a route, and
+    the proposer may withdraw on that ground, but the two propositions are
+    still neighbours. Dropping the merge and saying nothing leaves the Registry
+    with the duplicate the pass exists to catch and no record that anyone
+    noticed. So the edge is required wherever the merge did not stick.
+    """
+
+    surviving = {item.local_key for item in proposal.new_viewpoint_candidates}
+    edges = {
+        (source, target)
+        for relation in proposal.viewpoint_relations
+        for source, target in (
+            (relation.endpoints()[0], relation.endpoints()[1]),
+            (relation.endpoints()[1], relation.endpoints()[0]),
+        )
+    }
+    findings: list[str] = []
+    unmerged: list[dict[str, str]] = []
+    for verdict in consolidation.verdicts:
+        if verdict.verdict == "new" or verdict.local_key not in surviving:
+            continue
+        target = str(verdict.target_viewpoint_revision_id)
+        unmerged.append({"local_key": verdict.local_key, "target": target})
+        if (("new", verdict.local_key), ("existing", target)) not in edges:
+            findings.append(
+                f"{verdict.local_key}: consolidation matched {target} but the merge did "
+                "not stick and no relation records the connection"
+            )
+
+    if findings:
+        raise BatchResolutionError(findings)
+
+    report = {
+        "schema_version": "wang_canonical_viewpoint_consolidation_fallback_v1",
+        "unmerged_matches": unmerged,
+        "checks_passed": ["refused_merge_keeps_a_relation"],
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report

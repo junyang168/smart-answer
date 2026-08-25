@@ -4115,3 +4115,39 @@ def test_revision_that_strands_an_unconfirmed_record_is_refused():
             reviewer_model_id="claude-opus-5/high",
             decided_at="2026-08-24T12:00:00Z",
         )
+
+
+def test_refused_merge_must_leave_the_two_viewpoints_related():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    ruling = _consolidation(_merge_verdict())
+    # The merge did not stick: the candidate is still its own viewpoint.
+    with pytest.raises(BatchResolutionError, match="no relation records the connection"):
+        validate_consolidation_fallback(consolidation=ruling, proposal=_proposal())
+
+    related = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes",
+                "reason": "候选是既有观点在更窄经文范围上的具体化。",
+            }
+        ]
+    )
+    report = validate_consolidation_fallback(consolidation=ruling, proposal=related)
+    assert report["unmerged_matches"] == [{"local_key": "ROCK-NOT-PETER", "target": "CVR-1"}]
+
+
+def test_a_merge_that_stuck_needs_no_fallback_relation():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+        validate_consolidation_fallback,
+    )
+
+    ruling = _consolidation(_merge_verdict())
+    folded = apply_consolidation(consolidation=ruling, proposal=_proposal())
+    report = validate_consolidation_fallback(consolidation=ruling, proposal=folded)
+    assert report["unmerged_matches"] == []

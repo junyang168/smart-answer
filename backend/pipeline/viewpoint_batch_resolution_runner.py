@@ -42,6 +42,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     split_batches,
     validate_grouping,
     validate_consolidation,
+    validate_consolidation_fallback,
     validate_proposal,
     validate_reconsideration,
     validate_review,
@@ -257,6 +258,7 @@ def run_batch(
     # and it duplicated a viewpoint it had explicitly compared against.
     consolidation_calls = 0
     consolidation_seconds = 0.0
+    consolidation: IdentityConsolidationResponse | None = None
     if consolidator is not None and proposal.new_viewpoint_candidates and registry_context:
         consolidation_packet = build_consolidation_packet(
             proposal=proposal, claims=claims, registry_context=registry_context
@@ -439,6 +441,14 @@ def run_batch(
             },
         )
 
+    # Checked on whatever the batch actually settled on, so a merge dropped in
+    # the correction round is caught as surely as one dropped in review.
+    consolidation_fallback_report = None
+    if consolidation is not None:
+        consolidation_fallback_report = validate_consolidation_fallback(
+            consolidation=consolidation, proposal=effective_proposal
+        )
+
     recorded_model_executions = _recorded_model_executions(
         output_dir,
         raw_artifacts={
@@ -475,6 +485,7 @@ def run_batch(
         "escalations": (
             reconsideration_report["escalations"] if reconsideration_report else []
         ),
+        "consolidation_fallback": consolidation_fallback_report,
         "recorded_model_executions": recorded_model_executions,
         "master_data_mutations": 0,
         "apply_allowed": False,

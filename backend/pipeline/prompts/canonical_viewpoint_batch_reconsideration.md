@@ -59,7 +59,11 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 `accepted` 必须配一个 `revision_patches`：
 
 - `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
-- `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint 时，撤回后既有措辞不动，批次照常通过，那条 Claim 仍按 component 的 disposition 归入。
+- `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
+
+**撤回之后必须补一条 relation。** 该候选之所以提出修订，是因为身份复核判定它与那条既有 viewpoint 讲的是同一件事；措辞改不动，不等于这个判断消失了。若该候选最终仍作为独立 viewpoint 留下，就必须在 `relation_patches` 里加一条边，连接它与那条既有 viewpoint（`specializes` 通常合适：候选是既有观点在更窄经文范围上的具体化）。
+
+不补这条边，整批不通过——留下两条互不相识的近邻，正是这一步要防的事。
 
 没被点名的修订不要输出，程序会保持原样。
 
