@@ -4867,3 +4867,104 @@ def test_backreview_provenance_names_no_identity_decision():
 
     provenance = ViewpointGraphReviewProvenance(review_artifact_sha256="review-sha")
     assert provenance.basis_identity_decision_ids == []
+
+
+def test_relation_the_correction_left_in_place_is_not_written_as_approved():
+    """The failure this card would otherwise have introduced.
+
+    A `reject` stops the batch at the review gate, so the last line of defence
+    is the correction round: the reviewer flags a relation, the proposer accepts
+    the finding but leaves the edge in the effective proposal. Stamping
+    provenance on whatever the proposal contained wrote it `system_approved`,
+    pointing at the very review that refused it -- worse than the unreviewed
+    state this card set out to fix.
+    """
+
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "applies",
+                "reason": "方向写反了。",
+            }
+        ]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "applies",
+                "decision": "correct",
+                "finding_codes": ["relation_direction_inverted"],
+                "reason": "是既有观点应用本候选，不是相反。",
+                "direction_correct": False,
+            }
+        ],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "review_sha256": sha256_json(review.model_dump(mode="json")),
+            "relation_dispositions": [
+                {
+                    "source_ref": "ROCK-NOT-PETER",
+                    "target_ref": "CVR-1",
+                    "relation_type": "applies",
+                    "disposition": "accepted",
+                    "reason": "同意方向记反了。",
+                }
+            ],
+        }
+    )
+    with pytest.raises(CvpBatchChangeSetError, match="relations are not reviewer-approved"):
+        compile_cvp_batch_package(
+            proposal=proposal,
+            review=review,
+            reviewed_proposal=proposal,
+            reconsideration=reconsideration,
+            deterministic_validation_sha256="validation-sha",
+            scope_manifest_sha256="scope-manifest-sha",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_context=REGISTRY_CONTEXT_ROCK,
+            proposal_artifact_sha256="proposal-call-sha",
+            review_artifact_sha256="review-call-sha",
+            proposer_model_id="gpt-5.6-sol/high",
+            reviewer_model_id="claude-opus-5/high",
+            decided_at="2026-08-24T12:00:00Z",
+        )
+
+
+def test_relation_only_finding_still_asks_for_a_correction():
+    """A finding that cannot reach the correction round dead-ends the scope."""
+
+    proposal = _proposal(
+        viewpoint_relations=[
+            {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "applies",
+                "reason": "方向写反了。",
+            }
+        ]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "applies",
+                "decision": "correct",
+                "finding_codes": ["relation_direction_inverted"],
+                "reason": "方向反了，改为既有观点应用本候选。",
+                "direction_correct": False,
+            }
+        ],
+    )
+    report = _validate(proposal, review)
+    assert report["outcome"] == "findings"
+    assert report["reconsideration_required"] is True
+    assert report["correction_required"] is True

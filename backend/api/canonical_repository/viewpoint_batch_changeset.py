@@ -557,6 +557,45 @@ def compile_cvp_batch_package(
         ),
     )
 
+    # Stamping it on whatever the proposal happens to contain is worse than the
+    # state it was meant to fix: a relation the reviewer rejected would land
+    # `system_approved`, pointing at the very review that said no. Approval is
+    # `pass` plus the structured question, the same rule the back-review path
+    # applies to committed records.
+    approved_structures = {
+        item.structure_index
+        for item in review.structure_reviews
+        if item.decision == "pass" and item.synthesis_entailed_by_focal
+    }
+    approved_relations = {
+        item.edge()
+        for item in review.relation_reviews
+        if item.decision == "pass" and item.direction_correct
+    }
+    unapproved_structures = sorted(
+        set(range(len(proposal.structures))) - approved_structures
+    )
+    if unapproved_structures:
+        raise CvpBatchChangeSetError(
+            "structures are not reviewer-approved: "
+            + ", ".join(f"structures#{index}" for index in unapproved_structures)
+        )
+    unapproved_relations = sorted(
+        f"{source[1]} --{relation.relation_type}--> {target[1]}"
+        for relation in proposal.viewpoint_relations
+        for source, target in [relation.endpoints()]
+        if (
+            str(relation.source_viewpoint_revision_id or relation.source_local_key),
+            str(relation.target_viewpoint_revision_id or relation.target_local_key),
+            relation.relation_type,
+        )
+        not in approved_relations
+    )
+    if unapproved_relations:
+        raise CvpBatchChangeSetError(
+            "relations are not reviewer-approved: " + ", ".join(unapproved_relations)
+        )
+
     relations_out: list[dict[str, Any]] = []
     for relation in proposal.viewpoint_relations:
         source, target = relation.endpoints()

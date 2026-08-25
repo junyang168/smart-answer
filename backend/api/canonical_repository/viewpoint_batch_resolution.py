@@ -1539,10 +1539,21 @@ def validate_review(
             for name in ("pass", "correct", "reject", "defer")
         },
         "reconsideration_required": outcome != "pass",
+        # Every kind of finding that can reach `outcome` has to reach this too.
+        # Left off the structure and relation reviews, a relation-only rejection
+        # made the batch `findings` while `correction_required` stayed False --
+        # so no correction round ran, and the scope stopped with no way forward.
         "correction_required": any(
             item.decision == "correct"
-            for item in (*review.change_reviews, *review.revision_reviews)
-        ),
+            for item in (
+                *review.change_reviews,
+                *review.revision_reviews,
+                *review.structure_reviews,
+                *review.relation_reviews,
+            )
+        )
+        or any(not item.synthesis_entailed_by_focal for item in review.structure_reviews)
+        or any(not item.direction_correct for item in review.relation_reviews),
     }
     report["artifact_sha256"] = sha256_json(report)
     return report
@@ -1940,6 +1951,27 @@ class FindingDisposition(StrictBatchModel):
     reason: str = Field(min_length=1)
 
 
+class StructureFindingDisposition(StrictBatchModel):
+    """The proposer's answer to one finding about a proposed structure."""
+
+    structure_index: int = Field(ge=0)
+    disposition: Literal["accepted", "rebutted", "deferred"]
+    reason: str = Field(min_length=1)
+
+
+class RelationFindingDisposition(StrictBatchModel):
+    """The proposer's answer to one finding about a proposed relation."""
+
+    source_ref: str = Field(min_length=1)
+    target_ref: str = Field(min_length=1)
+    relation_type: str = Field(min_length=1)
+    disposition: Literal["accepted", "rebutted", "deferred"]
+    reason: str = Field(min_length=1)
+
+    def edge(self) -> tuple[str, str, str]:
+        return (self.source_ref, self.target_ref, self.relation_type)
+
+
 class RevisionFindingDisposition(StrictBatchModel):
     """The proposer's answer to one finding about a proposed viewpoint revision."""
 
@@ -2083,10 +2115,19 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
     structure_patches: list[StructureCorrectionPatch] = Field(default_factory=list)
     revision_dispositions: list[RevisionFindingDisposition] = Field(default_factory=list)
     revision_patches: list[ViewpointRevisionCorrectionPatch] = Field(default_factory=list)
+    structure_dispositions: list[StructureFindingDisposition] = Field(default_factory=list)
+    relation_dispositions: list[RelationFindingDisposition] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_reconsideration(self) -> "CanonicalViewpointReconsiderationResponse":
-        if not self.finding_dispositions and not self.revision_dispositions:
+        if not any(
+            (
+                self.finding_dispositions,
+                self.revision_dispositions,
+                self.structure_dispositions,
+                self.relation_dispositions,
+            )
+        ):
             raise ValueError("a reconsideration must answer at least one finding")
         keys = [(item.claim_id, item.component_index) for item in self.finding_dispositions]
         if len(keys) != len(set(keys)):
@@ -2113,6 +2154,12 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         ]
         if len(revision_patch_keys) != len(set(revision_patch_keys)):
             raise ValueError("revision patches must be unique")
+        structure_keys = [item.structure_index for item in self.structure_dispositions]
+        if len(structure_keys) != len(set(structure_keys)):
+            raise ValueError("structure dispositions must be unique")
+        relation_keys = [item.edge() for item in self.relation_dispositions]
+        if len(relation_keys) != len(set(relation_keys)):
+            raise ValueError("relation dispositions must be unique")
         return self
 
 
@@ -2419,6 +2466,37 @@ def validate_reconsideration(
     for extra in sorted(answered_revisions - flagged_revisions):
         findings.append(f"{extra}: revision disposition answers no finding")
 
+    # A structure or relation the reviewer would not pass has to be answered
+    # too. Without this its rejection reached neither `escalations` nor the
+    # correction round, and the batch resolved as though the reviewer had
+    # agreed -- writing the record `system_approved` against a review that
+    # said no.
+    flagged_structures = {
+        item.structure_index
+        for item in review.structure_reviews
+        if item.decision != "pass" or not item.synthesis_entailed_by_focal
+    }
+    answered_structures = {item.structure_index for item in reconsideration.structure_dispositions}
+    for missing in sorted(flagged_structures - answered_structures):
+        findings.append(f"structures#{missing}: finding has no disposition")
+    for extra in sorted(answered_structures - flagged_structures):
+        findings.append(f"structures#{extra}: disposition answers no finding")
+
+    flagged_relations = {
+        item.edge()
+        for item in review.relation_reviews
+        if item.decision != "pass" or not item.direction_correct
+    }
+    answered_relations = {item.edge() for item in reconsideration.relation_dispositions}
+    for missing in sorted(flagged_relations - answered_relations):
+        findings.append(
+            f"relation {missing[0]} --{missing[2]}--> {missing[1]}: finding has no disposition"
+        )
+    for extra in sorted(answered_relations - flagged_relations):
+        findings.append(
+            f"relation {extra[0]} --{extra[2]}--> {extra[1]}: disposition answers no finding"
+        )
+
     if findings:
         raise BatchResolutionError(findings)
 
@@ -2430,6 +2508,17 @@ def validate_reconsideration(
 
     escalations = sorted(
         [
+            *(
+                f"structures#{item.structure_index}:{item.disposition}"
+                for item in reconsideration.structure_dispositions
+                if item.disposition != "accepted"
+            ),
+            *(
+                f"relation {item.source_ref}--{item.relation_type}->{item.target_ref}"
+                f":{item.disposition}"
+                for item in reconsideration.relation_dispositions
+                if item.disposition != "accepted"
+            ),
             *(
                 f"{item.target_viewpoint_revision_id}:{item.disposition}"
                 for item in reconsideration.revision_dispositions

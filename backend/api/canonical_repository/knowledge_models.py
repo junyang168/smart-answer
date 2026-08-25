@@ -1195,34 +1195,6 @@ class ViewpointStructureRecord(StrictViewpointRecord):
     effective_state: Literal["active", "retired"] = "active"
 
 
-class ViewpointStructureRevisionRecord(StrictViewpointRecord):
-    structure_revision_id: str
-    schema_version: Literal["wang_viewpoint_structure_revision_v1"] = (
-        "wang_viewpoint_structure_revision_v1"
-    )
-    structure_id: str
-    revision_number: int = Field(ge=1)
-    central_synthesis: str = Field(min_length=1)
-    representation_kind: Literal["reviewed_editorial_normalization_of_source_claims"] = (
-        "reviewed_editorial_normalization_of_source_claims"
-    )
-    not_a_direct_quote: Literal[True] = True
-    focal_viewpoints: list[ViewpointStructureFocal] = Field(min_length=1)
-    unresolved_items: list[str] = Field(default_factory=list)
-    scope_manifest_sha256: str
-    supersedes_revision_id: Optional[str] = None
-    review_provenance: Optional[ViewpointGraphReviewProvenance] = None
-
-    @model_validator(mode="after")
-    def validate_structure_revision(self) -> "ViewpointStructureRevisionRecord":
-        revisions = [item.viewpoint_revision_id for item in self.focal_viewpoints]
-        if len(revisions) != len(set(revisions)):
-            raise ValueError("a viewpoint may hold only one role in a structure")
-        if self.supersedes_revision_id == self.structure_revision_id:
-            raise ValueError("structure revision cannot supersede itself")
-        return self
-
-
 class ViewpointGraphReviewProvenance(BaseModel):
     """Which independent review approved this structure or relation.
 
@@ -1254,6 +1226,34 @@ class ViewpointGraphReviewProvenance(BaseModel):
     #: it, and naming a decision that did not rule on it would be a fabricated
     #: lineage. The review artifact is the anchor either way.
     basis_identity_decision_ids: list[str] = Field(default_factory=list)
+
+
+class ViewpointStructureRevisionRecord(StrictViewpointRecord):
+    structure_revision_id: str
+    schema_version: Literal["wang_viewpoint_structure_revision_v1"] = (
+        "wang_viewpoint_structure_revision_v1"
+    )
+    structure_id: str
+    revision_number: int = Field(ge=1)
+    central_synthesis: str = Field(min_length=1)
+    representation_kind: Literal["reviewed_editorial_normalization_of_source_claims"] = (
+        "reviewed_editorial_normalization_of_source_claims"
+    )
+    not_a_direct_quote: Literal[True] = True
+    focal_viewpoints: list[ViewpointStructureFocal] = Field(min_length=1)
+    unresolved_items: list[str] = Field(default_factory=list)
+    scope_manifest_sha256: str
+    supersedes_revision_id: Optional[str] = None
+    review_provenance: Optional[ViewpointGraphReviewProvenance] = None
+
+    @model_validator(mode="after")
+    def validate_structure_revision(self) -> "ViewpointStructureRevisionRecord":
+        revisions = [item.viewpoint_revision_id for item in self.focal_viewpoints]
+        if len(revisions) != len(set(revisions)):
+            raise ValueError("a viewpoint may hold only one role in a structure")
+        if self.supersedes_revision_id == self.structure_revision_id:
+            raise ValueError("structure revision cannot supersede itself")
+        return self
 
 
 class ViewpointRelationRecord(StrictViewpointRecord):

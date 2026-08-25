@@ -39,6 +39,7 @@ from backend.pipeline.viewpoint_resolution_runtime import (
     call_model as _call,
     read_artifact as _read,
     subscription_client as _subscription_client,
+    write_derived as _write_derived,
     write_immutable as _write_immutable,
 )
 
@@ -54,10 +55,23 @@ def build_backreviewer(
     )
 
 
-def unreviewed(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Records with no review behind them -- `None` is how they say so."""
+def unreviewed(
+    records: list[dict[str, Any]], *, live: set[str] | None = None, id_key: str = ""
+) -> list[dict[str, Any]]:
+    """Live records with no review behind them -- `None` is how they say so.
 
-    return [item for item in records if not item.get("review_provenance")]
+    A retired relation or a superseded structure revision is not what anyone is
+    reading, and approving one would attach a review to a record already out of
+    service.
+    """
+
+    return [
+        item
+        for item in records
+        if not item.get("review_provenance")
+        and item.get("effective_state", "active") == "active"
+        and (live is None or str(item[id_key]) in live)
+    ]
 
 
 def main() -> int:
@@ -76,7 +90,14 @@ def main() -> int:
     args = parser.parse_args()
 
     store = PostgresKnowledgeStore(args.database_url)
-    structures = unreviewed(store.list_records("viewpoint_structure_revisions"))
+    current_structure_revisions = {
+        str(item["current_revision_id"]) for item in store.list_records("viewpoint_structures")
+    }
+    structures = unreviewed(
+        store.list_records("viewpoint_structure_revisions"),
+        live=current_structure_revisions,
+        id_key="structure_revision_id",
+    )
     relations = unreviewed(store.list_records("viewpoint_relations"))
     if not structures and not relations:
         print(json.dumps({"status": "nothing_unreviewed"}, ensure_ascii=False))
@@ -142,12 +163,20 @@ def main() -> int:
     plan_document["schema_version"] = "wang_viewpoint_graph_backreview_plan_v1"
     plan_document["apply_allowed"] = bool(args.apply)
     plan_document["artifact_sha256"] = sha256_json(plan_document)
-    _write_immutable(args.output_dir / "backreview-change-plan.json", plan_document)
+    # Derived, not immutable: the documented flow is a plan-only run followed by
+    # a `--apply` rerun off the cached call, and `apply_allowed` differs between
+    # the two. Written immutably the second run dies here, after the model call
+    # has already been paid for.
+    _write_derived(args.output_dir / "backreview-change-plan.json", plan_document)
 
     mutations = 0
     if args.apply:
-        store.apply_plan(plan)
-        mutations = len(plan.operations)
+        # `apply_plan` returns `already_applied` without touching anything when
+        # a change set with the same fingerprint already landed; counting the
+        # operations regardless reports mutations for a run that made none.
+        apply_result = store.apply_plan(plan)
+        if apply_result.get("status") == "applied":
+            mutations = len(plan.operations)
         observed = {
             **{
                 str(item["structure_revision_id"]): item
