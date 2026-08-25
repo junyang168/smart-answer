@@ -2989,26 +2989,40 @@ def validate_consolidation_fallback(
     noticed. So the edge is required wherever the merge did not stick.
     """
 
-    surviving = {item.local_key for item in proposal.new_viewpoint_candidates}
-    edges = {
-        (source, target)
+    # Keyed on the matched revision, never on the candidate's local key: the
+    # correction round may rename or replace a candidate, and an earlier version
+    # of this check keyed on the key, so a rename slipped the whole rule.
+    # A merge lands as `member_existing` -- that is what `apply_consolidation`
+    # writes, and every candidate is required to own a member component. A
+    # `support_existing` aimed at the same viewpoint is a different claim about
+    # it and does not mean the identity was folded in.
+    merged_targets = {
+        str(component.target_viewpoint_revision_id)
+        for decision in proposal.claim_decisions
+        for component in decision.components
+        if component.disposition == "member_existing"
+        and component.target_viewpoint_revision_id
+    }
+    connected_targets = {
+        key
         for relation in proposal.viewpoint_relations
-        for source, target in (
-            (relation.endpoints()[0], relation.endpoints()[1]),
-            (relation.endpoints()[1], relation.endpoints()[0]),
-        )
+        for kind, key in relation.endpoints()
+        if kind == "existing"
+        and any(side == "new" for side, _ in relation.endpoints())
     }
     findings: list[str] = []
     unmerged: list[dict[str, str]] = []
     for verdict in consolidation.verdicts:
-        if verdict.verdict == "new" or verdict.local_key not in surviving:
+        if verdict.verdict == "new":
             continue
         target = str(verdict.target_viewpoint_revision_id)
-        unmerged.append({"local_key": verdict.local_key, "target": target})
-        if (("new", verdict.local_key), ("existing", target)) not in edges:
+        if target in merged_targets:
+            continue
+        unmerged.append({"matched_revision_id": target, "ruled_local_key": verdict.local_key})
+        if target not in connected_targets:
             findings.append(
-                f"{verdict.local_key}: consolidation matched {target} but the merge did "
-                "not stick and no relation records the connection"
+                f"{target}: consolidation matched it but the merge did not stick and no "
+                "relation connects it to a viewpoint this batch proposes"
             )
 
     if findings:

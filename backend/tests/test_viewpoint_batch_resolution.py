@@ -4124,7 +4124,7 @@ def test_refused_merge_must_leave_the_two_viewpoints_related():
 
     ruling = _consolidation(_merge_verdict())
     # The merge did not stick: the candidate is still its own viewpoint.
-    with pytest.raises(BatchResolutionError, match="no relation records the connection"):
+    with pytest.raises(BatchResolutionError, match="no relation connects it to a viewpoint this batch proposes"):
         validate_consolidation_fallback(consolidation=ruling, proposal=_proposal())
 
     related = _proposal(
@@ -4138,7 +4138,43 @@ def test_refused_merge_must_leave_the_two_viewpoints_related():
         ]
     )
     report = validate_consolidation_fallback(consolidation=ruling, proposal=related)
-    assert report["unmerged_matches"] == [{"local_key": "ROCK-NOT-PETER", "target": "CVR-1"}]
+    assert report["unmerged_matches"] == [
+        {"matched_revision_id": "CVR-1", "ruled_local_key": "ROCK-NOT-PETER"}
+    ]
+
+
+def test_renaming_the_candidate_does_not_slip_the_fallback_rule():
+    """The correction round may replace a candidate under a new local key.
+
+    Keying the rule on that key let a rename carry the match out of scope
+    silently, which is how a batch reported the check passing while the edge it
+    requires had only been drawn because the prompt asked nicely.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    renamed = _proposal(
+        claim_decisions=[
+            {
+                "claim_id": "C1",
+                "components": [
+                    _component(
+                        ROCK_STATEMENT,
+                        "磐石不是彼得这个人",
+                        "new_viewpoint",
+                        local_new_viewpoint_key="RENAMED-AFTER-CORRECTION",
+                    )
+                ],
+            }
+        ],
+        new_viewpoint_candidates=[_candidate("RENAMED-AFTER-CORRECTION")],
+    )
+    with pytest.raises(BatchResolutionError, match="CVR-1: consolidation matched it"):
+        validate_consolidation_fallback(
+            consolidation=_consolidation(_merge_verdict()), proposal=renamed
+        )
 
 
 def test_a_merge_that_stuck_needs_no_fallback_relation():
