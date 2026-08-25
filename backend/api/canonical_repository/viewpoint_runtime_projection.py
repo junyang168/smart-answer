@@ -303,6 +303,8 @@ class ViewpointRuntimeCompiler:
             "argument_routes": "argument_route_id", "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
             "viewpoint_relations": "viewpoint_relation_id", "viewpoint_coverage_snapshots": "coverage_snapshot_id",
+            "viewpoint_structures": "structure_id",
+            "viewpoint_structure_revisions": "structure_revision_id",
             "viewpoint_resolution_ledgers": "resolution_ledger_id", "viewpoint_quality_reports": "quality_report_id",
             "knowledge_routes": "route_id", "product_dependencies": "dependency_id",
             "impact_events": "impact_event_id",

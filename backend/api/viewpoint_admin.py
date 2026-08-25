@@ -354,6 +354,11 @@ def viewpoint_impact(
     )
 
 
+@router.get("/viewpoint-structures")
+def list_viewpoint_structures():
+    return _run("structures")
+
+
 @router.get("/viewpoint-exceptions")
 def list_viewpoint_exceptions(
     cursor: str | None = None,

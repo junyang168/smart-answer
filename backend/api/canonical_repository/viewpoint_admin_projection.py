@@ -111,6 +111,8 @@ class AdminViewpointProjectionCompiler:
                 "argument_route_revisions",
                 "argument_route_attestations",
                 "viewpoint_relations",
+                "viewpoint_structures",
+                "viewpoint_structure_revisions",
                 "viewpoint_resolution_ledgers",
                 "viewpoint_quality_reports",
             )
@@ -651,9 +653,16 @@ class AdminViewpointProjectionCompiler:
         for claim in self.records["claims"]:
             for evidence_id in claim.evidence_step_ids:
                 step = evidence.get(evidence_id)
-                fragment = fragments.get(step.source_fragment_id) if step and step.source_fragment_id else None
-                if fragment:
-                    result[claim.claim_id].add(fragment.source_id)
+                if step is None:
+                    continue
+                # Extraction wrote the fragment singular in one era and plural in
+                # another, and both forms are live in the store. Reading only the
+                # singular reports zero sources for every viewpoint built from
+                # plural-era evidence.
+                for fragment_id in evidence_fragment_ids(step):
+                    fragment = fragments.get(fragment_id)
+                    if fragment:
+                        result[claim.claim_id].add(fragment.source_id)
         return result
 
     def detail(
@@ -994,6 +1003,68 @@ class AdminViewpointProjectionCompiler:
         detail = self.detail(viewpoint_id, **kwargs)
         detail["data"] = {"viewpoint_id": viewpoint_id, **detail["data"]["impact"]}
         return detail
+
+    def structures(self) -> dict[str, Any]:
+        """Reviewed centres: which viewpoints add up to one argument, and how.
+
+        A structure never asserts anything of its own, so every row here is a
+        pointer into viewpoints that already stand on their own evidence.
+        """
+
+        state = self._state()
+        revisions = {
+            item.viewpoint_revision_id: item for item in self.records["viewpoint_revisions"]
+        }
+        viewpoint_by_revision = {
+            item.viewpoint_revision_id: item.viewpoint_id
+            for item in self.records["viewpoint_revisions"]
+        }
+        sources_by_claim = self._source_ids_by_claim()
+        claims_by_revision: dict[str, set[str]] = defaultdict(set)
+        for link in self.records["viewpoint_claim_links"]:
+            if link.effective_state == "active" and link.link_type == "equivalent_component":
+                claims_by_revision[link.validated_against_viewpoint_revision_id].add(link.claim_id)
+
+        structure_revisions = {
+            item.structure_revision_id: item
+            for item in self.records["viewpoint_structure_revisions"]
+        }
+        items = []
+        for structure in self.records["viewpoint_structures"]:
+            if structure.effective_state != "active":
+                continue
+            revision = structure_revisions.get(structure.current_revision_id)
+            if revision is None:
+                continue
+            focal = []
+            for entry in revision.focal_viewpoints:
+                pinned = revisions.get(entry.viewpoint_revision_id)
+                claim_ids = claims_by_revision.get(entry.viewpoint_revision_id, set())
+                source_ids: set[str] = set()
+                for claim_id in claim_ids:
+                    source_ids.update(sources_by_claim.get(claim_id, set()))
+                focal.append({
+                    "structure_role": entry.structure_role,
+                    "viewpoint_revision_id": entry.viewpoint_revision_id,
+                    "viewpoint_id": viewpoint_by_revision.get(entry.viewpoint_revision_id),
+                    "core_proposition": pinned.core_proposition if pinned else None,
+                    "counts": {"members": len(claim_ids), "sources": len(source_ids)},
+                })
+            items.append({
+                "structure_id": structure.structure_id,
+                "structure_revision_id": revision.structure_revision_id,
+                "central_synthesis": revision.central_synthesis,
+                "wording_label": "编辑归一化（非逐字引文）",
+                "focal": focal,
+                "unresolved_items": revision.unresolved_items,
+                "review_status": revision.review_status,
+            })
+        items.sort(key=lambda item: item["structure_id"])
+        return self._envelope(
+            state,
+            {"items": items, "total": len(items)},
+            {"self": "/admin/wang/viewpoint-structures", "viewpoints": "/admin/wang/viewpoints"},
+        )
 
     def exceptions(self, *, cursor: str | None = None, limit: int = 25) -> dict[str, Any]:
         state = self._state()

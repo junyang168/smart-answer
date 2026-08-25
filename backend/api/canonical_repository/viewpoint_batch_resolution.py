@@ -397,10 +397,25 @@ class ProposedComponent(StrictBatchModel):
             if later[0] < earlier[1]:
                 raise ValueError("component spans overlap")
         if self.disposition in EXISTING_DISPOSITIONS:
-            if not self.target_viewpoint_revision_id:
-                raise ValueError(f"{self.disposition} requires a target viewpoint revision")
-            if self.local_new_viewpoint_key:
-                raise ValueError(f"{self.disposition} may not claim a new viewpoint key")
+            # A component can support, qualify or contest a viewpoint that this
+            # same batch is proposing, so the target is either a committed
+            # revision or a local candidate key -- exactly one of them. Without
+            # the local form an argument for a new viewpoint has nowhere to
+            # attach and has to become its own CVP.
+            targets = [self.target_viewpoint_revision_id, self.local_new_viewpoint_key]
+            if not any(targets):
+                raise ValueError(
+                    f"{self.disposition} requires a target viewpoint revision or local key"
+                )
+            if all(targets):
+                raise ValueError(
+                    f"{self.disposition} may not target both a revision and a local key"
+                )
+            if self.disposition == "member_existing" and self.local_new_viewpoint_key:
+                raise ValueError(
+                    "member_existing targets a committed revision; use new_viewpoint "
+                    "with a shared local key to make components members of one new viewpoint"
+                )
         elif self.disposition == "new_viewpoint":
             if not self.local_new_viewpoint_key:
                 raise ValueError("new_viewpoint requires a local candidate key")
@@ -646,6 +661,98 @@ class RouteComponentBinding(StrictBatchModel):
         return self
 
 
+class ProposedViewpointRelation(StrictBatchModel):
+    """A typed edge between two viewpoints this batch knows about.
+
+    Direction reads source-first, matching ``specializes``/``generalizes``:
+    ``source applies target`` means the source viewpoint is an application of
+    the target, not the other way round. Recording an application as a Claim
+    link would invert it, because a Claim link says the Claim is evidence *for*
+    the viewpoint.
+
+    Each endpoint is either a revision id from the packet or a local candidate
+    key from this proposal, never both.
+    """
+
+    source_viewpoint_revision_id: str | None = None
+    source_local_key: str | None = None
+    target_viewpoint_revision_id: str | None = None
+    target_local_key: str | None = None
+    relation_type: Literal["applies", "extends", "entails", "specializes", "generalizes"]
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_relation(self) -> "ProposedViewpointRelation":
+        for side in ("source", "target"):
+            revision = getattr(self, f"{side}_viewpoint_revision_id")
+            local = getattr(self, f"{side}_local_key")
+            if not revision and not local:
+                raise ValueError(f"{side} endpoint requires a revision id or a local key")
+            if revision and local:
+                raise ValueError(f"{side} endpoint may not carry both a revision id and a local key")
+        if self.endpoints()[0] == self.endpoints()[1]:
+            raise ValueError("viewpoint relation endpoints must differ")
+        return self
+
+    def endpoints(self) -> tuple[tuple[str, str], tuple[str, str]]:
+        def one(side: str) -> tuple[str, str]:
+            revision = getattr(self, f"{side}_viewpoint_revision_id")
+            return ("existing", revision) if revision else ("new", str(getattr(self, f"{side}_local_key")))
+
+        return one("source"), one("target")
+
+
+class ProposedStructureFocal(StrictBatchModel):
+    """One viewpoint's role in the proposed centre."""
+
+    viewpoint_revision_id: str | None = None
+    local_key: str | None = None
+    structure_role: Literal[
+        "central_claim",
+        "negative_boundary",
+        "positive_identification",
+        "supporting_conclusion",
+        "qualification",
+        "tension_side",
+        "application",
+        "methodological_boundary",
+    ]
+
+    @model_validator(mode="after")
+    def validate_focal(self) -> "ProposedStructureFocal":
+        if not self.viewpoint_revision_id and not self.local_key:
+            raise ValueError("structure focal requires a revision id or a local key")
+        if self.viewpoint_revision_id and self.local_key:
+            raise ValueError("structure focal may not carry both a revision id and a local key")
+        return self
+
+    def endpoint(self) -> tuple[str, str]:
+        if self.viewpoint_revision_id:
+            return ("existing", self.viewpoint_revision_id)
+        return ("new", str(self.local_key))
+
+
+class ProposedViewpointStructure(StrictBatchModel):
+    """The reviewed centre this scope's viewpoints add up to.
+
+    It organises viewpoints the proposal already lists; it may not introduce a
+    claim of its own, which is why ``central_synthesis`` is checkable only
+    against the listed focal viewpoints.
+    """
+
+    central_synthesis: str = Field(min_length=1)
+    focal: list[ProposedStructureFocal] = Field(min_length=1)
+    unresolved_items: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "ProposedViewpointStructure":
+        endpoints = [item.endpoint() for item in self.focal]
+        if len(endpoints) != len(set(endpoints)):
+            raise ValueError("a viewpoint may hold only one role in a structure")
+        return self
+
+
 class CanonicalViewpointProposalResponse(StrictBatchModel):
     """Exactly what the proposer model returns.
 
@@ -657,6 +764,8 @@ class CanonicalViewpointProposalResponse(StrictBatchModel):
     batch_id: str
     claim_decisions: list[ProposedClaimDecision] = Field(min_length=1)
     new_viewpoint_candidates: list[NewViewpointCandidate] = Field(default_factory=list)
+    viewpoint_relations: list[ProposedViewpointRelation] = Field(default_factory=list)
+    structures: list[ProposedViewpointStructure] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "CanonicalViewpointProposalResponse":
@@ -1070,6 +1179,34 @@ def validate_proposal(
                 else:
                     seen_component_keys[key] = (decision.claim_id, index)
 
+    for index, relation in enumerate(proposal.viewpoint_relations):
+        where = f"viewpoint_relations#{index}"
+        for kind, key in relation.endpoints():
+            if kind == "new":
+                if key not in candidate_keys:
+                    findings.append(f"{where}: local key {key} has no candidate")
+            elif key not in known_revisions:
+                findings.append(f"{where}: revision {key} was not in the packet")
+
+    seen_edges: set[Any] = set()
+    for index, relation in enumerate(proposal.viewpoint_relations):
+        edge = (*relation.endpoints(), relation.relation_type)
+        if edge in seen_edges:
+            findings.append(f"viewpoint_relations#{index}: duplicate {relation.relation_type} edge")
+        seen_edges.add(edge)
+
+    for index, structure in enumerate(proposal.structures):
+        where = f"structures#{index}"
+        for focal in structure.focal:
+            kind, key = focal.endpoint()
+            if kind == "new":
+                if key not in candidate_keys:
+                    findings.append(f"{where}: local key {key} has no candidate")
+            elif key not in known_revisions:
+                findings.append(f"{where}: revision {key} was not in the packet")
+
+    # A relation or structure endpoint alone does not justify a candidate: every
+    # new viewpoint still needs at least one Claim component of its own.
     for orphan in sorted(candidate_keys - referenced_keys):
         findings.append(f"{orphan}: new viewpoint candidate has no member component")
 
