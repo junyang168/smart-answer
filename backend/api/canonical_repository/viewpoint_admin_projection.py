@@ -295,6 +295,7 @@ class AdminViewpointProjectionCompiler:
             "proposition_unit_id", "viewpoint_proposition_unit_link_id",
             "argument_route_id", "argument_route_revision_id", "argument_route_attestation_id",
             "viewpoint_relation_id",
+            "structure_id", "structure_revision_id",
             "claim_id", "evidence_step_id", "route_id", "claim_relation_id",
             "dependency_id", "impact_event_id", "source_id", "fragment_id",
         ):
@@ -321,6 +322,8 @@ class AdminViewpointProjectionCompiler:
             "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
             "viewpoint_relations": "viewpoint_relation_id",
+            "viewpoint_structures": "structure_id",
+            "viewpoint_structure_revisions": "structure_revision_id",
             "viewpoint_resolution_ledgers": "resolution_ledger_id",
             "viewpoint_quality_reports": "quality_report_id",
         }

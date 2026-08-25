@@ -427,3 +427,42 @@ def test_viewpoint_pilot_is_optional_and_fails_closed(monkeypatch, tmp_path):
     invalid = client.get("/admin/wang/viewpoints/pilot")
     assert invalid.status_code == 503
     assert "Viewpoint pilot unavailable" in invalid.json()["detail"]
+
+
+def test_every_loaded_collection_resolves_a_record_id() -> None:
+    """A collection the compiler loads but cannot key crashes every read model.
+
+    Adding viewpoint_structures to the loader without teaching the id resolver
+    took out /admin/wang/viewpoints in production: the listing walks all loaded
+    records, and one unkeyed type raises before any row is built.
+    """
+    from backend.api.canonical_repository.viewpoint_admin_projection import (
+        AdminViewpointProjectionCompiler,
+    )
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+
+    loaded = _loaded_collection_names()
+    for collection in loaded:
+        model, id_field = KNOWLEDGE_COLLECTIONS[collection]
+        assert id_field in model.model_fields, f"{collection}: {id_field} not on {model.__name__}"
+        stub = type("Stub", (), {id_field: "X-1"})()
+        assert AdminViewpointProjectionCompiler._record_id(collection, stub) == "X-1"
+
+
+def _loaded_collection_names() -> list[str]:
+    """The collection names the compiler's constructor asks the store for."""
+    import ast
+    import inspect
+    from backend.api.canonical_repository.viewpoint_admin_projection import (
+        AdminViewpointProjectionCompiler,
+    )
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+
+    source = inspect.getsource(AdminViewpointProjectionCompiler.__init__)
+    tree = ast.parse(source.lstrip())
+    names = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    return sorted(names & set(KNOWLEDGE_COLLECTIONS))
