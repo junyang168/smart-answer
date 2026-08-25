@@ -3841,3 +3841,202 @@ def test_withdrawing_a_flagged_revision_resolves_the_batch():
         reconsideration=reconsideration, proposal=proposal, review=review
     )
     assert effective.viewpoint_revisions == []
+
+
+# --- identity consolidation ----------------------------------------------------
+
+def _consolidation(*verdicts: dict[str, Any]) -> Any:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        IdentityConsolidationResponse,
+    )
+
+    return IdentityConsolidationResponse.model_validate({"verdicts": list(verdicts)})
+
+
+def _merge_verdict(**overrides: Any) -> dict[str, Any]:
+    payload = {
+        "local_key": "ROCK-NOT-PETER",
+        "verdict": "matches_but_wording_too_narrow",
+        "target_viewpoint_revision_id": "CVR-1",
+        "revised_core_proposition": "罗马天主教据太16章所立的教皇制解经是错误的。",
+        "revised_subject": "罗马天主教对太16章的教皇制解经",
+        "revised_predicate": "成立",
+        "revised_object": "",
+        "revised_polarity": "denied",
+        "revised_modality": "断言",
+        "revised_scripture_scope": ["馬太福音16:18"],
+        "revised_conditions": [],
+        "revised_population_scope": ["彼得", "历代教皇"],
+        "reason": "讲员把整套主张当一个整体否定；既有 signature 只锁在彼得的身份上，装不下本候选。",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_consolidation_folds_a_duplicate_into_the_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal()
+    folded = apply_consolidation(
+        consolidation=_consolidation(_merge_verdict()), proposal=proposal
+    )
+
+    component = folded.claim_decisions[0].components[0]
+    assert component.disposition == "member_existing"
+    assert component.target_viewpoint_revision_id == "CVR-1"
+    assert component.local_new_viewpoint_key is None
+    assert folded.new_viewpoint_candidates == []
+    # The wording that could not hold it becomes the revision the reviewer sees.
+    assert [item.target_viewpoint_revision_id for item in folded.viewpoint_revisions] == ["CVR-1"]
+    assert folded.viewpoint_revisions[0].revision_reason.startswith("讲员把整套主张")
+
+
+def test_consolidation_keeping_the_wording_writes_no_revision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {
+                "local_key": "ROCK-NOT-PETER",
+                "verdict": "matches_existing",
+                "target_viewpoint_revision_id": "CVR-1",
+                "reason": "同一真值条件，既有措辞装得下。",
+            }
+        ),
+        proposal=_proposal(),
+    )
+
+    assert folded.viewpoint_revisions == []
+    assert folded.claim_decisions[0].components[0].disposition == "member_existing"
+
+
+def test_consolidation_leaves_a_genuinely_new_viewpoint_alone():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal()
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            {"local_key": "ROCK-NOT-PETER", "verdict": "new", "reason": "库里没有。"}
+        ),
+        proposal=proposal,
+    )
+    assert folded == proposal
+
+
+def test_consolidation_retargets_a_relation_onto_the_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        viewpoint_relations=[
+            {
+                "source_local_key": "SPARE",
+                "target_local_key": "ROCK-NOT-PETER",
+                "relation_type": "applies",
+                "reason": "由前者推出后者。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            _merge_verdict(),
+            {"local_key": "SPARE", "verdict": "new", "reason": "库里没有。"},
+        ),
+        proposal=proposal,
+    )
+    relation = folded.viewpoint_relations[0]
+    assert relation.source_local_key == "SPARE"
+    assert relation.target_viewpoint_revision_id == "CVR-1"
+    assert relation.target_local_key is None
+
+
+def test_consolidation_drops_a_relation_whose_ends_became_one_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        viewpoint_relations=[
+            {
+                "source_local_key": "SPARE",
+                "target_local_key": "ROCK-NOT-PETER",
+                "relation_type": "applies",
+                "reason": "由前者推出后者。",
+            }
+        ],
+    )
+    folded = apply_consolidation(
+        consolidation=_consolidation(
+            _merge_verdict(),
+            _merge_verdict(local_key="SPARE", verdict="matches_existing",
+                           revised_core_proposition=None, revised_subject=None,
+                           revised_predicate=None, revised_object=None,
+                           revised_polarity=None, revised_modality=None,
+                           target_viewpoint_revision_id="CVR-2"),
+        ),
+        proposal=proposal,
+    )
+    assert len(folded.viewpoint_relations) == 1
+    folded_same = apply_consolidation(
+        consolidation=_consolidation(
+            {"local_key": "ROCK-NOT-PETER", "verdict": "matches_existing",
+             "target_viewpoint_revision_id": "CVR-1", "reason": "同一条。"},
+            {"local_key": "SPARE", "verdict": "new", "reason": "库里没有。"},
+        ),
+        proposal=_proposal(
+            new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+            viewpoint_relations=[
+                {
+                    "source_viewpoint_revision_id": "CVR-1",
+                    "target_local_key": "ROCK-NOT-PETER",
+                    "relation_type": "applies",
+                    "reason": "两端合并后同一。",
+                }
+            ],
+        ),
+    )
+    assert folded_same.viewpoint_relations == []
+
+
+def test_two_candidates_may_not_claim_one_registry_viewpoint():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")]
+    )
+    with pytest.raises(BatchResolutionError, match="already claimed by"):
+        validate_consolidation(
+            consolidation=_consolidation(
+                _merge_verdict(),
+                _merge_verdict(local_key="SPARE"),
+            ),
+            proposal=proposal,
+            registry_revision_ids=["CVR-1"],
+        )
+
+
+def test_consolidation_must_rule_on_every_candidate():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")]
+    )
+    with pytest.raises(BatchResolutionError, match="SPARE: candidate has no consolidation verdict"):
+        validate_consolidation(
+            consolidation=_consolidation(_merge_verdict()),
+            proposal=proposal,
+            registry_revision_ids=["CVR-1"],
+        )

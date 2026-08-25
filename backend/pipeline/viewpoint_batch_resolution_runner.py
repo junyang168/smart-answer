@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from dotenv import load_dotenv
@@ -23,10 +24,12 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReconsiderationResponse,
+    IdentityConsolidationResponse,
     CanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
     anchor_proposal_spans,
+    apply_consolidation,
     apply_reconsideration_patches,
     batches_from_groups,
     build_batch_packet,
@@ -38,6 +41,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     repair_grouping,
     split_batches,
     validate_grouping,
+    validate_consolidation,
     validate_proposal,
     validate_reconsideration,
     validate_review,
@@ -104,6 +108,19 @@ def build_reviewer(
     )
 
 
+def build_consolidator(
+    model: str, reasoning_effort: str, *, provider: str = "claude"
+) -> StructuredJsonReviewerAdapter:
+    return StructuredJsonReviewerAdapter(
+        client=_subscription_client(provider, model, reasoning_effort),
+        prompt=(PROMPT_DIR / "canonical_viewpoint_identity_consolidation.md").read_text(
+            encoding="utf-8"
+        ),
+        response_model=IdentityConsolidationResponse,
+        schema_name="wang_canonical_viewpoint_identity_consolidation_v1",
+    )
+
+
 def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
         client=ClaudeSubscriptionClient(
@@ -132,6 +149,63 @@ def build_reconsiderer(
     )
 
 
+def build_consolidation_packet(
+    *,
+    proposal: CanonicalViewpointProposalResponse,
+    claims: Sequence[ReviewClaim],
+    registry_context: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Candidates with the words they rest on, plus the Registry to check against.
+
+    Each candidate carries the preacher's own verbatim rather than only the
+    proposer's normalized wording: normalization is what splits one package of
+    claims into several, and the raw sentences are what show it was one.
+    """
+
+    claim_index = {item.claim_id: item for item in claims}
+    members: dict[str, list[dict[str, Any]]] = {}
+    for decision in proposal.claim_decisions:
+        claim = claim_index[decision.claim_id]
+        for component in decision.components:
+            key = component.local_new_viewpoint_key
+            if not key or component.disposition != "new_viewpoint":
+                continue
+            steps = set(component.evidence_step_ids)
+            members.setdefault(str(key), []).append(
+                {
+                    "claim_id": claim.claim_id,
+                    "source_id": claim.source_id,
+                    "statement": claim.statement,
+                    "verbatim": sorted(
+                        {
+                            item.verbatim_excerpt
+                            for item in claim.evidence
+                            if item.evidence_step_id in steps and item.verbatim_excerpt
+                        }
+                    ),
+                }
+            )
+
+    packet = {
+        "schema_version": "wang_canonical_viewpoint_consolidation_packet_v1",
+        "batch_id": proposal.batch_id,
+        "new_viewpoint_candidates": [
+            {
+                **{
+                    key: value
+                    for key, value in item.model_dump(mode="json").items()
+                    if key != "novelty_comparison"
+                },
+                "attested_by": members.get(item.local_key, []),
+            }
+            for item in proposal.new_viewpoint_candidates
+        ],
+        "registry_viewpoints": [dict(item) for item in registry_context],
+    }
+    packet["packet_sha256"] = sha256_json(packet)
+    return packet
+
+
 def run_batch(
     *,
     batch_id: str,
@@ -143,6 +217,7 @@ def run_batch(
     proposer: Any,
     reviewer: Any,
     reconsiderer: Any = None,
+    consolidator: Any = None,
 ) -> dict[str, Any]:
     packet = build_batch_packet(
         batch_id=batch_id,
@@ -163,16 +238,60 @@ def run_batch(
     )
     normalization_changes = sorted({*normalization_changes, *span_changes})
     proposal = CanonicalViewpointProposalResponse.model_validate(canonical_proposal)
+    registry_revision_ids = [
+        str(item["viewpoint_revision_id"])
+        for item in registry_context
+        if item.get("viewpoint_revision_id")
+    ]
     validation = validate_proposal(
         proposal=proposal,
         batch_id=batch_id,
         claims=claims,
-        registry_revision_ids=[
-            str(item["viewpoint_revision_id"])
-            for item in registry_context
-            if item.get("viewpoint_revision_id")
-        ],
+        registry_revision_ids=registry_revision_ids,
     )
+
+    # Identity, asked on its own. The proposer decides it while also carving
+    # components, assigning roles, writing relations and building a structure,
+    # and it duplicated a viewpoint it had explicitly compared against.
+    consolidation_calls = 0
+    consolidation_seconds = 0.0
+    if consolidator is not None and proposal.new_viewpoint_candidates and registry_context:
+        consolidation_packet = build_consolidation_packet(
+            proposal=proposal, claims=claims, registry_context=registry_context
+        )
+        raw_consolidation, consolidation_calls, consolidation_seconds = _call(
+            consolidator, consolidation_packet, output_dir / "raw-consolidation.json"
+        )
+        consolidation = IdentityConsolidationResponse.model_validate(raw_consolidation)
+        consolidation_report = validate_consolidation(
+            consolidation=consolidation,
+            proposal=proposal,
+            registry_revision_ids=registry_revision_ids,
+        )
+        consolidated = apply_consolidation(
+            consolidation=consolidation, proposal=proposal
+        )
+        if consolidated != proposal:
+            # The merged proposal is what the reviewer sees, so it must satisfy
+            # the same deterministic contract the original did.
+            validation = validate_proposal(
+                proposal=consolidated,
+                batch_id=batch_id,
+                claims=claims,
+                registry_revision_ids=registry_revision_ids,
+            )
+        proposal = consolidated
+        _write_immutable(
+            output_dir / "consolidation.json",
+            {
+                "schema_version": "wang_canonical_viewpoint_consolidation_envelope_v1",
+                "batch_id": batch_id,
+                "packet_sha256": consolidation_packet["packet_sha256"],
+                "consolidation": consolidation.model_dump(mode="json"),
+                "validation_report": consolidation_report,
+            },
+        )
+
     proposal_payload = proposal.model_dump(mode="json")
     proposal_sha = sha256_json(proposal_payload)
     _write_immutable(
@@ -313,6 +432,7 @@ def run_batch(
         output_dir,
         raw_artifacts={
             "proposal": "raw-proposal.json",
+            "consolidation": "raw-consolidation.json",
             "review": "raw-review.json",
             "reconsideration": "raw-reconsideration.json",
         },
@@ -327,6 +447,7 @@ def run_batch(
         "new_viewpoint_candidate_count": effective_validation[
             "new_viewpoint_candidate_count"
         ],
+        "viewpoint_revision_count": effective_validation["viewpoint_revision_count"],
         "outcome": review_validation["outcome"],
         "reconsideration_required": review_validation["reconsideration_required"],
         "novelty_status": review_validation["novelty_status"],
@@ -461,6 +582,25 @@ def main() -> int:
         "--no-reconsider",
         action="store_true",
         help="stop after review instead of giving the proposer its one revision",
+    )
+    parser.add_argument(
+        "--no-consolidate",
+        action="store_true",
+        help="skip the identity-only pass over this batch's new viewpoints",
+    )
+    parser.add_argument(
+        "--consolidation-provider", choices=("claude", "codex"), default="claude"
+    )
+    parser.add_argument(
+        "--consolidation-model",
+        default="claude-opus-5",
+        help=(
+            "identity-only pass; on the 2026-08-25 calibration Opus caught the "
+            "duplicate in 3 of 3 runs and Sol in 0 of 3"
+        ),
+    )
+    parser.add_argument(
+        "--consolidation-effort", choices=("high", "xhigh"), default="high"
     )
     parser.add_argument(
         "--group",
@@ -606,6 +746,16 @@ def main() -> int:
         )
     )
 
+    consolidator = (
+        None
+        if args.no_consolidate
+        else build_consolidator(
+            args.consolidation_model,
+            args.consolidation_effort,
+            provider=args.consolidation_provider,
+        )
+    )
+
     reports: list[dict[str, Any]] = []
     for ordinal, batch in enumerate(batches, start=1):
         batch_id = f"CVB-{scope_label}-{ordinal:03d}"
@@ -621,6 +771,7 @@ def main() -> int:
                 proposer=proposer,
                 reviewer=reviewer,
                 reconsiderer=reconsiderer,
+                consolidator=consolidator,
             )
         except (BatchResolutionError, ValidationError) as exc:
             findings = (
