@@ -3,10 +3,10 @@
 > **读者**：Developer
 > **类型**：规范
 > **状态**：当前
-> **与代码对齐**：未核对
+> **与代码对齐**：2026-08-25 部分核对（核对到 4131807）——已核对本文所列的配置值与页面上线状态；其余陈述未逐条核对
 > **权威范围**：/admin/wang/matthew-progress 只读进度页的数据模型与边界。
 
-> 状态：第一阶段实现候选，尚未合并或部署。
+> 状态：已实现并上线，页面在 `web/src/app/admin/wang/matthew-progress/`。本文保留为该页的设计依据。
 > 日期：2026-08-16（America/Chicago）
 > 范围：Wang Knowledge Platform 内部只读管理页面；不生成或修改释经文章正文，不运行 notes-to-sermon fidelity audit，不 push、不 deploy。
 

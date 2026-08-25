@@ -3,7 +3,7 @@
 > **读者**：Developer
 > **类型**：规范
 > **状态**：当前
-> **与代码对齐**：未核对
+> **与代码对齐**：2026-08-25 部分核对（核对到 4131807）——已核对本文所列的配置值与页面上线状态；其余陈述未逐条核对
 > **权威范围**：文库的实现架构、数据模型、API 与失效规则。
 
 > This specification implements the goals described in the [Project Mission Statement](../00-overview/project_mission_statement.md). The Mission Statement is authoritative for why the repository exists and how original teaching, claims, arguments, recurring thought, exegesis, and topic articles relate.
@@ -835,7 +835,7 @@ The bundle is generated deterministically from retrieval and graph traversal bef
       "priority": "required"
     }
   ],
-  "default_sections": ["释经", "神学意义", "生活应用", "附录"],
+  "default_sections": ["釋經", "神學意義", "生活應用", "附錄"],
   "tone": "平和、清晰、保留主张强度",
   "citation_policy": "substantive claims resolve to approved sources",
   "review_status": "approved",
@@ -844,6 +844,12 @@ The bundle is generated deterministically from retrieval and graph traversal bef
   "approved_at": "2026-08-07T00:00:00Z"
 }
 ```
+
+Section names are stored in Traditional characters, matching `CONTENT_CATEGORIES` in
+`backend/pipeline/seed_catalog/generator.py`. This document previously spelled them in Simplified
+while the functional specification spelled them in Traditional, so the two normative documents
+disagreed on the bytes of a config value; `backend/pipeline/transcript_pipeline.py` still carries a
+Traditional-to-Simplified alias table absorbing that mismatch at runtime.
 
 The profile stores explicit editorial rules, not imitation instructions for another author's distinctive prose. A published work snapshots the profile revision it used. Updating a profile never silently changes earlier works.
 

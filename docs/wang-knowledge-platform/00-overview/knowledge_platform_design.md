@@ -3,7 +3,7 @@
 > **读者**：Solution architect
 > **类型**：规范
 > **状态**：当前
-> **与代码对齐**：未核对
+> **与代码对齐**：2026-08-25 部分核对（核对到 4131807）——已核对本文所列的配置值与页面上线状态；其余陈述未逐条核对
 > **权威范围**：平台目标架构、知识边界与不可倒置的上下游治理顺序。实现与本文冲突时先修订设计并记录决定。
 
 > 状态：目标架构与产品设计。本文补充 [Project Mission Statement](./project_mission_statement.md)，并约束 [Exegesis and Topic Repository Functional Specification](../20-knowledge/exegesis_topic_repository_functional_spec.md)、[Technical Specification](../20-knowledge/exegesis_topic_repository_tech_spec.md) 与 [Sermon Search and QA Specification](../40-qa-search/sermon_search_functional_spec.md)。如实现细节与本文的知识边界、来源忠实性或审核原则冲突，应先修订设计并记录决定。
@@ -114,7 +114,7 @@ flowchart LR
 
 本项目不能假设每篇讲道提取出的所有 Question、Claim、Relation、Scripture Evidence、Original Language Judgment 和 Citation 都会在发布前逐条完成审核。两百多篇讲道可能产生上万条候选记录；若任何成果都要等待全库变成已批准，项目会停在审核积压，而不是形成可交付的知识。
 
-因此采用三项原则：
+因此采用四项原则：
 
 1. **候选可以大量存在**：AI 普查和抽取结果默认是 Candidate，不因尚未审核而阻止其他成果。
 2. **按交付物审核**：每篇文章、公开问答集或研究报告只审核它实际依赖的最小知识子图。
