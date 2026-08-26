@@ -119,6 +119,7 @@ flowchart TD
         ART["马太释经系列文章"]
         TOPIC["主题文章"]
         QA["证据型智能问答"]
+        AUDIO["按经文与主题重排的原声"]
     end
 
     SERMON --> PROV
@@ -126,7 +127,11 @@ flowchart TD
     CVP --> ART
     CVP --> TOPIC
     CVP --> QA
+    PROV --> AUDIO
+    CLAIM --> AUDIO
 ```
+
+**原声那一样只连到下面两层，不经过观点层。** 它不产出任何新的文字，只把教授的录音按经文与主题换个次序放；要的是来源记录里的录音位置，和主张上的经文与主题。后果有两个：它可以先于观点层交付；而它的覆盖范围止于**有录音的来源**——母本是释经课笔记生成的逐字稿，没有录音。
 
 三个 component 的内部细节见[知识库详细设计](./knowledge_platform_design.md)与 [Canonical Viewpoint Registry 设计](../20-knowledge/canonical_viewpoint_design.md)。
 
@@ -263,5 +268,5 @@ flowchart TD
 > **读者**：教会同工与 Solution architect。同工要参与审阅，必须能读懂本文；全文不用系统内部术语，英文名词在[术语](#术语)一节定义。
 > **类型**：规范
 > **状态**：当前
-> **与代码对齐**：2026-08-26。第 2 节「正确性」一行与其下那条约束核对到 `scripts/audit-library.py`，比率取自当日的审计运行。第 4 节 D1／D2／D4 引用的数字取自 2026-08-25 的 Registry 快照与仓库；其余陈述未逐条核对。
+> **与代码对齐**：2026-08-26。第 2 节「正确性」一行与其下那条约束核对到 `scripts/audit-library.py`，比率取自当日的审计运行。第 3 节「按经文与主题重排的原声」的覆盖边界核对到 `source_fragments.media_time`（讲道来源 4,011／5,911 条有时间戳，母本 0／2,422）。第 4 节 D1／D2／D4 引用的数字取自 2026-08-25 的 Registry 快照与仓库；其余陈述未逐条核对。
 > **权威范围**：第 4 节的 architecture decisions 与第 2 节的质量属性。下游设计与本文冲突时，先改本文并记录决定，不在下游打补丁。
