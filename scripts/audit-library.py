@@ -1150,6 +1150,7 @@ def audit_claims(
     rng: random.Random,
     workers: int = 8,
     progress: "Progress | None" = None,
+    only: set[str] | None = None,
 ) -> dict[str, Any]:
     """抽樣問一件確定性檢查問不出來的事：這條主張能不能從它引的證據推出來。"""
 
@@ -1168,6 +1169,8 @@ def audit_claims(
     # 全查，不抽樣。範圍內是 1,365 條，不是 20 萬條；而這一輪要回答的是「往下
     # 跑之前，這批到底對不對」——抽樣答不了那個問題，它只答得出「抽到的這 20
     # 條對不對」。`--claims N` 仍然可以縮小，用在改 prompt 的時候。
+    if only:
+        eligible = [row for row in eligible if row["object_id"] in only]
     chosen = eligible if sample_size is None else rng.sample(eligible, min(sample_size, len(eligible)))
     status_mix = Counter(row["review_status"] for row in chosen)
 
@@ -1332,6 +1335,7 @@ def audit_viewpoints(
     rng: random.Random,
     workers: int = 8,
     progress: "Progress | None" = None,
+    only: set[str] | None = None,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1362,6 +1366,8 @@ def audit_viewpoints(
         for viewpoint_id, links in sorted(links_by_viewpoint.items())
         if links and viewpoint_id in viewpoints
     ]
+    if only:
+        candidates = [v for v in candidates if v in only]
     chosen = (
         candidates if sample_size is None else rng.sample(candidates, min(sample_size, len(candidates)))
     )
@@ -1747,6 +1753,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workers", type=int, default=8, help="同時打幾個模型呼叫（預設 8）"
     )
+    parser.add_argument(
+        "--claim-ids",
+        default="",
+        help="只查這幾條主張（逗號分隔）。跟進某一條判定時用，不必為了一條等全查跑完",
+    )
+    parser.add_argument(
+        "--viewpoint-ids", default="", help="只查這幾個觀點（逗號分隔）"
+    )
     parser.add_argument("--seed", type=int, default=241, help="抽樣種子，同種子可重放")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
     parser.add_argument(
@@ -1847,7 +1861,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         layers[3] = audit_claims(
-            store, sources, model, claim_limit, rng, args.workers, progress
+            store,
+            sources,
+            model,
+            claim_limit,
+            rng,
+            args.workers,
+            progress,
+            {x.strip() for x in args.claim_ids.split(",") if x.strip()} or None,
         )
     if 4 in wanted and model is not None:
         print(
@@ -1855,7 +1876,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         layers[4] = audit_viewpoints(
-            store, sources, model, viewpoint_limit, rng, args.workers, progress
+            store,
+            sources,
+            model,
+            viewpoint_limit,
+            rng,
+            args.workers,
+            progress,
+            {x.strip() for x in args.viewpoint_ids.split(",") if x.strip()} or None,
         )
 
     meta = {
