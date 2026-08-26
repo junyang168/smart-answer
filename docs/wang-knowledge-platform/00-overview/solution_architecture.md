@@ -242,3 +242,11 @@ flowchart TD
 - [知识库详细设计](./knowledge_platform_design.md)——知识对象、双轴组织、问答设计、审核机制
 - [共享知识模型](./shared_knowledge_model_v1.md)——对象的意义与边界
 - [Canonical Viewpoint Registry 设计](../canonical_viewpoint_registry_design_v1.md)——跨讲身份层的架构权威
+
+## 关于本文档
+
+> **读者**：教会同工与 Solution architect。同工要参与审阅，必须能读懂本文；全文不用系统内部术语，英文名词在[术语](#术语)一节定义。
+> **类型**：规范
+> **状态**：当前
+> **与代码对齐**：2026-08-25。第 4 节 D1／D2／D4 引用的数字取自当日的 Registry 快照与仓库；其余陈述未逐条核对。
+> **权威范围**：第 4 节的 architecture decisions 与第 2 节的质量属性。下游设计与本文冲突时，先改本文并记录决定，不在下游打补丁。
