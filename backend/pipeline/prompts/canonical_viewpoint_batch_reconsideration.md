@@ -77,6 +77,13 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 两条路都走不通，就让批次停下来交给人判。**不要为了让检查通过而编一条边**——复核会以 `REL_NOT_LOAD_BEARING` 把它扔掉，而那时它已经写进库了。
 
+**这条边必须有一端正好落在身份复核判定的那个 `viewpoint_revision_id` 上。** 指向别的既有 viewpoint（哪怕关系本身成立）不算数：要记下来的是「本批这个候选与**那一条**讲的是同一件事」，换一个对象就不再是这个判断。
+
+同一条规则适用于 `matches_existing`：身份复核判定匹配、而合并最终没有落地时（无论是被复核否掉，还是候选仍作为独立 viewpoint 留下），effective proposal 里都必须留下这样一条边。
+
+**注意它和「撤回方向读反的边」会互相干扰。** 若你撤掉的那条边正是唯一触及该 revision 的边，撤回之后要另补一条方向正确的；只删不补，批次会停在
+`consolidation matched it but the merge did not stick and no relation connects it`。
+
 **复核员判 `correct` 的修订，通常只能撤回。** 因为它判 `correct` 时正在否定那个措辞，`confirmed_dependent_ids` 必然是空的——没有人对着新措辞确认过被牵动的既有记录（claim link、relation、route revision）。你照要求改好措辞，那些记录仍然无人复核，ChangeSet 会拒绝整批。
 
 只有一种例外：该 viewpoint 根本没有任何既有记录指向它，改写才能落地。你无从判断有没有，所以默认撤回。撤回后既有措辞不动，本批 Claim 仍按 component 的 disposition 归入，批次照常通过。
