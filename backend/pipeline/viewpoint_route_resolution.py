@@ -18,6 +18,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ArgumentRouteProposalResponse,
     ArgumentRouteReviewResponse,
     NoRouteDisposition,
+    ROUTE_TARGETED_DISPOSITIONS,
     RouteComponentBinding,
     canonicalize_proposal,
     canonicalize_review,
@@ -54,6 +55,11 @@ _REGISTRY_LINK_DISPOSITIONS = {
     "applies": "application_existing",
     "tension_evidence": "tension_existing",
 }
+
+
+#: Dispositions a terminal Claim component may carry -- the same set the route
+#: validator enforces, so the roster promises exactly what can be bound.
+_TERMINAL_ELIGIBLE_DISPOSITIONS = ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
 
 
 class RouteStageNotReadyError(ValueError):
@@ -418,7 +424,27 @@ def build_registry_route_packet(
             "每个 attestation 的 Claim、EvidenceStep、SourceFragment 必须同属一篇来源。"
             "不得从两篇拼出一条谁都没讲完整的论证。"
         ),
-        "approved_viewpoints": [approved_index[key] for key in sorted(approved_index)],
+        # Each viewpoint carries the sources that can attest it. The set was
+        # already computable from claim_components, but a proposer that has to
+        # derive its own denominator does not notice the source it left out --
+        # four viewpoints in binding_loosing_meaning were taught in two sermons
+        # and got one attestation each. Stating the roster makes the omission
+        # visible to the proposer, to the reviewer, and to the deterministic
+        # check that now divides by it.
+        "approved_viewpoints": [
+            {
+                **approved_index[key],
+                "attesting_source_roster": sorted(
+                    {
+                        binding.source_id
+                        for binding in components.values()
+                        if binding.target_viewpoint_revision_id == key
+                        and binding.disposition in _TERMINAL_ELIGIBLE_DISPOSITIONS
+                    }
+                ),
+            }
+            for key in sorted(approved_index)
+        ],
         "membership_ledger": {
             "out_of_scope_members": sorted(
                 out_of_scope_members,

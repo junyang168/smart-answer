@@ -3371,6 +3371,120 @@ def test_existing_route_must_reach_the_same_conclusion_viewpoint():
         )
 
 
+def _second_source_binding() -> Any:
+    """A second sermon holding a member component of the same viewpoint."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding,
+    )
+
+    claim = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    component = ProposedComponent.model_validate(
+        _component(
+            ROCK_STATEMENT,
+            "磐石不是彼得这个人",
+            "member_existing",
+            target_viewpoint_revision_id="CVR-1",
+        )
+    )
+    return RouteComponentBinding(
+        claim_component_key=component_key(claim, component),
+        claim_id="C2",
+        source_id="S2",
+        disposition="member_existing",
+        target_viewpoint_revision_id="CVR-1",
+        statement_component=component.statement_component(),
+        spans=component.spans,
+        evidence_step_ids=component.evidence_step_ids,
+        source_fragment_ids=component.source_fragment_ids,
+    )
+
+
+def test_a_member_source_that_attests_nothing_is_a_finding():
+    """binding_loosing_meaning, 2026-08-25: taught twice, connected once.
+
+    Four viewpoints each held member Claims from two sermons and each got one
+    route attesting one of them. The second source sat in the packet with
+    evidence stating the conclusion in as many words and an active member link
+    to bind a terminal on. Nothing asked for it, so nothing missed it, and the
+    viewpoint reads as taught once.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes()
+    with pytest.raises(BatchResolutionError, match="source S2 holds a member Claim but attests no route"):
+        validate_route_proposal(
+            routes=routes,
+            scope_label="matt16-13-18",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            approved_viewpoint_revision_ids=["CVR-1"],
+            known_route_revision_ids=[],
+            component_bindings=[_route_component_binding(), _second_source_binding()],
+        )
+
+
+def test_a_source_that_only_asserts_the_conclusion_can_be_declared():
+    """Holding a member Claim is not the same as arguing it in that sermon.
+
+    Without somewhere to say so, the rule above would be one more finding the
+    proposer cannot answer.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes(
+        unattested_members=[
+            {
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "source_id": "S2",
+                "reason": "该篇只顺带断言结论，没有可绑定的推理步骤。",
+            }
+        ]
+    )
+    report = validate_route_proposal(
+        routes=routes,
+        scope_label="matt16-13-18",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        approved_viewpoint_revision_ids=["CVR-1"],
+        known_route_revision_ids=[],
+        component_bindings=[_route_component_binding(), _second_source_binding()],
+    )
+    coverage = report["member_source_coverage"]["CVR-1"]
+    assert coverage["eligible"] == ["S1", "S2"]
+    assert coverage["attested"] == ["S1"]
+    assert coverage["declared_unattested"] == ["S2"]
+
+
+def test_declaring_a_source_that_did_attest_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes(
+        unattested_members=[
+            {
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "source_id": "S1",
+                "reason": "想把已经 attest 的那篇也记成讲不出来。",
+            }
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="which does attest a route for it"):
+        validate_route_proposal(
+            routes=routes,
+            scope_label="matt16-13-18",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            approved_viewpoint_revision_ids=["CVR-1"],
+            known_route_revision_ids=[],
+            component_bindings=[_route_component_binding()],
+        )
+
+
 def test_route_correction_is_confined_to_flagged_objects():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         ArgumentRouteReconsiderationResponse,

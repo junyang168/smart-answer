@@ -16,7 +16,8 @@
 - 同结论的不同理由是否 false-merge，同路线的措辞变体是否 false-split；
 - attestation 是否严格 source-local，component/Evidence/Fragment 是否真支持该 node；
 - full 是否覆盖所有 required nodes；terminal component 必须有指向该 conclusion 的正向 active Registry link，并且其原文确实说出了 conclusion。`support / extends / qualifies / applies` 只说明有关联，不自动等于结论；若原文只说“不是彼得一人”却把路线结论写成“完全不是彼得本人”，必须 correct/reject，而不能因 link target 相同就 pass；
-- no-route 是否在完整 scope evidence 中真的没有可 attested 路线。
+- no-route 是否在完整 scope evidence 中真的没有可 attested 路线；
+- `attesting_source_roster` 是否被逐篇交代：凡被 route 作为 conclusion 的 CVP，roster 里每一篇要么有 attestation，要么在 `unattested_members` 中带具体理由。缺席即 correct，并指名该篇与可用的 terminal component；反之，若某篇被写进 `unattested_members` 而其正文确有可绑的推理步骤，同样 correct。讲了两次只接上一次，与只讲过一次在库里读起来一样，但不是同一回事。
 
 任何跨来源拼接都将 `cross_source_composition_found` 设为 true，对应 attestation 不得 pass。
 

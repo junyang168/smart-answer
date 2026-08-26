@@ -2608,6 +2608,25 @@ class NoRouteDisposition(StrictBatchModel):
     reason: str = Field(min_length=1)
 
 
+class UnattestedMember(StrictBatchModel):
+    """One source that holds a member Claim but attests no route for it.
+
+    A source asserting a conclusion is not the same as arguing it: the professor
+    may state it in passing with no inference steps to bind. Without somewhere
+    to say so, requiring every member source to attest would be one more finding
+    the proposer cannot answer, so the requirement ships with this exemption --
+    which has to name the source and say why, and is checked against the roster
+    like everything else.
+    """
+
+    conclusion_viewpoint_revision_id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    def key(self) -> tuple[str, str]:
+        return (self.conclusion_viewpoint_revision_id, self.source_id)
+
+
 class ArgumentRouteProposalResponse(StrictBatchModel):
     """Routes for the exact approved-CVP set of one scope."""
 
@@ -2617,6 +2636,7 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
     argument_route_candidates: list[ArgumentRouteCandidate] = Field(default_factory=list)
     source_route_attestations: list[SourceRouteAttestation] = Field(default_factory=list)
     viewpoints_with_no_route: list[NoRouteDisposition] = Field(default_factory=list)
+    unattested_members: list[UnattestedMember] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "ArgumentRouteProposalResponse":
@@ -2772,6 +2792,61 @@ def validate_route_proposal(
         findings.append(f"{missing}: approved viewpoint has no route or no-route disposition")
     for extra in sorted((routed | no_route) - set(approved)):
         findings.append(f"{extra}: route coverage names a viewpoint outside the approved set")
+
+    # A viewpoint's member sources are its denominator, and until now nothing
+    # divided by it. The packet builder computes which members cannot be
+    # attested -- out of this evidence scope, or carrying no exact evidence
+    # bindings -- and the remainder is exactly the set of sources that can.
+    #
+    # binding_loosing_meaning: four viewpoints each hold member Claims from two
+    # sermons, and each got one route attesting one of them. The second source
+    # was in the packet with evidence saying the conclusion in as many words
+    # (「捆綁」可指不准人進天國，「釋放」可指准人進天國) and an active member link
+    # to bind a terminal on. Nothing asked for it, so nothing missed it, and the
+    # viewpoint reads as taught once when it was taught twice.
+    attested_by_conclusion: dict[str, set[str]] = {}
+    routes_by_key = {
+        item.local_route_key: item for item in routes.argument_route_candidates
+    }
+    for attestation in routes.source_route_attestations:
+        route = routes_by_key.get(str(attestation.route_ref.local_route_key))
+        if route is None:
+            continue
+        attested_by_conclusion.setdefault(route.conclusion_ref.key(), set()).add(
+            attestation.source_id
+        )
+    eligible_by_conclusion: dict[str, set[str]] = {}
+    for binding in component_bindings:
+        target = binding.target_viewpoint_revision_id
+        if not target or binding.disposition not in ROUTE_TARGETED_DISPOSITIONS - {
+            "tension_existing"
+        }:
+            continue
+        eligible_by_conclusion.setdefault(target, set()).add(binding.source_id)
+    exempt = {item.key() for item in routes.unattested_members}
+    for revision_id in sorted(routed):
+        eligible = eligible_by_conclusion.get(revision_id, set())
+        attested = attested_by_conclusion.get(revision_id, set())
+        for source_id in sorted(eligible - attested):
+            if (revision_id, source_id) in exempt:
+                continue
+            findings.append(
+                f"{revision_id}: source {source_id} holds a member Claim but attests no "
+                "route for it, and is not declared in unattested_members"
+            )
+    for item in sorted(routes.unattested_members, key=lambda entry: entry.key()):
+        eligible = eligible_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
+        attested = attested_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
+        if item.source_id not in eligible:
+            findings.append(
+                f"{item.conclusion_viewpoint_revision_id}: unattested_members names "
+                f"{item.source_id}, which holds no member Claim for it"
+            )
+        elif item.source_id in attested:
+            findings.append(
+                f"{item.conclusion_viewpoint_revision_id}: unattested_members names "
+                f"{item.source_id}, which does attest a route for it"
+            )
     if findings:
         raise BatchResolutionError(findings)
 
@@ -2788,6 +2863,18 @@ def validate_route_proposal(
             1 for item in routes.source_route_attestations if item.completeness == "partial"
         ),
         "attested_sources": sorted({item.source_id for item in routes.source_route_attestations}),
+        "member_source_coverage": {
+            revision_id: {
+                "eligible": sorted(eligible_by_conclusion.get(revision_id, set())),
+                "attested": sorted(attested_by_conclusion.get(revision_id, set())),
+                "declared_unattested": sorted(
+                    item.source_id
+                    for item in routes.unattested_members
+                    if item.conclusion_viewpoint_revision_id == revision_id
+                ),
+            }
+            for revision_id in sorted(routed)
+        },
         "inference_method_codes": sorted(
             {code for item in routes.argument_route_candidates for code in item.inference_method_codes}
         ),
@@ -2945,8 +3032,52 @@ def validate_route_reconsideration(
 
     before = _route_change_payloads(proposal)
     after = _route_change_payloads(reconsideration.revised_proposal)
-    if set(before) != set(after):
-        findings.append("route reconsideration changed proposal object keys")
+    # One finding can only be answered by changing the key set: the reviewer
+    # says the proposal declared `no_route` for a viewpoint whose route is
+    # sitting right there in the evidence, quotes it, and names the nodes.  The
+    # answer is to drop the no_route entry and add the route with its
+    # attestation -- refusing every key-set change made that finding
+    # unanswerable, and one unanswerable finding fails the whole work unit.
+    #
+    # Only that transformation is authorised.  A no_route entry may disappear
+    # when its finding was accepted; a route may appear when it concludes in one
+    # of those viewpoints; an attestation may appear when it attests one of
+    # those new routes.  Everything else is still a collateral edit.
+    accepted_targets = {
+        (item.target_kind, item.target_key)
+        for item in reconsideration.finding_dispositions
+        if item.disposition == "accepted"
+    }
+    released_viewpoints = {
+        key for kind, key in accepted_targets if kind == "no_route"
+    }
+    added_routes = {
+        item.local_route_key
+        for item in reconsideration.revised_proposal.argument_route_candidates
+        if ("route", item.local_route_key) not in before
+        and item.conclusion_ref.key() in released_viewpoints
+    }
+    # A missing attestation is now a finding the reviewer can raise (a member
+    # source that attests nothing), and its only answer is a new attestation on
+    # an existing route. Authorised by that route's own accepted finding, the
+    # same way a released no_route authorises the route that replaces it.
+    routes_with_accepted_findings = added_routes | {
+        key for kind, key in accepted_targets if kind == "route"
+    }
+    authorized_additions = {("route", key) for key in added_routes} | {
+        ("attestation", item.local_attestation_key)
+        for item in reconsideration.revised_proposal.source_route_attestations
+        if ("attestation", item.local_attestation_key) not in before
+        and item.route_ref.local_route_key in routes_with_accepted_findings
+    }
+    for kind, key in sorted((set(before) - set(after)) - accepted_targets):
+        findings.append(
+            f"{kind}:{key}: route reconsideration dropped an object no finding authorised"
+        )
+    for kind, key in sorted((set(after) - set(before)) - authorized_additions):
+        findings.append(
+            f"{kind}:{key}: route reconsideration added an object no finding authorised"
+        )
     for key in sorted(set(before) & set(after)):
         if key not in flagged and before[key] != after[key]:
             findings.append(
