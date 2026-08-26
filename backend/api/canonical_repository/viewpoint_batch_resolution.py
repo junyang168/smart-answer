@@ -2506,9 +2506,30 @@ def apply_reconsideration_patches(
             proposal.viewpoint_relations, payload["viewpoint_relations"]
         )
     }
+    # A relation the reviewer flagged directly authorises its own patch, the
+    # same way a flagged structure does. Reaching a relation only through the
+    # candidates a component finding disturbed left the commonest case
+    # unanswerable: the reviewer says this edge does not hold, the proposer
+    # accepts and withdraws it, and the withdrawal is refused as unauthorised.
+    accepted_relations = {
+        item.edge()
+        for item in reconsideration.relation_dispositions
+        if item.disposition == "accepted"
+    }
     for patch in reconsideration.relation_patches:
         endpoints = patch.relation.endpoints()
-        reachable = any(
+        patch_edge = (
+            str(
+                patch.relation.source_viewpoint_revision_id
+                or patch.relation.source_local_key
+            ),
+            str(
+                patch.relation.target_viewpoint_revision_id
+                or patch.relation.target_local_key
+            ),
+            patch.relation.relation_type,
+        )
+        reachable = patch_edge in accepted_relations or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in endpoints
         )

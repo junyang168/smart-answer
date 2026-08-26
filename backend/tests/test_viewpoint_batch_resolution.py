@@ -5446,6 +5446,77 @@ def test_structure_the_proposer_corrected_can_be_written_as_approved():
     assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
 
 
+def test_a_relation_finding_authorises_its_own_patch():
+    """matt16 part-8 batch-008, 2026-08-26: the only finding was about the edge.
+
+    The reviewer said MATT17-PS2-CITATION --extends--> CVR-7e91930b… does not
+    hold, the proposer accepted and withdrew it, and the withdrawal was refused
+    as unreachable: authorisation ran only through the candidates a component
+    finding had disturbed, and there was no component finding at all.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_relations=[{
+            "source_local_key": "ROCK-NOT-PETER",
+            "target_viewpoint_revision_id": "CVR-1",
+            "relation_type": "extends",
+            "reason": "这条边其实不成立。",
+        }]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[{
+            "source_ref": "ROCK-NOT-PETER",
+            "target_ref": "CVR-1",
+            "relation_type": "extends",
+            "decision": "correct",
+            "finding_codes": ["rel_not_load_bearing"],
+            "reason": "这条边不承重。",
+            "correction": "撤回该 relation。",
+            "direction_correct": True,
+        }],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER",
+            "target_ref": "CVR-1",
+            "relation_type": "extends",
+            "disposition": "accepted",
+            "reason": "同意，撤回。",
+        }],
+        "relation_patches": [{
+            "action": "delete",
+            "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "extends",
+                "reason": "这条边其实不成立。",
+            },
+        }],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.viewpoint_relations == []
+
+
 def test_a_structure_finding_authorises_its_own_patch():
     """matt16 batch-004, 2026-08-26: the only finding was about the structure.
 
