@@ -1033,6 +1033,37 @@ class Progress:
         temporary.replace(self.path)
 
 
+def _judge_trimming_on_block(
+    model: "IndependentModel",
+    build: Any,
+    paragraphs: list[str],
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    """被過濾器擋下時，少送一段原文再問一次，直到它肯回答。
+
+    Gemini 的過濾器擋的不是任何**一個**部分，是組合：主張、證據、每一段原文
+    分開送都過得去，合起來就 `PROHIBITED_CONTENT`。這個理由不在 `safetySettings`
+    管得到的類別裡，關不掉。
+
+    而被擋掉的偏偏是離婚、再婚、情慾這些題目——教授講得最多、最需要被查的部
+    分。留著不判，等於審計在最要緊的地方系統性地閉眼。
+
+    所以逐段減，減到它肯判為止，並且把**減掉了幾段**記下來。少送原文的判斷比
+    足額的弱，一路減到零段的那種尤其弱——那等於只拿主張比證據摘要。記下來，讀
+    的人才分得出這兩種。
+    """
+
+    kept = len(paragraphs)
+    while kept >= 0:
+        verdict = model.judge(build(paragraphs[:kept]), schema)
+        if verdict.get("verdict") != "blocked":
+            return verdict, kept
+        if kept == 0:
+            return verdict, 0
+        kept -= 1
+    return {"verdict": "blocked", "issue": "other", "reason": "過濾器擋下"}, 0
+
+
 def _judge_all(
     rows: list[Any],
     judge: Any,
@@ -1157,14 +1188,19 @@ def audit_claims(
             )
             fragment_ids.extend(_step_fragment_ids(step))
         paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources)
-        prompt = _claim_prompt(row["object_id"], payload, evidence_lines, paragraphs)
-        verdict = model.judge(prompt, CLAIM_SCHEMA)
+        verdict, used = _judge_trimming_on_block(
+            model,
+            lambda kept: _claim_prompt(row["object_id"], payload, evidence_lines, kept),
+            paragraphs,
+            CLAIM_SCHEMA,
+        )
         return {
             "claim_id": row["object_id"],
             "review_status": row["review_status"],
             "statement": str(payload.get("statement") or "")[:200],
             "evidence_step_ids": evidence_ids[:10],
-            "source_paragraphs": len(paragraphs),
+            "source_paragraphs": used,
+            "paragraphs_dropped_to_pass_filter": len(paragraphs) - used,
             **verdict,
         }
 
