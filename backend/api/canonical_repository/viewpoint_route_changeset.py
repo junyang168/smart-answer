@@ -29,6 +29,7 @@ def compile_argument_route_package(
     passing_attestation_keys: Sequence[str],
     route_packet: Mapping[str, Any],
     existing_routes: Sequence[Mapping[str, Any]],
+    existing_attestation_ids: Sequence[str] = (),
     claims: Sequence[ReviewClaim],
     proposal_artifact_sha256: str,
     review_artifact_sha256: str,
@@ -158,6 +159,8 @@ def compile_argument_route_package(
     if any(key not in attestation_candidates for key in accepted_attestation_keys):
         raise ArgumentRouteChangeSetError("passing attestation key is absent from proposal")
     attestation_records: list[dict[str, Any]] = []
+    already_attested = set(existing_attestation_ids)
+    unchanged_attestation_ids: list[str] = []
     for key in accepted_attestation_keys:
         attestation = attestation_candidates[key]
         local_route_key = attestation.route_ref.local_route_key
@@ -220,6 +223,16 @@ def compile_argument_route_package(
             review_artifact_sha256=review_artifact_sha256,
             review_status="system_approved",
         )
+        if record.argument_route_attestation_id in already_attested:
+            # The id seed is route revision, source, claims, step bindings and
+            # terminal link -- deliberately not the review that approved it. So
+            # re-deriving an attestation that is already committed yields the
+            # same id with a different `review_artifact_sha256`, and emitting it
+            # is an in-place rewrite of an immutable record. Re-reviewing an
+            # attestation does not make it a new fact, and the review that first
+            # approved it is the one that approved it.
+            unchanged_attestation_ids.append(record.argument_route_attestation_id)
+            continue
         attestation_records.append(record.model_dump(mode="json"))
 
     package_seed = {
@@ -237,6 +250,7 @@ def compile_argument_route_package(
         "argument_route_revisions": sorted(
             revision_records, key=lambda item: item["argument_route_revision_id"]
         ),
+        "unchanged_attestation_ids": sorted(unchanged_attestation_ids),
         "argument_route_attestations": sorted(
             attestation_records, key=lambda item: item["argument_route_attestation_id"]
         ),

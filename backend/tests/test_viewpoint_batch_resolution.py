@@ -3010,6 +3010,52 @@ def test_registry_route_packet_rejects_stale_claim_link():
         )
 
 
+def test_an_attestation_already_committed_is_not_rewritten_by_a_later_review():
+    """Re-reviewing an attestation does not make it a new fact.
+
+    The id seed is route revision, source, claims, step bindings and terminal
+    link -- deliberately not the review. So a second route run over committed
+    viewpoints re-derives the same id with a new review_artifact_sha256, and
+    emitting it is an in-place rewrite of an immutable record. That is what
+    stopped the binding_loosing_meaning re-run: two attestations identical in
+    every substantive field, differing only in which review had looked at them.
+    """
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    common = dict(
+        proposal=_routes(),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    first = compile_argument_route_package(review_artifact_sha256="review-1", **common)
+    committed = first["argument_route_attestations"][0]["argument_route_attestation_id"]
+
+    second = compile_argument_route_package(
+        review_artifact_sha256="review-2",
+        existing_attestation_ids=[committed],
+        **common,
+    )
+    assert second["argument_route_attestations"] == []
+    assert second["unchanged_attestation_ids"] == [committed]
+    # Without the skip it would come back with the later review stamped on it.
+    naive = compile_argument_route_package(review_artifact_sha256="review-2", **common)
+    assert naive["argument_route_attestations"][0]["review_artifact_sha256"] == "review-2"
+
+
 def test_route_changeset_compiles_reviewed_v2_master_records():
     claim = _claim("C1", ROCK_STATEMENT)
     packet = build_registry_route_packet(

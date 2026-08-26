@@ -267,6 +267,10 @@ def process_work_unit(
         passing_attestation_keys=report["passing_attestation_keys"],
         route_packet=packet,
         existing_routes=existing_routes,
+        existing_attestation_ids=[
+            str(item["argument_route_attestation_id"])
+            for item in store.list_records("argument_route_attestations")
+        ],
         claims=claims,
         proposal_artifact_sha256=str(report["effective_route_proposal_sha256"]),
         review_artifact_sha256=str(report["route_review_sha256"]),
