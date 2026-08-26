@@ -2550,10 +2550,15 @@ def apply_reconsideration_patches(
         if structure_replacements.get(index, item) is not None
     ]
 
+    # `reject` had no legal answer. Only `correct` counted as a finding, so a
+    # disposition answering a rejection was refused as answering nothing --
+    # while leaving it unanswered kept the revision in the effective proposal,
+    # where the approval gate refused it in turn. The proposer's only move,
+    # withdrawing, was unreachable from either side.
     flagged_revisions = {
         item.target_viewpoint_revision_id
         for item in review.revision_reviews
-        if item.decision == "correct"
+        if item.decision != "pass"
     }
     accepted_revisions = {
         item.target_viewpoint_revision_id
@@ -2632,7 +2637,7 @@ def validate_reconsideration(
     flagged_revisions = {
         item.target_viewpoint_revision_id
         for item in review.revision_reviews
-        if item.decision == "correct"
+        if item.decision != "pass"
     }
     answered_revisions = {
         item.target_viewpoint_revision_id

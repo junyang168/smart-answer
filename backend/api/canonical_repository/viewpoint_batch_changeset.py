@@ -161,10 +161,21 @@ def compile_cvp_batch_package(
         if item.decision == "pass"
     }
     if reconsideration is not None:
+        # Accepting a `correct` means the reviewer's rewording landed. Accepting
+        # a `reject` means withdrawing, so it must not approve anything: a
+        # withdrawn revision leaves the effective proposal entirely, and one
+        # that somehow survived would be written on the strength of a review
+        # that refused it.
+        correctable = {
+            item.target_viewpoint_revision_id
+            for item in review.revision_reviews
+            if item.decision == "correct"
+        }
         approved_revision_targets |= {
             item.target_viewpoint_revision_id
             for item in reconsideration.revision_dispositions
             if item.disposition == "accepted"
+            and item.target_viewpoint_revision_id in correctable
         }
     # The effective proposal is what gets written, so a revision surviving into
     # it without approval is a contradiction, not something to drop quietly.

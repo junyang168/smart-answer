@@ -5441,6 +5441,70 @@ def test_a_structure_finding_authorises_its_own_patch():
     assert effective.structures[0].central_synthesis == "按复核意见收窄后的中心综合。"
 
 
+def test_a_rejected_revision_is_answered_by_withdrawing_it():
+    """matt16 part-6 batch-001, 2026-08-26: `reject` had no legal answer.
+
+    Only `correct` counted as a revision finding, so a disposition answering a
+    rejection was refused as answering nothing -- and leaving it unanswered kept
+    the revision in the effective proposal, where the approval gate refused it
+    in turn. Withdrawing, the one right move, was unreachable from either side.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReviewResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_revisions=[{
+            "target_viewpoint_revision_id": "CVR-1",
+            "core_proposition": "改写后的措辞。",
+            "subject": "磐石", "predicate": "不是", "object": "彼得本人",
+            "polarity": "denied", "modality": "断言",
+            "revision_reason": "本批 Claim 不适用既有措辞。",
+        }],
+    )
+    review = CanonicalViewpointReviewResponse.model_validate(
+        _review_for(proposal).model_dump(mode="json")
+        | {
+            "revision_reviews": [{
+                "target_viewpoint_revision_id": "CVR-1",
+                "decision": "reject",
+                "finding_codes": ["revision_widens_past_evidence"],
+                "reason": "这条修订会吞掉邻近观点。",
+                "confirmed_dependent_ids": [],
+            }]
+        }
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "revision_dispositions": [{
+            "target_viewpoint_revision_id": "CVR-1",
+            "disposition": "accepted",
+            "reason": "同意，撤回这条修订。",
+        }],
+        "revision_patches": [{
+            "target_viewpoint_revision_id": "CVR-1", "action": "withdraw",
+        }],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    # Withdrawn, so nothing survives for the approval gate to refuse.
+    assert effective.viewpoint_revisions == []
+
+
 def test_a_synthesis_that_overreached_can_be_corrected():
     """The commonest structure finding, and it has to be answerable.
 

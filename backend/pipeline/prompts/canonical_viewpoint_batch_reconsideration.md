@@ -54,7 +54,7 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 ## Viewpoint revision patch
 
-复核员对 `viewpoint_revisions` 的每条 `correct`，都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
+复核员对 `viewpoint_revisions` 的每条**非 `pass`** 判定（`correct`、`reject`、`defer`），都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
 
 **structure 与 relation 不只看 `decision`。** 复核员对它们各有一个结构化提问，答案为否**本身就是 finding**，即使 `decision` 写的是 `pass`：
 
@@ -66,7 +66,7 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 `accepted` 必须配一个 `revision_patches`：
 
 - `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
-- `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
+- `action: withdraw` 不携带内容，撤回这条修订。**复核员判 `reject` 时,撤回是唯一答案**——它说的是这条修订不该存在,不是让你改一版;`accepted` 配 `withdraw`,该修订离开 effective proposal,批次照常往下走。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
 
 **撤回之后必须补一条 relation。** 该候选之所以提出修订，是因为身份复核判定它与那条既有 viewpoint 讲的是同一件事；措辞改不动，不等于这个判断消失了。若该候选最终仍作为独立 viewpoint 留下，就要把这个联系记下来。两条路：
 
