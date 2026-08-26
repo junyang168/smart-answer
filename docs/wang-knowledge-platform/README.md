@@ -29,7 +29,7 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [**Solution Architecture**](./00-overview/solution_architecture.md) | **先读这份。** 分层理由、四条约束、三个目标产品、同工的分工、什么情况该掉头 |
+| [**Solution Architecture**](./00-overview/solution_architecture.md) | **先读这份。** 分层理由、质量属性、五条关键决策、同工的分工 |
 | [Project Mission Statement](./00-overview/project_mission_statement.md) | 这个计划为什么存在，忠实与署名的底线在哪里 |
 | [知识库详细设计](./00-overview/knowledge_platform_design.md) | 知识对象、双轴组织、问答设计、审核机制。原「总体设计」，已降为详细设计 |
 | [共享知识模型 v1](./00-overview/shared_knowledge_model_v1.md) | Claim、EvidenceStep、Relation、TopicNode 的意义与边界 |
@@ -90,11 +90,11 @@
 | [独立问答产品验证 v1](./40-qa-search/qa_product_validation_v1.md) | 问答作为独立产品的三种答案状态与读者要求 |
 | [问答答案双模型诊断与上游修复协议 v1](./40-qa-search/qa_answer_diagnostic_protocol_v1.md) | 一个坏答案怎样定位到最早出错的那一层 |
 
-## 50-micro-sermon —— 微讲道（optional）
+## 50-micro-sermon —— 微讲道（后续 phase）
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在三个目标产品之内**，见 [Solution Architecture D5](./00-overview/solution_architecture.md#d5三个目标产品其余延后) |
+| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在 Phase 1 之内**，见 [Solution Architecture D5](./00-overview/solution_architecture.md#d5implementation-phasesphase-1-只做文章与问答) |
 
 ## 90-ops —— 运营与工作台
 
