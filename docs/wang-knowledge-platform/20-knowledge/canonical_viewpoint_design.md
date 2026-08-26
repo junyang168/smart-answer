@@ -71,7 +71,10 @@ erDiagram
     CANONICAL_VIEWPOINT ||--o{ VIEWPOINT_REVISION : "改写历史"
     CANONICAL_VIEWPOINT ||--o{ ARGUMENT_ROUTE : "论证路线"
     ARGUMENT_ROUTE ||--o{ ROUTE_ATTESTATION : "在某篇的实例"
-    ROUTE_ATTESTATION }o--|| SOURCE_DOCUMENT : "绑死单篇来源"
+    ROUTE_ATTESTATION ||--o{ STEP_BINDING : "每一步"
+    STEP_BINDING }o--o{ SOURCE_FRAGMENT : "证据在这儿"
+    STEP_BINDING }o--o{ EVIDENCE_STEP : ""
+    ROUTE_ATTESTATION }o--|| SOURCE_DOCUMENT : "范围约束：不得跨出这一篇"
     CANONICAL_VIEWPOINT ||--o{ VIEWPOINT_RELATION : "与别的观点"
     CANONICAL_VIEWPOINT }o--o{ VIEWPOINT_STRUCTURE : "组成观点结构"
     TOPIC_NODE }o--o{ CANONICAL_VIEWPOINT : "归类"
@@ -92,14 +95,19 @@ erDiagram
 | **观点修订** | 这个看法当前的表述与适用范围。改写会产生新修订，旧的保留 | `viewpoint_revisions` |
 | **成员连接** | 把一条主张挂到一个观点上，并说明是哪一种关系 | `viewpoint_claim_links` |
 | **论证路线** | 到达这个结论的一种讲法。同一个观点可以有几条 | `argument_routes` |
-| **路线实例** | 这条讲法在某一篇里实际出现的那一次，带该篇的证据步骤 | `argument_route_attestations` |
+| **路线实例** | 这条讲法在某一篇里实际出现的那一次 | `argument_route_attestations` |
+| **步骤绑定** | 实例里的每一步，指向支撑它的来源片段与证据步骤 | `step_bindings[]` |
 | **观点关系** | 两个观点之间：限定、特化、延伸、张力、后期修正 | `viewpoint_relations` |
 | **观点结构** | 一组观点围绕一个中心怎样组织 | `viewpoint_structures` |
 | **主题** | 分类与导航用的主题身份，不是观点的父节点 | `topic_nodes` |
 
 **为什么身份和文字分开存。** 观点记录只有 ID 和状态；它的文字在修订里。教授的看法被重新表述时，产生新修订、旧修订保留并注明由谁取代——这样「这句话是什么时候改的、原来怎么写的」永远答得出来。
 
-**为什么路线实例要绑死单篇。** 一条实例的所有证据步骤、来源片段必须来自同一篇来源。**不能把不同讲道的证据步骤拼成一条完整论证**——那会造出教授从没讲过的推理。
+**证据在片段上，来源文档只是范围约束。** 来源文档那条记录里没有正文（见上表），所以实例并不「从文档取证据」——每一步的证据在 `step_bindings` 指向的来源片段与证据步骤上。`source_id` 与 `source_revision_sha256` 起两个作用：声明这次论证不得跨出哪一篇，以及在那一篇被改动时能查出哪些实例失效。
+
+**为什么范围要绑死单篇。** 不能把不同讲道的证据步骤拼成一条完整论证——那会造出教授从没讲过的推理。同一篇之内取邻近主张的一步则不算编造，代码里对此有明确判断：「A step from a sibling Claim in the same sermon is the professor's own reasoning; only another sermon is fabrication.」
+
+实测支持这条判断：现有 35 条实例中，步骤的段落跨度最大 24、录音时间跨度最大 15 分钟，超过一半跨度为 0，没有一条在讲座两头捞证据。**但这是小样本，且只覆盖太 16 章。** 一份系列讲座可长达 79 分钟、615 个片段，语料铺开后同一份文档里的题目跨度会变大，这条假设需要重新验证——届时按来源类型分别定阈值，比一刀切合理。
 
 ## 3. 观点怎样产生
 
