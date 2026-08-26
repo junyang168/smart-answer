@@ -2307,39 +2307,25 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         return self
 
 
-#: What a passing component was judged against.  A reviewer reads a support or
-#: member component against the proposition it attaches to and that
-#: proposition's polarity; the rest of a candidate -- the signature triple,
-#: modality, conditions, scopes -- is the candidate's own bookkeeping, and is
-#: exactly what a signature finding has to be able to correct.
-_CANDIDATE_IDENTITY_FIELDS = ("local_key", "core_proposition", "polarity")
+def _candidate_patch_strands_referrers(patch: "CandidatePatch") -> bool:
+    """Whether a candidate patch leaves its other components pointing at nothing.
 
+    Only deletion does. Restricting *which fields* a patch may touch when some
+    other component refers to the candidate looked prudent and was wrong twice
+    over. A candidate with one member component and one support is the ordinary
+    shape, so almost every correction has an unflagged referrer by construction;
+    and the reviewer read every component of the batch in one pass before
+    writing the correction, so the components that were passed were passed in
+    the knowledge of it. Two real findings died on that restriction in one day:
+    a signature triple inverting a necessary condition into a sufficient one,
+    and a core_proposition the reviewer required be narrowed because it had lost
+    its source's qualifier ("不得保留無限定的絕對否定措辭").
 
-def _candidate_identity_moves(
-    original: Mapping[str, Any] | None, patch: "CandidatePatch"
-) -> bool:
-    """Whether a candidate patch changes what its other components attach to.
-
-    Blocking every patch to a candidate an unflagged component refers to leaves
-    a whole class of finding unanswerable: a candidate with one member component
-    and one support is the ordinary shape, so any correction to it has an
-    unflagged referrer by construction.  A batch stops with zero mutations, and
-    the reviewer's finding -- here, that a signature triple read "只有 A 才 B" as
-    a sufficient condition when the sentence states a necessary one -- goes
-    nowhere.
-
-    Deleting the candidate always moves it: the unflagged referrers would point
-    at nothing.
+    What still authorises a patch is reachability from an accepted finding, and
+    unflagged components are still copied verbatim by construction.
     """
 
-    if patch.action == "delete" or original is None:
-        return True
-    assert patch.candidate is not None
-    revised = patch.candidate.model_dump(mode="json")
-    return any(
-        original.get(field) != revised.get(field)
-        for field in _CANDIDATE_IDENTITY_FIELDS
-    )
+    return patch.action == "delete"
 
 
 def apply_reconsideration_patches(
@@ -2464,7 +2450,6 @@ def apply_reconsideration_patches(
     candidates = {
         item["local_key"]: item for item in payload["new_viewpoint_candidates"]
     }
-    proposed_candidates = deepcopy(candidates)
     for patch in reconsideration.candidate_patches:
         if patch.local_key not in affected_candidate_keys:
             findings.append(
@@ -2475,9 +2460,7 @@ def apply_reconsideration_patches(
             candidate_referrers.get(patch.local_key, set())
             - authorized_candidate_referrers
         )
-        if unflagged_referrers and _candidate_identity_moves(
-            proposed_candidates.get(patch.local_key), patch
-        ):
+        if unflagged_referrers and _candidate_patch_strands_referrers(patch):
             rendered = ", ".join(
                 f"{claim_id}#{component_index}"
                 for claim_id, component_index in sorted(unflagged_referrers)

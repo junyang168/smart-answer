@@ -2267,7 +2267,45 @@ def test_reconsideration_cannot_patch_a_component_the_reviewer_passed():
         )
 
 
-def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_component():
+def test_a_candidate_patch_must_still_reach_an_accepted_finding():
+    """What authorises a candidate patch, once field restrictions are gone.
+
+    Restricting which fields a patch may touch when another component refers to
+    the candidate killed two real corrections in one day -- an inverted
+    signature and a proposition the reviewer required be narrowed -- because a
+    member plus a support is the ordinary shape of a candidate. Reachability is
+    the check that survives: a patch to a candidate no accepted finding leads to
+    is a collateral edit whatever it changes.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    stranger = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    stranger["local_key"] = "UNRELATED-CANDIDATE"
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    with pytest.raises(BatchResolutionError, match="not reachable from an accepted finding"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [component],
+                }],
+                candidate_patches=[{
+                    "local_key": "UNRELATED-CANDIDATE", "action": "upsert",
+                    "candidate": stranger,
+                }],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
+def test_a_candidate_the_reviewer_required_be_narrowed_may_be_narrowed():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal_payload = _proposal().model_dump(mode="json")
@@ -2283,28 +2321,31 @@ def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_componen
         )["spans"][0]
     ]
     proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    # matt16 batch-003, 2026-08-26: 「不得保留無限定的絕對否定措辭」 -- the
+    # reviewer flagged one component of a Claim, passed another, and required
+    # the candidate both point at be narrowed to carry its source's qualifier.
     changed_candidate = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
-    changed_candidate["core_proposition"] = "偷偷影响 passed component"
+    changed_candidate["core_proposition"] = "耶穌在受苦這一階段的使命不是作政治君王。"
     component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
 
-    with pytest.raises(BatchResolutionError, match="unflagged referrers C1#1"):
-        validate_reconsideration(
-            reconsideration=_reconsideration(
-                "accepted",
-                component_patches=[{
-                    "claim_id": "C1", "component_index": 0,
-                    "replacement_components": [component],
-                }],
-                candidate_patches=[{
-                    "local_key": "ROCK-NOT-PETER", "action": "upsert",
-                    "candidate": changed_candidate,
-                }],
-            ),
-            proposal=proposal,
-            review=_review("correct", "pass"),
-            proposal_sha256="proposal-sha",
-            review_sha256="review-sha",
-        )
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [component],
+            }],
+            candidate_patches=[{
+                "local_key": "ROCK-NOT-PETER", "action": "upsert",
+                "candidate": changed_candidate,
+            }],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
 
 
 def test_candidate_signature_can_be_corrected_under_an_unflagged_referrer():
