@@ -1,4 +1,4 @@
-# 王守仁教授釋經與專題講論文庫
+# 王守仁教授聖經講論文庫
 
 ## Project Mission Statement
 
