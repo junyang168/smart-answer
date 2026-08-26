@@ -196,3 +196,30 @@ def test_the_newest_run_wins(tmp_path):
         (run / "audit.json").write_text(json.dumps(AUDIT), encoding="utf-8")
     assert latest_run(tmp_path).name == "2026-08-26T145012Z"
     assert load_view(tmp_path)["run_id"] == "2026-08-26T145012Z"
+
+
+def test_a_fragment_with_no_quote_is_not_reported_as_a_mismatch():
+    """"對不上" reads as "the professor never said this".
+
+    Six of the ten layer-1 findings carry no `verbatim_excerpt` at all, so
+    nothing failed to match -- there was nothing to match. Counting them as
+    mismatches makes the page accuse the library of quoting words the professor
+    did not say, which is the one thing this layer must never say by accident.
+    """
+
+    audit = json.loads(json.dumps(AUDIT))
+    audit["layers"]["1"]["counts"] = {"pass": 90, "no_excerpt": 10}
+    audit["layers"]["1"]["total"] = 100
+    audit["layers"]["1"]["passed"] = 90
+    layer = next(l for l in build_view(audit, "run")["layers"] if l["key"] == "verbatim")
+    assert "對不上" not in layer["headline"]
+    assert "沒有存引文" in layer["headline"]
+
+
+def test_a_real_mismatch_is_still_said_plainly():
+    audit = json.loads(json.dumps(AUDIT))
+    audit["layers"]["1"]["counts"] = {"pass": 90, "absent": 10}
+    audit["layers"]["1"]["total"] = 100
+    audit["layers"]["1"]["passed"] = 90
+    layer = next(l for l in build_view(audit, "run")["layers"] if l["key"] == "verbatim")
+    assert "10 條對不上" in layer["headline"]

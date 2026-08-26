@@ -80,11 +80,11 @@ VERDICT_TEXT = {
     "different_proposition": "講的是另一件事",
     "stitched": "把主張裡不相鄰的兩截接了起來",
     "punctuation_variant": "只差在標點寫法",
-    "punctuation_only": "只差在省略號或空白的寫法",
+    "punctuation_only": "教授確實說過這句話，只是存下來的字串在省略號或空白上不逐字",
     "misplaced": "引文在原件裡，但不在所記位置",
     "deleted_text_only": "引文只存在於校對者劃掉的文字裡",
     "absent": "引文不在這份原件裡",
-    "no_excerpt": "片段沒有引文，無從核對",
+    "no_excerpt": "這筆記錄根本沒有存引文，沒有東西可以核對",
     "no_source_file": "找不到這份原件",
     "span_offsets_wrong": "字元位置框到的不是它宣稱的那段",
     "unresolvable_dependency": "引用指向的物件不在庫裡",
@@ -136,7 +136,25 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     first = layers.get("1")
     if first:
-        missed = first["total"] - first["passed"]
+        # "N 條對不上" was wrong for most of them. Six of the ten carry no
+        # quote at all, so nothing failed to match -- there was nothing to
+        # match. Saying they "對不上" reads as "the professor never said this",
+        # which is the one accusation this layer must not make by accident.
+        counts = first.get("counts", {})
+        nothing_to_check = counts.get("no_excerpt", 0)
+        mismatched = first["total"] - first["passed"] - nothing_to_check
+        if first["passed"] == first["total"]:
+            headline = f"{first['total']:,} 條引文，全部逐字對得上，位置也對。"
+        elif mismatched == 0:
+            headline = (
+                f"{first['passed']:,} 條引文逐字對得上。另外 {nothing_to_check} 條"
+                "根本沒有存引文，無從核對。"
+            )
+        else:
+            headline = (
+                f"{first['passed']:,} 條引文逐字對得上，{mismatched} 條對不上"
+                + (f"，另有 {nothing_to_check} 條沒有存引文。" if nothing_to_check else "。")
+            )
         rows.append({
             "key": "verbatim",
             "layer": 1,
@@ -145,12 +163,8 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "passed": first["passed"],
             "total": first["total"],
             "unit": "條引文",
-            "question": "教授真的說過這句話嗎，而且是在記著的那一段裡",
-            "headline": (
-                f"{first['total']:,} 條引文，全部在逐字稿裡找得到，位置也對。"
-                if missed == 0
-                else f"{first['total']:,} 條引文裡，{missed} 條在逐字稿裡對不上。"
-            ),
+            "question": "庫裡存的每一句教授原話，逐字稿裡真的有，而且就在它記的那一段",
+            "headline": headline,
             "detail": [
                 {"label": code, "count": count, "text": VERDICT_TEXT.get(code, code)}
                 for code, count in sorted(first.get("counts", {}).items(), key=lambda kv: -kv[1])
