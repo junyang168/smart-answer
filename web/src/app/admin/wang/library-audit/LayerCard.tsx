@@ -30,6 +30,12 @@ export function LayerCard({ layer }: { layer: Layer }) {
       <p className="text-[0.95rem] leading-relaxed text-slate-900">{layer.headline}</p>
       <p className="text-[0.8rem] leading-snug text-slate-400">{layer.question}</p>
 
+      {layer.skipped_note && (
+        // Said, not hidden. A ratio whose denominator quietly shrinks is the
+        // move this audit exists to catch.
+        <p className="text-[0.78rem] leading-relaxed text-slate-500">{layer.skipped_note}</p>
+      )}
+
       <p className="font-mono text-[0.72rem] text-slate-400">
         {layer.kind === "ratio"
           ? `${count(layer.passed ?? 0)}/${count(layer.total ?? 0)} ${layer.unit}`

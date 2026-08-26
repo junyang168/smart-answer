@@ -39,6 +39,8 @@ export type Layer = {
   question: string;
   headline: string;
   note?: string;
+  skipped?: number;
+  skipped_note?: string;
   detail: LayerDetail[];
   passed?: number;
   total?: number;

@@ -136,39 +136,52 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     first = layers.get("1")
     if first:
-        # "N 條對不上" was wrong for most of them. Six of the ten carry no
-        # quote at all, so nothing failed to match -- there was nothing to
-        # match. Saying they "對不上" reads as "the professor never said this",
-        # which is the one accusation this layer must not make by accident.
+        # Two verdicts are not problems, and listing them as such made the
+        # page read as though the library quoted words the professor never
+        # said.
+        #
+        # `no_excerpt` stores no quote, so no check ran -- it leaves the
+        # denominator. `punctuation_only` passed the question this layer asks:
+        # the professor did say it, in the paragraph recorded, and only the
+        # ellipsis is written differently (`……` in the transcript, `…` stored).
+        # It counts as found.
+        #
+        # Neither disappears. Both stay as a quiet line under the number,
+        # because a ratio whose denominator quietly shrinks is the exact move
+        # this audit exists to catch, and the page does not get to make it
+        # either. What changes is that they no longer sit in the list of things
+        # to fix.
         counts = first.get("counts", {})
-        nothing_to_check = counts.get("no_excerpt", 0)
-        mismatched = first["total"] - first["passed"] - nothing_to_check
-        if first["passed"] == first["total"]:
-            headline = f"{first['total']:,} 條引文，全部逐字對得上，位置也對。"
-        elif mismatched == 0:
-            headline = (
-                f"{first['passed']:,} 條引文逐字對得上。另外 {nothing_to_check} 條"
-                "根本沒有存引文，無從核對。"
-            )
-        else:
-            headline = (
-                f"{first['passed']:,} 條引文逐字對得上，{mismatched} 條對不上"
-                + (f"，另有 {nothing_to_check} 條沒有存引文。" if nothing_to_check else "。")
-            )
+        skipped = counts.get("no_excerpt", 0)
+        loose = counts.get("punctuation_only", 0)
+        checked = first["total"] - skipped
+        found = first["passed"] + loose
+        mismatched = checked - found
+        notes = []
+        if loose:
+            notes.append(f"其中 {loose} 條的省略號寫法與原文不同，話是同一句，位置也對。")
+        if skipped:
+            notes.append(f"另有 {skipped} 筆記錄沒有存引文，沒有東西可以核對，不算在裡面。")
         rows.append({
             "key": "verbatim",
             "layer": 1,
             "name": first["name"],
             "kind": "ratio",
-            "passed": first["passed"],
-            "total": first["total"],
+            "passed": found,
+            "total": checked,
+            "skipped": skipped,
+            "skipped_note": "".join(notes),
             "unit": "條引文",
             "question": "庫裡存的每一句教授原話，逐字稿裡真的有，而且就在它記的那一段",
-            "headline": headline,
+            "headline": (
+                f"{checked:,} 條引文，全部在逐字稿的所記位置找得到。"
+                if mismatched == 0
+                else f"{checked:,} 條引文裡，{mismatched} 條在逐字稿裡找不到。"
+            ),
             "detail": [
                 {"label": code, "count": count, "text": VERDICT_TEXT.get(code, code)}
-                for code, count in sorted(first.get("counts", {}).items(), key=lambda kv: -kv[1])
-                if code not in ("pass", "one_locator_only")
+                for code, count in sorted(counts.items(), key=lambda kv: -kv[1])
+                if code not in ("pass", "one_locator_only", "no_excerpt", "punctuation_only")
             ],
         })
     second = layers.get("2")
@@ -182,27 +195,32 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "passed": second["checked_clean"],
             "total": second["checked_objects"],
             "unit": "筆記錄",
-            "question": "一筆記錄提到的另一筆，還找得到嗎",
+            # "提到了庫裡沒有的東西" left the reader guessing what kind of thing.
+            # Records point at each other by id -- a route names its plan, a
+            # link names its claim -- and the sentence has to say that, or the
+            # number means nothing without someone explaining it.
+            "question": "記錄之間互相引用，被引用的那一筆還在嗎",
             "headline": (
-                f"{second['checked_objects']:,} 筆記錄，它們提到的東西都找得到。"
+                f"{second['checked_objects']:,} 筆記錄，它們指向的每一筆都還在。"
                 if broken == 0
-                else f"{second['checked_objects']:,} 筆記錄裡，{broken} 筆提到了庫裡沒有的東西。"
+                else f"{second['checked_objects']:,} 筆記錄裡，{broken} 筆指向另一筆記錄，"
+                "而那一筆不在庫裡。"
             ),
             "detail": [
                 {
                     "label": "references_dangling",
                     "count": second["references_dangling"],
-                    "text": "處引用指向一個庫裡根本沒有的東西",
+                    "text": "個 id 指向一筆從來沒進庫的記錄（幾乎全是同一批沒 ingest 的計劃）",
                 },
                 {
                     "label": "references_to_retired",
                     "count": second["references_to_retired"],
-                    "text": "處引用指向舊版本（記錄還在，只是已經被取代）",
+                    "text": "個 id 指向舊版本——那一筆還在庫裡，只是已經被新版取代",
                 },
                 {
                     "label": "component_locator_findings",
                     "count": len(second.get("component_locator_findings") or []),
-                    "text": "處觀點引的那句話，在主張裡找不到",
+                    "text": "個觀點引了一句話，而那句話不在它所引的主張裡",
                 },
             ],
         })
@@ -291,6 +309,11 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     for entry in (layers.get("1") or {}).get("findings", []):
+        if entry.get("verdict") in ("no_excerpt", "punctuation_only"):
+            # Nothing to follow up. One stores no quote at all, so there is no
+            # mismatch to resolve; the other is the professor's sentence in the
+            # right paragraph with a different ellipsis. Neither is work.
+            continue
         items["fragment_anchor"].append({
             "object_id": entry["fragment_id"],
             "collection": "source_fragments",

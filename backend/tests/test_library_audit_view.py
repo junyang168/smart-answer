@@ -122,8 +122,12 @@ AUDIT = {
 def test_the_four_layers_keep_the_audits_own_names_and_numbers():
     view = build_view(AUDIT, "2026-08-26T145012Z")
     layers = {layer["key"]: layer for layer in view["layers"]}
-    assert layers["verbatim"]["passed"] == 7333
-    assert layers["verbatim"]["total"] == 7343
+    # 7,333 matched byte-for-byte and 4 differ only in ellipsis style, so 7,337
+    # were found where they were recorded. The 6 with no quote stored are not
+    # in the denominator at all -- no check ran on them.
+    assert layers["verbatim"]["passed"] == 7337
+    assert layers["verbatim"]["total"] == 7337
+    assert layers["verbatim"]["skipped"] == 6
     assert layers["coverage"]["passed"] == 23428
     assert layers["claims"]["name"] == "主張站得住"
 
@@ -198,28 +202,50 @@ def test_the_newest_run_wins(tmp_path):
     assert load_view(tmp_path)["run_id"] == "2026-08-26T145012Z"
 
 
-def test_a_fragment_with_no_quote_is_not_reported_as_a_mismatch():
-    """"對不上" reads as "the professor never said this".
+def _layer_one(**counts):
+    audit = json.loads(json.dumps(AUDIT))
+    audit["layers"]["1"]["counts"] = counts
+    audit["layers"]["1"]["total"] = sum(counts.values())
+    audit["layers"]["1"]["passed"] = counts.get("pass", 0)
+    audit["layers"]["1"]["findings"] = [
+        {"fragment_id": f"FR-{code}", "source_id": "SRC-L3", "verdict": code, "detail": ""}
+        for code, n in counts.items()
+        if code != "pass"
+        for _ in range(n)
+    ]
+    return build_view(audit, "run")
 
-    Six of the ten layer-1 findings carry no `verbatim_excerpt` at all, so
-    nothing failed to match -- there was nothing to match. Counting them as
-    mismatches makes the page accuse the library of quoting words the professor
-    did not say, which is the one thing this layer must never say by accident.
+
+def test_a_record_with_no_quote_leaves_the_denominator_rather_than_failing():
+    """Nothing was checked, so nothing failed.
+
+    Counting these as mismatches made the page say the library quotes words the
+    professor never said -- the one accusation this layer must not make by
+    accident. They are excluded, and the exclusion is stated rather than hidden.
     """
 
-    audit = json.loads(json.dumps(AUDIT))
-    audit["layers"]["1"]["counts"] = {"pass": 90, "no_excerpt": 10}
-    audit["layers"]["1"]["total"] = 100
-    audit["layers"]["1"]["passed"] = 90
-    layer = next(l for l in build_view(audit, "run")["layers"] if l["key"] == "verbatim")
-    assert "對不上" not in layer["headline"]
-    assert "沒有存引文" in layer["headline"]
+    view = _layer_one(**{"pass": 90, "no_excerpt": 10})
+    layer = next(l for l in view["layers"] if l["key"] == "verbatim")
+    assert layer["total"] == 90 and layer["passed"] == 90
+    assert layer["skipped"] == 10
+    assert "沒有存引文" in layer["skipped_note"]
+    assert not any(g["kind"] == "fragment_anchor" for g in view["followups"])
 
 
-def test_a_real_mismatch_is_still_said_plainly():
-    audit = json.loads(json.dumps(AUDIT))
-    audit["layers"]["1"]["counts"] = {"pass": 90, "absent": 10}
-    audit["layers"]["1"]["total"] = 100
-    audit["layers"]["1"]["passed"] = 90
-    layer = next(l for l in build_view(audit, "run")["layers"] if l["key"] == "verbatim")
-    assert "10 條對不上" in layer["headline"]
+def test_an_ellipsis_difference_counts_as_found_and_is_not_work():
+    """The professor said it, in the paragraph recorded. Only `……` became `…`."""
+
+    view = _layer_one(**{"pass": 90, "punctuation_only": 10})
+    layer = next(l for l in view["layers"] if l["key"] == "verbatim")
+    assert layer["passed"] == 100 and layer["total"] == 100
+    assert "省略號" in layer["skipped_note"]
+    assert not any(g["kind"] == "fragment_anchor" for g in view["followups"])
+
+
+def test_a_quote_that_is_really_missing_is_still_said_plainly_and_is_work():
+    view = _layer_one(**{"pass": 90, "absent": 10})
+    layer = next(l for l in view["layers"] if l["key"] == "verbatim")
+    assert layer["passed"] == 90 and layer["total"] == 100
+    assert "10 條在逐字稿裡找不到" in layer["headline"]
+    group = next(g for g in view["followups"] if g["kind"] == "fragment_anchor")
+    assert group["count"] == 10
