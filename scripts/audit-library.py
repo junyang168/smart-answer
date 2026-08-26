@@ -34,7 +34,7 @@ Architecture D4 第 4 步同一個出口。
 
     scripts/audit-library.py
     scripts/audit-library.py --layers 1,2          # 只跑確定性的兩層，不呼叫模型
-    scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
+    scripts/audit-library.py --claims 40 --viewpoints 15   # 抽樣，改 prompt 時用
 """
 
 from __future__ import annotations
@@ -48,9 +48,11 @@ import re
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -745,13 +747,18 @@ def _audit_derived_scripture(store: Store) -> list[dict[str, Any]]:
 def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
     """`equivalent_component` 說它等價的是主張裡的哪一段，那一段真的長那樣嗎。
 
-    設計要求成分定位「必須是結構化的，不能只憑模型說這條裡包含同一個觀點」。所以
-    照字面查：`statement_component` 必須是主張 `statement` 的一段連續文字，而
-    `canonical_spans` 的字元位置必須真的框到它宣稱的那段字。
+    設計要求成分定位「必須是結構化的，不能只憑模型說這條裡包含同一個觀點」。
+    結構化的意思在 `canonical_spans` 上：它是一個**列表**，因為中文的並提句要
+    拆開才對得上。`「捆綁」和「釋放」既可指禁止與准許某事` 拆成 捆綁→禁止、
+    釋放→准許某事，兩個觀點各拿一半，各自兩段不相鄰的字元區間。
 
-    對不上分兩種，差別很大：只差標點是抄寫走樣；把主張裡**不相鄰**的兩截拼起來
-    （`「捆綁」既可指禁止`），則是造出了一個教授沒有作為一體說過的句子——而觀點
-    的成員資格就掛在那個句子上。
+    所以查的是三件事，而**不是**「`statement_component` 是不是一段連續文字」：
+    第一版就是那樣查的，於是把兩條正確的並提拆解報成了造句。
+
+    1. 每一段 span 的 `exact_text`，真的在它記的字元位置上；
+    2. `statement_component` 等於那幾段依序接起來——它是摘要，不是第三個事實；
+    3. 沒有 `canonical_spans` 的舊記錄，退回「必須是一段連續文字」，因為那時
+       沒有別的東西可以驗。
     """
 
     claims = {row["object_id"]: row["payload"] for row in store.collection("claims")}
@@ -771,34 +778,56 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
             })
             continue
         statement = str(claim.get("statement") or "")
-        if component in statement:
-            for span in locator.get("canonical_spans") or []:
-                start, end = span.get("start_char"), span.get("end_char")
-                exact = span.get("exact_text")
-                if exact is None or start is None or end is None:
-                    continue
-                if statement[start:end] != exact:
-                    findings.append({
-                        "object_id": row["object_id"],
-                        "claim_id": payload.get("claim_id"),
-                        "verdict": "span_offsets_wrong",
-                        "expected": exact[:60],
-                        "at_offsets": statement[start:end][:60],
-                    })
+        spans = locator.get("canonical_spans") or []
+
+        if not spans:
+            if component in statement:
+                continue
+            verdict = (
+                "punctuation_variant"
+                if re.sub(r"[，。、；：,.;:\s]", "", component)
+                in re.sub(r"[，。、；：,.;:\s]", "", statement)
+                else "stitched"
+            )
+            findings.append({
+                "object_id": row["object_id"],
+                "claim_id": payload.get("claim_id"),
+                "verdict": verdict,
+                "component": component[:80],
+                "statement": statement[:120],
+            })
             continue
-        verdict = (
-            "punctuation_only"
-            if re.sub(r"[，。、；：,.;:\s]", "", component)
-            in re.sub(r"[，。、；：,.;:\s]", "", statement)
-            else "stitched"
-        )
-        findings.append({
-            "object_id": row["object_id"],
-            "claim_id": payload.get("claim_id"),
-            "verdict": verdict,
-            "component": component[:80],
-            "statement": statement[:120],
-        })
+
+        misplaced = []
+        pieces = []
+        for span in spans:
+            start_char, end_char = span.get("start_char"), span.get("end_char")
+            exact = span.get("exact_text")
+            if exact is None or start_char is None or end_char is None:
+                continue
+            pieces.append(str(exact))
+            if statement[start_char:end_char] != exact:
+                misplaced.append({
+                    "expected": str(exact)[:60],
+                    "at_offsets": statement[start_char:end_char][:60],
+                })
+        if misplaced:
+            findings.append({
+                "object_id": row["object_id"],
+                "claim_id": payload.get("claim_id"),
+                "verdict": "span_offsets_wrong",
+                "spans": misplaced,
+                "statement": statement[:120],
+            })
+            continue
+        if "".join(pieces) != component:
+            findings.append({
+                "object_id": row["object_id"],
+                "claim_id": payload.get("claim_id"),
+                "verdict": "component_not_from_spans",
+                "component": component[:80],
+                "spans_joined": "".join(pieces)[:80],
+            })
     return findings
 
 
@@ -849,14 +878,42 @@ class IndependentModel:
     錯，用它們任何一個來審計自己的產物等於沒審，所以這裡用第三家。
     """
 
-    def __init__(self, model: str, api_key: str, timeout: int = 300) -> None:
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        timeout: int = 300,
+        cache_dir: Path | None = None,
+    ) -> None:
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.calls = 0
+        self.cached = 0
         self.ssl_context = _trust_store()
+        #: 判讀結果按 prompt 的 sha256 存檔。溫度是 0，同一個 prompt 的答案不會
+        #: 變，所以重跑只需要為**變過的**那幾條付錢——1,408 條全查一次要幾分鐘，
+        #: 中途斷掉重來一次就不必再等一次。
+        self.cache_dir = cache_dir
+        self._lock = threading.Lock()
+        if cache_dir is not None:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _cache_path(self, prompt: str) -> Path | None:
+        if self.cache_dir is None:
+            return None
+        key = hashlib.sha256(f"{self.model}\n{prompt}".encode("utf-8")).hexdigest()
+        return self.cache_dir / f"{key}.json"
 
     def judge(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
+        cached = self._cache_path(prompt)
+        if cached is not None and cached.is_file():
+            try:
+                with self._lock:
+                    self.cached += 1
+                return json.loads(cached.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
         body = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -876,9 +933,17 @@ class IndependentModel:
                     request, timeout=self.timeout, context=self.ssl_context
                 ) as response:
                     parsed = json.loads(response.read().decode("utf-8"))
-                self.calls += 1
+                with self._lock:
+                    self.calls += 1
                 text = parsed["candidates"][0]["content"]["parts"][0]["text"]
-                return json.loads(text)
+                verdict = json.loads(text)
+                if cached is not None:
+                    # A model error is never cached: it is a fact about the
+                    # network, not about the claim.
+                    cached.write_text(
+                        json.dumps(verdict, ensure_ascii=False), encoding="utf-8"
+                    )
+                return verdict
             # `OSError` 而不是 `URLError`：讀取逾時丟的是 `TimeoutError`，它是
             # `OSError` 的子類但不是 `URLError` 的，抓窄了會讓整支審計在第 17 條
             # 抽樣上崩掉。
@@ -922,6 +987,35 @@ VIEWPOINT_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
+def _judge_all(
+    rows: list[Any],
+    judge: Any,
+    workers: int,
+    label: str,
+) -> list[dict[str, Any]]:
+    """把一批判讀跑完，順序與輸入一致，並在 stderr 報進度。
+
+    一條一條打要等上四十分鐘，而每一條都是獨立的一次 HTTP 呼叫，彼此沒有先後
+    關係。順序保留是為了同一個範圍重跑時輸出可比對，不是為了正確性。
+    """
+
+    results: list[dict[str, Any] | None] = [None] * len(rows)
+    done = 0
+    lock = threading.Lock()
+
+    def run(index: int) -> None:
+        nonlocal done
+        results[index] = judge(rows[index])
+        with lock:
+            done += 1
+            if done % 25 == 0 or done == len(rows):
+                print(f"  {label} {done}/{len(rows)}", file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(run, range(len(rows))))
+    return [row for row in results if row is not None]
+
+
 def _paragraphs_for_fragments(
     fragment_ids: Iterable[str],
     fragments: dict[str, dict[str, Any]],
@@ -963,8 +1057,9 @@ def audit_claims(
     store: Store,
     sources: SourceIndex,
     model: IndependentModel,
-    sample_size: int,
+    sample_size: int | None,
     rng: random.Random,
+    workers: int = 8,
 ) -> dict[str, Any]:
     """抽樣問一件確定性檢查問不出來的事：這條主張能不能從它引的證據推出來。"""
 
@@ -980,15 +1075,17 @@ def audit_claims(
         for row in claims
         if _claim_evidence_ids(row["payload"]) and _claim_in_scope(row["payload"], sources, fragments)
     ]
-    sample = rng.sample(eligible, min(sample_size, len(eligible)))
-    status_mix = Counter(row["review_status"] for row in sample)
+    # 全查，不抽樣。範圍內是 1,365 條，不是 20 萬條；而這一輪要回答的是「往下
+    # 跑之前，這批到底對不對」——抽樣答不了那個問題，它只答得出「抽到的這 20
+    # 條對不對」。`--claims N` 仍然可以縮小，用在改 prompt 的時候。
+    chosen = eligible if sample_size is None else rng.sample(eligible, min(sample_size, len(eligible)))
+    status_mix = Counter(row["review_status"] for row in chosen)
 
-    results: list[dict[str, Any]] = []
-    for row in sample:
+    def judge(row: dict[str, Any]) -> dict[str, Any]:
         payload = row["payload"]
         evidence_ids = _claim_evidence_ids(payload)
         evidence_lines = []
-        fragment_ids = []
+        fragment_ids: list[str] = []
         for step_id in evidence_ids[:10]:
             step = steps.get(step_id)
             if step is None:
@@ -1001,22 +1098,25 @@ def audit_claims(
             )
             fragment_ids.extend(_step_fragment_ids(step))
         paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources)
-
         prompt = _claim_prompt(row["object_id"], payload, evidence_lines, paragraphs)
         verdict = model.judge(prompt, CLAIM_SCHEMA)
-        results.append({
+        return {
             "claim_id": row["object_id"],
             "review_status": row["review_status"],
             "statement": str(payload.get("statement") or "")[:200],
             "evidence_step_ids": evidence_ids[:10],
+            "source_paragraphs": len(paragraphs),
             **verdict,
-        })
+        }
+
+    results = _judge_all(chosen, judge, workers, "主張")
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
     return {
         "layer": 3,
         "name": "主張站得住",
+        "complete": sample_size is None,
         "population": len(eligible),
         "sampled": len(results),
         "judged": len(results) - len(errors),
@@ -1131,8 +1231,9 @@ def audit_viewpoints(
     store: Store,
     sources: SourceIndex,
     model: IndependentModel,
-    sample_size: int,
+    sample_size: int | None,
     rng: random.Random,
+    workers: int = 8,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1155,27 +1256,28 @@ def audit_viewpoints(
             continue
         links_by_viewpoint[str(payload.get("viewpoint_id") or "")].append(payload)
 
-    # 只有兩條以上**成員**主張的觀點才談得上「歸併對不對」；一條主張的觀點沒有
-    # 歸併可審。
+    # 有一條成員主張就查。兩條以上才談得上「歸併對不對」，但一條也有它自己的
+    # 問題：那一條主張的成分，真的和觀點的核心命題等價嗎？把它們排除，等於把
+    # 剛建立、還只有一個來源的觀點全部跳過——而那正是最沒被看過的一批。
     candidates = [
         viewpoint_id
-        for viewpoint_id, links in links_by_viewpoint.items()
-        if len(links) >= 2 and viewpoint_id in viewpoints
+        for viewpoint_id, links in sorted(links_by_viewpoint.items())
+        if links and viewpoint_id in viewpoints
     ]
-    sample = rng.sample(candidates, min(sample_size, len(candidates)))
+    chosen = (
+        candidates if sample_size is None else rng.sample(candidates, min(sample_size, len(candidates)))
+    )
 
-    results: list[dict[str, Any]] = []
-    for viewpoint_id in sample:
+    def judge(viewpoint_id: str) -> dict[str, Any]:
         viewpoint = viewpoints[viewpoint_id]
         revision = revisions.get(str(viewpoint.get("current_revision_id") or ""))
         if revision is None:
-            results.append({
+            return {
                 "viewpoint_id": viewpoint_id,
                 "verdict": "disputed",
                 "issue": "other",
                 "reason": "current_revision_id 指不到任何 viewpoint_revision，無從判斷這個觀點主張什麼",
-            })
-            continue
+            }
         blocks = []
         for link in links_by_viewpoint[viewpoint_id]:
             claim_id = str(link.get("claim_id") or "")
@@ -1195,22 +1297,24 @@ def audit_viewpoints(
                 f"    主張全文：{str(claim.get('statement') or '（庫裡找不到這條主張）').strip()}\n"
                 f"{source_block}"
             )
-
         prompt = _viewpoint_prompt(viewpoint_id, revision, blocks)
         verdict = model.judge(prompt, VIEWPOINT_SCHEMA)
-        results.append({
+        return {
             "viewpoint_id": viewpoint_id,
             "revision_id": viewpoint.get("current_revision_id"),
             "core_proposition": str(revision.get("core_proposition") or "")[:200],
             "linked_claims": len(links_by_viewpoint[viewpoint_id]),
             **verdict,
-        })
+        }
+
+    results = _judge_all(chosen, judge, workers, "觀點")
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
     return {
         "layer": 4,
         "name": "觀點歸併對",
+        "complete": sample_size is None,
         "population": len(candidates),
         "sampled": len(results),
         "judged": len(results) - len(errors),
@@ -1463,9 +1567,14 @@ def render_report(
 
     if 3 in layers:
         layer = layers[3]
+        complete = layer.get("complete")
         lines.append(
-            f"第 3 層 主張抽樣     {layer['judged']} 條中 {layer['disputed']} 條有異議"
-            f"   （母體 {layer['population']:,} 條）"
+            (
+                f"第 3 層 主張全查     {layer['judged']:,} 條中 {layer['disputed']} 條有異議"
+                if complete
+                else f"第 3 層 主張抽樣     {layer['judged']} 條中 {layer['disputed']} 條有異議"
+                f"   （母體 {layer['population']:,} 條）"
+            )
         )
         mix = "、".join(f"{k} {v}" for k, v in sorted(layer["review_status_mix"].items()))
         lines.append(f"          抽樣的 review_status：{mix}")
@@ -1479,9 +1588,14 @@ def render_report(
 
     if 4 in layers:
         layer = layers[4]
+        complete = layer.get("complete")
         lines.append(
-            f"第 4 層 觀點抽樣     {layer['judged']} 個中 {layer['disputed']} 個有異議"
-            f"   （母體 {layer['population']} 個）"
+            (
+                f"第 4 層 觀點全查     {layer['judged']} 個中 {layer['disputed']} 個有異議"
+                if complete
+                else f"第 4 層 觀點抽樣     {layer['judged']} 個中 {layer['disputed']} 個有異議"
+                f"   （母體 {layer['population']} 個）"
+            )
         )
         for entry in layer["results"]:
             if entry.get("verdict") == "disputed":
@@ -1505,8 +1619,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--layers", default="1,2,3,4", help="要跑哪幾層，逗號分隔。預設四層全跑"
     )
-    parser.add_argument("--claims", type=int, default=20, help="第 3 層抽幾條主張")
-    parser.add_argument("--viewpoints", type=int, default=10, help="第 4 層抽幾個觀點")
+    parser.add_argument(
+        "--claims",
+        default="all",
+        help="第 3 層查幾條主張：`all`（預設，範圍內全查）或一個數字（抽樣，改 prompt 時用）",
+    )
+    parser.add_argument(
+        "--viewpoints",
+        default="all",
+        help="第 4 層查幾個觀點：`all`（預設）或一個數字",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=8, help="同時打幾個模型呼叫（預設 8）"
+    )
     parser.add_argument("--seed", type=int, default=241, help="抽樣種子，同種子可重放")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
     parser.add_argument(
@@ -1551,7 +1676,14 @@ def main(argv: list[str] | None = None) -> int:
         api_key = settings.get("GEMINI_API_KEY1", "")
         if not api_key:
             raise SystemExit("第 3、4 層需要 GEMINI_API_KEY1；或用 --layers 1,2 只跑確定性的兩層")
-        model = IndependentModel(args.model, api_key)
+        model = IndependentModel(
+            args.model,
+            api_key,
+            # 判讀結果按 prompt 存檔，跨次重用。全查一次一千多條，中途斷掉不必
+            # 從頭付一次錢。
+            cache_dir=data_base_dir
+            / "wang-knowledge-platform/staging/reports/library-audit/.judgements",
+        )
 
     layers: dict[int, dict[str, Any]] = {}
     if 1 in wanted:
@@ -1560,12 +1692,20 @@ def main(argv: list[str] | None = None) -> int:
     if 2 in wanted:
         print("第 2 層 覆蓋誠實 …", file=sys.stderr)
         layers[2] = audit_coverage(store, sources)
+    claim_limit = None if args.claims == "all" else int(args.claims)
+    viewpoint_limit = None if args.viewpoints == "all" else int(args.viewpoints)
     if 3 in wanted and model is not None:
-        print(f"第 3 層 主張抽樣（{args.claims} 條）…", file=sys.stderr)
-        layers[3] = audit_claims(store, sources, model, args.claims, rng)
+        print(
+            f"第 3 層 主張（{'全查' if claim_limit is None else f'抽 {claim_limit} 條'}）…",
+            file=sys.stderr,
+        )
+        layers[3] = audit_claims(store, sources, model, claim_limit, rng, args.workers)
     if 4 in wanted and model is not None:
-        print(f"第 4 層 觀點抽樣（{args.viewpoints} 個）…", file=sys.stderr)
-        layers[4] = audit_viewpoints(store, sources, model, args.viewpoints, rng)
+        print(
+            f"第 4 層 觀點（{'全查' if viewpoint_limit is None else f'抽 {viewpoint_limit} 個'}）…",
+            file=sys.stderr,
+        )
+        layers[4] = audit_viewpoints(store, sources, model, viewpoint_limit, rng, args.workers)
 
     meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
