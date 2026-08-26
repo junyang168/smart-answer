@@ -1682,6 +1682,50 @@ def test_group_coverage_measures_the_plan_not_the_batch():
     assert report["linked_claim_count"] == 3
 
 
+def test_claims_stopped_before_grouping_are_counted_in_the_same_ledger():
+    """"Every Claim has an explanation" has to be answerable from one artifact.
+
+    24 of Matthew 16's 214 Claims never reach a batch: no evidence bindings, an
+    ineligible source, no reviewed candidate. They are named in the packet that
+    dropped them and nowhere else, so a ledger whose denominator is the 190
+    planned Claims can report the scope complete while they sit unaccounted for
+    -- the same shape as a part-resolved group reading as finished, one stage
+    earlier.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matt16-full",
+            "groups": [{"group_key": "a", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    report = group_coverage_report(
+        grouping=grouping,
+        linked_claim_ids=["C1"],
+        blocked_claims=[
+            {"claim_id": "C9", "reason_code": "invalid_source_evidence"},
+            {"claim_id": "C8", "reason_code": "invalid_source_evidence"},
+            {"claim_id": "C7", "reason_code": "missing_reviewed_candidate"},
+        ],
+    )
+
+    assert report["covered_group_count"] == 1
+    assert report["planned_claim_count"] == 1
+    # The scope is four Claims, not one, and the ledger says which three the
+    # pipeline will never route.
+    assert report["scope_claim_count"] == 4
+    assert report["blocked_claim_counts"] == {
+        "invalid_source_evidence": 2,
+        "missing_reviewed_candidate": 1,
+    }
+    assert [item["claim_id"] for item in report["blocked_claims"]] == ["C7", "C8", "C9"]
+
+
 def test_group_coverage_names_links_the_plan_does_not_account_for():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         ClaimGroupingResponse,

@@ -1809,6 +1809,7 @@ def group_coverage_report(
     *,
     grouping: ClaimGroupingResponse,
     linked_claim_ids: Sequence[str],
+    blocked_claims: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Measure Registry coverage against the grouping plan, not against a batch.
 
@@ -1860,6 +1861,30 @@ def group_coverage_report(
         # fix, but leaving it unnamed would let the two sides drift apart
         # silently -- the plan is the scope's, and both are rebuilt from it.
         "linked_claims_outside_plan": sorted(linked - planned),
+        # Claims the packet stopped before grouping ever saw them: no evidence
+        # bindings, an ineligible source, no reviewed candidate. They can never
+        # reach a batch, so a denominator of planned Claims alone reports full
+        # coverage while they sit unaccounted for -- which is the shape of the
+        # gap this whole report exists to close, one stage earlier.
+        "blocked_claims": sorted(
+            (
+                {
+                    "claim_id": str(item["claim_id"]),
+                    "reason_code": str(item.get("reason_code") or "unspecified"),
+                }
+                for item in blocked_claims
+            ),
+            key=lambda item: item["claim_id"],
+        ),
+        "blocked_claim_counts": dict(
+            sorted(
+                Counter(
+                    str(item.get("reason_code") or "unspecified")
+                    for item in blocked_claims
+                ).items()
+            )
+        ),
+        "scope_claim_count": len(planned) + len(blocked_claims),
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

@@ -82,6 +82,14 @@ def main() -> int:
         required=True,
         help="grouping envelope written by the batch resolution runner",
     )
+    parser.add_argument(
+        "--packet",
+        type=Path,
+        help=(
+            "scope packet, so the Claims blocked before grouping are counted "
+            "in the same ledger instead of only in that packet"
+        ),
+    )
     parser.add_argument("--database-url")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -92,6 +100,9 @@ def main() -> int:
         grouping=grouping,
         linked_claim_ids=active_linked_claim_ids(
             store.list_records("viewpoint_claim_links")
+        ),
+        blocked_claims=(
+            _read(args.packet).get("blocked_claims") or [] if args.packet else []
         ),
     )
     if args.output:
@@ -104,11 +115,13 @@ def main() -> int:
                 for key in (
                     "scope_label",
                     "group_count",
+                    "scope_claim_count",
                     "planned_claim_count",
                     "linked_claim_count",
                     "covered_group_count",
                     "partial_group_count",
                     "linked_claims_outside_plan",
+                    "blocked_claim_counts",
                 )
             },
             ensure_ascii=False,
