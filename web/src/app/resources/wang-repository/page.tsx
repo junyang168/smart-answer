@@ -138,7 +138,7 @@ export default function WangRepositoryPage() {
       <div className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
         <p className="text-sm font-semibold tracking-wide text-amber-800">達拉斯聖道教會文獻整理計畫</p>
         <h1 className="mt-2 font-serif text-4xl font-bold leading-tight text-stone-950 sm:text-5xl">
-          王守仁教授釋經文庫
+          王守仁教授聖經講論文庫
         </h1>
         <p className="mt-4 max-w-3xl text-lg leading-8 text-stone-600">
           按聖經經卷、章節或講論主題尋找正式發布的釋經文章。每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解。

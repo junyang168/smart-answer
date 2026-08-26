@@ -25,10 +25,10 @@ import { useRouter } from 'next/navigation';
 const resourceCardsData = [
   {
     icon: BookOpen,
-    title: '王守仁教授釋經文庫',
+    title: '王守仁教授聖經講論文庫',
     description: `按聖經經卷或講論主題閱讀正式釋經文章，也可進入信仰問答；文章支援在完整閱讀與原聲講解之間隨時切換。`,
     link: '/resources/wang-repository',
-    linkLabel: '進入釋經文庫',
+    linkLabel: '進入聖經講論文庫',
   },
   {
     icon: Users,

@@ -229,7 +229,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     <main className="min-h-screen bg-[#f7f4ee] pb-28 text-stone-900">
       <header className="border-b border-stone-200/80 bg-[#eee7da]">
         <div className="mx-auto max-w-6xl px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
-          <Link href="/resources/wang-repository" className="text-sm font-semibold text-amber-900 underline-offset-4 hover:underline">王守仁教授釋經文庫</Link>
+          <Link href="/resources/wang-repository" className="text-sm font-semibold text-amber-900 underline-offset-4 hover:underline">王守仁教授聖經講論文庫</Link>
           <p className="mt-8 text-sm font-bold tracking-[0.18em] text-amber-900">馬太福音 · {article.passage.replace(/^太/, "")}</p>
           <h1 className="mt-4 max-w-4xl font-serif text-4xl font-bold leading-[1.2] text-stone-950 sm:text-5xl lg:text-6xl">{article.title}</h1>
           <p className="mt-6 max-w-2xl text-base leading-8 text-stone-700 sm:text-lg">

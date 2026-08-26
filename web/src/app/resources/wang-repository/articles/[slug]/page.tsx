@@ -25,7 +25,7 @@ export async function generateMetadata(props: { params: Promise<{ slug: string }
   if (!article) return { title: "找不到文章" };
   const description = `從馬太福音 ${article.passage.replace(/^太/, "")} 閱讀認信、磐石、教會與天國鑰匙，並聆聽王守仁教授相關原聲講解。`;
   return {
-    title: `${article.title} | 王守仁教授釋經文庫`,
+    title: `${article.title} | 王守仁教授聖經講論文庫`,
     description,
     alternates: { canonical: `/resources/wang-repository/articles/${article.slug}` },
     openGraph: {
