@@ -582,19 +582,20 @@ def compile_cvp_batch_package(
         # content's polarity rather than by their function, which the proposer
         # then fixed exactly as asked.
         #
-        # The structured question is not waived.  A correction round answers a
-        # finding; it cannot re-answer whether the synthesis follows from the
-        # focal set or whether an edge points the right way, so a structure the
-        # reviewer said was not entailed stays unapproved however it is patched.
-        entailed = {
-            item.structure_index
-            for item in review.structure_reviews
-            if item.synthesis_entailed_by_focal
-        }
+        # `synthesis_entailed_by_focal: false` is the commonest structure
+        # finding -- the synthesis asserts more than its focal set supports --
+        # and requiring it to be true before a correction could land meant that
+        # class could only ever be deleted, never fixed. It is also the wrong
+        # reading of who judged what: a `correct` decision carries the
+        # reviewer's own replacement text ("central_synthesis 改为：「…」"), so
+        # the corrected content is the content the reviewer wrote. What the
+        # accepted finding does not license is a structure the proposer argued
+        # its way out of; a rebutted or deferred finding stays unapproved, and
+        # the effective proposal is re-validated structurally either way.
         approved_structures |= {
             item.structure_index
             for item in reconsideration.structure_dispositions
-            if item.disposition == "accepted" and item.structure_index in entailed
+            if item.disposition == "accepted"
         }
         directed = {
             item.edge() for item in review.relation_reviews if item.direction_correct

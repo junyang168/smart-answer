@@ -5358,15 +5358,56 @@ def test_structure_the_proposer_corrected_can_be_written_as_approved():
     assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
 
 
-def test_structure_the_reviewer_said_was_not_entailed_stays_unapproved():
-    """A correction answers a finding; it cannot re-answer the structured question.
+def test_a_synthesis_that_overreached_can_be_corrected():
+    """The commonest structure finding, and it has to be answerable.
 
-    Nobody looked at the patched synthesis, so "the focal set does not support
-    this" is still the last word anyone actually gave on it.
+    `synthesis_entailed_by_focal: false` says the synthesis asserts more than
+    its focal set supports. A `correct` decision carries the reviewer's own
+    replacement text, so the corrected wording is the reviewer's -- requiring
+    entailment to have been true beforehand meant this class could only be
+    deleted, never fixed. matt16 batch-002, 2026-08-26.
     """
 
     proposal, review, reconsideration = _structure_correction_case(entailed=False)
-    with pytest.raises(CvpBatchChangeSetError, match="structures are not reviewer-approved"):
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert package["viewpoint_structure_revisions"][0]["review_provenance"][
+        "review_artifact_sha256"
+    ] == "review-call-sha"
+
+
+def test_a_structure_whose_finding_was_rebutted_never_reaches_the_gate():
+    """Accepting is what licenses it; arguing out of it is not.
+
+    A rebutted finding leaves the reviewer's objection standing, and the batch
+    stops one step earlier than the structure gate: the correction is unresolved,
+    so there is no effective proposal to write at all.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    reconsideration = reconsideration.model_copy(
+        update={
+            "structure_dispositions": [
+                reconsideration.structure_dispositions[0].model_copy(
+                    update={"disposition": "rebutted"}
+                )
+            ]
+        }
+    )
+    with pytest.raises(CvpBatchChangeSetError, match="correction is unresolved"):
         compile_cvp_batch_package(
             proposal=proposal,
             review=review,
