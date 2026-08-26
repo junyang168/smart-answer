@@ -37,7 +37,7 @@
 | `AIReviewArtifact` | 第二模型对候选抽取的独立复审、问题与风险分流 | 必须绑定来源抽取世代与 reviewer fingerprint；不是批准记录 |
 | `ReviewRecord` | 人工审核结论 | AI 只能提出候选和分流，不能自行批准 |
 
-`CanonicalViewpoint`、`ArgumentRoute`、Coverage/Registry Snapshot 与 `ViewpointKnowledgeProjection` 的规范性 architecture authority 是 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../canonical_viewpoint_registry_design_v1.md)。正式 schema 尚未实现前，现有 Claim、ClaimRelation 和 EditorialSynthesis 不得被临时改名或静默当作 viewpoint registry。
+`CanonicalViewpoint`、`ArgumentRoute`、Coverage/Registry Snapshot 与 `ViewpointKnowledgeProjection` 的规范性 architecture authority 是 [Canonical Viewpoint Registry 与跨讲论证路径设计 v1](../20-knowledge/canonical_viewpoint_design.md)。正式 schema 尚未实现前，现有 Claim、ClaimRelation 和 EditorialSynthesis 不得被临时改名或静默当作 viewpoint registry。
 
 ## 三、三条不可破坏的边界
 
