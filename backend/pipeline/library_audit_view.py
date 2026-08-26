@@ -332,10 +332,21 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "collection": "claims",
             "verdict": _verdict(str(entry.get("issue") or "other")),
             "reason": entry.get("reason", ""),
+            # 有沒有拿到原文，決定這一條有多重。沒拿到的時候模型只能拿主張比
+            # 證據摘要，判出來的異議站得住的程度不一樣——32 條裡有 11 條是這樣，
+            # 而它們的片段根本沒記位置，取不到段落。不標出來，讀的人會把兩種當
+            # 成同一回事。
+            "weak": not entry.get("source_paragraphs"),
             "evidence": [
                 _evidence("主張原文", "statement", entry.get("statement")),
                 _evidence("模型據以判斷的那句", "quote", entry.get("quote")),
                 _evidence("它引的證據", "evidence_step_ids", "、".join(entry.get("evidence_step_ids") or [])),
+                _evidence(
+                    "模型看到的逐字稿",
+                    "source_paragraphs",
+                    f"{entry.get('source_paragraphs', 0)} 段"
+                    + ("——片段沒記位置，取不到原文，這一條只憑證據摘要判" if not entry.get("source_paragraphs") else ""),
+                ),
                 _evidence("目前狀態", "review_status", entry.get("review_status")),
             ],
         })

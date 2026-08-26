@@ -105,6 +105,14 @@ function FollowUpRow({ item }: { item: FollowUpItem }) {
         </button>
         <span className="inline-flex items-center gap-2">
           {copied && <span className="text-[0.7rem] text-emerald-700">已複製</span>}
+          {item.weak && (
+            <span
+              className="rounded-md bg-amber-50 px-2 py-0.5 text-[0.68rem] text-amber-700"
+              title="模型沒拿到逐字稿，只憑證據摘要判"
+            >
+              沒看到原文
+            </span>
+          )}
           <span className="rounded-md bg-rose-50 px-2 py-0.5 font-mono text-[0.7rem] text-rose-700">
             {item.verdict.code}
           </span>

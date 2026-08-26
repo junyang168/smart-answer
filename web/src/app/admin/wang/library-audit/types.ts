@@ -8,6 +8,7 @@ export type FollowUpItem = {
   verdict: Verdict;
   reason: string;
   evidence: Evidence[];
+  weak?: boolean;
   target?: string;
 };
 
