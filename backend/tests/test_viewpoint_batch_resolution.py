@@ -3558,6 +3558,150 @@ def test_route_correction_is_confined_to_flagged_objects():
         )
 
 
+def _no_route_correction_case():
+    """A proposal that declared no_route, and the reviewer's answer to it."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+    )
+
+    proposal = _routes(
+        argument_route_candidates=[],
+        source_route_attestations=[],
+        viewpoints_with_no_route=[
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "reason_code": "no_attested_route",
+                "reason": "本证据 scope 内没有可 attest 的路线。",
+            }
+        ],
+    )
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = ArgumentRouteReviewResponse.model_validate(
+        {
+            "route_proposal_sha256": proposal_sha,
+            "route_evidence_packet_sha256": "packet-sha",
+            "change_reviews": [
+                {
+                    "target_kind": "no_route",
+                    "target_key": "CVR-1",
+                    "decision": "correct",
+                    "finding_codes": ["ATTESTABLE_ROUTE_EXISTS_IN_SCOPE"],
+                    "reason": "scope 内存在带正向 active link 且原文说出该结论的 terminal component。",
+                    "correction": "撤回 no_route，改为提出以该来源为单一来源的候选路线。",
+                }
+            ],
+            "cross_source_composition_found": False,
+            "reason": "no_route 判定与证据不符",
+        }
+    )
+    return proposal, proposal_sha, review, sha256_json(review.model_dump(mode="json"))
+
+
+def test_no_route_can_become_the_route_the_reviewer_found():
+    """binding_loosing_meaning route stage, 2026-08-25.
+
+    The proposal declared `no_route` for a viewpoint; review quoted the source
+    line that states the conclusion（「你可以去宣告，在什麼情況底下……你可以被釋放、
+    進天國」）, named the terminal component and its active Registry link, and told
+    the proposer to withdraw the no_route and propose the route. Doing that is
+    the only possible answer, and it necessarily changes the proposal's key set
+    -- which the guard refused outright, failing the whole work unit.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReconsiderationResponse,
+        validate_route_reconsideration,
+    )
+
+    proposal, proposal_sha, review, review_sha = _no_route_correction_case()
+    revised = proposal.model_dump(mode="json")
+    revised["viewpoints_with_no_route"] = []
+    revised["argument_route_candidates"] = [_route()]
+    revised["source_route_attestations"] = [_attestation()]
+
+    report = validate_route_reconsideration(
+        reconsideration=ArgumentRouteReconsiderationResponse.model_validate(
+            {
+                "route_proposal_sha256": proposal_sha,
+                "route_review_sha256": review_sha,
+                "finding_dispositions": [
+                    {
+                        "target_kind": "no_route",
+                        "target_key": "CVR-1",
+                        "disposition": "accepted",
+                        "reason": "同意，已按复核指名的节点提出路线。",
+                    }
+                ],
+                "revised_proposal": revised,
+            }
+        ),
+        proposal=proposal,
+        review=review,
+        route_proposal_sha256=proposal_sha,
+        route_review_sha256=review_sha,
+    )
+    assert report["outcome"] == "resolved"
+
+
+def test_route_correction_cannot_smuggle_in_an_unrelated_route():
+    """Only the released viewpoint's own route may appear."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReconsiderationResponse,
+        validate_route_reconsideration,
+    )
+
+    proposal, proposal_sha, review, review_sha = _no_route_correction_case()
+    revised = proposal.model_dump(mode="json")
+    revised["viewpoints_with_no_route"] = []
+    revised["approved_viewpoint_revision_ids"] = ["CVR-1"]
+    # Concludes in a viewpoint no finding released.
+    revised["argument_route_candidates"] = [
+        _route(
+            local_route_key="ROUTE-SMUGGLED",
+            conclusion_ref={"target_viewpoint_revision_id": "CVR-9"},
+            ordered_inference_nodes=[
+                {
+                    "route_step_key": "P1",
+                    "role": "observation",
+                    "normalized_proposition": "无关的观察",
+                    "required_for_full_attestation": True,
+                },
+                {
+                    "route_step_key": "C1",
+                    "role": "conclusion",
+                    "conclusion_ref": {"target_viewpoint_revision_id": "CVR-9"},
+                    "required_for_full_attestation": True,
+                },
+            ],
+        )
+    ]
+
+    with pytest.raises(BatchResolutionError, match="added an object no finding authorised"):
+        validate_route_reconsideration(
+            reconsideration=ArgumentRouteReconsiderationResponse.model_validate(
+                {
+                    "route_proposal_sha256": proposal_sha,
+                    "route_review_sha256": review_sha,
+                    "finding_dispositions": [
+                        {
+                            "target_kind": "no_route",
+                            "target_key": "CVR-1",
+                            "disposition": "accepted",
+                            "reason": "同意撤回 no_route。",
+                        }
+                    ],
+                    "revised_proposal": revised,
+                }
+            ),
+            proposal=proposal,
+            review=review,
+            route_proposal_sha256=proposal_sha,
+            route_review_sha256=review_sha,
+        )
+
+
 def test_failed_attestation_does_not_invalidate_approved_cvp(tmp_path: Path):
     from backend.pipeline.viewpoint_route_resolution import run_route_scope
 
