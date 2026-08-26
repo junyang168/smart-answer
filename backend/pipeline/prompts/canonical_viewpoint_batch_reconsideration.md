@@ -56,6 +56,13 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 复核员对 `viewpoint_revisions` 的每条 `correct`，都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
 
+**structure 与 relation 不只看 `decision`。** 复核员对它们各有一个结构化提问，答案为否**本身就是 finding**，即使 `decision` 写的是 `pass`：
+
+- structure：`synthesis_entailed_by_focal` 为 false —— 中心综合说得比 focal 集合所能推出的多；
+- relation：`direction_correct` 为 false —— 这条边的方向读反了。
+
+凡满足「`decision` 不是 `pass`，**或**结构化提问答否」的 structure／relation，都必须有一个 `structure_dispositions`／`relation_dispositions`。漏掉一条，整批停在这里。方向读反的边通常应撤回（把它从 `viewpoint_relations` 中删去），而不是硬改成另一条：审核说的是这条边不成立，不是要你换个方向再断言一次。
+
 `accepted` 必须配一个 `revision_patches`：
 
 - `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
@@ -90,6 +97,7 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 ## 最后检查
 
 - 每个 reviewer `correct` finding 恰好一个 disposition；
+- 每个 `synthesis_entailed_by_focal` 为 false 的 structure、每条 `direction_correct` 为 false 的 relation，也各有一个 disposition，哪怕它的 `decision` 是 `pass`；
 - 每个 accepted disposition 恰好一个同 key component patch；
 - correction 要求的 relation 已在 `relation_patches` 中给出，因 candidate delete 悬空的 relation 与 structure focal 也已一并处理；
 - 没有因为「没有接口」或「schema 不支持」而 rebut —— 先回到上面两节确认一次；
