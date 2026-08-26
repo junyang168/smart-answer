@@ -38,6 +38,20 @@ def check(paths):
                         bad.append(f"{p}:{ln}  missing anchor {filepart}#{frag}")
             elif frag and frag.lower() not in anchors:
                 bad.append(f"{p}:{ln}  missing local anchor #{frag}")
+        # erDiagram entities must appear in a table in the same document
+        for blk in re.finditer(r'```mermaid\n(erDiagram.*?)```', text, re.S):
+            body = blk.group(1)
+            start = text[:blk.start()].count('\n') + 1
+            ents = set(re.findall(r'^\s*([A-Z][A-Z_]+)\s', body, re.M))
+            ents |= set(re.findall(r'--\S*\s+([A-Z][A-Z_]+)\s*:', body))
+            for ent in sorted(ents):
+                snake = ent.lower()
+                # look for the entity outside every mermaid block
+                prose = re.sub(r'```mermaid.*?```', '', text, flags=re.S).lower()
+                if snake in prose or snake + 's' in prose:
+                    continue
+                bad.append(f"{p}:{start}  erDiagram entity '{ent}' appears in the diagram but nowhere in the text")
+
         # mermaid duplicate node ids
         for blk in re.finditer(r'```mermaid\n(.*?)```', text, re.S):
             body = blk.group(1)
