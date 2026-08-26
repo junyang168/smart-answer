@@ -1,10 +1,12 @@
 # 王守仁教授释经与思想知识平台设计
 
-> **读者**：Solution architect
+> **读者**：Solution architect、Developer
 > **类型**：规范
-> **状态**：当前
+> **状态**：当前，但已降为**知识库详细设计**
 > **与代码对齐**：2026-08-25 部分核对（核对到 4131807）——已核对本文所列的配置值与页面上线状态；其余陈述未逐条核对
-> **权威范围**：平台目标架构、知识边界与不可倒置的上下游治理顺序。实现与本文冲突时先修订设计并记录决定。
+> **权威范围**：知识对象的定义、双轴组织、问答设计、审核机制与演化规则。**分层理由、约束、产品优先级与掉头条件不在本文，在 [Solution Architecture](./solution_architecture.md)**；两者冲突时以 Solution Architecture 为准。
+
+> 先读 [Solution Architecture](./solution_architecture.md)。本文是它下面一层的细节：那里说明为什么这样分层、受什么约束、哪三个产品是目标；本文说明知识库内部怎么建。
 
 > 状态：目标架构与产品设计。本文补充 [Project Mission Statement](./project_mission_statement.md)，并约束 [Exegesis and Topic Repository Functional Specification](../20-knowledge/exegesis_topic_repository_functional_spec.md)、[Technical Specification](../20-knowledge/repository-tech-spec/README.md) 与 [Sermon Search and QA Specification](../40-qa-search/sermon_search_functional_spec.md)。如实现细节与本文的知识边界、来源忠实性或审核原则冲突，应先修订设计并记录决定。
 
@@ -585,7 +587,7 @@ Evidence Step 还必须保存以下审计字段：
 - 当前仍缺失或未回答的环节；
 - 可用于某一 Composition Plan 的已审核子链。
 
-这条链属于知识层，不等于文章大纲。文章仍由 Publication Profile 和 Composition Plan 决定详略、顺序和转介。
+这条链属于知识库，不等于文章大纲。文章仍由 Publication Profile 和 Composition Plan 决定详略、顺序和转介。
 
 ### 5.16 External Evidence
 

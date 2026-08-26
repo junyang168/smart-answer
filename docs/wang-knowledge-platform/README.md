@@ -13,9 +13,9 @@
 
 | 你是 | 从这里开始 |
 | --- | --- |
-| **普通基督徒 / 教会同工** | [Project Mission Statement](./00-overview/project_mission_statement.md) —— 不需要技术背景，读完就知道这个平台在做什么。 |
-| **神学编辑（审稿同工）** | 上面那份，加[馬太福音釋經教學文集：成書體例](./30-authoring/matthew_exposition_publication_profile_v1.md)和[思想与篇章审核工作台使用说明](./90-ops/reviewer_ui_guide.md)。 |
-| **Solution architect** | [知识平台总体设计](./00-overview/knowledge_platform_design.md) → [共享知识模型](./00-overview/shared_knowledge_model_v1.md) → 下面各子系统。 |
+| **普通基督徒** | [Project Mission Statement](./00-overview/project_mission_statement.md) —— 不需要技术背景，读完就知道这个平台在做什么。 |
+| **教会同工（审稿）** | [Solution Architecture 第 5 节](./00-overview/solution_architecture.md#5-运营谁在用同工做什么) —— 你会拿到什么、要判断什么、什么不归你判断。再看[成書體例](./30-authoring/matthew_exposition_publication_profile_v1.md)和[审核工作台使用说明](./90-ops/reviewer_ui_guide.md)。 |
+| **Solution architect** | [Solution Architecture](./00-overview/solution_architecture.md) → [知识库详细设计](./00-overview/knowledge_platform_design.md) → [共享知识模型](./00-overview/shared_knowledge_model_v1.md) → 下面各子系统。 |
 | **Developer** | 先读该子系统的规范，再读对应流程文档。写文章相关的从 `30-authoring/` 开始。 |
 | **要修改本目录文档的人** | [文檔維護約定](./CONVENTIONS.md)。 |
 
@@ -23,14 +23,15 @@
 
 ## 设计治理顺序
 
-本项目必须遵循：**Project Mission → 共享知识模型 → 205 篇全库普查、跨讲综合与结构级人工审核 → 多 use-case 验证 → 正式产品与公开 UI**。use case 验证发现的问题必须回写上游模型或候选基线，不能只在某个产品中修补。`/admin/thought-review` 等页面是可以提前建设的内部审核基础设施，不代表已经跳到正式产品阶段。详细规则见总体设计的「不可倒置的上下游治理顺序」。
+本项目必须遵循：**Project Mission → 共享知识模型 → 205 篇全库普查、跨讲综合与结构级人工审核 → 多 use-case 验证 → 正式产品与公开 UI**。use case 验证发现的问题必须回写上游模型或候选基线，不能只在某个产品中修补。`/admin/thought-review` 等页面是可以提前建设的内部审核基础设施，不代表已经跳到正式产品阶段。详细规则见[知识库详细设计](./00-overview/knowledge_platform_design.md)的「不可倒置的上下游治理顺序」；这条顺序为什么存在，见 [Solution Architecture](./00-overview/solution_architecture.md)。
 
 ## 00-overview —— 平台级
 
 | 文档 | 它回答什么 |
 | --- | --- |
+| [**Solution Architecture**](./00-overview/solution_architecture.md) | **先读这份。** 分层理由、质量属性、五条关键决策、同工的分工 |
 | [Project Mission Statement](./00-overview/project_mission_statement.md) | 这个计划为什么存在，忠实与署名的底线在哪里 |
-| [知识平台总体设计](./00-overview/knowledge_platform_design.md) | 目标架构与产品定位；与实现冲突时先改设计 |
+| [知识库详细设计](./00-overview/knowledge_platform_design.md) | 知识对象、双轴组织、问答设计、审核机制。原「总体设计」，已降为详细设计 |
 | [共享知识模型 v1](./00-overview/shared_knowledge_model_v1.md) | Claim、EvidenceStep、Relation、TopicNode 的意义与边界 |
 | [王守仁教授学术思想整理：核心 Use Case](./00-overview/scholarly_thought_reconstruction_use_case.md) | 把教授的学术思想整体重建出来，需要什么 |
 | [同工反馈到产品需求与验收标准 v1](./00-overview/stakeholder_feedback_to_requirements_v1.md) | 同工的一句话怎样变成可验收的需求 |
@@ -50,7 +51,7 @@
 | [候选基线 v3](./10-extraction/candidate_baseline_v3.md) | 205 篇普查后经批准的 8 个候选领域与 3 条轴 |
 | [经文角色与释经覆盖格式 v2 校准](./10-extraction/scripture_roles_v2_pilot_validation.md) | 经文角色能否无损抽取（记录） |
 
-## 20-knowledge —— 知识层
+## 20-knowledge —— 知识库
 
 | 文档 | 它回答什么 |
 | --- | --- |
@@ -89,11 +90,11 @@
 | [独立问答产品验证 v1](./40-qa-search/qa_product_validation_v1.md) | 问答作为独立产品的三种答案状态与读者要求 |
 | [问答答案双模型诊断与上游修复协议 v1](./40-qa-search/qa_answer_diagnostic_protocol_v1.md) | 一个坏答案怎样定位到最早出错的那一层 |
 
-## 50-micro-sermon —— 微讲道
+## 50-micro-sermon —— 微讲道（后续 phase）
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计 |
+| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在 Phase 1 之内**，见 [Solution Architecture D5](./00-overview/solution_architecture.md#d5implementation-phasesphase-1-只做文章与问答) |
 
 ## 90-ops —— 运营与工作台
 
