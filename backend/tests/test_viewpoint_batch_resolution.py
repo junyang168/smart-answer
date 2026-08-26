@@ -5517,6 +5517,71 @@ def test_a_relation_finding_authorises_its_own_patch():
     assert effective.viewpoint_relations == []
 
 
+def test_a_relation_can_be_retyped_by_the_correction():
+    """matt16 part-9 batch-001: 「這條邊應是 extends，不是 specializes」.
+
+    An edge's identity includes its type, so answering means deleting one edge
+    and adding another between the same two viewpoints. Matching authorisation
+    on the whole edge left the second half unauthorised and the batch stopped.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_relations=[{
+            "source_local_key": "ROCK-NOT-PETER",
+            "target_viewpoint_revision_id": "CVR-1",
+            "relation_type": "specializes",
+            "reason": "类型选错了。",
+        }]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "specializes", "decision": "correct",
+            "finding_codes": ["relation_type_wrong"],
+            "reason": "这是延伸，不是具体化。",
+            "correction": "relation_type 改为 extends。",
+            "direction_correct": True,
+        }],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "specializes", "disposition": "accepted",
+            "reason": "同意改类型。",
+        }],
+        "relation_patches": [
+            {"action": "delete", "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes", "reason": "类型选错了。"}},
+            {"action": "upsert", "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "extends", "reason": "按复核意见改为延伸。"}},
+        ],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration, proposal=proposal, review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert [r.relation_type for r in effective.viewpoint_relations] == ["extends"]
+
+
 def test_a_structure_finding_authorises_its_own_patch():
     """matt16 batch-004, 2026-08-26: the only finding was about the structure.
 
