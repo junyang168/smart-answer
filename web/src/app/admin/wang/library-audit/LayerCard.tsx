@@ -25,33 +25,15 @@ export function LayerCard({ layer }: { layer: Layer }) {
         </span>
       </div>
 
-      {layer.kind === "ratio" ? (
-        <p className="font-mono text-xl font-medium text-slate-900">
-          {count(layer.passed ?? 0)}
-          <span className="text-slate-400">/{count(layer.total ?? 0)}</span>
-          <span className="ml-1 text-xs text-slate-400">{layer.unit}</span>
-        </p>
-      ) : (
-        <p className="font-mono text-xl font-medium text-slate-900">
-          抽 {layer.judged ?? 0}
-          <span className="text-slate-400"> · 有異議 </span>
-          {layer.disputed ?? 0}
-          <span className="ml-1 text-xs text-slate-400">
-            母體 {count(layer.population ?? 0)} {layer.unit}
-          </span>
-        </p>
-      )}
-
+      {/* The sentence first. A reader who stops here still knows what happened;
+          the raw ratio underneath is for the one who wants to check it. */}
+      <p className="text-[0.95rem] leading-relaxed text-slate-900">{layer.headline}</p>
       <p className="text-[0.8rem] leading-snug text-slate-400">{layer.question}</p>
 
-      <p className={`text-[0.8rem] leading-snug ${clean ? "text-emerald-700" : "text-slate-700"}`}>
-        {clean
-          ? layer.kind === "ratio"
-            ? "全部對得上。"
-            : "抽到的都沒有異議。"
-          : layer.kind === "ratio"
-            ? `${count(left)} ${layer.unit}對不上，在下面。`
-            : `${left} 條有異議，在下面。`}
+      <p className="font-mono text-[0.72rem] text-slate-400">
+        {layer.kind === "ratio"
+          ? `${count(layer.passed ?? 0)}/${count(layer.total ?? 0)} ${layer.unit}`
+          : layer.note}
       </p>
 
       {layer.detail.filter((row) => row.count > 0).length > 0 && (
@@ -59,11 +41,11 @@ export function LayerCard({ layer }: { layer: Layer }) {
           {layer.detail
             .filter((row) => row.count > 0)
             .map((row) => (
-              <div key={row.label} className="flex items-baseline justify-between gap-3">
-                <dt className="font-mono text-[0.72rem] text-slate-500">{row.label}</dt>
-                <dd className="text-right text-[0.72rem] text-slate-400">
-                  <span className="font-mono text-slate-700">{count(row.count)}</span> · {row.text}
-                </dd>
+              <div key={row.label} className="flex flex-col gap-0.5">
+                <span className="text-[0.78rem] leading-snug text-slate-600">
+                  <span className="font-mono text-slate-900">{count(row.count)}</span> {row.text}
+                </span>
+                <span className="font-mono text-[0.65rem] text-slate-300">{row.label}</span>
               </div>
             ))}
         </dl>

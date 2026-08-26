@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { FollowUpGroup } from "./FollowUpGroup";
 import { LayerCard } from "./LayerCard";
-import { count, shortfall, type AuditReport } from "./types";
+import { count, type AuditReport } from "./types";
 
 /**
  * 獨立審計的結果，一頁看完。
@@ -67,35 +67,40 @@ export default function LibraryAuditPage() {
   }
 
   const { scope, corpus, layers = [], followups = [] } = report;
-  const pending = followups.reduce((total, group) => total + group.count, 0);
-  const judgement = layers
-    .filter((layer) => layer.kind === "sample")
-    .reduce((total, layer) => total + (layer.disputed ?? 0), 0);
+  const needsHuman = report.needs_human ?? 0;
+  const mechanical = report.mechanical ?? 0;
   const checked = report.generated_at
     ? new Date(report.generated_at).toLocaleString("zh-TW", { hour12: false })
     : "—";
 
   return (
     <main className="flex flex-col gap-8 pb-12">
+      {/* The split that decides what happens next. Four items needing someone
+          to read a claim and a hundred needing a batch re-run are not the same
+          backlog, and a single total of 113 hides which is which. */}
       <section className="flex flex-col gap-2">
         <h1 className="text-base font-semibold tracking-tight text-slate-900">文庫獨立審計</h1>
-        <p className="text-2xl leading-snug text-slate-900">
-          {pending === 0 ? (
-            <span className="font-semibold text-emerald-700">沒有一條待跟進</span>
-          ) : (
-            <>
-              <span className="font-mono">{count(pending)}</span> 條待跟進，
-              {judgement > 0 ? (
-                <>
-                  其中 <span className="font-semibold text-rose-700">{judgement} 條要人判斷</span>
-                </>
-              ) : (
-                <>沒有一條需要人判斷</>
-              )}
-            </>
-          )}
-          。
-        </p>
+        {needsHuman === 0 && mechanical === 0 ? (
+          <p className="text-2xl leading-snug font-semibold text-emerald-700">這一輪沒有查出問題。</p>
+        ) : (
+          <p className="text-2xl leading-snug text-slate-900">
+            {needsHuman > 0 ? (
+              <>
+                <span className="font-semibold text-rose-700">{needsHuman} 條要人看</span>
+                <span className="text-slate-500">——教授的意思有沒有被寫歪。</span>
+              </>
+            ) : (
+              <span className="font-semibold text-emerald-700">沒有一條要人看。</span>
+            )}
+            {mechanical > 0 && (
+              <>
+                <br />
+                <span className="font-mono">{count(mechanical)}</span> 條是程序問題
+                <span className="text-slate-500">——記錄之間對不上，不必判斷對錯。</span>
+              </>
+            )}
+          </p>
+        )}
         <p className="font-mono text-xs leading-relaxed text-slate-500">
           {checked} · {report.run_id} · 判讀模型 {report.model} · seed {report.seed}
         </p>
@@ -140,9 +145,10 @@ export default function LibraryAuditPage() {
       {followups.length > 0 && (
         <div className="flex flex-col gap-8">
           <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold tracking-tight text-slate-900">待跟進</h2>
+            <h2 className="text-sm font-semibold tracking-tight text-slate-900">要處理的</h2>
             <p className="text-[0.8rem] leading-snug text-slate-400">
-              審計只讀，這些不會被自動修掉，也不會被自動接受。處置走既有的複審路徑。
+              「要人看」的排在前面。審計只讀，這些不會被自動修掉，也不會被自動接受；
+              處置走既有的複審路徑。
             </p>
           </div>
           {followups.map((group) => (
@@ -152,11 +158,10 @@ export default function LibraryAuditPage() {
       )}
 
       <p className="border-t border-slate-100 pt-4 text-[0.75rem] leading-relaxed text-slate-400">
-        比率是量出來的，不是評出來的，所以這一頁沒有紅黃綠燈，也沒有及格線。
-        層 3、4 是抽樣：{layers.find((l) => l.key === "claims")?.judged ?? 0} 條中{" "}
-        {layers.find((l) => l.key === "claims")?.disputed ?? 0} 條有異議，說的是這一批抽樣，
-        不是整個文庫的比例。
-        {layers.some((l) => shortfall(l) > 0) && " 有異議不等於錯，等於需要人看一眼。"}
+        這一頁沒有紅黃綠燈，也沒有及格線：數字是量出來的，不是評出來的，只有一輪資料時
+        畫一條線會讓人把那條線當真。第 3、4 層是抽樣，「{layers.find((l) => l.key === "claims")?.disputed ?? 0} 條看起來不對」
+        說的是抽到的那 {layers.find((l) => l.key === "claims")?.judged ?? 0} 條，不是整個文庫的比例。
+        看起來不對也不等於錯，等於需要人看一眼。
       </p>
     </main>
   );

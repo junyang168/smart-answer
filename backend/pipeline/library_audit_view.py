@@ -30,26 +30,31 @@ from typing import Any
 
 #: What each follow-up group is, in one line, for a reader who has not read the
 #: audit's own documentation. Keyed by the `kind` the audit assigns.
-FOLLOWUP_GROUPS: dict[str, dict[str, str]] = {
+FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
     "claim_support": {
-        "title": "主張撐不撐得住它引的證據",
-        "note": "獨立模型抽樣判讀。有異議不等於錯，等於需要人看一眼。",
+        "title": "這條主張，證據撐不住",
+        "note": "主張說的比它引的證據多。要人讀一遍才能決定是改主張還是補證據。",
+        "needs_human": True,
     },
     "viewpoint_identity": {
-        "title": "判為同一個觀點的主張，真值條件對不對得上",
-        "note": "只問 equivalent_full 與 equivalent_component 兩種成員連結。",
+        "title": "這幾條主張，可能不是同一個觀點",
+        "note": "被判成同一個觀點的主張，說的其實不是同一件事。要人決定該不該拆開。",
+        "needs_human": True,
     },
     "component_locator": {
-        "title": "成分定位對不上主張原文",
-        "note": "觀點的成員資格掛在這段字上，所以它必須是主張裡的一段連續文字。",
+        "title": "觀點引的那句話，主張裡沒有",
+        "note": "觀點說「主張的這一段和我等價」，但那段字不是主張裡的原話。",
+        "needs_human": False,
     },
     "fragment_anchor": {
-        "title": "引文在原件裡對不上所記位置",
-        "note": "直接打開磁碟上的逐字稿比對，不採信 anchor_state 與存下來的雜湊。",
+        "title": "引文在逐字稿裡對不上",
+        "note": "打開磁碟上的原件核對，這幾條的引文不在它自己記的位置上。",
+        "needs_human": False,
     },
     "dangling_reference": {
-        "title": "依賴解不開",
-        "note": "引用指向的物件不在庫裡，任何狀態都沒有。",
+        "title": "指向的東西不在庫裡",
+        "note": "這些記錄引用了一批從來沒進庫的計劃與決定。重跑那批 ingest 就沒了。",
+        "needs_human": False,
     },
 }
 
@@ -106,6 +111,19 @@ def _verdict(code: str) -> dict[str, str]:
     return {"code": code, "text": VERDICT_TEXT.get(code, code)}
 
 
+def _evidence(label: str, field: str, text: Any) -> dict[str, str]:
+    """One piece of evidence, named twice on purpose.
+
+    `label` is what the row is, in words, for the person deciding. `field` is
+    the store's own name for it, kept alongside because the next step is
+    usually a query and `statement_component` is what that query has to say.
+    Translating the field name away would make the page readable and the
+    follow-up harder.
+    """
+
+    return {"label": label, "field": field, "text": str(text or "")}
+
+
 def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
     """The four headline numbers, in the audit's own words.
 
@@ -118,6 +136,7 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     first = layers.get("1")
     if first:
+        missed = first["total"] - first["passed"]
         rows.append({
             "key": "verbatim",
             "layer": 1,
@@ -125,8 +144,13 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "kind": "ratio",
             "passed": first["passed"],
             "total": first["total"],
-            "unit": "條片段",
-            "question": "片段的 verbatim_excerpt 在原件裡真的存在於所記位置嗎",
+            "unit": "條引文",
+            "question": "教授真的說過這句話嗎，而且是在記著的那一段裡",
+            "headline": (
+                f"{first['total']:,} 條引文，全部在逐字稿裡找得到，位置也對。"
+                if missed == 0
+                else f"{first['total']:,} 條引文裡，{missed} 條在逐字稿裡對不上。"
+            ),
             "detail": [
                 {"label": code, "count": count, "text": VERDICT_TEXT.get(code, code)}
                 for code, count in sorted(first.get("counts", {}).items(), key=lambda kv: -kv[1])
@@ -135,6 +159,7 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
         })
     second = layers.get("2")
     if second:
+        broken = second["checked_objects"] - second["checked_clean"]
         rows.append({
             "key": "coverage",
             "layer": 2,
@@ -142,29 +167,34 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "kind": "ratio",
             "passed": second["checked_clean"],
             "total": second["checked_objects"],
-            "unit": "個當前物件",
-            "question": "已寫入的內容，它依賴的東西都還在嗎",
+            "unit": "筆記錄",
+            "question": "一筆記錄提到的另一筆，還找得到嗎",
+            "headline": (
+                f"{second['checked_objects']:,} 筆記錄，它們提到的東西都找得到。"
+                if broken == 0
+                else f"{second['checked_objects']:,} 筆記錄裡，{broken} 筆提到了庫裡沒有的東西。"
+            ),
             "detail": [
                 {
                     "label": "references_dangling",
                     "count": second["references_dangling"],
-                    "text": "引用指向的物件不在庫裡",
+                    "text": "處引用指向一個庫裡根本沒有的東西",
                 },
                 {
                     "label": "references_to_retired",
                     "count": second["references_to_retired"],
-                    "text": "引用指向已經 retire 的物件（記錄還在，只是不再是當前版本）",
+                    "text": "處引用指向舊版本（記錄還在，只是已經被取代）",
                 },
                 {
                     "label": "component_locator_findings",
                     "count": len(second.get("component_locator_findings") or []),
-                    "text": "成分定位對不上主張原文",
+                    "text": "處觀點引的那句話，在主張裡找不到",
                 },
             ],
         })
-    for key, layer_id, unit, question in (
-        ("claims", "3", "條主張", "這條主張能否從它所引的證據推出"),
-        ("viewpoints", "4", "個觀點", "判為同一觀點的主張，真值條件是否真的一致"),
+    for key, layer_id, unit, question, verb in (
+        ("claims", "3", "條主張", "主張說的，證據撐得住嗎", "條"),
+        ("viewpoints", "4", "個觀點", "判成同一個觀點的，真的是同一件事嗎", "個"),
     ):
         layer = layers.get(layer_id)
         if not layer:
@@ -180,6 +210,12 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "model_errors": layer.get("model_errors", 0),
             "unit": unit,
             "question": question,
+            "headline": (
+                f"抽查 {layer['judged']} {verb}，都沒問題。"
+                if layer["disputed"] == 0
+                else f"抽查 {layer['judged']} {verb}，{layer['disputed']} {verb}看起來不對。"
+            ),
+            "note": f"全部 {layer['population']:,} {unit}裡抽的，這個數字說的是抽到的這一批。",
             "detail": [],
         })
     return rows
@@ -199,10 +235,10 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict(str(entry.get("issue") or "other")),
             "reason": entry.get("reason", ""),
             "evidence": [
-                {"label": "statement", "text": entry.get("statement", "")},
-                {"label": "quote", "text": entry.get("quote", "")},
-                {"label": "evidence_step_ids", "text": "、".join(entry.get("evidence_step_ids") or [])},
-                {"label": "review_status", "text": entry.get("review_status", "")},
+                _evidence("主張原文", "statement", entry.get("statement")),
+                _evidence("模型據以判斷的那句", "quote", entry.get("quote")),
+                _evidence("它引的證據", "evidence_step_ids", "、".join(entry.get("evidence_step_ids") or [])),
+                _evidence("目前狀態", "review_status", entry.get("review_status")),
             ],
         })
 
@@ -215,13 +251,14 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict(str(entry.get("issue") or "other")),
             "reason": entry.get("reason", ""),
             "evidence": [
-                {"label": "core_proposition", "text": entry.get("core_proposition", "")},
-                {"label": "current_revision_id", "text": entry.get("revision_id", "")},
-                {"label": "成員主張", "text": f"{entry.get('linked_claims', 0)} 條"},
-                {
-                    "label": "claim_ids_in_question",
-                    "text": "、".join(entry.get("claim_ids_in_question") or []),
-                },
+                _evidence("這個觀點說的是", "core_proposition", entry.get("core_proposition")),
+                _evidence("目前版本", "current_revision_id", entry.get("revision_id")),
+                _evidence("底下掛了幾條主張", "linked_claims", f"{entry.get('linked_claims', 0)} 條"),
+                _evidence(
+                    "有問題的是這幾條",
+                    "claim_ids_in_question",
+                    "、".join(entry.get("claim_ids_in_question") or []),
+                ),
             ],
         })
 
@@ -233,9 +270,9 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict(str(entry.get("verdict") or "other")),
             "reason": "",
             "evidence": [
-                {"label": "statement_component", "text": entry.get("component", "")},
-                {"label": "claim.statement", "text": entry.get("statement", "")},
-                {"label": "claim_id", "text": entry.get("claim_id", "")},
+                _evidence("觀點引的那句", "statement_component", entry.get("component")),
+                _evidence("主張的原話", "claim.statement", entry.get("statement")),
+                _evidence("哪一條主張", "claim_id", entry.get("claim_id")),
             ],
         })
 
@@ -246,10 +283,10 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict(str(entry.get("verdict") or "other")),
             "reason": entry.get("detail", ""),
             "evidence": [
-                {"label": "verbatim_excerpt", "text": entry.get("excerpt", "")},
-                {"label": "source_id", "text": entry.get("source_id", "")},
-                {"label": "paragraph_key", "text": str(entry.get("paragraph_key") or "")},
-                {"label": "anchor_state", "text": str(entry.get("anchor_state") or "")},
+                _evidence("這段引文", "verbatim_excerpt", entry.get("excerpt")),
+                _evidence("哪一篇", "source_id", entry.get("source_id")),
+                _evidence("記在第幾段", "paragraph_key", entry.get("paragraph_key")),
+                _evidence("庫裡標的狀態", "anchor_state", entry.get("anchor_state")),
             ],
         })
 
@@ -260,7 +297,7 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict("unresolvable_dependency"),
             "reason": "",
             "evidence": [
-                {"label": entry.get("field", "→"), "text": entry.get("value", "")},
+                _evidence("指向", entry.get("field", "→"), entry.get("value")),
             ],
             # What the reference points at. Ninety-seven rows that all point at
             # the same missing plan are one problem, not ninety-seven, so the
@@ -307,6 +344,7 @@ def build_view(audit: dict[str, Any], run_id: str) -> dict[str, Any]:
 
     meta = audit.get("meta") or {}
     layers = audit.get("layers") or {}
+    groups = _followups(layers)
     scoped = meta.get("scope") == "current-run"
     return {
         "run_id": run_id,
@@ -333,7 +371,12 @@ def build_view(audit: dict[str, Any], run_id: str) -> dict[str, Any]:
             "viewpoints": meta.get("viewpoints", 0),
         },
         "layers": _ratio_layers(layers),
-        "followups": _followups(layers),
+        "followups": groups,
+        # The one split that decides what happens next. Four items needing a
+        # person's judgement and a hundred needing a batch re-run are not the
+        # same backlog, and one total of 113 hides which is which.
+        "needs_human": sum(g["count"] for g in groups if g["needs_human"]),
+        "mechanical": sum(g["count"] for g in groups if not g["needs_human"]),
     }
 
 

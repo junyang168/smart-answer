@@ -1,6 +1,6 @@
 export type Verdict = { code: string; text: string };
 
-export type Evidence = { label: string; text: string };
+export type Evidence = { label: string; field: string; text: string };
 
 export type FollowUpItem = {
   object_id: string;
@@ -22,6 +22,7 @@ export type FollowUpGroup = {
   kind: string;
   title: string;
   note: string;
+  needs_human: boolean;
   count: number;
   items: FollowUpItem[];
   targets?: DanglingTarget[];
@@ -36,6 +37,8 @@ export type Layer = {
   kind: "ratio" | "sample";
   unit: string;
   question: string;
+  headline: string;
+  note?: string;
   detail: LayerDetail[];
   passed?: number;
   total?: number;
@@ -62,6 +65,8 @@ export type AuditReport = {
   corpus?: { fragments: number; claims: number; viewpoints: number };
   layers?: Layer[];
   followups?: FollowUpGroup[];
+  needs_human?: number;
+  mechanical?: number;
 };
 
 /** `7,333/7,343` reads better than `99.9%` when the question is "how many are left". */

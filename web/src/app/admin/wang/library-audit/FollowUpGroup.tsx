@@ -21,9 +21,16 @@ export function FollowUpGroup({ group }: { group: Group }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <h2 className="flex items-baseline gap-2 text-sm font-semibold tracking-tight text-slate-900">
+        <h2 className="flex flex-wrap items-baseline gap-2 text-sm font-semibold tracking-tight text-slate-900">
+          <span
+            className={`rounded-md px-2 py-0.5 text-[0.68rem] font-semibold ${
+              group.needs_human ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {group.needs_human ? "要人看" : "程序問題"}
+          </span>
           {group.title}
-          <span className="font-mono text-xs font-normal text-slate-500">{count(group.count)}</span>
+          <span className="font-mono text-xs font-normal text-slate-500">{count(group.count)} 條</span>
         </h2>
         <p className="text-[0.8rem] leading-snug text-slate-400">{group.note}</p>
       </div>
@@ -113,9 +120,10 @@ function FollowUpRow({ item }: { item: FollowUpItem }) {
       {evidence.length > 0 && (
         <dl className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3">
           {evidence.map((row) => (
-            <div key={row.label} className="flex flex-col gap-0.5">
-              <dt className="font-mono text-[0.68rem] uppercase tracking-[0.06em] text-slate-400">
+            <div key={row.field} className="flex flex-col gap-0.5">
+              <dt className="flex items-baseline gap-2 text-[0.72rem] text-slate-500">
                 {row.label}
+                <span className="font-mono text-[0.62rem] text-slate-300">{row.field}</span>
               </dt>
               <dd className="break-words text-[0.82rem] leading-relaxed text-slate-700">
                 {row.text}
