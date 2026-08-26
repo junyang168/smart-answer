@@ -77,6 +77,10 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 两条路都走不通，就让批次停下来交给人判。**不要为了让检查通过而编一条边**——复核会以 `REL_NOT_LOAD_BEARING` 把它扔掉，而那时它已经写进库了。
 
+输入里的 **`connection_required`** 逐条列出了身份复核判定「与本批某个候选是同一件事」的既有 `viewpoint_revision_id`。**除非该候选的 component 以 `member_existing` 真的并入了它,否则你交出的 effective proposal 里必须有一条边(或一个共享 structure)把这两者连起来。**
+
+把既有观点原有的边搬到候选身上**不算**——那记录的是候选与第三方的关系,不是「候选与它是同一件事」这个判断。
+
 **这条边必须有一端正好落在身份复核判定的那个 `viewpoint_revision_id` 上。** 指向别的既有 viewpoint（哪怕关系本身成立）不算数：要记下来的是「本批这个候选与**那一条**讲的是同一件事」，换一个对象就不再是这个判断。
 
 同一条规则适用于 `matches_existing`：身份复核判定匹配、而合并最终没有落地时（无论是被复核否掉，还是候选仍作为独立 viewpoint 留下），effective proposal 里都必须留下这样一条边。

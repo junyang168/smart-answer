@@ -368,6 +368,22 @@ def run_batch(
     effective_proposal = proposal
     effective_validation = validation
     if review_validation["correction_required"] and reconsiderer is not None:
+        # Identity consolidation's verdicts are an input to the correction, not
+        # just a gate after it. A candidate ruled the same viewpoint as a
+        # committed one has to end up connected to that exact revision when the
+        # merge does not land, and twice in one scope the proposer answered by
+        # moving the committed viewpoint's edges onto the candidate instead --
+        # coherent if they are the same thing, but it records no connection
+        # between them and the batch stops with zero mutations. Stating the
+        # obligation next to the findings beats burying it in the prompt.
+        connection_required = [
+            {
+                "matched_viewpoint_revision_id": str(item.target_viewpoint_revision_id),
+                "ruled_same_as_candidate": item.local_key,
+            }
+            for item in (consolidation.verdicts if consolidation is not None else [])
+            if item.verdict != "new" and item.target_viewpoint_revision_id
+        ]
         reconsider_packet = {
             "batch_id": batch_id,
             "packet": packet,
@@ -375,6 +391,7 @@ def run_batch(
             "proposal": proposal_payload,
             "review_sha256": review_sha,
             "review": review_payload,
+            "connection_required": connection_required,
         }
         raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
             reconsiderer, reconsider_packet, output_dir / "raw-reconsideration.json"
