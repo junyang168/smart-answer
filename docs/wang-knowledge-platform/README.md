@@ -14,7 +14,7 @@
 | 你是 | 从这里开始 |
 | --- | --- |
 | **普通基督徒** | [Project Mission Statement](./00-overview/project_mission_statement.md) —— 不需要技术背景，读完就知道这个平台在做什么。 |
-| **教会同工（审稿）** | [Solution Architecture 第 3 节](./00-overview/solution_architecture.md#3-同工做什么以及不做什么) —— 你会拿到什么、要判断什么、什么不归你判断。再看[成書體例](./30-authoring/matthew_exposition_publication_profile_v1.md)和[审核工作台使用说明](./90-ops/reviewer_ui_guide.md)。 |
+| **教会同工（审稿）** | [Solution Architecture 第 5 节](./00-overview/solution_architecture.md#5-运营谁在用同工做什么) —— 你会拿到什么、要判断什么、什么不归你判断。再看[成書體例](./30-authoring/matthew_exposition_publication_profile_v1.md)和[审核工作台使用说明](./90-ops/reviewer_ui_guide.md)。 |
 | **Solution architect** | [Solution Architecture](./00-overview/solution_architecture.md) → [知识库详细设计](./00-overview/knowledge_platform_design.md) → [共享知识模型](./00-overview/shared_knowledge_model_v1.md) → 下面各子系统。 |
 | **Developer** | 先读该子系统的规范，再读对应流程文档。写文章相关的从 `30-authoring/` 开始。 |
 | **要修改本目录文档的人** | [文檔維護約定](./CONVENTIONS.md)。 |
@@ -94,7 +94,7 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在三个目标产品之内**，见 [Solution Architecture 第 6 节](./00-overview/solution_architecture.md#6-三个目标产品其余-optional) |
+| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在三个目标产品之内**，见 [Solution Architecture D6](./00-overview/solution_architecture.md#d6三个目标产品其余延后) |
 
 ## 90-ops —— 运营与工作台
 
