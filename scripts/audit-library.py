@@ -646,6 +646,9 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
     scripture_findings = _audit_derived_scripture(store)
     for entry in scripture_findings:
         objects_with_gap.add(("argument_route_attestations", entry["object_id"]))
+    struck_evidence = _audit_struck_evidence(store, sources)
+    for entry in struck_evidence:
+        objects_with_gap.add(("claims", entry["object_id"]))
     retired_evidence = _audit_retired_evidence(store)
     for entry in retired_evidence:
         objects_with_gap.add(("claims", entry["object_id"]))
@@ -690,6 +693,7 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
         "derived_scripture_findings": scripture_findings,
         "component_locator_findings": locator_findings,
         "retired_evidence_findings": retired_evidence,
+        "struck_evidence_findings": struck_evidence,
         "source_document_findings": document_findings,
     }
 
@@ -761,6 +765,56 @@ def _audit_derived_scripture(store: Store) -> list[dict[str, Any]]:
                 "argument_route_id": payload.get("argument_route_id"),
                 "unsupported_scripture_refs": undeclared,
                 "evidence_scripture_refs": sorted(actual),
+            })
+    return findings
+
+
+def _audit_struck_evidence(store: Store, sources: SourceIndex) -> list[dict[str, Any]]:
+    """主張的證據，引文只活在校對者劃掉的文字裡。
+
+    三份逐字稿被劃掉的比例是 23%、41%、43%——校對者刪掉的不是幾個錯字，是整段
+    整段的內容。一條主張如果它的證據落在那些字上，那條主張現在講的是逐字稿裡
+    已經不存在的話。
+
+    這一類非報不可，而且必須報成它自己：讓模型去判，模型只會說「證據裡沒有這
+    件事」，聽起來像教授沒講過——他講過，是後來被劃掉了。兩件事的處置完全不同。
+    """
+
+    frags = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("source_fragments", include_retired=True)
+    }
+    steps = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("evidence_steps", include_retired=True)
+    }
+    findings: list[dict[str, Any]] = []
+    for row in store.collection("claims"):
+        ids = _claim_evidence_ids(row["payload"])
+        if not ids:
+            continue
+        struck: list[str] = []
+        alive = 0
+        for step_id in ids:
+            step = steps.get(step_id)
+            for fragment_id in _step_fragment_ids(step) if step else []:
+                payload = frags.get(fragment_id)
+                if payload is None:
+                    continue
+                source_file = sources.file_for(str(payload.get("source_id") or ""))
+                excerpt = str(payload.get("verbatim_excerpt") or "")
+                if source_file is None or not excerpt:
+                    continue
+                if excerpt in source_file.live_whole:
+                    alive += 1
+                elif excerpt in source_file.raw_whole:
+                    struck.append(fragment_id)
+        if struck:
+            findings.append({
+                "object_id": row["object_id"],
+                "verdict": "all_evidence_struck" if not alive else "some_evidence_struck",
+                "struck_fragment_ids": struck,
+                "statement": str(row["payload"].get("statement") or "")[:120],
             })
     return findings
 
@@ -1660,6 +1714,13 @@ def build_human_queue(layers: dict[int, dict[str, Any]]) -> dict[str, Any]:
             "verdict": "foreign_source_fragment",
             "detail": json.dumps(entry, ensure_ascii=False),
         })
+    for entry in layers.get(2, {}).get("struck_evidence_findings", []):
+        items.append({
+            "kind": "struck_evidence",
+            "object_id": entry["object_id"],
+            "verdict": entry["verdict"],
+            "detail": f"{len(entry['struck_fragment_ids'])} 條引文只存在於劃掉的文字裡",
+        })
     for entry in layers.get(2, {}).get("retired_evidence_findings", []):
         items.append({
             "kind": "retired_evidence",
@@ -1826,6 +1887,11 @@ def render_report(
         )
         lines.append(
             f"          scripture_refs_derived 無證據支持 {len(layer['derived_scripture_findings']):>4,}"
+        )
+        struck_mix = Counter(e["verdict"] for e in layer.get("struck_evidence_findings", []))
+        lines.append(
+            f"          證據只在校對者劃掉的文字裡 {sum(struck_mix.values()):>4,}"
+            + (f"   （{'、'.join(f'{k} {v}' for k, v in sorted(struck_mix.items()))}）" if struck_mix else "")
         )
         retired_mix = Counter(e["verdict"] for e in layer.get("retired_evidence_findings", []))
         lines.append(
