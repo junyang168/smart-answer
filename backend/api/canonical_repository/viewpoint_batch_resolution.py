@@ -2417,9 +2417,15 @@ def apply_reconsideration_patches(
                     f"{claim_id}#{component_index}: merge target does not exist"
                 )
                 continue
-            if target in claim_patches:
+            target_patch = claim_patches.get(target)
+            if target_patch is not None and (
+                target_patch.replacement_components is None
+                or len(target_patch.replacement_components) != 1
+            ):
+                # Folding into a sibling that is itself being merged away, or
+                # split into several, has no single component to fold into.
                 findings.append(
-                    f"{claim_id}#{component_index}: merge target must be an unpatched sibling"
+                    f"{claim_id}#{component_index}: merge target must be one component"
                 )
                 continue
             authorized_candidate_referrers.add((claim_id, target))
@@ -2436,7 +2442,18 @@ def apply_reconsideration_patches(
         revised_components: list[dict[str, Any]] = []
         for index, original in enumerate(original_components):
             if index in replacements:
-                revised_components.extend(replacements[index])
+                # A reviewer can require both halves of the same move: rewrite
+                # this component and fold a sibling into it. The spans have to
+                # land on the replacement, not on the component it replaced --
+                # matt16 part-7 batch-001, where 「與 component 0 合併」 and
+                # 「改為 new_viewpoint...」 were two findings on one Claim.
+                merged = deepcopy(replacements[index])
+                if merged and index in merge_spans:
+                    merged[0]["spans"] = sorted(
+                        [*merged[0]["spans"], *merge_spans[index]],
+                        key=lambda item: (item["start_char"], item["end_char"]),
+                    )
+                revised_components.extend(merged)
                 continue
             copied = deepcopy(original)
             if index in merge_spans:

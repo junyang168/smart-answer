@@ -2449,6 +2449,53 @@ def test_candidate_patch_cannot_delete_a_candidate_an_unflagged_component_uses()
         )
 
 
+def test_a_component_can_be_folded_into_a_sibling_the_reviewer_also_rewrote():
+    """matt16 part-7 batch-001, 2026-08-26: both halves of one move.
+
+    The reviewer flagged both components of a Claim: rewrite #0 into a new
+    viewpoint with the full truth condition, and fold #1 into it rather than
+    let the batch carry the same proposition twice. The guard required a merge
+    target to be unpatched, so the two findings could not both be answered --
+    and the spans would have landed on the component that was replaced.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal()
+    rewritten = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    rewritten["reason"] = "按复核意见改写为完整真值条件。"
+    reconsideration = _reconsideration(
+        "accepted", "accepted",
+        component_patches=[
+            {"claim_id": "C1", "component_index": 0, "replacement_components": [rewritten]},
+            {"claim_id": "C1", "component_index": 1, "merge_into_component_index": 0},
+        ],
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "correct"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "correct"),
+    )
+    components = effective.claim_decisions[0].components
+    before = proposal.claim_decisions[0].components
+    assert len(components) == 1
+    assert components[0].reason == "按复核意见改写为完整真值条件。"
+    # The folded sibling's spans landed on the replacement, not on what it replaced.
+    assert len(components[0].spans) == len(before[0].spans) + len(before[1].spans)
+
+
 def test_reconsideration_can_merge_components_the_reviewer_flagged():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
