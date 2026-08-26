@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { FollowUpGroup } from "./FollowUpGroup";
 import { LayerCard } from "./LayerCard";
+import { RunControl } from "./RunControl";
 import { count, type AuditReport } from "./types";
 
 /**
@@ -25,24 +26,39 @@ export default function LibraryAuditPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = async () => {
       try {
         const response = await fetch("/api/admin/library-audit", { cache: "no-store" });
         if (!response.ok) throw new Error(`審計服務回傳 ${response.status}`);
         const data = (await response.json()) as AuditReport;
-        if (!cancelled) setReport(data);
+        if (cancelled) return;
+        setReport(data);
+        setError("");
+        // Poll only while something is actually running. A dashboard that
+        // refetches forever costs a query every few seconds for a number that
+        // changes once a week.
+        if (data.run?.state === "running") {
+          timer = setTimeout(() => void load(), 3000);
+        }
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "無法讀取審計結果");
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+
+    void load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [tick]);
 
   if (loading) return <p className="px-1 py-6 text-sm text-slate-400">讀取中…</p>;
   if (error || !report) return <p className="px-1 py-6 text-sm text-rose-700">{error || "沒有資料"}</p>;
@@ -53,15 +69,15 @@ export default function LibraryAuditPage() {
     return (
       <main className="flex flex-col gap-4 pb-10">
         <h1 className="text-base font-semibold tracking-tight text-slate-900">文庫獨立審計</h1>
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
-          <p className="text-sm text-slate-700">還沒有跑過。這一頁只顯示審計寫下的結果，不代跑。</p>
-          <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-[0.75rem] text-slate-100">
-            scripts/audit-library.py
-          </pre>
-          <p className="mt-2 break-all font-mono text-[0.72rem] text-slate-400">
-            輸出會落在 {report.reports_root}
-          </p>
-        </div>
+        <p className="text-sm text-slate-700">還沒有跑過。</p>
+        <RunControl
+          run={report.run ?? null}
+          ranAt="從來沒有"
+          onChange={() => setTick((n) => n + 1)}
+        />
+        <p className="break-all font-mono text-[0.72rem] text-slate-400">
+          輸出會落在 {report.reports_root}
+        </p>
       </main>
     );
   }
@@ -102,9 +118,11 @@ export default function LibraryAuditPage() {
           </p>
         )}
         <p className="font-mono text-xs leading-relaxed text-slate-500">
-          {checked} · {report.run_id} · 判讀模型 {report.model} · seed {report.seed}
+          {checked} · {report.run_id} · 判讀模型 {report.model}
         </p>
       </section>
+
+      <RunControl run={report.run ?? null} ranAt={checked} onChange={() => setTick((n) => n + 1)} />
 
       <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
         <p className="text-[0.82rem] leading-relaxed text-slate-700">

@@ -50,6 +50,17 @@ export type Layer = {
   model_errors?: number;
 };
 
+export type RunStatus = {
+  state: "running" | "finished" | "died";
+  stage?: string;
+  done?: number;
+  total?: number;
+  started_at?: string;
+  finished_at?: string;
+  run_id?: string;
+  detail?: string;
+};
+
 export type AuditReport = {
   status: "ok" | "never_run";
   reports_root?: string;
@@ -69,6 +80,7 @@ export type AuditReport = {
   followups?: FollowUpGroup[];
   needs_human?: number;
   mechanical?: number;
+  run?: RunStatus | null;
 };
 
 /** `7,333/7,343` reads better than `99.9%` when the question is "how many are left". */
