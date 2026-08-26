@@ -65,6 +65,14 @@ scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
 節](../../20-knowledge/canonical_viewpoint_design.md)）。拿一條 `qualifies` 去問「這
 是不是同一個觀點」，model 當然說不是，而那是審計自己問錯了。
 
+## 在哪裡看
+
+`/admin/wang/library-audit`（導覽列「獨立審計」，#245）顯示**最新一輪**：四個比率、範
+圍，以及分組後的待跟進條目。它只讀審計已經寫好的 `audit.json`，不代跑、不改任何記錄
+——跑一次要呼叫模型、要花錢，那屬於 CLI。
+
+沒跑過時它說「還沒有跑過」並給出指令，不顯示 0/0：一頁 0/0 讀起來像「沒問題」。
+
 ## 輸出
 
 每次跑產生三個檔案：
