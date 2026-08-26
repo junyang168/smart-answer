@@ -999,8 +999,7 @@ def audit_claims(
                 f"- [{step_id}]（{step.get('function') or '未標'}／經文：{refs}）"
                 f"{str(step.get('statement') or '').strip()}"
             )
-            if step.get("source_fragment_id"):
-                fragment_ids.append(str(step["source_fragment_id"]))
+            fragment_ids.extend(_step_fragment_ids(step))
         paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources)
 
         prompt = _claim_prompt(row["object_id"], payload, evidence_lines, paragraphs)
@@ -1053,6 +1052,25 @@ def _claim_in_scope(
         if name in titles and sources.covers(source_id):
             return True
     return False
+
+
+def _step_fragment_ids(step: dict[str, Any]) -> list[str]:
+    """一條證據步驟錨在哪幾個片段上。
+
+    兩個欄位名並存，而且**複數的那個才是多數**：3,575 條步驟用
+    `source_fragment_ids`，只有 166 條用單數的 `source_fragment_id`。只讀單數
+    的後果不是少幾段——是第 3 層有 95% 的抽樣根本沒拿到原文，模型只能拿摘要
+    去比摘要，而這一層存在的理由正是「直接讀原件」。
+    """
+
+    values: list[str] = []
+    single = step.get("source_fragment_id")
+    if single:
+        values.append(str(single))
+    for item in step.get("source_fragment_ids") or []:
+        if item and str(item) not in values:
+            values.append(str(item))
+    return values
 
 
 def _claim_evidence_ids(payload: dict[str, Any]) -> list[str]:
