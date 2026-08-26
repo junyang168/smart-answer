@@ -355,6 +355,11 @@ def main() -> int:
     parser.add_argument("--worker-id", default=f"{socket.gethostname()}:{os.getpid()}")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--route-policy", type=Path, default=DEFAULT_ROUTE_POLICY_PATH)
+    parser.add_argument(
+        "--retry-exceptions",
+        action="store_true",
+        help="also claim jobs that ended in exception, for retrying after a fix",
+    )
     args = parser.parse_args()
 
     policy = load_route_policy(args.route_policy)
@@ -386,6 +391,7 @@ def main() -> int:
         scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
         evidence_scope_sha256=str(scope_packet["packet_sha256"]),
         route_policy_fingerprint_sha256=policy_sha256,
+        retry_exceptions=args.retry_exceptions,
     )
     if work is None:
         print(json.dumps({"status": "idle"}, ensure_ascii=False))

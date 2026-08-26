@@ -426,6 +426,60 @@ def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path:
     assert new_state["attempt"] == 2
 
 
+def test_a_job_that_failed_on_a_defect_can_be_retried_after_the_fix(tmp_path: Path):
+    """Twice now an exception has been a dead end with no way back.
+
+    A job id is derived from its content, so re-enqueuing the same work returns
+    the same id, already in `exception` -- #220 got past it by fabricating a
+    receipt to move the id. Retrying is not re-enqueuing: the job artifact is
+    untouched and only its state moves, which is what `attempt` counts.
+    """
+
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job, enqueued_at="2026-08-25T12:00:00+00:00")
+    current = {"CV-1": "CVR-1"}
+    started = datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc)
+
+    work = queue.claim(worker_id="w1", current_viewpoint_revisions=current, now=started)
+    assert work is not None
+    queue.finish(work, worker_id="w1", status="exception", detail="code defect")
+
+    # Enqueuing the same work again cannot revive it: same content, same id.
+    queue.enqueue(job, enqueued_at="2026-08-25T13:05:00+00:00")
+    assert queue.claim(
+        worker_id="w2",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(hours=1),
+    ) is None
+
+    retried = queue.claim(
+        worker_id="w2",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(hours=1),
+        retry_exceptions=True,
+    )
+    assert retried is not None
+    queue.finish(retried, worker_id="w2", status="resolved")
+
+    state = json.loads((tmp_path / "queue" / "states" / f"{job.job_id}.json").read_text())
+    assert state["status"] == "resolved"
+    assert state["attempt"] == 2
+
+
 def test_file_route_queue_refuses_to_invent_missing_current_revision_job(tmp_path: Path):
     receipt = build_cvp_batch_readback_receipt(
         scope_label="matthew-16",
