@@ -48,6 +48,7 @@ export type Layer = {
   disputed?: number;
   population?: number;
   model_errors?: number;
+  complete?: boolean;
 };
 
 export type RunStatus = {

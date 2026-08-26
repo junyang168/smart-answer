@@ -177,9 +177,7 @@ export default function LibraryAuditPage() {
 
       <p className="border-t border-slate-100 pt-4 text-[0.75rem] leading-relaxed text-slate-400">
         這一頁沒有紅黃綠燈，也沒有及格線：數字是量出來的，不是評出來的，只有一輪資料時
-        畫一條線會讓人把那條線當真。第 3、4 層是抽樣，「{layers.find((l) => l.key === "claims")?.disputed ?? 0} 條看起來不對」
-        說的是抽到的那 {layers.find((l) => l.key === "claims")?.judged ?? 0} 條，不是整個文庫的比例。
-        看起來不對也不等於錯，等於需要人看一眼。
+        畫一條線會讓人把那條線當真。看起來不對也不等於錯，等於需要人看一眼。
       </p>
     </main>
   );

@@ -41,6 +41,14 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
         "note": "被判成同一個觀點的主張，說的其實不是同一件事。要人決定該不該拆開。",
         "needs_human": True,
     },
+    "not_judged": {
+        "title": "審計模型拒答，這幾條沒有判讀",
+        "note": (
+            "安全過濾器擋下了 prompt。擋掉的多半是離婚、情慾這類牧養上敏感的題目，"
+            "而那正是最需要有人看過的。這幾條沒有人也沒有機器看過。"
+        ),
+        "needs_human": True,
+    },
     "component_locator": {
         "title": "觀點指的那幾段字，在主張裡對不上",
         "note": (
@@ -66,6 +74,7 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
 #: plan that was never ingested, and the first kind is what this audit exists
 #: for.
 GROUP_ORDER = [
+    "not_judged",
     "claim_support",
     "viewpoint_identity",
     "component_locator",
@@ -92,6 +101,7 @@ VERDICT_TEXT = {
     "no_source_file": "找不到這份原件",
     "span_offsets_wrong": "字元位置框到的，不是它說的那段字",
     "unresolvable_dependency": "引用指向的物件不在庫裡",
+    "blocked": "審計模型的安全過濾器擋下了這一條，沒有判讀",
     "other": "其他",
 }
 
@@ -246,15 +256,35 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "model_errors": layer.get("model_errors", 0),
             "unit": unit,
             "question": question,
-            "headline": (
-                f"抽查 {layer['judged']} {verb}，都沒問題。"
-                if layer["disputed"] == 0
-                else f"抽查 {layer['judged']} {verb}，{layer['disputed']} {verb}看起來不對。"
+            # 全查與抽樣說法不能一樣。「20 條中 3 條」是抽到的那一批，「1,363
+            # 條中 31 條」是範圍內的全部——後者才可以拿來說整批對不對，前者不行。
+            "complete": bool(layer.get("complete")),
+            "headline": _sample_headline(layer, verb),
+            "note": (
+                f"範圍內的 {layer['population']:,} {unit}全部查過"
+                + (
+                    f"，其中 {layer['model_errors']} {verb}模型沒答成。"
+                    if layer.get("model_errors")
+                    else "。"
+                )
+                if layer.get("complete")
+                else f"全部 {layer['population']:,} {unit}裡抽的，這個數字說的是抽到的這一批。"
             ),
-            "note": f"全部 {layer['population']:,} {unit}裡抽的，這個數字說的是抽到的這一批。",
             "detail": [],
         })
     return rows
+
+
+def _sample_headline(layer: dict[str, Any], verb: str) -> str:
+    judged = layer["judged"]
+    disputed = layer["disputed"]
+    whole = layer.get("complete")
+    if disputed == 0:
+        return f"{'全部' if whole else '抽查'} {judged:,} {verb}，都沒問題。"
+    return (
+        f"{'全部' if whole else '抽查'} {judged:,} {verb}，"
+        f"{disputed} {verb}看起來不對。"
+    )
 
 
 def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
@@ -263,6 +293,18 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
     items: dict[str, list[dict[str, Any]]] = {key: [] for key in GROUP_ORDER}
 
     for entry in (layers.get("3") or {}).get("results", []):
+        if entry.get("verdict") == "blocked":
+            items["not_judged"].append({
+                "object_id": entry["claim_id"],
+                "collection": "claims",
+                "verdict": _verdict("blocked"),
+                "reason": entry.get("reason", ""),
+                "evidence": [
+                    _evidence("主張原文", "statement", entry.get("statement")),
+                    _evidence("目前狀態", "review_status", entry.get("review_status")),
+                ],
+            })
+            continue
         if entry.get("verdict") != "disputed":
             continue
         items["claim_support"].append({
