@@ -1,0 +1,69 @@
+# Matthew exposition current authoring session
+
+> **讀者**：Developer
+> **類型**：記錄
+> **狀態**：當前工作狀態，隨每次交付更新（AGENTS.md 必讀）
+> **與代碼對齊**：不適用
+> **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
+
+Updated: 2026-08-23 (America/Chicago)
+
+## Project boundary
+
+This session belongs to Wang Knowledge Platform, not notes-to-sermon-agent. Do not run notes-to-sermon fidelity audit, source reconstruction, or article generation outside the Matthew exposition runner.
+
+The first active exegesis CanonicalViewpoint is now end-to-end master data: `CV-59fdfc87534d1f17fc9f` (“太 16:18 的磐石不指彼得本人”), system-approved by the formal atomic gate and applied to PostgreSQL. Its active composition projection is `matthew16-viewpoint-pilot-rock-v14-active-composition-projection-2026-08-23/composition-projection.json`, SHA-256 `78ed881b55ac2a6598c25b8a1a89ecedc3f2b9495f760659ab82ed70a7baf701`. `CP-matthew-16-13-20` passed a no-model/no-publication packet dry-run with that projection. Before the next real Matthew run, read `canonical_viewpoint_registry_design_v1.md` section 13.12: article sections must report exact `viewpoint_revision_ids_used`, while every reader-visible assertion still needs source Claim provenance. Do not start a second viewpoint until this first one has been exercised by the intended article generation or revision run.
+
+## Completed articles
+
+- Article 1, Matt.16.1–12: editorial pass, Program Audit, human approval and repository publication completed. Published manuscript SHA: `c71a6da593b0c8c9093f152282a3b4ee562c60f98754915613ac74ba7173502a`.
+- Article 2, Matt.16.13–20: regenerated from the rebuilt knowledge layer and republished on 2026-08-18 (#62). Published manuscript SHA: `93d0597a6dea0635b72fea034de8fee727325115ae3be2edaa38498336a20e72`; editorial review 91 with every dimension at or above its own minimum; Program Audit `pass_with_warnings`, 0 errors, 15 warnings. The decision is `human-publication-decision.v1` — the user read the draft and judged the disputed sentence themselves, so this is not an automated decision and must not be described as one. The previous 2026-08-15 publication is kept at `repository/editorial_drafts/.backup-DRAFT-M16-002-V1-20260818/`. Publicly listed as `matthew-16-13-20`; its approval is independent of Article 1.
+
+  **Read this before regenerating anything.** It published while the argument layer is still incomplete. The grounding gate correctly flagged 「君王與祭司的職分在制度上分開，不可集於一身」 as unsupported; the sentence is verbatim in the base manuscript (`notes_manuscript:16章釋經`, lines 91 and 113) but was never extracted into the claim layer, so the gate could not see it. It survived because the user recognised it as the professor's teaching, not because anything verified it. Across the three articles, 26 base-manuscript sentences flagged load-bearing are absent from the claim layer (#64). On the next article nobody may be standing there to recognise the sentence, and its deletion would be silent.
+- Article 3, Matt.16.21–23: regenerated from CompositionPlan revision 10 and republished on 2026-08-18 (#62). Published manuscript SHA: `047c64d2fc2e34e291817fb4e989be72a44e36e3a30fa2b74a7307fd1a066933`; editorial review 86 with every dimension at or above its own minimum; final grounding gate 7 paragraphs checked, 0 findings; Program Audit `pass`, 0 errors and 0 warnings; public slug `matthew-16-21-23`. The decision is `human-publication-decision.v1` — the user read the draft, directed a one-phrase edit and approved publication.
+
+  Replanning came first, and it mattered: composition review routed `DK-72483dc200ad-CL025` (the rebuke is aimed at the direction of Peter's thinking, not merely at his act of restraint) into `CD-M16-003-03`, where it had never been placed. The 2026-08-15 publication scored 90 without it, by elaborating the same point unsourced — that run has no grounding report at all, because it predates the gate. A higher score against no grounding check is not a better article, and this pair is the cleanest evidence of it on the platform.
+
+  The reviewed draft is `410b06786193a2d069730f4a7d5018ef33ff3af25ccbc51cad8df1492cf31469`. What publishes differs from it by one footnote phrase — 「材料中的」 removed, on the user's instruction, because 「材料」 is this project's internal word for the knowledge layer and means nothing to a reader. The edit is recorded as `post_review_edit` in `publication-editorial-review.json`, which carries both SHAs. Author, revision, grounding-repair and editorial-review prompts now all carry the rule, since a rule only one agent knows gets revised back out.
+
+The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
+
+## Repository integration
+
+The automated editorial-review, Program Audit and publication workflow was merged to GitHub `main` through PR #2 (`Optimize Matthew editorial workflow`). Merge commit: `ba7850527de1432f94016f28195ff56e8449851b`. The local checkout and `origin/main` contain the change. The later Wang path cutover deployed only the five audited backend path files from the working tree; it did not push or broadly deploy unrelated uncommitted changes.
+
+WKP-F10.2 recovery and path reconciliation was later merged through PR #27 and deployed as immutable release `92d899e1dd6d2179866f76b495fe365f9b02f9a1`. PostgreSQL remains the authoring authority; no Wang knowledge payload, corpus survey data, staging generation, source manifest, research runner packet, media, or professor-content fixture entered Git. The production sermon catalog and overrides now load from `$DATA_BASE_DIR/wang-knowledge-platform/catalog/`; their two old root/config copies were SHA-verified, archived with a successful restore test, and removed. The deployment report is `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/sermon-catalog-path-cutover-20260817.json`.
+
+## Corpus survey authority
+
+The 205-transcript corpus survey is an important broad knowledge map, not disposable scratch output. Its versioned research release is `$DATA_BASE_DIR/wang-knowledge-platform/repository/research_corpus_snapshots/CORPUS-SURVEY-205-V1/`; all 265 detailed artifacts remain under canonical `staging/corpus-survey/` with a SHA manifest and recovery archive. PostgreSQL stores the project-owner-approved candidate structure: eight revisable primary domains, three cross-cutting axes, 17 reviewed grouping resolutions, and four human-reviewed comparison decisions. This approval is structural only; the 3,752 survey claims remain candidate and must not be presented as approved claims.
+
+The corpus survey is a one-time, closed 205-transcript historical survey. Do not add later sermons, follow later transcript revisions, regenerate its 205 cards, or build a rolling V2 from it. Source SHA differences discovered after the survey are provenance facts, not refresh instructions. The SHA-bound closure policy is `repository/research_corpus_snapshots/CORPUS-SURVEY-205-V1/closure-policy.json` (SHA-256 `3957c536bfb34c521f0da850e69816eaa9717668136ae10a840cae3fa11c1e1c`). On 2026-08-16 an attempted three-card refresh and two independent reviews were withdrawn after this boundary was clarified. The original cards were restored byte-for-byte from the V1 generation archive; all 265 canonical staging files again match the immutable V1 SHA manifest. Withdrawn exploratory artifacts are retained only for audit under `staging/corpus-survey/withdrawn-generations/2026-08-16-partial-refresh/` and must not be read as repository or PostgreSQL authority.
+
+No cron, launchd, API, or web invocation writes this survey automatically. The closure and legacy-copy audit is `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/corpus-survey-closure-audit-20260816.json` (SHA-256 `e651aae1a378729d194443a1752aacc1460abecd1267538a5715dc197b286d32`). After the user authorized continuation of the two exact legacy-removal candidates, both 265-file `output/corpus-survey` copies were removed from their original paths and placed together in the recoverable system Trash directory `/Users/junyang/.Trash/corpus-survey-legacy-20260816-175900/`. No `output/corpus-survey` directory remains in the scanned worktrees, developer checkout, or production roots. The execution report is `$DATA_BASE_DIR/wang-knowledge-platform/deployment-reports/corpus-survey-legacy-removal-20260816.json` (SHA-256 `c7d1e729b5370f336be6370277d0d468f5750da644560cdb5ce663e61f38d968`).
+
+## Article 3 artifacts
+
+- Final published manuscript: `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/DRAFT-M16-003-V1/manuscript.md`
+- Publication-bound editorial review: `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/DRAFT-M16-003-V1/publication-editorial-review.json`
+- Program Audit: `$DATA_BASE_DIR/wang-knowledge-platform/repository/editorial_drafts/DRAFT-M16-003-V1/program-audit.json`
+- Program Audit staging artifacts: `$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-21-23-sources/authoring-v1/round-02/program-audit/`
+
+## Open work before the next batch
+
+Four issues carry what the 2026-08-18 session found but did not finish. #64 is the root cause of the other authoring symptoms and should go first.
+
+- **#64** — base-manuscript sentences marked load-bearing that never entered the claim layer. Every downstream gate reads only the claim layer, so such material does not exist as far as this system is concerned. `CP-matthew-16-1-12` still has 0 of 9 required steps carrying a `claim_id`, the same mine that stopped Article 2.
+- **#65** — derived artifacts with no rebuild path. The Program Audit reported 14 errors on a sound article, every one of them the manifest describing the previous version. Its manifest-shape checks are warnings for now; restore them to errors once the manifest is derived rather than hand-maintained.
+- **#66** — the manuscript that publishes has never passed the grounding gate. The gate runs before the writing review; the revision then rewrites prose and nothing re-checks it. Article 2's publication was only safe because that check was run by hand first.
+- **#67** — sermon generation, where expansion is the form's requirement rather than a violation. Needs #64 and #66 as its foundation.
+
+## Publication rule
+
+Matthew exposition articles now publish automatically when the program verifies that every applicable rubric dimension reached its own minimum, that no hard failure was declared, and that the Program Audit is `pass` or `pass_with_warnings` with zero errors. The dimension minimums live in the quality profile (revision 4: 80% of each weight); no total score gates publication. The workflow creates `automated-publication-decision.v1`; it must not claim human approval. Repository publication is part of the authoring workflow, but source-code push and production deployment remain separate operations.
+
+For a new article, start from its existing fast-passage CompositionPlan and knowledge snapshot, confirm the article's authoring contract on that plan (base source, required argument steps, allowed/ineligible operations), and invoke `backend.pipeline.matthew_exposition_authoring_runner` with `--plan-id <CompositionPlan id>`, `--program-audit-manifest`, `--program-audit-draft-id`, `--auto-accept-maintained-findings`, `--max-revision-rounds 2`, and `--max-grounding-attempts 4`. Omitting `--knowledge` compiles the snapshot from the store and writes it to the run directory as `compiled-knowledge-snapshot.json`, which is what the Program Audit reads; the two must be the same snapshot or the audit judges material the author never saw. Long runs get reaped when started as a tracked background task — launch detached and poll instead.
+
+The authoring contract now lives on the CompositionPlan in PostgreSQL, not in a `base-manuscript-contract-input.json` beside the staging artifacts. `--plan` / `--base-contract` still read those files for articles not yet migrated, and are mutually exclusive with `--plan-id`. Migrate an existing contract with `backend.pipeline.authoring_contract_migration`, which verifies every `source_excerpt` is still a verbatim substring of the manuscript it names before writing anything.
+
+Reviewer-call invariant: one Independent Editorial Review for the initial draft, then exactly one Final Delta Review per revision. A Delta Review must return any next-round findings in the same response. Never add a Score-Gap Review or send a revised manuscript back through full Editorial Review.

@@ -281,8 +281,8 @@ The canonical repository is also the editorial gateway into a broader knowledge 
 
 The system must distinguish the professor's explicit statements and reasoning from views he rejects, editorial synthesis, unresolved questions, and later external fact checking. Public intelligent answers use only approved public records and exact approved sources; manuscript search remains a provisional fallback for material not yet curated.
 
-The complete product requirements, editorial workflows, source behavior, UI, migration plan, and acceptance criteria are defined in [Functional Specification: Exegesis and Topic Repository](../wang-knowledge-platform/exegesis_topic_repository_functional_spec.md).
-The product-wide object model and multi-product design are defined in [Knowledge Platform Design](../wang-knowledge-platform/knowledge_platform_design.md), and the QA projection is defined in [Knowledge-Grounded Sermon Search and QA](../wang-knowledge-platform/sermon_search_functional_spec.md).
+The complete product requirements, editorial workflows, source behavior, UI, migration plan, and acceptance criteria are defined in [Functional Specification: Exegesis and Topic Repository](../wang-knowledge-platform/20-knowledge/exegesis_topic_repository_functional_spec.md).
+The product-wide object model and multi-product design are defined in [Knowledge Platform Design](../wang-knowledge-platform/00-overview/knowledge_platform_design.md), and the QA projection is defined in [Knowledge-Grounded Sermon Search and QA](../wang-knowledge-platform/40-qa-search/sermon_search_functional_spec.md).
 
 ## 4. User Stories
 *   *As a Pastor, I want to see the "Exegetical Notes" before the draft is written, so I can trust the biblical foundation.*

@@ -18,7 +18,7 @@
 CLI::
 
     python -m backend.pipeline.base_contract_coverage \
-        --output-dir docs/wang-knowledge-platform/base-contract-coverage
+        --output-dir docs/wang-knowledge-platform/90-ops/base-contract-coverage
 
 相同輸入必定產生相同輸出（沒有時間戳、沒有隨機性）。
 """
@@ -1079,7 +1079,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output-dir",
-        default="docs/wang-knowledge-platform/base-contract-coverage",
+        default="docs/wang-knowledge-platform/90-ops/base-contract-coverage",
         help="報告輸出目錄（repo 內；不會寫入 DATA_BASE_DIR）",
     )
     parser.add_argument("--data-base-dir", default=None, help="覆寫 DATA_BASE_DIR")
