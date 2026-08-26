@@ -32,12 +32,12 @@ from typing import Any
 #: audit's own documentation. Keyed by the `kind` the audit assigns.
 FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
     "claim_support": {
-        "title": "這條主張，證據撐不住",
+        "title": "這條主張（Claim），證據撐不住",
         "note": "主張說的比它引的證據多。要人讀一遍才能決定是改主張還是補證據。",
         "needs_human": True,
     },
     "viewpoint_identity": {
-        "title": "這幾條主張，可能不是同一個觀點",
+        "title": "這幾條主張，可能不是同一個觀點（CanonicalViewpoint）",
         "note": "被判成同一個觀點的主張，說的其實不是同一件事。要人決定該不該拆開。",
         "needs_human": True,
     },
@@ -50,7 +50,7 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
         "needs_human": True,
     },
     "component_locator": {
-        "title": "觀點指的那幾段字，在主張裡對不上",
+        "title": "觀點（CanonicalViewpoint）指的那幾段字，在主張裡對不上",
         "note": (
             "觀點說「主張的這幾段和我等價」，並記下每一段的字元位置。"
             "位置框到的字不是它說的那段，或摘要與那幾段接不起來。"
@@ -58,7 +58,7 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
         "needs_human": False,
     },
     "fragment_anchor": {
-        "title": "引文在逐字稿裡對不上",
+        "title": "引文（source_fragment）在逐字稿裡對不上",
         "note": "打開磁碟上的原件核對，這幾條的引文不在它自己記的位置上。",
         "needs_human": False,
     },
@@ -81,6 +81,16 @@ GROUP_ORDER = [
     "fragment_anchor",
     "dangling_reference",
 ]
+
+#: 中文說法配上它在代碼與資料庫裡的名字，就是 Solution Architecture 術語表的做
+#: 法：「同工不必記右邊，developer 照右邊找」。這一頁兩種人都會看——同工要判斷
+#: 主張對不對，developer 要拿 id 去查——所以兩個名字並排，不挑一個。
+ENTITY = {
+    "fragment": "來源片段（source_fragment）",
+    "object": "記錄（object）",
+    "claim": "主張（Claim）",
+    "viewpoint": "觀點（CanonicalViewpoint）",
+}
 
 #: A verdict word, said in a way that does not require reading the source.
 VERDICT_TEXT = {
@@ -186,6 +196,7 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "skipped": skipped,
             "skipped_note": "".join(notes),
             "unit": "條引文",
+            "entity": ENTITY["fragment"],
             "question": "庫裡存的每一句教授原話，逐字稿裡真的有，而且就在它記的那一段",
             "headline": (
                 f"{checked:,} 條引文，全部在逐字稿的所記位置找得到。"
@@ -209,6 +220,7 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "passed": second["checked_clean"],
             "total": second["checked_objects"],
             "unit": "筆記錄",
+            "entity": ENTITY["object"],
             # "提到了庫裡沒有的東西" left the reader guessing what kind of thing.
             # Records point at each other by id -- a route names its plan, a
             # link names its claim -- and the sentence has to say that, or the
@@ -238,9 +250,16 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
                 },
             ],
         })
-    for key, layer_id, unit, question, verb in (
-        ("claims", "3", "條主張", "主張說的，證據撐得住嗎", "條"),
-        ("viewpoints", "4", "個觀點", "判成同一個觀點的，真的是同一件事嗎", "個"),
+    for key, layer_id, unit, question, verb, entity in (
+        ("claims", "3", "條主張", "主張說的，證據撐得住嗎", "條", ENTITY["claim"]),
+        (
+            "viewpoints",
+            "4",
+            "個觀點",
+            "判成同一個觀點的，真的是同一件事嗎",
+            "個",
+            ENTITY["viewpoint"],
+        ),
     ):
         layer = layers.get(layer_id)
         if not layer:
@@ -255,6 +274,7 @@ def _ratio_layers(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "population": layer["population"],
             "model_errors": layer.get("model_errors", 0),
             "unit": unit,
+            "entity": entity,
             "question": question,
             # 全查與抽樣說法不能一樣。「20 條中 3 條」是抽到的那一批，「1,363
             # 條中 31 條」是範圍內的全部——後者才可以拿來說整批對不對，前者不行。
@@ -461,6 +481,7 @@ def build_view(audit: dict[str, Any], run_id: str) -> dict[str, Any]:
             "fragments": meta.get("fragments", 0),
             "claims": meta.get("claims", 0),
             "viewpoints": meta.get("viewpoints", 0),
+            "labels": ENTITY,
         },
         "layers": _ratio_layers(layers),
         "followups": groups,

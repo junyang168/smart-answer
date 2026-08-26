@@ -20,8 +20,11 @@ export function LayerCard({ layer }: { layer: Layer }) {
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="font-mono text-[0.7rem] font-semibold uppercase tracking-[0.09em] text-slate-500">
+        <span className="text-[0.7rem] font-semibold tracking-[0.06em] text-slate-500">
           第 {layer.layer} 層 · {layer.name}
+          {layer.entity && (
+            <span className="ml-1 font-normal text-slate-400">· {layer.entity}</span>
+          )}
         </span>
       </div>
 

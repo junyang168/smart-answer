@@ -36,6 +36,7 @@ export type Layer = {
   name: string;
   kind: "ratio" | "sample";
   unit: string;
+  entity?: string;
   question: string;
   headline: string;
   note?: string;
@@ -76,7 +77,12 @@ export type AuditReport = {
     text: string;
     duplicate_sources: { name: string; source_ids: string[] }[];
   };
-  corpus?: { fragments: number; claims: number; viewpoints: number };
+  corpus?: {
+    fragments: number;
+    claims: number;
+    viewpoints: number;
+    labels?: Record<string, string>;
+  };
   layers?: Layer[];
   followups?: FollowUpGroup[];
   needs_human?: number;

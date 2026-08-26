@@ -128,9 +128,12 @@ export default function LibraryAuditPage() {
         <p className="text-[0.82rem] leading-relaxed text-slate-700">
           <span className="font-semibold">範圍</span>　{scope?.text}：
           <span className="font-mono"> {scope?.sources} </span>份來源記錄 ·
-          <span className="font-mono"> {count(corpus?.fragments ?? 0)} </span>條片段 ·
-          <span className="font-mono"> {count(corpus?.claims ?? 0)} </span>條主張 ·
-          <span className="font-mono"> {corpus?.viewpoints} </span>個觀點。
+          <span className="font-mono"> {count(corpus?.fragments ?? 0)} </span>
+          條{corpus?.labels?.fragment ?? "片段"} ·
+          <span className="font-mono"> {count(corpus?.claims ?? 0)} </span>
+          條{corpus?.labels?.claim ?? "主張"} ·
+          <span className="font-mono"> {corpus?.viewpoints} </span>
+          個{corpus?.labels?.viewpoint ?? "觀點"}。
           {(scope?.sources_out_of_scope ?? 0) > 0 && (
             <>
               另有 <span className="font-mono">{scope?.sources_out_of_scope}</span> 份更早批次的來源沒查。
