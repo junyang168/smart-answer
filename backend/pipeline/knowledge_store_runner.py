@@ -22,6 +22,11 @@ from backend.pipeline.source_anchor_binding import bind_source_versions
 from backend.pipeline.reviewed_relation_integration import (
     build_reviewed_relation_integration,
 )
+from backend.pipeline.ai_review_ledger import (
+    build_plan,
+    collect_verdicts,
+    review_reason,
+)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -119,6 +124,23 @@ def main() -> None:
         type=Path,
         default=platform_paths.claim_layer_staging / "review_state.json",
     )
+
+    # The human path is `sync-review-state`, right above. This is the same
+    # move for the reviewer that handles almost everything: read the verdicts
+    # the independent review already wrote, record them as review events, and
+    # let `review_status` say what actually happened.
+    ai_review_parser = subparsers.add_parser(
+        "sync-ai-review",
+        help="Record independent AI review verdicts against claims in the store.",
+    )
+    ai_review_parser.add_argument(
+        "artifact_root",
+        nargs="?",
+        type=Path,
+        default=platform_paths.claim_layer_staging,
+        help="Directory to scan for artifacts carrying `claim_reviews`",
+    )
+    ai_review_parser.add_argument("--apply", action="store_true")
 
     anchor_parser = subparsers.add_parser("bind-source-anchors")
     anchor_parser.add_argument(
@@ -285,6 +307,34 @@ def main() -> None:
                     )
                 )
         result = {"status": "synced", "changed": changed, "skipped": skipped}
+    elif args.command == "sync-ai-review":
+        # `list_records` hands back payloads, and a claim carries its own id.
+        claims = {
+            str(row.get("claim_id") or ""): str(row.get("review_status") or "")
+            for row in store.list_records("claims")
+        }
+        claims.pop("", None)
+        verdicts = collect_verdicts(args.artifact_root)
+        plan = build_plan(claims, verdicts)
+        applied = []
+        if args.apply:
+            for verdict in plan.changes:
+                applied.append(
+                    store.record_review(
+                        "claims",
+                        verdict.claim_id,
+                        decision=verdict.target_status,
+                        reason=review_reason(verdict),
+                        reviewer_id=verdict.reviewer_id,
+                        reviewer_kind="ai",
+                    )
+                )
+        result = {
+            "status": "applied" if args.apply else "preview",
+            "artifact_root": str(args.artifact_root),
+            "summary": plan.summary(),
+            "applied": len(applied),
+        }
     elif args.command == "bind-source-anchors":
         result = bind_source_versions(store, args.transcript_root, apply=args.apply)
     else:
