@@ -115,6 +115,72 @@ def test_route_binding_accepts_aggregate_fragments_for_multiple_evidence_steps()
     assert validate_runtime_authoring_graph(_serialized(store)) == []
 
 
+def test_a_partial_attestation_may_say_a_step_is_missing():
+    """binding_loosing_meaning route stage, 2026-08-26.
+
+    A source that carries a route's first and last node but not its middle one
+    says so with attestation_status="missing" and an empty binding, which is
+    what makes the attestation `partial`. The proposal model permits exactly
+    that -- it requires bindings only for `attested` -- while this end demanded
+    a fragment from every binding whatever its status, so such an attestation
+    could be proposed and reviewed and never written.
+    """
+
+    store = _fixture()
+    attestation = store.records["argument_route_attestations"][0]
+    payload = attestation.model_dump(mode="json")
+    payload["step_bindings"].append(
+        {
+            "route_step_key": "P2",
+            "claim_component_keys": [],
+            "evidence_step_ids": [],
+            "source_fragment_ids": [],
+            "attestation_status": "missing",
+        }
+    )
+    payload["completeness"] = "partial"
+    store.records["argument_route_attestations"][0] = (
+        ArgumentRouteAttestationRecord.model_validate(payload)
+    )
+
+    findings = validate_runtime_authoring_graph(_serialized(store))
+    assert [item for item in findings if "binding mismatch" in item] == []
+
+
+def test_an_attested_step_still_has_to_bind_something():
+    """Relaxing the empty case must not reach `attested`.
+
+    The record model refuses it outright, which is the stricter of the two and
+    the reason the projection can be permissive about the others.
+    """
+
+    store = _fixture()
+    payload = store.records["argument_route_attestations"][0].model_dump(mode="json")
+    payload["step_bindings"][0]["source_fragment_ids"] = []
+    with pytest.raises(ValidationError, match="attested route step requires"):
+        ArgumentRouteAttestationRecord.model_validate(payload)
+
+
+def test_a_non_attested_step_may_not_name_fragments_from_elsewhere():
+    store = _fixture()
+    payload = store.records["argument_route_attestations"][0].model_dump(mode="json")
+    payload["step_bindings"].append(
+        {
+            "route_step_key": "P2",
+            "claim_component_keys": [],
+            "evidence_step_ids": [],
+            "source_fragment_ids": ["FR-SOMEWHERE-ELSE"],
+            "attestation_status": "ambiguous",
+        }
+    )
+    store.records["argument_route_attestations"][0] = (
+        ArgumentRouteAttestationRecord.model_validate(payload)
+    )
+
+    findings = validate_runtime_authoring_graph(_serialized(store))
+    assert any("binding mismatch" in item for item in findings)
+
+
 def test_projection_sha_changes_when_citation_changes_and_public_fails_closed():
     store = _fixture()
     compiler = ViewpointRuntimeCompiler(store.records, store.citations)

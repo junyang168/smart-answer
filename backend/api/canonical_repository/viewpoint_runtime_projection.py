@@ -237,7 +237,18 @@ def validate_runtime_authoring_graph(
                 if not selected_fragment_ids & allowed_fragment_ids:
                     findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
                 derived_refs.update(str(value) for value in step.get("scripture_refs") or [])
-            if not selected_fragment_ids or not selected_fragment_ids <= allowed_fragment_union:
+            # A step marked `missing` or `ambiguous` binds nothing by design:
+            # that is how one source says it does not carry this node, and why
+            # the attestation is `partial`. The proposal model permits exactly
+            # that -- it requires bindings only for `attested` -- while this end
+            # demanded a fragment from every binding regardless of status, so a
+            # partial attestation could be proposed and reviewed but never
+            # written. What both ends do require is that whatever a binding does
+            # name belongs to the EvidenceSteps it names.
+            attested = binding.get("attestation_status") == "attested"
+            if (attested and not selected_fragment_ids) or (
+                selected_fragment_ids and not selected_fragment_ids <= allowed_fragment_union
+            ):
                 findings.append(f"{attestation_id}: evidence/fragment binding mismatch")
             bound = [fragments.get(value) for value in selected_fragment_ids]
             if any(
