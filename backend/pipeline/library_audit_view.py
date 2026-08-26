@@ -42,8 +42,11 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
         "needs_human": True,
     },
     "component_locator": {
-        "title": "觀點引的那句話，主張裡沒有",
-        "note": "觀點說「主張的這一段和我等價」，但那段字不是主張裡的原話。",
+        "title": "觀點指的那幾段字，在主張裡對不上",
+        "note": (
+            "觀點說「主張的這幾段和我等價」，並記下每一段的字元位置。"
+            "位置框到的字不是它說的那段，或摘要與那幾段接不起來。"
+        ),
         "needs_human": False,
     },
     "fragment_anchor": {
@@ -78,7 +81,8 @@ VERDICT_TEXT = {
     "over_merge": "把兩個可分開的命題併成一條",
     "scope_mismatch": "適用範圍對不上",
     "different_proposition": "講的是另一件事",
-    "stitched": "把主張裡不相鄰的兩截接了起來",
+    "stitched": "這段字不是主張裡的原話，而且沒有記字元位置可以查",
+    "component_not_from_spans": "摘要那句話，與它自己記的那幾段字元位置接不起來",
     "punctuation_variant": "只差在標點寫法",
     "punctuation_only": "教授確實說過這句話，只是存下來的字串在省略號或空白上不逐字",
     "misplaced": "引文在原件裡，但不在所記位置",
@@ -86,7 +90,7 @@ VERDICT_TEXT = {
     "absent": "引文不在這份原件裡",
     "no_excerpt": "這筆記錄根本沒有存引文，沒有東西可以核對",
     "no_source_file": "找不到這份原件",
-    "span_offsets_wrong": "字元位置框到的不是它宣稱的那段",
+    "span_offsets_wrong": "字元位置框到的，不是它說的那段字",
     "unresolvable_dependency": "引用指向的物件不在庫裡",
     "other": "其他",
 }
@@ -302,7 +306,16 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
             "verdict": _verdict(str(entry.get("verdict") or "other")),
             "reason": "",
             "evidence": [
-                _evidence("觀點引的那句", "statement_component", entry.get("component")),
+                _evidence("觀點指的那幾段", "statement_component", entry.get("component")),
+                _evidence(
+                    "接起來實際是",
+                    "canonical_spans",
+                    entry.get("spans_joined")
+                    or "；".join(
+                        f"記著「{s.get('expected')}」，位置上是「{s.get('at_offsets')}」"
+                        for s in entry.get("spans") or []
+                    ),
+                ),
                 _evidence("主張的原話", "claim.statement", entry.get("statement")),
                 _evidence("哪一條主張", "claim_id", entry.get("claim_id")),
             ],
