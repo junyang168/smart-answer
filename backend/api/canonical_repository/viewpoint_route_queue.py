@@ -162,6 +162,7 @@ class FileRouteResolutionQueue:
         route_policy_fingerprint_sha256: str | None = None,
         now: datetime | None = None,
         lease_seconds: int = 900,
+        retry_exceptions: bool = False,
     ) -> RouteResolutionWorkUnit | None:
         if lease_seconds < 1:
             raise ValueError("route queue lease must be positive")
@@ -194,6 +195,18 @@ class FileRouteResolutionQueue:
                 if state is None:
                     continue
                 if state["status"] == "queued":
+                    available.append(job)
+                    continue
+                # A job id is derived from its content, so the work that failed
+                # cannot be enqueued again -- re-deriving it yields the same id,
+                # already sitting in `exception`.  Twice now that has left a job
+                # that failed on a code defect with no way back after the defect
+                # was fixed, and the only escape was fabricating a receipt to
+                # move the id.  Retrying is not re-enqueuing: the job artifact
+                # stays immutable and only its state moves, which is what
+                # `attempt` has always been counting.  Off by default, so an
+                # ordinary worker pass still leaves failures alone.
+                if retry_exceptions and state["status"] == "exception":
                     available.append(job)
                     continue
                 if state["status"] == "running" and state.get("lease_expires_at"):
