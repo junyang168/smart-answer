@@ -54,6 +54,15 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 ## Viewpoint revision patch
 
+## 漏项（`novelty_review`）
+
+`novelty_review.status` 为 `missed_novelty` 时，`missed_claim_ids` 列出的每一条 Claim 都必须被答复——**即使这批一条 `correct` 都没有**。复核员说的是：这条 Claim 里有一个承重命题，proposal 的任何一个 component 都没有切出来。
+
+答法：对该 Claim 的某个 component 出一条 `finding_dispositions`（`accepted` 或 `rebutted`），并配一个 `component_patches`，把漏掉的那段切成成分。**接受之后，该 Claim 在 effective proposal 里必须至少有一个 `new_viewpoint` component**，否则批次停在
+`accepted novelty correction produced no new_viewpoint`。
+
+复核员的 `reason` 里通常已经写明漏掉的字符区间与建议的候选命题，照它切。若你确实不同意，用 `rebutted` 并说明理由——那会进 exception 交给人判，不会再问第二次。
+
 复核员对 `viewpoint_revisions` 的每条**非 `pass`** 判定（`correct`、`reject`、`defer`），都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
 
 **structure 与 relation 不只看 `decision`。** 复核员对它们各有一个结构化提问，答案为否**本身就是 finding**，即使 `decision` 写的是 `pass`：

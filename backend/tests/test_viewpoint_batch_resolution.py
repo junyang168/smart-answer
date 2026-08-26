@@ -5624,6 +5624,53 @@ def test_a_structure_finding_authorises_its_own_patch():
     assert effective.structures[0].central_synthesis == "按复核意见收窄后的中心综合。"
 
 
+def test_a_novelty_only_review_can_be_answered():
+    """matt16 psyche_life_meaning, 2026-08-26: 16 pass, 0 correct, 1 novelty.
+
+    Resolution required accepting a component finding on the named Claim, and a
+    review whose only finding is the novelty one has none to accept. The Claim
+    could not be resolved by construction, so every novelty-only review
+    escalated no matter what the proposer did.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReviewResponse,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal()
+    review = CanonicalViewpointReviewResponse.model_validate(
+        _review_for(proposal).model_dump(mode="json")
+        | {
+            "novelty_review": {
+                "status": "missed_novelty",
+                "missed_claim_ids": ["C1"],
+                "reason": "首段的承重命题没有被任何 component 切出。",
+            }
+        }
+    )
+    patched = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    patched["disposition"] = "new_viewpoint"
+    patched["target_viewpoint_revision_id"] = None
+    patched["local_new_viewpoint_key"] = "ROCK-NOT-PETER"
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [patched],
+            }],
+        ),
+        proposal=proposal,
+        review=review,
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["resolved_novelty_claim_ids"] == ["C1"]
+    assert report["unresolved_novelty_claim_ids"] == []
+    assert report["outcome"] == "resolved"
+
+
 def test_a_rejected_revision_is_answered_by_withdrawing_it():
     """matt16 part-6 batch-001, 2026-08-26: `reject` had no legal answer.
 

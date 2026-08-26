@@ -2347,6 +2347,16 @@ def apply_reconsideration_patches(
         for item in review.change_reviews
         if item.decision == "correct"
     }
+    # A novelty finding names a Claim whose proposition no component carries,
+    # so the patch surface is that Claim's components -- the same widening
+    # validate_reconsideration makes, and without it the patch answering the
+    # finding is refused as unconfined.
+    flagged |= {
+        (decision.claim_id, index)
+        for decision in proposal.claim_decisions
+        if decision.claim_id in set(review.novelty_review.missed_claim_ids)
+        for index in range(len(decision.components))
+    }
     accepted = {
         (item.claim_id, item.component_index)
         for item in reconsideration.finding_dispositions
@@ -2668,10 +2678,35 @@ def validate_reconsideration(
         for item in review.change_reviews
         if item.decision == "correct"
     }
+    # A novelty finding says a Claim's proposition was never cut into any
+    # component. Answering it means patching that Claim -- but resolution was
+    # keyed on accepting a component finding, and a review whose only finding is
+    # the novelty one has none to accept. The claim could not be resolved by
+    # construction, so every novelty-only review escalated no matter what the
+    # proposer did. Naming the Claim flags its components, which is the surface
+    # a patch has to work on.
+    novelty_flagged = {
+        (decision.claim_id, index)
+        for decision in proposal.claim_decisions
+        if decision.claim_id in set(review.novelty_review.missed_claim_ids)
+        for index in range(len(decision.components))
+    }
+    flagged |= novelty_flagged
     answered = {
         (item.claim_id, item.component_index) for item in reconsideration.finding_dispositions
     }
-    for missing in sorted(flagged - answered):
+    # A novelty finding is answered per Claim, not per component: the proposer
+    # patches whichever component carries the missed proposition, and the
+    # others stay as they were.
+    novelty_claims = {claim_id for claim_id, _ in novelty_flagged}
+    answered_novelty_claims = {
+        claim_id for claim_id, _ in answered if claim_id in novelty_claims
+    }
+    for missing in sorted(
+        item
+        for item in flagged - answered
+        if item not in novelty_flagged or item[0] not in answered_novelty_claims
+    ):
         findings.append(f"{missing[0]}#{missing[1]}: finding has no disposition")
     for extra in sorted(answered - flagged):
         findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
@@ -2775,11 +2810,7 @@ def validate_reconsideration(
     accepted_novelty_claim_ids = {
         claim_id
         for claim_id in review.novelty_review.missed_claim_ids
-        if any(
-            flagged_key in accepted
-            for flagged_key in flagged
-            if flagged_key[0] == claim_id
-        )
+        if any(key[0] == claim_id for key in accepted)
     }
     for claim_id in sorted(
         accepted_novelty_claim_ids - revised_new_viewpoint_claim_ids
