@@ -123,3 +123,30 @@ def test_an_unmoved_pin_is_left_exactly_as_it_is():
     )
     assert report["repinned"] == []
     assert report["unchanged_link_ids"] == ["VCL-1"]
+
+
+def test_review_fields_are_the_only_thing_a_pin_may_advance_over():
+    """The rule the scope packet leans on, stated once.
+
+    Both the claim link pin and the Claim manifest pin were invalidated by the
+    same review stamp, and both now ask this one question. Whatever a future
+    review learns to write must be added here deliberately -- a field that
+    quietly joins the exemption list is how "the Claim did not change" stops
+    being true.
+    """
+
+    from backend.api.canonical_repository.viewpoint_claim_repin import (
+        CLAIM_REVIEW_FIELDS,
+    )
+
+    assert CLAIM_REVIEW_FIELDS == {
+        "review_status",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "revision",
+    }
+    pinned = _claim(2)
+    current = _reviewed(3)
+    current["visibility"] = "public"
+    assert substantive_difference(pinned, current) == ["visibility"]

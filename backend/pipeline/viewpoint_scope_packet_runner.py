@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from dotenv import load_dotenv
 
@@ -37,6 +37,9 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     sha256_json,
 )
 from backend.api.canonical_repository.viewpoint_resolution import compile_review_claim
+from backend.api.canonical_repository.viewpoint_claim_repin import (
+    substantive_difference,
+)
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     IdentitySourceEligibilityArtifact,
 )
@@ -155,6 +158,27 @@ def route_registry_context(
     return sorted(context, key=lambda item: item["route_revision_id"])
 
 
+def _pinned_claim_payloads(
+    store: Any, wanted: Sequence[tuple[str, int]]
+) -> dict[tuple[str, int], dict[str, Any]]:
+    """Each Claim payload as it stood at the revision the manifest pinned."""
+
+    found: dict[tuple[str, int], dict[str, Any]] = {}
+    if not wanted:
+        return found
+    with store.connect() as conn, conn.cursor() as cursor:
+        for claim_id, revision in sorted(set(wanted)):
+            cursor.execute(
+                """SELECT payload FROM wang_knowledge.object_versions
+                   WHERE collection='claims' AND object_id=%s AND revision=%s""",
+                (claim_id, revision),
+            )
+            row = cursor.fetchone()
+            if row:
+                found[(claim_id, revision)] = row[0]
+    return found
+
+
 def build_scope_packet(
     *,
     scope: dict[str, Any],
@@ -222,8 +246,24 @@ def build_scope_packet(
         for fragment in fragment_index.values()
     }
 
+    # A Claim review moves every reviewed Claim's revision and fingerprint
+    # without altering a word it says, and the manifest pins both. On
+    # 2026-08-26 that took a 214-Claim scope from 190 resolvable to 2: the
+    # pipeline's own review stage had made the corpus unusable to the stage
+    # that consumes it. The pinned revision's payload is still in the version
+    # history, so a pin that moved for review metadata alone is a pin that
+    # still holds -- and anything else is still stale.
+    pinned_claim_payloads = _pinned_claim_payloads(
+        store,
+        [
+            (claim_id, int(manifest_rows[claim_id]["pinned_claim_revision"]))
+            for claim_id in in_scope
+            if claim_id in manifest_rows
+        ],
+    )
     review_claims = []
     blocked: list[dict[str, Any]] = []
+    advanced_review_pins: list[dict[str, Any]] = []
     for claim_id in in_scope:
         manifest_row = manifest_rows.get(claim_id)
         claim = claims.get(claim_id)
@@ -235,10 +275,28 @@ def build_scope_packet(
             blocked.append({"claim_id": claim_id, "reason_code": "missing_claim",
                             "detail": "Claim is not in the authoring store."})
             continue
-        if (
-            claim.revision != int(manifest_row["pinned_claim_revision"])
+        pinned_revision = int(manifest_row["pinned_claim_revision"])
+        pin_moved = (
+            claim.revision != pinned_revision
             or semantic_record_sha(claim) != manifest_row["claim_revision_sha256"]
-        ):
+        )
+        if pin_moved:
+            pinned_payload = pinned_claim_payloads.get((claim_id, pinned_revision))
+            differences = (
+                substantive_difference(pinned_payload, claim.model_dump(mode="json"))
+                if pinned_payload is not None
+                else ["<pinned revision is not in the version history>"]
+            )
+            if not differences:
+                pin_moved = False
+                advanced_review_pins.append(
+                    {
+                        "claim_id": claim_id,
+                        "manifest_pinned_claim_revision": pinned_revision,
+                        "store_claim_revision": claim.revision,
+                    }
+                )
+        if pin_moved:
             blocked.append({"claim_id": claim_id, "reason_code": "stale_claim_revision",
                             "detail": "Claim revision or SHA no longer matches the manifest."})
             continue
@@ -292,10 +350,15 @@ def build_scope_packet(
             store.list_records("argument_route_revisions"),
         ),
         "blocked_claims": blocked,
+        # Named, not silent: the manifest and the store disagree on these
+        # Claims' revisions, and the packet says so even though the difference
+        # is review metadata and the pin still holds.
+        "advanced_review_pins": advanced_review_pins,
         "statistics": {
             "scope_claim_count": len(in_scope),
             "resolvable_claim_count": len(review_claims),
             "blocked_claim_count": len(blocked),
+            "advanced_review_pin_count": len(advanced_review_pins),
         },
         "semantic_prefilter_applied": False,
         "model_calls_executed": 0,
