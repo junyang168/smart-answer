@@ -935,6 +935,25 @@ class IndependentModel:
                     parsed = json.loads(response.read().decode("utf-8"))
                 with self._lock:
                     self.calls += 1
+                blocked = (parsed.get("promptFeedback") or {}).get("blockReason")
+                if blocked:
+                    # 安全過濾器擋下了 prompt。這是決定性的，重試三次只是把同一
+                    # 個拒絕再要兩次。
+                    #
+                    # 它擋的是什麼值得記下來：擋掉的兩條是「離婚要按具體情況判
+                    # 斷」和「看見女性漂亮不等於心裡犯姦淫」——都是再平常不過的
+                    # 釋經。過濾器誤判的正好是牧養上最敏感的那些題目，所以這一
+                    # 類必須報成「沒有人也沒有機器看過」，不能算成一次網路失敗。
+                    verdict = {
+                        "verdict": "blocked",
+                        "issue": "other",
+                        "reason": f"審計模型的安全過濾器擋下了這一條（{blocked}），沒有判讀。",
+                    }
+                    if cached is not None:
+                        cached.write_text(
+                            json.dumps(verdict, ensure_ascii=False), encoding="utf-8"
+                        )
+                    return verdict
                 text = parsed["candidates"][0]["content"]["parts"][0]["text"]
                 verdict = json.loads(text)
                 if cached is not None:
@@ -1069,11 +1088,17 @@ def _paragraphs_for_fragments(
         source_file = sources.file_for(str(payload.get("source_id") or ""))
         if source_file is None:
             continue
+        # 兩種 paragraph_key 都要認得。`S0016` 是第 16 段，`417` 是 `index` 欄位
+        # 等於 417 的那一段——第 1 層一直是兩種都查的，這裡卻只查了第一種，於是
+        # 48 條主張送給模型時一段原文都沒帶。跟前一個 bug 同一類：這一層說它讀
+        # 原件，實際上沒讀到。
         segment = None
         key = str(payload.get("paragraph_key") or "")
         match = re.match(r"^S(\d+)$", key)
         if match:
             segment = source_file.by_ordinal(int(match.group(1)))
+        elif key:
+            segment = source_file.by_index(key)
         if segment is None and payload.get("source_segment_index") is not None:
             segment = source_file.by_index(payload["source_segment_index"])
         if segment is None:
@@ -1147,15 +1172,17 @@ def audit_claims(
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
+    blocked = [r for r in results if r.get("verdict") == "blocked"]
     return {
         "layer": 3,
         "name": "主張站得住",
         "complete": sample_size is None,
         "population": len(eligible),
         "sampled": len(results),
-        "judged": len(results) - len(errors),
+        "judged": len(results) - len(errors) - len(blocked),
         "disputed": len(disputed),
         "model_errors": len(errors),
+        "blocked": len(blocked),
         "review_status_mix": dict(status_mix),
         "results": results,
     }
@@ -1346,15 +1373,17 @@ def audit_viewpoints(
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
+    blocked = [r for r in results if r.get("verdict") == "blocked"]
     return {
         "layer": 4,
         "name": "觀點歸併對",
         "complete": sample_size is None,
         "population": len(candidates),
         "sampled": len(results),
-        "judged": len(results) - len(errors),
+        "judged": len(results) - len(errors) - len(blocked),
         "disputed": len(disputed),
         "model_errors": len(errors),
+        "blocked": len(blocked),
         "results": results,
     }
 
@@ -1449,6 +1478,13 @@ def build_human_queue(layers: dict[int, dict[str, Any]]) -> dict[str, Any]:
             "detail": "、".join(entry["unsupported_scripture_refs"]),
         })
     for entry in layers.get(3, {}).get("results", []):
+        if entry.get("verdict") == "blocked":
+            items.append({
+                "kind": "not_judged",
+                "object_id": entry["claim_id"],
+                "verdict": "blocked",
+                "detail": entry.get("reason", ""),
+            })
         if entry.get("verdict") == "disputed":
             items.append({
                 "kind": "claim_support",
@@ -1619,6 +1655,10 @@ def render_report(
                 lines.append(f"              {entry['reason'][:88]}")
         if layer["model_errors"]:
             lines.append(f"          模型呼叫失敗 {layer['model_errors']}")
+        if layer.get("blocked"):
+            lines.append(
+                f"          審計模型拒答 {layer['blocked']}   （安全過濾器擋下，這幾條沒有判讀）"
+            )
         lines.append("")
 
     if 4 in layers:
@@ -1638,6 +1678,10 @@ def render_report(
                 lines.append(f"              {entry['reason'][:88]}")
         if layer["model_errors"]:
             lines.append(f"          模型呼叫失敗 {layer['model_errors']}")
+        if layer.get("blocked"):
+            lines.append(
+                f"          審計模型拒答 {layer['blocked']}   （安全過濾器擋下，這幾條沒有判讀）"
+            )
         lines.append("")
 
     lines.append(f"人工佇列    {queue_size:,} 條待判斷")
