@@ -105,6 +105,7 @@
 | [思想与篇章审核工作台使用说明](./90-ops/reviewer_ui_guide.md) | 非技术同工怎样使用 `/admin/thought-review` |
 | [base-contract-coverage/](./90-ops/base-contract-coverage/README.md) | 基础契约覆盖率量测输出（由代码生成） |
 | [observation-argument-coverage/](./90-ops/observation-argument-coverage/README.md) | observation→argument 覆盖率量测输出（由代码生成） |
+| [library-audit/](./90-ops/library-audit/README.md) | 文库独立完整性与正确性审计：怎么跑、四层查什么、输出长什么样 |
 
 ## archive —— 已被取代或已结束
 
