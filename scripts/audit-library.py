@@ -1683,7 +1683,10 @@ def main(argv: list[str] | None = None) -> int:
         "--status-file",
         type=Path,
         default=None,
-        help="把跑到哪裡了寫進這個檔案，給網頁讀（不給就不寫）",
+        help="把跑到哪裡了寫進這個檔案。預設寫在報告目錄底下，網頁就是讀那一份",
+    )
+    parser.add_argument(
+        "--no-status-file", action="store_true", help="不要寫進度檔"
     )
     args = parser.parse_args(argv)
 
@@ -1696,7 +1699,17 @@ def main(argv: list[str] | None = None) -> int:
     if not data_base_dir.is_dir():
         raise SystemExit(f"DATA_BASE_DIR 不是目錄：{data_base_dir}")
 
-    progress = Progress(args.status_file)
+    reports_root = (
+        data_base_dir / "wang-knowledge-platform/staging/reports/library-audit"
+    )
+    # 預設就寫。從命令列跑的那一輪如果不寫，網頁上就看不出有東西在跑——而看不
+    # 出來的時候，人會以為它壞了，然後再按一次。
+    status_path = (
+        None
+        if args.no_status_file
+        else (args.status_file or reports_root / ".run-status.json")
+    )
+    progress = Progress(status_path)
     progress.update(
         state="running",
         pid=os.getpid(),
@@ -1785,9 +1798,7 @@ def main(argv: list[str] | None = None) -> int:
     report = render_report(layers, meta, len(queue["items"]))
 
     out_dir = args.out or (
-        data_base_dir
-        / "wang-knowledge-platform/staging/reports/library-audit"
-        / datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+        reports_root / datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "report.txt").write_text(report + "\n", encoding="utf-8")
