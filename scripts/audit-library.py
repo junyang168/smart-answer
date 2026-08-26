@@ -987,11 +987,39 @@ VIEWPOINT_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 
+class Progress:
+    """跑到哪裡了，寫成一個檔案給讀報告的人看。
+
+    這一輪要打一千四百次模型呼叫，十來分鐘。從網頁按下去之後，如果中間什麼都
+    不說，按的人只能猜它有沒有在動——而猜的結果通常是再按一次。
+
+    刻意寫檔案而不是回報給某個服務：審計不 import 任何 `backend/` 模組，這條
+    不因為多了一個進度條就放棄。誰想知道進度，自己讀這個檔案。
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self.path = path
+        self.state: dict[str, Any] = {}
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+    def update(self, **fields: Any) -> None:
+        if self.path is None:
+            return
+        self.state.update(fields)
+        self.state["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # 先寫暫存再換名：讀的人永遠讀到一份完整的 JSON，不會讀到寫到一半的。
+        temporary = self.path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.state, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(self.path)
+
+
 def _judge_all(
     rows: list[Any],
     judge: Any,
     workers: int,
     label: str,
+    progress: "Progress | None" = None,
 ) -> list[dict[str, Any]]:
     """把一批判讀跑完，順序與輸入一致，並在 stderr 報進度。
 
@@ -1003,6 +1031,9 @@ def _judge_all(
     done = 0
     lock = threading.Lock()
 
+    if progress is not None:
+        progress.update(stage=label, done=0, total=len(rows))
+
     def run(index: int) -> None:
         nonlocal done
         results[index] = judge(rows[index])
@@ -1010,6 +1041,8 @@ def _judge_all(
             done += 1
             if done % 25 == 0 or done == len(rows):
                 print(f"  {label} {done}/{len(rows)}", file=sys.stderr)
+                if progress is not None:
+                    progress.update(stage=label, done=done, total=len(rows))
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(run, range(len(rows))))
@@ -1060,6 +1093,7 @@ def audit_claims(
     sample_size: int | None,
     rng: random.Random,
     workers: int = 8,
+    progress: "Progress | None" = None,
 ) -> dict[str, Any]:
     """抽樣問一件確定性檢查問不出來的事：這條主張能不能從它引的證據推出來。"""
 
@@ -1109,7 +1143,7 @@ def audit_claims(
             **verdict,
         }
 
-    results = _judge_all(chosen, judge, workers, "主張")
+    results = _judge_all(chosen, judge, workers, "主張", progress)
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
@@ -1234,6 +1268,7 @@ def audit_viewpoints(
     sample_size: int | None,
     rng: random.Random,
     workers: int = 8,
+    progress: "Progress | None" = None,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1307,7 +1342,7 @@ def audit_viewpoints(
             **verdict,
         }
 
-    results = _judge_all(chosen, judge, workers, "觀點")
+    results = _judge_all(chosen, judge, workers, "觀點", progress)
 
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
@@ -1644,6 +1679,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
+    parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=None,
+        help="把跑到哪裡了寫進這個檔案，給網頁讀（不給就不寫）",
+    )
     args = parser.parse_args(argv)
 
     wanted = {int(x) for x in args.layers.split(",") if x.strip()}
@@ -1655,6 +1696,17 @@ def main(argv: list[str] | None = None) -> int:
     if not data_base_dir.is_dir():
         raise SystemExit(f"DATA_BASE_DIR 不是目錄：{data_base_dir}")
 
+    progress = Progress(args.status_file)
+    progress.update(
+        state="running",
+        pid=os.getpid(),
+        started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        stage="讀取",
+        done=0,
+        total=0,
+        scope=args.scope,
+        model=args.model,
+    )
     store = Store(database_url)
     documents = store.collection("source_documents")
     in_scope: set[str] | None = None
@@ -1688,9 +1740,11 @@ def main(argv: list[str] | None = None) -> int:
     layers: dict[int, dict[str, Any]] = {}
     if 1 in wanted:
         print("第 1 層 逐字對得上 …", file=sys.stderr)
+        progress.update(stage="逐字對得上", done=0, total=0)
         layers[1] = audit_verbatim(store, sources)
     if 2 in wanted:
         print("第 2 層 覆蓋誠實 …", file=sys.stderr)
+        progress.update(stage="覆蓋誠實", done=0, total=0)
         layers[2] = audit_coverage(store, sources)
     claim_limit = None if args.claims == "all" else int(args.claims)
     viewpoint_limit = None if args.viewpoints == "all" else int(args.viewpoints)
@@ -1699,13 +1753,17 @@ def main(argv: list[str] | None = None) -> int:
             f"第 3 層 主張（{'全查' if claim_limit is None else f'抽 {claim_limit} 條'}）…",
             file=sys.stderr,
         )
-        layers[3] = audit_claims(store, sources, model, claim_limit, rng, args.workers)
+        layers[3] = audit_claims(
+            store, sources, model, claim_limit, rng, args.workers, progress
+        )
     if 4 in wanted and model is not None:
         print(
             f"第 4 層 觀點（{'全查' if viewpoint_limit is None else f'抽 {viewpoint_limit} 個'}）…",
             file=sys.stderr,
         )
-        layers[4] = audit_viewpoints(store, sources, model, viewpoint_limit, rng, args.workers)
+        layers[4] = audit_viewpoints(
+            store, sources, model, viewpoint_limit, rng, args.workers, progress
+        )
 
     meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -1745,6 +1803,13 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(queue, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    progress.update(
+        state="finished",
+        stage="完成",
+        run_id=out_dir.name,
+        run_dir=str(out_dir),
+        finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
     print(report)
     print(f"\n輸出：{out_dir}")
     return 0
