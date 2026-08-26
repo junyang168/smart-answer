@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 from backend.api.canonical_repository.postgres_store import (
     ChangeSetConflict,
     PostgresKnowledgeStore,
-    combined_plan,
     record_content_sha,
 )
 from backend.api.canonical_repository.viewpoint_batch_resolution import RouteResolutionWorkUnit
@@ -280,35 +279,29 @@ def process_work_unit(
         decided_at=_stable_decided_at(output_dir),
     )
     _write_immutable(output_dir / "route-change-package.json", package)
-    plan = store.plan_package(package, source_kind="argument_route_resolution")
+    # Revising a route strands the attestations pinned to the revision it
+    # replaces: the projection rejects an attestation whose route revision is
+    # not current. They are immutable, so they are withdrawn rather than edited,
+    # and in the same change set as the revision that stranded them -- both
+    # because two change sets leave a window where the store holds both or
+    # neither, and because the validator inside plan_package would otherwise
+    # refuse the package for a state neither half intends to leave behind.
     superseded = set(package.get("superseded_route_revision_ids") or [])
-    if superseded:
-        # Revising a route strands the attestations pinned to the revision it
-        # replaces: the projection rejects an attestation whose route revision
-        # is not current. They are immutable, so they are withdrawn rather than
-        # edited, and in the same change set as the revision that stranded them
-        # -- two change sets would leave a window where the store holds both or
-        # neither, with nothing to say which.
-        stale = [
-            ("argument_route_attestations", str(item["argument_route_attestation_id"]))
-            for item in store.list_records("argument_route_attestations")
-            if str(item.get("validated_against_route_revision_id")) in superseded
-            and str(item["argument_route_attestation_id"])
-            not in {
-                str(row["argument_route_attestation_id"])
-                for row in package.get("argument_route_attestations") or []
-            }
-        ]
-        if stale:
-            plan = combined_plan(
-                plan,
-                store.plan_retirement(
-                    stale,
-                    reason="route revision superseded by a reviewed correction",
-                    package_id=str(package.get("package_id") or plan.package_id),
-                    source_kind="argument_route_resolution",
-                ),
-            )
+    keeping = {
+        str(row["argument_route_attestation_id"])
+        for row in package.get("argument_route_attestations") or []
+    }
+    stale = [
+        ("argument_route_attestations", str(item["argument_route_attestation_id"]))
+        for item in store.list_records("argument_route_attestations")
+        if str(item.get("validated_against_route_revision_id")) in superseded
+        and str(item["argument_route_attestation_id"]) not in keeping
+    ] if superseded else []
+    plan = store.plan_package(
+        package,
+        source_kind="argument_route_resolution",
+        retiring_keys=stale,
+    )
     plan_document = plan.as_dict() | {
         "schema_version": "wang_argument_route_changeset_plan_v2",
         "apply_allowed": apply,

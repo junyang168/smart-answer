@@ -1007,7 +1007,23 @@ class PostgresKnowledgeStore:
             for row in rows
         }
 
-    def plan_package(self, package: Mapping[str, Any], *, source_kind: str = "knowledge_package") -> ChangeSetPlan:
+    def plan_package(
+        self,
+        package: Mapping[str, Any],
+        *,
+        source_kind: str = "knowledge_package",
+        retiring_keys: Sequence[tuple[str, str]] = (),
+    ) -> ChangeSetPlan:
+        """Plan one package, optionally withdrawing records it makes obsolete.
+
+        `retiring_keys` is not a convenience for issuing two change sets. The
+        cross-record validator runs inside this call against package plus store,
+        so a record the package strands -- an attestation whose route revision
+        the package supersedes -- has to be gone from that picture, or the
+        package is refused for a state neither half intends to leave behind.
+        Retiring afterwards is too late: nothing was ever planned.
+        """
+
         normalized = normalize_package(package)
         keys = [
             (collection, object_id)
@@ -1026,7 +1042,23 @@ class PostgresKnowledgeStore:
                 existing.update(
                     self._existing_collections(conn, VIEWPOINT_VALIDATION_COLLECTIONS)
                 )
-        return build_change_set_plan(package, existing, source_kind=source_kind)
+            withdrawal = (
+                build_retirement_plan(
+                    list(retiring_keys),
+                    self._existing(conn, list(retiring_keys)),
+                    reason="superseded by the package planned in the same change set",
+                    package_id=str(package.get("package_id") or ""),
+                    source_kind=source_kind,
+                )
+                if retiring_keys
+                else None
+            )
+        arrival = build_change_set_plan(
+            package,
+            {key: row for key, row in existing.items() if key not in set(retiring_keys)},
+            source_kind=source_kind,
+        )
+        return combined_plan(arrival, withdrawal) if withdrawal else arrival
 
     def plan_retirement(
         self, keys: Sequence[tuple[str, str]], *, reason: str, package_id: str,

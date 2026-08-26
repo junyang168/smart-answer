@@ -1198,6 +1198,33 @@ def _route_findings(
             for fragment_id in binding.source_fragment_ids:
                 if fragment_id not in allowed_fragments:
                     findings.append(f"{where}: SourceFragment {fragment_id} is outside this source")
+            # Same-source is not close enough: a fragment has to belong to one
+            # of the EvidenceSteps this binding names, which is what the runtime
+            # projection requires. Checking only the source here let a binding
+            # that quoted a neighbouring step's fragment pass deterministic
+            # validation and die at the store, where the finding arrives as a
+            # failed write instead of something the review round can correct.
+            selected = set(binding.source_fragment_ids)
+            union: set[str] = set()
+            for step_id in binding.evidence_step_ids:
+                fragments_of_step = {
+                    pair.source_fragment_id
+                    for claim in claims
+                    if claim.source_id == attestation.source_id
+                    for pair in claim.evidence
+                    if pair.evidence_step_id == step_id
+                }
+                union |= fragments_of_step
+                if fragments_of_step and not selected & fragments_of_step:
+                    findings.append(
+                        f"{where}: step {binding.route_step_key} names EvidenceStep "
+                        f"{step_id} but binds none of its SourceFragments"
+                    )
+            if union and not selected <= union:
+                findings.append(
+                    f"{where}: step {binding.route_step_key} binds SourceFragments "
+                    "outside the EvidenceSteps it names"
+                )
             for component_key_value in binding.claim_component_keys:
                 component = component_bindings.get(component_key_value)
                 if component is None:
