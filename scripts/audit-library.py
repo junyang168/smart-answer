@@ -1162,11 +1162,7 @@ def _paragraphs_for_fragments(
     sources: SourceIndex,
     limit: int = 6,
 ) -> list[str]:
-    """片段所指的那幾段**原文**，從磁碟上現讀。
-
-    刻意不用片段存下來的 `verbatim_excerpt`：那是流水線挑出來的一句，正好是要被
-    審的東西。模型要看的是教授在那一段裡整段說了什麼。
-    """
+    """片段所指的那幾段原文，前後各帶一段。第 4 層還在用這個窄視窗。"""
 
     seen: list[str] = []
     for fragment_id in fragment_ids:
@@ -1176,30 +1172,9 @@ def _paragraphs_for_fragments(
         source_file = sources.file_for(str(payload.get("source_id") or ""))
         if source_file is None:
             continue
-        # 兩種 paragraph_key 都要認得。`S0016` 是第 16 段，`417` 是 `index` 欄位
-        # 等於 417 的那一段——第 1 層一直是兩種都查的，這裡卻只查了第一種，於是
-        # 48 條主張送給模型時一段原文都沒帶。跟前一個 bug 同一類：這一層說它讀
-        # 原件，實際上沒讀到。
-        segment = None
-        key = str(payload.get("paragraph_key") or "")
-        match = re.match(r"^S(\d+)$", key)
-        if match:
-            segment = source_file.by_ordinal(int(match.group(1)))
-        elif key:
-            segment = source_file.by_index(key)
-        if segment is None and payload.get("source_segment_index") is not None:
-            segment = source_file.by_index(payload["source_segment_index"])
+        segment = _segment_for(source_file, payload)
         if segment is None:
             continue
-        # 連前一段一起送。
-        #
-        # 口語講道的論證會跨段：錨點常常落在結論那一句上，而理由在上一段。
-        # CL-0027 就是這樣——錨點指著「馬太說過了六天…在猶太的觀念裡面完全一
-        # 樣」，而「禮拜五一部分的時間就是一天，禮拜六整天就是一天」這個算法
-        # 在前一段，模型看不到，於是把講過的東西判成「證據裡沒有這件事」。
-        #
-        # 只往前一段，不往後：講員先講理由再下結論的次序，比反過來常見得多，
-        # 而每多送一段就多一分被過濾器擋下的機會。
         ordinal = source_file.ordinal_of(segment)
         window = []
         if ordinal is not None and ordinal > 1:
@@ -1213,6 +1188,67 @@ def _paragraphs_for_fragments(
         if len(seen) >= limit:
             break
     return seen
+
+
+def _segment_for(source_file: SourceFile, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """片段記的位置，兩種寫法都認得。"""
+
+    key = str(payload.get("paragraph_key") or "")
+    match = re.match(r"^S(\d+)$", key)
+    segment = None
+    if match:
+        segment = source_file.by_ordinal(int(match.group(1)))
+    elif key:
+        segment = source_file.by_index(key)
+    if segment is None and payload.get("source_segment_index") is not None:
+        segment = source_file.by_index(payload["source_segment_index"])
+    return segment
+
+
+def _whole_sources_for_claim(
+    fragment_ids: Iterable[str],
+    fragments: dict[str, dict[str, Any]],
+    sources: SourceIndex,
+) -> tuple[list[str], list[str]]:
+    """整篇來源，外加錨點落在哪幾段。
+
+    窄視窗是這一路假陽性的最後一個來源，而且是最大的一個：18 條異議裡有 12
+    條，模型說「原文沒提到」的字就在同一篇逐字稿裡，只是不在送去的那兩段。
+    量出來的例子——「護照」在原文裡，模型說「完全沒有提及護照與主權的類比」；
+    「遷入」三次、「愛子的國」四次、「Strong」兩次、「字典」九次，全是這樣。
+    
+    原因不是視窗開得不夠大，是視窗這個做法本身錯了：一條主張概括的是教授在
+    整篇裡鋪的一段論證，錨點只標了其中一句。講道八千到兩萬八千字，整篇送得
+    起，那就整篇送——讓模型自己在裡面找，而不是我替它挑，然後把挑漏的算成文
+    庫的問題。
+
+    錨點仍然標出來，因為「證據指著哪一句」本身是要判的東西之一。
+    """
+
+    texts: list[str] = []
+    anchors: list[str] = []
+    seen_sources: set[str] = set()
+    for fragment_id in fragment_ids:
+        payload = fragments.get(fragment_id)
+        if payload is None:
+            continue
+        source_id = str(payload.get("source_id") or "")
+        source_file = sources.file_for(source_id)
+        if source_file is None:
+            continue
+        if source_id not in seen_sources:
+            seen_sources.add(source_id)
+            title = str(sources.documents.get(source_id, {}).get("title") or source_id)
+            body = "\n\n".join(
+                live_text(segment.get("text", "")).strip()
+                for segment in source_file.segments
+                if live_text(segment.get("text", "")).strip()
+            )
+            texts.append(f"《{title}》\n{body}")
+        excerpt = str(payload.get("verbatim_excerpt") or "").strip()
+        if excerpt and excerpt not in anchors:
+            anchors.append(excerpt)
+    return texts, anchors
 
 
 def audit_claims(
@@ -1273,7 +1309,7 @@ def audit_claims(
                 f"{str(step.get('statement') or '').strip()}"
             )
             fragment_ids.extend(_step_fragment_ids(step))
-        paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources)
+        paragraphs, anchors = _whole_sources_for_claim(fragment_ids, fragments, sources)
         if not paragraphs:
             # 拿不到一段原文就不要問模型。
             #
@@ -1296,7 +1332,7 @@ def audit_claims(
             }
         verdict, used = _judge_trimming_on_block(
             model,
-            lambda kept: _claim_prompt(row["object_id"], payload, evidence_lines, kept),
+            lambda kept: _claim_prompt(row["object_id"], payload, evidence_lines, kept, anchors),
             paragraphs,
             CLAIM_SCHEMA,
         )
@@ -1394,9 +1430,15 @@ def _claim_evidence_ids(payload: dict[str, Any]) -> list[str]:
 
 
 def _claim_prompt(
-    claim_id: str, payload: dict[str, Any], evidence_lines: list[str], paragraphs: list[str]
+    claim_id: str,
+    payload: dict[str, Any],
+    evidence_lines: list[str],
+    paragraphs: list[str],
+    anchors: list[str] | None = None,
 ) -> str:
-    source_block = "\n\n".join(f"【原文】{p}" for p in paragraphs) or "（沒有可讀的原文段落）"
+    source_block = "\n\n".join(f"【逐字稿全文】{p}" for p in paragraphs) or "（沒有可讀的原文段落）"
+    if anchors:
+        source_block += "\n\n【證據錨在原文的這幾句】\n" + "\n".join(f"· {a}" for a in anchors[:12])
     return f"""你在審計一個講道知識庫。庫裡的每一條「主張」都聲稱是從下面列出的「證據步驟」推出來的，而證據步驟又錨定在講員的逐字稿原文上。
 
 你的任務只有一件：**判斷這條主張能不能從這些證據推出來。**
@@ -1419,8 +1461,10 @@ def _claim_prompt(
 證據步驟：
 {chr(10).join(evidence_lines) or '（沒有列出證據步驟）'}
 
-證據所錨定的逐字稿原文：
+教授在這篇裡說的全部話（證據錨在其中哪幾句，列在最後）：
 {source_block}
+
+注意：判斷「證據撐不撐得住」時，要看**整篇逐字稿**，不要只看錨點那一句。教授常常先鋪理由、後下結論，理由可能出現在錨點之前或之後很遠的地方。只有整篇裡都找不到，才算證據裡沒有。
 
 ---
 
