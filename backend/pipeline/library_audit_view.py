@@ -49,6 +49,24 @@ FOLLOWUP_GROUPS: dict[str, dict[str, Any]] = {
         ),
         "needs_human": True,
     },
+    "struck_evidence": {
+        "title": "證據落在校對者劃掉的文字裡",
+        "note": (
+            "教授說過這句話，後來在校對時被劃掉了。三份逐字稿被劃掉的比例是 23%、41%、43%，"
+            "刪的不是錯字是整段內容。要決定的是改主張還是恢復那段話。"
+        ),
+        "needs_human": True,
+    },
+    "retired_evidence": {
+        "title": "主張引的證據步驟已退役",
+        "note": "那幾條證據步驟已經被新版取代，主張還指著舊的。重新指過去就好。",
+        "needs_human": False,
+    },
+    "no_source_text": {
+        "title": "取不到逐字稿，沒有送去判讀",
+        "note": "這些主張引的片段沒有記位置，取不到原文。是資料的缺口，不是主張站不住。",
+        "needs_human": False,
+    },
     "component_locator": {
         "title": "觀點（CanonicalViewpoint）指的那幾段字，在主張裡對不上",
         "note": (
@@ -77,6 +95,9 @@ GROUP_ORDER = [
     "not_judged",
     "claim_support",
     "viewpoint_identity",
+    "struck_evidence",
+    "retired_evidence",
+    "no_source_text",
     "component_locator",
     "fragment_anchor",
     "dangling_reference",
@@ -112,6 +133,11 @@ VERDICT_TEXT = {
     "span_offsets_wrong": "字元位置框到的，不是它說的那段字",
     "unresolvable_dependency": "引用指向的物件不在庫裡",
     "blocked": "審計模型的安全過濾器擋下了這一條，沒有判讀",
+    "some_evidence_struck": "一部分引文只存在於劃掉的文字裡",
+    "all_evidence_struck": "它引的每一句都只存在於劃掉的文字裡",
+    "some_evidence_retired": "一部分證據步驟已被新版取代",
+    "all_evidence_retired": "它引的證據步驟全部已被新版取代",
+    "no_source_text": "片段沒記位置，取不到逐字稿",
     "other": "其他",
 }
 
@@ -313,6 +339,15 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
     items: dict[str, list[dict[str, Any]]] = {key: [] for key in GROUP_ORDER}
 
     for entry in (layers.get("3") or {}).get("results", []):
+        if entry.get("verdict") == "no_source_text":
+            items["no_source_text"].append({
+                "object_id": entry["claim_id"],
+                "collection": "claims",
+                "verdict": _verdict("no_source_text"),
+                "reason": entry.get("reason", ""),
+                "evidence": [_evidence("主張原文", "statement", entry.get("statement"))],
+            })
+            continue
         if entry.get("verdict") == "blocked":
             items["not_judged"].append({
                 "object_id": entry["claim_id"],
@@ -372,6 +407,36 @@ def _followups(layers: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     second = layers.get("2") or {}
+    for entry in second.get("struck_evidence_findings", []):
+        items["struck_evidence"].append({
+            "object_id": entry["object_id"],
+            "collection": "claims",
+            "verdict": _verdict(entry["verdict"]),
+            "reason": "",
+            "evidence": [
+                _evidence("主張原文", "statement", entry.get("statement")),
+                _evidence(
+                    "被劃掉的引文",
+                    "struck_fragment_ids",
+                    "、".join(entry.get("struck_fragment_ids") or []),
+                ),
+            ],
+        })
+    for entry in second.get("retired_evidence_findings", []):
+        items["retired_evidence"].append({
+            "object_id": entry["object_id"],
+            "collection": "claims",
+            "verdict": _verdict(entry["verdict"]),
+            "reason": "",
+            "evidence": [
+                _evidence("主張原文", "statement", entry.get("statement")),
+                _evidence(
+                    "已退役的證據步驟",
+                    "retired_step_ids",
+                    "、".join(entry.get("retired_step_ids") or []),
+                ),
+            ],
+        })
     for entry in second.get("component_locator_findings", []):
         items["component_locator"].append({
             "object_id": entry["object_id"],
