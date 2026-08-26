@@ -1,11 +1,27 @@
 # Wang Knowledge Platform session boundary
 
-When the task concerns Matthew exposition articles or Wang repository content production, `docs/wang-knowledge-platform/` is authoritative. Read these files before acting:
+When the task concerns Matthew exposition articles or Wang repository content
+production, `docs/wang-knowledge-platform/` is authoritative.
 
-1. `docs/wang-knowledge-platform/30-authoring/CURRENT_AUTHORING_SESSION.md`
-2. `docs/wang-knowledge-platform/30-authoring/matthew_exposition_multi_agent_authoring_workflow_v1.md`
-3. `docs/wang-knowledge-platform/30-authoring/fast_passage_editorial_workflow_v1.md`
-4. `docs/wang-knowledge-platform/20-knowledge/canonical_viewpoint_design.md`
+**Read these two first, whatever the task.** They are short, and they carry the
+boundaries every other document assumes:
+
+1. `docs/wang-knowledge-platform/00-overview/project_mission_statement.md` — why this
+   work exists, and what it will not do. The lines that cannot be traded are here:
+   nothing added and nothing removed from what he taught, editorial synthesis never
+   passed off as his words, no question he did not answer filled in by the system, and
+   no theological judgement — the platform records what he taught, it does not rule on
+   whether he was right.
+2. `docs/wang-knowledge-platform/00-overview/solution_architecture.md` — the five
+   architecture decisions, the constraints that can veto a design, and what Phase 1 is.
+   A proposal that contradicts one of these is wrong before it is evaluated.
+
+Then, for content production, read:
+
+3. `docs/wang-knowledge-platform/30-authoring/CURRENT_AUTHORING_SESSION.md`
+4. `docs/wang-knowledge-platform/30-authoring/matthew_exposition_multi_agent_authoring_workflow_v1.md`
+5. `docs/wang-knowledge-platform/30-authoring/fast_passage_editorial_workflow_v1.md`
+6. `docs/wang-knowledge-platform/20-knowledge/canonical_viewpoint_design.md`
 
 Before writing or editing anything under `docs/wang-knowledge-platform/`, read
 `docs/wang-knowledge-platform/CONVENTIONS.md` and run `python3 scripts/check-docs.py docs`

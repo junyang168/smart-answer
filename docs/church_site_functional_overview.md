@@ -55,7 +55,7 @@ Current resource modules:
 
 - Sermon Center
 - Sermon Series
-- 王守仁教授釋經與專題講論文庫
+- 王守仁教授聖經講論文庫
 - Full Articles
 - Fellowship Study Reviews
 - Q&A

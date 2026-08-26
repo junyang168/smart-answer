@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "王守仁教授釋經與專題講論文庫",
+  title: "王守仁教授聖經講論文庫",
   description:
-    "按聖經經卷與講論專題，整理王守仁教授在不同時期、不同場合的釋經內容。",
+    "整理王守仁教授在不同時期、不同場合的聖經講論，按經卷與專題編排。",
 };
 
 export default function WangRepositoryLayout({
