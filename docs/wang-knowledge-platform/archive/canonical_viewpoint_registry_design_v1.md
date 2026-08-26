@@ -1,5 +1,9 @@
 # Canonical Viewpoint Registry 与跨讲论证路径设计 v1
 
+> **狀態**：已被 [CanonicalViewpoint 设计](../20-knowledge/canonical_viewpoint_design.md) 取代（2026-08-26）。保留供审计：本文 2,676 行中有 16 处自称「非规范／历史／已退役」，四整节是废弃流程，另有已停用的召回机制（规则 blocking、SemanticSignature、RecallGraph、lossless union）与被否决的逐条解析路线。新文档只保留仍然生效的部分。
+> **類型**：記錄
+> **與代碼對齊**：不適用
+
 > **读者**：Solution architect
 > **类型**：规范
 > **状态**：当前（AGENTS.md 必读）
@@ -1601,7 +1605,7 @@ Route A 与 Route B 指向同一个候选结论，却具有不同 required premi
 
 ## 9. 机械不变量
 
-本层继承而不重写 extraction layer 的质量事实。详细抽取仍按 [detailed knowledge extraction workflow](./10-extraction/detailed_knowledge_extraction_workflow_v1.md) 以源文本为完整性分母，保存逐字 anchor、sentence audit、speaker/stance 与审核 provenance；跨讲关系仍按 [cross-sermon relation workflow](./20-knowledge/cross_sermon_relation_workflow_v1.md) 要求每个候选进入关系判断或明确 unassigned。Viewpoint registry 不得因为自己的 identity review 通过，就把上游 candidate Claim、未批准 exclusion 或无效 anchor 升级为可公开事实。
+本层继承而不重写 extraction layer 的质量事实。详细抽取仍按 [detailed knowledge extraction workflow](../10-extraction/detailed_knowledge_extraction_workflow_v1.md) 以源文本为完整性分母，保存逐字 anchor、sentence audit、speaker/stance 与审核 provenance；跨讲关系仍按 [cross-sermon relation workflow](../20-knowledge/cross_sermon_relation_workflow_v1.md) 要求每个候选进入关系判断或明确 unassigned。Viewpoint registry 不得因为自己的 identity review 通过，就把上游 candidate Claim、未批准 exclusion 或无效 anchor 升级为可公开事实。
 
 因此系统有两个不可互相替代的完整性账本：
 

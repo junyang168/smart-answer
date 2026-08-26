@@ -113,7 +113,7 @@ flowchart TD
     CVP --> QA
 ```
 
-三个 component 的内部细节见[知识库详细设计](./knowledge_platform_design.md)与 [Canonical Viewpoint Registry 设计](../canonical_viewpoint_registry_design_v1.md)。
+三个 component 的内部细节见[知识库详细设计](./knowledge_platform_design.md)与 [Canonical Viewpoint Registry 设计](../20-knowledge/canonical_viewpoint_design.md)。
 
 ### 知识库依赖它不拥有的文件
 
@@ -241,7 +241,7 @@ flowchart TD
 - [Project Mission Statement](./project_mission_statement.md)——本计划为什么存在，忠实与署名的底线
 - [知识库详细设计](./knowledge_platform_design.md)——知识对象、双轴组织、问答设计、审核机制
 - [共享知识模型](./shared_knowledge_model_v1.md)——对象的意义与边界
-- [Canonical Viewpoint Registry 设计](../canonical_viewpoint_registry_design_v1.md)——跨讲身份层的架构权威
+- [Canonical Viewpoint Registry 设计](../20-knowledge/canonical_viewpoint_design.md)——跨讲身份层的架构权威
 
 ## 关于本文档
 

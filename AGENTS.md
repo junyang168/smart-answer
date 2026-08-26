@@ -5,7 +5,7 @@ When the task concerns Matthew exposition articles or Wang repository content pr
 1. `docs/wang-knowledge-platform/30-authoring/CURRENT_AUTHORING_SESSION.md`
 2. `docs/wang-knowledge-platform/30-authoring/matthew_exposition_multi_agent_authoring_workflow_v1.md`
 3. `docs/wang-knowledge-platform/30-authoring/fast_passage_editorial_workflow_v1.md`
-4. `docs/wang-knowledge-platform/canonical_viewpoint_registry_design_v1.md`
+4. `docs/wang-knowledge-platform/20-knowledge/canonical_viewpoint_design.md`
 
 The Canonical Viewpoint specification governs cross-sermon viewpoint identity,
 argument routes, coverage disclosure and downstream article/QA/search use. Read
