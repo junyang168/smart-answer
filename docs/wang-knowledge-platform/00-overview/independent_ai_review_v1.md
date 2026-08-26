@@ -66,7 +66,7 @@ Claude 逐条检查：
 
 | 状态 | 含义 | 后续动作 |
 |---|---|---|
-| `ai_reviewed` | Claude 未发现来源忠实度问题 | 保持 candidate，可进入内部综合 |
+| `ai_reviewed` | Claude 未发现来源忠实度问题 | 写入 `review_status=ai_consensus_reviewed` 并记一条 `reviewer_kind='ai'` 的 review event，可进入内部综合 |
 | `human_spot_check` | Claude 判定 pass，但被随机抽样 | 进人工队列，核对 AI 复审本身是否可靠 |
 | `auto_applied` | OpenAI 重新核对来源后接受 Claude 意见 | 写入版本化 override，并重建共享知识包 |
 | `withdrawn` | OpenAI 拒绝，Claude 看过反驳后撤回 | 不修改原候选，不转人工 |
@@ -82,6 +82,25 @@ Claude 逐条检查：
 OpenAI 不得盲目接受 Claude。它看到完整逐字稿、候选主张、锚点和 Claude 理由，逐条给出 `accept/reject`。`accept` 必须给出可执行的有界补丁；`reject` 不得夹带修改。忠实度仲裁不得借机改变“释经／专题／方法”等产品路由，除非原问题明确是 `route_error`。
 
 任何结果都写入 `approval_status=not_human_approved`。这里的“无需人工审阅”是指：双方一致的来源忠实度补丁可直接写入候选层，不再逐条排队等待同工确认；它不表示 AI 可以自行通过产品出版闸门。双方一致授权的是修正候选数据，不是人工批准、神学认可或自动公开发布。
+
+### 复审通过的 claim 不再留在 `candidate`
+
+本文原先写「保持 candidate」，本意是「不等于人工批准」。但这两件事不一样：`candidate` 说的是**没人审过**，而这些 claim 审过了。照字面执行的结果是复审结论一条都没有进库——`review_events` 一共 28 行、全部 `reviewer_kind='human'`，1,551 条 claim 停在 `candidate`，而磁盘上的复审产物里 1,530 条各有一条自己的裁定（#243）。于是任何按 `review_status` 圈范围的问题——什么已批准、什么还要人看、人工队列有多宽——答案都只能取自人工碰巧手批过的那 6 条。
+
+现在按裁定回写，沿用跨讲关系一直在用的两个词（`shared_knowledge_pilot._apply_claim_relation_review`）：
+
+| 复审裁定 | `review_status` |
+| --- | --- |
+| `pass` | `ai_consensus_reviewed` |
+| `changes_suggested` | `human_review_required` |
+| `human_review_required` | `human_review_required` |
+| 没有裁定 | 留在 `candidate`，不猜 |
+
+`changes_suggested` 归到人工那一侧是有意的：复审要求改这条 claim，而仲裁那一轮改没改，产物里没记。把它读成「审过了、就这样挺好」等于拿一条说反话的裁定去批准 86 条。
+
+**`approved` 与 `human_approved` 不在这张表里**，一个都不会由这条路径写出。AI 复审通过不是人工批准——这条不能破，破了就是把 [#219](https://github.com/junyang168/smart-answer/issues/219)（观点层以 `system_approved` 写入却无人审核）换个层再来一次。
+
+回写方式与幂等性见[下一节](#六代码与运行)的 `sync-ai-review`。
 
 ## 四、自动补丁与历史保留
 
@@ -131,6 +150,15 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.shared_knowledge_pilot
 ```
+
+把复审裁定回写到 authoring store。默认只预览，`--apply` 才写：
+
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.knowledge_store_runner sync-ai-review
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.knowledge_store_runner sync-ai-review --apply
+```
+
+它扫描产物目录里带 `claim_reviews` 的档案，同一条 claim 有多份裁定时取最新的那份（按档案 mtime，所以重跑复审是覆盖而不是抢跑）。每条写入都经 `record_review`，`reason` 里带产物档名与 SHA，所以库里的一个状态追得回是哪份档案让它变成那样。已经在目标状态的跳过，因此再跑一次不会产生新事件。人已经决定过的（`approved`／`human_approved`／`superseded`）一律不动。
 
 默认使用 `gpt-5.6-sol` medium 仲裁、`claude-sonnet-5` 复审／再审。Sonnet 5 调用不发送旧版 temperature 与 disabled-thinking 参数，使用模型默认 adaptive thinking；复审 runner 的输出预算为 32,000 tokens，因为 thinking 与最终 JSON 共用 `max_tokens`，旧的 10,000 上限会在模型输出 JSON 前耗尽。
 
