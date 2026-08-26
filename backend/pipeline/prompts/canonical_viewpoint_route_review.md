@@ -12,7 +12,8 @@
 
 - conclusion 是否由该有序骨架支持；是否把同段共现夸大成推理；
 - 承重 premise/bridge/objection-response 是否遗漏；node role 和 method codes 是否忠实；
-- match_existing 是否基于 materially equivalent ordered skeleton，而非 label、method code 或自由文本 discourse_role；
+- match_existing 是否基于 materially equivalent ordered skeleton，而非 label、method code 或自由文本 discourse_role；骨架需要改正时，正确的动作是 `revise_existing`（同一条路线的新 revision），不是让它按原样 match_existing，也不是为同一结论 create_new 一条并列路线——后者正是 false split；
+- 结论边界与骨架是否相称：结论所覆盖的每一处经文都要有承重节点。只走到其中一处而结论覆盖两处的，要求 `revise_existing` 补上承重节点，并指明该节点可由哪一来源的哪些 EvidenceStep 绑定；
 - 同结论的不同理由是否 false-merge，同路线的措辞变体是否 false-split；
 - attestation 是否严格 source-local，component/Evidence/Fragment 是否真支持该 node；
 - full 是否覆盖所有 required nodes；terminal component 必须有指向该 conclusion 的正向 active Registry link，并且其原文确实说出了 conclusion。`support / extends / qualifies / applies` 只说明有关联，不自动等于结论；若原文只说“不是彼得一人”却把路线结论写成“完全不是彼得本人”，必须 correct/reject，而不能因 link target 相同就 pass；

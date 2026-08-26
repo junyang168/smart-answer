@@ -66,7 +66,8 @@ C1              conclusion    → 指向某个已定结论
 
 `proposed_action`：
 
-- `match_existing` —— 跟输入里某条现有路线是同一条，必须填 `target_argument_route_revision_id`
+- `match_existing` —— 跟输入里某条现有路线是同一条，且骨架不需要改动，必须填 `target_argument_route_revision_id`
+- `revise_existing` —— **同一条路线，但骨架需要改正**（补一个承重节点、改一个不忠实的命题措辞）。必须填 `target_argument_route_revision_id` 与 `revision_reason`：说明既有骨架为什么撑不住这个结论，以及改后为什么仍是同一条论证而不是另一条
 - `create_new` —— 新路线
 - `defer` —— 拿不准
 
@@ -76,7 +77,11 @@ C1              conclusion    → 指向某个已定结论
 
 `identity_comparison` 写清你是怎么比的。
 
-无论 `match_existing` 还是 `create_new`，attestation 都引用本 proposal 中的 `local_route_key`；既有 route revision 只由 candidate 的 `target_argument_route_revision_id` 表示。
+不论哪种动作，attestation 都引用本 proposal 中的 `local_route_key`；既有 route revision 只由 candidate 的 `target_argument_route_revision_id` 表示。
+
+**`revise_existing` 会作废原 revision 上的全部 attestation**（attestation 钉在 route revision 上，钉在旧版本上的会被撤下）。因此改骨架时，原来那些来源的 attestation 必须在本次一并按新骨架重提，否则这条路线会连同它原有的见证一起缩水——`attesting_source_roster` 的检查会挡住这种缩水，但更该做的是在提案时就想到。
+
+结论边界与骨架不一致（例如结论覆盖太16:19 与太18:18，而所有节点只走到 16:19），正是 `revise_existing` 的典型用法：补上承重节点，而不是让结论有一半没有支撑，也不是为同一结论另起一条并列路线。
 
 ## 覆盖
 

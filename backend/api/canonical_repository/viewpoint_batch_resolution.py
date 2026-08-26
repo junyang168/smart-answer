@@ -570,15 +570,35 @@ class InferenceNode(StrictBatchModel):
 
 
 class ArgumentRouteCandidate(StrictBatchModel):
+    """One route as this scope proposes to leave it.
+
+    ``revise_existing`` is the counterpart of the viewpoint layer's revision:
+    the same route, its skeleton corrected. Without it the first scope to write
+    a route fixes its steps forever, and a reviewer who finds a load-bearing
+    node missing has only two illegal answers -- leave it (a conclusion half of
+    whose scripture scope no node supports) or create a parallel route for the
+    same conclusion (the false split the reviewer is trying to prevent).
+
+    binding_loosing_meaning met it head on: two routes concluded in viewpoints
+    covering 太16:19 and 太18:18 while every node stopped at 16:19. The review
+    said so, named the bridge to add, and wrote that the action had to become a
+    new revision of the existing route. The proposer wrote `create_new` pinned
+    to the existing revision -- the nearest legal shape to what was asked -- and
+    the schema rejected it.
+    """
+
     local_route_key: str = Field(min_length=1)
     conclusion_ref: ConclusionRef
-    proposed_action: Literal["match_existing", "create_new", "defer"]
+    proposed_action: Literal["match_existing", "revise_existing", "create_new", "defer"]
     target_argument_route_revision_id: str | None = None
     route_label: str = Field(min_length=1)
     inference_method_codes: list[str] = Field(min_length=1)
     inference_method_note: str | None = None
     ordered_inference_nodes: list[InferenceNode] = Field(min_length=2)
     identity_comparison: str = Field(min_length=1)
+    #: Why the committed skeleton cannot carry this conclusion, and why the
+    #: revised one is the same argument corrected rather than a different route.
+    revision_reason: str | None = None
 
     @model_validator(mode="after")
     def validate_candidate(self) -> "ArgumentRouteCandidate":
@@ -594,11 +614,17 @@ class ArgumentRouteCandidate(StrictBatchModel):
             raise ValueError("a route ends at its conclusion node")
         if sum(1 for item in self.ordered_inference_nodes if item.role == "conclusion") != 1:
             raise ValueError("a route reaches exactly one conclusion")
-        if self.proposed_action == "match_existing":
+        if self.proposed_action in ("match_existing", "revise_existing"):
             if not self.target_argument_route_revision_id:
-                raise ValueError("match_existing must pin the route revision it matches")
+                raise ValueError(
+                    f"{self.proposed_action} must pin the route revision it acts on"
+                )
         elif self.target_argument_route_revision_id:
             raise ValueError(f"{self.proposed_action} may not pin an existing route revision")
+        if self.proposed_action == "revise_existing" and not self.revision_reason:
+            raise ValueError("revise_existing must say why the committed skeleton cannot hold")
+        if self.proposed_action != "revise_existing" and self.revision_reason:
+            raise ValueError("only revise_existing carries a revision reason")
         return self
 
 
@@ -1085,18 +1111,21 @@ def _route_findings(
         if conclusion not in approved_revisions:
             findings.append(f"{where}: conclusion revision {conclusion} is not approved in this scope")
         if (
-            route.proposed_action == "match_existing"
+            route.proposed_action in ("match_existing", "revise_existing")
             and route.target_argument_route_revision_id not in known_route_revisions
         ):
             findings.append(
                 f"{where}: existing route revision "
                 f"{route.target_argument_route_revision_id} was not in the packet"
             )
-        elif route.proposed_action == "match_existing" and (
+        elif route.proposed_action in ("match_existing", "revise_existing") and (
             known_route_conclusions.get(str(route.target_argument_route_revision_id))
             != conclusion
         ):
             findings.append(
+                # A revision corrects one route's steps. Moving it to a
+                # different conclusion is not a correction, it is a different
+                # route wearing the old one's id.
                 f"{where}: existing route revision belongs to another conclusion viewpoint"
             )
         for node in route.ordered_inference_nodes:

@@ -3010,6 +3010,125 @@ def test_registry_route_packet_rejects_stale_claim_link():
         )
 
 
+def test_a_route_skeleton_can_be_corrected_without_forking_the_route():
+    """binding_loosing_meaning route stage, 2026-08-25.
+
+    Two routes concluded in viewpoints covering 太16:19 and 太18:18 while every
+    node stopped at 16:19. Review named the bridge to add and said the action had
+    to become a new revision of the existing route. There was no such action:
+    match_existing means unchanged, create_new means a second route for the same
+    conclusion -- the false split the reviewer was preventing. The proposer wrote
+    create_new pinned to the existing revision and the schema rejected it.
+    """
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    first = compile_argument_route_package(
+        proposal=_routes(),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha",
+        review_artifact_sha256="review-1",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    committed = first["argument_route_revisions"][0]
+    route_id = committed["argument_route_id"]
+    prior_revision_id = committed["argument_route_revision_id"]
+
+    revised = _route(
+        proposed_action="revise_existing",
+        target_argument_route_revision_id=prior_revision_id,
+        revision_reason="结论覆盖两处经文，骨架只走到一处，补一个承重节点。",
+        ordered_inference_nodes=[
+            {
+                "route_step_key": "P1",
+                "role": "observation",
+                "normalized_proposition": "Petrus 是阳性、petra 是阴性",
+                "required_for_full_attestation": True,
+            },
+            {
+                "route_step_key": "P2",
+                "role": "bridge",
+                "normalized_proposition": "同一用语把该语义延伸到第二处经文",
+                "required_for_full_attestation": True,
+            },
+            {
+                "route_step_key": "C1",
+                "role": "conclusion",
+                "conclusion_ref": {"target_viewpoint_revision_id": "CVR-1"},
+                "required_for_full_attestation": True,
+            },
+        ],
+    )
+    second = compile_argument_route_package(
+        proposal=_routes(argument_route_candidates=[revised]),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[
+            {
+                "argument_route_id": route_id,
+                "route_revision_id": prior_revision_id,
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "revision": committed,
+            }
+        ],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha-2",
+        review_artifact_sha256="review-2",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-25T12:00:00Z",
+    )
+    new_revision = second["argument_route_revisions"][0]
+
+    # Same route, new revision, chained -- not a second route for one conclusion.
+    assert new_revision["argument_route_id"] == route_id
+    assert new_revision["argument_route_revision_id"] != prior_revision_id
+    assert new_revision["supersedes_revision_id"] == prior_revision_id
+    # revision_number stays 1: each revision is its own stored object, and
+    # writing 2 here is what took production down in #220.
+    assert new_revision["revision_number"] == 1
+    assert second["argument_routes"][0]["current_revision_id"] == (
+        new_revision["argument_route_revision_id"]
+    )
+    # The worker withdraws attestations stranded on the revision it replaced.
+    assert second["superseded_route_revision_ids"] == [prior_revision_id]
+
+
+def test_revise_existing_must_pin_a_revision_and_say_why():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteCandidate,
+    )
+
+    with pytest.raises(ValidationError, match="must pin the route revision it acts on"):
+        ArgumentRouteCandidate.model_validate(
+            _route(proposed_action="revise_existing", revision_reason="理由")
+        )
+    with pytest.raises(ValidationError, match="must say why the committed skeleton cannot hold"):
+        ArgumentRouteCandidate.model_validate(
+            _route(
+                proposed_action="revise_existing",
+                target_argument_route_revision_id="ARR-1",
+            )
+        )
+    with pytest.raises(ValidationError, match="only revise_existing carries a revision reason"):
+        ArgumentRouteCandidate.model_validate(
+            _route(proposed_action="create_new", revision_reason="理由")
+        )
+
+
 def test_an_attestation_already_committed_is_not_rewritten_by_a_later_review():
     """Re-reviewing an attestation does not make it a new fact.
 
