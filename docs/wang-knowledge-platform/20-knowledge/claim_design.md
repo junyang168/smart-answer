@@ -45,7 +45,7 @@
 
 ```mermaid
 erDiagram
-    SOURCE_DOCUMENT ||--o{ SOURCE_FRAGMENT : "切成"
+    SOURCE_FRAGMENT }o--|| SOURCE_DOCUMENT : "锚定到"
     SOURCE_FRAGMENT ||--o{ CLAIM_OCCURRENCE : "锚定"
     CLAIM ||--o{ CLAIM_OCCURRENCE : "在各篇的出现"
     CLAIM ||--o{ EVIDENCE_STEP : "推论步骤"
@@ -59,8 +59,8 @@ erDiagram
 
 | 对象 | 它是什么 | 代码里 |
 | --- | --- | --- |
-| **来源文档** | 哪一份讲道或母本。只有元数据和内容哈希，**正文在系统外的文件里** | `source_documents` |
-| **来源片段** | 教授原话的一段逐字文字，带它在录音里的时间 | `source_fragments` |
+| **来源文档** | **一份完整的讲道或母本，一份一条记录，不切分。** 保存标题、类型、文件路径和整份文件的内容哈希；正文本身在文件系统上 | `source_documents` |
+| **来源片段** | 教授原话的一段逐字文字，带段落编号和录音起止时间，锚定到某一份来源文档上 | `source_fragments` |
 | **Claim** | 教授的一个判断 | `claims` |
 | **出现** | 这个判断在某一篇的某一处被讲到，带原话高亮、行号、录音时间 | `claims.occurrences[]` |
 | **证据步骤** | 从经文或观察走到结论的一步。一条 Claim 可以有多步 | `evidence_steps` |
