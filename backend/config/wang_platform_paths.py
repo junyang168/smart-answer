@@ -24,6 +24,7 @@ class WangPlatformPaths:
     staging: Path
     claim_layer_staging: Path
     corpus_survey_staging: Path
+    library_audit_reports: Path
     seed_catalog: Path
     sermon_catalog: Path
     sermon_catalog_overrides: Path
@@ -48,6 +49,11 @@ def wang_platform_paths(data_base_dir: str | Path | None = None) -> WangPlatform
         staging=staging,
         claim_layer_staging=staging / "claim-layer",
         corpus_survey_staging=staging / "corpus-survey",
+        # `scripts/audit-library.py` writes here. It cannot import this module
+        # -- it imports nothing from `backend/`, which is the point of it -- so
+        # the path is spelled out in both places. Changing one means changing
+        # the other.
+        library_audit_reports=staging / "reports" / "library-audit",
         seed_catalog=catalog / "seed-catalog",
         sermon_catalog=catalog / "sermon_catalog.json",
         sermon_catalog_overrides=catalog / "sermon_catalog_overrides.json",

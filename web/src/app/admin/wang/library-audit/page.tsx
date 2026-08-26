@@ -1,0 +1,163 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { FollowUpGroup } from "./FollowUpGroup";
+import { LayerCard } from "./LayerCard";
+import { count, shortfall, type AuditReport } from "./types";
+
+/**
+ * 獨立審計的結果，一頁看完。
+ *
+ * The audit answers a question none of the platform's other dozen checks do:
+ * not "is anything missing" but "is any of it right". It writes three files to
+ * disk and stops, which meant reading it required finding the newest timestamp
+ * on the machine and `cat`-ing a text file. Nobody does that, and the rule
+ * those files carry -- the library does not move on to new passages until it
+ * passes -- blocks nothing while nobody reads it.
+ *
+ * Two rules borrowed from the extraction health view, for the same reasons:
+ * no invented thresholds and no traffic lights, because the ratios are measured
+ * rather than graded; and one question per page, because "has it been run" and
+ * "did it come out right" in one grid is how both became unreadable.
+ */
+export default function LibraryAuditPage() {
+  const [report, setReport] = useState<AuditReport | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/admin/library-audit", { cache: "no-store" });
+        if (!response.ok) throw new Error(`審計服務回傳 ${response.status}`);
+        const data = (await response.json()) as AuditReport;
+        if (!cancelled) setReport(data);
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "無法讀取審計結果");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) return <p className="px-1 py-6 text-sm text-slate-400">讀取中…</p>;
+  if (error || !report) return <p className="px-1 py-6 text-sm text-rose-700">{error || "沒有資料"}</p>;
+
+  // Never a zero. A page of 0/0 reads as "nothing is wrong", which for a rule
+  // that gates new passages is the worst thing it could say.
+  if (report.status === "never_run") {
+    return (
+      <main className="flex flex-col gap-4 pb-10">
+        <h1 className="text-base font-semibold tracking-tight text-slate-900">文庫獨立審計</h1>
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
+          <p className="text-sm text-slate-700">還沒有跑過。這一頁只顯示審計寫下的結果，不代跑。</p>
+          <pre className="mt-3 overflow-x-auto rounded-lg bg-slate-900 px-3 py-2 font-mono text-[0.75rem] text-slate-100">
+            scripts/audit-library.py
+          </pre>
+          <p className="mt-2 break-all font-mono text-[0.72rem] text-slate-400">
+            輸出會落在 {report.reports_root}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const { scope, corpus, layers = [], followups = [] } = report;
+  const pending = followups.reduce((total, group) => total + group.count, 0);
+  const judgement = layers
+    .filter((layer) => layer.kind === "sample")
+    .reduce((total, layer) => total + (layer.disputed ?? 0), 0);
+  const checked = report.generated_at
+    ? new Date(report.generated_at).toLocaleString("zh-TW", { hour12: false })
+    : "—";
+
+  return (
+    <main className="flex flex-col gap-8 pb-12">
+      <section className="flex flex-col gap-2">
+        <h1 className="text-base font-semibold tracking-tight text-slate-900">文庫獨立審計</h1>
+        <p className="text-2xl leading-snug text-slate-900">
+          {pending === 0 ? (
+            <span className="font-semibold text-emerald-700">沒有一條待跟進</span>
+          ) : (
+            <>
+              <span className="font-mono">{count(pending)}</span> 條待跟進，
+              {judgement > 0 ? (
+                <>
+                  其中 <span className="font-semibold text-rose-700">{judgement} 條要人判斷</span>
+                </>
+              ) : (
+                <>沒有一條需要人判斷</>
+              )}
+            </>
+          )}
+          。
+        </p>
+        <p className="font-mono text-xs leading-relaxed text-slate-500">
+          {checked} · {report.run_id} · 判讀模型 {report.model} · seed {report.seed}
+        </p>
+      </section>
+
+      <section className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-[0.82rem] leading-relaxed text-slate-700">
+          <span className="font-semibold">範圍</span>　{scope?.text}：
+          <span className="font-mono"> {scope?.sources} </span>份來源記錄 ·
+          <span className="font-mono"> {count(corpus?.fragments ?? 0)} </span>條片段 ·
+          <span className="font-mono"> {count(corpus?.claims ?? 0)} </span>條主張 ·
+          <span className="font-mono"> {corpus?.viewpoints} </span>個觀點。
+          {(scope?.sources_out_of_scope ?? 0) > 0 && (
+            <>
+              另有 <span className="font-mono">{scope?.sources_out_of_scope}</span> 份更早批次的來源沒查。
+            </>
+          )}
+        </p>
+        {(scope?.duplicate_sources.length ?? 0) > 0 && (
+          <div className="border-t border-slate-200 pt-2">
+            <p className="text-[0.8rem] text-slate-700">
+              同一份逐字稿登記了兩筆 <span className="font-mono">source_document</span>，兩筆各自帶錨點：
+            </p>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {scope?.duplicate_sources.map((row) => (
+                <li key={row.name} className="text-[0.78rem] text-slate-500">
+                  {row.name}
+                  <span className="font-mono text-slate-700"> {row.source_ids.join(" · ")}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {layers.map((layer) => (
+          <LayerCard key={layer.key} layer={layer} />
+        ))}
+      </section>
+
+      {followups.length > 0 && (
+        <div className="flex flex-col gap-8">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-sm font-semibold tracking-tight text-slate-900">待跟進</h2>
+            <p className="text-[0.8rem] leading-snug text-slate-400">
+              審計只讀，這些不會被自動修掉，也不會被自動接受。處置走既有的複審路徑。
+            </p>
+          </div>
+          {followups.map((group) => (
+            <FollowUpGroup key={group.kind} group={group} />
+          ))}
+        </div>
+      )}
+
+      <p className="border-t border-slate-100 pt-4 text-[0.75rem] leading-relaxed text-slate-400">
+        比率是量出來的，不是評出來的，所以這一頁沒有紅黃綠燈，也沒有及格線。
+        層 3、4 是抽樣：{layers.find((l) => l.key === "claims")?.judged ?? 0} 條中{" "}
+        {layers.find((l) => l.key === "claims")?.disputed ?? 0} 條有異議，說的是這一批抽樣，
+        不是整個文庫的比例。
+        {layers.some((l) => shortfall(l) > 0) && " 有異議不等於錯，等於需要人看一眼。"}
+      </p>
+    </main>
+  );
+}
