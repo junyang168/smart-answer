@@ -3046,8 +3046,46 @@ def validate_route_reconsideration(
 
     before = _route_change_payloads(proposal)
     after = _route_change_payloads(reconsideration.revised_proposal)
-    if set(before) != set(after):
-        findings.append("route reconsideration changed proposal object keys")
+
+    # One finding can only be answered by changing the key set: the reviewer
+    # says the proposal declared `no_route` for a viewpoint whose route is
+    # sitting right there in the evidence, quotes it, and names the nodes.  The
+    # answer is to drop the no_route entry and add the route with its
+    # attestation -- refusing every key-set change made that finding
+    # unanswerable, and one unanswerable finding fails the whole work unit.
+    #
+    # Only that transformation is authorised.  A no_route entry may disappear
+    # when its finding was accepted; a route may appear when it concludes in one
+    # of those viewpoints; an attestation may appear when it attests one of
+    # those new routes.  Everything else is still a collateral edit.
+    accepted_targets = {
+        (item.target_kind, item.target_key)
+        for item in reconsideration.finding_dispositions
+        if item.disposition == "accepted"
+    }
+    released_viewpoints = {
+        key for kind, key in accepted_targets if kind == "no_route"
+    }
+    added_routes = {
+        item.local_route_key
+        for item in reconsideration.revised_proposal.argument_route_candidates
+        if ("route", item.local_route_key) not in before
+        and item.conclusion_ref.key() in released_viewpoints
+    }
+    authorized_additions = {("route", key) for key in added_routes} | {
+        ("attestation", item.local_attestation_key)
+        for item in reconsideration.revised_proposal.source_route_attestations
+        if ("attestation", item.local_attestation_key) not in before
+        and item.route_ref.local_route_key in added_routes
+    }
+    for kind, key in sorted((set(before) - set(after)) - accepted_targets):
+        findings.append(
+            f"{kind}:{key}: route reconsideration dropped an object no finding authorised"
+        )
+    for kind, key in sorted((set(after) - set(before)) - authorized_additions):
+        findings.append(
+            f"{kind}:{key}: route reconsideration added an object no finding authorised"
+        )
     for key in sorted(set(before) & set(after)):
         if key not in flagged and before[key] != after[key]:
             findings.append(
