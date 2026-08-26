@@ -2511,6 +2511,18 @@ def apply_reconsideration_patches(
     # structure a finding strands is the one that named the viewpoint under
     # review.  Patches are resolved against the original indices and the list
     # is rebuilt once, so a delete cannot shift a later patch's target.
+    # A structure the reviewer flagged directly authorises its own patch. The
+    # rule below reaches a structure through the candidates a component finding
+    # disturbed, which covers the structure stranded by someone else's
+    # correction but not the commonest case of all: the reviewer says the
+    # synthesis or a role is wrong, names the fix, the proposer accepts, and the
+    # patch is refused as unauthorised because authorisation only understood
+    # component findings.
+    accepted_structures = {
+        item.structure_index
+        for item in reconsideration.structure_dispositions
+        if item.disposition == "accepted"
+    }
     structure_replacements: dict[int, dict[str, Any] | None] = {}
     for patch in reconsideration.structure_patches:
         if patch.structure_index >= len(proposal.structures):
@@ -2519,7 +2531,7 @@ def apply_reconsideration_patches(
             )
             continue
         original = proposal.structures[patch.structure_index]
-        reachable = any(
+        reachable = patch.structure_index in accepted_structures or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in (focal.endpoint() for focal in original.focal)
         )

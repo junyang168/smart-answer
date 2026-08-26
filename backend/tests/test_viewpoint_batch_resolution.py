@@ -5399,6 +5399,48 @@ def test_structure_the_proposer_corrected_can_be_written_as_approved():
     assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
 
 
+def test_a_structure_finding_authorises_its_own_patch():
+    """matt16 batch-004, 2026-08-26: the only finding was about the structure.
+
+    Reachability ran from the candidates a component finding disturbed, so a
+    batch whose sole finding is "this synthesis is wrong, here is the wording"
+    had an accepted disposition, a patch implementing it, and no authorisation
+    for that patch.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        StructureCorrectionPatch,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    revised = proposal.structures[0].model_dump(mode="json")
+    revised["central_synthesis"] = "按复核意见收窄后的中心综合。"
+    reconsideration = reconsideration.model_copy(
+        update={
+            "structure_patches": [
+                StructureCorrectionPatch.model_validate(
+                    {"structure_index": 0, "action": "upsert", "structure": revised}
+                )
+            ]
+        }
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.structures[0].central_synthesis == "按复核意见收窄后的中心综合。"
+
+
 def test_a_synthesis_that_overreached_can_be_corrected():
     """The commonest structure finding, and it has to be answerable.
 
