@@ -163,6 +163,7 @@ class FileRouteResolutionQueue:
         now: datetime | None = None,
         lease_seconds: int = 900,
         retry_exceptions: bool = False,
+        max_jobs: int | None = None,
     ) -> RouteResolutionWorkUnit | None:
         if lease_seconds < 1:
             raise ValueError("route queue lease must be positive")
@@ -237,6 +238,15 @@ class FileRouteResolutionQueue:
                 == first_scope
             ]
 
+            # Coalescing every queued job into one work unit ties the route
+            # packet's size to how much CVP work has piled up behind it. Five
+            # committed batches made a 27-viewpoint unit whose packet came to
+            # 1.6M characters against a 1.05M ceiling, and no amount of trimming
+            # the packet fixes that -- the CVP stage batches and the route stage
+            # never had a counterpart. Taking the queue in bounded bites is that
+            # counterpart; the rest stays queued for the next pass.
+            if max_jobs is not None and max_jobs > 0:
+                available = sorted(available, key=lambda item: item.job_id)[:max_jobs]
             work = coalesce_route_resolution_jobs(
                 available,
                 current_viewpoint_revisions=current_viewpoint_revisions,

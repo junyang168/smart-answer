@@ -426,6 +426,61 @@ def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path:
     assert new_state["attempt"] == 2
 
 
+def test_the_route_queue_can_be_taken_in_bounded_bites(tmp_path: Path):
+    """The counterpart to CVP batching that the route stage never had.
+
+    Coalescing every queued job ties the route packet's size to how much CVP
+    work has piled up behind it: five committed batches made a 27-viewpoint
+    work unit whose packet came to 1.6M characters against a 1.05M ceiling.
+    """
+
+    receipts = [
+        build_cvp_batch_readback_receipt(
+            scope_label="matthew-16",
+            scope_manifest_sha256="scope-sha",
+            triggering_cvp_batch_id=f"CVB-{index}",
+            cvp_changeset_id=f"KCS-{index}",
+            cvp_changeset_sha256=f"changeset-{index}",
+            expected_current_revisions={f"CV-{index}": f"CVR-{index}"},
+            observed_current_revisions={f"CV-{index}": f"CVR-{index}"},
+        )
+        for index in range(3)
+    ]
+    jobs = [
+        build_route_resolution_job(
+            receipt=item,
+            evidence_scope_sha256="evidence-scope-sha",
+            route_policy_fingerprint_sha256="route-policy-sha",
+        )
+        for item in receipts
+    ]
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    for job in jobs:
+        queue.enqueue(job, enqueued_at="2026-08-26T12:00:00+00:00")
+    current = {f"CV-{index}": f"CVR-{index}" for index in range(3)}
+    started = datetime(2026, 8, 26, 13, 0, tzinfo=timezone.utc)
+
+    first = queue.claim(
+        worker_id="w1",
+        current_viewpoint_revisions=current,
+        now=started,
+        max_jobs=2,
+    )
+    assert first is not None
+    assert len(first.current_viewpoint_revisions) == 2
+    queue.finish(first, worker_id="w1", status="resolved")
+
+    # What did not fit stays queued for the next pass rather than being lost.
+    second = queue.claim(
+        worker_id="w1",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(minutes=5),
+        max_jobs=2,
+    )
+    assert second is not None
+    assert len(second.current_viewpoint_revisions) == 1
+
+
 def test_a_job_that_failed_on_a_defect_can_be_retried_after_the_fix(tmp_path: Path):
     """Twice now an exception has been a dead end with no way back.
 
