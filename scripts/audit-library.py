@@ -68,6 +68,20 @@ APPROVED_STATUSES = {"approved", "system_approved", "human_approved"}
 #: 而那是審計自己問錯了。
 MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
 
+#: 一條欄位路徑要有這個比例的值解析得開，才當它是指向物件的引用。低於這條線的
+#: 是撞號，不是引用——見 `audit_coverage` 裡的說明。
+REFERENCE_PATH_MIN_RATE = 0.9
+
+#: 這個庫的物件 id 一律是「前綴 + 連字號 + 其餘」：`DK-91b546f25db1-P03-CL013`、
+#: `CV-01f185ea9e965baab351`、`CP-COVENANT-LAW-CORE-NINE-01-S-123b74723555`。不長
+#: 這樣的值不是物件引用，比對之前先擋掉。
+#:
+#: 擋掉的是這幾類，全都真的出現在 `*_id` 欄位裡：來源內部的錨點編號（`E037`，沒
+#: 有連字號）、經文出處（`馬太福音16:28`）、逐字稿標題（`2016 NYSC 專題…`，有空
+#: 白）。其中 `E037` 這類最麻煩：庫裡有 140 個舊的 evidence_step 物件 id 剛好也長
+#: 這樣，於是同一批值有些「解析得開」，逐字稿裡的另外 151 個就被報成斷掉的依賴。
+OBJECT_ID_SHAPE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-[!-~]+$")
+
 #: 逐字稿目錄的優先順序。`source_documents.source_path` 缺失時（早期的 `SRC-L3`
 #: 一類記錄只留了 `transcript_id`）按這個順序找檔案。
 TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
@@ -452,20 +466,25 @@ def walk_references(payload: Any, own_ids: set[str], path: str = "") -> Iterable
     elif isinstance(payload, str):
         field = path.rsplit(".", 1)[-1]
         if ID_KEY.search(field) and payload and payload not in own_ids:
+            # 回傳完整路徑，不是最後一段。`evidence_step_ids` 指的是庫裡的物件，
+            # 而 `occurrences.anchors.evidence_id` 是來源內部的編號（`E037`），
+            # 兩者最後一段像、意思不同。只看最後一段時，少數 `E037` 恰好撞上某個
+            # 物件 id，就足以把整個欄位誤判成引用欄位，於是另外 184 個本地編號被
+            # 報成斷掉的依賴。
             # 雜湊不是 ID：64 位十六進位一律跳過，否則 `*_sha256` 欄位會把整份
             # 報告淹掉。
-            if not re.fullmatch(r"[0-9a-f]{64}", payload):
-                yield field, payload
+            if not re.fullmatch(r"[0-9a-f]{64}", payload) and OBJECT_ID_SHAPE.match(payload):
+                yield path, payload
 
 
 def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
     """已批准的內容，依賴解不解析得開；聲稱覆蓋的來源與實際用到的對不對得上。
 
     參照解析刻意**不查表**。硬寫一張 `claim_id → claims` 的對照表，等於把流水線
-    的資料模型抄一份進審計，模型錯了審計跟著錯。改成先建全庫 ID 索引，再看每個
-    欄位名底下的值解不解析得開：某個欄位名的值**一個都解不開**（`occurrence_ref`
-    是這樣），那它根本不指向任何物件，報成「無主的命名空間」而不是失敗；只有**部
-    分**解不開的，才是真的斷掉的依賴。
+    的資料模型抄一份進審計，模型錯了審計跟著錯。改成先建全庫 ID 索引，再按**欄位
+    的完整路徑**看它的值解不解析得開：一條路徑底下的值**一個都解不開**
+    （`occurrence_ref` 是這樣），那它根本不指向任何物件，報成「查無此物的 ID」而
+    不是失敗；只有**部分**解不開的，才是真的斷掉的依賴。
     """
 
     collections = store.collection_names()
@@ -479,36 +498,72 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
                 if isinstance(value, str) and ID_KEY.search(key) and value == row["object_id"]:
                     own.add(value)
             own_ids_by_object[(name, row["object_id"])] = own
-    retired = store.retired_ids()
-    retired_ids = {object_id for _, object_id in retired}
+    retired_ids = {object_id for _, object_id in store.retired_ids()}
 
     resolved_by_field: Counter[str] = Counter()
     unresolved_by_field: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    checked_total = 0
     approved_total = 0
-    approved_with_gap: set[tuple[str, str]] = set()
+    approved_ids: set[tuple[str, str]] = set()
+    objects_with_gap: set[tuple[str, str]] = set()
+    retired_targets: list[dict[str, Any]] = []
 
+    # 查全部當前物件，不只查 `review_status` 說已批准的那些。
+    #
+    # 卡片原話是「已批准內容的依賴全部可解析」，照字面做出來的範圍是 360 個物
+    # 件，而且全在觀點層——claim 層一條都沒查到。原因不是 claim 層沒審過：1,530
+    # 條 claim 各有一條 AI 裁定，只是從來沒有回寫進 `review_status`（見 #243）。
+    # 拿一個還沒定下來的詞彙去圈審計範圍，量到的是詞彙，不是文庫。
     for name in collections:
         for row in store.collection(name):
-            if row["review_status"] not in APPROVED_STATUSES:
-                continue
-            approved_total += 1
+            checked_total += 1
+            if row["review_status"] in APPROVED_STATUSES:
+                approved_total += 1
+                approved_ids.add((name, row["object_id"]))
             own = own_ids_by_object[(name, row["object_id"])]
             for field, value in walk_references(row["payload"], own):
                 if value in universe:
                     resolved_by_field[field] += 1
+                elif value in retired_ids:
+                    # 指向一個已經 retire 的物件。這不是斷掉的依賴——那條記錄還
+                    # 在庫裡，只是不再是當前版本——但它也不是乾淨的引用，所以自
+                    # 成一類。598 條 claim 引用落在這裡。
+                    resolved_by_field[field] += 1
+                    retired_targets.append({
+                        "collection": name,
+                        "object_id": row["object_id"],
+                        "field": field,
+                        "value": value,
+                    })
                 else:
                     unresolved_by_field[field].append({
                         "collection": name,
                         "object_id": row["object_id"],
                         "field": field,
                         "value": value,
-                        "retired": value in retired_ids,
                     })
 
     dangling: list[dict[str, Any]] = []
     ids_with_no_collection: list[dict[str, Any]] = []
+    ambiguous_paths: list[dict[str, Any]] = []
     for field, rows in unresolved_by_field.items():
-        if resolved_by_field.get(field, 0) == 0:
+        resolved = resolved_by_field.get(field, 0)
+        rate = resolved / (resolved + len(rows))
+        if 0 < rate < REFERENCE_PATH_MIN_RATE:
+            # 這條路徑底下**大部分**值解不開，少數解得開。少數那幾個是撞號，不是
+            # 引用：`occurrences.anchors.evidence_id` 的 `E037` 是來源內部編號，
+            # 而庫裡剛好有幾個 evidence_step 的 id 長一樣。照「有人解得開就算引用
+            # 欄位」判，另外 184 個本地編號會被報成斷掉的依賴。
+            #
+            # 不當成失敗，但也不靜靜丟掉——列出來，讓讀的人自己看那個比率。
+            ambiguous_paths.append({
+                "path": field,
+                "resolved": resolved,
+                "unresolved": len(rows),
+                "sample": rows[0]["value"][:60],
+            })
+            continue
+        if resolved == 0:
             # 這個欄位名底下沒有一個值指得到任何物件。它不是斷掉的依賴，是一個沒
             # 有對應 collection 的 ID 命名空間——照樣要報出來，因為引用它的記錄
             # 讀起來像是有東西可查。附一個樣例值，讀的人才分得出哪些是真的 ID
@@ -521,19 +576,20 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
             continue
         dangling.extend(rows)
         for entry in rows:
-            approved_with_gap.add((entry["collection"], entry["object_id"]))
+            objects_with_gap.add((entry["collection"], entry["object_id"]))
     ids_with_no_collection.sort(key=lambda row: -row["count"])
+    ambiguous_paths.sort(key=lambda row: -row["unresolved"])
 
     # 覆蓋誠實的第二半：聲稱的來源與實際用到的來源。
     attestation_findings = _audit_attestation_sources(store)
     for entry in attestation_findings:
-        approved_with_gap.add(("argument_route_attestations", entry["object_id"]))
+        objects_with_gap.add(("argument_route_attestations", entry["object_id"]))
     scripture_findings = _audit_derived_scripture(store)
     for entry in scripture_findings:
-        approved_with_gap.add(("argument_route_attestations", entry["object_id"]))
+        objects_with_gap.add(("argument_route_attestations", entry["object_id"]))
     locator_findings = _audit_component_locators(store)
     for entry in locator_findings:
-        approved_with_gap.add(("viewpoint_claim_links", entry["object_id"]))
+        objects_with_gap.add(("viewpoint_claim_links", entry["object_id"]))
 
     # 原件本身：source_documents 說的雜湊，與磁碟上這份檔案現在的雜湊。
     document_findings: list[dict[str, Any]] = []
@@ -557,12 +613,17 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
     return {
         "layer": 2,
         "name": "覆蓋誠實",
+        "checked_objects": checked_total,
+        "checked_clean": checked_total - len(objects_with_gap),
         "approved_objects": approved_total,
-        "approved_clean": approved_total - len(approved_with_gap),
+        "approved_clean": approved_total - len(objects_with_gap & approved_ids),
         "references_resolved": sum(resolved_by_field.values()),
+        "references_to_retired": len(retired_targets),
+        "retired_targets": retired_targets[:200],
         "references_dangling": len(dangling),
         "dangling": dangling[:200],
         "ids_with_no_collection": ids_with_no_collection,
+        "ambiguous_paths": ambiguous_paths,
         "attestation_findings": attestation_findings,
         "derived_scripture_findings": scripture_findings,
         "component_locator_findings": locator_findings,
@@ -1242,11 +1303,16 @@ def render_report(
     if 2 in layers:
         layer = layers[2]
         lines.append(
-            f"第 2 層 覆蓋誠實     {ratio(layer['approved_clean'], layer['approved_objects'])}"
-            "   （已批准物件中依賴全部可解析的）"
+            f"第 2 層 覆蓋誠實     {ratio(layer['checked_clean'], layer['checked_objects'])}"
+            "   （當前物件中依賴全部可解析的）"
+        )
+        lines.append(
+            f"          其中 review_status 已批准的 "
+            f"{ratio(layer['approved_clean'], layer['approved_objects'])}"
         )
         lines.append(
             f"          已解析引用 {layer['references_resolved']:,} · "
+            f"其中指向已 retire 的 {layer['references_to_retired']:,} · "
             f"斷掉 {layer['references_dangling']:,}"
         )
         lines.append(
@@ -1263,6 +1329,11 @@ def render_report(
         lines.append(
             f"          原件雜湊與記錄不符 {len(layer['source_document_findings']):>4,}"
         )
+        for entry in layer["ambiguous_paths"][:4]:
+            lines.append(
+                f"          撞號的路徑 {entry['path']:<34} 解得開 {entry['resolved']:,}"
+                f" · 解不開 {entry['unresolved']:,}   例：{entry['sample'][:20]}"
+            )
         for entry in layer["ids_with_no_collection"][:6]:
             lines.append(
                 f"          查無此物的 ID {entry['field']:<26} {entry['count']:>5,}"
