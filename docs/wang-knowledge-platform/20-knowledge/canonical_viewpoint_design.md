@@ -71,13 +71,20 @@ erDiagram
     CANONICAL_VIEWPOINT ||--o{ VIEWPOINT_REVISION : "改写历史"
     CANONICAL_VIEWPOINT ||--o{ ARGUMENT_ROUTE : "论证路线"
     ARGUMENT_ROUTE ||--o{ ROUTE_ATTESTATION : "在某篇的实例"
-    ROUTE_ATTESTATION }o--|| SOURCE_DOCUMENT : "来自"
+    ROUTE_ATTESTATION }o--|| SOURCE_DOCUMENT : "绑死单篇来源"
     CANONICAL_VIEWPOINT ||--o{ VIEWPOINT_RELATION : "与别的观点"
     CANONICAL_VIEWPOINT }o--o{ VIEWPOINT_STRUCTURE : "组成观点结构"
     TOPIC_NODE }o--o{ CANONICAL_VIEWPOINT : "归类"
 ```
 
-每个对象一句话：
+图里有两个框不属于本层，是它连接的另外两个 component（定义见 [Claim 设计](./claim_design.md)）：
+
+| 对象 | 它是什么 | 代码里 |
+| --- | --- | --- |
+| **来源文档** | 哪一份讲道或母本。只有元数据和内容哈希，**正文在系统之外的文件里** | `source_documents` |
+| **主张** | 教授在**某一篇**里提出的一个判断，连同他引的经文和推到结论的步骤 | `claims` |
+
+本层自己的对象：
 
 | 对象 | 它是什么 | 代码里 |
 | --- | --- | --- |
