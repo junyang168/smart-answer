@@ -269,6 +269,14 @@ class SourceFile:
             return self.segments[ordinal - 1]
         return None
 
+    def ordinal_of(self, segment: dict[str, Any]) -> int | None:
+        """這一段是第幾段（1-based），用來取它前面那一段。"""
+
+        for position, candidate in enumerate(self.segments, start=1):
+            if candidate is segment:
+                return position
+        return None
+
     def by_index(self, index: Any) -> dict[str, Any] | None:
         """`index` 欄位等於這個值的那一段，也就是 `source_segment_index`。"""
 
@@ -1134,9 +1142,25 @@ def _paragraphs_for_fragments(
             segment = source_file.by_index(payload["source_segment_index"])
         if segment is None:
             continue
-        text = live_text(segment.get("text", "")).strip()
-        if text and text not in seen:
-            seen.append(text)
+        # 連前一段一起送。
+        #
+        # 口語講道的論證會跨段：錨點常常落在結論那一句上，而理由在上一段。
+        # CL-0027 就是這樣——錨點指著「馬太說過了六天…在猶太的觀念裡面完全一
+        # 樣」，而「禮拜五一部分的時間就是一天，禮拜六整天就是一天」這個算法
+        # 在前一段，模型看不到，於是把講過的東西判成「證據裡沒有這件事」。
+        #
+        # 只往前一段，不往後：講員先講理由再下結論的次序，比反過來常見得多，
+        # 而每多送一段就多一分被過濾器擋下的機會。
+        ordinal = source_file.ordinal_of(segment)
+        window = []
+        if ordinal is not None and ordinal > 1:
+            previous = source_file.by_ordinal(ordinal - 1)
+            if previous is not None:
+                window.append(live_text(previous.get("text", "")).strip())
+        window.append(live_text(segment.get("text", "")).strip())
+        for text in window:
+            if text and text not in seen:
+                seen.append(text)
         if len(seen) >= limit:
             break
     return seen
