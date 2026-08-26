@@ -94,7 +94,7 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在三个目标产品之内**，见 [Solution Architecture D6](./00-overview/solution_architecture.md#d6三个目标产品其余延后) |
+| [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在三个目标产品之内**，见 [Solution Architecture D5](./00-overview/solution_architecture.md#d5三个目标产品其余延后) |
 
 ## 90-ops —— 运营与工作台
 
