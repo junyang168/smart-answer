@@ -111,6 +111,9 @@ proposal 若提出 `viewpoint_relations`，每一条都要有一条 `relation_re
 - 没有漏项：`status` 为 `pass`，`missed_claim_ids` 为空。
 - 有漏项：`status` 为 `missed_novelty`，列出相关 `claim_id`，并在 `reason` 里说明漏掉的是什么命题。
 
+`missed_claim_ids` **只能是本批 packet 里的 `claim_id`**。本批之外的 Claim 不归这次提案处理，点名它会让整批停在
+`novelty finding names a Claim outside the batch`，而那条 Claim 仍会在它自己所属的批次里被处理。若你是想说「另一篇来源也讲了同一件事」，那属于该候选 `novelty_comparison` 的评价，写进对应 component 的 `reason`，不要写进 `missed_claim_ids`。
+
 ## 边界
 
 你不写 master record，不分配 ID，不批准任何东西。你的输出是复核意见；程序据此决定进入 ChangeSet 还是 exception。
