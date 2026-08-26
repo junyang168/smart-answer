@@ -179,6 +179,28 @@ class Store:
         )
         return [row["collection"] for row in rows]
 
+    def ingested_subjects(self) -> set[str]:
+        """What the run ledger says actually landed in the store.
+
+        `pipeline_runs` is the pipeline's own record, so this is the one place
+        the audit takes the pipeline's word for something. That is deliberate
+        and narrow: the ledger decides **which rows to look at**, never whether
+        those rows are right. Every judgement below still comes from the files
+        on disk.
+
+        The alternative is worse. The store holds 35 sources while the current
+        run covers 20 -- the other 13 are Romans-era material from earlier
+        batches -- so a ratio over everything answers a question nobody asked,
+        and averages the obsolete rows in with the ones about to be built on.
+        """
+
+        rows = self._query(
+            "select json_build_object('s', subject_id)::text "
+            "from wang_knowledge.pipeline_runs "
+            "where stage = 'ingest' and status = 'succeeded' group by subject_id"
+        )
+        return {row["s"] for row in rows}
+
     def retired_ids(self) -> set[tuple[str, str]]:
         rows = self._query(
             "select json_build_object('c', collection, 'i', object_id)::text "
@@ -254,11 +276,24 @@ class SourceFile:
 class SourceIndex:
     """`source_id` → 磁碟上的原件。"""
 
-    def __init__(self, documents: list[dict[str, Any]], data_base_dir: Path) -> None:
+    def __init__(
+        self,
+        documents: list[dict[str, Any]],
+        data_base_dir: Path,
+        in_scope: set[str] | None = None,
+    ) -> None:
         self.data_base_dir = data_base_dir
         self.documents = {row["object_id"]: row["payload"] for row in documents}
+        #: `None` 表示不限範圍。否則只有這些 `source_id` 算數。
+        self.in_scope = in_scope
+        self.out_of_scope = (
+            sorted(set(self.documents) - in_scope) if in_scope is not None else []
+        )
         self._files: dict[str, SourceFile | None] = {}
         self.unresolved: dict[str, str] = {}
+
+    def covers(self, source_id: str) -> bool:
+        return self.in_scope is None or source_id in self.in_scope
 
     def path_for(self, payload: dict[str, Any]) -> Path | None:
         declared = payload.get("source_path")
@@ -334,10 +369,14 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
                 **extra,
             })
 
+    skipped_out_of_scope = 0
     for row in fragments:
         payload = row["payload"]
         fragment_id = row["object_id"]
         source_id = str(payload.get("source_id") or "")
+        if not sources.covers(source_id):
+            skipped_out_of_scope += 1
+            continue
         source_file = sources.file_for(source_id)
         if source_file is None:
             binding["no_source_file"] += 1
@@ -431,7 +470,8 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
     return {
         "layer": 1,
         "name": "逐字對得上",
-        "total": len(fragments),
+        "out_of_scope": skipped_out_of_scope,
+        "total": len(fragments) - skipped_out_of_scope,
         "passed": counts["pass"],
         "counts": dict(counts),
         "version_binding": {**binding, "stale_by_source": dict(stale_by_source)},
@@ -935,7 +975,11 @@ def audit_claims(
     steps = {row["object_id"]: row["payload"] for row in store.collection("evidence_steps")}
     fragments = {row["object_id"]: row["payload"] for row in store.collection("source_fragments")}
 
-    eligible = [row for row in claims if _claim_evidence_ids(row["payload"])]
+    eligible = [
+        row
+        for row in claims
+        if _claim_evidence_ids(row["payload"]) and _claim_in_scope(row["payload"], sources, fragments)
+    ]
     sample = rng.sample(eligible, min(sample_size, len(eligible)))
     status_mix = Counter(row["review_status"] for row in sample)
 
@@ -982,6 +1026,33 @@ def audit_claims(
         "review_status_mix": dict(status_mix),
         "results": results,
     }
+
+
+def _claim_in_scope(
+    payload: dict[str, Any],
+    sources: SourceIndex,
+    fragments: dict[str, dict[str, Any]],
+) -> bool:
+    """Whether this claim belongs to a source the current run covers.
+
+    A claim names its source through `occurrences[].transcript_id`, which is a
+    transcript title rather than a `source_id`, so the match goes through the
+    source documents. Claims that name no source at all stay in: excluding them
+    would quietly shrink the population on a technicality.
+    """
+
+    titles = {
+        str(occurrence.get("transcript_id") or "")
+        for occurrence in payload.get("occurrences") or []
+    }
+    titles.discard("")
+    if not titles:
+        return True
+    for source_id, document in sources.documents.items():
+        name = str(document.get("transcript_id") or document.get("title") or "")
+        if name in titles and sources.covers(source_id):
+            return True
+    return False
 
 
 def _claim_evidence_ids(payload: dict[str, Any]) -> list[str]:
@@ -1255,6 +1326,25 @@ def _anchor_state_disagrees(key: str) -> bool:
     return bound != (verdict == "pass")
 
 
+def duplicate_source_documents(sources: SourceIndex) -> list[tuple[str, list[str]]]:
+    """同一份逐字稿被登記成兩筆 `source_document`。
+
+    `SRC-L3` 與 `SRC-2016_NYSC_3-f35be4755f9b` 是同一篇（五）3；`SRC-L4` 同理。
+    早期 pilot 的那一筆沒有 `source_path`，它底下的片段也正是庫裡僅有的 40 條
+    對不上的片段。重複本身無害，但兩筆記錄各自帶錨點，覆蓋率與去重都會把同一篇
+    算兩次。
+    """
+
+    by_name: defaultdict[str, list[str]] = defaultdict(list)
+    for source_id, document in sources.documents.items():
+        if not sources.covers(source_id):
+            continue
+        name = str(document.get("transcript_id") or document.get("title") or "")
+        if name:
+            by_name[name].append(source_id)
+    return [(name, sorted(ids)) for name, ids in sorted(by_name.items()) if len(ids) > 1]
+
+
 def ratio(passed: int, total: int) -> str:
     if not total:
         return "—"
@@ -1270,8 +1360,20 @@ def render_report(
         f"審計模型    {meta['model']}（第 3、4 層；提議與複核模型未參與）",
         f"語料        {meta['sources']} 份來源 · {meta['fragments']:,} 條片段 · "
         f"{meta['claims']:,} 條主張 · {meta['viewpoints']} 個觀點",
+        f"範圍        {meta['scope']}"
+        + (
+            f"（run ledger 說這一輪 ingest 成功的來源；另有 {meta['sources_out_of_scope']} 份更早批次的沒查。"
+            "第 2 層例外：依賴是全庫的，範圍縮不了）"
+            if meta["scope"] == "current-run"
+            else "（庫裡全部來源，包含更早批次留下的）"
+        ),
         "",
     ]
+    if meta["duplicate_sources"]:
+        lines.append("同一份逐字稿登記了兩次：")
+        for name, ids in meta["duplicate_sources"]:
+            lines.append(f"          {name[:40]}  {' · '.join(ids)}")
+        lines.append("")
 
     if 1 in layers:
         layer = layers[1]
@@ -1389,6 +1491,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--viewpoints", type=int, default=10, help="第 4 層抽幾個觀點")
     parser.add_argument("--seed", type=int, default=241, help="抽樣種子，同種子可重放")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
+    parser.add_argument(
+        "--scope",
+        choices=("current-run", "all"),
+        default="current-run",
+        help=(
+            "current-run：只查 run ledger 說這一輪 ingest 成功的來源（預設）。"
+            "all：查庫裡全部來源，包含更早批次留下的"
+        ),
+    )
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
     args = parser.parse_args(argv)
 
@@ -1402,7 +1513,19 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"DATA_BASE_DIR 不是目錄：{data_base_dir}")
 
     store = Store(database_url)
-    sources = SourceIndex(store.collection("source_documents"), data_base_dir)
+    documents = store.collection("source_documents")
+    in_scope: set[str] | None = None
+    if args.scope == "current-run":
+        subjects = store.ingested_subjects()
+        in_scope = {
+            row["object_id"]
+            for row in documents
+            if str(
+                row["payload"].get("transcript_id") or row["payload"].get("title") or ""
+            ).replace("notes_manuscript:", "")
+            in subjects
+        }
+    sources = SourceIndex(documents, data_base_dir, in_scope)
     rng = random.Random(args.seed)
 
     model: IndependentModel | None = None
@@ -1430,8 +1553,15 @@ def main(argv: list[str] | None = None) -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model": args.model if model else "未使用",
         "seed": args.seed,
-        "sources": len(sources.documents),
-        "fragments": len(store.collection("source_fragments")),
+        "scope": args.scope,
+        "sources": len(sources.in_scope) if sources.in_scope is not None else len(sources.documents),
+        "sources_out_of_scope": len(sources.out_of_scope),
+        "duplicate_sources": duplicate_source_documents(sources),
+        "fragments": sum(
+            1
+            for row in store.collection("source_fragments")
+            if sources.covers(str(row["payload"].get("source_id") or ""))
+        ),
         "claims": len(store.collection("claims")),
         "viewpoints": len(store.collection("canonical_viewpoints")),
     }

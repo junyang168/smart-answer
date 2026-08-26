@@ -15,8 +15,18 @@
 ```bash
 scripts/audit-library.py                       # 四層全跑，抽 20 條主張、10 個觀點
 scripts/audit-library.py --layers 1,2          # 只跑確定性的兩層，不呼叫 model
+scripts/audit-library.py --scope all           # 連更早批次留下的來源一起查
 scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
 ```
+
+**預設只查這一輪的來源。** 庫裡有 35 份 source document，而目前這一輪 ingest 成功的
+是 20 個來源（22 筆記錄，見下）——其餘 13 份是更早批次留下的羅馬書材料。把它們平均進
+同一個比率，答出來的是沒人問的問題，而且會把要往下建的那一批和已經放下的那一批混在
+一起。範圍由 `wang_knowledge.pipeline_runs` 裡 `stage='ingest' and status='succeeded'`
+的 subject 決定。
+
+這是全篇唯一一處審計採信流水線自己的紀錄，而且只採信到「**查哪些列**」為止；那些列對
+不對，判斷一律仍來自磁碟上的原件。
 
 用系統的 `python3` 就能跑，不需要 `backend/.venv`：整支程式只用標準函式庫，資料庫走
 `psql` 子行程，model 走 `urllib`。這是刻意的——審計要有自己的代碼路徑，不 import
@@ -71,38 +81,44 @@ scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
 
 ## 2026-08-26 的量測結果（僅數字，不含內容）
 
-`--claims 20 --viewpoints 10 --seed 241`，語料為 35 份來源、8,333 條片段、1,587 條主
-張、31 個觀點。
+`--claims 20 --viewpoints 10 --seed 241`，範圍 `current-run`：22 份來源記錄、7,343 條
+片段、1,365 條在範圍內的主張、31 個觀點。
 
 | 層 | 結果 |
 | --- | --- |
-| 1 逐字對得上 | 8,293／8,333（99.5%）。40 條不通過的，庫裡本來就標成 `unresolved`：36 條根本沒有 `verbatim_excerpt`，4 條只差在省略號寫法（原文兩個 `…`，片段存成一個） |
+| 1 逐字對得上 | 7,333／7,343（99.9%）。10 條不通過的全部落在 `SRC-L3`——同一篇（五）3 的舊 pilot 記錄 |
 | 2 覆蓋誠實 | 23,428／23,485 當前物件（99.8%）依賴全部可解析。47,852 條引用，97 條斷掉 |
-| 3 主張抽樣 | 20 條中 1 條有異議（`overreach`） |
-| 4 觀點抽樣 | 10 個中 0 個有異議（母體 12 個） |
+| 3 主張抽樣 | 20 條中 3 條有異議，全部是 `overreach`（母體 1,365 條） |
+| 4 觀點抽樣 | 10 個中 1 個有異議（`over_merge`，母體 12 個） |
 
-第 2 層查的是**全部當前物件**，不是 `review_status` 說已批准的那 360 個。範圍按
-`review_status` 圈，量到的會是詞彙而不是文庫：1,530 條 claim 各有一條 AI 裁定，只是
-從來沒有回寫進那個欄位（見 #243）。已批准的那一小撮另外列一行。
+第 2 層是全庫的，範圍縮不了：依賴本來就跨來源，一條指向別批物件的引用不會因為換個範圍
+就不算斷。
 
-三件值得看的：
+五件值得看的：
+
+**同一份逐字稿登記了兩次。**（五）3 同時是 `SRC-L3` 與 `SRC-2016_NYSC_3-f35be4755f9b`，
+（四）4 同時是 `SRC-2016_NYSC_4-d05cd6cbe477` 與 `SRC-2016_NYSC_4-07c73c44dc11`。舊
+pilot 的那一筆沒有 `source_path`，而**庫裡僅有的 10 條對不上的片段全在它底下**。重複
+本身無害，但兩筆記錄各自帶錨點，覆蓋率與去重會把同一篇算兩次。
 
 **97 條斷掉的引用全在同一批。** `knowledge_routes` 指向
-`CP-RIGHTEOUSNESS-FAITH-ROMANS-VALIDATION-01-…` 的幾份 composition plan 與
-decision，而那幾份不在庫裡——同批的其他 plan 都在。routes 進了庫，它們指向的計劃沒
-進。
+`CP-RIGHTEOUSNESS-FAITH-ROMANS-VALIDATION-01-…` 的幾份 composition plan 與 decision，
+而那幾份不在庫裡——同批的其他 plan 都在。routes 進了庫，它們指向的計劃沒進。
 
-**2 條成分定位是拼接出來的。** 兩條 `equivalent_component` 連結宣稱等價的成分，不是
-主張原文裡的一段連續文字，而是把不相鄰的兩截接起來的。抽取的規則本來就寫著「不能改
-字、補標點或拼接」（`backend/pipeline/detailed_knowledge_extraction_runner.py:126`），
-觀點成員資格就掛在那個拼出來的句子上。
+**2 條成分定位是拼接出來的。** 兩條 `equivalent_component` 連結宣稱等價的成分，不是主
+張原文裡的一段連續文字，而是把不相鄰的兩截接起來的。抽取的規則本來就寫著「不能改字、
+補標點或拼接」（`backend/pipeline/detailed_knowledge_extraction_runner.py:126`），觀點
+成員資格就掛在那個拼出來的句子上。
+
+**第 4 層那一條是 `over_merge`。** 觀點把太16:19 與太18:18、以及「譯法沒譯出未來完成
+式」與「常見理解錯誤」合成一條，而各成員主張只涵蓋其中一半。這正是
+[#232](https://github.com/junyang168/smart-answer/issues/232) 記過的那一類——差別是那
+三條是人偶然發現的，這一條是跑出來的。
 
 **896 條引用指向已經 retire 的物件。** 那些記錄還在庫裡，只是不再是當前版本。不算斷
 掉，但也不是乾淨的引用，所以單獨計數。
 
-報告另外列出**查無此物的 ID**：長得像物件 id、被引用得到、庫裡卻沒有對應 collection
-的值。其中 `occurrence_refs` 與 `occurrence_ref_id` 共 132 處指向 `OCC-…`，而沒有任
-何物件定義它們。
-
-以及**撞號的路徑**：同一個欄位路徑底下，多數值解不開、少數解得開。少數那幾個是撞
-號，不是引用。列出來讓人自己看那個比率，不當成失敗。
+報告另外列出**查無此物的 ID**（長得像物件 id、被引用得到、庫裡卻沒有對應 collection
+的值；`occurrence_refs` 與 `occurrence_ref_id` 共 132 處指向 `OCC-…`，而沒有任何物件定
+義它們），以及**撞號的路徑**（同一條路徑底下多數值解不開、少數解得開；少數那幾個是撞
+號，不是引用）。
