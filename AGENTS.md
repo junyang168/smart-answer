@@ -7,6 +7,11 @@ When the task concerns Matthew exposition articles or Wang repository content pr
 3. `docs/wang-knowledge-platform/30-authoring/fast_passage_editorial_workflow_v1.md`
 4. `docs/wang-knowledge-platform/20-knowledge/canonical_viewpoint_design.md`
 
+Before writing or editing anything under `docs/wang-knowledge-platform/`, read
+`docs/wang-knowledge-platform/CONVENTIONS.md` and run `python3 scripts/check-docs.py docs`
+before you call the work done. The conventions are short and every one of them exists
+because the corpus already broke that way once.
+
 The Canonical Viewpoint specification governs cross-sermon viewpoint identity,
 argument routes, coverage disclosure and downstream article/QA/search use. Read
 it as an architecture and packet-construction authority; do not send the full
