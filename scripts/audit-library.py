@@ -161,18 +161,27 @@ class Store:
             raise SystemExit(f"psql failed: {result.stderr.strip()}")
         return [json.loads(line) for line in result.stdout.splitlines() if line]
 
-    def collection(self, name: str) -> list[dict[str, Any]]:
-        """一個 collection 的當前物件（不含已 retire 的）。"""
+    def collection(self, name: str, *, include_retired: bool = False) -> list[dict[str, Any]]:
+        """一個 collection 的物件。預設不含已 retire 的。
 
-        if name not in self._cache:
-            self._cache[name] = self._query(
+        `include_retired` 是給**取材**用的，不是給判定用的。一條被 retire 的
+        `evidence_step` 或 `source_fragment` 仍然是教授說過的話，只是不再是當前
+        版本；讀不到它，第 3 層就只能拿一個空包去問模型，而模型會誠實地回答
+        「沒有證據支持」——那句話說的是我的包，不是文庫。
+        """
+
+        key = f"{name}:{include_retired}"
+        if key not in self._cache:
+            where = "" if include_retired else "and retired_at is null "
+            self._cache[key] = self._query(
                 "select json_build_object("
                 "'object_id', object_id, 'review_status', review_status,"
-                "'revision', revision, 'payload', payload)::text "
+                "'revision', revision, 'retired', (retired_at is not null),"
+                "'payload', payload)::text "
                 f"from wang_knowledge.objects where collection = '{name}' "
-                "and retired_at is null order by object_id"
+                f"{where}order by object_id"
             )
-        return self._cache[name]
+        return self._cache[key]
 
     def collection_names(self) -> list[str]:
         rows = self._query(
@@ -637,6 +646,9 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
     scripture_findings = _audit_derived_scripture(store)
     for entry in scripture_findings:
         objects_with_gap.add(("argument_route_attestations", entry["object_id"]))
+    retired_evidence = _audit_retired_evidence(store)
+    for entry in retired_evidence:
+        objects_with_gap.add(("claims", entry["object_id"]))
     locator_findings = _audit_component_locators(store)
     for entry in locator_findings:
         objects_with_gap.add(("viewpoint_claim_links", entry["object_id"]))
@@ -677,6 +689,7 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
         "attestation_findings": attestation_findings,
         "derived_scripture_findings": scripture_findings,
         "component_locator_findings": locator_findings,
+        "retired_evidence_findings": retired_evidence,
         "source_document_findings": document_findings,
     }
 
@@ -749,6 +762,42 @@ def _audit_derived_scripture(store: Store) -> list[dict[str, Any]]:
                 "unsupported_scripture_refs": undeclared,
                 "evidence_scripture_refs": sorted(actual),
             })
+    return findings
+
+
+def _audit_retired_evidence(store: Store) -> list[dict[str, Any]]:
+    """主張引的證據步驟已經被 retire。
+
+    這是確定性的事實，不必問模型：一條主張如果它引的證據步驟全部退役了，那條
+    主張現在沒有當前的證據撐著。第 2 層查引用解不解析得開，而指向 retire 物件
+    的引用算「解得開」（記錄還在），所以這一類從那裡漏了下去——然後在第 3 層以
+    「證據裡沒有這件事」的樣子冒出來，看起來像是教授的內容有問題。
+
+    分兩級：全部退役是斷了，部分退役是缺了一塊。兩種都要人看，但不是同一件事。
+    """
+
+    retired_steps = {
+        row["object_id"]
+        for row in store.collection("evidence_steps", include_retired=True)
+        if row.get("retired")
+    }
+    if not retired_steps:
+        return []
+    findings: list[dict[str, Any]] = []
+    for row in store.collection("claims"):
+        ids = _claim_evidence_ids(row["payload"])
+        if not ids:
+            continue
+        stale = [i for i in ids if i in retired_steps]
+        if not stale:
+            continue
+        findings.append({
+            "object_id": row["object_id"],
+            "verdict": "all_evidence_retired" if len(stale) == len(ids) else "some_evidence_retired",
+            "retired_step_ids": stale,
+            "evidence_step_ids": ids,
+            "statement": str(row["payload"].get("statement") or "")[:120],
+        })
     return findings
 
 
@@ -1182,8 +1231,16 @@ def audit_claims(
     # `candidate`，只抽已批准的等於用一個 6 條的母體去代表 1,587 條——那個比率沒
     # 有意義。抽到的 `review_status` 分布照樣報出來，讀的人自己判斷代表性。
     claims = store.collection("claims")
-    steps = {row["object_id"]: row["payload"] for row in store.collection("evidence_steps")}
-    fragments = {row["object_id"]: row["payload"] for row in store.collection("source_fragments")}
+    # 取材連 retire 的一起讀。412 條 evidence_step 的片段全部已 retire，6 條主張
+    # 的證據步驟全部已 retire——照舊只讀當前的，這些主張送進去就是空包。
+    steps = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("evidence_steps", include_retired=True)
+    }
+    fragments = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("source_fragments", include_retired=True)
+    }
 
     eligible = [
         row
@@ -1203,7 +1260,9 @@ def audit_claims(
         evidence_ids = _claim_evidence_ids(payload)
         evidence_lines = []
         fragment_ids: list[str] = []
-        for step_id in evidence_ids[:10]:
+        # 全部送，不截斷。原來寫死 `[:10]`，10 條主張的證據被砍掉一截而報告上
+        # 什麼都不說——模型少看幾條證據，判出來的「證據不足」就是我造的。
+        for step_id in evidence_ids:
             step = steps.get(step_id)
             if step is None:
                 evidence_lines.append(f"- [{step_id}] （這條證據步驟在庫裡找不到）")
@@ -1215,6 +1274,26 @@ def audit_claims(
             )
             fragment_ids.extend(_step_fragment_ids(step))
         paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources)
+        if not paragraphs:
+            # 拿不到一段原文就不要問模型。
+            #
+            # 這一層問的是「這條主張能不能從證據推出來」，而證據的根在逐字稿。
+            # 一段都拿不到還去問，模型只能拿主張比證據摘要，然後誠實地回答「證
+            # 據裡沒有這件事」——那句話說的是我的包，不是文庫。這一路的假陽性
+            # 全是這麼來的。
+            #
+            # 這 18 條的片段本來就沒記位置（`DK-STEP-*` 那批 `paragraph_key` 是
+            # 空的），所以它是資料的缺口，該報成缺口，不該報成主張站不住。
+            return {
+                "claim_id": row["object_id"],
+                "review_status": row["review_status"],
+                "statement": str(payload.get("statement") or "")[:200],
+                "evidence_step_ids": evidence_ids,
+                "source_paragraphs": 0,
+                "verdict": "no_source_text",
+                "issue": "none",
+                "reason": "這條主張引的片段沒有記位置，取不到逐字稿，無從判讀。",
+            }
         verdict, used = _judge_trimming_on_block(
             model,
             lambda kept: _claim_prompt(row["object_id"], payload, evidence_lines, kept),
@@ -1225,7 +1304,7 @@ def audit_claims(
             "claim_id": row["object_id"],
             "review_status": row["review_status"],
             "statement": str(payload.get("statement") or "")[:200],
-            "evidence_step_ids": evidence_ids[:10],
+            "evidence_step_ids": evidence_ids,
             "source_paragraphs": used,
             "paragraphs_dropped_to_pass_filter": len(paragraphs) - used,
             **verdict,
@@ -1236,16 +1315,18 @@ def audit_claims(
     disputed = [r for r in results if r.get("verdict") == "disputed"]
     errors = [r for r in results if r.get("verdict") == "model_error"]
     blocked = [r for r in results if r.get("verdict") == "blocked"]
+    unreadable = [r for r in results if r.get("verdict") == "no_source_text"]
     return {
         "layer": 3,
         "name": "主張站得住",
         "complete": sample_size is None,
         "population": len(eligible),
         "sampled": len(results),
-        "judged": len(results) - len(errors) - len(blocked),
+        "judged": len(results) - len(errors) - len(blocked) - len(unreadable),
         "disputed": len(disputed),
         "model_errors": len(errors),
         "blocked": len(blocked),
+        "no_source_text": len(unreadable),
         "review_status_mix": dict(status_mix),
         "results": results,
     }
@@ -1370,8 +1451,14 @@ def audit_viewpoints(
 
     viewpoints = {row["object_id"]: row["payload"] for row in store.collection("canonical_viewpoints")}
     revisions = {row["object_id"]: row["payload"] for row in store.collection("viewpoint_revisions")}
-    claims = {row["object_id"]: row["payload"] for row in store.collection("claims")}
-    fragments = {row["object_id"]: row["payload"] for row in store.collection("source_fragments")}
+    claims = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("claims", include_retired=True)
+    }
+    fragments = {
+        row["object_id"]: row["payload"]
+        for row in store.collection("source_fragments", include_retired=True)
+    }
 
     links_by_viewpoint: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in store.collection("viewpoint_claim_links"):
@@ -1529,6 +1616,13 @@ def build_human_queue(layers: dict[int, dict[str, Any]]) -> dict[str, Any]:
             "verdict": "foreign_source_fragment",
             "detail": json.dumps(entry, ensure_ascii=False),
         })
+    for entry in layers.get(2, {}).get("retired_evidence_findings", []):
+        items.append({
+            "kind": "retired_evidence",
+            "object_id": entry["object_id"],
+            "verdict": entry["verdict"],
+            "detail": f"{len(entry['retired_step_ids'])}/{len(entry['evidence_step_ids'])} 條證據步驟已退役",
+        })
     for entry in layers.get(2, {}).get("component_locator_findings", []):
         items.append({
             "kind": "component_locator",
@@ -1544,6 +1638,13 @@ def build_human_queue(layers: dict[int, dict[str, Any]]) -> dict[str, Any]:
             "detail": "、".join(entry["unsupported_scripture_refs"]),
         })
     for entry in layers.get(3, {}).get("results", []):
+        if entry.get("verdict") == "no_source_text":
+            items.append({
+                "kind": "no_source_text",
+                "object_id": entry["claim_id"],
+                "verdict": "no_source_text",
+                "detail": entry.get("reason", ""),
+            })
         if entry.get("verdict") == "blocked":
             items.append({
                 "kind": "not_judged",
@@ -1682,6 +1783,11 @@ def render_report(
         lines.append(
             f"          scripture_refs_derived 無證據支持 {len(layer['derived_scripture_findings']):>4,}"
         )
+        retired_mix = Counter(e["verdict"] for e in layer.get("retired_evidence_findings", []))
+        lines.append(
+            f"          主張引的證據步驟已退役 {sum(retired_mix.values()):>4,}"
+            + (f"   （{'、'.join(f'{k} {v}' for k, v in sorted(retired_mix.items()))}）" if retired_mix else "")
+        )
         locator_mix = Counter(entry["verdict"] for entry in layer["component_locator_findings"])
         lines.append(
             f"          成分定位對不上主張原文 {sum(locator_mix.values()):>4,}"
@@ -1724,6 +1830,10 @@ def render_report(
         if layer.get("blocked"):
             lines.append(
                 f"          審計模型拒答 {layer['blocked']}   （安全過濾器擋下，這幾條沒有判讀）"
+            )
+        if layer.get("no_source_text"):
+            lines.append(
+                f"          取不到逐字稿 {layer['no_source_text']}   （片段沒記位置，沒送去判讀）"
             )
         lines.append("")
 
