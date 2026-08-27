@@ -532,6 +532,7 @@ def parse_reference(slug: str) -> Dict[str, object]:
         "display": display,
         "slug": book_slug,
         "slug_book": alias,
+        "osis_book": osis_book,
         "chapter": chapter_number,
         "start": verse_start,
         "end": verse_end or verse_start,

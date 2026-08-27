@@ -28,7 +28,13 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
-from backend.api.scripture import format_chinese_reference, reference_slugs, spoken_references
+from backend.api.scripture import (
+    BOOK_SLUG_TO_NAME,
+    format_chinese_reference,
+    parse_reference,
+    reference_slugs,
+    spoken_references,
+)
 
 
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
@@ -68,10 +74,15 @@ LEAD_IN_SECONDS = 8.0
 
 #: 一段最短播多久。
 #:
-#: 按引文长度算，一句话只有五六秒，点开听完还没反应过来就停了。45 秒是教授把
-#: 一个判断说完再举一句例子的长度——量下来单条引文中位 18 字（约 6 秒），而他
-#: 说清一件事通常连着三到八句。
-MIN_STRETCH_SECONDS = 45.0
+#: 按引文长度算，一句话只有五六秒，点开听完还没反应过来就停了。原来是 45 秒，
+#: 估的是「他把一个判断说完再举一句例子」的长度。那个估计偏紧：太 16 章四页共
+#: 33 段，有 8 段的长度**正好是 45.0 秒**——那不是量出来的长度，是下限本身，只
+#: 是说明这几段的引文短到落回下限。整章段长中位 174 秒，45 秒离它太远。
+#:
+#: 提到 90 秒：不足 1 分钟的段从 8 降到 0，段数一段不变（33），总时长 173 分
+#: 变 179 分。120 秒也是 33 段，但要再多播 6 分钟，而 90 秒已经把「点开还没
+#: 反应过来就停了」解决掉了。
+MIN_STRETCH_SECONDS = 90.0
 
 #: 逐字稿目录的优先顺序，与抽取一致。
 TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
@@ -452,6 +463,19 @@ def judgement_during(
             judgement = dominant(begin, finish)
             if judgement and (not out or out[-1]["judgement"] != judgement):
                 out.append({"at": begin, "judgement": judgement})
+    # 每个判断能听多久。
+    #
+    # 判断不再只是幻灯上的抬头，它同时是读者的收听单位——一段一个判断，点它开始
+    # 播。所以每条要报出自己有多长，读者才看得出「这一条听 3 分钟还是 13 分钟」。
+    #
+    # 算的是**能播的**秒数，不是首尾相减：一个判断可以横跨两段录音，中间隔着教
+    # 授岔去讲别的，那段不播，也就不该计进去。
+    for index, mark in enumerate(out):
+        until = out[index + 1]["at"] if index + 1 < len(out) else float("inf")
+        mark["seconds"] = sum(
+            max(0.0, min(finish, until) - max(begin, mark["at"]))
+            for begin, finish, _ in stretches
+        )
     return out
 
 
@@ -495,8 +519,12 @@ def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: i
     return False
 
 
-def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
+def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
+
+    `passage` 是 `api.scripture` 的经文 slug（`mat-16-13-20`），书卷、章、节全从
+    它读出来——原来书名写死成 `"mat"`，章节另用一个正则拆，于是这一层只能服务马
+    太福音的一页。同一个 slug 也是页面的地址和幻灯要取的那段经文，三处一个写法。
 
     `store` 只需要一个 `list_records(collection)`，所以既能接 PostgresKnowledgeStore，
     也能在测试里塞一个字典。
@@ -511,10 +539,10 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     documents = by_id("source_documents", "source_id")
     sermons = Sermons(data_base_dir)
 
-    chapter_text, _, verse_text = scripture.partition(":")
-    chapter = int(chapter_text)
-    verses = [int(n) for n in re.findall(r"\d+", verse_text)] or [1, 999]
-    low, high = verses[0], verses[-1]
+    reference = parse_reference(passage)
+    book = str(reference["slug"])
+    chapter = int(reference["chapter"])
+    low, high = int(reference["start"]), int(reference["end"])
 
     def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
         """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
@@ -555,7 +583,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     # 人要的。
     by_sermon: dict[str, dict[str, Any]] = {}
     for claim_id, claim in claims.items():
-        if not in_passage(claim, "mat", chapter, low, high):
+        if not in_passage(claim, book, chapter, low, high):
             continue
         statement = str(claim.get("statement") or "").strip()
         if not statement:
@@ -584,9 +612,81 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     sermons_out.sort(key=lambda row: -row["seconds"])
 
     return {
-        "schema_version": "wang_original_audio_index_v2",
-        "scripture": scripture,
-        # 幻灯上的那一节。一段经文一个入口，所以整页只有这一处经文。
-        "reference": f"mat-{scripture.replace(':', '-')}" if ":" in scripture else "",
+        "schema_version": "wang_original_audio_index_v3",
+        # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
+        # 页面地址，用的都是这一个 slug。
+        "passage": passage,
+        "label": format_chinese_reference(passage),
         "sermons": sermons_out,
     }
+
+
+#: 有原声页面的经文段落。
+#:
+#: 跟文章层的单元走，不跟数据走。量过太 16 章 27 个切点，数的是「有多少条主张
+#: 的经文范围跨过这一刀」：9｜10 有 20 条（全章最不能切，他讲「你們還不明白嗎」
+#: 的连贯论证），21｜22 有 17 条，20｜21 有 15 条，12｜13 只有 1 条。纯按数据切
+#: 会得到 16:1-12 / 16:13-23 / 16:24-27 三段，而文章层切在 20｜21。
+#:
+#: 骑跨不等于切断：那 14 条主张会在 16:13-20 和 16:21-23 两页上各出现一次，而不
+#: 去重本来就是这一层的规则（同一件事他在几篇里各讲一遍，删掉就是删掉他的论
+#: 证）。14 条重复换全站一致——落地页上文章和原声并排显示，范围对不齐会被读者当
+#: 成 bug。
+#:
+#: 但 20｜21 是全章第三糟的一刀，文章重写若要重划边界，这里最该重新考虑，而且两
+#: 边要一起动。证据记在 #36。
+#:
+#: 16:28 不做：那 24 条主张引的是 `馬太福音16:28-17:2`、`馬可福音9:1-2`、`路加
+#: 福音9:28`、`彼得後書1:16-18`，全指向登山变像，跨章，归 #20。
+#:
+#: 读者看到的写法（`太16:1–12`）跟文章卡片上的一样，两列并排才对得齐；那是编辑
+#: 决定，不是从 slug 推出来的，所以写在这里。
+PASSAGES: tuple[tuple[str, str], ...] = (
+    ("mat-16-1-12", "太16:1–12"),
+    ("mat-16-13-20", "太16:13–20"),
+    ("mat-16-21-23", "太16:21–23"),
+    ("mat-16-24-27", "太16:24–27"),
+)
+
+#: 原声页面的地址。文库落地页按这个拼链接。
+PASSAGE_URL_PREFIX = "/resources/wang-repository/audio"
+
+
+def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
+    """每一段有多少可听的、分成几个判断——文库落地页上那一排。
+
+    落地页自己写着「每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解」，而从
+    那里通不到任何原声。这个列表就是兑现那一句。
+
+    经卷和章按文章那边的写法给（`Matt` / `馬太福音` / 16），落地页才能把原声和
+    文章排进同一章底下。16:21-23 和 16:24-27 只有原声没有文章——原声可以先于文
+    章上线。
+
+    现读现算，四段合起来不到一秒。缓存会在观点层改动之后继续端出旧的数字，而这
+    一排给的正是「有多少可听」。
+    """
+
+    out: list[dict[str, Any]] = []
+    for slug, label in PASSAGES:
+        index = build_index(store, data_base_dir, slug)
+        if not index["sermons"]:
+            continue
+        reference = parse_reference(slug)
+        out.append({
+            "passage": slug,
+            "label": label,
+            "scripture": {
+                "book": reference["osis_book"],
+                "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),
+                "chapter": reference["chapter"],
+                "verse_start": reference["start"],
+                "end_chapter": reference["chapter"],
+                "verse_end": reference["end"],
+                "display": label,
+            },
+            "sermons": len(index["sermons"]),
+            "seconds": sum(row["seconds"] for row in index["sermons"]),
+            "topics": sum(len(row["judgements"]) for row in index["sermons"]),
+            "href": f"{PASSAGE_URL_PREFIX}/{slug}",
+        })
+    return out

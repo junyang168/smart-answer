@@ -29,6 +29,17 @@ type BibleChapterGroup = {
   articles: PublicArticleSummary[];
 };
 
+/** 一段有原声的经文。 */
+type AudioPassage = {
+  passage: string;
+  label: string;
+  scripture: ScriptureReference;
+  sermons: number;
+  seconds: number;
+  topics: number;
+  href: string;
+};
+
 type BibleBookGroup = {
   book: string;
   bookLabel: string;
@@ -108,9 +119,39 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
   );
 }
 
+/** 原声的卡片。
+ *
+ * 跟文章卡并排，但一眼要能分出来：文章是读的，原声是听的。同一个圆角边框，换
+ * 一套颜色。
+ *
+ * 没有标题——经节就是标题。文章的标题是写出来的，原声一个字都不新增，硬编一个
+ * 「求神蹟的試探」上去就破了这一页的前提。标题的位置留给只有原声才有的东西：
+ * 他在几篇讲道里讲过、总共多久、分成几个讲题。
+ */
+function AudioLink({ passage }: { passage: AudioPassage }) {
+  return (
+    <Link
+      href={passage.href}
+      className="group block rounded-2xl border border-stone-800 bg-stone-900 px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-700"
+    >
+      <span className="text-sm font-bold text-amber-300">原聲</span>
+      <h4 className="mt-2 font-serif text-2xl font-bold leading-8 text-stone-50">
+        {passage.label}
+      </h4>
+      <p className="mt-2 text-sm text-stone-400">
+        {passage.sermons} 篇講道 · 共 {Math.round(passage.seconds / 60)} 分 · {passage.topics} 個講題
+      </p>
+      <span className="mt-3 inline-block text-sm font-semibold text-amber-200 group-hover:text-amber-100">
+        聽教授自己講 <span aria-hidden="true">→</span>
+      </span>
+    </Link>
+  );
+}
+
 export default function WangRepositoryPage() {
   const [view, setView] = useState<RepositoryView>("bible");
   const [articles, setArticles] = useState<PublicArticleSummary[]>([]);
+  const [audio, setAudio] = useState<AudioPassage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -130,7 +171,27 @@ export default function WangRepositoryPage() {
     return () => controller.abort();
   }, []);
 
+  // 原声单独取一次。它跟文章是两个来源——有的段落只有原声还没有文章，原声可以
+  // 先于文章上线。取不到就当没有，落地页照常显示文章，不该因为原声挂了而整页
+  // 报错。
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/public/original-audio/passages", { cache: "no-store", signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { passages: [] }))
+      .then((payload) => setAudio(payload.passages ?? []))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
   const bibleBooks = useMemo(() => groupArticlesByBible(articles), [articles]);
+  const audioByChapter = useMemo(() => {
+    const map = new Map<string, AudioPassage[]>();
+    for (const passage of audio) {
+      const key = `${passage.scripture.book}-${passage.scripture.chapter}`;
+      map.set(key, [...(map.get(key) ?? []), passage]);
+    }
+    return map;
+  }, [audio]);
   const topicGroups = useMemo(() => groupArticlesByTopic(articles), [articles]);
 
   return (
@@ -189,6 +250,17 @@ export default function WangRepositoryPage() {
                       <div className="mt-3 grid gap-4 sm:grid-cols-2">
                         {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
                       </div>
+                      {/* 原声排在同一章底下，跟文章并排。
+                          落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽
+                          相關原聲講解」，在这之前从这里通不到任何原声。
+                          有的段落只有原声还没有文章——原声可以先于文章上线。 */}
+                      {(audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).length > 0 && (
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                          {(audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).map(
+                            (passage) => <AudioLink key={passage.passage} passage={passage} />,
+                          )}
+                        </div>
+                      )}
                     </section>
                   ))}
                 </div>

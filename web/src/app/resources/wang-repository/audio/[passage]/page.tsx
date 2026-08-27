@@ -1,15 +1,16 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide, { type Gloss } from "./ScriptureSlide";
+import ScriptureSlide, { type Gloss } from "../ScriptureSlide";
 
 /**
  * 教授的原声，按经文重排。
  *
  * 名义上是马太福音释经，实际讲到一处经文时常跳去讲别的题目，讲完再跳回来。现
- * 场听是自然的，事后按经文找就不是。这一页把他讲太16:18-19 的话按经文聚起来
- * ——一个字都不新增，价值在次序。
+ * 场听是自然的，事后按经文找就不是。这一页把他讲某一段经文的话聚起来——一个字
+ * 都不新增，价值在次序。
  *
  * 三条规则，都是从材料量出来的：
  *
@@ -30,7 +31,7 @@ type Stretch = { start: number; end: number };
 /** 教授念到经文的时刻。只在幻灯角上标一行小字，主经文不跟着换。 */
 type Spoken = { at: number; scripture: string; label: string };
 /** 他立起一个判断的时刻。幻灯的标题跟着这个走。 */
-type Judgement = { at: number; judgement: string };
+type Judgement = { at: number; judgement: string; seconds: number };
 type Sermon = {
   source_id: string;
   transcript_id: string;
@@ -105,7 +106,8 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
 export default function OriginalAudioPage() {
-  const [reference, setReference] = useState("");
+  const passage = String(useParams()?.passage ?? "");
+  const [label, setLabel] = useState("");
   const [sermons, setSermons] = useState<Sermon[] | null>(null);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
@@ -117,19 +119,44 @@ export default function OriginalAudioPage() {
   useEffect(() => {
     (async () => {
       try {
-        const response = await fetch("/api/public/original-audio", { cache: "no-store" });
+        const response = await fetch(`/api/public/original-audio/${passage}`, {
+          cache: "no-store",
+        });
+        if (response.status === 404) throw new Error("這段經文還沒有原聲頁面。");
         if (!response.ok) throw new Error(`服務回傳 ${response.status}`);
         const data = await response.json();
-        setReference(data.reference ?? "");
+        setLabel(data.label ?? "");
         setSermons(data.sermons ?? []);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "讀不到");
       }
     })();
-  }, []);
+  }, [passage]);
 
   // 一篇讲道里的几段接着播：放完一段自动跳到下一段的起点。跳过的地方教授在讲
   // 别的，所以时间轴上会看到断口——看得见就够了，不必打断听。
+  /** 从某一刻开始播，不管它落在哪一段。
+   *
+   * topic 的起点未必是某一段的起点——一段里常有两三个 topic。点 topic 要跳到他
+   * 说那句话的地方，不是跳到那一段的开头。
+   */
+  function playFrom(sermon: Sermon, seconds: number) {
+    const index = Math.max(
+      0,
+      sermon.stretches.findIndex((stretch) => seconds < stretch.end),
+    );
+    setPlaying({ sermon, index });
+    setPaused(false);
+    setAt(seconds);
+    window.setTimeout(() => {
+      const element = media.current;
+      if (element) {
+        element.currentTime = seconds;
+        void element.play();
+      }
+    }, 0);
+  }
+
   function play(sermon: Sermon, index = 0) {
     setPlaying({ sermon, index });
     setPaused(false);
@@ -184,7 +211,7 @@ export default function OriginalAudioPage() {
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-10">
       <header className="flex flex-col gap-2">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-          王教授講太 16:18-19
+          王教授講{label || "這段經文"}
         </h1>
         <p className="text-sm leading-relaxed text-slate-600">
           他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
@@ -221,10 +248,10 @@ export default function OriginalAudioPage() {
                       面的不放——那些本来就有得看。 */}
                   {sermon.media_kind === "audio" && (
                     <ScriptureSlide
-                      slug={reference}
+                      slug={passage}
                       title={judgementAt(sermon, seconds)}
                       glosses={glossesUpTo(sermon, seconds)}
-                      cited={citedAt(sermon, seconds, reference)}
+                      cited={citedAt(sermon, seconds, passage)}
                     />
                   )}
                   {sermon.media_kind === "video" ? (
@@ -270,6 +297,39 @@ export default function OriginalAudioPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* 他在这一篇里讲的几件事，各从第几分钟起。
+                      一篇讲道二十五分钟，一整条时间轴上找不到东西；他自己立的
+                      判断就是目录。点一条跳到他说那句话的地方，之后照常往下
+                      播，不断——播放的连续区间和读者的入口是两件事。 */}
+                  <ul className="flex flex-col divide-y divide-slate-200/70 border-t border-slate-200 pt-1">
+                    {sermon.judgements.map((mark) => {
+                      const here = judgementAt(sermon, seconds) === mark.judgement;
+                      return (
+                        <li key={mark.at}>
+                          <button
+                            type="button"
+                            onClick={() => playFrom(sermon, mark.at)}
+                            className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-white"
+                          >
+                            <span
+                              className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-400"}`}
+                            >
+                              {clock(mark.at)}
+                            </span>
+                            <span
+                              className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-slate-900" : "text-slate-600"}`}
+                            >
+                              {mark.judgement}
+                            </span>
+                            <span className="font-mono text-[0.7rem] text-slate-400">
+                              {minutes(mark.seconds)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
               )}
             </li>
