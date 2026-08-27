@@ -17,6 +17,8 @@ import ScriptureSlide from "./ScriptureSlide";
  */
 
 type Stretch = { start: number; end: number; scripture: string };
+/** 教授念到经文的时刻。幻灯跟着这个走，不跟着段走——他在一段之内会翻好几处。 */
+type Spoken = { at: number; scripture: string };
 type Occasion = {
   source_id: string;
   transcript_id: string;
@@ -26,6 +28,7 @@ type Occasion = {
   saying: string;
   other_sayings: string[];
   stretches: Stretch[];
+  spoken: Spoken[];
   seconds: number;
 };
 type Viewpoint = {
@@ -47,6 +50,20 @@ const mediaSrc = (url: string) =>
     ? url
     : url.replace("/web/video/", "/dev-media/");
 
+/** 播到这一刻，教授正在讲哪一节。
+ *
+ * 取他最后念到的那一处。一处都还没念到就用这一段的 scope——`scripture_scope`
+ * 是整个观点的范围，粗，但总比空着强。
+ */
+function verseAt(occasion: Occasion, seconds: number, fallback: string) {
+  let slug = fallback;
+  for (const mark of occasion.spoken) {
+    if (mark.at > seconds) break;
+    slug = mark.scripture;
+  }
+  return slug;
+}
+
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
@@ -62,6 +79,8 @@ export default function OriginalAudioPage() {
     { structureId: string; occasion: Occasion; index: number } | null
   >(null);
   const [paused, setPaused] = useState(false);
+  // 幻灯要跟着他念到哪一节换，所以得知道播到第几秒。
+  const [at, setAt] = useState(0);
   const media = useRef<HTMLAudioElement | HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -86,6 +105,7 @@ export default function OriginalAudioPage() {
       const element = media.current;
       if (element) {
         element.currentTime = occasion.stretches[index].start;
+        setAt(occasion.stretches[index].start);
         void element.play();
       }
     }, 0);
@@ -113,6 +133,7 @@ export default function OriginalAudioPage() {
   function onTimeUpdate() {
     const element = media.current;
     if (!element || !playing) return;
+    setAt(element.currentTime);
     const stretch = playing.occasion.stretches[playing.index];
     if (element.currentTime < stretch.end) return;
     const next = playing.index + 1;
@@ -184,9 +205,13 @@ export default function OriginalAudioPage() {
                           的不放——那些本来就有得看。 */}
                       {occasion.media_kind === "audio" && (
                         <ScriptureSlide
-                          slug={occasion.stretches[playing?.index ?? 0]?.scripture ?? ""}
+                          slug={verseAt(
+                            occasion,
+                            open ? at : (occasion.stretches[0]?.start ?? 0),
+                            occasion.stretches[playing?.index ?? 0]?.scripture ?? "",
+                          )}
                           caption={`${occasion.title.slice(-6)} · ${clock(
-                            occasion.stretches[playing?.index ?? 0]?.start ?? 0,
+                            open ? at : (occasion.stretches[0]?.start ?? 0),
                           )}`}
                         />
                       )}

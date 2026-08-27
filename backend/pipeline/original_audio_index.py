@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
-from backend.api.scripture import reference_slugs
+from backend.api.scripture import reference_slugs, spoken_references
 
 
 #: 只有「等价」才算观点的成员。`supports`／`qualifies` 是关系不是身份，见
@@ -104,7 +104,11 @@ class Sermons:
         script = raw["script"] if isinstance(raw, dict) else raw
         transcript_id = str(document.get("transcript_id") or source_id)
         media = self._media_for(transcript_id)
+        full_text = "".join(
+            STRIKETHROUGH.sub("", str(segment.get("text") or "")) for segment in (script or [])
+        )
         entry = {
+            "spoken": spoken_references(full_text),
             "source_id": source_id,
             "transcript_id": transcript_id,
             "title": str(document.get("title") or transcript_id),
@@ -374,6 +378,38 @@ def reading_order(row: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def spoken_during(
+    stretches: list[tuple[float, float, str]], sermon: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """教授在这几段里念到的经文，按时间排。
+
+    观点的 `scripture_scope` 说不出这一刻在念哪一节。它是整个观点的范围，而一个
+    观点的证据能横跨十分钟，中间教授翻了三处经文：（四）1 的 43:19 那一段里，
+    他 42:39 念太16:18、47:16 才翻到弗2:20，一段之内换了书卷。
+
+    他是念出来的：「請各位看以弗所書第四章第十一節」。五篇讲道里这样的口语引用
+    有 88 处。把时间点交给播放器，让幻灯跟着他走——段里没念到的时候，用这一段
+    开始时他正在讲的那一节；连那也没有，才退回 scope 推出来的。
+    """
+
+    spoken = sermon.get("spoken") or []
+    anchors = _timeline(sermon)
+    if not spoken or not anchors:
+        return []
+    timed = sorted((_at(anchors, position), slug) for position, slug in spoken)
+    marks: dict[float, str] = {}
+    for start, end, _ in stretches:
+        # 这一段开始时他正在讲的那一节——常常是上一段里念的，人不会每换一段就
+        # 重念一次书卷章节。
+        before = [(at, slug) for at, slug in timed if at <= start]
+        if before:
+            marks[start] = before[-1][1]
+        for at, slug in timed:
+            if start < at < end:
+                marks[at] = slug
+    return [{"at": at, "scripture": marks[at]} for at in sorted(marks)]
+
+
 def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
     """整棵树：中心观点 → 讲道 → 连着讲的几段。
 
@@ -567,6 +603,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                 "stretches": [
                     {"start": a, "end": b, "scripture": ref} for a, b, ref in merged
                 ],
+                "spoken": spoken_during(merged, sermon),
                 "seconds": sum(b - a for a, b, _ in merged),
             })
         if not occasions_out:

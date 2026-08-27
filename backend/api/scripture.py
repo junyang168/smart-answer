@@ -618,6 +618,111 @@ def reference_slugs(text: str) -> list[str]:
     return found
 
 
+#: 教授口里的书名简称。
+#:
+#: 他讲课说「馬太十六章十八節」「約翰二十章二十三節」，不说全名。书名表收的是
+#: 「馬太福音」「約翰福音」，所以这些简称查不到。这里只给口语识别用，不进
+#: `BOOK_NAME_TO_SLUG`——那张表还管文章页的引用转链接，不该跟着放宽。
+SPOKEN_BOOK_ALIASES: Dict[str, str] = {
+    "馬太": "mat", "马太": "mat",
+    "馬可": "mrk", "马可": "mrk",
+    "路加": "luk",
+    "約翰": "jhn", "约翰": "jhn",
+    "使徒": "act",
+    "羅馬": "rom", "罗马": "rom",
+    "希伯來": "heb", "希伯来": "heb",
+    "啟示錄": "rev", "启示录": "rev",
+}
+
+_CHINESE_DIGITS: Dict[str, int] = {c: i for i, c in enumerate("零一二三四五六七八九")}
+
+#: 书名里不能出现数字字符，也不能包含「第」。
+#:
+#: 不挡的话贪婪的书名会把章号的第一个字吃掉：「馬太十六章十八節」里书名吞了
+#: 「十」，剩下「六」当章号，认成了马太 6:18。「第」同理，「以弗所書第四章」的
+#: 书名会带上「第」而查不到书卷。
+_SPOKEN_BOOK_CHAR = r"(?:(?![零一二三四五六七八九十百第章節节])[\u4e00-\u9fff])"
+
+#: 「以弗所書第四章第十一節」「馬太十六章十八節」「16章19節」都要认。
+_SPOKEN_REFERENCE_PATTERN = re.compile(
+    # 书名和章号之间可能隔着一个收尾书名号：「《帖撒羅尼迦前書》五章二十三節」。
+    # 不放行的话书名认不出来，就退回上一次带下来的书卷——上一句正好在讲马太，
+    # 于是帖前 5:23 被显示成了马太 5:23。
+    rf"(?P<book>{_SPOKEN_BOOK_CHAR}{{1,7}})?\s*[》〉」』〕】）]?\s*(?:第)?"
+    rf"(?P<chapter>[零一二三四五六七八九十百\d]+)\s*章"
+    rf"\s*(?:第)?(?P<verse>[零一二三四五六七八九十百\d]+)\s*[節节]"
+)
+
+
+def chinese_number(text: str) -> Optional[int]:
+    """「二十三」→ 23。阿拉伯数字原样返回。"""
+
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    if not text or any(c not in "零一二三四五六七八九十百" for c in text):
+        return None
+    total = 0
+    digit = 0
+    for char in text:
+        if char in _CHINESE_DIGITS:
+            digit = _CHINESE_DIGITS[char]
+        elif char == "十":
+            total += (digit or 1) * 10
+            digit = 0
+        elif char == "百":
+            total += (digit or 1) * 100
+            digit = 0
+    return total + digit
+
+
+def _spoken_book(token: Optional[str]) -> Optional[str]:
+    """从「可是以弗所書」这样的一串字里认出书名。
+
+    正则捕的是「章」前面的几个汉字，前面粘着上一句的尾巴是常事——量到的有
+    「各位看以弗所書」「可是以弗所書」「的罪約翰福音」。所以从最长的后缀往短了
+    试，第一个查得到的就是书名。
+    """
+
+    if not token:
+        return None
+    # 至少两个字。单字缩写（太、弗、書）在写出来的引用里是正经写法，在连着的
+    # 讲话里不是：「帖撒羅尼迦前書五章二十三節」一路退到「書」就命中了
+    # `BOOK_NAME_TO_SLUG["書"]`——约书亚记，跟原话差了三十多卷。
+    for size in range(len(token), 1, -1):
+        tail = token[-size:]
+        slug = BOOK_NAME_TO_SLUG.get(tail) or SPOKEN_BOOK_ALIASES.get(tail)
+        if slug:
+            return slug
+    return None
+
+
+def spoken_references(text: str) -> list[tuple[int, str]]:
+    """教授在这段话里念到的经文，按出现次序返回 `(第几个字, slug)`。
+
+    观点的 `scripture_scope` 说不出「他此刻在念哪一节」——同一个观点的证据能横跨
+    十分钟，中间他翻了三处经文。他自己是念出来的：「可是以弗所書二章二十節，
+    『並且教會被建造在使徒和先知的根基上』」，那才是那一刻屏幕上该有的字。
+
+    书名可以省略。他讲一段以弗所书时会说「第四章第十一節」「第二章二十節」，书
+    名是上一句给的。所以书名往下带，直到他换书为止。
+    """
+
+    found: list[tuple[int, str]] = []
+    carried: Optional[str] = None
+    for match in _SPOKEN_REFERENCE_PATTERN.finditer(text or ""):
+        book = _spoken_book(match.group("book")) or carried
+        if not book:
+            continue
+        carried = book
+        chapter = chinese_number(match.group("chapter"))
+        verse = chinese_number(match.group("verse"))
+        if not chapter or not verse:
+            continue
+        found.append((match.start(), f"{book}-{chapter}-{verse}"))
+    return found
+
+
 def _build_reference_link(slug: str, chapter: str, start: str, end: Optional[str]) -> str:
     book_name = BOOK_SLUG_TO_NAME.get(slug, slug.upper())
     chapter_number = int(chapter)
