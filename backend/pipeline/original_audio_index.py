@@ -38,6 +38,19 @@ MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
 #: 30 秒是段落之间的正常间隙；再大就是教授岔去讲了别的又绕回来，那要算两段。
 CONTIGUOUS_GAP_SECONDS = 30.0
 
+#: 每段往前留的引子。
+#:
+#: 引文定位到的是那句话本身，从那一刻起播会掐在半句上——「所以彼得叫一個人進天
+#: 堂」前面的「所以」承的是上一句。往前退 8 秒（约 25 字）能接上一句的尾巴。
+LEAD_IN_SECONDS = 8.0
+
+#: 一段最短播多久。
+#:
+#: 按引文长度算，一句话只有五六秒，点开听完还没反应过来就停了。45 秒是教授把
+#: 一个判断说完再举一句例子的长度——量下来单条引文中位 18 字（约 6 秒），而他
+#: 说清一件事通常连着三到八句。
+MIN_STRETCH_SECONDS = 45.0
+
 #: 逐字稿目录的优先顺序，与抽取一致。
 TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
 
@@ -114,35 +127,108 @@ class Sermons:
         return {"media_kind": None, "media_url": None}
 
 
-def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[float, float] | None:
-    """一条片段在录音里的起止秒数。
+#: 校对时删掉的字。`~~…~~` 是软删除，念的时候没念，算字数要先去掉。
+STRIKETHROUGH = re.compile(r"~~([^~]+?)~~", re.S)
 
-    片段自己带 `media_time` 时直接用。没带的时候回到逐字稿去取段落的
-    `start_time`——不过量下来这只补得回 3 条，因为缺时间的那 1,861 条是段落本身
-    就没写时间（见 #251），不是片段没记。
+
+def _timeline(sermon: dict[str, Any]) -> list[tuple[int, float]]:
+    """把逐字稿变成「读到第几个字 → 第几秒」的一串锚点。
+
+    逐字稿的时间是按段落记的，而段落很长：（四）2 整篇 26 段 17 个时间点，一段
+    平均 3 分钟，最长的一段（四）3 有 28 分钟。片段的 `media_time` 就是它所在
+    段落的段首，所以从段首起播，先听到的是这一段开头在讲的别的事——「捆绑释放的
+    权柄不只给彼得」那一组，引用的话在段落第 237 字，而段落头 90 字在讲磐石的
+    希腊文，于是点开听到的是磐石。
+
+    段落里的字数可以定位。教授语速稳定（四篇量下来中位 3.0–3.5 字/秒，各篇一
+    致，末段起点离录音结束都只差 2–3 分钟），所以「读到第几个字」和「第几秒」
+    近似成正比，可以在两个锚点之间线性插值。段落里 26% 的位置就是这一段 26% 的
+    时间。
+
+    误差来自语速起伏（同一篇内 2.7–4.1 字/秒），一段 5 分钟的话大约 ±15 秒——
+    比整段 5 分钟的误差小一个量级。这不是真正的对齐，真正的对齐要做强制对齐
+    （见 #251），这里只是把现有材料用尽。
     """
 
-    start = fragment.get("media_time")
-    end = fragment.get("media_end_time")
-    if start is not None:
-        return float(start), float(end if end is not None else start)
+    cached = sermon.get("_timeline")
+    if cached is not None:
+        return cached
+    anchors: list[tuple[int, float]] = []
+    position = 0
+    for segment in sermon.get("segments") or []:
+        if segment.get("start_time") is not None:
+            anchors.append((position, float(segment["start_time"])))
+        position += len(STRIKETHROUGH.sub("", str(segment.get("text") or "")))
+    sermon["_timeline"] = anchors
+    return anchors
+
+
+def _at(anchors: list[tuple[int, float]], position: int) -> float | None:
+    """第 `position` 个字大约在第几秒。"""
+
+    if not anchors:
+        return None
+    if position <= anchors[0][0]:
+        return anchors[0][1]
+    for (p0, t0), (p1, t1) in zip(anchors, anchors[1:]):
+        if position < p1:
+            if p1 == p0:
+                return t0
+            return t0 + (position - p0) / (p1 - p0) * (t1 - t0)
+    # 末段之后：按这一篇自己量出来的语速往后推，没有锚点可插值了。
+    (p0, t0) = anchors[-1]
+    span = anchors[-1][0] - anchors[0][0]
+    seconds = anchors[-1][1] - anchors[0][1]
+    rate = span / seconds if seconds > 0 else 3.2
+    return t0 + (position - p0) / (rate or 3.2)
+
+
+def _locate(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[int, str] | None:
+    """片段在整篇逐字稿里的字位置，以及它自己的原话。"""
 
     segments = sermon.get("segments") or []
     key = str(fragment.get("paragraph_key") or "")
     match = re.match(r"^S(\d+)$", key)
-    segment = None
+    index = None
     if match and 1 <= int(match.group(1)) <= len(segments):
-        segment = segments[int(match.group(1)) - 1]
+        index = int(match.group(1)) - 1
     elif key:
-        segment = next((s for s in segments if str(s.get("index")) == key), None)
-    if segment is None and fragment.get("source_segment_index") is not None:
+        index = next((i for i, s in enumerate(segments) if str(s.get("index")) == key), None)
+    if index is None and fragment.get("source_segment_index") is not None:
         wanted = str(fragment["source_segment_index"])
-        segment = next((s for s in segments if str(s.get("index")) == wanted), None)
-    if segment is None or segment.get("start_time") is None:
+        index = next((i for i, s in enumerate(segments) if str(s.get("index")) == wanted), None)
+    if index is None:
         return None
-    start = float(segment["start_time"])
-    end = segment.get("end_time")
-    return start, float(end) if end is not None else start
+    before = sum(
+        len(STRIKETHROUGH.sub("", str(s.get("text") or ""))) for s in segments[:index]
+    )
+    text = STRIKETHROUGH.sub("", str(segments[index].get("text") or ""))
+    excerpt = str(fragment.get("verbatim_excerpt") or "")
+    offset = text.find(excerpt) if excerpt else -1
+    return before + max(offset, 0), excerpt
+
+
+def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[float, float] | None:
+    """一条片段在录音里的起止秒数。
+
+    先按引文在逐字稿里的字位置插值（见 `_timeline`）。定位不到就退回片段自己记
+    的 `media_time`——那是它所在段落的段首，会早好几分钟，但总比没有强。
+    """
+
+    located = _locate(sermon, fragment)
+    anchors = _timeline(sermon)
+    if located is not None and anchors:
+        position, excerpt = located
+        start = _at(anchors, position)
+        end = _at(anchors, position + len(excerpt))
+        if start is not None:
+            return start, end if end is not None else start
+
+    start = fragment.get("media_time")
+    if start is not None:
+        end = fragment.get("media_end_time")
+        return float(start), float(end if end is not None else start)
+    return None
 
 
 def stretch(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -152,7 +238,7 @@ def stretch(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float
     是连着的一句话。
     """
 
-    ordered = sorted(intervals)
+    ordered = sorted((max(0.0, a - LEAD_IN_SECONDS), b) for a, b in intervals)
     if not ordered:
         return []
     merged = [list(ordered[0])]
@@ -161,7 +247,7 @@ def stretch(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])
-    return [(a, b) for a, b in merged]
+    return [(a, max(b, a + MIN_STRETCH_SECONDS)) for a, b in merged]
 
 
 #: 太16:18-19 这一段的 scope 在数据里有好几种写法：`馬太福音16:19`、
