@@ -213,7 +213,6 @@ export default function OriginalAudioPage() {
                     <ScriptureSlide
                       slug={reference}
                       title={judgementAt(sermon, seconds)}
-                      caption={`${sermon.title.slice(-6)} · ${clock(seconds)}`}
                       now={citedAt(sermon, seconds, reference)}
                     />
                   )}

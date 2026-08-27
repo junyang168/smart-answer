@@ -52,13 +52,11 @@ function plain(html: string | undefined) {
 export default function ScriptureSlide({
   slug,
   title,
-  caption,
   now,
 }: {
   slug: string;
-  /** 教授在这一组里立的那个判断。幻灯的标题，一组之内不变。 */
+  /** 教授此刻立的那个判断。幻灯的抬头。 */
   title: string;
-  caption: string;
   /** 他此刻念到的经文，中文写法（「弗 4:11」）。旁证，只占一行小字。 */
   now?: string;
 }) {
@@ -90,15 +88,10 @@ export default function ScriptureSlide({
 
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 px-5 py-4 text-slate-100">
-      {/* 幻灯的抬头是他此刻立的那个判断，不是经节号。
-          经节号整页只有一个（页面标题就是「王教授講太 16:18-19」），在每张幻灯
-          上再报一次是废话；判断才是这一分钟和下一分钟的区别。 */}
-      <div className="flex items-baseline justify-between gap-4">
-        <p className="flex-1 text-[0.95rem] font-semibold leading-snug text-amber-300">
-          {title}
-        </p>
-        <span className="shrink-0 font-mono text-[0.68rem] text-slate-500">{caption}</span>
-      </div>
+      {/* 幻灯上只有两样：他此刻立的判断，和他正在解的经文。
+          经节号不报——整页就一段经文，页面标题已经写着「王教授講太 16:18-19」。
+          讲道名和播放时间也不报——讲道名在幻灯上一行，时间在下一行的播放器里。 */}
+      <p className="text-[0.95rem] font-semibold leading-snug text-amber-300">{title}</p>
       {zh && <p className="text-[0.9rem] leading-relaxed text-slate-300">{zh}</p>}
       {el && (
         <p className="border-t border-slate-700 pt-3 text-[0.8rem] leading-relaxed text-slate-400">
