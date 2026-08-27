@@ -395,29 +395,37 @@ def judgement_during(
 
     if not spans:
         return []
+
+    def dominant(begin: float, finish: float) -> str:
+        """这一段里哪个判断占的时间最多。"""
+
+        scores: dict[str, float] = {}
+        for start, end, proposition in spans:
+            if not proposition:
+                continue
+            overlap = min(end, finish) - max(start, begin)
+            if overlap > 0:
+                scores[proposition] = scores.get(proposition, 0.0) + overlap
+        return max(scores, key=lambda k: (scores[k], k)) if scores else ""
+
     out: list[dict[str, Any]] = []
     for begin, finish, _ in stretches:
         blocks: list[tuple[float, str]] = []
         cursor = begin
         while cursor < finish:
             edge = min(cursor + JUDGEMENT_BLOCK_SECONDS, finish)
-            scores: dict[str, float] = {}
-            for start, end, proposition in spans:
-                if not proposition:
-                    continue
-                overlap = min(end, edge) - max(start, cursor)
-                if overlap > 0:
-                    scores[proposition] = scores.get(proposition, 0.0) + overlap
-            if scores:
-                blocks.append((cursor, max(scores, key=lambda k: (scores[k], k))))
+            judgement = dominant(cursor, edge)
+            if judgement:
+                blocks.append((cursor, judgement))
             cursor = edge
-        # 连着一样的并成一段，撑不满的让前一个judgement 盖过去——他只是穿插提了
-        # 一句，不是转了话题。
+        # 连着一样的并成一段，撑不满的让前一个盖过去——他只是穿插提了一句，不是
+        # 转了话题。
         runs: list[list[Any]] = []
         for at, judgement in blocks:
             if runs and runs[-1][1] == judgement:
                 continue
             runs.append([at, judgement])
+        kept = len(out)
         for index, run in enumerate(runs):
             until = runs[index + 1][0] if index + 1 < len(runs) else finish
             if out and out[-1]["judgement"] == run[1]:
@@ -432,21 +440,19 @@ def judgement_during(
             if until - run[0] < MIN_JUDGEMENT_SECONDS:
                 continue
             out.append({"at": run[0], "judgement": run[1]})
-    if out:
-        return out
-    # 一个都撑不住的短讲道，取全篇占时间最多的那个，总得有个抬头。
-    scores: dict[str, float] = {}
-    for start, end, proposition in spans:
-        if proposition:
-            scores[proposition] = scores.get(proposition, 0.0) + (end - start)
-    if not scores:
-        return []
-    return [
-        {
-            "at": stretches[0][0],
-            "judgement": max(scores, key=lambda k: (scores[k], k)),
-        }
-    ]
+        # 每一段都得有自己的抬头。
+        #
+        # 90 秒那条线会把短段的抬头全滤掉：（四）3 的 2:05–3:03 和 35:27–36:12
+        # 各只有一分钟，一条都没剩，前端就退回列表里的第一条——拿 38:51 那段
+        # 「磐石不是彼得本人」去标 2:05，而他那时候讲的是天国钥匙。
+        #
+        # 一条都没剩就用整段的主导判断。它撑不满 90 秒不是因为他在穿插，是因为
+        # 这一段本来就短。
+        if len(out) == kept:
+            judgement = dominant(begin, finish)
+            if judgement and (not out or out[-1]["judgement"] != judgement):
+                out.append({"at": begin, "judgement": judgement})
+    return out
 
 
 def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: int) -> bool:
