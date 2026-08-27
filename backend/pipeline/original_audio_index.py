@@ -1,0 +1,373 @@
+"""教授的原声，按中心观点重排。
+
+这一层不产出任何新的文字。它做的只有一件事：把「教授在哪几个地方讲过这个判
+断」算出来，每一处给一个能寻址的位置，让读者点进去听他自己讲。
+
+三条规则，都是从材料本身量出来的，不是设计出来的：
+
+**一、一个判断，按讲道分开列。** 跨讲道接起来会跳过半小时——量到的最大空隙是
+28 分钟，那半小时里教授在讲别的。分开列就没有跳跃可言。
+
+**二、一篇讲道里的几段，接着播。** 他在同一堂课里翻来覆去讲同一件事是常事，最
+多的一条讲了四遍。这些属于同一次讲授，接起来算一行；同一篇内的空隙中位 4 分钟。
+
+**三、不去重。** 同一个判断他在五篇讲道里各讲一遍，而每一遍的理由都不一样——有
+的从信仰内容说，有的从希腊文性别说。删掉四遍等于删掉他四个论证，那正是
+[D2](../../docs/wang-knowledge-platform/00-overview/solution_architecture.md#d2不用-rag)
+说的「漏掉的可能正是他的限定」。要综合版的读者去看文章。
+
+输出是一棵可寻址的树：`观点 × 讲道 × 起止时间`。文章那边将来引用这个地址就能
+「听教授自己讲这一段」，不需要重新设计——所以这里不产出页面，只产出地址。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any, Iterable
+from urllib.parse import quote
+
+
+#: 只有「等价」才算观点的成员。`supports`／`qualifies` 是关系不是身份，见
+#: CanonicalViewpoint 设计第 4 节。
+MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
+
+#: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
+#:
+#: 30 秒是段落之间的正常间隙；再大就是教授岔去讲了别的又绕回来，那要算两段。
+CONTIGUOUS_GAP_SECONDS = 30.0
+
+#: 逐字稿目录的优先顺序，与抽取一致。
+TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
+
+#: 媒体文件的位置与 nginx 暴露的路径。
+#:
+#: 刻意**不读** `metadata.type`：全库 115 篇里 107 篇是 `None`，而现有页面的逻辑
+#: 是「不是 audio 就当 mp4」——16:18-19 能用的那七篇 `type` 全是 `None`，磁盘上却
+#: 只有 mp3。按文件实际存在与否决定，才不会去要一个不存在的文件。
+#: 媒体不在 `DATA_BASE_DIR` 底下，是它的**同级**：`DATA_BASE_DIR` 指
+#: `…/church/web/data`，而 mp3／mp4 在 `…/church/web/video`。拼成 `data/video`
+#: 会让 35 篇来源全部「没有媒体」，而目录里其实有 350 个 mp4、125 个 mp3。
+MEDIA_DIR_NAME = "video"
+MEDIA_URL_PREFIX = "/web/video"
+
+
+class Sermons:
+    """磁盘上的讲道：逐字稿段落、时间、以及有没有录音可播。"""
+
+    def __init__(self, data_base_dir: Path) -> None:
+        self.root = Path(data_base_dir)
+        self._cache: dict[str, dict[str, Any]] = {}
+
+    def _transcript_path(self, document: dict[str, Any]) -> Path | None:
+        declared = document.get("source_path")
+        if declared and Path(str(declared)).is_file():
+            return Path(str(declared))
+        transcript_id = str(document.get("transcript_id") or "").strip()
+        for directory in TRANSCRIPT_DIRS:
+            candidate = self.root / directory / f"{transcript_id}.json"
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def load(self, source_id: str, document: dict[str, Any]) -> dict[str, Any] | None:
+        """一篇讲道的段落与媒体。母本没有录音，返回 None。"""
+
+        if source_id in self._cache:
+            return self._cache[source_id]
+        if str(document.get("source_type") or "") == "notes_manuscript":
+            self._cache[source_id] = None
+            return None
+        path = self._transcript_path(document)
+        if path is None:
+            self._cache[source_id] = None
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        # 两种格式都有：有的逐字稿是 {"metadata":…, "script":[…]}，有的直接是
+        # 段落数组。只认前者会让整篇讲道无声无息地消失。
+        script = raw["script"] if isinstance(raw, dict) else raw
+        transcript_id = str(document.get("transcript_id") or source_id)
+        media = self._media_for(transcript_id)
+        entry = {
+            "source_id": source_id,
+            "transcript_id": transcript_id,
+            "title": str(document.get("title") or transcript_id),
+            "segments": list(script or []),
+            **media,
+        }
+        self._cache[source_id] = entry
+        return entry
+
+    def _media_for(self, transcript_id: str) -> dict[str, Any]:
+        directory = self.root.parent / MEDIA_DIR_NAME
+        for suffix, kind in ((".mp4", "video"), (".mp3", "audio")):
+            candidate = directory / f"{transcript_id}{suffix}"
+            if candidate.is_file():
+                # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
+                # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
+                # 錯誤——產生 URL 的一方負責編碼。
+                return {
+                    "media_kind": kind,
+                    "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + suffix)}",
+                }
+        return {"media_kind": None, "media_url": None}
+
+
+def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[float, float] | None:
+    """一条片段在录音里的起止秒数。
+
+    片段自己带 `media_time` 时直接用。没带的时候回到逐字稿去取段落的
+    `start_time`——不过量下来这只补得回 3 条，因为缺时间的那 1,861 条是段落本身
+    就没写时间（见 #251），不是片段没记。
+    """
+
+    start = fragment.get("media_time")
+    end = fragment.get("media_end_time")
+    if start is not None:
+        return float(start), float(end if end is not None else start)
+
+    segments = sermon.get("segments") or []
+    key = str(fragment.get("paragraph_key") or "")
+    match = re.match(r"^S(\d+)$", key)
+    segment = None
+    if match and 1 <= int(match.group(1)) <= len(segments):
+        segment = segments[int(match.group(1)) - 1]
+    elif key:
+        segment = next((s for s in segments if str(s.get("index")) == key), None)
+    if segment is None and fragment.get("source_segment_index") is not None:
+        wanted = str(fragment["source_segment_index"])
+        segment = next((s for s in segments if str(s.get("index")) == wanted), None)
+    if segment is None or segment.get("start_time") is None:
+        return None
+    start = float(segment["start_time"])
+    end = segment.get("end_time")
+    return start, float(end) if end is not None else start
+
+
+def stretch(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
+    """把区间并成「连着讲的几段」。
+
+    相隔 30 秒之内接起来，超过就断开——断开的地方教授在讲别的，接起来听会以为
+    是连着的一句话。
+    """
+
+    ordered = sorted(intervals)
+    if not ordered:
+        return []
+    merged = [list(ordered[0])]
+    for start, end in ordered[1:]:
+        if start - merged[-1][1] <= CONTIGUOUS_GAP_SECONDS:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(a, b) for a, b in merged]
+
+
+#: 太16:18-19 这一段的 scope 在数据里有好几种写法：`馬太福音16:19`、
+#: `馬太福音16:18-23`、`約翰福音20:23馬太福音16:19馬太福音18:18`。只找 `16:18`
+#: 会漏掉四分之三。
+#:
+#: 不能用 `\b` 收尾：`16:19馬太福音18:18` 里数字后面紧跟中文，而中文与数字之间
+#: 没有词边界，`16:19\b` 匹配不上——三分之二的 scope 长这样。改成「后面不是数
+#: 字」。
+SCRIPTURE_PATTERNS = {
+    "16:18-19": re.compile(r"16:(?:18|19)(?!\d)|16:1[0-8]-(?:19|2\d)"),
+}
+
+
+def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
+    """整棵树：中心观点 → 讲道 → 连着讲的几段。
+
+    `store` 只需要一个 `list_records(collection)`，所以既能接 PostgresKnowledgeStore，
+    也能在测试里塞一个字典。
+    """
+
+    def by_id(collection: str, key: str) -> dict[str, dict[str, Any]]:
+        return {str(row.get(key)): row for row in store.list_records(collection) if row.get(key)}
+
+    viewpoints = by_id("canonical_viewpoints", "viewpoint_id")
+    revisions = by_id("viewpoint_revisions", "viewpoint_revision_id")
+    claims = by_id("claims", "claim_id")
+    steps = by_id("evidence_steps", "evidence_step_id")
+    fragments = by_id("source_fragments", "fragment_id")
+    documents = by_id("source_documents", "source_id")
+    structures = by_id("viewpoint_structures", "structure_id")
+    # 键是 revision 不是 structure：26 个结构有 28 个 revision，按 structure 建
+    # 索引会让新旧两版互相覆盖。
+    structure_revisions = {
+        str(row.get("structure_revision_id") or row.get("revision_id") or ""): row
+        for row in store.list_records("viewpoint_structure_revisions")
+    }
+    # 每一个修订都要认，不能只认当前修订。
+    #
+    # 结构里的 focal 条目记的是它成形那一刻的 viewpoint_revision_id，观点后来又改
+    # 过，那条 id 就不再是「当前」的了。只建 current_revision_id → viewpoint_id
+    # 的话，这些条目查不到主人：轻则录音少收，重则去重失效——VS-454dd 的中心指的
+    # 正是 CV-d8e50d04 的旧修订，查不到就当成了另一个中心观点。
+    revision_to_viewpoint = {
+        str(rid): str(row.get("viewpoint_id"))
+        for rid, row in revisions.items()
+        if row.get("viewpoint_id")
+    }
+    for vid, v in viewpoints.items():
+        revision_to_viewpoint.setdefault(str(v.get("current_revision_id")), vid)
+
+    members: dict[str, list[dict[str, Any]]] = {}
+    for link in store.list_records("viewpoint_claim_links"):
+        if link.get("link_type") not in MEMBER_LINK_TYPES:
+            continue
+        if str(link.get("effective_state") or "active") != "active":
+            continue
+        members.setdefault(str(link.get("viewpoint_id")), []).append(link)
+
+    sermons = Sermons(data_base_dir)
+
+    def occasions(claim_id: str) -> dict[str, list[tuple[float, float]]]:
+        """这条主张的录音，按讲道分开。"""
+
+        claim = claims.get(claim_id) or {}
+        ids = claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []
+        found: dict[str, list[tuple[float, float]]] = {}
+        for step_id in ids:
+            step = steps.get(str(step_id))
+            if not step:
+                continue
+            fragment_ids = []
+            if step.get("source_fragment_id"):
+                fragment_ids.append(str(step["source_fragment_id"]))
+            fragment_ids.extend(str(x) for x in (step.get("source_fragment_ids") or []))
+            for fragment_id in fragment_ids:
+                fragment = fragments.get(fragment_id)
+                if not fragment:
+                    continue
+                source_id = str(fragment.get("source_id") or "")
+                sermon = sermons.load(source_id, documents.get(source_id) or {})
+                if not sermon or not sermon.get("media_url"):
+                    continue
+                span = segment_time(sermon, fragment)
+                if span:
+                    found.setdefault(source_id, []).append(span)
+        return found
+
+    def current_revision(structure: dict[str, Any]) -> dict[str, Any] | None:
+        """结构的当前版本。
+
+        只看当前版本。26 个结构有 28 个 revision，把 revision 当结构会让两个判断
+        各出现两次——一次旧版一次新版，看起来像重复的数据。
+        """
+
+        return structure_revisions.get(str(structure.get("current_revision_id")))
+
+    def central_of(revision: dict[str, Any]) -> dict[str, Any] | None:
+        return next(
+            (f for f in (revision.get("focal_viewpoints") or []) if f.get("structure_role") == "central_claim"),
+            None,
+        )
+
+    # 同一个中心观点撞上两个结构时，只留一个。
+    #
+    # CV-d8e50d04e164c2e6c750（捆绑释放的标准已由天上决定）有两个结构：
+    # VS-454dd942da1fa7c51657 停在第 1 版、5 个 focal，VS-11ee1cfd2f5252675588 到
+    # 了第 2 版、8 个 focal。两者都没退役，也没有 supersedes 链接——结构生成器给
+    # 同一个中心观点另起了一个结构，而不是改原来的。读者看到的就是同一句判断出现
+    # 两次，其中旧的那个还挂着一条不属于它的 focal（「教会建立在彼得的信仰告
+    # 白上」，属于「磐石是什么」那个结构），于是一段讲 Petrus／Petra 的话混进了
+    # 捆绑释放。
+    #
+    # 这里按「版本高、focal 多」留后来的那个。真正的修法在结构生成器，不在这里。
+    latest: dict[str, dict[str, Any]] = {}
+    for structure in structures.values():
+        revision = current_revision(structure)
+        central = central_of(revision) if revision else None
+        if not revision or not central:
+            continue
+        viewpoint_id = revision_to_viewpoint.get(str(central.get("viewpoint_revision_id")))
+        key = viewpoint_id or str(structure.get("structure_id"))
+        rank = (
+            int(structure.get("revision") or 0),
+            len(revision.get("focal_viewpoints") or []),
+            str(structure.get("structure_id")),
+        )
+        if key not in latest or rank > latest[key]["rank"]:
+            latest[key] = {"structure": structure, "rank": rank}
+
+    rows: list[dict[str, Any]] = []
+    for chosen in latest.values():
+        structure = chosen["structure"]
+        revision = current_revision(structure)
+        if not revision:
+            continue
+        focal = revision.get("focal_viewpoints") or []
+        central = central_of(revision)
+        if not central:
+            continue
+        central_revision = revisions.get(str(central.get("viewpoint_revision_id"))) or {}
+        scope = "".join(central_revision.get("scope", {}).get("scripture_scope") or [])
+        pattern = SCRIPTURE_PATTERNS.get(scripture)
+        if pattern is not None:
+            if not pattern.search(scope):
+                continue
+        elif scripture and scripture not in scope:
+            continue
+
+        # 播整个结构的录音：中心判断，加上支撑它的那几条（正面说明、界线、限定、
+        # 方法）。教授论证一个判断时话是连着说的，只挑中心那一句会把理由切掉。
+        #
+        # 前提是结构里的 focal 条目确实都在讲同一件事。上面的去重就是为了这个：
+        # 被留下的旧结构会把别的题目的录音带进来。
+        by_sermon: dict[str, dict[str, Any]] = {}
+        for entry in focal:
+            viewpoint_id = revision_to_viewpoint.get(str(entry.get("viewpoint_revision_id")))
+            if not viewpoint_id:
+                continue
+            for link in members.get(viewpoint_id, []):
+                claim_id = str(link.get("claim_id"))
+                claim = claims.get(claim_id) or {}
+                for source_id, spans in occasions(claim_id).items():
+                    slot = by_sermon.setdefault(source_id, {"spans": [], "sayings": []})
+                    slot["spans"].extend(spans)
+                    # 这一遍他是怎么说的。同一个判断五篇讲道五种讲法，副标题让
+                    # 读者一眼看出五行不是同一段话的复制。
+                    saying = str(
+                        (link.get("component_locator") or {}).get("statement_component")
+                        or claim.get("statement")
+                        or ""
+                    ).strip()
+                    if saying and saying not in slot["sayings"]:
+                        slot["sayings"].append(saying)
+
+        occasions_out = []
+        for source_id, slot in by_sermon.items():
+            sermon = sermons.load(source_id, documents.get(source_id) or {})
+            merged = stretch(slot["spans"])
+            if not merged or not sermon:
+                continue
+            occasions_out.append({
+                "source_id": source_id,
+                "transcript_id": sermon["transcript_id"],
+                "title": sermon["title"],
+                "media_kind": sermon["media_kind"],
+                "media_url": sermon["media_url"],
+                "saying": slot["sayings"][0] if slot["sayings"] else "",
+                "other_sayings": slot["sayings"][1:],
+                "stretches": [{"start": a, "end": b} for a, b in merged],
+                "seconds": sum(b - a for a, b in merged),
+            })
+        if not occasions_out:
+            continue
+        occasions_out.sort(key=lambda row: -row["seconds"])
+        rows.append({
+            "structure_id": str(structure.get("structure_id")),
+            "central_proposition": str(central_revision.get("core_proposition") or ""),
+            "scripture_scope": central_revision.get("scope", {}).get("scripture_scope") or [],
+            "focal_count": len(focal),
+            "occasions": occasions_out,
+        })
+
+    rows.sort(key=lambda row: -sum(o["seconds"] for o in row["occasions"]))
+    return {
+        "schema_version": "wang_original_audio_index_v1",
+        "scripture": scripture,
+        "viewpoints": rows,
+    }
