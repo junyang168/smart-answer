@@ -7,6 +7,7 @@ from urllib.parse import quote_plus
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from opencc import OpenCC
 
 BOOK_TO_OSIS: Dict[str, str] = {
     "GEN": "Gen",
@@ -455,10 +456,22 @@ CHINESE_BOOK_ABBREVIATIONS: Dict[str, str] = {
 BOOK_NAME_TO_SLUG: Dict[str, str] = {}
 BOOK_SLUG_TO_NAME: Dict[str, str] = {}
 
+# 书名表是繁体的，而库里两种都有。
+#
+# 观点的 `scripture_scope` 里「馬太福音16:1」和「马太福音16:1」并存——命题正文
+# 是简体写的，经文范围有时跟着写成简体。缩写表本来就两种都收（創／创），全名表
+# 只收了繁体，于是简体全名一律查不到书卷。
+#
+# opencc 已经是本项目的依赖（backend/requirements.txt，sermon_to_video 在用）。
+_TO_SIMPLIFIED = OpenCC("t2s")
+
 for slug, name in CHINESE_BOOKS:
     BOOK_SLUG_TO_NAME[slug] = name
     BOOK_NAME_TO_SLUG[name] = slug
     BOOK_NAME_TO_SLUG[name.lower()] = slug
+    simplified = _TO_SIMPLIFIED.convert(name)
+    if simplified != name:
+        BOOK_NAME_TO_SLUG.setdefault(simplified, slug)
     BOOK_NAME_TO_SLUG[slug] = slug
     BOOK_NAME_TO_SLUG[slug.upper()] = slug
     alias = SLUG_ALIASES.get(slug)
@@ -545,10 +558,22 @@ def format_chinese_reference(slug: str) -> str:
 
 
 _PAREN_REFERENCE_PATTERN = re.compile(r"（(?P<content>[^（）]+)）")
+# 书名里的数字只能在开头。
+#
+# 原来书名是 `[A-Za-z0-9\u4e00-\u9fff…]+`，数字也算书名的一部分，于是
+# 「馬太福音16:19」里贪婪的书名吃掉了 `1`，剩下 `6` 当章号，`馬太福音1` 查不到
+# 书卷，整条引用就不转链接了。单位数章号不受影响——「馬太福音8:22」一直是好
+# 的——所以这个 bug 藏了很久：读者看到的是「（馬太福音8:22）」有链接、
+# 「（馬太福音16:19）」没有。太16 是本项目的正题，整章都在这个坑里。
+#
+# 数字仍要允许在开头，「彼得後書」「1jn」「2pe」靠它。
 _SINGLE_REFERENCE_PATTERN = re.compile(
-    r"(?P<prefix>\s*)(?<!\[)(?P<book>[A-Za-z0-9\u4e00-\u9fff一二三上下前後后]+)"
+    r"(?P<prefix>\s*)(?<!\[)(?P<book>[A-Za-z0-9]?[A-Za-z\u4e00-\u9fff一二三上下前後后]+)"
     r"\s*(?P<chapter>\d+)\s*(?:[:：])\s*(?P<start>\d+)"
-    r"(?:\s*(?:[-–—~～至]\s*(?P<end>\d+)))?"
+    # 结尾的数字后面不能再跟冒号，否则「16:28-17:2」这种跨章范围会被读成
+    # 「16:28-17」——第 17 节根本不是它的意思。挡掉之后退回单节，链接指向
+    # 16:28，剩下的「-17:2」留作原文。跨章范围本来就不在这条正则的能力内。
+    r"(?:\s*(?:[-–—~～至]\s*(?P<end>\d+)(?!\d)(?!\s*[:：])))?"
 )
 _REFERENCE_SEPARATOR_CHARS = set(" ，,、；;/／&＆和與与及跟或")
 
@@ -568,6 +593,134 @@ def _resolve_book_slug(token: str) -> Optional[str]:
     if slug:
         return slug
     return None
+
+
+def reference_slugs(text: str) -> list[str]:
+    """从一段文字里认出所有经文引用，返回 `mat-16-18-19` 这样的 slug。
+
+    书名表、缩写表、繁简别名都在本模块，所以认经文这件事归这里做，别处不另起一
+    套。`parse_reference` 吃的就是这个 slug 格式。
+
+    认不出书卷的跳过——「聖經」「詩篇」「使徒行傳15章」这类没有节号的，返回空
+    列表，由调用方决定怎么办。
+    """
+
+    found: list[str] = []
+    for match in _SINGLE_REFERENCE_PATTERN.finditer(text or ""):
+        slug = _resolve_book_slug(match.group("book"))
+        if not slug:
+            continue
+        end = match.group("end")
+        tail = f"-{end}" if end else ""
+        candidate = f"{slug}-{match.group('chapter')}-{match.group('start')}{tail}"
+        if candidate not in found:
+            found.append(candidate)
+    return found
+
+
+#: 教授口里的书名简称。
+#:
+#: 他讲课说「馬太十六章十八節」「約翰二十章二十三節」，不说全名。书名表收的是
+#: 「馬太福音」「約翰福音」，所以这些简称查不到。这里只给口语识别用，不进
+#: `BOOK_NAME_TO_SLUG`——那张表还管文章页的引用转链接，不该跟着放宽。
+SPOKEN_BOOK_ALIASES: Dict[str, str] = {
+    "馬太": "mat", "马太": "mat",
+    "馬可": "mrk", "马可": "mrk",
+    "路加": "luk",
+    "約翰": "jhn", "约翰": "jhn",
+    "使徒": "act",
+    "羅馬": "rom", "罗马": "rom",
+    "希伯來": "heb", "希伯来": "heb",
+    "啟示錄": "rev", "启示录": "rev",
+}
+
+_CHINESE_DIGITS: Dict[str, int] = {c: i for i, c in enumerate("零一二三四五六七八九")}
+
+#: 书名里不能出现数字字符，也不能包含「第」。
+#:
+#: 不挡的话贪婪的书名会把章号的第一个字吃掉：「馬太十六章十八節」里书名吞了
+#: 「十」，剩下「六」当章号，认成了马太 6:18。「第」同理，「以弗所書第四章」的
+#: 书名会带上「第」而查不到书卷。
+_SPOKEN_BOOK_CHAR = r"(?:(?![零一二三四五六七八九十百第章節节])[\u4e00-\u9fff])"
+
+#: 「以弗所書第四章第十一節」「馬太十六章十八節」「16章19節」都要认。
+_SPOKEN_REFERENCE_PATTERN = re.compile(
+    # 书名和章号之间可能隔着一个收尾书名号：「《帖撒羅尼迦前書》五章二十三節」。
+    # 不放行的话书名认不出来，就退回上一次带下来的书卷——上一句正好在讲马太，
+    # 于是帖前 5:23 被显示成了马太 5:23。
+    rf"(?P<book>{_SPOKEN_BOOK_CHAR}{{1,7}})?\s*[》〉」』〕】）]?\s*(?:第)?"
+    rf"(?P<chapter>[零一二三四五六七八九十百\d]+)\s*章"
+    rf"\s*(?:第)?(?P<verse>[零一二三四五六七八九十百\d]+)\s*[節节]"
+)
+
+
+def chinese_number(text: str) -> Optional[int]:
+    """「二十三」→ 23。阿拉伯数字原样返回。"""
+
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    if not text or any(c not in "零一二三四五六七八九十百" for c in text):
+        return None
+    total = 0
+    digit = 0
+    for char in text:
+        if char in _CHINESE_DIGITS:
+            digit = _CHINESE_DIGITS[char]
+        elif char == "十":
+            total += (digit or 1) * 10
+            digit = 0
+        elif char == "百":
+            total += (digit or 1) * 100
+            digit = 0
+    return total + digit
+
+
+def _spoken_book(token: Optional[str]) -> Optional[str]:
+    """从「可是以弗所書」这样的一串字里认出书名。
+
+    正则捕的是「章」前面的几个汉字，前面粘着上一句的尾巴是常事——量到的有
+    「各位看以弗所書」「可是以弗所書」「的罪約翰福音」。所以从最长的后缀往短了
+    试，第一个查得到的就是书名。
+    """
+
+    if not token:
+        return None
+    # 至少两个字。单字缩写（太、弗、書）在写出来的引用里是正经写法，在连着的
+    # 讲话里不是：「帖撒羅尼迦前書五章二十三節」一路退到「書」就命中了
+    # `BOOK_NAME_TO_SLUG["書"]`——约书亚记，跟原话差了三十多卷。
+    for size in range(len(token), 1, -1):
+        tail = token[-size:]
+        slug = BOOK_NAME_TO_SLUG.get(tail) or SPOKEN_BOOK_ALIASES.get(tail)
+        if slug:
+            return slug
+    return None
+
+
+def spoken_references(text: str) -> list[tuple[int, str]]:
+    """教授在这段话里念到的经文，按出现次序返回 `(第几个字, slug)`。
+
+    观点的 `scripture_scope` 说不出「他此刻在念哪一节」——同一个观点的证据能横跨
+    十分钟，中间他翻了三处经文。他自己是念出来的：「可是以弗所書二章二十節，
+    『並且教會被建造在使徒和先知的根基上』」，那才是那一刻屏幕上该有的字。
+
+    书名可以省略。他讲一段以弗所书时会说「第四章第十一節」「第二章二十節」，书
+    名是上一句给的。所以书名往下带，直到他换书为止。
+    """
+
+    found: list[tuple[int, str]] = []
+    carried: Optional[str] = None
+    for match in _SPOKEN_REFERENCE_PATTERN.finditer(text or ""):
+        book = _spoken_book(match.group("book")) or carried
+        if not book:
+            continue
+        carried = book
+        chapter = chinese_number(match.group("chapter"))
+        verse = chinese_number(match.group("verse"))
+        if not chapter or not verse:
+            continue
+        found.append((match.start(), f"{book}-{chapter}-{verse}"))
+    return found
 
 
 def _build_reference_link(slug: str, chapter: str, start: str, end: Optional[str]) -> str:
@@ -647,6 +800,18 @@ def build_params() -> Dict[str, str]:
         "include-verse-numbers": "true",
         "include-verse-spans": "false",
     }
+
+
+def passage_id(book_slug: str, chapter: int, start: int, end: int) -> str:
+    """API.Bible 的 passage id，单节和范围都写成 `MAT.16.18` 这种形状。
+
+    原来单节拼的是 `16:18`——那不是 passage id，接口回空字符串，于是任何单节的
+    希腊文／希伯来文一律取不到，只有范围（`16:18-19`）才有。原声幻灯上太16:18
+    单独一节时希腊原文是空的，就是这里；文章页的原文弹窗同样中招。
+    """
+
+    head = f"{book_slug}.{chapter}.{start}"
+    return head if end == start else f"{head}-{book_slug}.{chapter}.{end}"
 
 
 async def fetch_passage(client: httpx.AsyncClient, bible_id: str, reference: str) -> str:
@@ -732,8 +897,7 @@ async def get_scripture_original(reference: str):
                 start = info["start"]
                 end = info["end"]
                 book_slug = info["slug_book"]
-                verse_part = f"{book_slug}.{chapter}.{start}-{book_slug}.{chapter}.{end}" if end != start else f"{chapter}:{start}"
-                range_ref = quote_plus(verse_part)
+                range_ref = quote_plus(passage_id(book_slug, chapter, start, end))
                 passages[lang] = await fetch_passage(client, bible_id, range_ref)
             except httpx.HTTPError as exc:
                 passages[lang] = ""
