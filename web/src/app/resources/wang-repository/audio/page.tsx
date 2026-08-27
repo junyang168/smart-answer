@@ -16,9 +16,9 @@ import ScriptureSlide from "./ScriptureSlide";
  * （五篇里每一遍的理由都不一样，删掉就是删掉他的论证——要综合版的去看文章）。
  */
 
-type Stretch = { start: number; end: number; scripture: string };
+type Stretch = { start: number; end: number };
 /** 教授念到经文的时刻。幻灯跟着这个走，不跟着段走——他在一段之内会翻好几处。 */
-type Spoken = { at: number; scripture: string };
+type Spoken = { at: number; scripture: string; label: string };
 type Occasion = {
   source_id: string;
   transcript_id: string;
@@ -36,6 +36,7 @@ type Viewpoint = {
   central_proposition: string;
   scripture_scope: string[];
   focal_count: number;
+  scripture: string;
   occasions: Occasion[];
 };
 
@@ -50,18 +51,19 @@ const mediaSrc = (url: string) =>
     ? url
     : url.replace("/web/video/", "/dev-media/");
 
-/** 播到这一刻，教授正在讲哪一节。
+/** 播到这一刻，教授手上翻的是哪一节。
  *
- * 取他最后念到的那一处。一处都还没念到就用这一段的 scope——`scripture_scope`
- * 是整个观点的范围，粗，但总比空着强。
+ * 只用来在幻灯角上标一行小字。主经文不跟着它换——他整组都在拆同一段经文，翻出
+ * 来的那些是旁证。
  */
-function verseAt(occasion: Occasion, seconds: number, fallback: string) {
-  let slug = fallback;
+function citedAt(occasion: Occasion, seconds: number, main: string) {
+  let cited: Spoken | null = null;
   for (const mark of occasion.spoken) {
     if (mark.at > seconds) break;
-    slug = mark.scripture;
+    cited = mark;
   }
-  return slug;
+  // 他翻到的正是幻灯上那一节时，不必再说一遍。
+  return cited && cited.scripture !== main ? cited.label : "";
 }
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -205,14 +207,16 @@ export default function OriginalAudioPage() {
                           的不放——那些本来就有得看。 */}
                       {occasion.media_kind === "audio" && (
                         <ScriptureSlide
-                          slug={verseAt(
-                            occasion,
-                            open ? at : (occasion.stretches[0]?.start ?? 0),
-                            occasion.stretches[playing?.index ?? 0]?.scripture ?? "",
-                          )}
+                          slug={row.scripture}
+                          title={row.central_proposition}
                           caption={`${occasion.title.slice(-6)} · ${clock(
                             open ? at : (occasion.stretches[0]?.start ?? 0),
                           )}`}
+                          now={citedAt(
+                            occasion,
+                            open ? at : (occasion.stretches[0]?.start ?? 0),
+                            row.scripture,
+                          )}
                         />
                       )}
                       {occasion.media_kind === "video" ? (

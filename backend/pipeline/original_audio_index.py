@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
-from backend.api.scripture import reference_slugs, spoken_references
+from backend.api.scripture import format_chinese_reference, reference_slugs, spoken_references
 
 
 #: 只有「等价」才算观点的成员。`supports`／`qualifies` 是关系不是身份，见
@@ -37,8 +37,13 @@ MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
 
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
 #:
-#: 30 秒是段落之间的正常间隙；再大就是教授岔去讲了别的又绕回来，那要算两段。
-CONTIGUOUS_GAP_SECONDS = 30.0
+#: 两分钟。跳过一两分钟省不下什么，却让人听见一次断口——原来是 30 秒，21 个空隙
+#: 里有 8 个在 30 秒到 2 分之间，每一个都是一次没必要的跳跃。
+#:
+#: 放到 2 分钟，全篇总共多播 7 分钟，剩下的 13 个断口最小的也有 2 分 24 秒，那
+#: 种长度确实是教授岔去讲了别的。再往上到 3 分钟能再吃掉 4 个，但要多播 10 分
+#: 钟——两分半的无关内容坐着听已经久了。
+CONTIGUOUS_GAP_SECONDS = 120.0
 
 #: 每段往前留的引子。
 #:
@@ -407,7 +412,16 @@ def spoken_during(
         for at, slug in timed:
             if start < at < end:
                 marks[at] = slug
-    return [{"at": at, "scripture": marks[at]} for at in sorted(marks)]
+    return [
+        {
+            "at": at,
+            "scripture": marks[at],
+            # 中文写法在这边生成——书名表在 `api.scripture`，前端不该再抄一份
+            # 六十六卷的对照。
+            "label": format_chinese_reference(marks[at]),
+        }
+        for at in sorted(marks)
+    ]
 
 
 def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
@@ -600,9 +614,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                 "media_url": sermon["media_url"],
                 "saying": slot["sayings"][0] if slot["sayings"] else "",
                 "other_sayings": slot["sayings"][1:],
-                "stretches": [
-                    {"start": a, "end": b, "scripture": ref} for a, b, ref in merged
-                ],
+                "stretches": [{"start": a, "end": b} for a, b, _ in merged],
                 "spoken": spoken_during(merged, sermon),
                 "seconds": sum(b - a for a, b, _ in merged),
             })
@@ -612,6 +624,21 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
         rows.append({
             "structure_id": str(structure.get("structure_id")),
             "central_proposition": str(central_revision.get("core_proposition") or ""),
+            # 幻灯上的那一节，一组之内不变。
+            #
+            # 一度让它跟着教授念到的经文换：43:19 太16:18 → 47:16 弗2:20 →
+            # 57:19 弗4:11。每一处都对得上他的话，可是听起来碎——他整组都在拆
+            # 16:18-19 的希腊文（Πέτρος／πέτρα、ἔσται δεδεμένον），弗2:20、弗
+            # 4:11 是他搬来作证的旁证。幻灯翻过去，等于把他正在拆的那句字从屏
+            # 幕上拿走。
+            #
+            # 取中心观点自己的经节，所以磐石那组是 16:18-19、阴间的权柄是
+            # 16:18、天国钥匙是 16:19——一组之内一动不动，但不是所有组一个样。
+            "scripture": scripture_slug(
+                central_revision.get("scope", {}).get("scripture_scope") or [],
+                prefer_book,
+                page_verses,
+            ),
             "scripture_scope": central_revision.get("scope", {}).get("scripture_scope") or [],
             "focal_count": len(focal),
             "occasions": occasions_out,

@@ -58,10 +58,16 @@ function heading(reference: string) {
 
 export default function ScriptureSlide({
   slug,
+  title,
   caption,
+  now,
 }: {
   slug: string;
+  /** 教授在这一组里立的那个判断。幻灯的标题，一组之内不变。 */
+  title: string;
   caption: string;
+  /** 他此刻念到的经文，中文写法（「弗 4:11」）。旁证，只占一行小字。 */
+  now?: string;
 }) {
   const [shown, setShown] = useState<{ reference: string; passages: Passages } | null>(null);
 
@@ -97,11 +103,19 @@ export default function ScriptureSlide({
         </span>
         <span className="font-mono text-[0.68rem] text-slate-500">{caption}</span>
       </div>
-      {zh && <p className="text-[0.95rem] leading-relaxed">{zh}</p>}
+      {/* 教授在这一段录音里立的判断。经文是他解的对象，判断是他解出来的结果——
+          屏幕上两样都有，听的人才知道自己在听什么。 */}
+      <p className="text-[0.95rem] font-semibold leading-snug text-slate-100">{title}</p>
+      {zh && <p className="text-[0.9rem] leading-relaxed text-slate-300">{zh}</p>}
       {el && (
-        <p className="border-t border-slate-700 pt-3 text-[0.82rem] leading-relaxed text-slate-400">
+        <p className="border-t border-slate-700 pt-3 text-[0.8rem] leading-relaxed text-slate-400">
           {el}
         </p>
+      )}
+      {/* 他此刻翻到的旁证（弗2:20、约20:23…）。只报节号不铺经文——铺开就成了
+          另一张幻灯，他正在拆的那句字反而被挤下去。 */}
+      {now && (
+        <p className="font-mono text-[0.68rem] text-slate-500">他此刻在念 {now}</p>
       )}
     </div>
   );
