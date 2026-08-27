@@ -75,18 +75,13 @@ function inside(slug: string, passage: string) {
   return Number(one[2]) >= low && Number(one[3] ?? one[2]) <= high;
 }
 
-/** 播到这一刻，他正在讲哪个字。
+/** 到这一刻为止，他讲过哪些字。
  *
- * 取最近一次注解。两分钟以内才算他还在讲那个字——再往前就是听的人已经听过去
- * 的了。
+ * 讲过的留着，不被后一个顶掉——他讲课就是一个个字累起来的：先说「你是彼得
+ * (Petrus)」，再说「這磐石(petra)」，两个摆在一起才看得出他在比什么。
  */
-function glossAt(sermon: Sermon, seconds: number) {
-  let held: Gloss | undefined;
-  for (const item of sermon.glosses) {
-    if (item.at > seconds) break;
-    held = item;
-  }
-  return held && seconds - held.at <= 120 ? held : undefined;
+function glossesUpTo(sermon: Sermon, seconds: number) {
+  return sermon.glosses.filter((item) => item.at <= seconds);
 }
 
 /** 播到这一刻，他手上翻的是哪一节。
@@ -228,7 +223,7 @@ export default function OriginalAudioPage() {
                     <ScriptureSlide
                       slug={reference}
                       title={judgementAt(sermon, seconds)}
-                      gloss={glossAt(sermon, seconds)}
+                      glosses={glossesUpTo(sermon, seconds)}
                       cited={citedAt(sermon, seconds, reference)}
                     />
                   )}

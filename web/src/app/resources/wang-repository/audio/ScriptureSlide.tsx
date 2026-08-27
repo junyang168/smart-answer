@@ -61,17 +61,45 @@ function verseWord(context: string, verse: string) {
   return "";
 }
 
+/** 经文切成一段段，讲过的字标出来。
+ *
+ * 讲过的字都留着，不是后一个把前一个顶掉——他讲课就是一个个字累起来的：先说
+ * 「你是彼得(Petrus)」，再说「這磐石(petra)」，两个字要摆在一起才看得出他在
+ * 比什么。
+ */
+function slice(verse: string, words: string[]) {
+  const spans: Array<[number, number]> = [];
+  for (const word of words) {
+    let from = verse.indexOf(word);
+    while (from >= 0) {
+      spans.push([from, from + word.length]);
+      from = verse.indexOf(word, from + word.length);
+    }
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  const out: Array<{ text: string; marked: boolean }> = [];
+  let cursor = 0;
+  for (const [from, to] of spans) {
+    if (from < cursor) continue;
+    if (from > cursor) out.push({ text: verse.slice(cursor, from), marked: false });
+    out.push({ text: verse.slice(from, to), marked: true });
+    cursor = to;
+  }
+  if (cursor < verse.length) out.push({ text: verse.slice(cursor), marked: false });
+  return out;
+}
+
 export default function ScriptureSlide({
   slug,
   title,
-  gloss,
+  glosses,
   cited,
 }: {
   slug: string;
   /** 教授此刻立的那个判断。幻灯的抬头。 */
   title: string;
-  /** 他此刻正在讲的那个字。没有就不显示原文。 */
-  gloss?: Gloss;
+  /** 到此刻为止他讲过的字，按先后。讲过的留着，不被后一个顶掉。 */
+  glosses: Gloss[];
   /** 他此刻翻到的别处经文，中文写法（「弗 4:11」）。 */
   cited?: string;
 }) {
@@ -95,8 +123,15 @@ export default function ScriptureSlide({
   const verse = plain(shown.passages.zh);
   if (!verse) return null;
 
-  const word = gloss ? verseWord(gloss.context, verse) : "";
-  const cut = word ? verse.indexOf(word) : -1;
+  const said: Array<{ word: string; original: string }> = [];
+  for (const item of glosses) {
+    const word = verseWord(item.context, verse);
+    // 同一个字他会讲好几遍（「你是彼得」在（四）1 里说了三次），列一次就够。
+    if (word && !said.some((x) => x.word === word)) {
+      said.push({ word, original: item.original });
+    }
+  }
+  const parts = slice(verse, said.map((x) => x.word));
 
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 px-5 py-4 text-slate-100">
@@ -108,30 +143,37 @@ export default function ScriptureSlide({
       {/* 他讲到经文里的哪个字，就把那个字标出来。原来铺整节的希腊原文——读者不看
           希腊文，铺开只是一堵墙；他在课上真正做的是挑几个字讲。 */}
       <p className="text-[0.9rem] leading-relaxed text-slate-300">
-        {cut < 0 ? (
-          verse
-        ) : (
-          <>
-            {verse.slice(0, cut)}
-            <mark className="rounded bg-amber-300/20 px-0.5 text-amber-200">{word}</mark>
-            {verse.slice(cut + word.length)}
-          </>
+        {parts.map((part, index) =>
+          part.marked ? (
+            <mark
+              key={index}
+              className="rounded bg-amber-300/20 px-0.5 text-amber-200"
+            >
+              {part.text}
+            </mark>
+          ) : (
+            <span key={index}>{part.text}</span>
+          ),
         )}
       </p>
 
-      {/* 底下这一行两件事共用，实际上互斥：他要么在拆这节经文里的一个字，要么
-          翻到别处去了。都没有就不占地方。 */}
-      {word && gloss ? (
-        <p className="border-t border-slate-700 pt-3 font-mono text-[0.82rem] text-slate-400">
-          <span className="text-amber-200">{word}</span>
-          <span className="px-2 text-slate-600">·</span>
-          {gloss.original}
-        </p>
-      ) : cited ? (
-        <p className="border-t border-slate-700 pt-3 font-mono text-[0.7rem] text-slate-500">
-          他此刻在念 {cited}
-        </p>
-      ) : null}
+      {said.length > 0 && (
+        <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-700 pt-3 font-mono text-[0.82rem] text-slate-400">
+          {said.map((item) => (
+            <span key={item.word}>
+              <span className="text-amber-200">{item.word}</span>
+              <span className="px-2 text-slate-600">·</span>
+              {item.original}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* 他翻到这段经文之外时说一声，不然幻灯上摆着马太、耳朵里听的是以弗所
+          书，读者不知道为什么。 */}
+      {cited && (
+        <p className="font-mono text-[0.7rem] text-slate-500">他此刻在念 {cited}</p>
+      )}
     </div>
   );
 }
