@@ -49,13 +49,6 @@ function plain(html: string | undefined) {
     .trim();
 }
 
-/** 中文经节写法：`Matt 16:18-19` → `太 16:18-19`。 */
-const CHINESE_BOOK: Record<string, string> = { Matt: "太", Mark: "可", Luke: "路", John: "約", Acts: "徒", Eph: "弗" };
-function heading(reference: string) {
-  const [book, ...rest] = reference.split(" ");
-  return `${CHINESE_BOOK[book] ?? book} ${rest.join(" ")}`;
-}
-
 export default function ScriptureSlide({
   slug,
   title,
@@ -97,15 +90,15 @@ export default function ScriptureSlide({
 
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 px-5 py-4 text-slate-100">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="font-mono text-[0.78rem] tracking-wide text-amber-300">
-          {heading(shown.reference)}
-        </span>
-        <span className="font-mono text-[0.68rem] text-slate-500">{caption}</span>
+      {/* 幻灯的抬头是他此刻立的那个判断，不是经节号。
+          经节号整页只有一个（页面标题就是「王教授講太 16:18-19」），在每张幻灯
+          上再报一次是废话；判断才是这一分钟和下一分钟的区别。 */}
+      <div className="flex items-baseline justify-between gap-4">
+        <p className="flex-1 text-[0.95rem] font-semibold leading-snug text-amber-300">
+          {title}
+        </p>
+        <span className="shrink-0 font-mono text-[0.68rem] text-slate-500">{caption}</span>
       </div>
-      {/* 教授在这一段录音里立的判断。经文是他解的对象，判断是他解出来的结果——
-          屏幕上两样都有，听的人才知道自己在听什么。 */}
-      <p className="text-[0.95rem] font-semibold leading-snug text-slate-100">{title}</p>
       {zh && <p className="text-[0.9rem] leading-relaxed text-slate-300">{zh}</p>}
       {el && (
         <p className="border-t border-slate-700 pt-3 text-[0.8rem] leading-relaxed text-slate-400">
