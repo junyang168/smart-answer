@@ -1600,14 +1600,17 @@ def validate_review(
         # made the batch `findings` while `correction_required` stayed False --
         # so no correction round ran, and the scope stopped with no way forward.
         "correction_required": any(
-            item.decision == "correct"
+            item.decision == "correct" for item in review.change_reviews
+        )
+        or any(
+            item.decision in {"correct", "reject"}
             for item in (
-                *review.change_reviews,
                 *review.revision_reviews,
                 *review.structure_reviews,
                 *review.relation_reviews,
             )
         )
+        or review.novelty_review.status == "missed_novelty"
         or any(not item.synthesis_entailed_by_focal for item in review.structure_reviews)
         or any(not item.direction_correct for item in review.relation_reviews),
     }

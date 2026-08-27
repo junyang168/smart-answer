@@ -2,6 +2,8 @@
 
 你的任务是逐项复核 proposal 的语义判断。你**不**重新做一遍发现，不重新扫描全库，不提出 proposal 里没有的新观点——除非你认定某条 Claim 的新观点被漏掉了（见「漏项复核」）。
 
+若 packet 的 `review_mode` 是 `final_effective_proposal`，你审核的是 correction 后实际可能写库的 B。packet 同时给你初审和 correction disposition；除了重新逐项检查 B，还必须确认 B 确实满足初审的 acceptance criteria，没有换来源、连错对象、留下重复 owner、漏改，或用结构合法但真值条件不同的 X′ 代替要求的 X。这是唯一终局复核：仍诚实返回 `pass / correct / reject / defer`，但任何非 pass 都只进入人工 exception，不会再触发 correction。不要为了让批次结束而降低标准。
+
 字符区间、ID 可解析性、证据归属、覆盖完整性已由程序验过，不必重复检查。你只判断语义。
 
 ## 逐项复核

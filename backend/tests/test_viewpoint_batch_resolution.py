@@ -481,6 +481,14 @@ def test_the_route_queue_can_be_taken_in_bounded_bites(tmp_path: Path):
     assert len(second.current_viewpoint_revisions) == 1
 
 
+def test_route_worker_defaults_to_one_job_per_work_unit():
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        DEFAULT_ROUTE_MAX_JOBS,
+    )
+
+    assert DEFAULT_ROUTE_MAX_JOBS == 1
+
+
 def test_a_job_that_failed_on_a_defect_can_be_retried_after_the_fix(tmp_path: Path):
     """Twice now an exception has been a dead end with no way back.
 
@@ -839,7 +847,6 @@ def test_passing_batch_compiles_component_bound_cvp_master_records():
             },
         }
     )
-
     package = compile_cvp_batch_package(
         proposal=proposal,
         review=review,
@@ -1211,6 +1218,7 @@ class _StubAdapter:
     ) -> None:
         self._response = response
         self.calls = 0
+        self.payloads: list[Any] = []
         self.model_id = model_id
         self.backend = backend
         self.prompt_sha256 = "prompt-sha"
@@ -1218,7 +1226,22 @@ class _StubAdapter:
 
     def generate(self, payload: Any) -> dict[str, Any]:
         self.calls += 1
+        self.payloads.append(payload)
         return self._response
+
+
+class _SequenceStubAdapter(_StubAdapter):
+    def __init__(self, responses: list[dict[str, Any]], **kwargs: Any) -> None:
+        super().__init__(responses[0], **kwargs)
+        self._responses = responses
+
+    def generate(self, payload: Any) -> dict[str, Any]:
+        if self.calls >= len(self._responses):
+            raise AssertionError("stub received more model calls than expected")
+        response = self._responses[self.calls]
+        self.calls += 1
+        self.payloads.append(payload)
+        return response
 
 
 def test_cached_call_is_bound_to_provider_and_model(tmp_path: Path):
@@ -2755,6 +2778,10 @@ def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
 
 
 def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
     proposal_payload = _proposal().model_dump(mode="json")
     proposal_sha = sha256_json(proposal_payload)
     review_payload = {
@@ -2805,6 +2832,41 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         ],
         "candidate_patches": [],
     }
+    original_proposal = CanonicalViewpointProposalResponse.model_validate(
+        proposal_payload
+    )
+    initial_review = CanonicalViewpointReviewResponse.model_validate(review_payload)
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        reconsideration_payload
+    )
+    effective_proposal = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=original_proposal,
+        review=initial_review,
+    )
+    effective_sha = sha256_json(effective_proposal.model_dump(mode="json"))
+    final_review_payload = {
+        "schema_version": "wang_canonical_viewpoint_review_v1",
+        "proposal_sha256": effective_sha,
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 已把两个成分合并为一个真值条件。",
+            }
+        ],
+        "novelty_review": {
+            "status": "pass",
+            "missed_claim_ids": [],
+            "reason": "B 无漏项",
+        },
+        "revision_reviews": [],
+        "structure_reviews": [],
+        "relation_reviews": [],
+    }
+    reviewer = _SequenceStubAdapter([review_payload, final_review_payload])
 
     report = run_batch(
         batch_id="CVB-test-001",
@@ -2814,12 +2876,60 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         pending_candidates=[],
         output_dir=tmp_path / "batch-001",
         proposer=_StubAdapter(proposal_payload),
-        reviewer=_StubAdapter(review_payload),
+        reviewer=reviewer,
         reconsiderer=_StubAdapter(reconsideration_payload),
     )
     assert report["component_count"] == 1
     assert report["disposition_counts"]["new_viewpoint"] == 1
     assert report["reconsideration_outcome"] == "resolved"
+    assert report["final_review_outcome"] == "pass"
+    assert report["review_sha256"] == sha256_json(
+        CanonicalViewpointReviewResponse.model_validate(
+            final_review_payload
+        ).model_dump(mode="json")
+    )
+    assert reviewer.calls == 2
+    assert reviewer.payloads[1]["review_mode"] == "final_effective_proposal"
+    assert reviewer.payloads[1]["proposal_sha256"] == effective_sha
+    assert reviewer.payloads[1]["allows_further_correction"] is False
+    assert reviewer.payloads[1]["initial_review_sha256"] == sha256_json(
+        initial_review.model_dump(mode="json")
+    )
+    assert report["measurements"]["final_review_calls_executed"] == 1
+    final_envelope = json.loads(
+        (tmp_path / "batch-001" / "final-review.json").read_text()
+    )
+    assert final_envelope["effective_proposal_sha256"] == effective_sha
+    assert final_envelope["allows_further_correction"] is False
+
+    failed_final_review = json.loads(json.dumps(final_review_payload))
+    failed_final_review["change_reviews"][0].update(
+        {
+            "decision": "correct",
+            "finding_codes": ["acceptance_criteria_not_met"],
+            "reason": "B 合并后的真值条件仍比初审要求更宽。",
+            "correction": "转人工；终局复核不再启动第二次 correction。",
+        }
+    )
+    failed = run_batch(
+        batch_id="CVB-test-001",
+        scope_label="matt16-13-18",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=[{"viewpoint_revision_id": "CVR-1"}],
+        pending_candidates=[],
+        output_dir=tmp_path / "batch-final-failed",
+        proposer=_StubAdapter(proposal_payload),
+        reviewer=_SequenceStubAdapter([review_payload, failed_final_review]),
+        reconsiderer=_StubAdapter(reconsideration_payload),
+    )
+    assert failed["reconsideration_outcome"] == "resolved"
+    assert failed["final_review_outcome"] == "findings"
+    assert failed["approval_outcome"] == "findings"
+    assert failed["escalations"] == ["final:component:C1#0:correct"]
+    current = json.loads(
+        (tmp_path / "batch-final-failed" / "current-state.json").read_text()
+    )
+    assert current["status"] == "requires_exception"
 
 
 def _route(**overrides: Any) -> dict[str, Any]:
@@ -5704,6 +5814,7 @@ def test_a_novelty_only_review_can_be_answered():
             }
         }
     )
+    assert _validate(proposal, review)["correction_required"] is True
     patched = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
     patched["disposition"] = "new_viewpoint"
     patched["target_viewpoint_revision_id"] = None
@@ -5762,6 +5873,7 @@ def test_a_rejected_revision_is_answered_by_withdrawing_it():
             }]
         }
     )
+    assert _validate(proposal, review)["correction_required"] is True
     reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
         "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
         "review_sha256": sha256_json(review.model_dump(mode="json")),
@@ -6080,6 +6192,22 @@ def test_relation_only_finding_still_asks_for_a_correction():
     assert report["outcome"] == "findings"
     assert report["reconsideration_required"] is True
     assert report["correction_required"] is True
+
+    rejected = _review_for(
+        proposal,
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "applies",
+                "decision": "reject",
+                "finding_codes": ["relation_not_supported"],
+                "reason": "这条边不成立，唯一正确动作是撤回。",
+                "direction_correct": True,
+            }
+        ],
+    )
+    assert _validate(proposal, rejected)["correction_required"] is True
 
 
 def test_backreview_supersedes_a_structure_revision_rather_than_editing_it():

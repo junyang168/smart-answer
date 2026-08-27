@@ -48,6 +48,8 @@ from backend.pipeline.viewpoint_route_policy import (
     route_policy_prompt_sha256s,
 )
 
+DEFAULT_ROUTE_MAX_JOBS = 1
+
 
 def _current_viewpoint_revisions(store: PostgresKnowledgeStore) -> dict[str, str]:
     return {
@@ -384,9 +386,10 @@ def main() -> int:
     parser.add_argument(
         "--max-jobs",
         type=int,
+        default=DEFAULT_ROUTE_MAX_JOBS,
         help=(
             "take at most this many queued jobs into one work unit; the route "
-            "packet's size follows the viewpoints it covers"
+            "packet's size follows the viewpoints it covers (default: 1)"
         ),
     )
     parser.add_argument(

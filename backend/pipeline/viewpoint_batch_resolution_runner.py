@@ -208,6 +208,76 @@ def build_consolidation_packet(
     return packet
 
 
+def run_final_cvp_review(
+    *,
+    batch_id: str,
+    packet: dict[str, Any],
+    proposal: CanonicalViewpointProposalResponse,
+    revision_dependents: dict[str, Any],
+    initial_proposal_sha256: str,
+    initial_review: CanonicalViewpointReviewResponse,
+    reconsideration: CanonicalViewpointReconsiderationResponse,
+    reviewer: Any,
+    output_dir: Path,
+) -> tuple[CanonicalViewpointReviewResponse, dict[str, Any], int, float]:
+    """Review the one effective post-correction proposal, with no next correction."""
+
+    proposal_payload = proposal.model_dump(mode="json")
+    proposal_sha256 = sha256_json(proposal_payload)
+    initial_review_payload = initial_review.model_dump(mode="json")
+    reconsideration_payload = reconsideration.model_dump(mode="json")
+    initial_review_sha256 = sha256_json(initial_review_payload)
+    reconsideration_sha256 = sha256_json(reconsideration_payload)
+    review_packet = {
+        "review_mode": "final_effective_proposal",
+        "batch_id": batch_id,
+        "packet": packet,
+        "proposal_sha256": proposal_sha256,
+        "proposal": proposal_payload,
+        "revision_dependents": revision_dependents,
+        "initial_proposal_sha256": initial_proposal_sha256,
+        "initial_review_sha256": initial_review_sha256,
+        "initial_review": initial_review_payload,
+        "reconsideration_sha256": reconsideration_sha256,
+        "reconsideration": reconsideration_payload,
+        "allows_further_correction": False,
+    }
+    raw_review, calls, seconds = _call(
+        reviewer, review_packet, output_dir / "raw-final-review.json"
+    )
+    canonical_review, normalization_changes = canonicalize_review(raw_review)
+    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
+    validation = validate_review(
+        review=review,
+        proposal=proposal,
+        proposal_sha256=proposal_sha256,
+    )
+    review_payload = review.model_dump(mode="json")
+    review_sha256 = sha256_json(review_payload)
+    _write_immutable(
+        output_dir / "final-review.json",
+        {
+            "schema_version": "wang_canonical_viewpoint_final_review_envelope_v1",
+            "batch_id": batch_id,
+            "effective_proposal_sha256": proposal_sha256,
+            "initial_proposal_sha256": initial_proposal_sha256,
+            "initial_review_sha256": initial_review_sha256,
+            "reconsideration_sha256": reconsideration_sha256,
+            "final_review_sha256": review_sha256,
+            "review": review_payload,
+            "validation_report": validation,
+            "allows_further_correction": False,
+            "normalization": {
+                "raw_response_sha256": sha256_json(dict(raw_review)),
+                "changed_paths": normalization_changes,
+                "reader_visible_text_changed": False,
+                "truth_conditions_changed": False,
+            },
+        },
+    )
+    return review, validation, calls, seconds
+
+
 def run_batch(
     *,
     batch_id: str,
@@ -365,6 +435,10 @@ def run_batch(
     reconsideration: CanonicalViewpointReconsiderationResponse | None = None
     reconsideration_calls = 0
     reconsideration_seconds = 0.0
+    final_review: CanonicalViewpointReviewResponse | None = None
+    final_review_validation: dict[str, Any] | None = None
+    final_review_calls = 0
+    final_review_seconds = 0.0
     effective_proposal = proposal
     effective_validation = validation
     if review_validation["correction_required"] and reconsiderer is not None:
@@ -458,6 +532,59 @@ def run_batch(
             },
         )
 
+    if reconsideration_report and reconsideration_report["outcome"] == "resolved":
+        assert reconsideration is not None
+        (
+            final_review,
+            final_review_validation,
+            final_review_calls,
+            final_review_seconds,
+        ) = run_final_cvp_review(
+            batch_id=batch_id,
+            packet=packet,
+            proposal=effective_proposal,
+            revision_dependents=revision_dependents,
+            initial_proposal_sha256=proposal_sha,
+            initial_review=review,
+            reconsideration=reconsideration,
+            reviewer=reviewer,
+            output_dir=output_dir,
+        )
+
+    approval_review = final_review or review
+    approval_validation = final_review_validation or review_validation
+    approval_review_payload = approval_review.model_dump(mode="json")
+    approval_review_sha = sha256_json(approval_review_payload)
+    final_review_escalations: list[str] = []
+    if final_review is not None and approval_validation["outcome"] != "pass":
+        final_review_escalations.extend(
+            f"final:component:{item.claim_id}#{item.component_index}:{item.decision}"
+            for item in final_review.change_reviews
+            if item.decision != "pass"
+        )
+        final_review_escalations.extend(
+            "final:novelty:" + claim_id
+            for claim_id in final_review.novelty_review.missed_claim_ids
+        )
+        final_review_escalations.extend(
+            "final:revision:"
+            f"{item.target_viewpoint_revision_id}:{item.decision}"
+            for item in final_review.revision_reviews
+            if item.decision != "pass"
+        )
+        final_review_escalations.extend(
+            f"final:structure:{item.structure_index}:{item.decision}"
+            for item in final_review.structure_reviews
+            if item.decision != "pass" or not item.synthesis_entailed_by_focal
+        )
+        final_review_escalations.extend(
+            "final:relation:"
+            f"{item.source_ref}--{item.relation_type}-->{item.target_ref}:"
+            f"{item.decision}"
+            for item in final_review.relation_reviews
+            if item.decision != "pass" or not item.direction_correct
+        )
+
     # Checked on whatever the batch actually settled on, so a merge dropped in
     # the correction round is caught as surely as one dropped in review.
     consolidation_fallback_report = None
@@ -473,6 +600,7 @@ def run_batch(
             "consolidation": "raw-consolidation.json",
             "review": "raw-review.json",
             "reconsideration": "raw-reconsideration.json",
+            "final_review": "raw-final-review.json",
         },
     )
     report = {
@@ -486,21 +614,35 @@ def run_batch(
             "new_viewpoint_candidate_count"
         ],
         "viewpoint_revision_count": effective_validation["viewpoint_revision_count"],
-        "outcome": review_validation["outcome"],
+        "outcome": approval_validation["outcome"],
+        "initial_review_outcome": review_validation["outcome"],
+        "approval_outcome": approval_validation["outcome"],
         "reconsideration_required": review_validation["reconsideration_required"],
-        "novelty_status": review_validation["novelty_status"],
-        "review_decision_counts": review_validation["decision_counts"],
+        "novelty_status": approval_validation["novelty_status"],
+        "review_decision_counts": approval_validation["decision_counts"],
         "packet_sha256": packet["packet_sha256"],
         "proposal_sha256": proposal_sha,
-        "review_sha256": review_sha,
+        "initial_review_sha256": review_sha,
+        "review_sha256": approval_review_sha,
+        "final_review_sha256": (
+            approval_review_sha if final_review is not None else None
+        ),
+        "final_review_outcome": (
+            final_review_validation["outcome"]
+            if final_review_validation is not None
+            else None
+        ),
         "effective_proposal_sha256": sha256_json(
             effective_proposal.model_dump(mode="json")
         ),
         "reconsideration_outcome": (
             reconsideration_report["outcome"] if reconsideration_report else None
         ),
-        "escalations": (
-            reconsideration_report["escalations"] if reconsideration_report else []
+        "escalations": sorted(
+            {
+                *(reconsideration_report["escalations"] if reconsideration_report else []),
+                *final_review_escalations,
+            }
         ),
         "consolidation_fallback": consolidation_fallback_report,
         "recorded_model_executions": recorded_model_executions,
@@ -521,9 +663,10 @@ def run_batch(
         str(path.relative_to(output_dir))
         for path in sorted((output_dir / "exceptions").glob("*.json"))
     )
-    resolved = not review_validation["reconsideration_required"] or bool(
+    correction_resolved = not review_validation["reconsideration_required"] or bool(
         reconsideration_report and reconsideration_report["outcome"] == "resolved"
     )
+    resolved = correction_resolved and approval_validation["outcome"] == "pass"
     _write_current_state(
         output_dir,
         schema_version="wang_canonical_viewpoint_batch_current_state_v1",
@@ -544,6 +687,8 @@ def run_batch(
         "review_wall_seconds": review_seconds,
         "reconsideration_calls_executed": reconsideration_calls,
         "reconsideration_wall_seconds": reconsideration_seconds,
+        "final_review_calls_executed": final_review_calls,
+        "final_review_wall_seconds": final_review_seconds,
         "call_timeout_seconds": CALL_TIMEOUT_SECONDS,
         "claim_count": len(claims),
         "component_count": validation["component_count"],
@@ -571,7 +716,9 @@ def run_batch(
         # reconsideration envelopes above remain the auditable artifacts.
         "_effective_proposal": effective_proposal,
         "_original_proposal": proposal,
-        "_review": review,
+        "_review": approval_review,
+        "_initial_review": review,
+        "_final_review": final_review,
         "_reconsideration": reconsideration,
         "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
@@ -881,11 +1028,15 @@ def main() -> int:
         # Fail-stop, not a hand-off. A batch shares nothing with the next one
         # except committed Registry master data, so an unresolved batch stops
         # the scope instead of passing provisional candidates forward.
-        if report["reconsideration_required"] and report.get("reconsideration_outcome") != "resolved":
+        if report["approval_outcome"] != "pass":
             stop = {
                 "schema_version": "wang_canonical_viewpoint_scope_stop_v1",
                 "batch_id": batch_id,
-                "reason": "batch did not resolve; scope stops here",
+                "reason": (
+                    "effective proposal failed final review; scope stops here"
+                    if report.get("final_review_outcome") == "findings"
+                    else "batch did not resolve; scope stops here"
+                ),
                 "escalations": report.get("escalations") or [],
                 "completed_batches": [
                     *completed_batches,
@@ -898,7 +1049,11 @@ def main() -> int:
             return 1
 
         raw_proposal = _read(batch_dir / "raw-proposal.json")
-        raw_review = _read(batch_dir / "raw-review.json")
+        raw_review = _read(
+            batch_dir / "raw-final-review.json"
+            if report.get("final_review_sha256")
+            else batch_dir / "raw-review.json"
+        )
         correction = report["_reconsideration"]
         effective_raw = (
             _read(batch_dir / "raw-reconsideration.json")
@@ -908,10 +1063,11 @@ def main() -> int:
         package = compile_cvp_batch_package(
             proposal=report["_effective_proposal"],
             review=report["_review"],
-            reviewed_proposal=(
-                report["_original_proposal"] if correction is not None else None
-            ),
-            reconsideration=correction,
+            # The approval review is bound directly to the effective proposal.
+            # Correction lineage remains in its own immutable artifacts; the
+            # ChangeSet no longer infers approval of B from a review of A.
+            reviewed_proposal=None,
+            reconsideration=None,
             deterministic_validation_sha256=report["_effective_validation"][
                 "artifact_sha256"
             ],
@@ -1049,6 +1205,12 @@ def main() -> int:
         ),
         "latest_execution_review_wall_seconds_total": round(
             sum(item["measurements"]["review_wall_seconds"] for item in reports), 3
+        ),
+        "latest_execution_final_review_wall_seconds_total": round(
+            sum(
+                item["measurements"]["final_review_wall_seconds"] for item in reports
+            ),
+            3,
         ),
         "cvp_model_calls_recorded_total": sum(
             item["recorded_model_executions"]["calls_recorded_total"]
