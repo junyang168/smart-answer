@@ -262,7 +262,12 @@ def process_work_unit(
         _write_derived(output_dir / "route-worker-result.json", result)
         return result
     raw_proposal = _read(output_dir / "raw-route-proposal.json")
-    raw_review = _read(output_dir / "raw-route-review-manifest.json")
+    final_review_manifest = output_dir / "raw-route-final-review-manifest.json"
+    raw_review = _read(
+        final_review_manifest
+        if report.get("route_final_review_sha256")
+        else output_dir / "raw-route-review-manifest.json"
+    )
     package = compile_argument_route_package(
         proposal=report["_effective_proposal"],
         passing_route_keys=report["passing_route_keys"],

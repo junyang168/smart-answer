@@ -4035,6 +4035,166 @@ def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
     assert current["status"] == "resolved"
 
 
+def test_corrected_route_is_reviewed_against_effective_proposal(tmp_path: Path):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+    )
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
+
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=claims,
+        viewpoint_claim_links=[_registry_link(claims[0])],
+        existing_routes=[],
+    )
+    original = _routes()
+    original_payload = original.model_dump(mode="json")
+    original_sha = sha256_json(original_payload)
+    initial_review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": original_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "correct",
+                "finding_codes": ["route_label_overstates"],
+                "reason": "label 说得过强",
+                "correction": "收窄 label，不改骨架",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "来源绑定成立",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "一项可修正 finding",
+    }
+    merged_initial_review = json.loads(json.dumps(initial_review))
+    merged_initial_review["reason"] = "RRB-001：一项可修正 finding"
+    merged_initial_review["change_reviews"] = sorted(
+        merged_initial_review["change_reviews"],
+        key=lambda item: (item["target_kind"], item["target_key"]),
+    )
+    merged_initial_review = ArgumentRouteReviewResponse.model_validate(
+        merged_initial_review
+    ).model_dump(mode="json")
+    initial_review_sha = sha256_json(merged_initial_review)
+    revised_payload = json.loads(json.dumps(original_payload))
+    revised_payload["argument_route_candidates"][0]["route_label"] = "词形差异路线"
+    revised_sha = sha256_json(revised_payload)
+    reconsideration = {
+        "schema_version": "wang_argument_route_reconsideration_v1",
+        "route_proposal_sha256": original_sha,
+        "route_review_sha256": initial_review_sha,
+        "finding_dispositions": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "disposition": "accepted",
+                "reason": "已按要求收窄",
+            }
+        ],
+        "revised_proposal": revised_payload,
+    }
+    final_review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": revised_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 的收窄 wording 与原证据一致",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 保留了正确的来源绑定",
+            },
+        ],
+        "cvp_re_review_exceptions": [
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "finding_code": "conclusion_boundary_needs_human_review",
+                "reason": "B 的路线可通过，但证据也提示观点边界应另案复核。",
+                "triggering_target_kind": "route",
+                "triggering_target_key": "ROUTE-GREEK",
+                "evidence_claim_component_keys": [
+                    packet["claim_components"][0]["claim_component_key"]
+                ],
+            }
+        ],
+        "cross_source_composition_found": False,
+        "reason": "effective proposal B 通过",
+    }
+    merged_final_review = json.loads(json.dumps(final_review))
+    merged_final_review["change_reviews"] = sorted(
+        merged_final_review["change_reviews"],
+        key=lambda item: (item["target_kind"], item["target_key"]),
+    )
+    merged_final_review = ArgumentRouteReviewResponse.model_validate(
+        merged_final_review
+    ).model_dump(mode="json")
+
+    reviewer = _SequenceStubAdapter([initial_review, final_review])
+    report = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=claims,
+        existing_routes=[],
+        output_dir=tmp_path / "routes-final",
+        proposer=_StubAdapter(original_payload),
+        reviewer=reviewer,
+        reconsiderer=_StubAdapter(reconsideration),
+        route_packet=packet,
+    )
+
+    assert reviewer.calls == 2
+    assert report["effective_route_proposal_sha256"] == revised_sha
+    assert report["initial_route_review_sha256"] == initial_review_sha
+    assert report["route_review_sha256"] == sha256_json(merged_final_review)
+    assert report["route_final_review_outcome"] == "pass"
+    assert report["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert report["passing_attestation_keys"] == ["ATTEST-1"]
+    assert report["cvp_re_review_exceptions"][0]["finding_code"] == (
+        "conclusion_boundary_needs_human_review"
+    )
+
+    failed_final_review = json.loads(json.dumps(final_review))
+    failed_final_review["change_reviews"][0].update(
+        {
+            "decision": "correct",
+            "finding_codes": ["correction_missed_acceptance_criteria"],
+            "reason": "B 仍比审核要求更强",
+            "correction": "需要人工处理；终局审核不再开启 correction",
+        }
+    )
+    failed = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=claims,
+        existing_routes=[],
+        output_dir=tmp_path / "routes-final-failed",
+        proposer=_StubAdapter(original_payload),
+        reviewer=_SequenceStubAdapter([initial_review, failed_final_review]),
+        reconsiderer=_StubAdapter(reconsideration),
+        route_packet=packet,
+    )
+    assert failed["route_final_review_outcome"] == "findings"
+    assert failed["passing_route_keys"] == []
+    assert failed["passing_attestation_keys"] == []
+    assert any(item.startswith("final:route:ROUTE-GREEK") for item in failed["exceptions"])
+
+
 def test_reject_and_defer_do_not_trigger_cvp_correction():
     proposal = _proposal()
     review = _review("reject", "pass")
@@ -4068,6 +4228,285 @@ def test_existing_route_must_reach_the_same_conclusion_viewpoint():
             approved_viewpoint_revision_ids=["CVR-1"],
             known_route_revision_ids=["ARR-1"],
             known_route_conclusions={"ARR-1": "CVR-OTHER"},
+            component_bindings=[_route_component_binding()],
+        )
+
+
+def _second_source_binding() -> Any:
+    """A second sermon holding a member component of the same viewpoint."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding,
+    )
+
+    claim = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    component = ProposedComponent.model_validate(
+        _component(
+            ROCK_STATEMENT,
+            "磐石不是彼得这个人",
+            "member_existing",
+            target_viewpoint_revision_id="CVR-1",
+        )
+    )
+    return RouteComponentBinding(
+        claim_component_key=component_key(claim, component),
+        claim_id="C2",
+        source_id="S2",
+        disposition="member_existing",
+        target_viewpoint_revision_id="CVR-1",
+        statement_component=component.statement_component(),
+        spans=component.spans,
+        evidence_step_ids=component.evidence_step_ids,
+        source_fragment_ids=component.source_fragment_ids,
+    )
+
+
+def test_a_member_source_that_attests_nothing_is_a_finding():
+    """binding_loosing_meaning, 2026-08-25: taught twice, connected once.
+
+    Four viewpoints each held member Claims from two sermons and each got one
+    route attesting one of them. The second source sat in the packet with
+    evidence stating the conclusion in as many words and an active member link
+    to bind a terminal on. Nothing asked for it, so nothing missed it, and the
+    viewpoint reads as taught once.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes()
+    with pytest.raises(BatchResolutionError, match="source S2 holds a member Claim but attests no route"):
+        validate_route_proposal(
+            routes=routes,
+            scope_label="matt16-13-18",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            approved_viewpoint_revision_ids=["CVR-1"],
+            known_route_revision_ids=[],
+            component_bindings=[_route_component_binding(), _second_source_binding()],
+        )
+
+
+def test_missing_member_source_is_an_exact_review_target():
+    from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
+
+    first = _claim("C1", ROCK_STATEMENT)
+    second = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[first, second],
+        viewpoint_claim_links=[
+            _registry_link(first),
+            _registry_link(
+                second,
+                viewpoint_claim_link_id="VCL-S2",
+                evidence_bindings=[
+                    {
+                        "evidence_step_id": "C2-E1",
+                        "source_fragment_id": "C2-F1",
+                    }
+                ],
+            ),
+        ],
+        existing_routes=[],
+    )
+
+    batches = build_route_review_batches(
+        proposal=_routes(),
+        route_packet=packet,
+        route_proposal_sha256="proposal-sha",
+    )
+
+    targets = [
+        (item["target_kind"], item["target_key"])
+        for batch in batches
+        for item in batch["review_targets"]
+    ]
+    assert targets.count(("member_source", "CVR-1::S2")) == 1
+    member_batch = next(
+        batch
+        for batch in batches
+        if ("member_source", "CVR-1::S2")
+        in {
+            (item["target_kind"], item["target_key"])
+            for item in batch["review_targets"]
+        }
+    )
+    dispositions = member_batch["route_proposal_context"][
+        "member_source_dispositions"
+    ]
+    assert dispositions == [
+        {
+            "target_key": "CVR-1::S2",
+            "conclusion_viewpoint_revision_id": "CVR-1",
+            "source_id": "S2",
+            "proposal_status": "unresolved",
+            "proposer_reason": None,
+        }
+    ]
+    assert {
+        item["claim_id"] for item in member_batch["route_evidence_context"]["claims"]
+    } >= {"C2"}
+
+
+def test_reviewer_can_confirm_a_missing_member_source_has_no_route(tmp_path: Path):
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
+
+    first = _claim("C1", ROCK_STATEMENT)
+    second = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[first, second],
+        viewpoint_claim_links=[
+            _registry_link(first),
+            _registry_link(
+                second,
+                viewpoint_claim_link_id="VCL-S2",
+                evidence_bindings=[
+                    {
+                        "evidence_step_id": "C2-E1",
+                        "source_fragment_id": "C2-F1",
+                    }
+                ],
+            ),
+        ],
+        existing_routes=[],
+    )
+    route_payload = _routes().model_dump(mode="json")
+    route_sha = sha256_json(route_payload)
+    review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": route_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "路线成立",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "S1 的绑定成立",
+            },
+            {
+                "target_kind": "member_source",
+                "target_key": "CVR-1::S2",
+                "decision": "confirmed_unattestable",
+                "finding_codes": [],
+                "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "成员来源分母已逐项交代",
+    }
+
+    report = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=[first, second],
+        existing_routes=[],
+        output_dir=tmp_path / "member-source-review",
+        proposer=_StubAdapter(route_payload),
+        reviewer=_StubAdapter(review),
+        route_packet=packet,
+    )
+
+    assert report["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert report["passing_attestation_keys"] == ["ATTEST-1"]
+    assert [
+        item.model_dump(mode="json")
+        for item in report["_effective_proposal"].unattested_members
+    ] == [
+        {
+            "conclusion_viewpoint_revision_id": "CVR-1",
+            "source_id": "S2",
+            "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
+        }
+    ]
+
+
+def test_member_source_confirmation_has_an_unambiguous_decision_word():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ReviewedRouteChange,
+    )
+
+    with pytest.raises(ValidationError, match="confirmed_unattestable, not pass"):
+        ReviewedRouteChange(
+            target_kind="member_source",
+            target_key="CVR-1::S2",
+            decision="pass",
+            reason="ambiguous",
+        )
+    with pytest.raises(ValidationError, match="only valid for a member-source"):
+        ReviewedRouteChange(
+            target_kind="route",
+            target_key="ROUTE-1",
+            decision="confirmed_unattestable",
+            reason="wrong target kind",
+        )
+
+
+def test_a_source_that_only_asserts_the_conclusion_can_be_declared():
+    """Holding a member Claim is not the same as arguing it in that sermon.
+
+    Without somewhere to say so, the rule above would be one more finding the
+    proposer cannot answer.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes(
+        unattested_members=[
+            {
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "source_id": "S2",
+                "reason": "该篇只顺带断言结论，没有可绑定的推理步骤。",
+            }
+        ]
+    )
+    report = validate_route_proposal(
+        routes=routes,
+        scope_label="matt16-13-18",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        approved_viewpoint_revision_ids=["CVR-1"],
+        known_route_revision_ids=[],
+        component_bindings=[_route_component_binding(), _second_source_binding()],
+    )
+    coverage = report["member_source_coverage"]["CVR-1"]
+    assert coverage["eligible"] == ["S1", "S2"]
+    assert coverage["attested"] == ["S1"]
+    assert coverage["declared_unattested"] == ["S2"]
+
+
+def test_declaring_a_source_that_did_attest_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_route_proposal,
+    )
+
+    routes = _routes(
+        unattested_members=[
+            {
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "source_id": "S1",
+                "reason": "想把已经 attest 的那篇也记成讲不出来。",
+            }
+        ]
+    )
+    with pytest.raises(BatchResolutionError, match="which does attest a route for it"):
+        validate_route_proposal(
+            routes=routes,
+            scope_label="matt16-13-18",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            approved_viewpoint_revision_ids=["CVR-1"],
+            known_route_revision_ids=[],
             component_bindings=[_route_component_binding()],
         )
 
@@ -4138,6 +4577,150 @@ def test_route_correction_is_confined_to_flagged_objects():
     with pytest.raises(BatchResolutionError, match="unflagged route object changed"):
         validate_route_reconsideration(
             reconsideration=ArgumentRouteReconsiderationResponse.model_validate(tampered),
+            proposal=proposal,
+            review=review,
+            route_proposal_sha256=proposal_sha,
+            route_review_sha256=review_sha,
+        )
+
+
+def _no_route_correction_case():
+    """A proposal that declared no_route, and the reviewer's answer to it."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+    )
+
+    proposal = _routes(
+        argument_route_candidates=[],
+        source_route_attestations=[],
+        viewpoints_with_no_route=[
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "reason_code": "no_attested_route",
+                "reason": "本证据 scope 内没有可 attest 的路线。",
+            }
+        ],
+    )
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    review = ArgumentRouteReviewResponse.model_validate(
+        {
+            "route_proposal_sha256": proposal_sha,
+            "route_evidence_packet_sha256": "packet-sha",
+            "change_reviews": [
+                {
+                    "target_kind": "no_route",
+                    "target_key": "CVR-1",
+                    "decision": "correct",
+                    "finding_codes": ["ATTESTABLE_ROUTE_EXISTS_IN_SCOPE"],
+                    "reason": "scope 内存在带正向 active link 且原文说出该结论的 terminal component。",
+                    "correction": "撤回 no_route，改为提出以该来源为单一来源的候选路线。",
+                }
+            ],
+            "cross_source_composition_found": False,
+            "reason": "no_route 判定与证据不符",
+        }
+    )
+    return proposal, proposal_sha, review, sha256_json(review.model_dump(mode="json"))
+
+
+def test_no_route_can_become_the_route_the_reviewer_found():
+    """binding_loosing_meaning route stage, 2026-08-25.
+
+    The proposal declared `no_route` for a viewpoint; review quoted the source
+    line that states the conclusion（「你可以去宣告，在什麼情況底下……你可以被釋放、
+    進天國」）, named the terminal component and its active Registry link, and told
+    the proposer to withdraw the no_route and propose the route. Doing that is
+    the only possible answer, and it necessarily changes the proposal's key set
+    -- which the guard refused outright, failing the whole work unit.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReconsiderationResponse,
+        validate_route_reconsideration,
+    )
+
+    proposal, proposal_sha, review, review_sha = _no_route_correction_case()
+    revised = proposal.model_dump(mode="json")
+    revised["viewpoints_with_no_route"] = []
+    revised["argument_route_candidates"] = [_route()]
+    revised["source_route_attestations"] = [_attestation()]
+
+    report = validate_route_reconsideration(
+        reconsideration=ArgumentRouteReconsiderationResponse.model_validate(
+            {
+                "route_proposal_sha256": proposal_sha,
+                "route_review_sha256": review_sha,
+                "finding_dispositions": [
+                    {
+                        "target_kind": "no_route",
+                        "target_key": "CVR-1",
+                        "disposition": "accepted",
+                        "reason": "同意，已按复核指名的节点提出路线。",
+                    }
+                ],
+                "revised_proposal": revised,
+            }
+        ),
+        proposal=proposal,
+        review=review,
+        route_proposal_sha256=proposal_sha,
+        route_review_sha256=review_sha,
+    )
+    assert report["outcome"] == "resolved"
+
+
+def test_route_correction_cannot_smuggle_in_an_unrelated_route():
+    """Only the released viewpoint's own route may appear."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReconsiderationResponse,
+        validate_route_reconsideration,
+    )
+
+    proposal, proposal_sha, review, review_sha = _no_route_correction_case()
+    revised = proposal.model_dump(mode="json")
+    revised["viewpoints_with_no_route"] = []
+    revised["approved_viewpoint_revision_ids"] = ["CVR-1"]
+    # Concludes in a viewpoint no finding released.
+    revised["argument_route_candidates"] = [
+        _route(
+            local_route_key="ROUTE-SMUGGLED",
+            conclusion_ref={"target_viewpoint_revision_id": "CVR-9"},
+            ordered_inference_nodes=[
+                {
+                    "route_step_key": "P1",
+                    "role": "observation",
+                    "normalized_proposition": "无关的观察",
+                    "required_for_full_attestation": True,
+                },
+                {
+                    "route_step_key": "C1",
+                    "role": "conclusion",
+                    "conclusion_ref": {"target_viewpoint_revision_id": "CVR-9"},
+                    "required_for_full_attestation": True,
+                },
+            ],
+        )
+    ]
+
+    with pytest.raises(BatchResolutionError, match="added an object no finding authorised"):
+        validate_route_reconsideration(
+            reconsideration=ArgumentRouteReconsiderationResponse.model_validate(
+                {
+                    "route_proposal_sha256": proposal_sha,
+                    "route_review_sha256": review_sha,
+                    "finding_dispositions": [
+                        {
+                            "target_kind": "no_route",
+                            "target_key": "CVR-1",
+                            "disposition": "accepted",
+                            "reason": "同意撤回 no_route。",
+                        }
+                    ],
+                    "revised_proposal": revised,
+                }
+            ),
             proposal=proposal,
             review=review,
             route_proposal_sha256=proposal_sha,

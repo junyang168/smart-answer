@@ -154,7 +154,7 @@ flowchart TD
 
 1. **不做候选配对，也不做分块。** 取材只是把相关的已有观点拿来给提议模型看，它**不能建立任何成员、关系或观点**。身份一律由提议与复核在整批材料上判定。
 2. **整批失败，不放行一半。** 一条验证不过，整批不写。宁可重跑，不可写进半套。
-3. **最多一轮改正。** 不设第二轮。若发生改正，同一独立 reviewer 角色必须再审核一次实际可能写库的 B；这次只准通过或转人工，不再产生 C。
+3. **最多一轮改正。** 不设第二轮。CanonicalViewpoint 或 ArgumentRoute 若发生改正，同一独立 reviewer 角色必须再审核一次实际可能写库的 B；这次只准通过或转人工，不再产生 C。
 4. **写完要回读。** 从库里读回来逐条比对，不一致就是失败。
 
 ## 4. 怎样判断两条主张是同一个观点
@@ -220,7 +220,9 @@ flowchart TD
     I --> V
     V -->|"通过"| R["分批独立复核<br/>claude-opus-5，每批 12 个目标"]
     R -->|"有异议"| C["仲裁：交回提议者<br/>gpt-5.6-sol，最多一轮"]
-    C --> W
+    C --> FR["终局复核实际写库的改正稿<br/>claude-opus-5；只通过或转人工"]
+    FR -->|"全部通过"| W
+    FR -->|"仍有问题"| E
     R -->|"无异议"| W["逐条路线生成幂等 ChangeSet"]
     W --> K["apply 前确认结论观点仍是 current"]
     K --> RB["apply / 回读"]
@@ -241,8 +243,9 @@ flowchart TD
 1. **复核分批**，每批 12 个目标——路线数量可以远多于观点，一次全塞进复核会超出上下文。
 2. **失败是局部的。** 一条路线失败进异常队列，**不回滚已批准的观点，也不阻塞其他路线**。观点是身份，路线是对它的论证；论证没整理好，不该把身份撤掉。
 3. **apply 前要重新确认结论观点仍是 current。** 路线 job 与下一批观点并行时，它的结论观点可能已被改写；这时按最新版本重新入队，而不是把路线挂到一个过期版本上。
+4. **成员来源是实例覆盖的分母。** 每个持有该观点成员主张、且本 scope 有精确证据绑定的来源，要么产生一条实例，要么成为独立复核对象，由 reviewer 确认该篇只断言结论而没有可绑定路线，或要求唯一 correction 补实例。提议者漏填不能让该来源从分母消失，也不能靠反复重问提议者碰运气。
 
-模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-opus-5` 复核、意见交回提议者仲裁。写在 `backend/pipeline/policies/wang_route_resolution_policy_v1.json` 里。
+模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-opus-5` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v1.json` 里。
 
 **实例分完整与部分。** 一篇里把这条路线的必需步骤都讲全了，是完整实例；缺步骤或有含糊的，只能记部分实例。**部分实例不计入「这条路线反复出现」的次数。**
 
@@ -289,6 +292,8 @@ flowchart TD
 10. 观点修订里不得内嵌成员、路线、关系或覆盖数组——它们是各自独立的记录。
 11. 同样的输入必须编译出同样的结果：语义修订、覆盖范围与编译器版本相同时，产出的内容哈希必须一致。
 12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得产生 ChangeSet。
+13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
+14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 
 ## 9. 谁读观点
 
