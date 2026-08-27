@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
+from backend.api.scripture import reference_slugs
+
 
 #: 只有「等价」才算观点的成员。`supports`／`qualifies` 是关系不是身份，见
 #: CanonicalViewpoint 设计第 4 节。
@@ -231,23 +233,94 @@ def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[floa
     return None
 
 
-def stretch(intervals: Iterable[tuple[float, float]]) -> list[tuple[float, float]]:
-    """把区间并成「连着讲的几段」。
+def stretch(intervals: Iterable[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
+    """把区间并成「连着讲的几段」，每段记住它主要在讲哪一节。
 
     相隔 30 秒之内接起来，超过就断开——断开的地方教授在讲别的，接起来听会以为
     是连着的一句话。
+
+    经节跟着时间走。一段录音是某个 focal 观点的证据带出来的，那个观点讲哪一节，
+    这一段就显示哪一节。合并之后一段里可能混着几个观点的区间，取占时间最长的那
+    个——幻灯只有一张，得挑教授在这一段里主要在讲的那一节。
     """
 
-    ordered = sorted((max(0.0, a - LEAD_IN_SECONDS), b) for a, b in intervals)
+    ordered = sorted((max(0.0, a - LEAD_IN_SECONDS), b, ref) for a, b, ref in intervals)
     if not ordered:
         return []
-    merged = [list(ordered[0])]
-    for start, end in ordered[1:]:
-        if start - merged[-1][1] <= CONTIGUOUS_GAP_SECONDS:
-            merged[-1][1] = max(merged[-1][1], end)
+    merged: list[dict[str, Any]] = []
+    for start, end, ref in ordered:
+        if merged and start - merged[-1]["end"] <= CONTIGUOUS_GAP_SECONDS:
+            merged[-1]["end"] = max(merged[-1]["end"], end)
         else:
-            merged.append([start, end])
-    return [(a, max(b, a + MIN_STRETCH_SECONDS)) for a, b in merged]
+            merged.append({"start": start, "end": end, "weight": {}})
+        if ref:
+            merged[-1]["weight"][ref] = merged[-1]["weight"].get(ref, 0.0) + (end - start)
+    out = []
+    for item in merged:
+        weight = item["weight"]
+        ref = max(weight, key=lambda k: (weight[k], k)) if weight else ""
+        out.append((item["start"], max(item["end"], item["start"] + MIN_STRETCH_SECONDS), ref))
+    return out
+
+
+#: 一个观点讲的是哪一节。
+#:
+#: `scripture_scope` 的写法不统一，同一个结构底下就见过六种：`馬太福音16:18-23`、
+#: `太 16:18、弗 2:20`、`太16:18`、`馬太福音16:16-18`，还有光写 `馬太福音` 和
+#: `聖經` 的。交给 `api.scripture` 去认——书名表、缩写表、繁简别名都在那边，这里
+#: 不另起一套。
+#:
+#: 取第一条解得出节号的。解不出就返回空字符串，幻灯保持上一张（`聖經`、`詩篇`、
+#: `使徒行傳15章` 这类本来就不是节级引用，全库 170 条里有 13 条）。
+def scripture_slug(
+    scope: Iterable[str], prefer: str = "", within: tuple[int, int] | None = None
+) -> str:
+    """这个观点讲的是哪一节，写成 `mat-16-19` 这样的 slug。
+
+    `scripture_scope` 的写法不统一，同一个结构底下就见过六种：`馬太福音16:18-23`、
+    `太 16:18、弗 2:20`、`太16:18`、`馬太福音16:16-18`，还有光写 `馬太福音` 和
+    `聖經` 的。认经文交给 `api.scripture`——书名表、缩写表、繁简别名都在那边。
+
+    `prefer` 是这一页正在解的那段经文。一条 scope 常常列着好几处，
+    `約翰福音20:23、馬太福音16:19、馬太福音18:18` 里教授解的是马太16章，约20:23
+    是他引来对照的；幻灯先显示他正在解的那一节。没有匹配的才退回第一条。
+
+    一条都解不出就返回空字符串，幻灯保持上一张（`聖經`、`詩篇`、`使徒行傳15章`
+    这类本来就不是节级引用，全库 170 条 scope 里有 13 条）。
+    """
+
+    found: list[str] = []
+    for piece in scope or []:
+        found.extend(s for s in reference_slugs(str(piece)) if s not in found)
+    if prefer:
+        for slug in found:
+            if slug.startswith(prefer):
+                return _clip(slug, within)
+    return _clip(found[0], within) if found else ""
+
+
+def _clip(slug: str, within: tuple[int, int] | None) -> str:
+    """把经节范围截到这一页讲的那几节。
+
+    `馬太福音16:18-23` 是那个观点的 scope，但这一页只讲 16:18-19。六节经文摆一
+    张幻灯，读者要在里面找教授正在讲的那一句。截到 16:18-19，多出来的 20-23 节
+    不是这一页的事。
+
+    只截同一章的。跨章的（`16:28-17:2` 这类）原样留着，宁可宽一点也不要截错。
+    """
+
+    if not within:
+        return slug
+    parts = slug.split("-")
+    if len(parts) < 3:
+        return slug
+    book, chapter, start = parts[0], parts[1], int(parts[2])
+    end = int(parts[3]) if len(parts) > 3 else start
+    low, high = within
+    start, end = max(start, low), min(end, high)
+    if start > end:
+        return slug
+    return f"{book}-{chapter}-{start}" + (f"-{end}" if end != start else "")
 
 
 #: 太16:18-19 这一段的 scope 在数据里有好几种写法：`馬太福音16:19`、
@@ -348,12 +421,18 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
 
     sermons = Sermons(data_base_dir)
 
-    def occasions(claim_id: str) -> dict[str, list[tuple[float, float]]]:
-        """这条主张的录音，按讲道分开。"""
+    # 这一页正在解的那段经文，用来在一条列了好几处的 scope 里挑出主经文。
+    # `scripture` 现在只有 "16:18-19"，讲的是马太福音。
+    prefer_book = f"mat-{scripture.split(':')[0]}-" if ":" in scripture else ""
+    verses = re.findall(r"\d+", scripture.split(":")[-1]) if ":" in scripture else []
+    page_verses = (int(verses[0]), int(verses[-1])) if verses else None
+
+    def occasions(claim_id: str, ref: str) -> dict[str, list[tuple[float, float, str]]]:
+        """这条主张的录音，按讲道分开，每段记上它讲的哪一节。"""
 
         claim = claims.get(claim_id) or {}
         ids = claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []
-        found: dict[str, list[tuple[float, float]]] = {}
+        found: dict[str, list[tuple[float, float, str]]] = {}
         for step_id in ids:
             step = steps.get(str(step_id))
             if not step:
@@ -372,7 +451,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                     continue
                 span = segment_time(sermon, fragment)
                 if span:
-                    found.setdefault(source_id, []).append(span)
+                    found.setdefault(source_id, []).append((span[0], span[1], ref))
         return found
 
     def current_revision(structure: dict[str, Any]) -> dict[str, Any] | None:
@@ -446,10 +525,19 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
             viewpoint_id = revision_to_viewpoint.get(str(entry.get("viewpoint_revision_id")))
             if not viewpoint_id:
                 continue
+            # 这一条 focal 观点讲的是哪一节。同一个结构底下几条 focal 的经节并不
+            # 相同——「磐石不是彼得」底下有太16:18-23、太16:16-18、弗2:20——所以
+            # 幻灯在一次播放里会跟着换。
+            entry_revision = revisions.get(str(entry.get("viewpoint_revision_id"))) or {}
+            ref = scripture_slug(
+                entry_revision.get("scope", {}).get("scripture_scope") or [],
+                prefer_book,
+                page_verses,
+            )
             for link in members.get(viewpoint_id, []):
                 claim_id = str(link.get("claim_id"))
                 claim = claims.get(claim_id) or {}
-                for source_id, spans in occasions(claim_id).items():
+                for source_id, spans in occasions(claim_id, ref).items():
                     slot = by_sermon.setdefault(source_id, {"spans": [], "sayings": []})
                     slot["spans"].extend(spans)
                     # 这一遍他是怎么说的。同一个判断五篇讲道五种讲法，副标题让
@@ -476,8 +564,10 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                 "media_url": sermon["media_url"],
                 "saying": slot["sayings"][0] if slot["sayings"] else "",
                 "other_sayings": slot["sayings"][1:],
-                "stretches": [{"start": a, "end": b} for a, b in merged],
-                "seconds": sum(b - a for a, b in merged),
+                "stretches": [
+                    {"start": a, "end": b, "scripture": ref} for a, b, ref in merged
+                ],
+                "seconds": sum(b - a for a, b, _ in merged),
             })
         if not occasions_out:
             continue

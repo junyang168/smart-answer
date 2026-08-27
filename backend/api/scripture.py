@@ -7,6 +7,7 @@ from urllib.parse import quote_plus
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from opencc import OpenCC
 
 BOOK_TO_OSIS: Dict[str, str] = {
     "GEN": "Gen",
@@ -455,10 +456,22 @@ CHINESE_BOOK_ABBREVIATIONS: Dict[str, str] = {
 BOOK_NAME_TO_SLUG: Dict[str, str] = {}
 BOOK_SLUG_TO_NAME: Dict[str, str] = {}
 
+# 书名表是繁体的，而库里两种都有。
+#
+# 观点的 `scripture_scope` 里「馬太福音16:1」和「马太福音16:1」并存——命题正文
+# 是简体写的，经文范围有时跟着写成简体。缩写表本来就两种都收（創／创），全名表
+# 只收了繁体，于是简体全名一律查不到书卷。
+#
+# opencc 已经是本项目的依赖（backend/requirements.txt，sermon_to_video 在用）。
+_TO_SIMPLIFIED = OpenCC("t2s")
+
 for slug, name in CHINESE_BOOKS:
     BOOK_SLUG_TO_NAME[slug] = name
     BOOK_NAME_TO_SLUG[name] = slug
     BOOK_NAME_TO_SLUG[name.lower()] = slug
+    simplified = _TO_SIMPLIFIED.convert(name)
+    if simplified != name:
+        BOOK_NAME_TO_SLUG.setdefault(simplified, slug)
     BOOK_NAME_TO_SLUG[slug] = slug
     BOOK_NAME_TO_SLUG[slug.upper()] = slug
     alias = SLUG_ALIASES.get(slug)
@@ -545,10 +558,22 @@ def format_chinese_reference(slug: str) -> str:
 
 
 _PAREN_REFERENCE_PATTERN = re.compile(r"（(?P<content>[^（）]+)）")
+# 书名里的数字只能在开头。
+#
+# 原来书名是 `[A-Za-z0-9\u4e00-\u9fff…]+`，数字也算书名的一部分，于是
+# 「馬太福音16:19」里贪婪的书名吃掉了 `1`，剩下 `6` 当章号，`馬太福音1` 查不到
+# 书卷，整条引用就不转链接了。单位数章号不受影响——「馬太福音8:22」一直是好
+# 的——所以这个 bug 藏了很久：读者看到的是「（馬太福音8:22）」有链接、
+# 「（馬太福音16:19）」没有。太16 是本项目的正题，整章都在这个坑里。
+#
+# 数字仍要允许在开头，「彼得後書」「1jn」「2pe」靠它。
 _SINGLE_REFERENCE_PATTERN = re.compile(
-    r"(?P<prefix>\s*)(?<!\[)(?P<book>[A-Za-z0-9\u4e00-\u9fff一二三上下前後后]+)"
+    r"(?P<prefix>\s*)(?<!\[)(?P<book>[A-Za-z0-9]?[A-Za-z\u4e00-\u9fff一二三上下前後后]+)"
     r"\s*(?P<chapter>\d+)\s*(?:[:：])\s*(?P<start>\d+)"
-    r"(?:\s*(?:[-–—~～至]\s*(?P<end>\d+)))?"
+    # 结尾的数字后面不能再跟冒号，否则「16:28-17:2」这种跨章范围会被读成
+    # 「16:28-17」——第 17 节根本不是它的意思。挡掉之后退回单节，链接指向
+    # 16:28，剩下的「-17:2」留作原文。跨章范围本来就不在这条正则的能力内。
+    r"(?:\s*(?:[-–—~～至]\s*(?P<end>\d+)(?!\d)(?!\s*[:：])))?"
 )
 _REFERENCE_SEPARATOR_CHARS = set(" ，,、；;/／&＆和與与及跟或")
 
@@ -568,6 +593,29 @@ def _resolve_book_slug(token: str) -> Optional[str]:
     if slug:
         return slug
     return None
+
+
+def reference_slugs(text: str) -> list[str]:
+    """从一段文字里认出所有经文引用，返回 `mat-16-18-19` 这样的 slug。
+
+    书名表、缩写表、繁简别名都在本模块，所以认经文这件事归这里做，别处不另起一
+    套。`parse_reference` 吃的就是这个 slug 格式。
+
+    认不出书卷的跳过——「聖經」「詩篇」「使徒行傳15章」这类没有节号的，返回空
+    列表，由调用方决定怎么办。
+    """
+
+    found: list[str] = []
+    for match in _SINGLE_REFERENCE_PATTERN.finditer(text or ""):
+        slug = _resolve_book_slug(match.group("book"))
+        if not slug:
+            continue
+        end = match.group("end")
+        tail = f"-{end}" if end else ""
+        candidate = f"{slug}-{match.group('chapter')}-{match.group('start')}{tail}"
+        if candidate not in found:
+            found.append(candidate)
+    return found
 
 
 def _build_reference_link(slug: str, chapter: str, start: str, end: Optional[str]) -> str:
@@ -647,6 +695,18 @@ def build_params() -> Dict[str, str]:
         "include-verse-numbers": "true",
         "include-verse-spans": "false",
     }
+
+
+def passage_id(book_slug: str, chapter: int, start: int, end: int) -> str:
+    """API.Bible 的 passage id，单节和范围都写成 `MAT.16.18` 这种形状。
+
+    原来单节拼的是 `16:18`——那不是 passage id，接口回空字符串，于是任何单节的
+    希腊文／希伯来文一律取不到，只有范围（`16:18-19`）才有。原声幻灯上太16:18
+    单独一节时希腊原文是空的，就是这里；文章页的原文弹窗同样中招。
+    """
+
+    head = f"{book_slug}.{chapter}.{start}"
+    return head if end == start else f"{head}-{book_slug}.{chapter}.{end}"
 
 
 async def fetch_passage(client: httpx.AsyncClient, bible_id: str, reference: str) -> str:
@@ -732,8 +792,7 @@ async def get_scripture_original(reference: str):
                 start = info["start"]
                 end = info["end"]
                 book_slug = info["slug_book"]
-                verse_part = f"{book_slug}.{chapter}.{start}-{book_slug}.{chapter}.{end}" if end != start else f"{chapter}:{start}"
-                range_ref = quote_plus(verse_part)
+                range_ref = quote_plus(passage_id(book_slug, chapter, start, end))
                 passages[lang] = await fetch_passage(client, bible_id, range_ref)
             except httpx.HTTPError as exc:
                 passages[lang] = ""

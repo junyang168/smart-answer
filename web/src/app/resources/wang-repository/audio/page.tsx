@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import ScriptureSlide from "./ScriptureSlide";
+
 /**
  * 教授的原声，按中心观点重排。
  *
@@ -14,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
  * （五篇里每一遍的理由都不一样，删掉就是删掉他的论证——要综合版的去看文章）。
  */
 
-type Stretch = { start: number; end: number };
+type Stretch = { start: number; end: number; scripture: string };
 type Occasion = {
   source_id: string;
   transcript_id: string;
@@ -178,6 +180,16 @@ export default function OriginalAudioPage() {
                       <p className="text-[0.82rem] leading-relaxed text-slate-700">
                         {occasion.saying}
                       </p>
+                      {/* 只有录音的讲道，屏幕上放教授此刻在讲的那节经文。有画面
+                          的不放——那些本来就有得看。 */}
+                      {occasion.media_kind === "audio" && (
+                        <ScriptureSlide
+                          slug={occasion.stretches[playing?.index ?? 0]?.scripture ?? ""}
+                          caption={`${occasion.title.slice(-6)} · ${clock(
+                            occasion.stretches[playing?.index ?? 0]?.start ?? 0,
+                          )}`}
+                        />
+                      )}
                       {occasion.media_kind === "video" ? (
                         <video
                           ref={media as React.RefObject<HTMLVideoElement>}
