@@ -48,6 +48,8 @@ from backend.pipeline.viewpoint_route_policy import (
     route_policy_prompt_sha256s,
 )
 
+DEFAULT_ROUTE_MAX_JOBS = 1
+
 
 def _current_viewpoint_revisions(store: PostgresKnowledgeStore) -> dict[str, str]:
     return {
@@ -272,6 +274,10 @@ def process_work_unit(
         passing_attestation_keys=report["passing_attestation_keys"],
         route_packet=packet,
         existing_routes=existing_routes,
+        existing_attestation_ids=[
+            str(item["argument_route_attestation_id"])
+            for item in store.list_records("argument_route_attestations")
+        ],
         claims=claims,
         proposal_artifact_sha256=str(report["effective_route_proposal_sha256"]),
         review_artifact_sha256=str(report["route_review_sha256"]),
@@ -280,7 +286,29 @@ def process_work_unit(
         decided_at=_stable_decided_at(output_dir),
     )
     _write_immutable(output_dir / "route-change-package.json", package)
-    plan = store.plan_package(package, source_kind="argument_route_resolution")
+    # Revising a route strands the attestations pinned to the revision it
+    # replaces: the projection rejects an attestation whose route revision is
+    # not current. They are immutable, so they are withdrawn rather than edited,
+    # and in the same change set as the revision that stranded them -- both
+    # because two change sets leave a window where the store holds both or
+    # neither, and because the validator inside plan_package would otherwise
+    # refuse the package for a state neither half intends to leave behind.
+    superseded = set(package.get("superseded_route_revision_ids") or [])
+    keeping = {
+        str(row["argument_route_attestation_id"])
+        for row in package.get("argument_route_attestations") or []
+    }
+    stale = [
+        ("argument_route_attestations", str(item["argument_route_attestation_id"]))
+        for item in store.list_records("argument_route_attestations")
+        if str(item.get("validated_against_route_revision_id")) in superseded
+        and str(item["argument_route_attestation_id"]) not in keeping
+    ] if superseded else []
+    plan = store.plan_package(
+        package,
+        source_kind="argument_route_resolution",
+        retiring_keys=stale,
+    )
     plan_document = plan.as_dict() | {
         "schema_version": "wang_argument_route_changeset_plan_v2",
         "apply_allowed": apply,
@@ -360,6 +388,20 @@ def main() -> int:
     parser.add_argument("--worker-id", default=f"{socket.gethostname()}:{os.getpid()}")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--route-policy", type=Path, default=DEFAULT_ROUTE_POLICY_PATH)
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=DEFAULT_ROUTE_MAX_JOBS,
+        help=(
+            "take at most this many queued jobs into one work unit; the route "
+            "packet's size follows the viewpoints it covers (default: 1)"
+        ),
+    )
+    parser.add_argument(
+        "--retry-exceptions",
+        action="store_true",
+        help="also claim jobs that ended in exception, for retrying after a fix",
+    )
     args = parser.parse_args()
 
     policy = load_route_policy(args.route_policy)
@@ -391,6 +433,8 @@ def main() -> int:
         scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
         evidence_scope_sha256=str(scope_packet["packet_sha256"]),
         route_policy_fingerprint_sha256=policy_sha256,
+        retry_exceptions=args.retry_exceptions,
+        max_jobs=args.max_jobs,
     )
     if work is None:
         print(json.dumps({"status": "idle"}, ensure_ascii=False))

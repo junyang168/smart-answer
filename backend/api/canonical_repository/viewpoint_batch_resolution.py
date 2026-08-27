@@ -570,15 +570,35 @@ class InferenceNode(StrictBatchModel):
 
 
 class ArgumentRouteCandidate(StrictBatchModel):
+    """One route as this scope proposes to leave it.
+
+    ``revise_existing`` is the counterpart of the viewpoint layer's revision:
+    the same route, its skeleton corrected. Without it the first scope to write
+    a route fixes its steps forever, and a reviewer who finds a load-bearing
+    node missing has only two illegal answers -- leave it (a conclusion half of
+    whose scripture scope no node supports) or create a parallel route for the
+    same conclusion (the false split the reviewer is trying to prevent).
+
+    binding_loosing_meaning met it head on: two routes concluded in viewpoints
+    covering 太16:19 and 太18:18 while every node stopped at 16:19. The review
+    said so, named the bridge to add, and wrote that the action had to become a
+    new revision of the existing route. The proposer wrote `create_new` pinned
+    to the existing revision -- the nearest legal shape to what was asked -- and
+    the schema rejected it.
+    """
+
     local_route_key: str = Field(min_length=1)
     conclusion_ref: ConclusionRef
-    proposed_action: Literal["match_existing", "create_new", "defer"]
+    proposed_action: Literal["match_existing", "revise_existing", "create_new", "defer"]
     target_argument_route_revision_id: str | None = None
     route_label: str = Field(min_length=1)
     inference_method_codes: list[str] = Field(min_length=1)
     inference_method_note: str | None = None
     ordered_inference_nodes: list[InferenceNode] = Field(min_length=2)
     identity_comparison: str = Field(min_length=1)
+    #: Why the committed skeleton cannot carry this conclusion, and why the
+    #: revised one is the same argument corrected rather than a different route.
+    revision_reason: str | None = None
 
     @model_validator(mode="after")
     def validate_candidate(self) -> "ArgumentRouteCandidate":
@@ -594,11 +614,17 @@ class ArgumentRouteCandidate(StrictBatchModel):
             raise ValueError("a route ends at its conclusion node")
         if sum(1 for item in self.ordered_inference_nodes if item.role == "conclusion") != 1:
             raise ValueError("a route reaches exactly one conclusion")
-        if self.proposed_action == "match_existing":
+        if self.proposed_action in ("match_existing", "revise_existing"):
             if not self.target_argument_route_revision_id:
-                raise ValueError("match_existing must pin the route revision it matches")
+                raise ValueError(
+                    f"{self.proposed_action} must pin the route revision it acts on"
+                )
         elif self.target_argument_route_revision_id:
             raise ValueError(f"{self.proposed_action} may not pin an existing route revision")
+        if self.proposed_action == "revise_existing" and not self.revision_reason:
+            raise ValueError("revise_existing must say why the committed skeleton cannot hold")
+        if self.proposed_action != "revise_existing" and self.revision_reason:
+            raise ValueError("only revise_existing carries a revision reason")
         return self
 
 
@@ -1085,18 +1111,21 @@ def _route_findings(
         if conclusion not in approved_revisions:
             findings.append(f"{where}: conclusion revision {conclusion} is not approved in this scope")
         if (
-            route.proposed_action == "match_existing"
+            route.proposed_action in ("match_existing", "revise_existing")
             and route.target_argument_route_revision_id not in known_route_revisions
         ):
             findings.append(
                 f"{where}: existing route revision "
                 f"{route.target_argument_route_revision_id} was not in the packet"
             )
-        elif route.proposed_action == "match_existing" and (
+        elif route.proposed_action in ("match_existing", "revise_existing") and (
             known_route_conclusions.get(str(route.target_argument_route_revision_id))
             != conclusion
         ):
             findings.append(
+                # A revision corrects one route's steps. Moving it to a
+                # different conclusion is not a correction, it is a different
+                # route wearing the old one's id.
                 f"{where}: existing route revision belongs to another conclusion viewpoint"
             )
         for node in route.ordered_inference_nodes:
@@ -1169,6 +1198,33 @@ def _route_findings(
             for fragment_id in binding.source_fragment_ids:
                 if fragment_id not in allowed_fragments:
                     findings.append(f"{where}: SourceFragment {fragment_id} is outside this source")
+            # Same-source is not close enough: a fragment has to belong to one
+            # of the EvidenceSteps this binding names, which is what the runtime
+            # projection requires. Checking only the source here let a binding
+            # that quoted a neighbouring step's fragment pass deterministic
+            # validation and die at the store, where the finding arrives as a
+            # failed write instead of something the review round can correct.
+            selected = set(binding.source_fragment_ids)
+            union: set[str] = set()
+            for step_id in binding.evidence_step_ids:
+                fragments_of_step = {
+                    pair.source_fragment_id
+                    for claim in claims
+                    if claim.source_id == attestation.source_id
+                    for pair in claim.evidence
+                    if pair.evidence_step_id == step_id
+                }
+                union |= fragments_of_step
+                if fragments_of_step and not selected & fragments_of_step:
+                    findings.append(
+                        f"{where}: step {binding.route_step_key} names EvidenceStep "
+                        f"{step_id} but binds none of its SourceFragments"
+                    )
+            if union and not selected <= union:
+                findings.append(
+                    f"{where}: step {binding.route_step_key} binds SourceFragments "
+                    "outside the EvidenceSteps it names"
+                )
             for component_key_value in binding.claim_component_keys:
                 component = component_bindings.get(component_key_value)
                 if component is None:
@@ -1544,14 +1600,17 @@ def validate_review(
         # made the batch `findings` while `correction_required` stayed False --
         # so no correction round ran, and the scope stopped with no way forward.
         "correction_required": any(
-            item.decision == "correct"
+            item.decision == "correct" for item in review.change_reviews
+        )
+        or any(
+            item.decision in {"correct", "reject"}
             for item in (
-                *review.change_reviews,
                 *review.revision_reviews,
                 *review.structure_reviews,
                 *review.relation_reviews,
             )
         )
+        or review.novelty_review.status == "missed_novelty"
         or any(not item.synthesis_entailed_by_focal for item in review.structure_reviews)
         or any(not item.direction_correct for item in review.relation_reviews),
     }
@@ -1744,6 +1803,94 @@ def batches_from_groups(
         for index in range(0, len(claim_ids), batch_size):
             batches.append(claim_ids[index : index + batch_size])
     return batches
+
+
+GROUP_COVERAGE_VERSION = "wang_canonical_viewpoint_group_coverage_v1"
+
+
+def group_coverage_report(
+    *,
+    grouping: ClaimGroupingResponse,
+    linked_claim_ids: Sequence[str],
+    blocked_claims: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Measure Registry coverage against the grouping plan, not against a batch.
+
+    A batch reports the Claims it was handed, so a batch that ran on part of a
+    group still reports success, and the group looks finished.  That is how
+    ``rock_referent`` came to hold 13 links for 14 planned Claims with nothing
+    saying so: the run's "13 Claims" came from the batch, and no check ever put
+    the plan on the other side of the comparison.
+
+    The plan is the denominator, active claim links are the numerator, and a
+    group is only ``covered`` when every Claim it plans for has one.  Nothing
+    here decides what a Claim means -- an ``uncovered`` group may well end in a
+    reasoned decision that some Claim carries no viewpoint, but that decision
+    has to be made rather than skipped into.
+    """
+
+    linked = set(linked_claim_ids)
+    groups: list[dict[str, Any]] = []
+    for group in sorted(grouping.groups, key=lambda item: item.group_key):
+        unlinked = sorted(set(group.claim_ids) - linked)
+        covered = len(group.claim_ids) - len(unlinked)
+        if not unlinked:
+            status = "covered"
+        elif covered:
+            status = "partial"
+        else:
+            status = "uncovered"
+        groups.append(
+            {
+                "group_key": group.group_key,
+                "claim_count": len(group.claim_ids),
+                "linked_claim_count": covered,
+                "unlinked_claim_ids": unlinked,
+                "status": status,
+            }
+        )
+
+    planned = {claim_id for group in grouping.groups for claim_id in group.claim_ids}
+    report = {
+        "schema_version": GROUP_COVERAGE_VERSION,
+        "scope_label": grouping.scope_label,
+        "group_count": len(groups),
+        "planned_claim_count": len(planned),
+        "linked_claim_count": len(planned & linked),
+        "covered_group_count": sum(1 for item in groups if item["status"] == "covered"),
+        "partial_group_count": sum(1 for item in groups if item["status"] == "partial"),
+        "groups": groups,
+        # A link to a Claim outside the plan is not this report's business to
+        # fix, but leaving it unnamed would let the two sides drift apart
+        # silently -- the plan is the scope's, and both are rebuilt from it.
+        "linked_claims_outside_plan": sorted(linked - planned),
+        # Claims the packet stopped before grouping ever saw them: no evidence
+        # bindings, an ineligible source, no reviewed candidate. They can never
+        # reach a batch, so a denominator of planned Claims alone reports full
+        # coverage while they sit unaccounted for -- which is the shape of the
+        # gap this whole report exists to close, one stage earlier.
+        "blocked_claims": sorted(
+            (
+                {
+                    "claim_id": str(item["claim_id"]),
+                    "reason_code": str(item.get("reason_code") or "unspecified"),
+                }
+                for item in blocked_claims
+            ),
+            key=lambda item: item["claim_id"],
+        ),
+        "blocked_claim_counts": dict(
+            sorted(
+                Counter(
+                    str(item.get("reason_code") or "unspecified")
+                    for item in blocked_claims
+                ).items()
+            )
+        ),
+        "scope_claim_count": len(planned) + len(blocked_claims),
+    }
+    report["artifact_sha256"] = sha256_json(report)
+    return report
 
 
 #: Fields whose order carries no meaning. The model emits them in narrative
@@ -2163,6 +2310,27 @@ class CanonicalViewpointReconsiderationResponse(StrictBatchModel):
         return self
 
 
+def _candidate_patch_strands_referrers(patch: "CandidatePatch") -> bool:
+    """Whether a candidate patch leaves its other components pointing at nothing.
+
+    Only deletion does. Restricting *which fields* a patch may touch when some
+    other component refers to the candidate looked prudent and was wrong twice
+    over. A candidate with one member component and one support is the ordinary
+    shape, so almost every correction has an unflagged referrer by construction;
+    and the reviewer read every component of the batch in one pass before
+    writing the correction, so the components that were passed were passed in
+    the knowledge of it. Two real findings died on that restriction in one day:
+    a signature triple inverting a necessary condition into a sufficient one,
+    and a core_proposition the reviewer required be narrowed because it had lost
+    its source's qualifier ("不得保留無限定的絕對否定措辭").
+
+    What still authorises a patch is reachability from an accepted finding, and
+    unflagged components are still copied verbatim by construction.
+    """
+
+    return patch.action == "delete"
+
+
 def apply_reconsideration_patches(
     *,
     reconsideration: CanonicalViewpointReconsiderationResponse,
@@ -2181,6 +2349,16 @@ def apply_reconsideration_patches(
         (item.claim_id, item.component_index)
         for item in review.change_reviews
         if item.decision == "correct"
+    }
+    # A novelty finding names a Claim whose proposition no component carries,
+    # so the patch surface is that Claim's components -- the same widening
+    # validate_reconsideration makes, and without it the patch answering the
+    # finding is refused as unconfined.
+    flagged |= {
+        (decision.claim_id, index)
+        for decision in proposal.claim_decisions
+        if decision.claim_id in set(review.novelty_review.missed_claim_ids)
+        for index in range(len(decision.components))
     }
     accepted = {
         (item.claim_id, item.component_index)
@@ -2252,9 +2430,15 @@ def apply_reconsideration_patches(
                     f"{claim_id}#{component_index}: merge target does not exist"
                 )
                 continue
-            if target in claim_patches:
+            target_patch = claim_patches.get(target)
+            if target_patch is not None and (
+                target_patch.replacement_components is None
+                or len(target_patch.replacement_components) != 1
+            ):
+                # Folding into a sibling that is itself being merged away, or
+                # split into several, has no single component to fold into.
                 findings.append(
-                    f"{claim_id}#{component_index}: merge target must be an unpatched sibling"
+                    f"{claim_id}#{component_index}: merge target must be one component"
                 )
                 continue
             authorized_candidate_referrers.add((claim_id, target))
@@ -2271,7 +2455,18 @@ def apply_reconsideration_patches(
         revised_components: list[dict[str, Any]] = []
         for index, original in enumerate(original_components):
             if index in replacements:
-                revised_components.extend(replacements[index])
+                # A reviewer can require both halves of the same move: rewrite
+                # this component and fold a sibling into it. The spans have to
+                # land on the replacement, not on the component it replaced --
+                # matt16 part-7 batch-001, where 「與 component 0 合併」 and
+                # 「改為 new_viewpoint...」 were two findings on one Claim.
+                merged = deepcopy(replacements[index])
+                if merged and index in merge_spans:
+                    merged[0]["spans"] = sorted(
+                        [*merged[0]["spans"], *merge_spans[index]],
+                        key=lambda item: (item["start_char"], item["end_char"]),
+                    )
+                revised_components.extend(merged)
                 continue
             copied = deepcopy(original)
             if index in merge_spans:
@@ -2295,7 +2490,7 @@ def apply_reconsideration_patches(
             candidate_referrers.get(patch.local_key, set())
             - authorized_candidate_referrers
         )
-        if unflagged_referrers:
+        if unflagged_referrers and _candidate_patch_strands_referrers(patch):
             rendered = ", ".join(
                 f"{claim_id}#{component_index}"
                 for claim_id, component_index in sorted(unflagged_referrers)
@@ -2324,9 +2519,34 @@ def apply_reconsideration_patches(
             proposal.viewpoint_relations, payload["viewpoint_relations"]
         )
     }
+    # A relation the reviewer flagged directly authorises its own patch, the
+    # same way a flagged structure does. Reaching a relation only through the
+    # candidates a component finding disturbed left the commonest case
+    # unanswerable: the reviewer says this edge does not hold, the proposer
+    # accepts and withdraws it, and the withdrawal is refused as unauthorised.
+    # Keyed on the two endpoints, not the whole edge: an edge's identity
+    # includes its type, and "this should be `extends`, not `specializes`" is a
+    # correction the reviewer can and does write. Answering it means deleting
+    # one edge and adding another between the same pair, and matching on the
+    # full edge left the second half unauthorised.
+    accepted_relations = {
+        (item.source_ref, item.target_ref)
+        for item in reconsideration.relation_dispositions
+        if item.disposition == "accepted"
+    }
     for patch in reconsideration.relation_patches:
         endpoints = patch.relation.endpoints()
-        reachable = any(
+        patch_ends = (
+            str(
+                patch.relation.source_viewpoint_revision_id
+                or patch.relation.source_local_key
+            ),
+            str(
+                patch.relation.target_viewpoint_revision_id
+                or patch.relation.target_local_key
+            ),
+        )
+        reachable = patch_ends in accepted_relations or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in endpoints
         )
@@ -2346,6 +2566,18 @@ def apply_reconsideration_patches(
     # structure a finding strands is the one that named the viewpoint under
     # review.  Patches are resolved against the original indices and the list
     # is rebuilt once, so a delete cannot shift a later patch's target.
+    # A structure the reviewer flagged directly authorises its own patch. The
+    # rule below reaches a structure through the candidates a component finding
+    # disturbed, which covers the structure stranded by someone else's
+    # correction but not the commonest case of all: the reviewer says the
+    # synthesis or a role is wrong, names the fix, the proposer accepts, and the
+    # patch is refused as unauthorised because authorisation only understood
+    # component findings.
+    accepted_structures = {
+        item.structure_index
+        for item in reconsideration.structure_dispositions
+        if item.disposition == "accepted"
+    }
     structure_replacements: dict[int, dict[str, Any] | None] = {}
     for patch in reconsideration.structure_patches:
         if patch.structure_index >= len(proposal.structures):
@@ -2354,7 +2586,7 @@ def apply_reconsideration_patches(
             )
             continue
         original = proposal.structures[patch.structure_index]
-        reachable = any(
+        reachable = patch.structure_index in accepted_structures or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in (focal.endpoint() for focal in original.focal)
         )
@@ -2373,10 +2605,15 @@ def apply_reconsideration_patches(
         if structure_replacements.get(index, item) is not None
     ]
 
+    # `reject` had no legal answer. Only `correct` counted as a finding, so a
+    # disposition answering a rejection was refused as answering nothing --
+    # while leaving it unanswered kept the revision in the effective proposal,
+    # where the approval gate refused it in turn. The proposer's only move,
+    # withdrawing, was unreachable from either side.
     flagged_revisions = {
         item.target_viewpoint_revision_id
         for item in review.revision_reviews
-        if item.decision == "correct"
+        if item.decision != "pass"
     }
     accepted_revisions = {
         item.target_viewpoint_revision_id
@@ -2444,10 +2681,35 @@ def validate_reconsideration(
         for item in review.change_reviews
         if item.decision == "correct"
     }
+    # A novelty finding says a Claim's proposition was never cut into any
+    # component. Answering it means patching that Claim -- but resolution was
+    # keyed on accepting a component finding, and a review whose only finding is
+    # the novelty one has none to accept. The claim could not be resolved by
+    # construction, so every novelty-only review escalated no matter what the
+    # proposer did. Naming the Claim flags its components, which is the surface
+    # a patch has to work on.
+    novelty_flagged = {
+        (decision.claim_id, index)
+        for decision in proposal.claim_decisions
+        if decision.claim_id in set(review.novelty_review.missed_claim_ids)
+        for index in range(len(decision.components))
+    }
+    flagged |= novelty_flagged
     answered = {
         (item.claim_id, item.component_index) for item in reconsideration.finding_dispositions
     }
-    for missing in sorted(flagged - answered):
+    # A novelty finding is answered per Claim, not per component: the proposer
+    # patches whichever component carries the missed proposition, and the
+    # others stay as they were.
+    novelty_claims = {claim_id for claim_id, _ in novelty_flagged}
+    answered_novelty_claims = {
+        claim_id for claim_id, _ in answered if claim_id in novelty_claims
+    }
+    for missing in sorted(
+        item
+        for item in flagged - answered
+        if item not in novelty_flagged or item[0] not in answered_novelty_claims
+    ):
         findings.append(f"{missing[0]}#{missing[1]}: finding has no disposition")
     for extra in sorted(answered - flagged):
         findings.append(f"{extra[0]}#{extra[1]}: disposition answers no finding")
@@ -2455,7 +2717,7 @@ def validate_reconsideration(
     flagged_revisions = {
         item.target_viewpoint_revision_id
         for item in review.revision_reviews
-        if item.decision == "correct"
+        if item.decision != "pass"
     }
     answered_revisions = {
         item.target_viewpoint_revision_id
@@ -2551,11 +2813,7 @@ def validate_reconsideration(
     accepted_novelty_claim_ids = {
         claim_id
         for claim_id in review.novelty_review.missed_claim_ids
-        if any(
-            flagged_key in accepted
-            for flagged_key in flagged
-            if flagged_key[0] == claim_id
-        )
+        if any(key[0] == claim_id for key in accepted)
     }
     for claim_id in sorted(
         accepted_novelty_claim_ids - revised_new_viewpoint_claim_ids

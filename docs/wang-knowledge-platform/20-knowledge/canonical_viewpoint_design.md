@@ -128,8 +128,10 @@ flowchart TD
     V -->|"通过"| R["独立复核<br/>claude-opus-5"]
     R -->|"无异议"| W["写入：观点、路线、关系"]
     R -->|"有异议"| C["仲裁：意见交回提议者<br/>最多一轮"]
-    C -->|"改对了"| W
+    C -->|"确定性验证通过"| FR["终局复核实际写库的改正稿 B<br/>claude-opus-5"]
     C -->|"仍不一致"| H["转人工"]
+    FR -->|"全部通过"| W
+    FR -->|"仍有问题"| H
     W --> RB["回读校验"]
     RB --> B
 ```
@@ -152,7 +154,7 @@ flowchart TD
 
 1. **不做候选配对，也不做分块。** 取材只是把相关的已有观点拿来给提议模型看，它**不能建立任何成员、关系或观点**。身份一律由提议与复核在整批材料上判定。
 2. **整批失败，不放行一半。** 一条验证不过，整批不写。宁可重跑，不可写进半套。
-3. **最多一轮改正。** 不设第二轮。ArgumentRoute 的改正产物还要经过一次只准通过或转人工的终局复核；这不是第二轮改正，也不得产生第三轮。
+3. **最多一轮改正。** 不设第二轮。CanonicalViewpoint 或 ArgumentRoute 若发生改正，同一独立 reviewer 角色必须再审核一次实际可能写库的 B；这次只准通过或转人工，不再产生 C。
 4. **写完要回读。** 从库里读回来逐条比对，不一致就是失败。
 
 ## 4. 怎样判断两条主张是同一个观点
@@ -289,8 +291,9 @@ flowchart TD
 9. 结论相同不足以证明两条路线是同一条。
 10. 观点修订里不得内嵌成员、路线、关系或覆盖数组——它们是各自独立的记录。
 11. 同样的输入必须编译出同样的结果：语义修订、覆盖范围与编译器版本相同时，产出的内容哈希必须一致。
-12. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
-13. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
+12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得产生 ChangeSet。
+13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
+14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 
 ## 9. 谁读观点
 

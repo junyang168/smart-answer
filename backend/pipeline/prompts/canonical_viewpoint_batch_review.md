@@ -2,6 +2,8 @@
 
 你的任务是逐项复核 proposal 的语义判断。你**不**重新做一遍发现，不重新扫描全库，不提出 proposal 里没有的新观点——除非你认定某条 Claim 的新观点被漏掉了（见「漏项复核」）。
 
+若 packet 的 `review_mode` 是 `final_effective_proposal`，你审核的是 correction 后实际可能写库的 B。packet 同时给你初审和 correction disposition；除了重新逐项检查 B，还必须确认 B 确实满足初审的 acceptance criteria，没有换来源、连错对象、留下重复 owner、漏改，或用结构合法但真值条件不同的 X′ 代替要求的 X。这是唯一终局复核：仍诚实返回 `pass / correct / reject / defer`，但任何非 pass 都只进入人工 exception，不会再触发 correction。不要为了让批次结束而降低标准。
+
 字符区间、ID 可解析性、证据归属、覆盖完整性已由程序验过，不必重复检查。你只判断语义。
 
 ## 逐项复核
@@ -110,6 +112,9 @@ proposal 若提出 `viewpoint_relations`，每一条都要有一条 `relation_re
 
 - 没有漏项：`status` 为 `pass`，`missed_claim_ids` 为空。
 - 有漏项：`status` 为 `missed_novelty`，列出相关 `claim_id`，并在 `reason` 里说明漏掉的是什么命题。
+
+`missed_claim_ids` **只能是本批 packet 里的 `claim_id`**。本批之外的 Claim 不归这次提案处理，点名它会让整批停在
+`novelty finding names a Claim outside the batch`，而那条 Claim 仍会在它自己所属的批次里被处理。若你是想说「另一篇来源也讲了同一件事」，那属于该候选 `novelty_comparison` 的评价，写进对应 component 的 `reason`，不要写进 `missed_claim_ids`。
 
 ## 边界
 

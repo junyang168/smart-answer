@@ -426,6 +426,123 @@ def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path:
     assert new_state["attempt"] == 2
 
 
+def test_the_route_queue_can_be_taken_in_bounded_bites(tmp_path: Path):
+    """The counterpart to CVP batching that the route stage never had.
+
+    Coalescing every queued job ties the route packet's size to how much CVP
+    work has piled up behind it: five committed batches made a 27-viewpoint
+    work unit whose packet came to 1.6M characters against a 1.05M ceiling.
+    """
+
+    receipts = [
+        build_cvp_batch_readback_receipt(
+            scope_label="matthew-16",
+            scope_manifest_sha256="scope-sha",
+            triggering_cvp_batch_id=f"CVB-{index}",
+            cvp_changeset_id=f"KCS-{index}",
+            cvp_changeset_sha256=f"changeset-{index}",
+            expected_current_revisions={f"CV-{index}": f"CVR-{index}"},
+            observed_current_revisions={f"CV-{index}": f"CVR-{index}"},
+        )
+        for index in range(3)
+    ]
+    jobs = [
+        build_route_resolution_job(
+            receipt=item,
+            evidence_scope_sha256="evidence-scope-sha",
+            route_policy_fingerprint_sha256="route-policy-sha",
+        )
+        for item in receipts
+    ]
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    for job in jobs:
+        queue.enqueue(job, enqueued_at="2026-08-26T12:00:00+00:00")
+    current = {f"CV-{index}": f"CVR-{index}" for index in range(3)}
+    started = datetime(2026, 8, 26, 13, 0, tzinfo=timezone.utc)
+
+    first = queue.claim(
+        worker_id="w1",
+        current_viewpoint_revisions=current,
+        now=started,
+        max_jobs=2,
+    )
+    assert first is not None
+    assert len(first.current_viewpoint_revisions) == 2
+    queue.finish(first, worker_id="w1", status="resolved")
+
+    # What did not fit stays queued for the next pass rather than being lost.
+    second = queue.claim(
+        worker_id="w1",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(minutes=5),
+        max_jobs=2,
+    )
+    assert second is not None
+    assert len(second.current_viewpoint_revisions) == 1
+
+
+def test_route_worker_defaults_to_one_job_per_work_unit():
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        DEFAULT_ROUTE_MAX_JOBS,
+    )
+
+    assert DEFAULT_ROUTE_MAX_JOBS == 1
+
+
+def test_a_job_that_failed_on_a_defect_can_be_retried_after_the_fix(tmp_path: Path):
+    """Twice now an exception has been a dead end with no way back.
+
+    A job id is derived from its content, so re-enqueuing the same work returns
+    the same id, already in `exception` -- #220 got past it by fabricating a
+    receipt to move the id. Retrying is not re-enqueuing: the job artifact is
+    untouched and only its state moves, which is what `attempt` counts.
+    """
+
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job, enqueued_at="2026-08-25T12:00:00+00:00")
+    current = {"CV-1": "CVR-1"}
+    started = datetime(2026, 8, 25, 13, 0, tzinfo=timezone.utc)
+
+    work = queue.claim(worker_id="w1", current_viewpoint_revisions=current, now=started)
+    assert work is not None
+    queue.finish(work, worker_id="w1", status="exception", detail="code defect")
+
+    # Enqueuing the same work again cannot revive it: same content, same id.
+    queue.enqueue(job, enqueued_at="2026-08-25T13:05:00+00:00")
+    assert queue.claim(
+        worker_id="w2",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(hours=1),
+    ) is None
+
+    retried = queue.claim(
+        worker_id="w2",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(hours=1),
+        retry_exceptions=True,
+    )
+    assert retried is not None
+    queue.finish(retried, worker_id="w2", status="resolved")
+
+    state = json.loads((tmp_path / "queue" / "states" / f"{job.job_id}.json").read_text())
+    assert state["status"] == "resolved"
+    assert state["attempt"] == 2
+
+
 def test_file_route_queue_refuses_to_invent_missing_current_revision_job(tmp_path: Path):
     receipt = build_cvp_batch_readback_receipt(
         scope_label="matthew-16",
@@ -730,7 +847,6 @@ def test_passing_batch_compiles_component_bound_cvp_master_records():
             },
         }
     )
-
     package = compile_cvp_batch_package(
         proposal=proposal,
         review=review,
@@ -1102,6 +1218,7 @@ class _StubAdapter:
     ) -> None:
         self._response = response
         self.calls = 0
+        self.payloads: list[Any] = []
         self.model_id = model_id
         self.backend = backend
         self.prompt_sha256 = "prompt-sha"
@@ -1109,6 +1226,7 @@ class _StubAdapter:
 
     def generate(self, payload: Any) -> dict[str, Any]:
         self.calls += 1
+        self.payloads.append(payload)
         return self._response
 
 
@@ -1122,6 +1240,7 @@ class _SequenceStubAdapter(_StubAdapter):
             raise AssertionError("stub received more model calls than expected")
         response = self._responses[self.calls]
         self.calls += 1
+        self.payloads.append(payload)
         return response
 
 
@@ -1601,6 +1720,134 @@ def test_grouping_coverage_is_repaired_not_thrown_away():
 
     # The repaired plan is what gets validated, and it passes.
     validate_grouping(grouping=repaired, scope_label="s", claim_ids=["C1", "C2", "C3", "C4"])
+
+
+def test_group_coverage_measures_the_plan_not_the_batch():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    # The real case: rock_referent was planned with 14 Claims, the batch ran on
+    # 13, and the run reported 13 of 13. Nothing compared the two sides, so a
+    # part-resolved group read as finished for two days.
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matt16-full",
+            "groups": [
+                {
+                    "group_key": "rock_referent",
+                    "claim_ids": ["C1", "C2", "C14"],
+                    "rationale": "磐石",
+                },
+                {"group_key": "binding_loosing_meaning", "claim_ids": ["C4"], "rationale": "词义"},
+                {"group_key": "future_perfect_grammar", "claim_ids": ["C5"], "rationale": "时态"},
+            ],
+        }
+    )
+    report = group_coverage_report(
+        grouping=grouping, linked_claim_ids=["C1", "C2", "C5"]
+    )
+    by_key = {item["group_key"]: item for item in report["groups"]}
+
+    assert by_key["rock_referent"]["status"] == "partial"
+    assert by_key["rock_referent"]["unlinked_claim_ids"] == ["C14"]
+    assert by_key["future_perfect_grammar"]["status"] == "covered"
+    assert by_key["binding_loosing_meaning"]["status"] == "uncovered"
+    assert report["covered_group_count"] == 1
+    assert report["partial_group_count"] == 1
+    assert report["planned_claim_count"] == 5
+    assert report["linked_claim_count"] == 3
+
+
+def test_claims_stopped_before_grouping_are_counted_in_the_same_ledger():
+    """"Every Claim has an explanation" has to be answerable from one artifact.
+
+    24 of Matthew 16's 214 Claims never reach a batch: no evidence bindings, an
+    ineligible source, no reviewed candidate. They are named in the packet that
+    dropped them and nowhere else, so a ledger whose denominator is the 190
+    planned Claims can report the scope complete while they sit unaccounted for
+    -- the same shape as a part-resolved group reading as finished, one stage
+    earlier.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matt16-full",
+            "groups": [{"group_key": "a", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    report = group_coverage_report(
+        grouping=grouping,
+        linked_claim_ids=["C1"],
+        blocked_claims=[
+            {"claim_id": "C9", "reason_code": "invalid_source_evidence"},
+            {"claim_id": "C8", "reason_code": "invalid_source_evidence"},
+            {"claim_id": "C7", "reason_code": "missing_reviewed_candidate"},
+        ],
+    )
+
+    assert report["covered_group_count"] == 1
+    assert report["planned_claim_count"] == 1
+    # The scope is four Claims, not one, and the ledger says which three the
+    # pipeline will never route.
+    assert report["scope_claim_count"] == 4
+    assert report["blocked_claim_counts"] == {
+        "invalid_source_evidence": 2,
+        "missing_reviewed_candidate": 1,
+    }
+    assert [item["claim_id"] for item in report["blocked_claims"]] == ["C7", "C8", "C9"]
+
+
+def test_group_coverage_names_links_the_plan_does_not_account_for():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        group_coverage_report,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "s",
+            "groups": [{"group_key": "a", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    report = group_coverage_report(grouping=grouping, linked_claim_ids=["C1", "C9"])
+
+    # A Claim linked from outside this plan is not counted as coverage, and is
+    # not silently dropped either -- both sides are rebuilt from the scope.
+    assert report["linked_claim_count"] == 1
+    assert report["linked_claims_outside_plan"] == ["C9"]
+
+
+def test_only_active_links_count_as_coverage():
+    from backend.pipeline.viewpoint_group_coverage_runner import active_linked_claim_ids
+
+    def _link(claim_id: str, state: str) -> dict:
+        return {
+            "viewpoint_claim_link_id": f"VCL-{claim_id}-{state}",
+            "viewpoint_id": "CV-1",
+            "validated_against_viewpoint_revision_id": "CVR-1",
+            "claim_id": claim_id,
+            "pinned_claim_revision": 1,
+            "link_type": "equivalent_full",
+            "decision_id": "VID-1",
+            "effective_state": state,
+            # An active link cannot exist under an unapproved review status.
+            "review_status": "system_approved" if state == "active" else "candidate",
+        }
+
+    # Superseding a revision invalidates the links pinned to it. Counting rows
+    # would report those leftovers as coverage the Registry no longer has.
+    assert active_linked_claim_ids(
+        [_link("C1", "active"), _link("C2", "invalidated"), _link("C3", "retired")]
+    ) == ["C1"]
+    # One Claim linked to two viewpoints is one covered Claim, not two.
+    assert active_linked_claim_ids([_link("C1", "active"), _link("C1", "active")]) == ["C1"]
 
 
 def _review(*decisions: str) -> CanonicalViewpointReviewResponse:
@@ -2098,7 +2345,45 @@ def test_reconsideration_cannot_patch_a_component_the_reviewer_passed():
         )
 
 
-def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_component():
+def test_a_candidate_patch_must_still_reach_an_accepted_finding():
+    """What authorises a candidate patch, once field restrictions are gone.
+
+    Restricting which fields a patch may touch when another component refers to
+    the candidate killed two real corrections in one day -- an inverted
+    signature and a proposition the reviewer required be narrowed -- because a
+    member plus a support is the ordinary shape of a candidate. Reachability is
+    the check that survives: a patch to a candidate no accepted finding leads to
+    is a collateral edit whatever it changes.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal = _proposal()
+    stranger = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    stranger["local_key"] = "UNRELATED-CANDIDATE"
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    with pytest.raises(BatchResolutionError, match="not reachable from an accepted finding"):
+        validate_reconsideration(
+            reconsideration=_reconsideration(
+                "accepted",
+                component_patches=[{
+                    "claim_id": "C1", "component_index": 0,
+                    "replacement_components": [component],
+                }],
+                candidate_patches=[{
+                    "local_key": "UNRELATED-CANDIDATE", "action": "upsert",
+                    "candidate": stranger,
+                }],
+            ),
+            proposal=proposal,
+            review=_review("correct", "pass"),
+            proposal_sha256="proposal-sha",
+            review_sha256="review-sha",
+        )
+
+
+def test_a_candidate_the_reviewer_required_be_narrowed_may_be_narrowed():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
 
     proposal_payload = _proposal().model_dump(mode="json")
@@ -2114,10 +2399,117 @@ def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_componen
         )["spans"][0]
     ]
     proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    # matt16 batch-003, 2026-08-26: 「不得保留無限定的絕對否定措辭」 -- the
+    # reviewer flagged one component of a Claim, passed another, and required
+    # the candidate both point at be narrowed to carry its source's qualifier.
     changed_candidate = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
-    changed_candidate["core_proposition"] = "偷偷影响 passed component"
+    changed_candidate["core_proposition"] = "耶穌在受苦這一階段的使命不是作政治君王。"
     component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
 
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [component],
+            }],
+            candidate_patches=[{
+                "local_key": "ROCK-NOT-PETER", "action": "upsert",
+                "candidate": changed_candidate,
+            }],
+        ),
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+
+def test_candidate_signature_can_be_corrected_under_an_unflagged_referrer():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    # The real case (church_and_hades_gates, 2026-08-25): one Claim produced a
+    # support component and a new_viewpoint component pointing at the same
+    # candidate. Review passed the support and flagged the candidate's signature
+    # -- subject/predicate/object read 「只有 A 才 B」 as a sufficient condition
+    # when the sentence states a necessary one. That is the ordinary shape of a
+    # candidate, so refusing every patch with an unflagged referrer left the
+    # finding unanswerable and stopped the batch at zero mutations.
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["claim_decisions"][0]["components"][1] = json.loads(
+        json.dumps(proposal_payload["claim_decisions"][0]["components"][0])
+    )
+    proposal_payload["claim_decisions"][0]["components"][1]["spans"] = [
+        _component(
+            ROCK_STATEMENT,
+            "而是彼得所承认的信仰",
+            "new_viewpoint",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )["spans"][0]
+    ]
+    proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    corrected = proposal.new_viewpoint_candidates[0].model_dump(mode="json")
+    corrected["subject"], corrected["object"] = corrected["object"], corrected["subject"]
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    reconsideration = _reconsideration(
+        "accepted",
+        component_patches=[{
+            "claim_id": "C1", "component_index": 0,
+            "replacement_components": [component],
+        }],
+        candidate_patches=[{
+            "local_key": "ROCK-NOT-PETER", "action": "upsert",
+            "candidate": corrected,
+        }],
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "pass"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "pass"),
+    )
+    patched = {
+        item.local_key: item for item in effective.new_viewpoint_candidates
+    }["ROCK-NOT-PETER"]
+
+    assert (patched.subject, patched.object) == (corrected["subject"], corrected["object"])
+    # What the unflagged support was passed against is untouched.
+    assert patched.core_proposition == corrected["core_proposition"]
+    assert patched.polarity == corrected["polarity"]
+
+
+def test_candidate_patch_cannot_delete_a_candidate_an_unflagged_component_uses():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_reconsideration
+
+    proposal_payload = _proposal().model_dump(mode="json")
+    proposal_payload["claim_decisions"][0]["components"][1] = json.loads(
+        json.dumps(proposal_payload["claim_decisions"][0]["components"][0])
+    )
+    proposal_payload["claim_decisions"][0]["components"][1]["spans"] = [
+        _component(
+            ROCK_STATEMENT,
+            "而是彼得所承认的信仰",
+            "new_viewpoint",
+            local_new_viewpoint_key="ROCK-NOT-PETER",
+        )["spans"][0]
+    ]
+    proposal = CanonicalViewpointProposalResponse.model_validate(proposal_payload)
+    component = proposal.claim_decisions[0].components[0].model_dump(mode="json")
+
+    # Deleting leaves the unflagged referrer pointing at nothing.
     with pytest.raises(BatchResolutionError, match="unflagged referrers C1#1"):
         validate_reconsideration(
             reconsideration=_reconsideration(
@@ -2126,16 +2518,60 @@ def test_candidate_patch_cannot_change_a_candidate_used_by_an_unflagged_componen
                     "claim_id": "C1", "component_index": 0,
                     "replacement_components": [component],
                 }],
-                candidate_patches=[{
-                    "local_key": "ROCK-NOT-PETER", "action": "upsert",
-                    "candidate": changed_candidate,
-                }],
+                candidate_patches=[{"local_key": "ROCK-NOT-PETER", "action": "delete"}],
             ),
             proposal=proposal,
             review=_review("correct", "pass"),
             proposal_sha256="proposal-sha",
             review_sha256="review-sha",
         )
+
+
+def test_a_component_can_be_folded_into_a_sibling_the_reviewer_also_rewrote():
+    """matt16 part-7 batch-001, 2026-08-26: both halves of one move.
+
+    The reviewer flagged both components of a Claim: rewrite #0 into a new
+    viewpoint with the full truth condition, and fold #1 into it rather than
+    let the batch carry the same proposition twice. The guard required a merge
+    target to be unpatched, so the two findings could not both be answered --
+    and the spans would have landed on the component that was replaced.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal()
+    rewritten = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    rewritten["reason"] = "按复核意见改写为完整真值条件。"
+    reconsideration = _reconsideration(
+        "accepted", "accepted",
+        component_patches=[
+            {"claim_id": "C1", "component_index": 0, "replacement_components": [rewritten]},
+            {"claim_id": "C1", "component_index": 1, "merge_into_component_index": 0},
+        ],
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "correct"),
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=_review("correct", "correct"),
+    )
+    components = effective.claim_decisions[0].components
+    before = proposal.claim_decisions[0].components
+    assert len(components) == 1
+    assert components[0].reason == "按复核意见改写为完整真值条件。"
+    # The folded sibling's spans landed on the replacement, not on what it replaced.
+    assert len(components[0].spans) == len(before[0].spans) + len(before[1].spans)
 
 
 def test_reconsideration_can_merge_components_the_reviewer_flagged():
@@ -2342,6 +2778,10 @@ def test_derived_summaries_survive_a_report_shape_change(tmp_path: Path):
 
 
 def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
     proposal_payload = _proposal().model_dump(mode="json")
     proposal_sha = sha256_json(proposal_payload)
     review_payload = {
@@ -2392,6 +2832,41 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         ],
         "candidate_patches": [],
     }
+    original_proposal = CanonicalViewpointProposalResponse.model_validate(
+        proposal_payload
+    )
+    initial_review = CanonicalViewpointReviewResponse.model_validate(review_payload)
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        reconsideration_payload
+    )
+    effective_proposal = apply_reconsideration_patches(
+        reconsideration=reconsideration,
+        proposal=original_proposal,
+        review=initial_review,
+    )
+    effective_sha = sha256_json(effective_proposal.model_dump(mode="json"))
+    final_review_payload = {
+        "schema_version": "wang_canonical_viewpoint_review_v1",
+        "proposal_sha256": effective_sha,
+        "change_reviews": [
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 已把两个成分合并为一个真值条件。",
+            }
+        ],
+        "novelty_review": {
+            "status": "pass",
+            "missed_claim_ids": [],
+            "reason": "B 无漏项",
+        },
+        "revision_reviews": [],
+        "structure_reviews": [],
+        "relation_reviews": [],
+    }
+    reviewer = _SequenceStubAdapter([review_payload, final_review_payload])
 
     report = run_batch(
         batch_id="CVB-test-001",
@@ -2401,12 +2876,60 @@ def test_batch_report_counts_the_effective_revised_proposal(tmp_path: Path):
         pending_candidates=[],
         output_dir=tmp_path / "batch-001",
         proposer=_StubAdapter(proposal_payload),
-        reviewer=_StubAdapter(review_payload),
+        reviewer=reviewer,
         reconsiderer=_StubAdapter(reconsideration_payload),
     )
     assert report["component_count"] == 1
     assert report["disposition_counts"]["new_viewpoint"] == 1
     assert report["reconsideration_outcome"] == "resolved"
+    assert report["final_review_outcome"] == "pass"
+    assert report["review_sha256"] == sha256_json(
+        CanonicalViewpointReviewResponse.model_validate(
+            final_review_payload
+        ).model_dump(mode="json")
+    )
+    assert reviewer.calls == 2
+    assert reviewer.payloads[1]["review_mode"] == "final_effective_proposal"
+    assert reviewer.payloads[1]["proposal_sha256"] == effective_sha
+    assert reviewer.payloads[1]["allows_further_correction"] is False
+    assert reviewer.payloads[1]["initial_review_sha256"] == sha256_json(
+        initial_review.model_dump(mode="json")
+    )
+    assert report["measurements"]["final_review_calls_executed"] == 1
+    final_envelope = json.loads(
+        (tmp_path / "batch-001" / "final-review.json").read_text()
+    )
+    assert final_envelope["effective_proposal_sha256"] == effective_sha
+    assert final_envelope["allows_further_correction"] is False
+
+    failed_final_review = json.loads(json.dumps(final_review_payload))
+    failed_final_review["change_reviews"][0].update(
+        {
+            "decision": "correct",
+            "finding_codes": ["acceptance_criteria_not_met"],
+            "reason": "B 合并后的真值条件仍比初审要求更宽。",
+            "correction": "转人工；终局复核不再启动第二次 correction。",
+        }
+    )
+    failed = run_batch(
+        batch_id="CVB-test-001",
+        scope_label="matt16-13-18",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=[{"viewpoint_revision_id": "CVR-1"}],
+        pending_candidates=[],
+        output_dir=tmp_path / "batch-final-failed",
+        proposer=_StubAdapter(proposal_payload),
+        reviewer=_SequenceStubAdapter([review_payload, failed_final_review]),
+        reconsiderer=_StubAdapter(reconsideration_payload),
+    )
+    assert failed["reconsideration_outcome"] == "resolved"
+    assert failed["final_review_outcome"] == "findings"
+    assert failed["approval_outcome"] == "findings"
+    assert failed["escalations"] == ["final:component:C1#0:correct"]
+    current = json.loads(
+        (tmp_path / "batch-final-failed" / "current-state.json").read_text()
+    )
+    assert current["status"] == "requires_exception"
 
 
 def _route(**overrides: Any) -> dict[str, Any]:
@@ -2782,6 +3305,171 @@ def test_registry_route_packet_rejects_stale_claim_link():
             viewpoint_claim_links=[_registry_link(claim, pinned_claim_revision=2)],
             existing_routes=[],
         )
+
+
+def test_a_route_skeleton_can_be_corrected_without_forking_the_route():
+    """binding_loosing_meaning route stage, 2026-08-25.
+
+    Two routes concluded in viewpoints covering 太16:19 and 太18:18 while every
+    node stopped at 16:19. Review named the bridge to add and said the action had
+    to become a new revision of the existing route. There was no such action:
+    match_existing means unchanged, create_new means a second route for the same
+    conclusion -- the false split the reviewer was preventing. The proposer wrote
+    create_new pinned to the existing revision and the schema rejected it.
+    """
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    first = compile_argument_route_package(
+        proposal=_routes(),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha",
+        review_artifact_sha256="review-1",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    committed = first["argument_route_revisions"][0]
+    route_id = committed["argument_route_id"]
+    prior_revision_id = committed["argument_route_revision_id"]
+
+    revised = _route(
+        proposed_action="revise_existing",
+        target_argument_route_revision_id=prior_revision_id,
+        revision_reason="结论覆盖两处经文，骨架只走到一处，补一个承重节点。",
+        ordered_inference_nodes=[
+            {
+                "route_step_key": "P1",
+                "role": "observation",
+                "normalized_proposition": "Petrus 是阳性、petra 是阴性",
+                "required_for_full_attestation": True,
+            },
+            {
+                "route_step_key": "P2",
+                "role": "bridge",
+                "normalized_proposition": "同一用语把该语义延伸到第二处经文",
+                "required_for_full_attestation": True,
+            },
+            {
+                "route_step_key": "C1",
+                "role": "conclusion",
+                "conclusion_ref": {"target_viewpoint_revision_id": "CVR-1"},
+                "required_for_full_attestation": True,
+            },
+        ],
+    )
+    second = compile_argument_route_package(
+        proposal=_routes(argument_route_candidates=[revised]),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[
+            {
+                "argument_route_id": route_id,
+                "route_revision_id": prior_revision_id,
+                "conclusion_viewpoint_revision_id": "CVR-1",
+                "revision": committed,
+            }
+        ],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha-2",
+        review_artifact_sha256="review-2",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-25T12:00:00Z",
+    )
+    new_revision = second["argument_route_revisions"][0]
+
+    # Same route, new revision, chained -- not a second route for one conclusion.
+    assert new_revision["argument_route_id"] == route_id
+    assert new_revision["argument_route_revision_id"] != prior_revision_id
+    assert new_revision["supersedes_revision_id"] == prior_revision_id
+    # revision_number stays 1: each revision is its own stored object, and
+    # writing 2 here is what took production down in #220.
+    assert new_revision["revision_number"] == 1
+    assert second["argument_routes"][0]["current_revision_id"] == (
+        new_revision["argument_route_revision_id"]
+    )
+    # The worker withdraws attestations stranded on the revision it replaced.
+    assert second["superseded_route_revision_ids"] == [prior_revision_id]
+
+
+def test_revise_existing_must_pin_a_revision_and_say_why():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteCandidate,
+    )
+
+    with pytest.raises(ValidationError, match="must pin the route revision it acts on"):
+        ArgumentRouteCandidate.model_validate(
+            _route(proposed_action="revise_existing", revision_reason="理由")
+        )
+    with pytest.raises(ValidationError, match="must say why the committed skeleton cannot hold"):
+        ArgumentRouteCandidate.model_validate(
+            _route(
+                proposed_action="revise_existing",
+                target_argument_route_revision_id="ARR-1",
+            )
+        )
+    with pytest.raises(ValidationError, match="only revise_existing carries a revision reason"):
+        ArgumentRouteCandidate.model_validate(
+            _route(proposed_action="create_new", revision_reason="理由")
+        )
+
+
+def test_an_attestation_already_committed_is_not_rewritten_by_a_later_review():
+    """Re-reviewing an attestation does not make it a new fact.
+
+    The id seed is route revision, source, claims, step bindings and terminal
+    link -- deliberately not the review. So a second route run over committed
+    viewpoints re-derives the same id with a new review_artifact_sha256, and
+    emitting it is an in-place rewrite of an immutable record. That is what
+    stopped the binding_loosing_meaning re-run: two attestations identical in
+    every substantive field, differing only in which review had looked at them.
+    """
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim],
+        viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[],
+    )
+    common = dict(
+        proposal=_routes(),
+        passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"],
+        route_packet=packet,
+        existing_routes=[],
+        claims=[claim],
+        proposal_artifact_sha256="proposal-sha",
+        proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    first = compile_argument_route_package(review_artifact_sha256="review-1", **common)
+    committed = first["argument_route_attestations"][0]["argument_route_attestation_id"]
+
+    second = compile_argument_route_package(
+        review_artifact_sha256="review-2",
+        existing_attestation_ids=[committed],
+        **common,
+    )
+    assert second["argument_route_attestations"] == []
+    assert second["unchanged_attestation_ids"] == [committed]
+    # Without the skip it would come back with the later review stamped on it.
+    naive = compile_argument_route_package(review_artifact_sha256="review-2", **common)
+    assert naive["argument_route_attestations"][0]["review_artifact_sha256"] == "review-2"
 
 
 def test_route_changeset_compiles_reviewed_v2_master_records():
@@ -5342,6 +6030,528 @@ def test_written_structure_and_relation_name_the_review_that_approved_them():
         assert record["review_provenance"]["basis_identity_decision_ids"]
 
 
+def test_relation_the_reviewer_asked_the_correction_to_add_can_be_written():
+    """binding_loosing_meaning, 2026-08-25.
+
+    The reviewer found a historical-linguistics proposition demoted to support
+    -- 「捆綁／釋放是文士、法利賽人所用的術語」 -- told the proposer to raise it to
+    its own viewpoint, and spelled out the two edges to add, naming both
+    endpoints and the type. The proposer added exactly those. The ChangeSet then
+    refused them: approval was read off relation reviews, and an edge created by
+    the correction has no review and never can. RelationCorrectionPatch exists
+    for this case -- without it "the proposer can only rebut the finding".
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal()
+    review = _review_for(
+        proposal,
+        change_reviews=[
+            {
+                "claim_id": "C1",
+                "component_index": 0,
+                "decision": "correct",
+                "finding_codes": ["historical_usage_proposition_demoted_to_support"],
+                "reason": "这条历史用法命题被降级为 support，等于永不入库。",
+                "correction": "改为 new_viewpoint，并新增一条 applies 边连到既有观点。",
+            },
+            {"claim_id": "C1", "component_index": 1, "decision": "pass", "reason": "通过"},
+        ],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "review_sha256": sha256_json(review.model_dump(mode="json")),
+            "finding_dispositions": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "disposition": "accepted",
+                    "reason": "同意，历史用法命题应独立入库。",
+                }
+            ],
+            "component_patches": [
+                {
+                    "claim_id": "C1",
+                    "component_index": 0,
+                    "replacement_components": [
+                        proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+                    ],
+                }
+            ],
+            "relation_patches": [
+                {
+                    "action": "upsert",
+                    "relation": {
+                        "source_local_key": "ROCK-NOT-PETER",
+                        "target_viewpoint_revision_id": "CVR-1",
+                        "relation_type": "applies",
+                        "reason": "复核意见指名要补的这条边。",
+                    },
+                }
+            ],
+        }
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    package = compile_cvp_batch_package(
+        proposal=effective,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert len(package["viewpoint_relations"]) == 1
+    assert (
+        package["viewpoint_relations"][0]["review_provenance"]["review_artifact_sha256"]
+        == "review-call-sha"
+    )
+
+
+def _structure_correction_case(*, entailed: bool):
+    """A structure the reviewer flagged `correct` and the proposer then fixed."""
+
+    proposal = _proposal(
+        structures=[
+            {
+                "central_synthesis": "本批共同否定磐石是彼得本人。",
+                "focal": [{"local_key": "ROCK-NOT-PETER", "structure_role": "central_claim"}],
+                "unresolved_items": [],
+                "reason": "这批材料合起来在论证什么。",
+            }
+        ],
+    )
+    review = _review_for(
+        proposal,
+        structure_reviews=[
+            {
+                "structure_index": 0,
+                "decision": "correct",
+                "finding_codes": ["structure_role_mismatch"],
+                "reason": "角色按命题内容的正负标注，而不是按它在结构中的功能。",
+                "correction": "保持 focal 集合与 central_synthesis 不变，只改 structure_role。",
+                "synthesis_entailed_by_focal": entailed,
+            }
+        ],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate(
+        {
+            "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+            "review_sha256": sha256_json(review.model_dump(mode="json")),
+            "structure_dispositions": [
+                {
+                    "structure_index": 0,
+                    "disposition": "accepted",
+                    "reason": "同意，角色错标已改。",
+                }
+            ],
+        }
+    )
+    return proposal, review, reconsideration
+
+
+def test_structure_the_proposer_corrected_can_be_written_as_approved():
+    """binding_loosing_meaning, 2026-08-25: a corrected structure had no way in.
+
+    Review flagged the structure -- four word-sense candidates had been given
+    roles by their content's polarity (禁止 / 准许) rather than by their function,
+    all four being the same same-layer identification -- and spelled out the
+    change. The proposer accepted and made exactly that change. The gate asked
+    for `pass`, the review artifact goes on saying `correct`, and there is no
+    second review, so the batch died with 0 mutations on a finding that had been
+    answered. The viewpoint revisions above already take this union.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    record = package["viewpoint_structure_revisions"][0]
+    assert record["review_provenance"]["review_artifact_sha256"] == "review-call-sha"
+
+
+def test_a_relation_finding_authorises_its_own_patch():
+    """matt16 part-8 batch-008, 2026-08-26: the only finding was about the edge.
+
+    The reviewer said MATT17-PS2-CITATION --extends--> CVR-7e91930b… does not
+    hold, the proposer accepted and withdrew it, and the withdrawal was refused
+    as unreachable: authorisation ran only through the candidates a component
+    finding had disturbed, and there was no component finding at all.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_relations=[{
+            "source_local_key": "ROCK-NOT-PETER",
+            "target_viewpoint_revision_id": "CVR-1",
+            "relation_type": "extends",
+            "reason": "这条边其实不成立。",
+        }]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[{
+            "source_ref": "ROCK-NOT-PETER",
+            "target_ref": "CVR-1",
+            "relation_type": "extends",
+            "decision": "correct",
+            "finding_codes": ["rel_not_load_bearing"],
+            "reason": "这条边不承重。",
+            "correction": "撤回该 relation。",
+            "direction_correct": True,
+        }],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER",
+            "target_ref": "CVR-1",
+            "relation_type": "extends",
+            "disposition": "accepted",
+            "reason": "同意，撤回。",
+        }],
+        "relation_patches": [{
+            "action": "delete",
+            "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "extends",
+                "reason": "这条边其实不成立。",
+            },
+        }],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.viewpoint_relations == []
+
+
+def test_a_relation_can_be_retyped_by_the_correction():
+    """matt16 part-9 batch-001: 「這條邊應是 extends，不是 specializes」.
+
+    An edge's identity includes its type, so answering means deleting one edge
+    and adding another between the same two viewpoints. Matching authorisation
+    on the whole edge left the second half unauthorised and the batch stopped.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_relations=[{
+            "source_local_key": "ROCK-NOT-PETER",
+            "target_viewpoint_revision_id": "CVR-1",
+            "relation_type": "specializes",
+            "reason": "类型选错了。",
+        }]
+    )
+    review = _review_for(
+        proposal,
+        relation_reviews=[{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "specializes", "decision": "correct",
+            "finding_codes": ["relation_type_wrong"],
+            "reason": "这是延伸，不是具体化。",
+            "correction": "relation_type 改为 extends。",
+            "direction_correct": True,
+        }],
+    )
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "specializes", "disposition": "accepted",
+            "reason": "同意改类型。",
+        }],
+        "relation_patches": [
+            {"action": "delete", "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "specializes", "reason": "类型选错了。"}},
+            {"action": "upsert", "relation": {
+                "source_local_key": "ROCK-NOT-PETER",
+                "target_viewpoint_revision_id": "CVR-1",
+                "relation_type": "extends", "reason": "按复核意见改为延伸。"}},
+        ],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration, proposal=proposal, review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert [r.relation_type for r in effective.viewpoint_relations] == ["extends"]
+
+
+def test_a_structure_finding_authorises_its_own_patch():
+    """matt16 batch-004, 2026-08-26: the only finding was about the structure.
+
+    Reachability ran from the candidates a component finding disturbed, so a
+    batch whose sole finding is "this synthesis is wrong, here is the wording"
+    had an accepted disposition, a patch implementing it, and no authorisation
+    for that patch.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        StructureCorrectionPatch,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    revised = proposal.structures[0].model_dump(mode="json")
+    revised["central_synthesis"] = "按复核意见收窄后的中心综合。"
+    reconsideration = reconsideration.model_copy(
+        update={
+            "structure_patches": [
+                StructureCorrectionPatch.model_validate(
+                    {"structure_index": 0, "action": "upsert", "structure": revised}
+                )
+            ]
+        }
+    )
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    assert effective.structures[0].central_synthesis == "按复核意见收窄后的中心综合。"
+
+
+def test_a_novelty_only_review_can_be_answered():
+    """matt16 psyche_life_meaning, 2026-08-26: 16 pass, 0 correct, 1 novelty.
+
+    Resolution required accepting a component finding on the named Claim, and a
+    review whose only finding is the novelty one has none to accept. The Claim
+    could not be resolved by construction, so every novelty-only review
+    escalated no matter what the proposer did.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReviewResponse,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal()
+    review = CanonicalViewpointReviewResponse.model_validate(
+        _review_for(proposal).model_dump(mode="json")
+        | {
+            "novelty_review": {
+                "status": "missed_novelty",
+                "missed_claim_ids": ["C1"],
+                "reason": "首段的承重命题没有被任何 component 切出。",
+            }
+        }
+    )
+    assert _validate(proposal, review)["correction_required"] is True
+    patched = proposal.model_dump(mode="json")["claim_decisions"][0]["components"][0]
+    patched["disposition"] = "new_viewpoint"
+    patched["target_viewpoint_revision_id"] = None
+    patched["local_new_viewpoint_key"] = "ROCK-NOT-PETER"
+    report = validate_reconsideration(
+        reconsideration=_reconsideration(
+            "accepted",
+            component_patches=[{
+                "claim_id": "C1", "component_index": 0,
+                "replacement_components": [patched],
+            }],
+        ),
+        proposal=proposal,
+        review=review,
+        proposal_sha256="proposal-sha",
+        review_sha256="review-sha",
+    )
+    assert report["resolved_novelty_claim_ids"] == ["C1"]
+    assert report["unresolved_novelty_claim_ids"] == []
+    assert report["outcome"] == "resolved"
+
+
+def test_a_rejected_revision_is_answered_by_withdrawing_it():
+    """matt16 part-6 batch-001, 2026-08-26: `reject` had no legal answer.
+
+    Only `correct` counted as a revision finding, so a disposition answering a
+    rejection was refused as answering nothing -- and leaving it unanswered kept
+    the revision in the effective proposal, where the approval gate refused it
+    in turn. Withdrawing, the one right move, was unreachable from either side.
+    """
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReviewResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+
+    proposal = _proposal(
+        viewpoint_revisions=[{
+            "target_viewpoint_revision_id": "CVR-1",
+            "core_proposition": "改写后的措辞。",
+            "subject": "磐石", "predicate": "不是", "object": "彼得本人",
+            "polarity": "denied", "modality": "断言",
+            "revision_reason": "本批 Claim 不适用既有措辞。",
+        }],
+    )
+    review = CanonicalViewpointReviewResponse.model_validate(
+        _review_for(proposal).model_dump(mode="json")
+        | {
+            "revision_reviews": [{
+                "target_viewpoint_revision_id": "CVR-1",
+                "decision": "reject",
+                "finding_codes": ["revision_widens_past_evidence"],
+                "reason": "这条修订会吞掉邻近观点。",
+                "confirmed_dependent_ids": [],
+            }]
+        }
+    )
+    assert _validate(proposal, review)["correction_required"] is True
+    reconsideration = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "revision_dispositions": [{
+            "target_viewpoint_revision_id": "CVR-1",
+            "disposition": "accepted",
+            "reason": "同意，撤回这条修订。",
+        }],
+        "revision_patches": [{
+            "target_viewpoint_revision_id": "CVR-1", "action": "withdraw",
+        }],
+    })
+    report = validate_reconsideration(
+        reconsideration=reconsideration,
+        proposal=proposal,
+        review=review,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")),
+    )
+    assert report["outcome"] == "resolved"
+
+    effective = apply_reconsideration_patches(
+        reconsideration=reconsideration, proposal=proposal, review=review
+    )
+    # Withdrawn, so nothing survives for the approval gate to refuse.
+    assert effective.viewpoint_revisions == []
+
+
+def test_a_synthesis_that_overreached_can_be_corrected():
+    """The commonest structure finding, and it has to be answerable.
+
+    `synthesis_entailed_by_focal: false` says the synthesis asserts more than
+    its focal set supports. A `correct` decision carries the reviewer's own
+    replacement text, so the corrected wording is the reviewer's -- requiring
+    entailment to have been true beforehand meant this class could only be
+    deleted, never fixed. matt16 batch-002, 2026-08-26.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=False)
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        reviewed_proposal=proposal,
+        reconsideration=reconsideration,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert package["viewpoint_structure_revisions"][0]["review_provenance"][
+        "review_artifact_sha256"
+    ] == "review-call-sha"
+
+
+def test_a_structure_whose_finding_was_rebutted_never_reaches_the_gate():
+    """Accepting is what licenses it; arguing out of it is not.
+
+    A rebutted finding leaves the reviewer's objection standing, and the batch
+    stops one step earlier than the structure gate: the correction is unresolved,
+    so there is no effective proposal to write at all.
+    """
+
+    proposal, review, reconsideration = _structure_correction_case(entailed=True)
+    reconsideration = reconsideration.model_copy(
+        update={
+            "structure_dispositions": [
+                reconsideration.structure_dispositions[0].model_copy(
+                    update={"disposition": "rebutted"}
+                )
+            ]
+        }
+    )
+    with pytest.raises(CvpBatchChangeSetError, match="correction is unresolved"):
+        compile_cvp_batch_package(
+            proposal=proposal,
+            review=review,
+            reviewed_proposal=proposal,
+            reconsideration=reconsideration,
+            deterministic_validation_sha256="validation-sha",
+            scope_manifest_sha256="scope-manifest-sha",
+            claims=[_claim("C1", ROCK_STATEMENT)],
+            registry_context=REGISTRY_CONTEXT_ROCK,
+            proposal_artifact_sha256="proposal-call-sha",
+            review_artifact_sha256="review-call-sha",
+            proposer_model_id="gpt-5.6-sol/high",
+            reviewer_model_id="claude-opus-5/high",
+            decided_at="2026-08-24T12:00:00Z",
+        )
+
+
 # --- reviewing what was committed before review existed -------------------------
 
 def _backreview_packet() -> dict[str, Any]:
@@ -5565,6 +6775,22 @@ def test_relation_only_finding_still_asks_for_a_correction():
     assert report["outcome"] == "findings"
     assert report["reconsideration_required"] is True
     assert report["correction_required"] is True
+
+    rejected = _review_for(
+        proposal,
+        relation_reviews=[
+            {
+                "source_ref": "ROCK-NOT-PETER",
+                "target_ref": "CVR-1",
+                "relation_type": "applies",
+                "decision": "reject",
+                "finding_codes": ["relation_not_supported"],
+                "reason": "这条边不成立，唯一正确动作是撤回。",
+                "direction_correct": True,
+            }
+        ],
+    )
+    assert _validate(proposal, rejected)["correction_required"] is True
 
 
 def test_backreview_supersedes_a_structure_revision_rather_than_editing_it():

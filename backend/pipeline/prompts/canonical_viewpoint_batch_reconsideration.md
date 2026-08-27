@@ -54,12 +54,28 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 ## Viewpoint revision patch
 
-复核员对 `viewpoint_revisions` 的每条 `correct`，都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
+## 漏项（`novelty_review`）
+
+`novelty_review.status` 为 `missed_novelty` 时，`missed_claim_ids` 列出的每一条 Claim 都必须被答复——**即使这批一条 `correct` 都没有**。复核员说的是：这条 Claim 里有一个承重命题，proposal 的任何一个 component 都没有切出来。
+
+答法：对该 Claim 的某个 component 出一条 `finding_dispositions`（`accepted` 或 `rebutted`），并配一个 `component_patches`，把漏掉的那段切成成分。**接受之后，该 Claim 在 effective proposal 里必须至少有一个 `new_viewpoint` component**，否则批次停在
+`accepted novelty correction produced no new_viewpoint`。
+
+复核员的 `reason` 里通常已经写明漏掉的字符区间与建议的候选命题，照它切。若你确实不同意，用 `rebutted` 并说明理由——那会进 exception 交给人判，不会再问第二次。
+
+复核员对 `viewpoint_revisions` 的每条**非 `pass`** 判定（`correct`、`reject`、`defer`），都要有一个 `revision_dispositions`（用 `target_viewpoint_revision_id` 定位），表态方式与 component finding 相同。
+
+**structure 与 relation 不只看 `decision`。** 复核员对它们各有一个结构化提问，答案为否**本身就是 finding**，即使 `decision` 写的是 `pass`：
+
+- structure：`synthesis_entailed_by_focal` 为 false —— 中心综合说得比 focal 集合所能推出的多；
+- relation：`direction_correct` 为 false —— 这条边的方向读反了。
+
+凡满足「`decision` 不是 `pass`，**或**结构化提问答否」的 structure／relation，都必须有一个 `structure_dispositions`／`relation_dispositions`。漏掉一条，整批停在这里。方向读反的边通常应撤回（把它从 `viewpoint_relations` 中删去），而不是硬改成另一条：审核说的是这条边不成立，不是要你换个方向再断言一次。
 
 `accepted` 必须配一个 `revision_patches`：
 
 - `action: upsert` 携带完整的修订（`target_viewpoint_revision_id` 与 patch 相同）；
-- `action: withdraw` 不携带内容，撤回这条修订。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
+- `action: withdraw` 不携带内容，撤回这条修订。**复核员判 `reject` 时,撤回是唯一答案**——它说的是这条修订不该存在,不是让你改一版;`accepted` 配 `withdraw`,该修订离开 effective proposal,批次照常往下走。**撤回是正当答案**——复核员指出新措辞会吞掉邻近 viewpoint、或会让某条既有记录失去支撑时，撤回后既有措辞不动，批次照常通过。
 
 **撤回之后必须补一条 relation。** 该候选之所以提出修订，是因为身份复核判定它与那条既有 viewpoint 讲的是同一件事；措辞改不动，不等于这个判断消失了。若该候选最终仍作为独立 viewpoint 留下，就要把这个联系记下来。两条路：
 
@@ -69,6 +85,17 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 **所有 `relation_type` 都是有方向的**（谁应用谁、谁延伸谁）。如果两条其实是同一批评在不同经文论点下的**平行结论**——互为兄弟而非父子——那么没有任何类型说得通，硬挑一个就是编造。这种情形用第 2 条路：structure 才是「这些属于一起」的地方。
 
 两条路都走不通，就让批次停下来交给人判。**不要为了让检查通过而编一条边**——复核会以 `REL_NOT_LOAD_BEARING` 把它扔掉，而那时它已经写进库了。
+
+输入里的 **`connection_required`** 逐条列出了身份复核判定「与本批某个候选是同一件事」的既有 `viewpoint_revision_id`。**除非该候选的 component 以 `member_existing` 真的并入了它,否则你交出的 effective proposal 里必须有一条边(或一个共享 structure)把这两者连起来。**
+
+把既有观点原有的边搬到候选身上**不算**——那记录的是候选与第三方的关系,不是「候选与它是同一件事」这个判断。
+
+**这条边必须有一端正好落在身份复核判定的那个 `viewpoint_revision_id` 上。** 指向别的既有 viewpoint（哪怕关系本身成立）不算数：要记下来的是「本批这个候选与**那一条**讲的是同一件事」，换一个对象就不再是这个判断。
+
+同一条规则适用于 `matches_existing`：身份复核判定匹配、而合并最终没有落地时（无论是被复核否掉，还是候选仍作为独立 viewpoint 留下），effective proposal 里都必须留下这样一条边。
+
+**注意它和「撤回方向读反的边」会互相干扰。** 若你撤掉的那条边正是唯一触及该 revision 的边，撤回之后要另补一条方向正确的；只删不补，批次会停在
+`consolidation matched it but the merge did not stick and no relation connects it`。
 
 **复核员判 `correct` 的修订，通常只能撤回。** 因为它判 `correct` 时正在否定那个措辞，`confirmed_dependent_ids` 必然是空的——没有人对着新措辞确认过被牵动的既有记录（claim link、relation、route revision）。你照要求改好措辞，那些记录仍然无人复核，ChangeSet 会拒绝整批。
 
@@ -90,6 +117,7 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 ## 最后检查
 
 - 每个 reviewer `correct` finding 恰好一个 disposition；
+- 每个 `synthesis_entailed_by_focal` 为 false 的 structure、每条 `direction_correct` 为 false 的 relation，也各有一个 disposition，哪怕它的 `decision` 是 `pass`；
 - 每个 accepted disposition 恰好一个同 key component patch；
 - correction 要求的 relation 已在 `relation_patches` 中给出，因 candidate delete 悬空的 relation 与 structure focal 也已一并处理；
 - 没有因为「没有接口」或「schema 不支持」而 rebut —— 先回到上面两节确认一次；

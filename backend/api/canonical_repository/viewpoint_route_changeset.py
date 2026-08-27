@@ -29,6 +29,7 @@ def compile_argument_route_package(
     passing_attestation_keys: Sequence[str],
     route_packet: Mapping[str, Any],
     existing_routes: Sequence[Mapping[str, Any]],
+    existing_attestation_ids: Sequence[str] = (),
     claims: Sequence[ReviewClaim],
     proposal_artifact_sha256: str,
     review_artifact_sha256: str,
@@ -75,6 +76,7 @@ def compile_argument_route_package(
     route_records: list[dict[str, Any]] = []
     revision_records: list[dict[str, Any]] = []
     resolved_routes: dict[str, tuple[str, str]] = {}
+    superseded_revision_ids: list[str] = []
 
     for key in accepted_route_keys:
         candidate = route_candidates[key]
@@ -101,6 +103,30 @@ def compile_argument_route_package(
             if not route_id:
                 raise ArgumentRouteChangeSetError(f"{key}: existing route identity is absent")
         else:
+            superseded_revision_id: str | None = None
+            if candidate.proposed_action == "revise_existing":
+                existing = existing_revision_index.get(
+                    str(candidate.target_argument_route_revision_id)
+                )
+                if existing is None:
+                    raise ArgumentRouteChangeSetError(
+                        f"{key}: revised route revision is absent"
+                    )
+                prior = (
+                    existing.get("revision")
+                    if isinstance(existing.get("revision"), Mapping)
+                    else existing
+                )
+                superseded_revision_id = str(candidate.target_argument_route_revision_id)
+                revised_route_id = str(
+                    existing.get("argument_route_id")
+                    or prior.get("argument_route_id")
+                    or ""
+                )
+                if not revised_route_id:
+                    raise ArgumentRouteChangeSetError(
+                        f"{key}: revised route identity is absent"
+                    )
             nodes = []
             for node in candidate.ordered_inference_nodes:
                 nodes.append(
@@ -126,11 +152,21 @@ def compile_argument_route_package(
                 "route_signature": signature.model_dump(mode="json"),
                 "ordered_inference_nodes": nodes,
             }
-            route_id = f"AR-{sha256_json(identity_seed)[:20]}"
-            revision_id = f"ARR-{sha256_json({**identity_seed, 'revision_number': 1})[:20]}"
+            # A revision keeps the route's identity and takes a new revision id
+            # from its corrected steps. `revision_number` stays 1: each revision
+            # is its own stored object, the model requires the two to agree, and
+            # the ordering lives in the supersedes chain -- writing 2 here is
+            # what took production down in #220.
+            route_id = (
+                revised_route_id
+                if superseded_revision_id
+                else f"AR-{sha256_json(identity_seed)[:20]}"
+            )
+            revision_id = f"ARR-{sha256_json({**identity_seed, 'argument_route_id': route_id, 'supersedes_revision_id': superseded_revision_id})[:20]}"
             revision = ArgumentRouteRevisionRecord(
                 argument_route_revision_id=revision_id,
                 argument_route_id=route_id,
+                supersedes_revision_id=superseded_revision_id,
                 revision_number=1,
                 validated_against_conclusion_viewpoint_revision_id=conclusion_revision_id,
                 route_label=candidate.route_label,
@@ -141,6 +177,10 @@ def compile_argument_route_package(
                 approved_at=decided_at,
                 review_status="system_approved",
             )
+            # For a revision this rewrites the existing route row, moving
+            # current_revision_id onto the corrected revision. argument_routes
+            # is the one mutable record in this family precisely so the pointer
+            # can move; the revisions themselves stay as written.
             route = ArgumentRouteRecord(
                 argument_route_id=route_id,
                 conclusion_viewpoint_id=conclusion_viewpoint_id,
@@ -149,6 +189,8 @@ def compile_argument_route_package(
             )
             revision_records.append(revision.model_dump(mode="json"))
             route_records.append(route.model_dump(mode="json"))
+            if superseded_revision_id:
+                superseded_revision_ids.append(superseded_revision_id)
         resolved_routes[key] = (route_id, revision_id)
 
     attestation_candidates = {
@@ -158,6 +200,8 @@ def compile_argument_route_package(
     if any(key not in attestation_candidates for key in accepted_attestation_keys):
         raise ArgumentRouteChangeSetError("passing attestation key is absent from proposal")
     attestation_records: list[dict[str, Any]] = []
+    already_attested = set(existing_attestation_ids)
+    unchanged_attestation_ids: list[str] = []
     for key in accepted_attestation_keys:
         attestation = attestation_candidates[key]
         local_route_key = attestation.route_ref.local_route_key
@@ -220,6 +264,16 @@ def compile_argument_route_package(
             review_artifact_sha256=review_artifact_sha256,
             review_status="system_approved",
         )
+        if record.argument_route_attestation_id in already_attested:
+            # The id seed is route revision, source, claims, step bindings and
+            # terminal link -- deliberately not the review that approved it. So
+            # re-deriving an attestation that is already committed yields the
+            # same id with a different `review_artifact_sha256`, and emitting it
+            # is an in-place rewrite of an immutable record. Re-reviewing an
+            # attestation does not make it a new fact, and the review that first
+            # approved it is the one that approved it.
+            unchanged_attestation_ids.append(record.argument_route_attestation_id)
+            continue
         attestation_records.append(record.model_dump(mode="json"))
 
     package_seed = {
@@ -237,6 +291,13 @@ def compile_argument_route_package(
         "argument_route_revisions": sorted(
             revision_records, key=lambda item: item["argument_route_revision_id"]
         ),
+        "unchanged_attestation_ids": sorted(unchanged_attestation_ids),
+        # An attestation pins its route revision, and the projection rejects one
+        # whose revision is no longer current. The records are immutable, so a
+        # superseded revision's attestations are withdrawn rather than edited --
+        # what stops standing is the store's assertion that they are current,
+        # not the record of what that source was once found to say.
+        "superseded_route_revision_ids": sorted(set(superseded_revision_ids)),
         "argument_route_attestations": sorted(
             attestation_records, key=lambda item: item["argument_route_attestation_id"]
         ),

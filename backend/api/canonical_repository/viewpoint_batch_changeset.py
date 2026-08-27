@@ -161,10 +161,21 @@ def compile_cvp_batch_package(
         if item.decision == "pass"
     }
     if reconsideration is not None:
+        # Accepting a `correct` means the reviewer's rewording landed. Accepting
+        # a `reject` means withdrawing, so it must not approve anything: a
+        # withdrawn revision leaves the effective proposal entirely, and one
+        # that somehow survived would be written on the strength of a review
+        # that refused it.
+        correctable = {
+            item.target_viewpoint_revision_id
+            for item in review.revision_reviews
+            if item.decision == "correct"
+        }
         approved_revision_targets |= {
             item.target_viewpoint_revision_id
             for item in reconsideration.revision_dispositions
             if item.disposition == "accepted"
+            and item.target_viewpoint_revision_id in correctable
         }
     # The effective proposal is what gets written, so a revision surviving into
     # it without approval is a contradiction, not something to drop quietly.
@@ -572,6 +583,71 @@ def compile_cvp_batch_package(
         for item in review.relation_reviews
         if item.decision == "pass" and item.direction_correct
     }
+    if reconsideration is not None:
+        # The same union the viewpoint revisions above already use, for the same
+        # reason.  Gating the graph on `pass` alone made a corrected structure
+        # permanently unapprovable: the review artifact goes on saying `correct`
+        # and there is no second review, so any structure the reviewer wanted
+        # adjusted killed the batch -- binding_loosing_meaning stopped on a
+        # finding that four word-sense candidates had been given roles by their
+        # content's polarity rather than by their function, which the proposer
+        # then fixed exactly as asked.
+        #
+        # `synthesis_entailed_by_focal: false` is the commonest structure
+        # finding -- the synthesis asserts more than its focal set supports --
+        # and requiring it to be true before a correction could land meant that
+        # class could only ever be deleted, never fixed. It is also the wrong
+        # reading of who judged what: a `correct` decision carries the
+        # reviewer's own replacement text ("central_synthesis 改为：「…」"), so
+        # the corrected content is the content the reviewer wrote. What the
+        # accepted finding does not license is a structure the proposer argued
+        # its way out of; a rebutted or deferred finding stays unapproved, and
+        # the effective proposal is re-validated structurally either way.
+        approved_structures |= {
+            item.structure_index
+            for item in reconsideration.structure_dispositions
+            if item.disposition == "accepted"
+        }
+        directed = {
+            item.edge() for item in review.relation_reviews if item.direction_correct
+        }
+        approved_relations |= {
+            item.edge()
+            for item in reconsideration.relation_dispositions
+            if item.disposition == "accepted" and item.edge() in directed
+        }
+        # An edge the correction round created has no relation review and never
+        # can, because it did not exist when the review ran.  Leaving it out
+        # made the reviewer's own instruction unsatisfiable: the finding on
+        # binding_loosing_meaning asked for 「同时新增两条 viewpoint_relations」
+        # naming both endpoints and the type, the proposer added exactly those,
+        # and the ChangeSet then refused them as unapproved.  That is the case
+        # RelationCorrectionPatch was added for -- "without this patch the
+        # proposer can only rebut the finding".
+        #
+        # Reachability from an accepted finding is already enforced when the
+        # patch is applied.  What is added here is that an edge the reviewer
+        # refused outright cannot be reinstated by patching it.
+        refused = {
+            item.edge()
+            for item in review.relation_reviews
+            if item.decision in ("reject", "defer") or not item.direction_correct
+        }
+        approved_relations |= {
+            edge
+            for edge in (
+                (
+                    str(patch.relation.source_viewpoint_revision_id
+                        or patch.relation.source_local_key),
+                    str(patch.relation.target_viewpoint_revision_id
+                        or patch.relation.target_local_key),
+                    patch.relation.relation_type,
+                )
+                for patch in reconsideration.relation_patches
+                if patch.action == "upsert"
+            )
+            if edge not in refused
+        }
     unapproved_structures = sorted(
         set(range(len(proposal.structures))) - approved_structures
     )
