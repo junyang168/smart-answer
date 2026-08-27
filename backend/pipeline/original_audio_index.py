@@ -262,6 +262,45 @@ SCRIPTURE_PATTERNS = {
 }
 
 
+#: 从 `scripture_scope` 里认出「第几章第几节」。
+#:
+#: 写法不统一：`馬太福音16:19`、`馬太福音16:18-23`、`約翰福音20:23`，还有三处连写
+#: 成一条的 `約翰福音20:23馬太福音16:19馬太福音18:18`。
+SCOPE_REFERENCE = re.compile(r"([\u4e00-\u9fff]+?)(\d+):(\d+)")
+
+
+def reading_order(row: dict[str, Any]) -> tuple[Any, ...]:
+    """中心观点在页面上的先后。
+
+    结构之间没有次序可依。`viewpoint_relations` 记的是观点之间的逻辑关系
+    （`applies`、`extends`、`specializes`、`generalizes`、`entails`、
+    `qualifies`），没有一种能回答「谁该先讲」；而这一页显示的**结构**
+    （`viewpoint_structures`）彼此之间连一条关联都没有，整张表七个字段里既没有
+    scope 也没有顺序。这是结构层的缺口，不是这里能补的。
+
+    所以按这一页自己的立意排——它是按经文重排的，那就跟着经文走：
+
+    1. **起始的那一节**。太16:18 的排在太16:19 前面。
+    2. **牵涉几处经文**。同一节底下，只讲这一节的排在要拉上别处才说得清的前
+       面：「天国钥匙的权柄」只用太16:19，「权柄不只给彼得」要加太18:18，「标
+       准已由天上决定」还要加约20:23——越往后越是从几处经文合起来推出来的。
+    3. **教授讲了多久**。前两项打平时，讲得多的先出现。
+
+    原来按录音总长排，「标准已由天上决定」23 分钟就排到了第一——那是全篇里最靠
+    推论的一条，读者一进来先撞上它。
+    """
+
+    scope = "".join(row.get("scripture_scope") or [])
+    references = SCOPE_REFERENCE.findall(scope)
+    verses = [(int(c), int(v)) for _, c, v in references]
+    passages = {(book, c) for book, c, _ in references}
+    return (
+        min(verses) if verses else (99, 99),
+        len(passages),
+        -sum(o["seconds"] for o in row["occasions"]),
+    )
+
+
 def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
     """整棵树：中心观点 → 讲道 → 连着讲的几段。
 
@@ -451,7 +490,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
             "occasions": occasions_out,
         })
 
-    rows.sort(key=lambda row: -sum(o["seconds"] for o in row["occasions"]))
+    rows.sort(key=reading_order)
     return {
         "schema_version": "wang_original_audio_index_v1",
         "scripture": scripture,
