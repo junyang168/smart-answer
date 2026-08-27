@@ -45,6 +45,18 @@ MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
 #: 钟——两分半的无关内容坐着听已经久了。
 CONTIGUOUS_GAP_SECONDS = 120.0
 
+#: 一个判断至少在幻灯上停多久。
+#:
+#: 不设这条，标题比原来的经文翻得还碎：（五）1 十七分钟里换 18 次，有的隔 4 秒。
+#: 教授论证时几个判断是缠在一起讲的，一句话同时是两个判断的证据，逐条铺开就是
+#: 这个样子。
+#:
+#: 90 秒。撑不满 90 秒的判断不值得让标题跳一次——它是穿插，不是他转了话题。
+MIN_JUDGEMENT_SECONDS = 90.0
+
+#: 算「这一刻主要在讲哪个判断」时，一块看多久。
+JUDGEMENT_BLOCK_SECONDS = 30.0
+
 #: 每段往前留的引子。
 #:
 #: 引文定位到的是那句话本身，从那一刻起播会掐在半句上——「所以彼得叫一個人進天
@@ -344,57 +356,17 @@ SCRIPTURE_PATTERNS = {
 }
 
 
-#: 从 `scripture_scope` 里认出「第几章第几节」。
-#:
-#: 写法不统一：`馬太福音16:19`、`馬太福音16:18-23`、`約翰福音20:23`，还有三处连写
-#: 成一条的 `約翰福音20:23馬太福音16:19馬太福音18:18`。
-SCOPE_REFERENCE = re.compile(r"([\u4e00-\u9fff]+?)(\d+):(\d+)")
-
-
-def reading_order(row: dict[str, Any]) -> tuple[Any, ...]:
-    """中心观点在页面上的先后。
-
-    结构之间没有次序可依。`viewpoint_relations` 记的是观点之间的逻辑关系
-    （`applies`、`extends`、`specializes`、`generalizes`、`entails`、
-    `qualifies`），没有一种能回答「谁该先讲」；而这一页显示的**结构**
-    （`viewpoint_structures`）彼此之间连一条关联都没有，整张表七个字段里既没有
-    scope 也没有顺序。这是结构层的缺口，不是这里能补的。
-
-    所以按这一页自己的立意排——它是按经文重排的，那就跟着经文走：
-
-    1. **起始的那一节**。太16:18 的排在太16:19 前面。
-    2. **牵涉几处经文**。同一节底下，只讲这一节的排在要拉上别处才说得清的前
-       面：「天国钥匙的权柄」只用太16:19，「权柄不只给彼得」要加太18:18，「标
-       准已由天上决定」还要加约20:23——越往后越是从几处经文合起来推出来的。
-    3. **教授讲了多久**。前两项打平时，讲得多的先出现。
-
-    原来按录音总长排，「标准已由天上决定」23 分钟就排到了第一——那是全篇里最靠
-    推论的一条，读者一进来先撞上它。
-    """
-
-    scope = "".join(row.get("scripture_scope") or [])
-    references = SCOPE_REFERENCE.findall(scope)
-    verses = [(int(c), int(v)) for _, c, v in references]
-    passages = {(book, c) for book, c, _ in references}
-    return (
-        min(verses) if verses else (99, 99),
-        len(passages),
-        -sum(o["seconds"] for o in row["occasions"]),
-    )
-
-
 def spoken_during(
     stretches: list[tuple[float, float, str]], sermon: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """教授在这几段里念到的经文，按时间排。
+    """教授在这几段里翻到的经文，按时间排。
 
-    观点的 `scripture_scope` 说不出这一刻在念哪一节。它是整个观点的范围，而一个
-    观点的证据能横跨十分钟，中间教授翻了三处经文：（四）1 的 43:19 那一段里，
-    他 42:39 念太16:18、47:16 才翻到弗2:20，一段之内换了书卷。
+    页面按经文聚合，幻灯上的主经文一整段不变。可是他讲着讲着会翻去别处作证：
+    「請各位看以弗所書第四章第十一節」「可是以弗所書二章二十節」。五篇讲道里这
+    样的口语引用有 88 处（（五）1 一篇就有 61 处）。
 
-    他是念出来的：「請各位看以弗所書第四章第十一節」。五篇讲道里这样的口语引用
-    有 88 处。把时间点交给播放器，让幻灯跟着他走——段里没念到的时候，用这一段
-    开始时他正在讲的那一节；连那也没有，才退回 scope 推出来的。
+    这些只在幻灯角上标一行小字，不换主经文——他整段都在拆 16:18-19 的希腊文，
+    翻出去的是旁证。
     """
 
     spoken = sermon.get("spoken") or []
@@ -404,8 +376,6 @@ def spoken_during(
     timed = sorted((_at(anchors, position), slug) for position, slug in spoken)
     marks: dict[float, str] = {}
     for start, end, _ in stretches:
-        # 这一段开始时他正在讲的那一节——常常是上一段里念的，人不会每换一段就
-        # 重念一次书卷章节。
         before = [(at, slug) for at, slug in timed if at <= start]
         if before:
             marks[start] = before[-1][1]
@@ -422,6 +392,57 @@ def spoken_during(
         }
         for at in sorted(marks)
     ]
+
+
+def judgement_during(
+    spans: list[tuple[float, float, str]], stretches: list[tuple[float, float, str]]
+) -> list[dict[str, Any]]:
+    """教授在这几段里先后立的判断，按时间排。
+
+    页面按经文聚合，一篇讲道一行，所以「他在讲哪个判断」不再由行来表示——它变成
+    幻灯上的标题，跟着播放位置换。经文是他解的对象，一整段不变；判断是他解出来
+    的结果，一堂课里会立好几个。
+
+    不能照着证据区间逐条铺。教授论证时几个判断是缠在一起讲的，一句话同时是两个
+    判断的证据，逐条铺开的话（五）1 十七分钟里标题要换 18 次，有的隔 4 秒。
+
+    所以按块算主导：每半分钟看这一块里哪个判断占的时间最多，再把撑不满 90 秒的
+    并进邻居。剩下的换法就是他真的转了话题。
+    """
+
+    if not spans:
+        return []
+    out: list[dict[str, Any]] = []
+    for begin, finish, _ in stretches:
+        blocks: list[tuple[float, str]] = []
+        cursor = begin
+        while cursor < finish:
+            edge = min(cursor + JUDGEMENT_BLOCK_SECONDS, finish)
+            scores: dict[str, float] = {}
+            for start, end, proposition in spans:
+                if not proposition:
+                    continue
+                overlap = min(end, edge) - max(start, cursor)
+                if overlap > 0:
+                    scores[proposition] = scores.get(proposition, 0.0) + overlap
+            if scores:
+                blocks.append((cursor, max(scores, key=lambda k: (scores[k], k))))
+            cursor = edge
+        # 连着一样的并成一段，撑不满的让前一个judgement 盖过去——他只是穿插提了
+        # 一句，不是转了话题。
+        runs: list[list[Any]] = []
+        for at, judgement in blocks:
+            if runs and runs[-1][1] == judgement:
+                continue
+            runs.append([at, judgement])
+        for index, run in enumerate(runs):
+            until = runs[index + 1][0] if index + 1 < len(runs) else finish
+            if out and out[-1]["judgement"] == run[1]:
+                continue
+            if out and until - run[0] < MIN_JUDGEMENT_SECONDS:
+                continue
+            out.append({"at": run[0], "judgement": run[1]})
+    return out
 
 
 def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
@@ -546,7 +567,16 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
         if key not in latest or rank > latest[key]["rank"]:
             latest[key] = {"structure": structure, "rank": rank}
 
-    rows: list[dict[str, Any]] = []
+    # 一段经文一个入口，不是一个观点一个入口。
+    #
+    # 原来按中心观点分组，太16:18-19 分出五组，同一篇讲道在里面出现两到四次，每
+    # 次只播它属于那一组的几段。听下来是碎的：（四）2 被切成 2+5+3 段散在三组
+    # 里，而教授在课上是一口气把这段经文讲完的。
+    #
+    # 现在按经文聚合。一篇讲道一行，把它讲这段经文的所有材料并起来，教授原来的
+    # 次序就还回去了。观点没丢，挪到幻灯上当标题——经文固定，标题跟着播放位置
+    # 换，告诉听的人他此刻在立哪个判断。
+    by_sermon: dict[str, dict[str, Any]] = {}
     for chosen in latest.values():
         structure = chosen["structure"]
         revision = current_revision(structure)
@@ -564,89 +594,43 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                 continue
         elif scripture and scripture not in scope:
             continue
+        proposition = str(central_revision.get("core_proposition") or "")
 
         # 播整个结构的录音：中心判断，加上支撑它的那几条（正面说明、界线、限定、
         # 方法）。教授论证一个判断时话是连着说的，只挑中心那一句会把理由切掉。
-        #
-        # 前提是结构里的 focal 条目确实都在讲同一件事。上面的去重就是为了这个：
-        # 被留下的旧结构会把别的题目的录音带进来。
-        by_sermon: dict[str, dict[str, Any]] = {}
         for entry in focal:
             viewpoint_id = revision_to_viewpoint.get(str(entry.get("viewpoint_revision_id")))
             if not viewpoint_id:
                 continue
-            # 这一条 focal 观点讲的是哪一节。同一个结构底下几条 focal 的经节并不
-            # 相同——「磐石不是彼得」底下有太16:18-23、太16:16-18、弗2:20——所以
-            # 幻灯在一次播放里会跟着换。
-            entry_revision = revisions.get(str(entry.get("viewpoint_revision_id"))) or {}
-            ref = scripture_slug(
-                entry_revision.get("scope", {}).get("scripture_scope") or [],
-                prefer_book,
-                page_verses,
-            )
             for link in members.get(viewpoint_id, []):
                 claim_id = str(link.get("claim_id"))
-                claim = claims.get(claim_id) or {}
-                for source_id, spans in occasions(claim_id, ref).items():
-                    slot = by_sermon.setdefault(source_id, {"spans": [], "sayings": []})
+                for source_id, spans in occasions(claim_id, proposition).items():
+                    slot = by_sermon.setdefault(source_id, {"spans": []})
                     slot["spans"].extend(spans)
-                    # 这一遍他是怎么说的。同一个判断五篇讲道五种讲法，副标题让
-                    # 读者一眼看出五行不是同一段话的复制。
-                    saying = str(
-                        (link.get("component_locator") or {}).get("statement_component")
-                        or claim.get("statement")
-                        or ""
-                    ).strip()
-                    if saying and saying not in slot["sayings"]:
-                        slot["sayings"].append(saying)
 
-        occasions_out = []
-        for source_id, slot in by_sermon.items():
-            sermon = sermons.load(source_id, documents.get(source_id) or {})
-            merged = stretch(slot["spans"])
-            if not merged or not sermon:
-                continue
-            occasions_out.append({
-                "source_id": source_id,
-                "transcript_id": sermon["transcript_id"],
-                "title": sermon["title"],
-                "media_kind": sermon["media_kind"],
-                "media_url": sermon["media_url"],
-                "saying": slot["sayings"][0] if slot["sayings"] else "",
-                "other_sayings": slot["sayings"][1:],
-                "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-                "spoken": spoken_during(merged, sermon),
-                "seconds": sum(b - a for a, b, _ in merged),
-            })
-        if not occasions_out:
+    sermons_out: list[dict[str, Any]] = []
+    for source_id, slot in by_sermon.items():
+        sermon = sermons.load(source_id, documents.get(source_id) or {})
+        merged = stretch(slot["spans"])
+        if not merged or not sermon:
             continue
-        occasions_out.sort(key=lambda row: -row["seconds"])
-        rows.append({
-            "structure_id": str(structure.get("structure_id")),
-            "central_proposition": str(central_revision.get("core_proposition") or ""),
-            # 幻灯上的那一节，一组之内不变。
-            #
-            # 一度让它跟着教授念到的经文换：43:19 太16:18 → 47:16 弗2:20 →
-            # 57:19 弗4:11。每一处都对得上他的话，可是听起来碎——他整组都在拆
-            # 16:18-19 的希腊文（Πέτρος／πέτρα、ἔσται δεδεμένον），弗2:20、弗
-            # 4:11 是他搬来作证的旁证。幻灯翻过去，等于把他正在拆的那句字从屏
-            # 幕上拿走。
-            #
-            # 取中心观点自己的经节，所以磐石那组是 16:18-19、阴间的权柄是
-            # 16:18、天国钥匙是 16:19——一组之内一动不动，但不是所有组一个样。
-            "scripture": scripture_slug(
-                central_revision.get("scope", {}).get("scripture_scope") or [],
-                prefer_book,
-                page_verses,
-            ),
-            "scripture_scope": central_revision.get("scope", {}).get("scripture_scope") or [],
-            "focal_count": len(focal),
-            "occasions": occasions_out,
+        sermons_out.append({
+            "source_id": source_id,
+            "transcript_id": sermon["transcript_id"],
+            "title": sermon["title"],
+            "media_kind": sermon["media_kind"],
+            "media_url": sermon["media_url"],
+            "stretches": [{"start": a, "end": b} for a, b, _ in merged],
+            "judgements": judgement_during(slot["spans"], merged),
+            "spoken": spoken_during(merged, sermon),
+            "seconds": sum(b - a for a, b, _ in merged),
         })
+    sermons_out.sort(key=lambda row: -row["seconds"])
 
-    rows.sort(key=reading_order)
     return {
-        "schema_version": "wang_original_audio_index_v1",
+        "schema_version": "wang_original_audio_index_v2",
         "scripture": scripture,
-        "viewpoints": rows,
+        # 幻灯上的那一节。一段经文一个入口，所以整页只有这一处经文。
+        "reference": f"mat-{scripture.replace(':', '-')}" if ":" in scripture else "",
+        "sermons": sermons_out,
     }
