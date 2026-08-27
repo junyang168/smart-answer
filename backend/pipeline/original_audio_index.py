@@ -153,6 +153,17 @@ class Sermons:
         return {"media_kind": None, "media_url": None}
 
 
+#: 教授给经文里的字作注解时的写法：中文词后面跟着括号，括号里是原文。
+#:
+#: 「你是彼得(Petrus)」「我的教會建造在這磐石(petra)」「使徒（ἀποστόλων/
+#: apostolōn）」。五篇讲道里这样的写法有 25 处。
+GLOSS = re.compile(r"(?P<context>[\u4e00-\u9fff]{1,10})\s*[（(]\s*(?P<original>[^（）()]{1,60}?)\s*[）)]")
+
+#: 括号里得是原文，不是随手一个中文注解。
+#:
+#: 希腊字母，或者一串拉丁字母（Petrus、petra、apostolōn 这类转写）。
+ORIGINAL = re.compile(r"^[A-Za-z\u0370-\u03ff\u1f00-\u1fff/\s,·.'\u2019-]{2,60}$")
+
 #: 校对时删掉的字。`~~…~~` 是软删除，念的时候没念，算字数要先去掉。
 STRIKETHROUGH = re.compile(r"~~([^~]+?)~~", re.S)
 
@@ -327,6 +338,43 @@ def spoken_during(
         }
         for at in sorted(marks)
     ]
+
+
+def glosses_during(
+    stretches: list[tuple[float, float, str]], sermon: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """教授在这几段里给哪些字作了注解。
+
+    幻灯上不铺整节的希腊原文——读者不看希腊文，铺开只是一堵墙。他在课上真正做的
+    是挑几个字讲：「你是彼得(Petrus)，我要把我的教會建造在這磐石(petra)上」。他
+    讲到哪个字，就把那个字在经文里标出来，旁边写上原文。
+
+    这里只给出**候选**，不判断哪个是经文里的词——经文正文是页面那边取的，词在不
+    在经文里得在那边比。候选是括号前面那串中文，前端取最短的、且出现在经文里的
+    后缀：「我的教會建造在這磐石」取到「磐石」，「你是彼得」取到「彼得」。
+
+    这条规则自己就把跑题的挡掉了：哈拉卡（Halakhah）、通用希臘文（Koine
+    Greek）、魂（psyche）、靈（ruach）都不是太16:18-19 里的字，前端比不上就不
+    显示。
+    """
+
+    anchors = _timeline(sermon)
+    if not anchors:
+        return []
+    text = "".join(
+        STRIKETHROUGH.sub("", str(segment.get("text") or ""))
+        for segment in (sermon.get("segments") or [])
+    )
+    out: list[dict[str, Any]] = []
+    for match in GLOSS.finditer(text):
+        original = match.group("original").strip()
+        if not ORIGINAL.match(original):
+            continue
+        at = _at(anchors, match.start())
+        if at is None or not any(begin <= at < finish for begin, finish, _ in stretches):
+            continue
+        out.append({"at": at, "context": match.group("context"), "original": original})
+    return out
 
 
 def judgement_during(
@@ -524,6 +572,7 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
             "judgements": judgement_during(slot["spans"], merged),
             "spoken": spoken_during(merged, sermon),
+            "glosses": glosses_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
         })
     sermons_out.sort(key=lambda row: -row["seconds"])

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide from "./ScriptureSlide";
+import ScriptureSlide, { type Gloss } from "./ScriptureSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -40,6 +40,7 @@ type Sermon = {
   stretches: Stretch[];
   judgements: Judgement[];
   spoken: Spoken[];
+  glosses: Gloss[];
   seconds: number;
 };
 
@@ -72,6 +73,20 @@ function inside(slug: string, passage: string) {
   if (one[0] !== all[0] || one[1] !== all[1]) return false;
   const [low, high] = [Number(all[2]), Number(all[3] ?? all[2])];
   return Number(one[2]) >= low && Number(one[3] ?? one[2]) <= high;
+}
+
+/** 播到这一刻，他正在讲哪个字。
+ *
+ * 取最近一次注解。两分钟以内才算他还在讲那个字——再往前就是听的人已经听过去
+ * 的了。
+ */
+function glossAt(sermon: Sermon, seconds: number) {
+  let held: Gloss | undefined;
+  for (const item of sermon.glosses) {
+    if (item.at > seconds) break;
+    held = item;
+  }
+  return held && seconds - held.at <= 120 ? held : undefined;
 }
 
 /** 播到这一刻，他手上翻的是哪一节。
@@ -213,7 +228,8 @@ export default function OriginalAudioPage() {
                     <ScriptureSlide
                       slug={reference}
                       title={judgementAt(sermon, seconds)}
-                      now={citedAt(sermon, seconds, reference)}
+                      gloss={glossAt(sermon, seconds)}
+                      cited={citedAt(sermon, seconds, reference)}
                     />
                   )}
                   {sermon.media_kind === "video" ? (
