@@ -66,6 +66,30 @@ function judgementAt(sermon: Sermon, seconds: number) {
   return held;
 }
 
+/** 幻灯上该摆哪一节。
+ *
+ * 不是整段。16:13-23 有十一节，铺出来是一堵墙，而他此刻只在讲其中一节。他自己
+ * 会念出来——「馬太十六章十九節，耶穌告訴彼得說……」——那一节才是屏幕上该有的。
+ *
+ * 跟着他念的走不会跳：量下来他在一篇讲道里只念到本段的 1 到 3 个不同节。一次
+ * 都没念到的（16:24-27 有两篇），用段首那一节兜底——那几篇讲的正是 16:24「若有
+ * 人要跟從我，就當捨己」。
+ */
+function verseAt(sermon: Sermon, seconds: number, passage: string) {
+  const [book, chapter, low, high] = passage.split("-");
+  const first = `${book}-${chapter}-${low}`;
+  const [start, end] = [Number(low), Number(high ?? low)];
+  let held = first;
+  for (const mark of sermon.spoken) {
+    if (mark.at > seconds) break;
+    const parts = mark.scripture.split("-");
+    if (parts[0] !== book || parts[1] !== chapter) continue;
+    const verse = Number(parts[2]);
+    if (verse >= start && verse <= end) held = `${book}-${chapter}-${parts[2]}`;
+  }
+  return held;
+}
+
 /** `mat-16-19` 落在 `mat-16-18-19` 里面吗。 */
 function inside(slug: string, passage: string) {
   const one = slug.split("-");
@@ -248,7 +272,7 @@ export default function OriginalAudioPage() {
                       面的不放——那些本来就有得看。 */}
                   {sermon.media_kind === "audio" && (
                     <ScriptureSlide
-                      slug={passage}
+                      slug={verseAt(sermon, seconds, passage)}
                       title={judgementAt(sermon, seconds)}
                       glosses={glossesUpTo(sermon, seconds)}
                       cited={citedAt(sermon, seconds, passage)}
