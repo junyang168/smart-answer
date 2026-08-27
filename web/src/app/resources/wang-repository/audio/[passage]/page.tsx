@@ -31,7 +31,7 @@ type Stretch = { start: number; end: number };
 /** 教授念到经文的时刻。只在幻灯角上标一行小字，主经文不跟着换。 */
 type Spoken = { at: number; scripture: string; label: string };
 /** 他立起一个判断的时刻。幻灯的标题跟着这个走。 */
-type Judgement = { at: number; judgement: string; seconds: number };
+type Judgement = { at: number; judgement: string; seconds: number; scripture: string };
 type Sermon = {
   source_id: string;
   transcript_id: string;
@@ -68,26 +68,48 @@ function judgementAt(sermon: Sermon, seconds: number) {
 
 /** 幻灯上该摆哪一节。
  *
- * 不是整段。16:13-23 有十一节，铺出来是一堵墙，而他此刻只在讲其中一节。他自己
- * 会念出来——「馬太十六章十九節，耶穌告訴彼得說……」——那一节才是屏幕上该有的。
+ * 不是整段。16:13-23 有十一节，铺出来 380 个字是一堵墙，而且每张幻灯长得都一
+ * 样，因为整页共用同一段经文。
  *
- * 跟着他念的走不会跳：量下来他在一篇讲道里只念到本段的 1 到 3 个不同节。一次
- * 都没念到的（16:24-27 有两篇），用段首那一节兜底——那几篇讲的正是 16:24「若有
- * 人要跟從我，就當捨己」。
+ * 也不是「他此刻念到哪一节」——他到 2:18 还一节都没念出来，而那时候讲的是「彼
+ * 得認信耶穌是基督、永生神的兒子」，太16:16；退回段首会摆成太16:13。
+ *
+ * 是这条 topic 自己讲的那一节。它是一条主张，主张的 `scripture_refs` 就写着：
+ * 「彼得認信」是太16:16，「相較於別人如何評價耶穌」是太16:13-15，「耶穌禁止門
+ * 徒立即公開祂是基督」是太16:20-23。经文跟着他讲到哪里换，跟标题同步。
  */
+/** 幻灯上一次最多摆几节。
+ *
+ * 三十四个 topic 里二十四个只有一节，五个三节，两个四节——够读。剩三个的主张
+ * 引用本身就宽（16:6-12、16:16-23、16:13-21），摆出来又是一堵墙。
+ */
+const MOST_VERSES = 4;
+
 function verseAt(sermon: Sermon, seconds: number, passage: string) {
-  const [book, chapter, low, high] = passage.split("-");
-  const first = `${book}-${chapter}-${low}`;
-  const [start, end] = [Number(low), Number(high ?? low)];
-  let held = first;
+  let slug = sermon.judgements[0]?.scripture || passage;
+  for (const mark of sermon.judgements) {
+    if (mark.at > seconds) break;
+    if (mark.scripture) slug = mark.scripture;
+  }
+  const [book, chapter, from, to] = slug.split("-");
+  const [start, end] = [Number(from), Number(to ?? from)];
+  if (end - start + 1 <= MOST_VERSES) return slug;
+
+  // 引用太宽时，用他此刻念到的那一节收窄。
+  //
+  // 「彼得雖認識耶穌是基督，卻不認識彌賽亞受苦」引的是太16:16-23，八节；而
+  // 24:05 他念到十六章二十节，26:55 讲的正是二十一、二十二节。从他念的那一节
+  // 起摆四节，比铺八节准，也比截头四节准——截头会摆成 16:16-19，他早讲过了。
+  let named = start;
   for (const mark of sermon.spoken) {
     if (mark.at > seconds) break;
     const parts = mark.scripture.split("-");
     if (parts[0] !== book || parts[1] !== chapter) continue;
     const verse = Number(parts[2]);
-    if (verse >= start && verse <= end) held = `${book}-${chapter}-${parts[2]}`;
+    if (verse >= start && verse <= end) named = verse;
   }
-  return held;
+  const stop = Math.min(named + MOST_VERSES - 1, end);
+  return `${book}-${chapter}-${named}` + (stop !== named ? `-${stop}` : "");
 }
 
 /** `mat-16-19` 落在 `mat-16-18-19` 里面吗。 */

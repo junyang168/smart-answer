@@ -389,7 +389,9 @@ def glosses_during(
 
 
 def judgement_during(
-    spans: list[tuple[float, float, str]], stretches: list[tuple[float, float, str]]
+    spans: list[tuple[float, float, str]],
+    stretches: list[tuple[float, float, str]],
+    verses: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """教授在这几段里先后立的判断，按时间排。
 
@@ -402,6 +404,10 @@ def judgement_during(
 
     所以按块算主导：每半分钟看这一块里哪个判断占的时间最多，再把撑不满 90 秒的
     并进邻居。剩下的换法就是他真的转了话题。
+
+    `verses` 把每个判断配上它讲的那一节——主张自己的 `scripture_refs` 就写着，
+    「彼得認信耶穌是基督、永生神的兒子」是太16:16，「相較於別人如何評價耶穌」是
+    太16:13-15。幻灯上摆哪一节由它决定。
     """
 
     if not spans:
@@ -450,7 +456,8 @@ def judgement_during(
             # 它当标题就错了。
             if until - run[0] < MIN_JUDGEMENT_SECONDS:
                 continue
-            out.append({"at": run[0], "judgement": run[1]})
+            out.append({"at": run[0], "judgement": run[1],
+                        "scripture": (verses or {}).get(run[1], "")})
         # 每一段都得有自己的抬头。
         #
         # 90 秒那条线会把短段的抬头全滤掉：（四）3 的 2:05–3:03 和 35:27–36:12
@@ -462,7 +469,8 @@ def judgement_during(
         if len(out) == kept:
             judgement = dominant(begin, finish)
             if judgement and (not out or out[-1]["judgement"] != judgement):
-                out.append({"at": begin, "judgement": judgement})
+                out.append({"at": begin, "judgement": judgement,
+                            "scripture": (verses or {}).get(judgement, "")})
     # 每个判断能听多久。
     #
     # 判断不再只是幻灯上的抬头，它同时是读者的收听单位——一段一个判断，点它开始
@@ -540,6 +548,43 @@ def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: i
     return False
 
 
+def claim_verse(claim: dict[str, Any], book: str, chapter: int, low: int, high: int) -> str:
+    """这条主张讲的是哪一节，截到本段范围内。
+
+    幻灯上摆哪一节由它决定。铺整段不行——16:13-23 有十一节，380 个字是一堵墙，
+    而且每张幻灯长得都一样。跟着「他此刻念到哪一节」走也不行：他到 2:18 还一节
+    都没念，而那时候讲的是「彼得認信耶穌是基督、永生神的兒子」——太16:16。
+
+    主张自己就写着。「彼得認信」是太16:16，「相較於別人如何評價耶穌」是
+    太16:13-15，「耶穌禁止門徒立即公開祂是基督」是太16:20-23。
+
+    取落在本段里最窄的那一处：一条主张常引好几处，`mat-16-19` 比 `mat-16-16-23`
+    更说得清他此刻在讲什么。截到本段是因为 `mat-16-16-23` 在 16:13-23 页上还有
+    八节，摆出来又是一堵墙。
+    """
+
+    best: tuple[int, str] | None = None
+    for reference in claim.get("scripture_refs") or []:
+        text = (
+            reference
+            if isinstance(reference, str)
+            else json.dumps(reference, ensure_ascii=False)
+        )
+        for slug in reference_slugs(text):
+            parts = slug.split("-")
+            if len(parts) < 3 or parts[0] != book or parts[1] != str(chapter):
+                continue
+            start = max(int(parts[2]), low)
+            end = min(int(parts[3]) if len(parts) > 3 else int(parts[2]), high)
+            if start > end:
+                continue
+            width = end - start
+            if best is None or width < best[0]:
+                tail = f"-{end}" if end != start else ""
+                best = (width, f"{book}-{chapter}-{start}{tail}")
+    return best[1] if best else f"{book}-{chapter}-{low}"
+
+
 def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
 
@@ -603,12 +648,15 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     # 什么。观点是把五篇里的同一件事归成一条，那是文章层要的东西，不是听原声的
     # 人要的。
     by_sermon: dict[str, dict[str, Any]] = {}
+    # 每个判断讲的是哪一节。主张自己的 `scripture_refs` 就写着，截到本段范围内。
+    verses: dict[str, str] = {}
     for claim_id, claim in claims.items():
         if not in_passage(claim, book, chapter, low, high):
             continue
         statement = str(claim.get("statement") or "").strip()
         if not statement:
             continue
+        verses.setdefault(statement, claim_verse(claim, book, chapter, low, high))
         for source_id, spans in spans_of(claim_id, statement).items():
             by_sermon.setdefault(source_id, {"spans": []})["spans"].extend(spans)
 
@@ -625,7 +673,7 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             "media_kind": sermon["media_kind"],
             "media_url": sermon["media_url"],
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": judgement_during(slot["spans"], merged),
+            "judgements": judgement_during(slot["spans"], merged, verses),
             "spoken": spoken_during(merged, sermon),
             "glosses": glosses_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
