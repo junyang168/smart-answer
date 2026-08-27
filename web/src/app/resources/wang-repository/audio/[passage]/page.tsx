@@ -87,9 +87,27 @@ const MOST_VERSES = 4;
 
 function verseAt(sermon: Sermon, seconds: number, passage: string) {
   let slug = sermon.judgements[0]?.scripture || passage;
+  let since = 0;
   for (const mark of sermon.judgements) {
     if (mark.at > seconds) break;
-    if (mark.scripture) slug = mark.scripture;
+    if (mark.scripture) {
+      slug = mark.scripture;
+      since = mark.at;
+    }
+  }
+
+  // 这条 topic 开始之后他自己念到的节，盖过主张给的那一节。
+  //
+  // （五）1 开头那两分钟：topic 是「彼得認信耶穌是基督、永生神的兒子」，主张说
+  // 太16:16，没错——可他 2:01 念完十六节就说「我再念一下，然後我特別來看十九節
+  // 那一段」，接着一路念到十九节，而幻灯还停在十六节。一条 topic 两分钟，他在
+  // 里面是会往前走的。
+  const [inBook, inChapter] = passage.split("-");
+  for (const mark of sermon.spoken) {
+    if (mark.at > seconds) break;
+    if (mark.at < since) continue;
+    const parts = mark.scripture.split("-");
+    if (parts[0] === inBook && parts[1] === inChapter) slug = mark.scripture;
   }
   const [book, chapter, from, to] = slug.split("-");
   const [start, end] = [Number(from), Number(to ?? from)];

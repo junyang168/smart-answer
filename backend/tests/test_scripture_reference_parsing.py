@@ -179,3 +179,67 @@ def test_chinese_number() -> None:
     assert chinese_number("一百二十") == 120
     assert chinese_number("16") == 16
     assert chinese_number("使徒") is None
+
+
+# ── 只报节的说法 ──────────────────────────────────────────────
+#
+# 他讲一章经文时章号不重复报，一路只说「十八節」「十九節」。原来只认「X章Y節」
+# 连写，于是（五）1 开头两分钟里他从十六节念到十九节，幻灯一直停在十六节。
+
+
+def test_bare_verse_carries_the_chapter_he_last_named() -> None:
+    from backend.api.scripture import spoken_references
+
+    text = (
+        "因為耶穌在這個地方，馬太十六章，耶穌帶了門徒到該撒利亞腓立比的境內。"
+        "十六節說，西門彼得回答說：「你是基督。」"
+        "好，我再念一下，然後我特別來看十九節那一段。"
+    )
+    assert [slug for _, slug in spoken_references(text)] == ["mat-16-16", "mat-16-19"]
+
+
+def test_bare_verse_follows_him_when_he_changes_book() -> None:
+    """他换书卷时会重报，带下去的就跟着换。
+
+    （四）3 里他从马太转到使徒行传：「使徒行傳第十五章十三節開始」，之后的
+    「第十九節」说的是徒15:19，不是太16:19。
+    """
+
+    from backend.api.scripture import spoken_references
+
+    text = (
+        "馬太福音第十六章二十節。耶穌講……"
+        "使徒行傳第十五章十三節開始：「他們住了聲」……"
+        "根據聖靈的帶領，第十九節，「所以據我的意見，不可難為那歸服神的外邦人」。"
+    )
+    assert [slug for _, slug in spoken_references(text)] == [
+        "mat-16-20",
+        "act-15-13",
+        "act-15-19",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["這一節聖經很多人一直是很有困擾", "把一節聖經拿來亂扯"],
+)
+def test_a_bare_one_that_means_this_passage_is_not_a_reference(text: str) -> None:
+    """「這一節聖經」说的是「这段经文」，不是第一节。"""
+
+    from backend.api.scripture import spoken_references
+
+    assert [slug for _, slug in spoken_references("馬太十六章。" + text)] == []
+
+
+def test_psalms_are_cited_by_chapter_word_pian() -> None:
+    """诗篇用「篇」不用「章」。
+
+    不认的话「詩篇三十四篇一節到三節」里的「到三節」会带上前面别处的章号——实测
+    带成了太16:3。
+    """
+
+    from backend.api.scripture import spoken_references
+
+    assert [slug for _, slug in spoken_references("馬太十六章。詩篇三十四篇一節到三節")] == [
+        "psa-34-1"
+    ]
