@@ -1112,6 +1112,19 @@ class _StubAdapter:
         return self._response
 
 
+class _SequenceStubAdapter(_StubAdapter):
+    def __init__(self, responses: list[dict[str, Any]], **kwargs: Any) -> None:
+        super().__init__(responses[0], **kwargs)
+        self._responses = responses
+
+    def generate(self, payload: Any) -> dict[str, Any]:
+        if self.calls >= len(self._responses):
+            raise AssertionError("stub received more model calls than expected")
+        response = self._responses[self.calls]
+        self.calls += 1
+        return response
+
+
 def test_cached_call_is_bound_to_provider_and_model(tmp_path: Path):
     from backend.pipeline.viewpoint_batch_resolution_runner import _call
 
@@ -3334,6 +3347,166 @@ def test_run_route_scope_is_independent_and_resumable(tmp_path: Path):
     assert current["status"] == "resolved"
 
 
+def test_corrected_route_is_reviewed_against_effective_proposal(tmp_path: Path):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewResponse,
+    )
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
+
+    claims = [_claim("C1", ROCK_STATEMENT)]
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=claims,
+        viewpoint_claim_links=[_registry_link(claims[0])],
+        existing_routes=[],
+    )
+    original = _routes()
+    original_payload = original.model_dump(mode="json")
+    original_sha = sha256_json(original_payload)
+    initial_review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": original_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "correct",
+                "finding_codes": ["route_label_overstates"],
+                "reason": "label 说得过强",
+                "correction": "收窄 label，不改骨架",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "来源绑定成立",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "一项可修正 finding",
+    }
+    merged_initial_review = json.loads(json.dumps(initial_review))
+    merged_initial_review["reason"] = "RRB-001：一项可修正 finding"
+    merged_initial_review["change_reviews"] = sorted(
+        merged_initial_review["change_reviews"],
+        key=lambda item: (item["target_kind"], item["target_key"]),
+    )
+    merged_initial_review = ArgumentRouteReviewResponse.model_validate(
+        merged_initial_review
+    ).model_dump(mode="json")
+    initial_review_sha = sha256_json(merged_initial_review)
+    revised_payload = json.loads(json.dumps(original_payload))
+    revised_payload["argument_route_candidates"][0]["route_label"] = "词形差异路线"
+    revised_sha = sha256_json(revised_payload)
+    reconsideration = {
+        "schema_version": "wang_argument_route_reconsideration_v1",
+        "route_proposal_sha256": original_sha,
+        "route_review_sha256": initial_review_sha,
+        "finding_dispositions": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "disposition": "accepted",
+                "reason": "已按要求收窄",
+            }
+        ],
+        "revised_proposal": revised_payload,
+    }
+    final_review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": revised_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 的收窄 wording 与原证据一致",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "B 保留了正确的来源绑定",
+            },
+        ],
+        "cvp_re_review_exceptions": [
+            {
+                "viewpoint_revision_id": "CVR-1",
+                "finding_code": "conclusion_boundary_needs_human_review",
+                "reason": "B 的路线可通过，但证据也提示观点边界应另案复核。",
+                "triggering_target_kind": "route",
+                "triggering_target_key": "ROUTE-GREEK",
+                "evidence_claim_component_keys": [
+                    packet["claim_components"][0]["claim_component_key"]
+                ],
+            }
+        ],
+        "cross_source_composition_found": False,
+        "reason": "effective proposal B 通过",
+    }
+    merged_final_review = json.loads(json.dumps(final_review))
+    merged_final_review["change_reviews"] = sorted(
+        merged_final_review["change_reviews"],
+        key=lambda item: (item["target_kind"], item["target_key"]),
+    )
+    merged_final_review = ArgumentRouteReviewResponse.model_validate(
+        merged_final_review
+    ).model_dump(mode="json")
+
+    reviewer = _SequenceStubAdapter([initial_review, final_review])
+    report = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=claims,
+        existing_routes=[],
+        output_dir=tmp_path / "routes-final",
+        proposer=_StubAdapter(original_payload),
+        reviewer=reviewer,
+        reconsiderer=_StubAdapter(reconsideration),
+        route_packet=packet,
+    )
+
+    assert reviewer.calls == 2
+    assert report["effective_route_proposal_sha256"] == revised_sha
+    assert report["initial_route_review_sha256"] == initial_review_sha
+    assert report["route_review_sha256"] == sha256_json(merged_final_review)
+    assert report["route_final_review_outcome"] == "pass"
+    assert report["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert report["passing_attestation_keys"] == ["ATTEST-1"]
+    assert report["cvp_re_review_exceptions"][0]["finding_code"] == (
+        "conclusion_boundary_needs_human_review"
+    )
+
+    failed_final_review = json.loads(json.dumps(final_review))
+    failed_final_review["change_reviews"][0].update(
+        {
+            "decision": "correct",
+            "finding_codes": ["correction_missed_acceptance_criteria"],
+            "reason": "B 仍比审核要求更强",
+            "correction": "需要人工处理；终局审核不再开启 correction",
+        }
+    )
+    failed = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=claims,
+        existing_routes=[],
+        output_dir=tmp_path / "routes-final-failed",
+        proposer=_StubAdapter(original_payload),
+        reviewer=_SequenceStubAdapter([initial_review, failed_final_review]),
+        reconsiderer=_StubAdapter(reconsideration),
+        route_packet=packet,
+    )
+    assert failed["route_final_review_outcome"] == "findings"
+    assert failed["passing_route_keys"] == []
+    assert failed["passing_attestation_keys"] == []
+    assert any(item.startswith("final:route:ROUTE-GREEK") for item in failed["exceptions"])
+
+
 def test_reject_and_defer_do_not_trigger_cvp_correction():
     proposal = _proposal()
     review = _review("reject", "pass")
@@ -3424,6 +3597,150 @@ def test_a_member_source_that_attests_nothing_is_a_finding():
             known_route_revision_ids=[],
             component_bindings=[_route_component_binding(), _second_source_binding()],
         )
+
+
+def test_missing_member_source_is_an_exact_review_target():
+    from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
+
+    first = _claim("C1", ROCK_STATEMENT)
+    second = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[first, second],
+        viewpoint_claim_links=[
+            _registry_link(first),
+            _registry_link(
+                second,
+                viewpoint_claim_link_id="VCL-S2",
+                evidence_bindings=[
+                    {
+                        "evidence_step_id": "C2-E1",
+                        "source_fragment_id": "C2-F1",
+                    }
+                ],
+            ),
+        ],
+        existing_routes=[],
+    )
+
+    batches = build_route_review_batches(
+        proposal=_routes(),
+        route_packet=packet,
+        route_proposal_sha256="proposal-sha",
+    )
+
+    targets = [
+        (item["target_kind"], item["target_key"])
+        for batch in batches
+        for item in batch["review_targets"]
+    ]
+    assert targets.count(("member_source", "CVR-1::S2")) == 1
+    member_batch = next(
+        batch
+        for batch in batches
+        if ("member_source", "CVR-1::S2")
+        in {
+            (item["target_kind"], item["target_key"])
+            for item in batch["review_targets"]
+        }
+    )
+    dispositions = member_batch["route_proposal_context"][
+        "member_source_dispositions"
+    ]
+    assert dispositions == [
+        {
+            "target_key": "CVR-1::S2",
+            "conclusion_viewpoint_revision_id": "CVR-1",
+            "source_id": "S2",
+            "proposal_status": "unresolved",
+            "proposer_reason": None,
+        }
+    ]
+    assert {
+        item["claim_id"] for item in member_batch["route_evidence_context"]["claims"]
+    } >= {"C2"}
+
+
+def test_reviewer_can_confirm_a_missing_member_source_has_no_route(tmp_path: Path):
+    from backend.pipeline.viewpoint_route_resolution import run_route_scope
+
+    first = _claim("C1", ROCK_STATEMENT)
+    second = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18",
+        approved_viewpoints=[_approved_viewpoint()],
+        claims=[first, second],
+        viewpoint_claim_links=[
+            _registry_link(first),
+            _registry_link(
+                second,
+                viewpoint_claim_link_id="VCL-S2",
+                evidence_bindings=[
+                    {
+                        "evidence_step_id": "C2-E1",
+                        "source_fragment_id": "C2-F1",
+                    }
+                ],
+            ),
+        ],
+        existing_routes=[],
+    )
+    route_payload = _routes().model_dump(mode="json")
+    route_sha = sha256_json(route_payload)
+    review = {
+        "schema_version": "wang_argument_route_review_v1",
+        "route_proposal_sha256": route_sha,
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {
+                "target_kind": "route",
+                "target_key": "ROUTE-GREEK",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "路线成立",
+            },
+            {
+                "target_kind": "attestation",
+                "target_key": "ATTEST-1",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "S1 的绑定成立",
+            },
+            {
+                "target_kind": "member_source",
+                "target_key": "CVR-1::S2",
+                "decision": "pass",
+                "finding_codes": [],
+                "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
+            },
+        ],
+        "cross_source_composition_found": False,
+        "reason": "成员来源分母已逐项交代",
+    }
+
+    report = run_route_scope(
+        scope_label="matt16-13-18",
+        claims=[first, second],
+        existing_routes=[],
+        output_dir=tmp_path / "member-source-review",
+        proposer=_StubAdapter(route_payload),
+        reviewer=_StubAdapter(review),
+        route_packet=packet,
+    )
+
+    assert report["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert report["passing_attestation_keys"] == ["ATTEST-1"]
+    assert [
+        item.model_dump(mode="json")
+        for item in report["_effective_proposal"].unattested_members
+    ] == [
+        {
+            "conclusion_viewpoint_revision_id": "CVR-1",
+            "source_id": "S2",
+            "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
+        }
+    ]
 
 
 def test_a_source_that_only_asserts_the_conclusion_can_be_declared():

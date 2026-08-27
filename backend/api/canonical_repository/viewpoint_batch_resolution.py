@@ -28,7 +28,7 @@ VALIDATION_VERSION = "wang_canonical_viewpoint_batch_validation_v1"
 CVP_READBACK_VERSION = "wang_cvp_batch_readback_receipt_v1"
 ROUTE_JOB_VERSION = "wang_route_resolution_job_v1"
 ROUTE_WORK_UNIT_VERSION = "wang_route_resolution_work_unit_v1"
-ROUTE_VALIDATION_VERSION = "wang_argument_route_validation_v1"
+ROUTE_VALIDATION_VERSION = "wang_argument_route_validation_v2"
 
 #: Claims per batch.  The 62-Claim POC ran over ten minutes against a 900s
 #: subprocess ceiling, and the reviewer emits more than the proposer does, so
@@ -2602,6 +2602,12 @@ ROUTE_REVIEW_VERSION = "wang_argument_route_review_v1"
 ROUTE_RECONSIDERATION_VERSION = "wang_argument_route_reconsideration_v1"
 
 
+def route_member_source_key(viewpoint_revision_id: str, source_id: str) -> str:
+    """Stable review key for one member source in one conclusion's denominator."""
+
+    return f"{viewpoint_revision_id}::{source_id}"
+
+
 class NoRouteDisposition(StrictBatchModel):
     viewpoint_revision_id: str = Field(min_length=1)
     reason_code: Literal["no_attested_route", "evidence_insufficient", "deferred"]
@@ -2653,12 +2659,15 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
         no_route = [item.viewpoint_revision_id for item in self.viewpoints_with_no_route]
         if len(no_route) != len(set(no_route)):
             raise ValueError("no-route dispositions must be unique")
+        unattested = [item.key() for item in self.unattested_members]
+        if len(unattested) != len(set(unattested)):
+            raise ValueError("unattested member dispositions must be unique")
         return self
 
 
 class ReviewedRouteChange(StrictBatchModel):
     target_key: str = Field(min_length=1)
-    target_kind: Literal["route", "attestation", "no_route"]
+    target_kind: Literal["route", "attestation", "no_route", "member_source"]
     decision: Literal["pass", "correct", "reject", "defer"]
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
@@ -2684,7 +2693,7 @@ class CvpReReviewException(StrictBatchModel):
     viewpoint_revision_id: str = Field(min_length=1)
     finding_code: str = Field(min_length=1)
     reason: str = Field(min_length=1)
-    triggering_target_kind: Literal["route", "attestation", "no_route"]
+    triggering_target_kind: Literal["route", "attestation", "no_route", "member_source"]
     triggering_target_key: str = Field(min_length=1)
     evidence_claim_component_keys: list[str] = Field(min_length=1)
 
@@ -2731,7 +2740,7 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
 
 class RouteFindingDisposition(StrictBatchModel):
     target_key: str = Field(min_length=1)
-    target_kind: Literal["route", "attestation", "no_route"]
+    target_kind: Literal["route", "attestation", "no_route", "member_source"]
     disposition: Literal["accepted", "rebutted", "deferred"]
     reason: str = Field(min_length=1)
 
@@ -2762,6 +2771,7 @@ def validate_route_proposal(
     known_route_revision_ids: Sequence[str],
     known_route_conclusions: Mapping[str, str] | None = None,
     component_bindings: Sequence[RouteComponentBinding],
+    allow_unresolved_member_sources: bool = False,
 ) -> dict[str, Any]:
     """Check routes against the scope's exact approved viewpoint set."""
 
@@ -2824,16 +2834,19 @@ def validate_route_proposal(
             continue
         eligible_by_conclusion.setdefault(target, set()).add(binding.source_id)
     exempt = {item.key() for item in routes.unattested_members}
+    unresolved_member_sources: list[tuple[str, str]] = []
     for revision_id in sorted(routed):
         eligible = eligible_by_conclusion.get(revision_id, set())
         attested = attested_by_conclusion.get(revision_id, set())
         for source_id in sorted(eligible - attested):
             if (revision_id, source_id) in exempt:
                 continue
-            findings.append(
-                f"{revision_id}: source {source_id} holds a member Claim but attests no "
-                "route for it, and is not declared in unattested_members"
-            )
+            unresolved_member_sources.append((revision_id, source_id))
+            if not allow_unresolved_member_sources:
+                findings.append(
+                    f"{revision_id}: source {source_id} holds a member Claim but attests no "
+                    "route for it, and is not declared in unattested_members"
+                )
     for item in sorted(routes.unattested_members, key=lambda entry: entry.key()):
         eligible = eligible_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
         attested = attested_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
@@ -2875,6 +2888,10 @@ def validate_route_proposal(
             }
             for revision_id in sorted(routed)
         },
+        "unresolved_member_source_keys": [
+            route_member_source_key(revision_id, source_id)
+            for revision_id, source_id in unresolved_member_sources
+        ],
         "inference_method_codes": sorted(
             {code for item in routes.argument_route_candidates for code in item.inference_method_codes}
         ),
@@ -2902,6 +2919,7 @@ def validate_route_review(
     route_evidence_packet_sha256: str,
     expected_targets: set[tuple[str, str]] | None = None,
     allowed_claim_component_keys: set[str] | None = None,
+    member_source_targets: set[str] | None = None,
 ) -> dict[str, Any]:
     """Require exact review coverage and bind it to both semantic inputs."""
 
@@ -2919,6 +2937,8 @@ def validate_route_review(
     } | {
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
+    } | {
+        ("member_source", key) for key in (member_source_targets or set())
     }
     expected = expected_targets if expected_targets is not None else full_expected
     if not expected <= full_expected:
@@ -2989,6 +3009,15 @@ def _route_change_payloads(
         **{
             ("no_route", item.viewpoint_revision_id): item.model_dump(mode="json")
             for item in proposal.viewpoints_with_no_route
+        },
+        **{
+            (
+                "member_source",
+                route_member_source_key(
+                    item.conclusion_viewpoint_revision_id, item.source_id
+                ),
+            ): item.model_dump(mode="json")
+            for item in proposal.unattested_members
         },
     }
 
@@ -3064,11 +3093,30 @@ def validate_route_reconsideration(
     routes_with_accepted_findings = added_routes | {
         key for kind, key in accepted_targets if kind == "route"
     }
+    accepted_member_sources = {
+        tuple(key.split("::", 1))
+        for kind, key in accepted_targets
+        if kind == "member_source" and "::" in key
+    }
+    revised_routes = {
+        item.local_route_key: item
+        for item in reconsideration.revised_proposal.argument_route_candidates
+    }
     authorized_additions = {("route", key) for key in added_routes} | {
         ("attestation", item.local_attestation_key)
         for item in reconsideration.revised_proposal.source_route_attestations
         if ("attestation", item.local_attestation_key) not in before
-        and item.route_ref.local_route_key in routes_with_accepted_findings
+        and (
+            item.route_ref.local_route_key in routes_with_accepted_findings
+            or (
+                item.route_ref.local_route_key in revised_routes
+                and (
+                    revised_routes[item.route_ref.local_route_key].conclusion_ref.key(),
+                    item.source_id,
+                )
+                in accepted_member_sources
+            )
+        )
     }
     for kind, key in sorted((set(before) - set(after)) - accepted_targets):
         findings.append(
