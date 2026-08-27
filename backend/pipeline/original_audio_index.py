@@ -31,10 +31,6 @@ from urllib.parse import quote
 from backend.api.scripture import format_chinese_reference, reference_slugs, spoken_references
 
 
-#: 只有「等价」才算观点的成员。`supports`／`qualifies` 是关系不是身份，见
-#: CanonicalViewpoint 设计第 4 节。
-MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
-
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
 #:
 #: 两分钟。跳过一两分钟省不下什么，却让人听见一次断口——原来是 30 秒，21 个空隙
@@ -56,6 +52,13 @@ MIN_JUDGEMENT_SECONDS = 90.0
 
 #: 算「这一刻主要在讲哪个判断」时，一块看多久。
 JUDGEMENT_BLOCK_SECONDS = 30.0
+
+#: 角上那行「他此刻在念」，最多往回认多久。
+#:
+#: 不设限的话会拿到听的人根本没听到的东西：（四）1 的第一段从 42:29 起播，而上
+#: 一处口语引用在 35:30——中间七分钟没有播，屏幕上却写着「他此刻在念 馬太福音
+#: 16:13」。两分钟以内才算他还在讲那一处。
+SPOKEN_LOOKBACK_SECONDS = 120.0
 
 #: 每段往前留的引子。
 #:
@@ -284,78 +287,6 @@ def stretch(intervals: Iterable[tuple[float, float, str]]) -> list[tuple[float, 
     return out
 
 
-#: 一个观点讲的是哪一节。
-#:
-#: `scripture_scope` 的写法不统一，同一个结构底下就见过六种：`馬太福音16:18-23`、
-#: `太 16:18、弗 2:20`、`太16:18`、`馬太福音16:16-18`，还有光写 `馬太福音` 和
-#: `聖經` 的。交给 `api.scripture` 去认——书名表、缩写表、繁简别名都在那边，这里
-#: 不另起一套。
-#:
-#: 取第一条解得出节号的。解不出就返回空字符串，幻灯保持上一张（`聖經`、`詩篇`、
-#: `使徒行傳15章` 这类本来就不是节级引用，全库 170 条里有 13 条）。
-def scripture_slug(
-    scope: Iterable[str], prefer: str = "", within: tuple[int, int] | None = None
-) -> str:
-    """这个观点讲的是哪一节，写成 `mat-16-19` 这样的 slug。
-
-    `scripture_scope` 的写法不统一，同一个结构底下就见过六种：`馬太福音16:18-23`、
-    `太 16:18、弗 2:20`、`太16:18`、`馬太福音16:16-18`，还有光写 `馬太福音` 和
-    `聖經` 的。认经文交给 `api.scripture`——书名表、缩写表、繁简别名都在那边。
-
-    `prefer` 是这一页正在解的那段经文。一条 scope 常常列着好几处，
-    `約翰福音20:23、馬太福音16:19、馬太福音18:18` 里教授解的是马太16章，约20:23
-    是他引来对照的；幻灯先显示他正在解的那一节。没有匹配的才退回第一条。
-
-    一条都解不出就返回空字符串，幻灯保持上一张（`聖經`、`詩篇`、`使徒行傳15章`
-    这类本来就不是节级引用，全库 170 条 scope 里有 13 条）。
-    """
-
-    found: list[str] = []
-    for piece in scope or []:
-        found.extend(s for s in reference_slugs(str(piece)) if s not in found)
-    if prefer:
-        for slug in found:
-            if slug.startswith(prefer):
-                return _clip(slug, within)
-    return _clip(found[0], within) if found else ""
-
-
-def _clip(slug: str, within: tuple[int, int] | None) -> str:
-    """把经节范围截到这一页讲的那几节。
-
-    `馬太福音16:18-23` 是那个观点的 scope，但这一页只讲 16:18-19。六节经文摆一
-    张幻灯，读者要在里面找教授正在讲的那一句。截到 16:18-19，多出来的 20-23 节
-    不是这一页的事。
-
-    只截同一章的。跨章的（`16:28-17:2` 这类）原样留着，宁可宽一点也不要截错。
-    """
-
-    if not within:
-        return slug
-    parts = slug.split("-")
-    if len(parts) < 3:
-        return slug
-    book, chapter, start = parts[0], parts[1], int(parts[2])
-    end = int(parts[3]) if len(parts) > 3 else start
-    low, high = within
-    start, end = max(start, low), min(end, high)
-    if start > end:
-        return slug
-    return f"{book}-{chapter}-{start}" + (f"-{end}" if end != start else "")
-
-
-#: 太16:18-19 这一段的 scope 在数据里有好几种写法：`馬太福音16:19`、
-#: `馬太福音16:18-23`、`約翰福音20:23馬太福音16:19馬太福音18:18`。只找 `16:18`
-#: 会漏掉四分之三。
-#:
-#: 不能用 `\b` 收尾：`16:19馬太福音18:18` 里数字后面紧跟中文，而中文与数字之间
-#: 没有词边界，`16:19\b` 匹配不上——三分之二的 scope 长这样。改成「后面不是数
-#: 字」。
-SCRIPTURE_PATTERNS = {
-    "16:18-19": re.compile(r"16:(?:18|19)(?!\d)|16:1[0-8]-(?:19|2\d)"),
-}
-
-
 def spoken_during(
     stretches: list[tuple[float, float, str]], sermon: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -376,7 +307,11 @@ def spoken_during(
     timed = sorted((_at(anchors, position), slug) for position, slug in spoken)
     marks: dict[float, str] = {}
     for start, end, _ in stretches:
-        before = [(at, slug) for at, slug in timed if at <= start]
+        before = [
+            (at, slug)
+            for at, slug in timed
+            if start - SPOKEN_LOOKBACK_SECONDS <= at <= start
+        ]
         if before:
             marks[start] = before[-1][1]
         for at, slug in timed:
@@ -439,14 +374,75 @@ def judgement_during(
             until = runs[index + 1][0] if index + 1 < len(runs) else finish
             if out and out[-1]["judgement"] == run[1]:
                 continue
-            if out and until - run[0] < MIN_JUDGEMENT_SECONDS:
+            # 第一个也要撑得住。
+            #
+            # 原来这条只挡后面的判断，第一个免检——于是（四）1 一开头顶着「阴间
+            # 的权柄不能胜过基督的教会」，而教授那时候才刚念到「你是彼得，我要
+            # 把我的教會建造在這磐石上」。那 60 秒之所以挂在阴间名下，是因为这
+            # 句话是「陰間的門不能勝過教會」那条主张的引证；录音收进来没错，拿
+            # 它当标题就错了。
+            if until - run[0] < MIN_JUDGEMENT_SECONDS:
                 continue
             out.append({"at": run[0], "judgement": run[1]})
-    return out
+    if out:
+        return out
+    # 一个都撑不住的短讲道，取全篇占时间最多的那个，总得有个抬头。
+    scores: dict[str, float] = {}
+    for start, end, proposition in spans:
+        if proposition:
+            scores[proposition] = scores.get(proposition, 0.0) + (end - start)
+    if not scores:
+        return []
+    return [
+        {
+            "at": stretches[0][0],
+            "judgement": max(scores, key=lambda k: (scores[k], k)),
+        }
+    ]
+
+
+def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: int) -> bool:
+    """这条主张讲的是不是这段经文。
+
+    主张自己带 `scripture_refs`，写法跟观点的 `scripture_scope` 一样杂：
+    `馬太福音16:28-17:2`、`馬可福音8:38（聽眾口述為「馬可福音九章最後一節」）`、
+    `啟示錄（未指明章節）`。认经文交给 `api.scripture`。
+    """
+
+    for reference in claim.get("scripture_refs") or []:
+        text = (
+            reference
+            if isinstance(reference, str)
+            else json.dumps(reference, ensure_ascii=False)
+        )
+        for slug in reference_slugs(text):
+            parts = slug.split("-")
+            if len(parts) < 3 or parts[0] != book or parts[1] != str(chapter):
+                continue
+            start = int(parts[2])
+            end = int(parts[3]) if len(parts) > 3 else start
+            overlap = min(end, high) - max(start, low) + 1
+            if overlap <= 0:
+                continue
+            # 光有交集不够。
+            #
+            # 「太16:16-23」跨八节，与 18-19 有交集，可它说的是彼得认耶稣是基督
+            # 到耶稣责备彼得那一整段——七条讲「彼得不认识弥赛亚受苦」的主张就是
+            # 这么串进来的，把（四）3、（四）4 和母本整篇拉进了 16:18-19。
+            #
+            # 分界在**起点**，不只在宽度。引用从哪一节起头，主张就锚在哪里：
+            # 「16:18-23」从 18 起，那条「耶穌不會把教會建立在彼得本人身上」正是
+            # 讲 18 节的；「16:16-23」从 16 起，锚在彼得认信，不在磐石。
+            #
+            # 起点不在这段里的，退一步看交集占不占这条引用的一半——「16:17-19」
+            # 占三分之二，算；「16:16-21」占三分之一，不算。
+            if low <= start <= high or overlap * 2 >= (end - start + 1):
+                return True
+    return False
 
 
 def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
-    """整棵树：中心观点 → 讲道 → 连着讲的几段。
+    """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
 
     `store` 只需要一个 `list_records(collection)`，所以既能接 PostgresKnowledgeStore，
     也能在测试里塞一个字典。
@@ -455,51 +451,19 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     def by_id(collection: str, key: str) -> dict[str, dict[str, Any]]:
         return {str(row.get(key)): row for row in store.list_records(collection) if row.get(key)}
 
-    viewpoints = by_id("canonical_viewpoints", "viewpoint_id")
-    revisions = by_id("viewpoint_revisions", "viewpoint_revision_id")
     claims = by_id("claims", "claim_id")
     steps = by_id("evidence_steps", "evidence_step_id")
     fragments = by_id("source_fragments", "fragment_id")
     documents = by_id("source_documents", "source_id")
-    structures = by_id("viewpoint_structures", "structure_id")
-    # 键是 revision 不是 structure：26 个结构有 28 个 revision，按 structure 建
-    # 索引会让新旧两版互相覆盖。
-    structure_revisions = {
-        str(row.get("structure_revision_id") or row.get("revision_id") or ""): row
-        for row in store.list_records("viewpoint_structure_revisions")
-    }
-    # 每一个修订都要认，不能只认当前修订。
-    #
-    # 结构里的 focal 条目记的是它成形那一刻的 viewpoint_revision_id，观点后来又改
-    # 过，那条 id 就不再是「当前」的了。只建 current_revision_id → viewpoint_id
-    # 的话，这些条目查不到主人：轻则录音少收，重则去重失效——VS-454dd 的中心指的
-    # 正是 CV-d8e50d04 的旧修订，查不到就当成了另一个中心观点。
-    revision_to_viewpoint = {
-        str(rid): str(row.get("viewpoint_id"))
-        for rid, row in revisions.items()
-        if row.get("viewpoint_id")
-    }
-    for vid, v in viewpoints.items():
-        revision_to_viewpoint.setdefault(str(v.get("current_revision_id")), vid)
-
-    members: dict[str, list[dict[str, Any]]] = {}
-    for link in store.list_records("viewpoint_claim_links"):
-        if link.get("link_type") not in MEMBER_LINK_TYPES:
-            continue
-        if str(link.get("effective_state") or "active") != "active":
-            continue
-        members.setdefault(str(link.get("viewpoint_id")), []).append(link)
-
     sermons = Sermons(data_base_dir)
 
-    # 这一页正在解的那段经文，用来在一条列了好几处的 scope 里挑出主经文。
-    # `scripture` 现在只有 "16:18-19"，讲的是马太福音。
-    prefer_book = f"mat-{scripture.split(':')[0]}-" if ":" in scripture else ""
-    verses = re.findall(r"\d+", scripture.split(":")[-1]) if ":" in scripture else []
-    page_verses = (int(verses[0]), int(verses[-1])) if verses else None
+    chapter_text, _, verse_text = scripture.partition(":")
+    chapter = int(chapter_text)
+    verses = [int(n) for n in re.findall(r"\d+", verse_text)] or [1, 999]
+    low, high = verses[0], verses[-1]
 
-    def occasions(claim_id: str, ref: str) -> dict[str, list[tuple[float, float, str]]]:
-        """这条主张的录音，按讲道分开，每段记上它讲的哪一节。"""
+    def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
+        """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
 
         claim = claims.get(claim_id) or {}
         ids = claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []
@@ -522,91 +486,28 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
                     continue
                 span = segment_time(sermon, fragment)
                 if span:
-                    found.setdefault(source_id, []).append((span[0], span[1], ref))
+                    found.setdefault(source_id, []).append((span[0], span[1], label))
         return found
 
-    def current_revision(structure: dict[str, Any]) -> dict[str, Any] | None:
-        """结构的当前版本。
-
-        只看当前版本。26 个结构有 28 个 revision，把 revision 当结构会让两个判断
-        各出现两次——一次旧版一次新版，看起来像重复的数据。
-        """
-
-        return structure_revisions.get(str(structure.get("current_revision_id")))
-
-    def central_of(revision: dict[str, Any]) -> dict[str, Any] | None:
-        return next(
-            (f for f in (revision.get("focal_viewpoints") or []) if f.get("structure_role") == "central_claim"),
-            None,
-        )
-
-    # 同一个中心观点撞上两个结构时，只留一个。
+    # 直接从主张出发，不绕 CanonicalViewpoint。
     #
-    # CV-d8e50d04e164c2e6c750（捆绑释放的标准已由天上决定）有两个结构：
-    # VS-454dd942da1fa7c51657 停在第 1 版、5 个 focal，VS-11ee1cfd2f5252675588 到
-    # 了第 2 版、8 个 focal。两者都没退役，也没有 supersedes 链接——结构生成器给
-    # 同一个中心观点另起了一个结构，而不是改原来的。读者看到的就是同一句判断出现
-    # 两次，其中旧的那个还挂着一条不属于它的 focal（「教会建立在彼得的信仰告
-    # 白上」，属于「磐石是什么」那个结构），于是一段讲 Petrus／Petra 的话混进了
-    # 捆绑释放。
+    # 一度是从中心结构走：结构 → focal 观点 → 成员主张。观点是跨讲道的抽象，为
+    # 了它得先处理结构撞号、focal 挂错、revision 新旧这些事，而拿到的材料反而更
+    # 少——量下来观点那条路只覆盖 46 条主张，主张自己带 scripture_refs 的有 66
+    # 条，前者是后者的子集。（五）1 从 17 分变 24 分，（四）3 从 5 分变 8 分。
     #
-    # 这里按「版本高、focal 多」留后来的那个。真正的修法在结构生成器，不在这里。
-    latest: dict[str, dict[str, Any]] = {}
-    for structure in structures.values():
-        revision = current_revision(structure)
-        central = central_of(revision) if revision else None
-        if not revision or not central:
-            continue
-        viewpoint_id = revision_to_viewpoint.get(str(central.get("viewpoint_revision_id")))
-        key = viewpoint_id or str(structure.get("structure_id"))
-        rank = (
-            int(structure.get("revision") or 0),
-            len(revision.get("focal_viewpoints") or []),
-            str(structure.get("structure_id")),
-        )
-        if key not in latest or rank > latest[key]["rank"]:
-            latest[key] = {"structure": structure, "rank": rank}
-
-    # 一段经文一个入口，不是一个观点一个入口。
-    #
-    # 原来按中心观点分组，太16:18-19 分出五组，同一篇讲道在里面出现两到四次，每
-    # 次只播它属于那一组的几段。听下来是碎的：（四）2 被切成 2+5+3 段散在三组
-    # 里，而教授在课上是一口气把这段经文讲完的。
-    #
-    # 现在按经文聚合。一篇讲道一行，把它讲这段经文的所有材料并起来，教授原来的
-    # 次序就还回去了。观点没丢，挪到幻灯上当标题——经文固定，标题跟着播放位置
-    # 换，告诉听的人他此刻在立哪个判断。
+    # 而且主张是**某一篇讲道里的**一句话，正是幻灯上该写的：他这一分钟说的是
+    # 什么。观点是把五篇里的同一件事归成一条，那是文章层要的东西，不是听原声的
+    # 人要的。
     by_sermon: dict[str, dict[str, Any]] = {}
-    for chosen in latest.values():
-        structure = chosen["structure"]
-        revision = current_revision(structure)
-        if not revision:
+    for claim_id, claim in claims.items():
+        if not in_passage(claim, "mat", chapter, low, high):
             continue
-        focal = revision.get("focal_viewpoints") or []
-        central = central_of(revision)
-        if not central:
+        statement = str(claim.get("statement") or "").strip()
+        if not statement:
             continue
-        central_revision = revisions.get(str(central.get("viewpoint_revision_id"))) or {}
-        scope = "".join(central_revision.get("scope", {}).get("scripture_scope") or [])
-        pattern = SCRIPTURE_PATTERNS.get(scripture)
-        if pattern is not None:
-            if not pattern.search(scope):
-                continue
-        elif scripture and scripture not in scope:
-            continue
-        proposition = str(central_revision.get("core_proposition") or "")
-
-        # 播整个结构的录音：中心判断，加上支撑它的那几条（正面说明、界线、限定、
-        # 方法）。教授论证一个判断时话是连着说的，只挑中心那一句会把理由切掉。
-        for entry in focal:
-            viewpoint_id = revision_to_viewpoint.get(str(entry.get("viewpoint_revision_id")))
-            if not viewpoint_id:
-                continue
-            for link in members.get(viewpoint_id, []):
-                claim_id = str(link.get("claim_id"))
-                for source_id, spans in occasions(claim_id, proposition).items():
-                    slot = by_sermon.setdefault(source_id, {"spans": []})
-                    slot["spans"].extend(spans)
+        for source_id, spans in spans_of(claim_id, statement).items():
+            by_sermon.setdefault(source_id, {"spans": []})["spans"].extend(spans)
 
     sermons_out: list[dict[str, Any]] = []
     for source_id, slot in by_sermon.items():
