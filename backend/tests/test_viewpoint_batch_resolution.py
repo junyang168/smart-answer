@@ -3710,7 +3710,7 @@ def test_reviewer_can_confirm_a_missing_member_source_has_no_route(tmp_path: Pat
             {
                 "target_kind": "member_source",
                 "target_key": "CVR-1::S2",
-                "decision": "pass",
+                "decision": "confirmed_unattestable",
                 "finding_codes": [],
                 "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
             },
@@ -3741,6 +3741,27 @@ def test_reviewer_can_confirm_a_missing_member_source_has_no_route(tmp_path: Pat
             "reason": "S2 只断言结论，没有 premise 或 bridge 可绑定。",
         }
     ]
+
+
+def test_member_source_confirmation_has_an_unambiguous_decision_word():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ReviewedRouteChange,
+    )
+
+    with pytest.raises(ValidationError, match="confirmed_unattestable, not pass"):
+        ReviewedRouteChange(
+            target_kind="member_source",
+            target_key="CVR-1::S2",
+            decision="pass",
+            reason="ambiguous",
+        )
+    with pytest.raises(ValidationError, match="only valid for a member-source"):
+        ReviewedRouteChange(
+            target_kind="route",
+            target_key="ROUTE-1",
+            decision="confirmed_unattestable",
+            reason="wrong target kind",
+        )
 
 
 def test_a_source_that_only_asserts_the_conclusion_can_be_declared():

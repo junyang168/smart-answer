@@ -118,7 +118,10 @@ def apply_confirmed_unattested_members(
 
     existing = {item.key(): item for item in proposal.unattested_members}
     for item in review.change_reviews:
-        if item.target_kind != "member_source" or item.decision != "pass":
+        if (
+            item.target_kind != "member_source"
+            or item.decision != "confirmed_unattestable"
+        ):
             continue
         revision_id, separator, source_id = item.target_key.partition("::")
         if not separator:
@@ -1221,7 +1224,7 @@ def run_route_scope(
     passed = {
         (item.target_kind, item.target_key)
         for item in approval_review.change_reviews
-        if item.decision == "pass"
+        if item.decision in {"pass", "confirmed_unattestable"}
     }
     initially_refused = {
         (item.target_kind, item.target_key)
@@ -1247,7 +1250,7 @@ def run_route_scope(
             sorted(
                 f"final:{item.target_kind}:{item.target_key}:{item.decision}"
                 for item in final_review.change_reviews
-                if item.decision != "pass"
+                if item.decision not in {"pass", "confirmed_unattestable"}
             )
         )
 

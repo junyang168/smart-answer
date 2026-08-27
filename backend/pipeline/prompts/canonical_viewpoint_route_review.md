@@ -9,7 +9,7 @@
 - no-route：`target_kind=no_route`，`target_key=viewpoint_revision_id`
 - member-source：`target_kind=member_source`，`target_key=viewpoint_revision_id::source_id`。这是程序从 `attesting_source_roster` 机械生成的分母项；`proposal_status=unresolved` 表示 proposer 漏了这篇，`declared_unattested` 表示 proposer 声称该篇只有结论、没有可 attest 路线。
 
-`decision` 是 `pass / correct / reject / defer`。pass 没有 finding/correction；correct 必须给具体 acceptance criteria；其他非 pass 必须有排序去重的 finding codes。
+普通 route / attestation / no-route 的 `decision` 是 `pass / correct / reject / defer`。member-source 不得用语义相反的 `pass`：确认该来源没有可绑定路线时必须用 `confirmed_unattestable`；正文中有路线则用 `correct`，证据不足用 `defer`。`pass` 与 `confirmed_unattestable` 都没有 finding/correction；correct 必须给具体 acceptance criteria；其他决定必须有排序去重的 finding codes。
 
 检查：
 
@@ -22,7 +22,7 @@
 - no-route 是否在完整 scope evidence 中真的没有可 attested 路线；
 - `attesting_source_roster` 是否被逐篇交代：凡被 route 作为 conclusion 的 CVP，roster 里每一篇要么有 attestation，要么在 `unattested_members` 中带具体理由。缺席即 correct，并指名该篇与可用的 terminal component；反之，若某篇被写进 `unattested_members` 而其正文确有可绑的推理步骤，同样 correct。讲了两次只接上一次，与只讲过一次在库里读起来一样，但不是同一回事。
 
-对 member-source target：若该来源确实只有结论、没有可绑的推理，判 `pass`，理由必须明确说明为什么不能形成 attestation；程序会从这项独立决定派生 `unattested_members`。若正文中存在可绑路线，判 `correct`，明确要求 correction 补哪条 route/attestation、terminal component 与承重步骤。证据不足则 `defer`。不要因为 proposer 漏填就自动判错，也不要替 proposer 写 route。
+对 member-source target：若该来源确实只有结论、没有可绑的推理，判 `confirmed_unattestable`，理由必须明确说明为什么不能形成 attestation；程序会从这项独立决定派生 `unattested_members`。若正文中存在可绑路线，判 `correct`，明确要求 correction 补哪条 route/attestation、terminal component 与承重步骤。证据不足则 `defer`。不要因为 proposer 漏填就自动判错，也不要替 proposer 写 route。
 
 任何跨来源拼接都将 `cross_source_composition_found` 设为 true，对应 attestation 不得 pass。
 

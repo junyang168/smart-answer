@@ -2668,7 +2668,9 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
 class ReviewedRouteChange(StrictBatchModel):
     target_key: str = Field(min_length=1)
     target_kind: Literal["route", "attestation", "no_route", "member_source"]
-    decision: Literal["pass", "correct", "reject", "defer"]
+    decision: Literal[
+        "pass", "confirmed_unattestable", "correct", "reject", "defer"
+    ]
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
     correction: str | None = None
@@ -2677,9 +2679,22 @@ class ReviewedRouteChange(StrictBatchModel):
     def validate_change(self) -> "ReviewedRouteChange":
         if self.finding_codes != sorted(set(self.finding_codes)):
             raise ValueError("finding codes must be sorted and unique")
-        if self.decision == "pass":
+        if self.target_kind == "member_source" and self.decision == "pass":
+            raise ValueError(
+                "member-source coverage uses confirmed_unattestable, not pass"
+            )
+        if (
+            self.target_kind != "member_source"
+            and self.decision == "confirmed_unattestable"
+        ):
+            raise ValueError(
+                "confirmed_unattestable is only valid for a member-source target"
+            )
+        if self.decision in {"pass", "confirmed_unattestable"}:
             if self.finding_codes or self.correction:
-                raise ValueError("a passing route change carries no finding or correction")
+                raise ValueError(
+                    "an approved route review carries no finding or correction"
+                )
         elif not self.finding_codes:
             raise ValueError(f"{self.decision} requires at least one finding code")
         if self.decision == "correct" and not self.correction:
@@ -2732,7 +2747,8 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
         if len(exception_keys) != len(set(exception_keys)):
             raise ValueError("CVP re-review exceptions must be unique")
         if self.cross_source_composition_found and all(
-            item.decision == "pass" for item in self.change_reviews
+            item.decision in {"pass", "confirmed_unattestable"}
+            for item in self.change_reviews
         ):
             raise ValueError("cross-source composition is never a passing review")
         return self
@@ -2971,7 +2987,13 @@ def validate_route_review(
         raise BatchResolutionError(findings)
     counts = {
         name: sum(1 for item in review.change_reviews if item.decision == name)
-        for name in ("pass", "correct", "reject", "defer")
+        for name in (
+            "pass",
+            "confirmed_unattestable",
+            "correct",
+            "reject",
+            "defer",
+        )
     }
     report = {
         "schema_version": "wang_argument_route_review_validation_v1",
@@ -2980,7 +3002,11 @@ def validate_route_review(
         "reviewed_change_count": len(reviewed),
         "decision_counts": counts,
         "cross_source_composition_found": review.cross_source_composition_found,
-        "outcome": "pass" if counts == {"pass": len(reviewed), "correct": 0, "reject": 0, "defer": 0} else "findings",
+        "outcome": (
+            "pass"
+            if counts["pass"] + counts["confirmed_unattestable"] == len(reviewed)
+            else "findings"
+        ),
         "reconsideration_required": any(
             item.decision == "correct" for item in review.change_reviews
         ),
