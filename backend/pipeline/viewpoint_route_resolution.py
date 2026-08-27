@@ -18,10 +18,13 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ArgumentRouteProposalResponse,
     ArgumentRouteReviewResponse,
     NoRouteDisposition,
+    ROUTE_TARGETED_DISPOSITIONS,
     RouteComponentBinding,
+    UnattestedMember,
     canonicalize_proposal,
     canonicalize_review,
     component_key_from_spans,
+    route_member_source_key,
     validate_route_proposal,
     validate_route_review,
     validate_route_reconsideration,
@@ -56,11 +59,83 @@ _REGISTRY_LINK_DISPOSITIONS = {
 }
 
 
+#: Dispositions a terminal Claim component may carry -- the same set the route
+#: validator enforces, so the roster promises exactly what can be bound.
+_TERMINAL_ELIGIBLE_DISPOSITIONS = ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
+
+
 class RouteStageNotReadyError(ValueError):
     """Committed Registry state cannot yet form a formal Route input cut."""
 
 
 _TARGET_FINDING = re.compile(r"^(attestation|route) ([^:]+):")
+
+
+def route_member_source_review_targets(
+    *,
+    proposal: ArgumentRouteProposalResponse,
+    route_packet: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Return explicit and missing member-source dispositions that need review."""
+
+    routes = {
+        item.local_route_key: item for item in proposal.argument_route_candidates
+    }
+    routed_conclusions = {item.conclusion_ref.key() for item in routes.values()}
+    attested = {
+        (routes[item.route_ref.key()].conclusion_ref.key(), item.source_id)
+        for item in proposal.source_route_attestations
+        if item.route_ref.key() in routes
+    }
+    declared = {item.key(): item for item in proposal.unattested_members}
+    targets: dict[str, dict[str, Any]] = {}
+    for viewpoint in route_packet["approved_viewpoints"]:
+        revision_id = str(viewpoint["viewpoint_revision_id"])
+        if revision_id not in routed_conclusions:
+            continue
+        for source_id in sorted(viewpoint.get("attesting_source_roster") or []):
+            pair = (revision_id, str(source_id))
+            if pair in attested:
+                continue
+            item = declared.get(pair)
+            key = route_member_source_key(*pair)
+            targets[key] = {
+                "target_key": key,
+                "conclusion_viewpoint_revision_id": revision_id,
+                "source_id": str(source_id),
+                "proposal_status": "declared_unattested" if item else "unresolved",
+                "proposer_reason": item.reason if item else None,
+            }
+    return targets
+
+
+def apply_confirmed_unattested_members(
+    *,
+    proposal: ArgumentRouteProposalResponse,
+    review: ArgumentRouteReviewResponse,
+) -> ArgumentRouteProposalResponse:
+    """Materialize reviewer-confirmed negative Route evidence as a disposition."""
+
+    existing = {item.key(): item for item in proposal.unattested_members}
+    for item in review.change_reviews:
+        if (
+            item.target_kind != "member_source"
+            or item.decision != "confirmed_unattestable"
+        ):
+            continue
+        revision_id, separator, source_id = item.target_key.partition("::")
+        if not separator:
+            raise ValueError(f"invalid member-source target key: {item.target_key}")
+        existing[(revision_id, source_id)] = UnattestedMember(
+            conclusion_viewpoint_revision_id=revision_id,
+            source_id=source_id,
+            reason=item.reason,
+        )
+    return proposal.model_copy(
+        update={
+            "unattested_members": [existing[key] for key in sorted(existing)]
+        }
+    )
 
 
 def isolate_deterministically_invalid_route_targets(
@@ -418,7 +493,27 @@ def build_registry_route_packet(
             "每个 attestation 的 Claim、EvidenceStep、SourceFragment 必须同属一篇来源。"
             "不得从两篇拼出一条谁都没讲完整的论证。"
         ),
-        "approved_viewpoints": [approved_index[key] for key in sorted(approved_index)],
+        # Each viewpoint carries the sources that can attest it. The set was
+        # already computable from claim_components, but a proposer that has to
+        # derive its own denominator does not notice the source it left out --
+        # four viewpoints in binding_loosing_meaning were taught in two sermons
+        # and got one attestation each. Stating the roster makes the omission
+        # visible to the proposer, to the reviewer, and to the deterministic
+        # check that now divides by it.
+        "approved_viewpoints": [
+            {
+                **approved_index[key],
+                "attesting_source_roster": sorted(
+                    {
+                        binding.source_id
+                        for binding in components.values()
+                        if binding.target_viewpoint_revision_id == key
+                        and binding.disposition in _TERMINAL_ELIGIBLE_DISPOSITIONS
+                    }
+                ),
+            }
+            for key in sorted(approved_index)
+        ],
         "membership_ledger": {
             "out_of_scope_members": sorted(
                 out_of_scope_members,
@@ -484,6 +579,12 @@ def build_route_review_batches(
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
     )
+    member_source_targets = route_member_source_review_targets(
+        proposal=proposal, route_packet=route_packet
+    )
+    ordered_targets.extend(
+        ("member_source", key) for key in sorted(member_source_targets)
+    )
     if len(ordered_targets) != len(set(ordered_targets)):
         raise ValueError("Route review targets must be unique")
 
@@ -514,6 +615,13 @@ def build_route_review_batches(
             attestations[key].route_ref.key()
             for kind, key in targets
             if kind == "attestation"
+        } | {
+            route.local_route_key
+            for kind, key in targets
+            if kind == "member_source"
+            for route in proposal.argument_route_candidates
+            if route.conclusion_ref.key()
+            == member_source_targets[key]["conclusion_viewpoint_revision_id"]
         }
         context_routes = [routes[key] for key in sorted(context_route_keys)]
         context_attestations = {
@@ -527,6 +635,11 @@ def build_route_review_batches(
         }
         target_no_routes = [
             no_routes[key] for kind, key in targets if kind == "no_route"
+        ]
+        target_member_sources = [
+            member_source_targets[key]
+            for kind, key in targets
+            if kind == "member_source"
         ]
         component_keys = {
             component_key_value
@@ -546,20 +659,36 @@ def build_route_review_batches(
         # A no-route decision is a claim about the complete scope, so it alone
         # receives the complete evidence context. Route/attestation batches are
         # sliced to the exact source-local objects they inspect.
+        member_source_ids = {
+            item["source_id"] for item in target_member_sources
+        }
         complete_evidence = bool(target_no_routes)
         selected_claims = (
             list(packet_claims.values())
             if complete_evidence
-            else [packet_claims[key] for key in sorted(claim_ids)]
+            else [
+                item
+                for item in packet_claims.values()
+                if item["claim_id"] in claim_ids
+                or item["source_id"] in member_source_ids
+            ]
         )
         selected_components = (
             list(packet_components.values())
             if complete_evidence
-            else [packet_components[key] for key in sorted(component_keys)]
+            else [
+                item
+                for item in packet_components.values()
+                if item["claim_component_key"] in component_keys
+                or item["source_id"] in member_source_ids
+            ]
         )
         viewpoint_revision_ids = {
             item.conclusion_ref.key() for item in context_routes
-        } | {item.viewpoint_revision_id for item in target_no_routes}
+        } | {item.viewpoint_revision_id for item in target_no_routes} | {
+            item["conclusion_viewpoint_revision_id"]
+            for item in target_member_sources
+        }
         evidence_context = {
             "schema_version": "wang_argument_route_review_evidence_context_v1",
             "scope_label": route_packet["scope_label"],
@@ -596,12 +725,166 @@ def build_route_review_batches(
                 "viewpoints_with_no_route": [
                     item.model_dump(mode="json") for item in target_no_routes
                 ],
+                "member_source_dispositions": target_member_sources,
             },
             "route_evidence_context": evidence_context,
         }
         batch["batch_sha256"] = sha256_json(batch)
         batches.append(batch)
     return batches
+
+
+def run_final_route_review(
+    *,
+    proposal: ArgumentRouteProposalResponse,
+    route_packet: dict[str, Any],
+    output_dir: Path,
+    reviewer: Any,
+    max_targets: int,
+    initial_review: ArgumentRouteReviewResponse,
+    reconsideration: ArgumentRouteReconsiderationResponse,
+) -> tuple[ArgumentRouteReviewResponse, dict[str, Any], int, float]:
+    """Review the effective post-correction proposal once, with no next correction."""
+
+    proposal_sha = sha256_json(proposal.model_dump(mode="json"))
+    initial_review_payload = initial_review.model_dump(mode="json")
+    reconsideration_payload = reconsideration.model_dump(mode="json")
+    initial_review_sha = sha256_json(initial_review_payload)
+    reconsideration_sha = sha256_json(reconsideration_payload)
+    batches = build_route_review_batches(
+        proposal=proposal,
+        route_packet=route_packet,
+        route_proposal_sha256=proposal_sha,
+        max_targets=max_targets,
+    )
+    _write_immutable(
+        output_dir / "route-final-review-batches.json",
+        {
+            "schema_version": "wang_argument_route_final_review_batch_manifest_v1",
+            "effective_route_proposal_sha256": proposal_sha,
+            "route_evidence_packet_sha256": route_packet["packet_sha256"],
+            "max_targets_per_batch": max_targets,
+            "batches": batches,
+        },
+    )
+    member_targets = set(
+        route_member_source_review_targets(
+            proposal=proposal, route_packet=route_packet
+        )
+    )
+    parts: list[ArgumentRouteReviewResponse] = []
+    calls_total = 0
+    seconds_total = 0.0
+    raw_shas: list[str] = []
+    for index, batch in enumerate(batches, start=1):
+        # The same independent reviewer examines the artifact that can actually
+        # be written. Any non-pass result is an exception; this function never
+        # feeds a finding into a second correction round.
+        final_packet = {
+            **batch,
+            "review_mode": "final_effective_proposal",
+            "initial_route_review_sha256": initial_review_sha,
+            "initial_route_review": initial_review_payload,
+            "route_reconsideration_sha256": reconsideration_sha,
+            "route_reconsideration": reconsideration_payload,
+        }
+        raw_path = output_dir / f"raw-route-final-review-{index:03d}.json"
+        raw, calls, seconds = _call(reviewer, final_packet, raw_path)
+        calls_total += calls
+        seconds_total += seconds
+        raw_shas.append(str(_read(raw_path)["artifact_sha256"]))
+        canonical, _ = canonicalize_review(raw)
+        part = ArgumentRouteReviewResponse.model_validate(canonical)
+        validate_route_review(
+            review=part,
+            proposal=proposal,
+            route_proposal_sha256=proposal_sha,
+            route_evidence_packet_sha256=route_packet["packet_sha256"],
+            expected_targets={
+                (str(item["target_kind"]), str(item["target_key"]))
+                for item in batch["review_targets"]
+            },
+            allowed_claim_component_keys={
+                str(item["claim_component_key"])
+                for item in route_packet["claim_components"]
+            },
+            member_source_targets=member_targets,
+        )
+        parts.append(part)
+    review = ArgumentRouteReviewResponse(
+        route_proposal_sha256=proposal_sha,
+        route_evidence_packet_sha256=route_packet["packet_sha256"],
+        change_reviews=sorted(
+            [item for part in parts for item in part.change_reviews],
+            key=lambda item: (item.target_kind, item.target_key),
+        ),
+        cvp_re_review_exceptions=sorted(
+            {
+                (
+                    item.viewpoint_revision_id,
+                    item.finding_code,
+                    item.triggering_target_kind,
+                    item.triggering_target_key,
+                ): item
+                for part in parts
+                for item in part.cvp_re_review_exceptions
+            }.values(),
+            key=lambda item: (
+                item.viewpoint_revision_id,
+                item.finding_code,
+                item.triggering_target_kind,
+                item.triggering_target_key,
+            ),
+        ),
+        cross_source_composition_found=any(
+            part.cross_source_composition_found for part in parts
+        ),
+        reason="；".join(part.reason for part in parts),
+    )
+    validation = validate_route_review(
+        review=review,
+        proposal=proposal,
+        route_proposal_sha256=proposal_sha,
+        route_evidence_packet_sha256=route_packet["packet_sha256"],
+        allowed_claim_component_keys={
+            str(item["claim_component_key"])
+            for item in route_packet["claim_components"]
+        },
+        member_source_targets=member_targets,
+    )
+    review_payload = review.model_dump(mode="json")
+    review_sha = sha256_json(review_payload)
+    manifest_body = {
+        "schema_version": "wang_argument_route_raw_final_review_manifest_v1",
+        "model_id": reviewer.model_id,
+        "backend": reviewer.backend,
+        "prompt_sha256": reviewer.prompt_sha256,
+        "generation_config_sha256": reviewer.generation_config_sha256,
+        "wall_seconds": round(seconds_total, 3),
+        "calls_recorded": len(raw_shas),
+        "raw_batch_artifact_sha256s": raw_shas,
+        "response_sha256": review_sha,
+    }
+    _write_immutable(
+        output_dir / "raw-route-final-review-manifest.json",
+        manifest_body | {"artifact_sha256": sha256_json(manifest_body)},
+    )
+    _write_immutable(
+        output_dir / "route-final-review.json",
+        {
+            "schema_version": "wang_argument_route_final_review_envelope_v1",
+            "scope_label": proposal.scope_label,
+            "route_evidence_packet_sha256": route_packet["packet_sha256"],
+            "effective_route_proposal_sha256": proposal_sha,
+            "initial_route_review_sha256": initial_review_sha,
+            "route_reconsideration_sha256": reconsideration_sha,
+            "route_final_review_sha256": review_sha,
+            "review": review_payload,
+            "validation_report": validation,
+            "allows_further_correction": False,
+        },
+    )
+    return review, validation, calls_total, seconds_total
 
 
 def run_route_scope(
@@ -655,6 +938,9 @@ def run_route_scope(
             if item.get("route_revision_id") or item.get("argument_route_revision_id")
         },
         "component_bindings": component_bindings,
+        # Missing roster entries are semantic review targets, not a reason to
+        # prevent the independent reviewer from seeing the proposal.
+        "allow_unresolved_member_sources": True,
     }
     deterministic_exceptions: list[str] = []
     try:
@@ -692,6 +978,11 @@ def run_route_scope(
         route_packet=packet,
         route_proposal_sha256=proposal_sha,
         max_targets=review_targets_per_batch,
+    )
+    member_source_target_keys = set(
+        route_member_source_review_targets(
+            proposal=proposal, route_packet=packet
+        )
     )
     _write_immutable(
         output_dir / "route-review-batches.json",
@@ -737,6 +1028,7 @@ def run_route_scope(
                 str(item["claim_component_key"])
                 for item in packet["claim_components"]
             },
+            member_source_targets=member_source_target_keys,
         )
         review_parts.append(part)
     review = ArgumentRouteReviewResponse(
@@ -781,6 +1073,7 @@ def run_route_scope(
             str(item["claim_component_key"])
             for item in packet["claim_components"]
         },
+        member_source_targets=member_source_target_keys,
     )
     review_payload = review.model_dump(mode="json")
     review_sha = sha256_json(review_payload)
@@ -829,7 +1122,10 @@ def run_route_scope(
         },
     )
 
-    effective_proposal = proposal
+    effective_proposal = apply_confirmed_unattested_members(
+        proposal=proposal, review=review
+    )
+    reconsideration: ArgumentRouteReconsiderationResponse | None = None
     reconsideration_report: dict[str, Any] | None = None
     reconsideration_calls = 0
     reconsideration_seconds = 0.0
@@ -858,8 +1154,12 @@ def run_route_scope(
             route_proposal_sha256=proposal_sha,
             route_review_sha256=review_sha,
         )
+        revised_proposal = apply_confirmed_unattested_members(
+            proposal=reconsideration.revised_proposal,
+            review=review,
+        )
         revised_validation = validate_route_proposal(
-            routes=reconsideration.revised_proposal,
+            routes=revised_proposal,
             scope_label=scope_label,
             claims=claims,
             approved_viewpoint_revision_ids=packet["approved_viewpoint_revision_ids"],
@@ -878,7 +1178,7 @@ def run_route_scope(
             component_bindings=component_bindings,
         )
         if reconsideration_report["outcome"] == "resolved":
-            effective_proposal = reconsideration.revised_proposal
+            effective_proposal = revised_proposal
         _write_immutable(
             output_dir / "route-reconsideration.json",
             {
@@ -900,13 +1200,44 @@ def run_route_scope(
     correction_resolved = bool(
         reconsideration_report and reconsideration_report["outcome"] == "resolved"
     )
+    final_review: ArgumentRouteReviewResponse | None = None
+    final_review_validation: dict[str, Any] | None = None
+    final_review_calls = 0
+    final_review_seconds = 0.0
+    if correction_resolved:
+        assert reconsideration is not None
+        final_review, final_review_validation, final_review_calls, final_review_seconds = (
+            run_final_route_review(
+                proposal=effective_proposal,
+                route_packet=packet,
+                output_dir=output_dir,
+                reviewer=reviewer,
+                max_targets=review_targets_per_batch,
+                initial_review=review,
+                reconsideration=reconsideration,
+            )
+        )
+    approval_review = final_review or review
+    final_review_passed = bool(
+        final_review_validation and final_review_validation["outcome"] == "pass"
+    )
     passed = {
         (item.target_kind, item.target_key)
-        for item in review.change_reviews
-        if item.decision == "pass"
+        for item in approval_review.change_reviews
+        if item.decision in {"pass", "confirmed_unattestable"}
     }
-    if correction_resolved:
-        passed |= corrected
+    initially_refused = {
+        (item.target_kind, item.target_key)
+        for item in review.change_reviews
+        if item.decision in {"reject", "defer"}
+    }
+    # A final review verifies B; it does not reopen an object the independent
+    # review of A already sent to the exception path.
+    passed -= initially_refused
+    if correction_resolved and not final_review_passed:
+        # B is one semantic artifact. Once it needed correction, none of B is
+        # approved by the review of A; a failed final review writes nothing.
+        passed = set()
     exceptions = deterministic_exceptions + sorted(
         f"{item.target_kind}:{item.target_key}:{item.decision}"
         for item in review.change_reviews
@@ -914,6 +1245,14 @@ def run_route_scope(
     )
     if corrected and not correction_resolved:
         exceptions.extend(sorted(f"{kind}:{key}:unresolved" for kind, key in corrected))
+    if final_review is not None and not final_review_passed:
+        exceptions.extend(
+            sorted(
+                f"final:{item.target_kind}:{item.target_key}:{item.decision}"
+                for item in final_review.change_reviews
+                if item.decision not in {"pass", "confirmed_unattestable"}
+            )
+        )
 
     route_for_attestation = {
         item.local_attestation_key: item.route_ref.local_route_key
@@ -940,8 +1279,11 @@ def run_route_scope(
             "proposal": "raw-route-proposal.json",
             "review": "raw-route-review-manifest.json",
             "reconsideration": "raw-route-reconsideration.json",
+            "final_review": "raw-route-final-review-manifest.json",
         },
     )
+    approval_review_payload = approval_review.model_dump(mode="json")
+    approval_review_sha = sha256_json(approval_review_payload)
     report = {
         "schema_version": "wang_argument_route_scope_run_v1",
         "scope_label": scope_label,
@@ -951,13 +1293,38 @@ def run_route_scope(
         "passing_route_keys": passing_routes,
         "passing_attestation_keys": passing_attestations,
         "exceptions": sorted(set(exceptions)),
-        "cvp_re_review_exceptions": [
-            item.model_dump(mode="json") for item in review.cvp_re_review_exceptions
-        ],
+        "cvp_re_review_exceptions": sorted(
+            {
+                (
+                    item.viewpoint_revision_id,
+                    item.finding_code,
+                    item.triggering_target_kind,
+                    item.triggering_target_key,
+                ): item.model_dump(mode="json")
+                for reviewed_artifact in (review, final_review)
+                if reviewed_artifact is not None
+                for item in reviewed_artifact.cvp_re_review_exceptions
+            }.values(),
+            key=lambda item: (
+                item["viewpoint_revision_id"],
+                item["finding_code"],
+                item["triggering_target_kind"],
+                item["triggering_target_key"],
+            ),
+        ),
         "cvp_mutations_proposed": 0,
         "route_evidence_packet_sha256": packet["packet_sha256"],
         "route_proposal_sha256": proposal_sha,
-        "route_review_sha256": review_sha,
+        "initial_route_review_sha256": review_sha,
+        "route_review_sha256": approval_review_sha,
+        "route_final_review_sha256": (
+            approval_review_sha if final_review is not None else None
+        ),
+        "route_final_review_outcome": (
+            final_review_validation["outcome"]
+            if final_review_validation is not None
+            else None
+        ),
         "effective_route_proposal_sha256": sha256_json(
             effective_proposal.model_dump(mode="json")
         ),
@@ -991,6 +1358,8 @@ def run_route_scope(
         "proposal_wall_seconds": proposal_seconds,
         "review_calls_executed": review_calls,
         "review_wall_seconds": review_seconds,
+        "final_review_calls_executed": final_review_calls,
+        "final_review_wall_seconds": final_review_seconds,
         "reconsideration_calls_executed": reconsideration_calls,
         "reconsideration_wall_seconds": reconsideration_seconds,
         "call_timeout_seconds": call_timeout_seconds,

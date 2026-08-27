@@ -28,7 +28,7 @@ VALIDATION_VERSION = "wang_canonical_viewpoint_batch_validation_v1"
 CVP_READBACK_VERSION = "wang_cvp_batch_readback_receipt_v1"
 ROUTE_JOB_VERSION = "wang_route_resolution_job_v1"
 ROUTE_WORK_UNIT_VERSION = "wang_route_resolution_work_unit_v1"
-ROUTE_VALIDATION_VERSION = "wang_argument_route_validation_v1"
+ROUTE_VALIDATION_VERSION = "wang_argument_route_validation_v2"
 
 #: Claims per batch.  The 62-Claim POC ran over ten minutes against a 900s
 #: subprocess ceiling, and the reviewer emits more than the proposer does, so
@@ -2602,10 +2602,35 @@ ROUTE_REVIEW_VERSION = "wang_argument_route_review_v1"
 ROUTE_RECONSIDERATION_VERSION = "wang_argument_route_reconsideration_v1"
 
 
+def route_member_source_key(viewpoint_revision_id: str, source_id: str) -> str:
+    """Stable review key for one member source in one conclusion's denominator."""
+
+    return f"{viewpoint_revision_id}::{source_id}"
+
+
 class NoRouteDisposition(StrictBatchModel):
     viewpoint_revision_id: str = Field(min_length=1)
     reason_code: Literal["no_attested_route", "evidence_insufficient", "deferred"]
     reason: str = Field(min_length=1)
+
+
+class UnattestedMember(StrictBatchModel):
+    """One source that holds a member Claim but attests no route for it.
+
+    A source asserting a conclusion is not the same as arguing it: the professor
+    may state it in passing with no inference steps to bind. Without somewhere
+    to say so, requiring every member source to attest would be one more finding
+    the proposer cannot answer, so the requirement ships with this exemption --
+    which has to name the source and say why, and is checked against the roster
+    like everything else.
+    """
+
+    conclusion_viewpoint_revision_id: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    def key(self) -> tuple[str, str]:
+        return (self.conclusion_viewpoint_revision_id, self.source_id)
 
 
 class ArgumentRouteProposalResponse(StrictBatchModel):
@@ -2617,6 +2642,7 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
     argument_route_candidates: list[ArgumentRouteCandidate] = Field(default_factory=list)
     source_route_attestations: list[SourceRouteAttestation] = Field(default_factory=list)
     viewpoints_with_no_route: list[NoRouteDisposition] = Field(default_factory=list)
+    unattested_members: list[UnattestedMember] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_response(self) -> "ArgumentRouteProposalResponse":
@@ -2633,13 +2659,18 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
         no_route = [item.viewpoint_revision_id for item in self.viewpoints_with_no_route]
         if len(no_route) != len(set(no_route)):
             raise ValueError("no-route dispositions must be unique")
+        unattested = [item.key() for item in self.unattested_members]
+        if len(unattested) != len(set(unattested)):
+            raise ValueError("unattested member dispositions must be unique")
         return self
 
 
 class ReviewedRouteChange(StrictBatchModel):
     target_key: str = Field(min_length=1)
-    target_kind: Literal["route", "attestation", "no_route"]
-    decision: Literal["pass", "correct", "reject", "defer"]
+    target_kind: Literal["route", "attestation", "no_route", "member_source"]
+    decision: Literal[
+        "pass", "confirmed_unattestable", "correct", "reject", "defer"
+    ]
     finding_codes: list[str] = Field(default_factory=list)
     reason: str = Field(min_length=1)
     correction: str | None = None
@@ -2648,9 +2679,22 @@ class ReviewedRouteChange(StrictBatchModel):
     def validate_change(self) -> "ReviewedRouteChange":
         if self.finding_codes != sorted(set(self.finding_codes)):
             raise ValueError("finding codes must be sorted and unique")
-        if self.decision == "pass":
+        if self.target_kind == "member_source" and self.decision == "pass":
+            raise ValueError(
+                "member-source coverage uses confirmed_unattestable, not pass"
+            )
+        if (
+            self.target_kind != "member_source"
+            and self.decision == "confirmed_unattestable"
+        ):
+            raise ValueError(
+                "confirmed_unattestable is only valid for a member-source target"
+            )
+        if self.decision in {"pass", "confirmed_unattestable"}:
             if self.finding_codes or self.correction:
-                raise ValueError("a passing route change carries no finding or correction")
+                raise ValueError(
+                    "an approved route review carries no finding or correction"
+                )
         elif not self.finding_codes:
             raise ValueError(f"{self.decision} requires at least one finding code")
         if self.decision == "correct" and not self.correction:
@@ -2664,7 +2708,7 @@ class CvpReReviewException(StrictBatchModel):
     viewpoint_revision_id: str = Field(min_length=1)
     finding_code: str = Field(min_length=1)
     reason: str = Field(min_length=1)
-    triggering_target_kind: Literal["route", "attestation", "no_route"]
+    triggering_target_kind: Literal["route", "attestation", "no_route", "member_source"]
     triggering_target_key: str = Field(min_length=1)
     evidence_claim_component_keys: list[str] = Field(min_length=1)
 
@@ -2703,7 +2747,8 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
         if len(exception_keys) != len(set(exception_keys)):
             raise ValueError("CVP re-review exceptions must be unique")
         if self.cross_source_composition_found and all(
-            item.decision == "pass" for item in self.change_reviews
+            item.decision in {"pass", "confirmed_unattestable"}
+            for item in self.change_reviews
         ):
             raise ValueError("cross-source composition is never a passing review")
         return self
@@ -2711,7 +2756,7 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
 
 class RouteFindingDisposition(StrictBatchModel):
     target_key: str = Field(min_length=1)
-    target_kind: Literal["route", "attestation", "no_route"]
+    target_kind: Literal["route", "attestation", "no_route", "member_source"]
     disposition: Literal["accepted", "rebutted", "deferred"]
     reason: str = Field(min_length=1)
 
@@ -2742,6 +2787,7 @@ def validate_route_proposal(
     known_route_revision_ids: Sequence[str],
     known_route_conclusions: Mapping[str, str] | None = None,
     component_bindings: Sequence[RouteComponentBinding],
+    allow_unresolved_member_sources: bool = False,
 ) -> dict[str, Any]:
     """Check routes against the scope's exact approved viewpoint set."""
 
@@ -2772,6 +2818,64 @@ def validate_route_proposal(
         findings.append(f"{missing}: approved viewpoint has no route or no-route disposition")
     for extra in sorted((routed | no_route) - set(approved)):
         findings.append(f"{extra}: route coverage names a viewpoint outside the approved set")
+
+    # A viewpoint's member sources are its denominator, and until now nothing
+    # divided by it. The packet builder computes which members cannot be
+    # attested -- out of this evidence scope, or carrying no exact evidence
+    # bindings -- and the remainder is exactly the set of sources that can.
+    #
+    # binding_loosing_meaning: four viewpoints each hold member Claims from two
+    # sermons, and each got one route attesting one of them. The second source
+    # was in the packet with evidence saying the conclusion in as many words
+    # (「捆綁」可指不准人進天國，「釋放」可指准人進天國) and an active member link
+    # to bind a terminal on. Nothing asked for it, so nothing missed it, and the
+    # viewpoint reads as taught once when it was taught twice.
+    attested_by_conclusion: dict[str, set[str]] = {}
+    routes_by_key = {
+        item.local_route_key: item for item in routes.argument_route_candidates
+    }
+    for attestation in routes.source_route_attestations:
+        route = routes_by_key.get(str(attestation.route_ref.local_route_key))
+        if route is None:
+            continue
+        attested_by_conclusion.setdefault(route.conclusion_ref.key(), set()).add(
+            attestation.source_id
+        )
+    eligible_by_conclusion: dict[str, set[str]] = {}
+    for binding in component_bindings:
+        target = binding.target_viewpoint_revision_id
+        if not target or binding.disposition not in ROUTE_TARGETED_DISPOSITIONS - {
+            "tension_existing"
+        }:
+            continue
+        eligible_by_conclusion.setdefault(target, set()).add(binding.source_id)
+    exempt = {item.key() for item in routes.unattested_members}
+    unresolved_member_sources: list[tuple[str, str]] = []
+    for revision_id in sorted(routed):
+        eligible = eligible_by_conclusion.get(revision_id, set())
+        attested = attested_by_conclusion.get(revision_id, set())
+        for source_id in sorted(eligible - attested):
+            if (revision_id, source_id) in exempt:
+                continue
+            unresolved_member_sources.append((revision_id, source_id))
+            if not allow_unresolved_member_sources:
+                findings.append(
+                    f"{revision_id}: source {source_id} holds a member Claim but attests no "
+                    "route for it, and is not declared in unattested_members"
+                )
+    for item in sorted(routes.unattested_members, key=lambda entry: entry.key()):
+        eligible = eligible_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
+        attested = attested_by_conclusion.get(item.conclusion_viewpoint_revision_id, set())
+        if item.source_id not in eligible:
+            findings.append(
+                f"{item.conclusion_viewpoint_revision_id}: unattested_members names "
+                f"{item.source_id}, which holds no member Claim for it"
+            )
+        elif item.source_id in attested:
+            findings.append(
+                f"{item.conclusion_viewpoint_revision_id}: unattested_members names "
+                f"{item.source_id}, which does attest a route for it"
+            )
     if findings:
         raise BatchResolutionError(findings)
 
@@ -2788,6 +2892,22 @@ def validate_route_proposal(
             1 for item in routes.source_route_attestations if item.completeness == "partial"
         ),
         "attested_sources": sorted({item.source_id for item in routes.source_route_attestations}),
+        "member_source_coverage": {
+            revision_id: {
+                "eligible": sorted(eligible_by_conclusion.get(revision_id, set())),
+                "attested": sorted(attested_by_conclusion.get(revision_id, set())),
+                "declared_unattested": sorted(
+                    item.source_id
+                    for item in routes.unattested_members
+                    if item.conclusion_viewpoint_revision_id == revision_id
+                ),
+            }
+            for revision_id in sorted(routed)
+        },
+        "unresolved_member_source_keys": [
+            route_member_source_key(revision_id, source_id)
+            for revision_id, source_id in unresolved_member_sources
+        ],
         "inference_method_codes": sorted(
             {code for item in routes.argument_route_candidates for code in item.inference_method_codes}
         ),
@@ -2815,6 +2935,7 @@ def validate_route_review(
     route_evidence_packet_sha256: str,
     expected_targets: set[tuple[str, str]] | None = None,
     allowed_claim_component_keys: set[str] | None = None,
+    member_source_targets: set[str] | None = None,
 ) -> dict[str, Any]:
     """Require exact review coverage and bind it to both semantic inputs."""
 
@@ -2832,6 +2953,8 @@ def validate_route_review(
     } | {
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
+    } | {
+        ("member_source", key) for key in (member_source_targets or set())
     }
     expected = expected_targets if expected_targets is not None else full_expected
     if not expected <= full_expected:
@@ -2864,7 +2987,13 @@ def validate_route_review(
         raise BatchResolutionError(findings)
     counts = {
         name: sum(1 for item in review.change_reviews if item.decision == name)
-        for name in ("pass", "correct", "reject", "defer")
+        for name in (
+            "pass",
+            "confirmed_unattestable",
+            "correct",
+            "reject",
+            "defer",
+        )
     }
     report = {
         "schema_version": "wang_argument_route_review_validation_v1",
@@ -2873,7 +3002,11 @@ def validate_route_review(
         "reviewed_change_count": len(reviewed),
         "decision_counts": counts,
         "cross_source_composition_found": review.cross_source_composition_found,
-        "outcome": "pass" if counts == {"pass": len(reviewed), "correct": 0, "reject": 0, "defer": 0} else "findings",
+        "outcome": (
+            "pass"
+            if counts["pass"] + counts["confirmed_unattestable"] == len(reviewed)
+            else "findings"
+        ),
         "reconsideration_required": any(
             item.decision == "correct" for item in review.change_reviews
         ),
@@ -2902,6 +3035,15 @@ def _route_change_payloads(
         **{
             ("no_route", item.viewpoint_revision_id): item.model_dump(mode="json")
             for item in proposal.viewpoints_with_no_route
+        },
+        **{
+            (
+                "member_source",
+                route_member_source_key(
+                    item.conclusion_viewpoint_revision_id, item.source_id
+                ),
+            ): item.model_dump(mode="json")
+            for item in proposal.unattested_members
         },
     }
 
@@ -2945,8 +3087,71 @@ def validate_route_reconsideration(
 
     before = _route_change_payloads(proposal)
     after = _route_change_payloads(reconsideration.revised_proposal)
-    if set(before) != set(after):
-        findings.append("route reconsideration changed proposal object keys")
+    # One finding can only be answered by changing the key set: the reviewer
+    # says the proposal declared `no_route` for a viewpoint whose route is
+    # sitting right there in the evidence, quotes it, and names the nodes.  The
+    # answer is to drop the no_route entry and add the route with its
+    # attestation -- refusing every key-set change made that finding
+    # unanswerable, and one unanswerable finding fails the whole work unit.
+    #
+    # Only that transformation is authorised.  A no_route entry may disappear
+    # when its finding was accepted; a route may appear when it concludes in one
+    # of those viewpoints; an attestation may appear when it attests one of
+    # those new routes.  Everything else is still a collateral edit.
+    accepted_targets = {
+        (item.target_kind, item.target_key)
+        for item in reconsideration.finding_dispositions
+        if item.disposition == "accepted"
+    }
+    released_viewpoints = {
+        key for kind, key in accepted_targets if kind == "no_route"
+    }
+    added_routes = {
+        item.local_route_key
+        for item in reconsideration.revised_proposal.argument_route_candidates
+        if ("route", item.local_route_key) not in before
+        and item.conclusion_ref.key() in released_viewpoints
+    }
+    # A missing attestation is now a finding the reviewer can raise (a member
+    # source that attests nothing), and its only answer is a new attestation on
+    # an existing route. Authorised by that route's own accepted finding, the
+    # same way a released no_route authorises the route that replaces it.
+    routes_with_accepted_findings = added_routes | {
+        key for kind, key in accepted_targets if kind == "route"
+    }
+    accepted_member_sources = {
+        tuple(key.split("::", 1))
+        for kind, key in accepted_targets
+        if kind == "member_source" and "::" in key
+    }
+    revised_routes = {
+        item.local_route_key: item
+        for item in reconsideration.revised_proposal.argument_route_candidates
+    }
+    authorized_additions = {("route", key) for key in added_routes} | {
+        ("attestation", item.local_attestation_key)
+        for item in reconsideration.revised_proposal.source_route_attestations
+        if ("attestation", item.local_attestation_key) not in before
+        and (
+            item.route_ref.local_route_key in routes_with_accepted_findings
+            or (
+                item.route_ref.local_route_key in revised_routes
+                and (
+                    revised_routes[item.route_ref.local_route_key].conclusion_ref.key(),
+                    item.source_id,
+                )
+                in accepted_member_sources
+            )
+        )
+    }
+    for kind, key in sorted((set(before) - set(after)) - accepted_targets):
+        findings.append(
+            f"{kind}:{key}: route reconsideration dropped an object no finding authorised"
+        )
+    for kind, key in sorted((set(after) - set(before)) - authorized_additions):
+        findings.append(
+            f"{kind}:{key}: route reconsideration added an object no finding authorised"
+        )
     for key in sorted(set(before) & set(after)):
         if key not in flagged and before[key] != after[key]:
             findings.append(
