@@ -233,7 +233,7 @@ export default function WangRepositoryPage() {
           王守仁教授聖經講論文庫
         </h1>
         <p className="mt-4 max-w-2xl text-lg leading-8 text-stone-600">
-          教授講道的原聲，與從中整理出的釋經文章。
+          教授講道的原聲，與從中整理出的釋經和專題文章。
         </p>
 
         {/* 先問「讀還是聽」，再問「怎麼排」。
