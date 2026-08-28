@@ -37,6 +37,14 @@ export const SermonMediaPlayer: React.FC<{
 
     return ( authenticated ? (
         <div className="mb-8 flex flex-col gap-4 rounded-xl border bg-gray-100 p-4 shadow-lg">
+          {slideDeck?.slides?.length ? (
+            <SermonPptSlide
+              deck={slideDeck}
+              seconds={seconds}
+              onSeek={seek}
+              coverTitle={sermon.title}
+            />
+          ) : null}
           {sermon.videoUrl ? (
             // --- 如果有視頻，渲染視頻播放器 ---
             <video
@@ -65,14 +73,6 @@ export const SermonMediaPlayer: React.FC<{
                 </audio>
             </div>
           )}
-          {slideDeck?.slides?.length ? (
-            <SermonPptSlide
-              deck={slideDeck}
-              seconds={seconds}
-              onSeek={seek}
-              coverTitle={sermon.title}
-            />
-          ) : null}
         </div>
     ) : (
     <div className="p-8 flex flex-col items-left justify-center text-left ">
