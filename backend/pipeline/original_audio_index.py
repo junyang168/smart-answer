@@ -823,6 +823,7 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
         # 页面地址，用的都是这一个 slug。
         "passage": passage,
         "label": format_chinese_reference(passage),
+        "title": PASSAGE_TITLES.get(passage, ""),
         "sermons": sermons_out,
     }
 
@@ -870,6 +871,21 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
 #: 记在 #36（16:21-23 的修订卡），文章重写时两边应一起动。
 #:
 #: 16:28 不在这里：跨章，归 #20（16:28–17:8 登山变像）。
+#: 每段的标题。
+#:
+#: 这是这一页唯一由人写的字——其余全是教授的原话和圣经经文。用词取自逐字稿里他
+#: 自己的分段小标题，不另造说法：
+#:
+#:   16:1-12   「小信」的真正含義 · 防備錯誤教導的「酵」
+#:   16:13-23  教會的磐石根基 · 權柄的對象：不只彼得，更是教會
+#:             彌賽亞的真諦：從身份認同到使命認知
+#:   16:24-27  何謂「捨己」？ · 何謂「背起十字架」？
+PASSAGE_TITLES: dict[str, str] = {
+    "mat-16-1-12": "求神蹟的試探，與防備法利賽人的酵",
+    "mat-16-13-23": "認信、磐石與天國的鑰匙，到第一次預言受難",
+    "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
+}
+
 PASSAGES: tuple[tuple[str, str], ...] = (
     ("mat-16-1-12", "太16:1–12"),
     ("mat-16-13-23", "太16:13–23"),
@@ -903,6 +919,7 @@ def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
         out.append({
             "passage": slug,
             "label": label,
+            "title": PASSAGE_TITLES.get(slug, ""),
             "scripture": {
                 "book": reference["osis_book"],
                 "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),

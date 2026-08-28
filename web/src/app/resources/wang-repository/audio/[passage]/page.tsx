@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -191,6 +192,7 @@ const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 export default function OriginalAudioPage() {
   const passage = String(useParams()?.passage ?? "");
   const [label, setLabel] = useState("");
+  const [title, setTitle] = useState("");
   const [sermons, setSermons] = useState<Sermon[] | null>(null);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
@@ -209,6 +211,7 @@ export default function OriginalAudioPage() {
         if (!response.ok) throw new Error(`服務回傳 ${response.status}`);
         const data = await response.json();
         setLabel(data.label ?? "");
+        setTitle(data.title ?? "");
         setSermons(data.sermons ?? []);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "讀不到");
@@ -287,22 +290,44 @@ export default function OriginalAudioPage() {
     }
   }
 
-  if (error) return <p className="px-1 py-10 text-sm text-rose-700">{error}</p>;
-  if (!sermons) return <p className="px-1 py-10 text-sm text-slate-400">讀取中…</p>;
+  if (error)
+    return (
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-rose-800">{error}</p>
+      </main>
+    );
+  if (!sermons)
+    return (
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-stone-600" role="status">
+          正在讀取…
+        </p>
+      </main>
+    );
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-10">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-          王教授講{label || "這段經文"}
-        </h1>
-        <p className="text-sm leading-relaxed text-slate-600">
-          他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
-          每一遍的理由都不一樣，所以不合併。
-        </p>
-      </header>
+    <main className="min-h-screen bg-stone-50">
+      <div className="mx-auto flex max-w-4xl flex-col gap-8 px-5 py-12 sm:px-8 sm:py-16">
+        <header className="flex flex-col gap-3">
+          {/* 回得去。原来这一页是个断头路——从文库进来之后没有任何路标，只能靠
+              浏览器的后退键。 */}
+          <Link
+            href="/resources/wang-repository"
+            className="w-fit text-sm font-semibold text-amber-800 hover:text-amber-900"
+          >
+            <span aria-hidden="true">←</span> 王守仁教授聖經講論文庫
+          </Link>
+          <p className="text-sm font-bold text-amber-800">原聲 · {label}</p>
+          <h1 className="font-serif text-3xl font-bold leading-tight text-stone-950 sm:text-4xl">
+            {title || label}
+          </h1>
+          <p className="max-w-3xl text-lg leading-8 text-stone-600">
+            他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
+            每一遍的理由都不一樣，所以不合併。
+          </p>
+        </header>
 
-      <ul className="flex flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+        <ul className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
         {sermons.map((sermon) => {
           const open = playing?.sermon.source_id === sermon.source_id;
           const seconds = open ? at : (sermon.stretches[0]?.start ?? 0);
@@ -418,7 +443,8 @@ export default function OriginalAudioPage() {
             </li>
           );
         })}
-      </ul>
+        </ul>
+      </div>
     </main>
   );
 }

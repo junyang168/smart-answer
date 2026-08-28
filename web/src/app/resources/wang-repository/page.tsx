@@ -38,6 +38,7 @@ type AudioPassage = {
   seconds: number;
   topics: number;
   href: string;
+  title: string;
 };
 
 type BibleBookGroup = {
@@ -124,9 +125,8 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
  * 跟文章卡并排，但一眼要能分出来：文章是读的，原声是听的。同一个圆角边框，换
  * 一套颜色。
  *
- * 没有标题——经节就是标题。文章的标题是写出来的，原声一个字都不新增，硬编一个
- * 「求神蹟的試探」上去就破了这一页的前提。标题的位置留给只有原声才有的东西：
- * 他在几篇讲道里讲过、总共多久、分成几个讲题。
+ * 标题的用词取自逐字稿里教授自己的分段小标题，不另造说法。底下报的是只有原声
+ * 才有的东西：他在几篇讲道里讲过、总共多久、分成几个讲题。
  */
 function AudioLink({ passage }: { passage: AudioPassage }) {
   return (
@@ -134,9 +134,9 @@ function AudioLink({ passage }: { passage: AudioPassage }) {
       href={passage.href}
       className="group block rounded-2xl border border-stone-800 bg-stone-900 px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-700"
     >
-      <span className="text-sm font-bold text-amber-300">原聲</span>
-      <h4 className="mt-2 font-serif text-2xl font-bold leading-8 text-stone-50">
-        {passage.label}
+      <span className="text-sm font-bold text-amber-300">原聲 · {passage.label}</span>
+      <h4 className="mt-2 font-serif text-xl font-bold leading-8 text-stone-50">
+        {passage.title || passage.label}
       </h4>
       <p className="mt-2 text-sm text-stone-400">
         {passage.sermons} 篇講道 · 共 {Math.round(passage.seconds / 60)} 分 · {passage.topics} 個講題
