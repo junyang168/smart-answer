@@ -29,6 +29,8 @@ from typing import Any, Iterable
 from urllib.parse import quote
 
 import httpx
+from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4
 
 from backend.api.scripture import (
     BIBLE_API_TRANSLATION_ZH,
@@ -160,11 +162,20 @@ class Sermons:
                 # 檔名裡有空格和全形冒號（`2016 NYSC 專題：…`）。不編碼就直接
                 # 塞進 `src`，瀏覽器不會發出請求，播放器停在 0:00 而且沒有任何
                 # 錯誤——產生 URL 的一方負責編碼。
+                duration: float | None = None
+                try:
+                    parsed = MP4(candidate) if suffix == ".mp4" else MP3(candidate)
+                    duration = float(parsed.info.length)
+                # 一只坏档不能让整段经文的公开接口一起 500。没有读到时前端仍可
+                # 播放，只是不在后端宣称已经验证过时长边界。
+                except Exception:
+                    pass
                 return {
                     "media_kind": kind,
                     "media_url": f"{MEDIA_URL_PREFIX}/{quote(transcript_id + suffix)}",
+                    "media_duration": duration,
                 }
-        return {"media_kind": None, "media_url": None}
+        return {"media_kind": None, "media_url": None, "media_duration": None}
 
 
 #: 教授给经文里的字作注解时的写法：中文词后面跟着括号，括号里是原文。
@@ -177,6 +188,21 @@ GLOSS = re.compile(r"(?P<context>[\u4e00-\u9fff]{1,10})\s*[（(]\s*(?P<original>
 #:
 #: 希腊字母，或者一串拉丁字母（Petrus、petra、apostolōn 这类转写）。
 ORIGINAL = re.compile(r"^[A-Za-z\u0370-\u03ff\u1f00-\u1fff/\s,·.'\u2019-]{2,60}$")
+
+#: 括号里的有时是语法名称，不是希腊词本身：
+#: `ἔσται δεδεμένον就是未來完成時態（Future Perfect Passive）`。把紧挨在前面的
+#: 希腊词也原样带出来，页面才能把「词形／教授怎么解释」放在同一张卡上。
+GREEK_TERM = re.compile(
+    r"[\u0370-\u03ff\u1f00-\u1fff]+(?:\s+[\u0370-\u03ff\u1f00-\u1fff]+){0,3}"
+)
+
+#: 英文括注不自动等于「原文讲解」；要有逐字稿自己的语言学信号。否则
+#: `完全了解你信心的內涵（implication）` 也会被标成希腊文卡。
+ORIGINAL_LANGUAGE_SIGNAL = re.compile(
+    r"希[臘腊]文|希伯[來来]文|亞蘭文|亚兰文|原文|文法|時態|时态|"
+    r"Greek|Hebrew|Aramaic",
+    re.I,
+)
 
 #: 校对时删掉的字。`~~…~~` 是软删除，念的时候没念，算字数要先去掉。
 STRIKETHROUGH = re.compile(r"~~([^~]+?)~~", re.S)
@@ -282,7 +308,10 @@ def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[floa
     return None
 
 
-def stretch(intervals: Iterable[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
+def stretch(
+    intervals: Iterable[tuple[float, float, str]],
+    media_duration: float | None = None,
+) -> list[tuple[float, float, str]]:
     """把区间并成「连着讲的几段」，每段记住它主要在讲哪一节。
 
     相隔 30 秒之内接起来，超过就断开——断开的地方教授在讲别的，接起来听会以为
@@ -293,7 +322,19 @@ def stretch(intervals: Iterable[tuple[float, float, str]]) -> list[tuple[float, 
     个——幻灯只有一张，得挑教授在这一段里主要在讲的那一节。
     """
 
-    ordered = sorted((max(0.0, a - LEAD_IN_SECONDS), b, ref) for a, b, ref in intervals)
+    limit = media_duration if media_duration is not None and media_duration > 0 else None
+    ordered = []
+    for raw_start, raw_end, ref in intervals:
+        start = max(0.0, raw_start - LEAD_IN_SECONDS)
+        if limit is not None and start >= limit:
+            # 对齐估算可能落到 EOF 后面。那不是一段可以播放的录音，不能靠伪造一
+            # 个 90 秒区间把它救回来。
+            continue
+        end = max(start, raw_end)
+        if limit is not None:
+            end = min(end, limit)
+        ordered.append((start, end, ref))
+    ordered.sort()
     if not ordered:
         return []
     merged: list[dict[str, Any]] = []
@@ -308,7 +349,11 @@ def stretch(intervals: Iterable[tuple[float, float, str]]) -> list[tuple[float, 
     for item in merged:
         weight = item["weight"]
         ref = max(weight, key=lambda k: (weight[k], k)) if weight else ""
-        out.append((item["start"], max(item["end"], item["start"] + MIN_STRETCH_SECONDS), ref))
+        finish = max(item["end"], item["start"] + MIN_STRETCH_SECONDS)
+        if limit is not None:
+            finish = min(finish, limit)
+        if finish > item["start"]:
+            out.append((item["start"], finish, ref))
     return out
 
 
@@ -354,22 +399,19 @@ def spoken_during(
     ]
 
 
-def glosses_during(
+def original_language_during(
     stretches: list[tuple[float, float, str]], sermon: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """教授在这几段里给哪些字作了注解。
+    """教授在这几段里明确讲了哪些原文词或语法。
 
     幻灯上不铺整节的希腊原文——读者不看希腊文，铺开只是一堵墙。他在课上真正做的
     是挑几个字讲：「你是彼得(Petrus)，我要把我的教會建造在這磐石(petra)上」。他
     讲到哪个字，就把那个字在经文里标出来，旁边写上原文。
 
-    这里只给出**候选**，不判断哪个是经文里的词——经文正文是页面那边取的，词在不
-    在经文里得在那边比。候选是括号前面那串中文，前端取最短的、且出现在经文里的
-    后缀：「我的教會建造在這磐石」取到「磐石」，「你是彼得」取到「彼得」。
-
-    这条规则自己就把跑题的挡掉了：哈拉卡（Halakhah）、通用希臘文（Koine
-    Greek）、魂（psyche）、靈（ruach）都不是太16:18-19 里的字，前端比不上就不
-    显示。
+    经文正文由页面取得；括号前的中文若能配上经文字词，页面同时高亮该词。配不上
+    也不自动丢掉——`ἔσται δεδεμένον…（Future Perfect Passive）` 讲的是语法，正
+    是这次 POC 必须呈现的内容。每条都带逐字稿原样切片和字符位置，页面只负责显
+    示，不替教授补一层语法分析。
     """
 
     anchors = _timeline(sermon)
@@ -384,10 +426,30 @@ def glosses_during(
         original = match.group("original").strip()
         if not ORIGINAL.match(original):
             continue
+        nearby = text[max(0, match.start() - 100):min(len(text), match.end() + 100)]
+        if not GREEK_TERM.search(original) and not ORIGINAL_LANGUAGE_SIGNAL.search(nearby):
+            continue
         at = _at(anchors, match.start())
         if at is None or not any(begin <= at < finish for begin, finish, _ in stretches):
             continue
-        out.append({"at": at, "context": match.group("context"), "original": original})
+        # 保留一个短的、逐字稿中的原样切片。页面可以把它折叠在「教授原话」下面，
+        # 而不是由系统替教授解释希腊文。
+        excerpt_start = max(0, match.start() - 60)
+        excerpt_end = min(len(text), match.end() + 100)
+        before = text[max(0, match.start() - 100):match.start()]
+        greek = list(GREEK_TERM.finditer(before))
+        greek_term = greek[-1].group(0) if greek else ""
+        if GREEK_TERM.fullmatch(original):
+            greek_term = original
+        out.append({
+            "at": at,
+            "context": match.group("context"),
+            "original": original,
+            "greek": greek_term,
+            "transcript_excerpt": text[excerpt_start:excerpt_end],
+            "transcript_span": {"start": excerpt_start, "end": excerpt_end},
+            "source_kind": "transcript_explicit",
+        })
     return out
 
 
@@ -521,6 +583,7 @@ def judgement_during(
     spans: list[tuple[float, float, str]],
     stretches: list[tuple[float, float, str]],
     verses: dict[str, str] | None = None,
+    provenance: dict[str, dict[str, list[str]]] | None = None,
 ) -> list[dict[str, Any]]:
     """教授在这几段里先后立的判断，按时间排。
 
@@ -585,8 +648,11 @@ def judgement_during(
             # 它当标题就错了。
             if until - run[0] < MIN_JUDGEMENT_SECONDS:
                 continue
-            out.append({"at": run[0], "judgement": run[1],
-                        "scripture": (verses or {}).get(run[1], "")})
+            mark = {"at": run[0], "judgement": run[1],
+                    "scripture": (verses or {}).get(run[1], "")}
+            if run[1] in (provenance or {}):
+                mark["provenance"] = provenance[run[1]]
+            out.append(mark)
         # 每一段都得有自己的抬头。
         #
         # 90 秒那条线会把短段的抬头全滤掉：（四）3 的 2:05–3:03 和 35:27–36:12
@@ -598,8 +664,11 @@ def judgement_during(
         if len(out) == kept:
             judgement = dominant(begin, finish)
             if judgement and (not out or out[-1]["judgement"] != judgement):
-                out.append({"at": begin, "judgement": judgement,
-                            "scripture": (verses or {}).get(judgement, "")})
+                mark = {"at": begin, "judgement": judgement,
+                        "scripture": (verses or {}).get(judgement, "")}
+                if judgement in (provenance or {}):
+                    mark["provenance"] = provenance[judgement]
+                out.append(mark)
     # 每个判断能听多久。
     #
     # 判断不再只是幻灯上的抬头，它同时是读者的收听单位——一段一个判断，点它开始
@@ -741,12 +810,19 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     # 这一段每一节的经文，用来在逐字稿里找他念到哪一节。
     passage_verses = verse_texts(data_base_dir, book, chapter, low, high)
 
-    def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
+    def spans_of(
+        claim_id: str,
+        label: str,
+    ) -> tuple[
+        dict[str, list[tuple[float, float, str]]],
+        dict[str, dict[str, list[str]]],
+    ]:
         """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
 
         claim = claims.get(claim_id) or {}
         ids = claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []
         found: dict[str, list[tuple[float, float, str]]] = {}
+        trace: dict[str, dict[str, list[str]]] = {}
         for step_id in ids:
             step = steps.get(str(step_id))
             if not step:
@@ -766,7 +842,18 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
                 span = segment_time(sermon, fragment)
                 if span:
                     found.setdefault(source_id, []).append((span[0], span[1], label))
-        return found
+                    item = trace.setdefault(source_id, {
+                        "claim_ids": [],
+                        "evidence_step_ids": [],
+                        "source_fragment_ids": [],
+                    })
+                    if claim_id not in item["claim_ids"]:
+                        item["claim_ids"].append(claim_id)
+                    if str(step_id) not in item["evidence_step_ids"]:
+                        item["evidence_step_ids"].append(str(step_id))
+                    if fragment_id not in item["source_fragment_ids"]:
+                        item["source_fragment_ids"].append(fragment_id)
+        return found, trace
 
     # 直接从主张出发，不绕 CanonicalViewpoint。
     #
@@ -788,13 +875,24 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
         if not statement:
             continue
         verses.setdefault(statement, claim_verse(claim, book, chapter, low, high))
-        for source_id, spans in spans_of(claim_id, statement).items():
-            by_sermon.setdefault(source_id, {"spans": []})["spans"].extend(spans)
+        located, traces = spans_of(claim_id, statement)
+        for source_id, spans in located.items():
+            slot = by_sermon.setdefault(source_id, {"spans": [], "provenance": {}})
+            slot["spans"].extend(spans)
+            target = slot["provenance"].setdefault(statement, {
+                "claim_ids": [],
+                "evidence_step_ids": [],
+                "source_fragment_ids": [],
+            })
+            for key, values in traces.get(source_id, {}).items():
+                for value in values:
+                    if value not in target[key]:
+                        target[key].append(value)
 
     sermons_out: list[dict[str, Any]] = []
     for source_id, slot in by_sermon.items():
         sermon = sermons.load(source_id, documents.get(source_id) or {})
-        merged = stretch(slot["spans"])
+        merged = stretch(slot["spans"], sermon.get("media_duration") if sermon else None)
         if not merged or not sermon:
             continue
         sermons_out.append({
@@ -803,8 +901,11 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             "title": sermon["title"],
             "media_kind": sermon["media_kind"],
             "media_url": sermon["media_url"],
+            "media_duration": sermon["media_duration"],
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": judgement_during(slot["spans"], merged, verses),
+            "judgements": judgement_during(
+                slot["spans"], merged, verses, slot["provenance"]
+            ),
             "spoken": spoken_during(merged, sermon),
             # 他什么时候念到哪一节。报节号是预告，念出来才算数。
             "readings": [
@@ -812,13 +913,13 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
                 for at, slug in verse_readings(sermon, passage_verses)
                 if any(begin <= at < finish for begin, finish, _ in merged)
             ],
-            "glosses": glosses_during(merged, sermon),
+            "original_language_events": original_language_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
         })
     sermons_out.sort(key=lambda row: -row["seconds"])
 
     return {
-        "schema_version": "wang_original_audio_index_v3",
+        "schema_version": "wang_original_audio_index_v4",
         # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
         # 页面地址，用的都是这一个 slug。
         "passage": passage,

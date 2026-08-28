@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide, { type Gloss } from "../ScriptureSlide";
+import ScriptureSlide, { type OriginalLanguageEvent } from "../ScriptureSlide";
 
 /**
  * 教授的原声，按经文重排。
@@ -31,20 +31,32 @@ import ScriptureSlide, { type Gloss } from "../ScriptureSlide";
 type Stretch = { start: number; end: number };
 /** 教授念到经文的时刻。只在幻灯角上标一行小字，主经文不跟着换。 */
 type Spoken = { at: number; scripture: string; label: string };
+type Provenance = {
+  claim_ids: string[];
+  evidence_step_ids: string[];
+  source_fragment_ids: string[];
+};
 /** 他立起一个判断的时刻。幻灯的标题跟着这个走。 */
-type Judgement = { at: number; judgement: string; seconds: number; scripture: string };
+type Judgement = {
+  at: number;
+  judgement: string;
+  seconds: number;
+  scripture: string;
+  provenance?: Provenance;
+};
 type Sermon = {
   source_id: string;
   transcript_id: string;
   title: string;
   media_kind: "audio" | "video" | null;
   media_url: string | null;
+  media_duration: number | null;
   stretches: Stretch[];
   judgements: Judgement[];
   spoken: Spoken[];
   /** 他念到某一节的时刻。念出来的比报出来的准。 */
   readings: { at: number; scripture: string }[];
-  glosses: Gloss[];
+  original_language_events: OriginalLanguageEvent[];
   seconds: number;
 };
 
@@ -59,12 +71,12 @@ const mediaSrc = (url: string) =>
     ? url
     : url.replace("/web/video/", "/dev-media/");
 
-/** 播到这一刻，他正在立哪个判断。 */
+/** 播到这一刻，对应哪条来源绑定的 Claim。 */
 function judgementAt(sermon: Sermon, seconds: number) {
-  let held = sermon.judgements[0]?.judgement ?? "";
+  let held = sermon.judgements[0];
   for (const mark of sermon.judgements) {
     if (mark.at > seconds) break;
-    held = mark.judgement;
+    held = mark;
   }
   return held;
 }
@@ -115,15 +127,14 @@ function verseAt(sermon: Sermon, seconds: number, passage: string) {
   // 此」——那一句他是复述不是照念，逐字比对认不出来。
   //
   // 按时间排，后来的盖过先前的：2:15 报十九节，2:17 起念十七节，盖回来了。
-  const [inBook, inChapter] = passage.split("-");
   const said = [
     ...sermon.spoken.map((m) => ({ at: m.at, scripture: m.scripture })),
     ...sermon.readings,
   ]
-    .filter((m) => {
-      const parts = m.scripture.split("-");
-      return parts[0] === inBook && parts[1] === inChapter;
-    })
+    // 同一章但在本页之外的经节是旁证，不得盖掉主经文。（四）1 进入 16:13-23
+    // 的可听段时，lookback 还抓着 16:10；它应该只出现在角上的「他此刻在念」，
+    // 而不是让 slide 主体从 Claim 的 16:13-15 跳回 16:10。
+    .filter((m) => inside(m.scripture, passage))
     .sort((a, b) => a.at - b.at);
   for (const mark of said) {
     if (mark.at > seconds) break;
@@ -160,13 +171,27 @@ function inside(slug: string, passage: string) {
   return Number(one[2]) >= low && Number(one[3] ?? one[2]) <= high;
 }
 
-/** 到这一刻为止，他讲过哪些字。
+/** 当前讲论要点里，到这一刻为止教授明确讲过哪些原文。
  *
  * 讲过的留着，不被后一个顶掉——他讲课就是一个个字累起来的：先说「你是彼得
- * (Petrus)」，再说「這磐石(petra)」，两个摆在一起才看得出他在比什么。
+ * (Petrus)」，再说「這磐石(petra)」，两个摆在一起才看得出他在比什么。换到下
+ * 一个 Claim 就清空，不能把上一题的希腊文一路带到整篇讲道结尾。
  */
-function glossesUpTo(sermon: Sermon, seconds: number) {
-  return sermon.glosses.filter((item) => item.at <= seconds);
+function originalLanguageAt(sermon: Sermon, seconds: number) {
+  const current = judgementAt(sermon, seconds);
+  if (!current) return [];
+  const index = sermon.judgements.indexOf(current);
+  const previous = sermon.judgements[index - 1];
+  const stretch = sermon.stretches.find(
+    (item) => item.start <= current.at && current.at < item.end,
+  );
+  // 一段录音开头的主导 Claim 可能到第一个 30 秒块才立标记；开场十几秒已经讲过
+  // 的 Petrus/Petra 仍属于它，不能因为 mark.at=0:30 就被切掉。
+  const since = stretch && (!previous || previous.at < stretch.start) ? stretch.start : current.at;
+  const until = sermon.judgements[index + 1]?.at ?? Number.POSITIVE_INFINITY;
+  return sermon.original_language_events.filter(
+    (item) => item.at >= since && item.at <= seconds && item.at < until,
+  );
 }
 
 /** 播到这一刻，他手上翻的是哪一节。
@@ -331,6 +356,7 @@ export default function OriginalAudioPage() {
         {sermons.map((sermon) => {
           const open = playing?.sermon.source_id === sermon.source_id;
           const seconds = open ? at : (sermon.stretches[0]?.start ?? 0);
+          const currentJudgement = judgementAt(sermon, seconds);
           return (
             <li key={sermon.source_id}>
               <button
@@ -357,8 +383,8 @@ export default function OriginalAudioPage() {
                   {sermon.media_kind === "audio" && (
                     <ScriptureSlide
                       slug={verseAt(sermon, seconds, passage)}
-                      title={judgementAt(sermon, seconds)}
-                      glosses={glossesUpTo(sermon, seconds)}
+                      title={currentJudgement?.judgement ?? ""}
+                      originalLanguage={originalLanguageAt(sermon, seconds)}
                       cited={citedAt(sermon, seconds, passage)}
                     />
                   )}
@@ -406,13 +432,30 @@ export default function OriginalAudioPage() {
                     </div>
                   )}
 
+                  {/* 逐字稿退到核对入口。主要播放体验由同步 slide 承担；需要查看
+                      全文的人主动展开，再去原始讲道页。 */}
+                  <details className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                    <summary className="cursor-pointer select-none font-semibold text-slate-700">
+                      完整逐字稿（核對用）
+                    </summary>
+                    <p className="mt-2 leading-relaxed text-slate-500">
+                      Slide 只顯示此刻的講論要點、經文與原文講解；完整內容仍保留在原始講道頁。
+                    </p>
+                    <Link
+                      href={`/resources/sermons/${encodeURIComponent(sermon.transcript_id)}`}
+                      className="mt-2 inline-block font-semibold text-amber-800 hover:text-amber-900"
+                    >
+                      打開完整逐字稿 ↗
+                    </Link>
+                  </details>
+
                   {/* 他在这一篇里讲的几件事，各从第几分钟起。
                       一篇讲道二十五分钟，一整条时间轴上找不到东西；他自己立的
                       判断就是目录。点一条跳到他说那句话的地方，之后照常往下
                       播，不断——播放的连续区间和读者的入口是两件事。 */}
                   <ul className="flex flex-col divide-y divide-slate-200/70 border-t border-slate-200 pt-1">
                     {sermon.judgements.map((mark) => {
-                      const here = judgementAt(sermon, seconds) === mark.judgement;
+                      const here = currentJudgement?.at === mark.at;
                       return (
                         <li key={mark.at}>
                           <button
