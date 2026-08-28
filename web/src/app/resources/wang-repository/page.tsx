@@ -233,34 +233,20 @@ export default function WangRepositoryPage() {
         <h1 className="mt-2 font-serif text-4xl font-bold leading-tight text-stone-950 sm:text-5xl">
           王守仁教授聖經講論文庫
         </h1>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-stone-600">
-          按聖經經卷、章節或講論主題尋找正式發布的釋經文章。每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解。
+        <p className="mt-4 max-w-2xl text-lg leading-8 text-stone-600">
+          教授講道的原聲，與從中整理出的釋經文章。
         </p>
 
-        <nav className="mt-8 flex flex-wrap gap-3" aria-label="文庫探索方式">
-          <button
-            type="button"
-            aria-pressed={view === "bible"}
-            onClick={() => setView("bible")}
-            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "bible" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
-          >
-            聖經目錄
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === "topic"}
-            onClick={() => setView("topic")}
-            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "topic" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
-          >
-            主題目錄
-          </button>
-          <Link href="/resources/qa" className="rounded-full bg-white px-5 py-2.5 font-semibold text-stone-700 shadow-sm hover:bg-stone-100">
-            信仰問答
-          </Link>
-        </nav>
-
-        {/* 内容的种类。轴在上面那一排，这一排是「读的还是听的」。 */}
-        <nav className="mt-4 flex flex-wrap gap-6 border-b border-stone-300" aria-label="內容種類">
+        {/* 先問「讀還是聽」，再問「怎麼排」。
+         *
+         * 读者进来要答三个问题：读还是听、怎么排、哪段经文。原来把「哪个目录」
+         * 做成实心药丸摆在最上，把「读还是听」做成最轻的下划线摆在下面——最常
+         * 切的那个做得最轻，两排控件叠着又看不出关系。
+         *
+         * 「信仰問答」原来混在两个「目录」旁边，长得一模一样，读者会当成第三种
+         * 目录；它其实是去别的页面，挪到下面单独放。
+         */}
+        <nav className="mt-8 flex flex-wrap gap-3" aria-label="內容種類">
           {([
             ["article", "綜合文章"],
             ["audio", "教授原聲"],
@@ -270,10 +256,32 @@ export default function WangRepositoryPage() {
               type="button"
               aria-pressed={kind === value}
               onClick={() => setKind(value)}
-              className={`-mb-px border-b-2 pb-3 font-semibold transition ${
+              className={`rounded-full px-5 py-2.5 font-semibold transition ${
                 kind === value
-                  ? "border-amber-700 text-amber-900"
-                  : "border-transparent text-stone-500 hover:text-stone-800"
+                  ? "bg-stone-900 text-white"
+                  : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </nav>
+
+        <nav className="mt-4 flex flex-wrap items-baseline gap-5" aria-label="排列方式">
+          <span className="text-sm text-stone-500">排列方式</span>
+          {([
+            ["bible", "按經卷章節"],
+            ["topic", "按講論主題"],
+          ] as const).map(([value, text]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={view === value}
+              onClick={() => setView(value)}
+              className={`text-sm font-semibold underline-offset-4 transition ${
+                view === value
+                  ? "text-amber-900 underline decoration-amber-700 decoration-2"
+                  : "text-stone-500 hover:text-stone-800"
               }`}
             >
               {text}
@@ -293,14 +301,15 @@ export default function WangRepositoryPage() {
           <div className="mt-12 space-y-14">
             {bibleBooks.map((book) => (
               <section key={book.book} aria-labelledby={`book-${book.book}`}>
-                <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-800">{book.book}</p>
-                <h2 id={`book-${book.book}`} className="mt-1 border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950">
+                <h2 id={`book-${book.book}`} className="border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950">
                   {book.bookLabel}
                 </h2>
                 <div className="mt-7 space-y-9">
                   {book.chapters.map((chapter) => (
                     <section key={`${book.book}-${chapter.chapter}`} aria-labelledby={`${book.book}-${chapter.chapter}`}>
-                      <h3 id={`${book.book}-${chapter.chapter}`} className="text-xl font-bold text-stone-700">第 {chapter.chapter} 章</h3>
+                      <h3 id={`${book.book}-${chapter.chapter}`} className="text-lg font-bold text-stone-700">
+                        第 {chapter.chapter} 章
+                      </h3>
                       {/* 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽
                           相關原聲講解」，在这之前从这里通不到任何原声。有的段落
                           只有原声还没有文章——原声可以先于文章上线。 */}
@@ -345,6 +354,12 @@ export default function WangRepositoryPage() {
             已發布文章尚未設定公開主題。
           </div>
         )}
+        <p className="mt-14 border-t border-stone-200 pt-6 text-sm text-stone-500">
+          找不到想問的？
+          <Link href="/resources/qa" className="ml-2 font-semibold text-amber-800 hover:text-amber-900">
+            信仰問答 <span aria-hidden="true">→</span>
+          </Link>
+        </p>
       </div>
     </main>
   );
