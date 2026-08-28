@@ -289,6 +289,18 @@ export const SermonDetailView = () => {
           </div>
         )}
 
+        {citationNotice ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {citationNotice}
+          </div>
+        ) : null}
+        <SermonMediaPlayer
+          sermon={sermon}
+          authenticated={status === "authenticated"}
+          startTime={citationStartTime}
+          slideDeck={slideDeck}
+        />
+
         {seriesHref ? (
           <nav className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4" aria-label="講道系列導航">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -320,18 +332,6 @@ export const SermonDetailView = () => {
             </div>
           </nav>
         ) : null}
-
-        {citationNotice ? (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {citationNotice}
-          </div>
-        ) : null}
-        <SermonMediaPlayer
-          sermon={sermon}
-          authenticated={status === "authenticated"}
-          startTime={citationStartTime}
-          slideDeck={slideDeck}
-        />
 
         {status === "authenticated" ? (
           <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">
