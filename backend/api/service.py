@@ -67,6 +67,7 @@ from .models import (
     SundaySongCreate,
 )
 from .storage import repository
+from ..fellowship_email import build_fellowship_email_content
 from .sunday_service_email import (
     send_sunday_service_email as _send_sunday_service_email,
     build_sunday_service_email_bodies,
@@ -1380,39 +1381,6 @@ def generate_fellowship_learning_content(date: str) -> FellowshipLearningContent
     return update_fellowship_learning_content(normalized_date, content)
 
 
-def _build_default_fellowship_email_subject(entry: FellowshipEntry) -> str:
-    title = (entry.title or "").strip()
-    series = (entry.series or "").strip()
-    if title and series:
-        return f"團契通知｜{series}｜{title}"
-    if title:
-        return f"團契通知｜{title}"
-    if series:
-        return f"團契通知｜{series}"
-    return f"團契通知｜{entry.date}"
-
-
-def _build_default_fellowship_email_html(entry: FellowshipEntry) -> str:
-    title = (entry.title or "未定").strip()
-    series = (entry.series or "未定").strip()
-    host = (entry.host or "未定").strip()
-    return f"""
-<div style="font-family:Roboto,Helvetica,Arial,sans-serif;font-size:15px;color:#202124;line-height:1.6;">
-  <p style="margin:0 0 12px 0;">弟兄姊妹平安，</p>
-  <p style="margin:0 0 12px 0;">以下是即將到來的團契資訊，歡迎預留時間參加。</p>
-  <table style="border-collapse:collapse;margin:0 0 16px 0;">
-    <tbody>
-      <tr><td style="padding:4px 24px 4px 0;">日期</td><td style="padding:4px 0;">{entry.date}</td></tr>
-      <tr><td style="padding:4px 24px 4px 0;">主題</td><td style="padding:4px 0;">{title}</td></tr>
-      <tr><td style="padding:4px 24px 4px 0;">系列</td><td style="padding:4px 0;">{series}</td></tr>
-      <tr><td style="padding:4px 24px 4px 0;">主講</td><td style="padding:4px 0;">{host}</td></tr>
-    </tbody>
-  </table>
-  <p style="margin:0;">願主賜福。</p>
-</div>
-""".strip()
-
-
 def get_fellowship_email_content(date: str) -> FellowshipEmailContent:
     normalized_date = _normalize_fellowship_date(date)
     entries = list_fellowships()
@@ -1422,10 +1390,16 @@ def get_fellowship_email_content(date: str) -> FellowshipEmailContent:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Fellowship date {normalized_date} not found",
         )
-    return FellowshipEmailContent(
-        subject=(entry.email_subject or "").strip() or _build_default_fellowship_email_subject(entry),
-        html=(entry.email_body_html or "").strip() or _build_default_fellowship_email_html(entry),
+    subject, _text_body, html_body = build_fellowship_email_content(
+        event_date=datetime.strptime(entry.date, "%m/%d/%Y").date(),
+        host=entry.host,
+        title=entry.title,
+        series=entry.series,
+        sequence=entry.sequence,
+        custom_subject=entry.email_subject,
+        custom_html=entry.email_body_html,
     )
+    return FellowshipEmailContent(subject=subject, html=html_body)
 
 
 def update_fellowship_email_content(date: str, payload: FellowshipEmailContent) -> FellowshipEmailContent:

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import argparse
 from email.utils import formataddr, parseaddr
-import html
 import json
 import os
-import re
 import smtplib
 import time as time_module
 from dataclasses import dataclass
@@ -18,6 +16,7 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 try:
+    from .fellowship_email import build_fellowship_email_content
     from .emailing import (
         chunked,
         determine_notification_recipients_file,
@@ -36,6 +35,7 @@ except ImportError as exc:  # Allows running as a script (python fellowship_remi
     if str(script_dir) not in sys.path:
         sys.path.insert(0, str(script_dir))
 
+    from fellowship_email import build_fellowship_email_content  # type: ignore[no-redef]
     from emailing import (  # type: ignore[no-redef]
         chunked,
         determine_notification_recipients_file,
@@ -170,20 +170,7 @@ def _record_event_sent(event: FellowshipEvent) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _html_to_text(value: str) -> str:
-    if not value:
-        return ""
-    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", value)
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</p>", "\n\n", text)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html.unescape(text)
-    lines = [line.rstrip() for line in text.splitlines()]
-    return "\n".join(lines).strip()
-
-
 def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
-    formatted_date = datetime.combine(event.date, time.min, tzinfo=TIMEZONE).strftime("%m/%d")
     raw_sender = os.getenv("REMINDER_SENDER") or os.getenv("SMTP_USERNAME")
     if not raw_sender:
         raise RuntimeError("REMINDER_SENDER or SMTP_USERNAME must be set in the environment")
@@ -195,89 +182,14 @@ def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     display_name = name_override or parsed_name
     sender = formataddr((display_name, parsed_email)) if display_name else parsed_email
 
-    custom_subject = (event.email_subject or "").strip()
-    custom_html = (event.email_body_html or "").strip()
-    if custom_html:
-        subject = custom_subject or os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ")
-        return sender, subject, _html_to_text(custom_html), custom_html
-
-    subject = os.getenv("REMINDER_SUBJECT", f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ")
-    details_lines: list[str] = []
-    if event.host:
-        details_lines.append(f"主持人: {event.host} ")
-    if event.series:
-        series_line = f"系列: {event.series} 系列"
-        if event.sequence is not None:
-            series_line += f" 的第 {event.sequence} 講"
-        details_lines.append(series_line)
-    if event.title:
-        details_lines.append(f"主題: {event.title}")
-
-    details_text = ""
-    if details_lines:
-        bullet_lines = "\n".join(f" - {line}" for line in details_lines)
-        details_text = f"Event details:\n{bullet_lines}\n\n"
-
-    default_body = (
-        "Hi everyone,\n\n"
-        "This is a friendly reminder that our next fellowship meets on {date}.\n"
-        "{details}"
-        "Please reach out if you have any questions.\n\n"
-        "Grace and peace,\nYour ministry team"
-    )
-    body_template = os.getenv("REMINDER_BODY_TEMPLATE", default_body)
-    text_body = body_template.format(
-        date=formatted_date,
-        details=details_text,
+    subject, text_body, html_body = build_fellowship_email_content(
+        event_date=event.date,
         host=event.host or "",
         title=event.title or "",
         series=event.series or "",
-        sequence=event.sequence or "",
-    )
-
-    details_html = ""
-    if details_lines:
-        rows = []
-        for line in details_lines:
-            if ": " in line:
-                label, value = line.split(": ", 1)
-            else:
-                label, value = line, ""
-            rows.append(
-                "<tr>"
-                f"<td style=\"padding:4px 12px 4px 0;\">{label}:</td>"
-                f"<td style=\"padding:4px 0;font-weight:600;\">{value}</td>"
-                "</tr>"
-            )
-        details_html = (
-            "<table style=\"border-collapse:collapse;margin:16px 0;\">"
-            + "".join(rows)
-            + "</table>"
-        )
-
-    default_html = (
-        "<div style=\"font-family:Roboto,Helvetica,Arial,sans-serif;font-size:16px;color:#202124;\">"
-        "  <p style=\"margin:0 0 16px 0;\">弟兄姊妹们平安，</p>"
-        "  <p style=\"margin:0 0 16px 0;\">"
-        "    圣道教会每两周一次的团契自本週 <strong> {date} </strong>起將改為線上進行。时间改為周五晚 7:30 - 9:00 CST。欢迎大家参加。<br/>"
-        "  </p>"
-        "  {details_html}"
-        "</div>"
-        "<div>"
-        "    <a href=\"https://meet.google.com/mhc-nafs-ahn\">Google 線上會議</a>"
-        "</div>"
-        "<div><br/><br/>"
-        "<a href=\"https://www.dallas-hlc.org/resources/articles\">觀看過往團契分享</a>"
-        "</div>"
-    )
-    html_body_template = os.getenv("REMINDER_BODY_TEMPLATE_HTML", default_html)
-    html_body = html_body_template.format(
-        date=formatted_date,
-        details_html=details_html,
-        host=event.host or "",
-        title=event.title or "",
-        series=event.series or "",
-        sequence=event.sequence or "",
+        sequence=event.sequence,
+        custom_subject=event.email_subject,
+        custom_html=event.email_body_html,
     )
 
     return sender, subject, text_body, html_body

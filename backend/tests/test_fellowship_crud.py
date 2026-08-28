@@ -63,3 +63,47 @@ def test_update_fellowship_email_content_accepts_iso_date(monkeypatch):
         "subject": "Subject",
         "html": "<p>Body</p>",
     }
+
+
+def test_get_fellowship_email_content_uses_reminder_template(monkeypatch):
+    monkeypatch.delenv("REMINDER_SUBJECT", raising=False)
+    monkeypatch.delenv("REMINDER_BODY_TEMPLATE", raising=False)
+    monkeypatch.delenv("REMINDER_BODY_TEMPLATE_HTML", raising=False)
+    entry = FellowshipEntry(
+        date="06/05/2026",
+        host="Host",
+        title="Title",
+        series="Series",
+        sequence=3,
+    )
+    monkeypatch.setattr(service, "list_fellowships", lambda: [entry])
+
+    content = service.get_fellowship_email_content("2026-06-05")
+
+    assert content.subject == "圣道教会 06/05 周五团契 时间改為周五晚 7:30 - 9:00 CST "
+    assert "弟兄姊妹们平安" in content.html
+    assert "主持人:</td>" in content.html
+    assert "Series 系列 的第 3 講" in content.html
+    assert "Google 線上會議" in content.html
+    assert "觀看過往團契分享" in content.html
+
+
+def test_get_fellowship_email_content_honors_reminder_template_override(monkeypatch):
+    monkeypatch.setenv("REMINDER_SUBJECT", "Template subject {date}")
+    monkeypatch.setenv(
+        "REMINDER_BODY_TEMPLATE_HTML",
+        "<p>{date}|{host}|{title}|{series}|{sequence}</p>",
+    )
+    entry = FellowshipEntry(
+        date="06/05/2026",
+        host="Host",
+        title="Title",
+        series="Series",
+        sequence=3,
+    )
+    monkeypatch.setattr(service, "list_fellowships", lambda: [entry])
+
+    content = service.get_fellowship_email_content("2026-06-05")
+
+    assert content.subject == "Template subject {date}"
+    assert content.html == "<p>06/05|Host|Title|Series|3</p>"
