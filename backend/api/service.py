@@ -1414,10 +1414,14 @@ def _build_default_fellowship_email_html(entry: FellowshipEntry) -> str:
 
 
 def get_fellowship_email_content(date: str) -> FellowshipEmailContent:
+    normalized_date = _normalize_fellowship_date(date)
     entries = list_fellowships()
-    entry = next((item for item in entries if item.date == date), None)
+    entry = next((item for item in entries if item.date == normalized_date), None)
     if entry is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fellowship date {normalized_date} not found",
+        )
     return FellowshipEmailContent(
         subject=(entry.email_subject or "").strip() or _build_default_fellowship_email_subject(entry),
         html=(entry.email_body_html or "").strip() or _build_default_fellowship_email_html(entry),
@@ -1432,7 +1436,11 @@ def update_fellowship_email_content(date: str, payload: FellowshipEmailContent) 
     if not html:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email HTML body is required")
     try:
-        updated = repository.set_fellowship_email_content(date, subject, html)
+        updated = repository.set_fellowship_email_content(
+            _normalize_fellowship_date(date),
+            subject,
+            html,
+        )
     except ValueError as exc:
         _raise_value_error(exc)
         raise AssertionError("unreachable")
