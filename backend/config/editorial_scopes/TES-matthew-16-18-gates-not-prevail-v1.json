@@ -1,0 +1,16 @@
+{
+  "schema_version": "wang_theological_editorial_scope_v1",
+  "scope_id": "TES-matthew-16-18-gates-not-prevail-v1",
+  "product_kind": "theological_topic_essay",
+  "working_title": "阴间的权柄不能胜过教会",
+  "reader_question": "教授怎样解释阴间的权柄不能胜过教会，这项应许以什么为前提？",
+  "passage_refs": [
+    "太16:18"
+  ],
+  "structure_revision_id": "VSR-c3f312af14c9c6a48663",
+  "publication_profile_id": "PP-theological-topic-essay-v1",
+  "explicit_exclusions": [],
+  "editorial_attribution": "church_editor",
+  "not_professor_words": true,
+  "scope_sha256": "6e8787677dcdd29939f87ddf223f4ff7dc4c8f151cf9b3ab978e5cae603c7cc2"
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "wang_theological_editorial_scope_v1",
+  "scope_id": "TES-matthew-16-18-church-foundation-v1",
+  "product_kind": "theological_topic_essay",
+  "working_title": "教会的根基",
+  "reader_question": "教授认为教会建立在什么根基上，他怎样从太16:18及相关经文形成这个判断？",
+  "passage_refs": [
+    "太16:18",
+    "弗2:20"
+  ],
+  "structure_revision_id": "VSR-030fd260fcea505c048d",
+  "publication_profile_id": "PP-theological-topic-essay-v1",
+  "explicit_exclusions": [],
+  "editorial_attribution": "church_editor",
+  "not_professor_words": true,
+  "scope_sha256": "000eecbba25eb8886bffcdd75d9d0cde0186ed1facb494961a3291a5e44bd0f2"
+}

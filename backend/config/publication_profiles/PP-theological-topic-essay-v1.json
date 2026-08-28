@@ -1,0 +1,29 @@
+{
+  "schema_version": "wang-publication-profile.v1",
+  "profile_id": "PP-theological-topic-essay-v1",
+  "revision": 1,
+  "product_type": "theological_topic_essay",
+  "primary_axis": "reader_question",
+  "authorship": "church_editorial_board",
+  "thought_source": "professor",
+  "structure_authority": "approved_theological_editorial_brief",
+  "required_reader_outcomes": [
+    "reader_can_state_the_professors_positive_claim",
+    "reader_can_follow_the_actual_argument_routes",
+    "reader_can_distinguish_qualifications_and_unresolved_relations"
+  ],
+  "source_policy": {
+    "every_substantive_paragraph_requires_provenance": true,
+    "professor_and_editorial_synthesis_paragraphs_require_claim_ids": true,
+    "argument_routes_remain_source_local": true,
+    "editorial_synthesis_must_not_be_attributed_as_professor_words": true
+  },
+  "structure_policy": {
+    "positive_thesis_precedes_negative_boundary": true,
+    "negative_material_cannot_carry_reader_takeaway": true,
+    "qualifications_and_unresolved_items_are_mandatory": true,
+    "brief_headings_and_order_are_binding": true
+  },
+  "style": "平和、清楚、有论证；让正面主张成为记忆中心，不保留生产术语或课堂表演语气。",
+  "status": "candidate"
+}

@@ -6,7 +6,7 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-23 (America/Chicago)
+Updated: 2026-08-28 (America/Chicago)
 
 ## Project boundary
 
@@ -25,6 +25,17 @@ The first active exegesis CanonicalViewpoint is now end-to-end master data: `CV-
   Replanning came first, and it mattered: composition review routed `DK-72483dc200ad-CL025` (the rebuke is aimed at the direction of Peter's thinking, not merely at his act of restraint) into `CD-M16-003-03`, where it had never been placed. The 2026-08-15 publication scored 90 without it, by elaborating the same point unsourced — that run has no grounding report at all, because it predates the gate. A higher score against no grounding check is not a better article, and this pair is the cleanest evidence of it on the platform.
 
   The reviewed draft is `410b06786193a2d069730f4a7d5018ef33ff3af25ccbc51cad8df1492cf31469`. What publishes differs from it by one footnote phrase — 「材料中的」 removed, on the user's instruction, because 「材料」 is this project's internal word for the knowledge layer and means nothing to a reader. The edit is recorded as `post_review_edit` in `publication-editorial-review.json`, which carries both SHAs. Author, revision, grounding-repair and editorial-review prompts now all carry the rule, since a rule only one agent knows gets revised back out.
+
+## Theological topic essay POC
+
+Issue #266 established a separate theological editorial synthesis workflow. It does not replace the three passage exposition articles and does not use `ViewpointKnowledgeProjection`. Its scope-bound `TheologicalEvidencePacket` is compiled directly from the approved Structure, CVP, source-local ArgumentRoute, Claim, Evidence and source records.
+
+Two topic essays completed the full workflow and were automatically published to the Wang repository on 2026-08-28 without a production deployment:
+
+- `TES-matthew-16-18-church-foundation-v1`, final manuscript SHA `0d17a88daaaa0bf972cbc533d4b40dc5875e136b15450831afbe48e88917dfe4`;
+- `TES-matthew-16-18-gates-not-prevail-v1`, final manuscript SHA `b599e72f8e7b9d06f84315a5108cdeeee4192b1e7ee0ec089d3edddfd8bcc4c8`.
+
+Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. The workflow definition, operator commands, POC record and non-destructive three-article gap report are under this directory with the `theological_editorial_synthesis_` prefix.
 
 The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
 
