@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type RepositoryView = "bible" | "topic";
+type RepositoryView = "bible" | "topic" | "audio";
 
 type ScriptureReference = {
   book: string;
@@ -120,31 +120,36 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
   );
 }
 
-/** 原声的卡片。
+/** 原声目录：一章底下有几段可听的。
  *
- * 跟文章卡并排，但一眼要能分出来：文章是读的，原声是听的。同一个圆角边框，换
- * 一套颜色。
- *
- * 标题的用词取自逐字稿里教授自己的分段小标题，不另造说法。底下报的是只有原声
- * 才有的东西：他在几篇讲道里讲过、总共多久、分成几个讲题。
+ * 跟文章分开成两个 tab。原来两种卡并排在同一章底下，四张深色压着两张浅色，读者
+ * 分不清哪个是读的、哪个是听的。读和听是两件事，各占一个入口。
  */
-function AudioLink({ passage }: { passage: AudioPassage }) {
+function AudioList({ passages }: { passages: AudioPassage[] }) {
+  if (passages.length === 0) return null;
   return (
-    <Link
-      href={passage.href}
-      className="group block rounded-2xl border border-stone-800 bg-stone-900 px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-700"
-    >
-      <span className="text-sm font-bold text-amber-300">原聲 · {passage.label}</span>
-      <h4 className="mt-2 font-serif text-xl font-bold leading-8 text-stone-50">
-        {passage.title || passage.label}
-      </h4>
-      <p className="mt-2 text-sm text-stone-400">
-        {passage.sermons} 篇講道 · 共 {Math.round(passage.seconds / 60)} 分 · {passage.topics} 個講題
-      </p>
-      <span className="mt-3 inline-block text-sm font-semibold text-amber-200 group-hover:text-amber-100">
-        聽教授自己講 <span aria-hidden="true">→</span>
-      </span>
-    </Link>
+    <div className="rounded-2xl border border-stone-200 bg-white shadow-sm">
+      <ul className="flex flex-col divide-y divide-stone-100">
+        {passages.map((passage) => (
+          <li key={passage.passage}>
+            <Link
+              href={passage.href}
+              className="group flex flex-wrap items-baseline gap-x-4 gap-y-1 px-5 py-3 hover:bg-stone-50"
+            >
+              <span className="font-mono text-sm font-semibold text-amber-800">
+                {passage.label}
+              </span>
+              <span className="flex-1 font-semibold text-stone-900 group-hover:text-amber-900">
+                {passage.title || passage.label}
+              </span>
+              <span className="text-sm text-stone-500">
+                {passage.sermons} 篇 · {Math.round(passage.seconds / 60)} 分 · {passage.topics} 個講題
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -184,11 +189,21 @@ export default function WangRepositoryPage() {
   }, []);
 
   const bibleBooks = useMemo(() => groupArticlesByBible(articles), [articles]);
-  const audioByChapter = useMemo(() => {
-    const map = new Map<string, AudioPassage[]>();
+  const audioByBookChapter = useMemo(() => {
+    const map = new Map<
+      string,
+      { book: string; bookLabel: string; chapter: number; passages: AudioPassage[] }
+    >();
     for (const passage of audio) {
       const key = `${passage.scripture.book}-${passage.scripture.chapter}`;
-      map.set(key, [...(map.get(key) ?? []), passage]);
+      const group = map.get(key) ?? {
+        book: passage.scripture.book,
+        bookLabel: passage.scripture.book_label,
+        chapter: passage.scripture.chapter,
+        passages: [],
+      };
+      group.passages.push(passage);
+      map.set(key, group);
     }
     return map;
   }, [audio]);
@@ -222,6 +237,14 @@ export default function WangRepositoryPage() {
           >
             主題目錄
           </button>
+          <button
+            type="button"
+            aria-pressed={view === "audio"}
+            onClick={() => setView("audio")}
+            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "audio" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
+          >
+            原聲
+          </button>
           <Link href="/resources/qa" className="rounded-full bg-white px-5 py-2.5 font-semibold text-stone-700 shadow-sm hover:bg-stone-100">
             信仰問答
           </Link>
@@ -250,23 +273,47 @@ export default function WangRepositoryPage() {
                       <div className="mt-3 grid gap-4 sm:grid-cols-2">
                         {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
                       </div>
-                      {/* 原声排在同一章底下，跟文章并排。
-                          落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽
-                          相關原聲講解」，在这之前从这里通不到任何原声。
-                          有的段落只有原声还没有文章——原声可以先于文章上线。 */}
-                      {(audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).length > 0 && (
-                        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                          {(audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).map(
-                            (passage) => <AudioLink key={passage.passage} passage={passage} />,
-                          )}
-                        </div>
-                      )}
                     </section>
                   ))}
                 </div>
               </section>
             ))}
           </div>
+        ) : view === "audio" ? (
+          // 原声自成一个目录。
+          //
+          // 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講
+          // 解」，在这之前从这里通不到任何原声。
+          //
+          // 有的段落只有原声还没有文章——原声可以先于文章上线，所以这个目录不
+          // 跟着文章走，按经卷章节自己排。
+          audio.length > 0 ? (
+            <div className="mt-12 space-y-14">
+              {[...audioByBookChapter.entries()].map(([key, group]) => (
+                <section key={key} aria-labelledby={`audio-${key}`}>
+                  <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-800">
+                    {group.book}
+                  </p>
+                  <h2
+                    id={`audio-${key}`}
+                    className="mt-1 border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950"
+                  >
+                    {group.bookLabel}
+                  </h2>
+                  <h3 className="mt-7 text-xl font-bold text-stone-700">
+                    第 {group.chapter} 章
+                  </h3>
+                  <div className="mt-3">
+                    <AudioList passages={group.passages} />
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
+              目前尚無可聽的原聲。
+            </div>
+          )
         ) : topicGroups.length > 0 ? (
           <div className="mt-12 space-y-10">
             {topicGroups.map(([topic, topicArticles]) => (
