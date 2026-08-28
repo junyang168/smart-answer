@@ -259,7 +259,7 @@ export default function WangRepositoryPage() {
                       <h3 id={`${book.book}-${chapter.chapter}`} className="text-xl font-bold text-stone-700">第 {chapter.chapter} 章</h3>
                       {chapter.articles.length > 0 && (
                         <>
-                          <p className="mt-4 text-sm font-bold text-amber-800">文章</p>
+                          <p className="mt-4 text-sm font-bold text-amber-800">綜合文章</p>
                           <div className="mt-2 grid gap-4 sm:grid-cols-2">
                             {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
                           </div>
@@ -270,7 +270,7 @@ export default function WangRepositoryPage() {
                           {/* 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換
                               聆聽相關原聲講解」，在这之前从这里通不到任何原声。
                               有的段落只有原声还没有文章——原声可以先于文章上线。 */}
-                          <p className="mt-6 text-sm font-bold text-amber-800">原聲</p>
+                          <p className="mt-6 text-sm font-bold text-amber-800">教授原聲</p>
                           <div className="mt-2">
                             <AudioList
                               passages={audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []}

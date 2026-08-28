@@ -317,7 +317,7 @@ export default function OriginalAudioPage() {
           >
             <span aria-hidden="true">←</span> 王守仁教授聖經講論文庫
           </Link>
-          <p className="text-sm font-bold text-amber-800">原聲 · {label}</p>
+          <p className="text-sm font-bold text-amber-800">教授原聲 · {label}</p>
           <h1 className="font-serif text-3xl font-bold leading-tight text-stone-950 sm:text-4xl">
             {title || label}
           </h1>
