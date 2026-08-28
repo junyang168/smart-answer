@@ -17,6 +17,10 @@ from zoneinfo import ZoneInfo
 
 try:
     from .fellowship_email import build_fellowship_email_content
+    from .fellowship_reminder_status import (
+        load_last_sent_fellowship_date,
+        record_fellowship_email_sent,
+    )
     from .emailing import (
         chunked,
         determine_notification_recipients_file,
@@ -36,6 +40,10 @@ except ImportError as exc:  # Allows running as a script (python fellowship_remi
         sys.path.insert(0, str(script_dir))
 
     from fellowship_email import build_fellowship_email_content  # type: ignore[no-redef]
+    from fellowship_reminder_status import (  # type: ignore[no-redef]
+        load_last_sent_fellowship_date,
+        record_fellowship_email_sent,
+    )
     from emailing import (  # type: ignore[no-redef]
         chunked,
         determine_notification_recipients_file,
@@ -139,37 +147,6 @@ def _log_notification(message: str) -> None:
         pass
 
 
-def _load_last_sent_event_date() -> Optional[str]:
-    if not STATUS_FILE:
-        return None
-
-    path = Path(STATUS_FILE)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError:
-        return None
-    if isinstance(data, dict):
-        last_event = data.get("event_date")
-        if isinstance(last_event, str):
-            return last_event
-    return None
-
-
-def _record_event_sent(event: FellowshipEvent) -> None:
-    if not STATUS_FILE:
-        return
-
-    path = Path(STATUS_FILE)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "event_date": event.date.isoformat(),
-        "recorded_at": datetime.now(TIMEZONE).isoformat(),
-    }
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-
 def build_email_content(event: FellowshipEvent) -> tuple[str, str, str, str]:
     raw_sender = os.getenv("REMINDER_SENDER") or os.getenv("SMTP_USERNAME")
     if not raw_sender:
@@ -250,7 +227,7 @@ def send_email(recipients: Iterable[str], event: FellowshipEvent) -> None:
         _log_notification(
             f"SUCCESS sent fellowship reminder for {event.date.isoformat()} to {total_sent} recipients in {batches_sent} batch(es)"
         )
-        _record_event_sent(event)
+        record_fellowship_email_sent(event.date, Path(STATUS_FILE))
 
 
 def compute_send_timestamp(events: list[FellowshipEvent]) -> tuple[FellowshipEvent, datetime]:
@@ -296,7 +273,7 @@ def main() -> None:
     recipients = load_notification_recipients(RECIPIENTS_FILE)
     event, send_at = compute_send_timestamp(events)
 
-    last_sent_event = _load_last_sent_event_date()
+    last_sent_event = load_last_sent_fellowship_date(Path(STATUS_FILE))
     event_date_iso = event.date.isoformat()
 
     print("Last scheduled fellowship date:", event.date.strftime("%Y-%m-%d"))

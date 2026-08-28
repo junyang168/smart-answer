@@ -68,6 +68,7 @@ from .models import (
 )
 from .storage import repository
 from ..fellowship_email import build_fellowship_email_content
+from ..fellowship_reminder_status import record_fellowship_email_sent
 from .sunday_service_email import (
     send_sunday_service_email as _send_sunday_service_email,
     build_sunday_service_email_bodies,
@@ -1425,7 +1426,8 @@ def update_fellowship_email_content(date: str, payload: FellowshipEmailContent) 
 
 
 def email_fellowship(date: str) -> FellowshipEmailResult:
-    content = get_fellowship_email_content(date)
+    normalized_date = _normalize_fellowship_date(date)
+    content = get_fellowship_email_content(normalized_date)
     recipients_path = determine_notification_recipients_file(NOTIFICATION_PRODUCTION)
     recipients = load_notification_recipients(recipients_path)
     recipient_list = list(recipients)
@@ -1438,6 +1440,10 @@ def email_fellowship(date: str) -> FellowshipEmailResult:
             text_body=_html_to_text(content.html),
             html_body=content.html,
         )
+        if EMAIL_PRODUCTION:
+            record_fellowship_email_sent(
+                datetime.strptime(normalized_date, "%m/%d/%Y").date(),
+            )
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     return FellowshipEmailResult(

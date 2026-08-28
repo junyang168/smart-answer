@@ -1,5 +1,11 @@
+from datetime import date
+
 from backend.api import service
 from backend.api.models import FellowshipEmailContent, FellowshipEntry
+from backend.fellowship_reminder_status import (
+    load_last_sent_fellowship_date,
+    record_fellowship_email_sent,
+)
 
 
 def test_update_fellowship_accepts_iso_date(monkeypatch):
@@ -108,3 +114,61 @@ def test_get_fellowship_email_content_honors_reminder_template_override(monkeypa
 
     assert content.subject == "Template subject {date}"
     assert content.html == "<p>06/05|Host|Title|Series|3</p>"
+
+
+def test_admin_email_send_records_production_reminder_status(monkeypatch):
+    sent = {}
+    recorded = {}
+    monkeypatch.setattr(
+        service,
+        "get_fellowship_email_content",
+        lambda date: FellowshipEmailContent(subject="Subject", html="<p>Body</p>"),
+    )
+    monkeypatch.setattr(service, "determine_notification_recipients_file", lambda production: "recipients")
+    monkeypatch.setattr(service, "load_notification_recipients", lambda path: ["person@example.com"])
+    monkeypatch.setattr(service, "EMAIL_PRODUCTION", True)
+    monkeypatch.setattr(
+        service,
+        "send_email",
+        lambda **kwargs: sent.update(kwargs),
+    )
+    monkeypatch.setattr(
+        service,
+        "record_fellowship_email_sent",
+        lambda event_date: recorded.update(event_date=event_date),
+    )
+
+    result = service.email_fellowship("2026-06-05")
+
+    assert sent["recipients"] == ["person@example.com"]
+    assert recorded["event_date"].isoformat() == "2026-06-05"
+    assert result.dry_run is False
+
+
+def test_admin_email_test_send_does_not_record_reminder_status(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(
+        service,
+        "get_fellowship_email_content",
+        lambda date: FellowshipEmailContent(subject="Subject", html="<p>Body</p>"),
+    )
+    monkeypatch.setattr(service, "determine_notification_recipients_file", lambda production: "recipients")
+    monkeypatch.setattr(service, "load_notification_recipients", lambda path: ["person@example.com"])
+    monkeypatch.setattr(service, "EMAIL_PRODUCTION", False)
+    monkeypatch.setattr(service, "TEST_RECIPIENT", "test@example.com")
+    monkeypatch.setattr(service, "send_email", lambda **kwargs: None)
+    monkeypatch.setattr(service, "record_fellowship_email_sent", recorded.append)
+
+    result = service.email_fellowship("2026-06-05")
+
+    assert recorded == []
+    assert result.recipients == ["test@example.com"]
+    assert result.dry_run is True
+
+
+def test_fellowship_reminder_status_round_trip(tmp_path):
+    status_file = tmp_path / "notification" / "last_sent.json"
+
+    record_fellowship_email_sent(date(2026, 6, 5), status_file)
+
+    assert load_last_sent_fellowship_date(status_file) == "2026-06-05"
