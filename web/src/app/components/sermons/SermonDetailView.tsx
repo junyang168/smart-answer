@@ -277,6 +277,18 @@ export const SermonDetailView = () => {
         </div>
         <p className="text-gray-600 mb-6">{sermon.speaker} • {sermon.date} ｜ 认领人：{sermon.assigned_to_name}</p>
 
+        {sermon.summary && (
+          <div className="mb-8 rounded-lg border border-slate-200 bg-slate-50 p-6">
+            <div className="mb-3 flex items-center">
+              <FileText className="mr-3 h-6 w-6 text-slate-600" />
+              <h2 className="font-display text-xl font-bold text-slate-800">內容摘要</h2>
+            </div>
+            <p className="leading-relaxed text-slate-700">
+              {sermon.summary}
+            </p>
+          </div>
+        )}
+
         {seriesHref ? (
           <nav className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4" aria-label="講道系列導航">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -320,20 +332,6 @@ export const SermonDetailView = () => {
           startTime={citationStartTime}
           slideDeck={slideDeck}
         />
-
-        {/* ✅ 新增的講道摘要區域 */}
-        {sermon.summary && (
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 mb-8">
-            <div className="flex items-center mb-3">
-              <FileText className="w-6 h-6 text-slate-600 mr-3" />
-              <h2 className="text-xl font-bold font-display text-slate-800">內容摘要</h2>
-            </div>
-            <p className="text-slate-700 leading-relaxed">
-              {sermon.summary}
-            </p>
-          </div>
-        )}
-
 
         {status === "authenticated" ? (
           <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">
