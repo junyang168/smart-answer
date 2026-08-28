@@ -80,12 +80,13 @@ def test_get_fellowship_email_content_uses_reminder_template(monkeypatch):
 
     content = service.get_fellowship_email_content("2026-06-05")
 
-    assert content.subject == "圣道教会 06/05 周五团契 时间改為周五晚 7:30 - 9:00 CST "
+    assert content.subject == "達拉斯圣道教会团契 时间: 06/05 周五晚 7:30 - 9:00 CST "
     assert "弟兄姊妹们平安" in content.html
     assert "主持人:</td>" in content.html
     assert "Series 系列 的第 3 講" in content.html
     assert "Google 線上會議" in content.html
     assert "觀看過往團契分享" in content.html
+    assert 'href="https://dallas-hlc.org/resources/fellowship"' in content.html
 
 
 def test_get_fellowship_email_content_honors_reminder_template_override(monkeypatch):

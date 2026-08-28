@@ -37,7 +37,7 @@ def build_fellowship_email_content(
     formatted_date = datetime.combine(event_date, time.min, tzinfo=TIMEZONE).strftime("%m/%d")
     subject = (custom_subject or "").strip() or os.getenv(
         "REMINDER_SUBJECT",
-        f"圣道教会 {formatted_date} 周五团契 时间改為周五晚 7:30 - 9:00 CST ",
+        f"達拉斯圣道教会团契 时间: {formatted_date} 周五晚 7:30 - 9:00 CST ",
     )
     rendered_custom_html = (custom_html or "").strip()
     if rendered_custom_html:
@@ -108,7 +108,7 @@ def build_fellowship_email_content(
         '    <a href="https://meet.google.com/mhc-nafs-ahn">Google 線上會議</a>'
         "</div>"
         "<div><br/><br/>"
-        '<a href="https://www.dallas-hlc.org/resources/articles">觀看過往團契分享</a>'
+        '<a href="https://dallas-hlc.org/resources/fellowship">觀看過往團契分享</a>'
         "</div>"
     )
     html_body_template = os.getenv("REMINDER_BODY_TEMPLATE_HTML", default_html)
