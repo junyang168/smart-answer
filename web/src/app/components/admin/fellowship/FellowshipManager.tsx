@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import "react-quill/dist/quill.snow.css";
+import "react-quill-new/dist/quill.snow.css";
 import {
   createFellowship,
   deleteFellowship,
@@ -34,7 +34,7 @@ import { toFellowshipDocumentHref } from "@/app/utils/fellowshipDocuments";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const ReactQuill = dynamic(() => import("react-quill"), { ssr: false });
+const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
 interface FormState {
   sequence: string;
@@ -207,7 +207,6 @@ export function FellowshipManager() {
       "underline",
       "strike",
       "list",
-      "bullet",
       "link",
       "blockquote",
     ],
