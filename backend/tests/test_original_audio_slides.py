@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from backend.pipeline.original_audio_index import (
+    Sermons,
+    build_sermon_slides,
     judgement_during,
     original_language_during,
     stretch,
@@ -89,3 +93,72 @@ def test_normalized_slide_title_keeps_claim_and_evidence_provenance() -> None:
     )
 
     assert mark["provenance"] == provenance["讲论要点"]
+
+
+def test_complete_sermon_deck_is_keyed_by_transcript_and_source_bound(
+    tmp_path, monkeypatch
+) -> None:
+    transcript = tmp_path / "sample.json"
+    transcript.write_text(
+        json.dumps({
+            "script": [
+                {
+                    "index": "1",
+                    "start_time": 0,
+                    "text": "這句中文沒有翻出希臘文法。那個地方是未來完成式。",
+                },
+                {"index": "2", "start_time": 200, "text": "收尾。"},
+            ]
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        Sermons,
+        "_media_for",
+        lambda _self, _transcript_id: {
+            "media_kind": "audio",
+            "media_url": "/sample.mp3",
+            "media_duration": 240.0,
+        },
+    )
+
+    class Store:
+        records = {
+            "source_documents": [{
+                "source_id": "SRC-1",
+                "transcript_id": "sample",
+                "title": "完整講道",
+                "source_type": "sermon_transcript",
+                "source_path": str(transcript),
+                "source_sha256": "sha",
+            }],
+            "claims": [{
+                "claim_id": "CL-1",
+                "statement": "中文譯法沒有準確譯出希臘文未來完成式。",
+                "scripture_refs": ["太16:19"],
+                "evidence_step_ids": ["EV-1"],
+            }],
+            "evidence_steps": [{
+                "evidence_step_id": "EV-1",
+                "source_fragment_id": "FR-1",
+            }],
+            "source_fragments": [{
+                "fragment_id": "FR-1",
+                "source_id": "SRC-1",
+                "paragraph_key": "S1",
+                "verbatim_excerpt": "那個地方是未來完成式。",
+            }],
+        }
+
+        def list_records(self, collection: str) -> list[dict]:
+            return self.records.get(collection, [])
+
+    deck = build_sermon_slides(Store(), tmp_path, "sample")
+
+    assert deck is not None
+    assert deck["transcript_id"] == "sample"
+    assert deck["media_duration"] == 240.0
+    claim_slide = next(slide for slide in deck["slides"] if slide["kind"] == "claim")
+    assert claim_slide["scripture"] == "mat-16-19"
+    assert claim_slide["provenance"]["source_fragment_ids"] == ["FR-1"]
+    assert claim_slide["language_notes"][0]["text"] == "那個地方是未來完成式。"

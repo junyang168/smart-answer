@@ -17,6 +17,7 @@ import { useSession, signIn } from "next-auth/react"; // ✅ 引入 useSession �
 import { Lock } from 'lucide-react';
 import { SermonMediaPlayer } from '@/app/components/sermons/SermonMediaPlayer';
 import { SermonKeyPoints } from './SermonKeyPoints';
+import type { SermonSlideDeck } from './SermonPptSlide';
 
 export const SermonDetailView = () => {
 
@@ -27,6 +28,7 @@ export const SermonDetailView = () => {
   const [error, setError] = useState<string | null>(null);
   const [citationStartTime, setCitationStartTime] = useState<number | undefined>();
   const [citationNotice, setCitationNotice] = useState<string | null>(null);
+  const [slideDeck, setSlideDeck] = useState<SermonSlideDeck | null>(null);
 
   // --- Get ID from URL ---
   const params = useParams();
@@ -73,9 +75,14 @@ export const SermonDetailView = () => {
       setIsLoading(true);
       setError(null);
       setSeriesContext(null);
+      setSlideDeck(null);
 
       // ✅ 使用您提供的新 API 端點
       const apiUrl = `/api/sc_api/final_sermon/junyang168@gmail.com/${id}`;
+      const slideRequest = fetch(
+        `/api/sc_api/sermon_slides/junyang168@gmail.com/${encodeURIComponent(id)}`,
+        { cache: "no-store" },
+      ).catch(() => null);
 
       try {
         const res = await fetch(apiUrl);
@@ -88,6 +95,13 @@ export const SermonDetailView = () => {
         }
 
         const data = await res.json();
+        const slideResponse = await slideRequest;
+        if (slideResponse?.ok) {
+          const deck = await slideResponse.json();
+          if (Array.isArray(deck?.slides) && deck.slides.length > 0) {
+            setSlideDeck(deck as SermonSlideDeck);
+          }
+        }
 
         const article: Sermon = {
           id: id,
@@ -128,8 +142,6 @@ export const SermonDetailView = () => {
 
 
         const paragraphs = [];
-
-        console.log(data.script)
 
         for (let i = 0; i < data.script.length; i++) {
           paragraphs.push(data.script[i].text);
@@ -302,7 +314,12 @@ export const SermonDetailView = () => {
             {citationNotice}
           </div>
         ) : null}
-        <SermonMediaPlayer sermon={sermon} authenticated={status === "authenticated"} startTime={citationStartTime} />
+        <SermonMediaPlayer
+          sermon={sermon}
+          authenticated={status === "authenticated"}
+          startTime={citationStartTime}
+          slideDeck={slideDeck}
+        />
 
         {/* ✅ 新增的講道摘要區域 */}
         {sermon.summary && (
@@ -319,9 +336,14 @@ export const SermonDetailView = () => {
 
 
         {status === "authenticated" ? (
-          <article className="prose lg:prose-lg max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sermon.markdownContent}</ReactMarkdown>
-          </article>
+          <details className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+            <summary className="cursor-pointer select-none font-semibold text-slate-700">
+              展開完整逐字稿（核對用）
+            </summary>
+            <article className="prose mt-6 max-w-none lg:prose-lg">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{sermon.markdownContent}</ReactMarkdown>
+            </article>
+          </details>
         ) : (
           <SermonKeyPoints sermon={sermon} />
         )

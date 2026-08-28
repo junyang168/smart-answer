@@ -199,7 +199,8 @@ GREEK_TERM = re.compile(
 #: 英文括注不自动等于「原文讲解」；要有逐字稿自己的语言学信号。否则
 #: `完全了解你信心的內涵（implication）` 也会被标成希腊文卡。
 ORIGINAL_LANGUAGE_SIGNAL = re.compile(
-    r"希[臘腊]文|希伯[來来]文|亞蘭文|亚兰文|原文|文法|時態|时态|"
+    r"希[臘腊]文|希伯[來来]文|亞蘭文|亚兰文|原文|文法|語法|语法|時態|时态|"
+    r"完成式|未來式|未来式|被動|被动|主動|主动|陽性|阳性|陰性|阴性|中性|"
     r"Greek|Hebrew|Aramaic",
     re.I,
 )
@@ -781,6 +782,216 @@ def claim_verse(claim: dict[str, Any], book: str, chapter: int, low: int, high: 
                 tail = f"-{end}" if end != start else ""
                 best = (width, f"{book}-{chapter}-{start}{tail}")
     return best[1] if best else f"{book}-{chapter}-{low}"
+
+
+def claim_primary_scripture(claim: dict[str, Any]) -> str:
+    """单篇讲道 slide 上放哪一处经文。
+
+    单篇页没有预先限定的经文范围，所以从 Claim 自己的 `scripture_refs` 里取最窄
+    的一处。它是教授这条判断的来源绑定，不从逐字稿标题或系统常识猜。
+    """
+
+    best: tuple[int, int, str] | None = None
+    order = 0
+    for reference in claim.get("scripture_refs") or []:
+        text = (
+            reference
+            if isinstance(reference, str)
+            else json.dumps(reference, ensure_ascii=False)
+        )
+        for slug in reference_slugs(text):
+            parts = slug.split("-")
+            if len(parts) < 3:
+                continue
+            start = int(parts[2])
+            end = int(parts[3]) if len(parts) > 3 else start
+            candidate = (max(0, end - start), order, slug)
+            if best is None or candidate < best:
+                best = candidate
+            order += 1
+    return best[2] if best else ""
+
+
+def claim_scripture_label(claim: dict[str, Any], scripture: str) -> str:
+    """可取正文就用规范中文引用；只有章级范围时仍保留 Claim 的原始写法。"""
+
+    if scripture:
+        return format_chinese_reference(scripture)
+    references = claim.get("scripture_refs") or []
+    if not references:
+        return ""
+    first = references[0]
+    return first if isinstance(first, str) else json.dumps(first, ensure_ascii=False)
+
+
+def build_sermon_slides(
+    store: Any,
+    data_base_dir: Path,
+    transcript_id: str,
+) -> dict[str, Any] | None:
+    """一篇完整讲道的同步 slide 时间轴。
+
+    这与按经文摘取录音的 `build_index` 是两个入口。这里从 0:00 播到媒体结束，
+    Claim 只提供规范化标题和经文范围；教授的原文解释只从该 Claim 绑定的
+    SourceFragment 或逐字稿明确标注中取得。没有来源的空档由上一张继续停留，不
+    生成系统自写的过场文字。
+    """
+
+    def by_id(collection: str, key: str) -> dict[str, dict[str, Any]]:
+        return {
+            str(row.get(key)): row
+            for row in store.list_records(collection)
+            if row.get(key)
+        }
+
+    claims = by_id("claims", "claim_id")
+    steps = by_id("evidence_steps", "evidence_step_id")
+    fragments = by_id("source_fragments", "fragment_id")
+    documents = by_id("source_documents", "source_id")
+    document = next(
+        (
+            row
+            for row in documents.values()
+            if str(row.get("transcript_id") or "") == transcript_id
+            or str(row.get("source_id") or "") == transcript_id
+        ),
+        None,
+    )
+    if document is None:
+        return None
+
+    source_id = str(document.get("source_id") or "")
+    sermon = Sermons(data_base_dir).load(source_id, document)
+    if not sermon or not sermon.get("media_url") or not sermon.get("media_duration"):
+        return None
+    duration = float(sermon["media_duration"])
+
+    spans: list[tuple[float, float, str]] = []
+    verses: dict[str, str] = {}
+    verse_labels: dict[str, str] = {}
+    provenance: dict[str, dict[str, list[str]]] = {}
+    language_notes: dict[str, list[dict[str, Any]]] = {}
+
+    for claim_id, claim in claims.items():
+        statement = str(claim.get("statement") or "").strip()
+        if not statement:
+            continue
+        evidence_ids = (
+            claim.get("eligible_evidence_step_ids")
+            or claim.get("evidence_step_ids")
+            or []
+        )
+        claim_fragments: list[dict[str, Any]] = []
+        seen_fragments: set[str] = set()
+        for evidence_id in evidence_ids:
+            step = steps.get(str(evidence_id))
+            if not step:
+                continue
+            fragment_ids: list[str] = []
+            if step.get("source_fragment_id"):
+                fragment_ids.append(str(step["source_fragment_id"]))
+            fragment_ids.extend(str(x) for x in (step.get("source_fragment_ids") or []))
+            for fragment_id in fragment_ids:
+                if fragment_id in seen_fragments:
+                    continue
+                fragment = fragments.get(fragment_id)
+                if not fragment or str(fragment.get("source_id") or "") != source_id:
+                    continue
+                span = segment_time(sermon, fragment)
+                if not span or span[0] >= duration:
+                    continue
+                seen_fragments.add(fragment_id)
+                start, end = span[0], min(span[1], duration)
+                spans.append((start, end, statement))
+                item = {
+                    "claim_id": claim_id,
+                    "evidence_step_id": str(evidence_id),
+                    "source_fragment_id": fragment_id,
+                    "at": start,
+                    "text": str(fragment.get("verbatim_excerpt") or "").strip(),
+                }
+                claim_fragments.append(item)
+
+                trace = provenance.setdefault(statement, {
+                    "claim_ids": [],
+                    "evidence_step_ids": [],
+                    "source_fragment_ids": [],
+                })
+                for key, value in (
+                    ("claim_ids", claim_id),
+                    ("evidence_step_ids", str(evidence_id)),
+                    ("source_fragment_ids", fragment_id),
+                ):
+                    if value not in trace[key]:
+                        trace[key].append(value)
+
+        if not claim_fragments:
+            continue
+        scripture = claim_primary_scripture(claim)
+        verses.setdefault(statement, scripture)
+        verse_labels.setdefault(statement, claim_scripture_label(claim, scripture))
+        explicit = [
+            item
+            for item in claim_fragments
+            if item["text"]
+            and (
+                ORIGINAL_LANGUAGE_SIGNAL.search(item["text"])
+                or GREEK_TERM.search(item["text"])
+            )
+        ]
+        candidates = explicit
+        if not candidates and ORIGINAL_LANGUAGE_SIGNAL.search(statement):
+            candidates = [item for item in claim_fragments if item["text"]]
+        if candidates:
+            target = language_notes.setdefault(statement, [])
+            for item in candidates:
+                if not any(note["source_fragment_id"] == item["source_fragment_id"] for note in target):
+                    target.append(item)
+
+    full = [(0.0, duration, "")]
+    marks = judgement_during(spans, full, verses, provenance)
+    slides: list[dict[str, Any]] = []
+    first_scripture = marks[0].get("scripture", "") if marks else ""
+    first_title = str(marks[0].get("judgement", "")) if marks else ""
+    first_at = float(marks[0]["at"]) if marks else duration
+    if first_at > 0 or not marks:
+        slides.append({
+            "at": 0.0,
+            "seconds": first_at,
+            "kind": "cover",
+            "title": sermon["title"],
+            "scripture": first_scripture,
+            "scripture_label": verse_labels.get(first_title, ""),
+            "language_notes": [],
+        })
+    for mark in marks:
+        statement = str(mark["judgement"])
+        notes = sorted(
+            language_notes.get(statement, []),
+            key=lambda item: (abs(float(item["at"]) - float(mark["at"])), float(item["at"])),
+        )[:2]
+        scripture = str(mark.get("scripture") or "")
+        slides.append({
+            "at": mark["at"],
+            "seconds": mark["seconds"],
+            "kind": "claim",
+            "title": statement,
+            "scripture": scripture,
+            "scripture_label": verse_labels.get(statement, ""),
+            "provenance": mark.get("provenance"),
+            "language_notes": notes,
+        })
+
+    return {
+        "schema_version": "wang_sermon_slide_deck_v1",
+        "source_id": source_id,
+        "source_sha256": document.get("source_sha256"),
+        "transcript_id": sermon["transcript_id"],
+        "title": sermon["title"],
+        "media_duration": duration,
+        "slides": slides,
+        "original_language_events": original_language_during(full, sermon),
+    }
 
 
 def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:

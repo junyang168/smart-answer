@@ -15,7 +15,9 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from backend.api.config import CONFIG_DIR, DATA_BASE_PATH, WANG_SERMON_CATALOG_FILE
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.gemini_client import gemini_client
+from backend.pipeline.original_audio_index import build_sermon_slides
 
 from .access_control import AccessControl
 from .copilot import Copilot, ChatMessage, Document
@@ -729,6 +731,14 @@ class SermonManager:
         sermon_data['metadata']['series_id'] = self.get_series_id_for_item(item)
 
         return sermon_data
+
+    def get_sermon_slides(self, user_id: str, item: str) -> dict | None:
+        """这篇完整讲道的同步 slide；沿用逐字稿页面自己的读取权限。"""
+
+        permissions = self.get_sermon_permissions(user_id, item)
+        if not permissions.canRead:
+            return {"message": "You don't have permission to read this item"}
+        return build_sermon_slides(PostgresKnowledgeStore(), DATA_BASE_PATH, item)
     
     def get_sitemap(self):
         return self._sm.get_sitemap()
