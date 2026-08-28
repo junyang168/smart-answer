@@ -233,12 +233,17 @@ do_start() {
   backend_pid=$!
   echo "$backend_pid" > "$STATE_DIR/$API_PORT.pid"
 
-  # Without this the frontend proxies /api to whatever holds the default port
-  # -- which, with several worktrees running, is another card's backend.
-  # `next.config.mjs` reads it.
+  # Keep both frontend request paths on this worktree's backend:
+  # `next.config.mjs` reads DEV_BACKEND_ORIGIN for /api proxies, while server
+  # components and route handlers read the two service URL variables directly.
+  # Leaving either path on the shared .env.local default silently connects the
+  # page to staging (or to whichever process happens to own that port).
   (
     cd "$WEB_DIR"
-    export DEV_BACKEND_ORIGIN="http://127.0.0.1:$API_PORT" PORT="$WEB_PORT"
+    export DEV_BACKEND_ORIGIN="http://127.0.0.1:$API_PORT"
+    export FULL_ARTICLE_SERVICE_URL="$DEV_BACKEND_ORIGIN"
+    export SC_API_SERVICE_URL="$DEV_BACKEND_ORIGIN"
+    export PORT="$WEB_PORT"
     exec npm run dev
   ) > >(tee -a "$STATE_DIR/$WEB_PORT.log") 2>&1 &
   frontend_pid=$!
