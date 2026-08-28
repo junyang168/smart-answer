@@ -28,7 +28,10 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
+import httpx
+
 from backend.api.scripture import (
+    BIBLE_API_TRANSLATION_ZH,
     BOOK_SLUG_TO_NAME,
     format_chinese_reference,
     parse_reference,
@@ -388,6 +391,95 @@ def glosses_during(
     return out
 
 
+#: 逐字稿和经文比对时都去掉的标点。
+#:
+#: 他念经文不会照标点念，逐字稿的标点也是校对时加的。留着标点比不上。
+PUNCTUATION = re.compile(r"[\s\u3000，。：；、！？「」『』（）〔〕《》…·,.!?:;\"'()\[\]]+")
+
+#: 比对时用多长的窗口。
+#:
+#: 八个字够独特，也短到经得起他改一两个字：和合本是「因為這不是屬血肉的指示你
+#: 的」，他念成「因為這不是屬血氣的指示你的」——「乃是我在天上的父指示」这一段
+#: 照样对得上。
+READING_WINDOW = 8
+
+
+#: 取过的经文不再取第二次。
+#:
+#: 一段十一节，四段合起来三十几节，而 `passage_summaries` 一次要跑四段。不缓存
+#: 的话每次请求都去打一遍外部接口。
+_VERSE_CACHE: dict[str, str] = {}
+
+
+def verse_texts(book: str, chapter: int, low: int, high: int) -> dict[str, str]:
+    """这一段每一节的中文经文，键是 `mat-16-17` 这样的 slug。
+
+    用来在逐字稿里找他念到哪一节（见 `verse_readings`）。取不到就返回已取到的那
+    些——幻灯还有主张给的那一节兜底，不该因为外部接口挂了整页不出。
+    """
+
+    out: dict[str, str] = {}
+    with httpx.Client(timeout=10) as client:
+        for verse in range(low, high + 1):
+            slug = f"{book}-{chapter}-{verse}"
+            if slug not in _VERSE_CACHE:
+                try:
+                    reference = parse_reference(slug)
+                    response = client.get(
+                        f"https://bible-api.com/{reference['slug_book']} {chapter}:{verse}",
+                        params={"translation": BIBLE_API_TRANSLATION_ZH},
+                    )
+                    response.raise_for_status()
+                    _VERSE_CACHE[slug] = str(response.json().get("text") or "").strip()
+                except (httpx.HTTPError, ValueError, KeyError):
+                    continue
+            if _VERSE_CACHE.get(slug):
+                out[slug] = _VERSE_CACHE[slug]
+    return out
+
+
+def verse_readings(
+    sermon: dict[str, Any], verses: dict[str, str]
+) -> list[tuple[float, str]]:
+    """教授在这篇讲道里，什么时候念到哪一节。
+
+    他自己报的节号靠不住：（五）1 的 2:15 他说「我再念一下，然後我特別來看十九
+    節那一段」——那是预告，接着他从十七节念起。照着报节号走，2:24 会显示十九节，
+    而他正在念「乃是我在天上的父指示你的」，十七节。
+
+    他念的经文本身靠得住。把每一节的原文切成八个字的窗口，在逐字稿里找。窗口短
+    到经得起他改字（和合本「屬血肉」他念成「屬血氣」），长到不会撞车。
+
+    没命中的节就是他没逐字念（复述或跳过），由主张给的那一节兜底。
+    """
+
+    text = "".join(
+        STRIKETHROUGH.sub("", str(segment.get("text") or ""))
+        for segment in (sermon.get("segments") or [])
+    )
+    anchors = _timeline(sermon)
+    if not anchors or not text:
+        return []
+    # 去标点之后再比，同时记住每个字在原文里的位置——时间是按原文的字数插值的。
+    keep = [i for i, char in enumerate(text) if not PUNCTUATION.match(char)]
+    flat = "".join(text[i] for i in keep)
+
+    found: dict[float, str] = {}
+    for slug, verse_text in verses.items():
+        stripped = PUNCTUATION.sub("", verse_text)
+        for start in range(0, max(1, len(stripped) - READING_WINDOW + 1), 2):
+            window = stripped[start : start + READING_WINDOW]
+            if len(window) < READING_WINDOW:
+                break
+            at = flat.find(window)
+            while at >= 0:
+                moment = _at(anchors, keep[at])
+                if moment is not None:
+                    found.setdefault(moment, slug)
+                at = flat.find(window, at + 1)
+    return sorted(found.items())
+
+
 def judgement_during(
     spans: list[tuple[float, float, str]],
     stretches: list[tuple[float, float, str]],
@@ -609,6 +701,8 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     book = str(reference["slug"])
     chapter = int(reference["chapter"])
     low, high = int(reference["start"]), int(reference["end"])
+    # 这一段每一节的经文，用来在逐字稿里找他念到哪一节。
+    passage_verses = verse_texts(book, chapter, low, high)
 
     def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
         """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
@@ -675,6 +769,12 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
             "judgements": judgement_during(slot["spans"], merged, verses),
             "spoken": spoken_during(merged, sermon),
+            # 他什么时候念到哪一节。报节号是预告，念出来才算数。
+            "readings": [
+                {"at": at, "scripture": slug}
+                for at, slug in verse_readings(sermon, passage_verses)
+                if any(begin <= at < finish for begin, finish, _ in merged)
+            ],
             "glosses": glosses_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
         })

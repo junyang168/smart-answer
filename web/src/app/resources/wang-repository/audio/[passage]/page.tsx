@@ -41,6 +41,8 @@ type Sermon = {
   stretches: Stretch[];
   judgements: Judgement[];
   spoken: Spoken[];
+  /** 他念到某一节的时刻。念出来的比报出来的准。 */
+  readings: { at: number; scripture: string }[];
   glosses: Gloss[];
   seconds: number;
 };
@@ -96,18 +98,35 @@ function verseAt(sermon: Sermon, seconds: number, passage: string) {
     }
   }
 
-  // 这条 topic 开始之后他自己念到的节，盖过主张给的那一节。
+  // 这条 topic 开始之后他念到的那一节，盖过主张给的那一节。
   //
-  // （五）1 开头那两分钟：topic 是「彼得認信耶穌是基督、永生神的兒子」，主张说
-  // 太16:16，没错——可他 2:01 念完十六节就说「我再念一下，然後我特別來看十九節
-  // 那一段」，接着一路念到十九节，而幻灯还停在十六节。一条 topic 两分钟，他在
-  // 里面是会往前走的。
+  // 一条 topic 两分钟，他在里面是会往前走的：topic 是「彼得認信耶穌是基督、永
+  // 生神的兒子」，主张说太16:16，没错——可他念完十六节就接着念十七、十八、十九
+  // 节，而幻灯停在十六节。
+  //
+  // 他念的和他报的，按时间合起来用。
+  //
+  // 报的常常是预告：2:15 他说「我再念一下，然後我特別來看十九節那一段」，接着
+  // 从十七节念起。只听报的，2:24 会显示十九节，而他正念着「乃是我在天上的父指
+  // 示你的」，十七节。
+  //
+  // 但报的不能丢：28:47 他说「二十二節，彼得就拉著祂，勸祂說：主啊，萬不可如
+  // 此」——那一句他是复述不是照念，逐字比对认不出来。
+  //
+  // 按时间排，后来的盖过先前的：2:15 报十九节，2:17 起念十七节，盖回来了。
   const [inBook, inChapter] = passage.split("-");
-  for (const mark of sermon.spoken) {
+  const said = [
+    ...sermon.spoken.map((m) => ({ at: m.at, scripture: m.scripture })),
+    ...sermon.readings,
+  ]
+    .filter((m) => {
+      const parts = m.scripture.split("-");
+      return parts[0] === inBook && parts[1] === inChapter;
+    })
+    .sort((a, b) => a.at - b.at);
+  for (const mark of said) {
     if (mark.at > seconds) break;
-    if (mark.at < since) continue;
-    const parts = mark.scripture.split("-");
-    if (parts[0] === inBook && parts[1] === inChapter) slug = mark.scripture;
+    if (mark.at >= since) slug = mark.scripture;
   }
   const [book, chapter, from, to] = slug.split("-");
   const [start, end] = [Number(from), Number(to ?? from)];
