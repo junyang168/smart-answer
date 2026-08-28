@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-type RepositoryView = "bible" | "topic" | "audio";
+type RepositoryView = "bible" | "topic";
 
 type ScriptureReference = {
   book: string;
@@ -120,10 +120,15 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
   );
 }
 
-/** 原声目录：一章底下有几段可听的。
+/** 一章底下可听的几段原声。
  *
- * 跟文章分开成两个 tab。原来两种卡并排在同一章底下，四张深色压着两张浅色，读者
- * 分不清哪个是读的、哪个是听的。读和听是两件事，各占一个入口。
+ * 聖經和主題是分类的两个轴，教授的原声和我们写的文章都沿这两个轴分——原声不是
+ * 第三个轴，是同一章底下的另一种内容。所以它跟文章排在一起，只是分成两组、各
+ * 带标签。
+ *
+ * 也不做成跟文章一样的卡片：原来两种卡并排，四张深色压着两张浅色，一章底下六
+ * 个方块抢戏，读者分不清哪个是读的、哪个是听的。文章是一篇一篇的，原声是一段
+ * 一段的，形状不同才看得出是两回事。
  */
 function AudioList({ passages }: { passages: AudioPassage[] }) {
   if (passages.length === 0) return null;
@@ -189,21 +194,11 @@ export default function WangRepositoryPage() {
   }, []);
 
   const bibleBooks = useMemo(() => groupArticlesByBible(articles), [articles]);
-  const audioByBookChapter = useMemo(() => {
-    const map = new Map<
-      string,
-      { book: string; bookLabel: string; chapter: number; passages: AudioPassage[] }
-    >();
+  const audioByChapter = useMemo(() => {
+    const map = new Map<string, AudioPassage[]>();
     for (const passage of audio) {
       const key = `${passage.scripture.book}-${passage.scripture.chapter}`;
-      const group = map.get(key) ?? {
-        book: passage.scripture.book,
-        bookLabel: passage.scripture.book_label,
-        chapter: passage.scripture.chapter,
-        passages: [],
-      };
-      group.passages.push(passage);
-      map.set(key, group);
+      map.set(key, [...(map.get(key) ?? []), passage]);
     }
     return map;
   }, [audio]);
@@ -237,14 +232,6 @@ export default function WangRepositoryPage() {
           >
             主題目錄
           </button>
-          <button
-            type="button"
-            aria-pressed={view === "audio"}
-            onClick={() => setView("audio")}
-            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "audio" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
-          >
-            原聲
-          </button>
           <Link href="/resources/qa" className="rounded-full bg-white px-5 py-2.5 font-semibold text-stone-700 shadow-sm hover:bg-stone-100">
             信仰問答
           </Link>
@@ -270,50 +257,33 @@ export default function WangRepositoryPage() {
                   {book.chapters.map((chapter) => (
                     <section key={`${book.book}-${chapter.chapter}`} aria-labelledby={`${book.book}-${chapter.chapter}`}>
                       <h3 id={`${book.book}-${chapter.chapter}`} className="text-xl font-bold text-stone-700">第 {chapter.chapter} 章</h3>
-                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                        {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
-                      </div>
+                      {chapter.articles.length > 0 && (
+                        <>
+                          <p className="mt-4 text-sm font-bold text-amber-800">文章</p>
+                          <div className="mt-2 grid gap-4 sm:grid-cols-2">
+                            {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
+                          </div>
+                        </>
+                      )}
+                      {(audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).length > 0 && (
+                        <>
+                          {/* 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換
+                              聆聽相關原聲講解」，在这之前从这里通不到任何原声。
+                              有的段落只有原声还没有文章——原声可以先于文章上线。 */}
+                          <p className="mt-6 text-sm font-bold text-amber-800">原聲</p>
+                          <div className="mt-2">
+                            <AudioList
+                              passages={audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []}
+                            />
+                          </div>
+                        </>
+                      )}
                     </section>
                   ))}
                 </div>
               </section>
             ))}
           </div>
-        ) : view === "audio" ? (
-          // 原声自成一个目录。
-          //
-          // 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講
-          // 解」，在这之前从这里通不到任何原声。
-          //
-          // 有的段落只有原声还没有文章——原声可以先于文章上线，所以这个目录不
-          // 跟着文章走，按经卷章节自己排。
-          audio.length > 0 ? (
-            <div className="mt-12 space-y-14">
-              {[...audioByBookChapter.entries()].map(([key, group]) => (
-                <section key={key} aria-labelledby={`audio-${key}`}>
-                  <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-800">
-                    {group.book}
-                  </p>
-                  <h2
-                    id={`audio-${key}`}
-                    className="mt-1 border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950"
-                  >
-                    {group.bookLabel}
-                  </h2>
-                  <h3 className="mt-7 text-xl font-bold text-stone-700">
-                    第 {group.chapter} 章
-                  </h3>
-                  <div className="mt-3">
-                    <AudioList passages={group.passages} />
-                  </div>
-                </section>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
-              目前尚無可聽的原聲。
-            </div>
-          )
         ) : topicGroups.length > 0 ? (
           <div className="mt-12 space-y-10">
             {topicGroups.map(([topic, topicArticles]) => (
