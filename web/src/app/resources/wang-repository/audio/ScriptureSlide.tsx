@@ -6,14 +6,24 @@ import { useEffect, useState } from "react";
  * 教授此刻在讲的判断，和他正在解的那节经文。
  *
  * 这一页的讲道全是只有音频——点开就是一个光秃秃的播放器，一小时听下来屏幕上什
- * 么都没有。幻灯上放三样：他此刻立的判断、经文、以及他正在讲的那个字的原文。
+ * 么都没有。幻灯上放三样：根据 Claim 整理的讲论要点、他正在解的经文、以及逐字
+ * 稿明确记下的原文讲解。
  *
- * 经文是圣经的字，判断是他自己的话。一个字都不是我们写的。
+ * 讲论要点是规范化后的 Claim，不冒充逐字引语；原文讲解则保留教授原话供展开核
+ * 对。两种文字在视觉上必须分清楚。
  */
 
 type Passages = { zh?: string; en?: string; el?: string; he?: string };
-/** 教授给经文里的字作的注解：「你是彼得(Petrus)」。 */
-export type Gloss = { at: number; context: string; original: string };
+/** 逐字稿中明确出现的原文讲解，不包含系统推断的 lemma 或 morphology。 */
+export type OriginalLanguageEvent = {
+  at: number;
+  context: string;
+  original: string;
+  greek: string;
+  transcript_excerpt: string;
+  transcript_span: { start: number; end: number };
+  source_kind: "transcript_explicit";
+};
 
 /** 取过的经节不再取第二次。
  *
@@ -92,14 +102,14 @@ function slice(verse: string, words: string[]) {
 export default function ScriptureSlide({
   slug,
   title,
-  glosses,
+  originalLanguage,
   cited,
 }: {
   slug: string;
-  /** 教授此刻立的那个判断。幻灯的抬头。 */
+  /** 由来源绑定 Claim 规范化出的讲论要点，不是逐字引语。 */
   title: string;
-  /** 到此刻为止他讲过的字，按先后。讲过的留着，不被后一个顶掉。 */
-  glosses: Gloss[];
+  /** 当前讲论要点里、到此刻为止教授明确讲过的原文。 */
+  originalLanguage: OriginalLanguageEvent[];
   /** 他此刻翻到的别处经文，中文写法（「弗 4:11」）。 */
   cited?: string;
 }) {
@@ -124,7 +134,7 @@ export default function ScriptureSlide({
   if (!verse) return null;
 
   const said: Array<{ word: string; original: string }> = [];
-  for (const item of glosses) {
+  for (const item of originalLanguage) {
     const word = verseWord(item.context, verse);
     // 同一个字他会讲好几遍（「你是彼得」在（四）1 里说了三次），列一次就够。
     if (word && !said.some((x) => x.word === word)) {
@@ -132,40 +142,77 @@ export default function ScriptureSlide({
     }
   }
   const parts = slice(verse, said.map((x) => x.word));
+  const language: OriginalLanguageEvent[] = [];
+  for (const item of originalLanguage) {
+    const key = `${item.greek}|${item.original}`.toLowerCase();
+    if (!language.some((seen) => `${seen.greek}|${seen.original}`.toLowerCase() === key)) {
+      language.push(item);
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-slate-900 px-5 py-4 text-slate-100">
-      {/* 幻灯的抬头是他此刻立的判断，不是经节号。
-          经节号整页只有一个（页面标题就是「王教授講太 16:18-19」），在每张幻灯
-          上再报一次是废话；判断才是这一分钟和下一分钟的区别。 */}
-      <p className="text-[0.95rem] font-semibold leading-snug text-amber-300">{title}</p>
+    <section className="flex min-h-[20rem] flex-col gap-5 rounded-xl bg-slate-950 px-5 py-5 text-slate-100 shadow-inner sm:px-7 sm:py-6">
+      <header className="border-b border-slate-800 pb-4">
+        <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-amber-400">
+          講論要點 · 根據來源 Claim 整理
+        </p>
+        <h2 className="font-serif text-xl font-semibold leading-snug text-white sm:text-2xl">
+          {title}
+        </h2>
+      </header>
 
       {/* 他讲到经文里的哪个字，就把那个字标出来。原来铺整节的希腊原文——读者不看
           希腊文，铺开只是一堵墙；他在课上真正做的是挑几个字讲。 */}
-      <p className="text-[0.9rem] leading-relaxed text-slate-300">
-        {parts.map((part, index) =>
-          part.marked ? (
-            <mark
-              key={index}
-              className="rounded bg-amber-300/20 px-0.5 text-amber-200"
-            >
-              {part.text}
-            </mark>
-          ) : (
-            <span key={index}>{part.text}</span>
-          ),
-        )}
-      </p>
+      <div>
+        <p className="mb-2 font-mono text-[0.7rem] text-slate-500">{shown.reference}</p>
+        <p className="font-serif text-[1.05rem] leading-8 text-slate-200 sm:text-lg">
+          {parts.map((part, index) =>
+            part.marked ? (
+              <mark
+                key={index}
+                className="rounded bg-amber-300/20 px-0.5 text-amber-100"
+              >
+                {part.text}
+              </mark>
+            ) : (
+              <span key={index}>{part.text}</span>
+            ),
+          )}
+        </p>
+      </div>
 
-      {said.length > 0 && (
-        <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-700 pt-3 font-mono text-[0.82rem] text-slate-400">
-          {said.map((item) => (
-            <span key={item.word}>
-              <span className="text-amber-200">{item.word}</span>
-              <span className="px-2 text-slate-600">·</span>
-              {item.original}
-            </span>
-          ))}
+      {language.length > 0 && (
+        <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.06] p-4">
+          <p className="mb-3 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-amber-300">
+            原文講解 · 逐字稿明載
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {language.map((item) => {
+              const word = verseWord(item.context, verse);
+              return (
+                <article
+                  key={`${item.at}-${item.greek}-${item.original}`}
+                  className="rounded-md bg-slate-900/80 px-4 py-3"
+                >
+                  {word && <p className="mb-1 text-xs text-slate-500">經文中的「{word}」</p>}
+                  <p className="font-serif text-xl text-amber-100">
+                    {item.greek || item.original}
+                  </p>
+                  {item.greek && item.original !== item.greek && (
+                    <p className="mt-1 font-mono text-xs text-slate-400">{item.original}</p>
+                  )}
+                  <details className="mt-3 text-xs leading-relaxed text-slate-400">
+                    <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-300">
+                      查看教授原話
+                    </summary>
+                    <blockquote className="mt-2 border-l border-amber-300/30 pl-3">
+                      {item.transcript_excerpt}
+                    </blockquote>
+                  </details>
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -174,6 +221,6 @@ export default function ScriptureSlide({
       {cited && (
         <p className="font-mono text-[0.7rem] text-slate-500">他此刻在念 {cited}</p>
       )}
-    </div>
+    </section>
   );
 }

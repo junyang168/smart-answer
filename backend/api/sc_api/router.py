@@ -454,6 +454,14 @@ def get_final_sermon(user_id: str, item: str, remove_tags: bool = True):
     return sermon_manager.get_final_sermon(user_id, item, remove_tags)
 
 
+@router.get("/sermon_slides/{user_id}/{item}")
+def get_sermon_slides(user_id: str, item: str):
+    result = sermon_manager.get_sermon_slides(user_id, item)
+    if result is None:
+        raise HTTPException(status_code=404, detail="這篇講道還沒有可用的同步 slides。")
+    return result
+
+
 @router.get("/sermon_series")
 def get_sermon_series():
     return sermon_manager.get_sermon_series()
