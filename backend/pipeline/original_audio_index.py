@@ -404,38 +404,63 @@ PUNCTUATION = re.compile(r"[\s\u3000，。：；、！？「」『』（）〔�
 READING_WINDOW = 8
 
 
-#: 取过的经文不再取第二次。
+#: 取过的经文存在磁盘上。
 #:
-#: 一段十一节，四段合起来三十几节，而 `passage_summaries` 一次要跑四段。不缓存
-#: 的话每次请求都去打一遍外部接口。
-_VERSE_CACHE: dict[str, str] = {}
+#: 不存的话内容会随取数成败而变：实测同一段经文，一次取全十一节，下一次第十七
+#: 节空了——于是幻灯从「乃是我在天上的父指示你的」跳回了别节。外部接口偶发失败
+#: 是常态，而这一页显示哪一节不该由它决定。
+#:
+#: 也省下重复请求：uvicorn 每次热重载都是新进程，只放内存的话每次都要重打三十
+#: 几次。
+_VERSE_CACHE_NAME = "bible-verses.json"
 
 
-def verse_texts(book: str, chapter: int, low: int, high: int) -> dict[str, str]:
+def _verse_cache_path(data_base_dir: Path) -> Path:
+    return Path(data_base_dir) / "wang-knowledge-platform" / "cache" / _VERSE_CACHE_NAME
+
+
+def verse_texts(data_base_dir: Path, book: str, chapter: int, low: int, high: int) -> dict[str, str]:
     """这一段每一节的中文经文，键是 `mat-16-17` 这样的 slug。
 
-    用来在逐字稿里找他念到哪一节（见 `verse_readings`）。取不到就返回已取到的那
-    些——幻灯还有主张给的那一节兜底，不该因为外部接口挂了整页不出。
+    用来在逐字稿里找他念到哪一节（见 `verse_readings`）。取不到就用存过的那一
+    份；两边都没有才少这一节，那一节由主张给的经文兜底。
     """
 
-    out: dict[str, str] = {}
-    with httpx.Client(timeout=10) as client:
-        for verse in range(low, high + 1):
-            slug = f"{book}-{chapter}-{verse}"
-            if slug not in _VERSE_CACHE:
+    path = _verse_cache_path(data_base_dir)
+    cached: dict[str, str] = {}
+    if path.is_file():
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = {}
+
+    wanted = [f"{book}-{chapter}-{verse}" for verse in range(low, high + 1)]
+    missing = [slug for slug in wanted if not cached.get(slug)]
+    if missing:
+        with httpx.Client(timeout=10) as client:
+            for slug in missing:
                 try:
                     reference = parse_reference(slug)
                     response = client.get(
-                        f"https://bible-api.com/{reference['slug_book']} {chapter}:{verse}",
+                        f"https://bible-api.com/{reference['slug_book']} {chapter}:{slug.rsplit('-', 1)[1]}",
                         params={"translation": BIBLE_API_TRANSLATION_ZH},
                     )
                     response.raise_for_status()
-                    _VERSE_CACHE[slug] = str(response.json().get("text") or "").strip()
+                    text = str(response.json().get("text") or "").strip()
                 except (httpx.HTTPError, ValueError, KeyError):
                     continue
-            if _VERSE_CACHE.get(slug):
-                out[slug] = _VERSE_CACHE[slug]
-    return out
+                if text:
+                    cached[slug] = text
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(cached, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    return {slug: cached[slug] for slug in wanted if cached.get(slug)}
 
 
 def verse_readings(
@@ -464,19 +489,31 @@ def verse_readings(
     keep = [i for i, char in enumerate(text) if not PUNCTUATION.match(char)]
     flat = "".join(text[i] for i in keep)
 
-    found: dict[float, str] = {}
+    # 一句话在几节里都出现时，它认不出他在念哪一节。
+    #
+    # 「法利賽人和撒都該人」在太16 的第 1、6、11、12 节里都有；靠它定位，4:22
+    # 他明明在讲第一节的定冠詞，幻灯却跳到第六节。只留在这一段里唯一的窗口。
+    owner: dict[str, str] = {}
+    ambiguous: set[str] = set()
     for slug, verse_text in verses.items():
         stripped = PUNCTUATION.sub("", verse_text)
         for start in range(0, max(1, len(stripped) - READING_WINDOW + 1), 2):
             window = stripped[start : start + READING_WINDOW]
             if len(window) < READING_WINDOW:
                 break
-            at = flat.find(window)
-            while at >= 0:
-                moment = _at(anchors, keep[at])
-                if moment is not None:
-                    found.setdefault(moment, slug)
-                at = flat.find(window, at + 1)
+            if owner.setdefault(window, slug) != slug:
+                ambiguous.add(window)
+
+    found: dict[float, str] = {}
+    for window, slug in owner.items():
+        if window in ambiguous:
+            continue
+        at = flat.find(window)
+        while at >= 0:
+            moment = _at(anchors, keep[at])
+            if moment is not None:
+                found.setdefault(moment, slug)
+            at = flat.find(window, at + 1)
     return sorted(found.items())
 
 
@@ -702,7 +739,7 @@ def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") 
     chapter = int(reference["chapter"])
     low, high = int(reference["start"]), int(reference["end"])
     # 这一段每一节的经文，用来在逐字稿里找他念到哪一节。
-    passage_verses = verse_texts(book, chapter, low, high)
+    passage_verses = verse_texts(data_base_dir, book, chapter, low, high)
 
     def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
         """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
