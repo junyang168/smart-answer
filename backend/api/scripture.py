@@ -532,6 +532,7 @@ def parse_reference(slug: str) -> Dict[str, object]:
         "display": display,
         "slug": book_slug,
         "slug_book": alias,
+        "osis_book": osis_book,
         "chapter": chapter_number,
         "start": verse_start,
         "end": verse_end or verse_start,
@@ -643,15 +644,39 @@ _CHINESE_DIGITS: Dict[str, int] = {c: i for i, c in enumerate("零一二三四�
 #: 书名会带上「第」而查不到书卷。
 _SPOKEN_BOOK_CHAR = r"(?:(?![零一二三四五六七八九十百第章節节])[\u4e00-\u9fff])"
 
-#: 「以弗所書第四章第十一節」「馬太十六章十八節」「16章19節」都要认。
+#: 他念经文的三种说法。
+#:
+#: 一、书名 + 章 + 节：「以弗所書第四章第十一節」「馬太十六章十八節」。
+#: 二、只报章：「因為耶穌在這個地方，馬太十六章，耶穌帶了門徒到該撒利亞……」。
+#: 三、只报节：「十六節說，西門彼得回答說……」「我特別來看十九節那一段」。
+#:
+#: 第三种最要紧也最容易漏。他讲一章经文时章号是不重复的，一路只说「十八節」
+#: 「十九節」「二十一節」——五篇讲道里这样的说法有 21 处，而幻灯要跟着他走，靠
+#: 的正是这些。原来只认第一种，于是（五）1 开头两分钟里他从十六节念到十九节，
+#: 幻灯一直停在十六节。
 _SPOKEN_REFERENCE_PATTERN = re.compile(
-    # 书名和章号之间可能隔着一个收尾书名号：「《帖撒羅尼迦前書》五章二十三節」。
-    # 不放行的话书名认不出来，就退回上一次带下来的书卷——上一句正好在讲马太，
-    # 于是帖前 5:23 被显示成了马太 5:23。
     rf"(?P<book>{_SPOKEN_BOOK_CHAR}{{1,7}})?\s*[》〉」』〕】）]?\s*(?:第)?"
-    rf"(?P<chapter>[零一二三四五六七八九十百\d]+)\s*章"
-    rf"\s*(?:第)?(?P<verse>[零一二三四五六七八九十百\d]+)\s*[節节]"
+    # 诗篇用「篇」不用「章」：「詩篇三十四篇一節到三節」。不认的话「到三節」会
+    # 带上前面别处的章号，成了另一卷书的第三节。
+    rf"(?P<chapter>[零一二三四五六七八九十百\d]+)\s*[章篇]"
+    rf"(?:\s*(?:第)?(?P<verse>[零一二三四五六七八九十百\d]+)\s*[節节])?"
 )
+
+#: 只报节：「十六節說」「我特別來看十九節那一段」「第十八節：我實在告訴你們」。
+#:
+#: 「這一節聖經很多人一直是很有困擾」「把一節聖經拿來亂扯」不是引用——这些
+#: 「一節」说的是「这段经文」，不是第一节。「詩篇三十四篇一節」的「篇」同理，
+#: 那是诗篇的章。
+_BARE_VERSE_PATTERN = re.compile(
+    r"(?<![這这那每上下同本一把幾几某整半篇章])(?:第)?"
+    r"(?P<verse>[零一二三四五六七八九十百\d]+)\s*[節节]"
+)
+
+#: 只报节的说法，最多离上一次报章多远还算数。
+#:
+#: 他换书卷时会重报（「使徒行傳第十五章十三節開始」），可换之前那几句里的「第
+#: 十九節」说的还是使徒行传。字数窗口挡住的是隔了半篇之后的孤立「第三節」。
+BARE_VERSE_REACH = 1200
 
 
 def chinese_number(text: str) -> Optional[int]:
@@ -704,22 +729,43 @@ def spoken_references(text: str) -> list[tuple[int, str]]:
     十分钟，中间他翻了三处经文。他自己是念出来的：「可是以弗所書二章二十節，
     『並且教會被建造在使徒和先知的根基上』」，那才是那一刻屏幕上该有的字。
 
-    书名可以省略。他讲一段以弗所书时会说「第四章第十一節」「第二章二十節」，书
-    名是上一句给的。所以书名往下带，直到他换书为止。
+    书名和章号都往下带。他讲一章经文时不重复报，一路只说「十八節」「十九節」；
+    换书卷时会重报（「使徒行傳第十五章十三節開始」），带下去的就跟着换。
     """
 
     found: list[tuple[int, str]] = []
-    carried: Optional[str] = None
+    carried_book: Optional[str] = None
+    carried_chapter: Optional[int] = None
+    chapter_at = -10**9
+
+    marks: list[tuple[int, Optional[str], Optional[int], Optional[int]]] = []
     for match in _SPOKEN_REFERENCE_PATTERN.finditer(text or ""):
-        book = _spoken_book(match.group("book")) or carried
-        if not book:
+        marks.append((
+            match.start(),
+            _spoken_book(match.group("book")),
+            chinese_number(match.group("chapter")),
+            chinese_number(match.group("verse")) if match.group("verse") else None,
+        ))
+    for match in _BARE_VERSE_PATTERN.finditer(text or ""):
+        # 「十六章十八節」里的「十八節」已经被上面认过了，别再算一次。
+        if any(start <= match.start() < start + 14 for start, _, _, verse in marks if verse):
             continue
-        carried = book
-        chapter = chinese_number(match.group("chapter"))
-        verse = chinese_number(match.group("verse"))
-        if not chapter or not verse:
+        marks.append((match.start(), None, None, chinese_number(match.group("verse"))))
+    marks.sort()
+
+    for position, book, chapter, verse in marks:
+        if book:
+            carried_book = book
+        if chapter:
+            carried_chapter = chapter
+            chapter_at = position
+        if verse is None:
             continue
-        found.append((match.start(), f"{book}-{chapter}-{verse}"))
+        if not carried_book or not carried_chapter:
+            continue
+        if not chapter and position - chapter_at > BARE_VERSE_REACH:
+            continue
+        found.append((position, f"{carried_book}-{carried_chapter}-{verse}"))
     return found
 
 

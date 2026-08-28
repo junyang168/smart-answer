@@ -28,7 +28,16 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote
 
-from backend.api.scripture import format_chinese_reference, reference_slugs, spoken_references
+import httpx
+
+from backend.api.scripture import (
+    BIBLE_API_TRANSLATION_ZH,
+    BOOK_SLUG_TO_NAME,
+    format_chinese_reference,
+    parse_reference,
+    reference_slugs,
+    spoken_references,
+)
 
 
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
@@ -68,10 +77,15 @@ LEAD_IN_SECONDS = 8.0
 
 #: 一段最短播多久。
 #:
-#: 按引文长度算，一句话只有五六秒，点开听完还没反应过来就停了。45 秒是教授把
-#: 一个判断说完再举一句例子的长度——量下来单条引文中位 18 字（约 6 秒），而他
-#: 说清一件事通常连着三到八句。
-MIN_STRETCH_SECONDS = 45.0
+#: 按引文长度算，一句话只有五六秒，点开听完还没反应过来就停了。原来是 45 秒，
+#: 估的是「他把一个判断说完再举一句例子」的长度。那个估计偏紧：太 16 章四页共
+#: 33 段，有 8 段的长度**正好是 45.0 秒**——那不是量出来的长度，是下限本身，只
+#: 是说明这几段的引文短到落回下限。整章段长中位 174 秒，45 秒离它太远。
+#:
+#: 提到 90 秒：不足 1 分钟的段从 8 降到 0，段数一段不变（33），总时长 173 分
+#: 变 179 分。120 秒也是 33 段，但要再多播 6 分钟，而 90 秒已经把「点开还没
+#: 反应过来就停了」解决掉了。
+MIN_STRETCH_SECONDS = 90.0
 
 #: 逐字稿目录的优先顺序，与抽取一致。
 TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
@@ -377,8 +391,136 @@ def glosses_during(
     return out
 
 
+#: 逐字稿和经文比对时都去掉的标点。
+#:
+#: 他念经文不会照标点念，逐字稿的标点也是校对时加的。留着标点比不上。
+PUNCTUATION = re.compile(r"[\s\u3000，。：；、！？「」『』（）〔〕《》…·,.!?:;\"'()\[\]]+")
+
+#: 比对时用多长的窗口。
+#:
+#: 八个字够独特，也短到经得起他改一两个字：和合本是「因為這不是屬血肉的指示你
+#: 的」，他念成「因為這不是屬血氣的指示你的」——「乃是我在天上的父指示」这一段
+#: 照样对得上。
+READING_WINDOW = 8
+
+
+#: 取过的经文存在磁盘上。
+#:
+#: 不存的话内容会随取数成败而变：实测同一段经文，一次取全十一节，下一次第十七
+#: 节空了——于是幻灯从「乃是我在天上的父指示你的」跳回了别节。外部接口偶发失败
+#: 是常态，而这一页显示哪一节不该由它决定。
+#:
+#: 也省下重复请求：uvicorn 每次热重载都是新进程，只放内存的话每次都要重打三十
+#: 几次。
+_VERSE_CACHE_NAME = "bible-verses.json"
+
+
+def _verse_cache_path(data_base_dir: Path) -> Path:
+    return Path(data_base_dir) / "wang-knowledge-platform" / "cache" / _VERSE_CACHE_NAME
+
+
+def verse_texts(data_base_dir: Path, book: str, chapter: int, low: int, high: int) -> dict[str, str]:
+    """这一段每一节的中文经文，键是 `mat-16-17` 这样的 slug。
+
+    用来在逐字稿里找他念到哪一节（见 `verse_readings`）。取不到就用存过的那一
+    份；两边都没有才少这一节，那一节由主张给的经文兜底。
+    """
+
+    path = _verse_cache_path(data_base_dir)
+    cached: dict[str, str] = {}
+    if path.is_file():
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = {}
+
+    wanted = [f"{book}-{chapter}-{verse}" for verse in range(low, high + 1)]
+    missing = [slug for slug in wanted if not cached.get(slug)]
+    if missing:
+        with httpx.Client(timeout=10) as client:
+            for slug in missing:
+                try:
+                    reference = parse_reference(slug)
+                    response = client.get(
+                        f"https://bible-api.com/{reference['slug_book']} {chapter}:{slug.rsplit('-', 1)[1]}",
+                        params={"translation": BIBLE_API_TRANSLATION_ZH},
+                    )
+                    response.raise_for_status()
+                    text = str(response.json().get("text") or "").strip()
+                except (httpx.HTTPError, ValueError, KeyError):
+                    continue
+                if text:
+                    cached[slug] = text
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(cached, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    return {slug: cached[slug] for slug in wanted if cached.get(slug)}
+
+
+def verse_readings(
+    sermon: dict[str, Any], verses: dict[str, str]
+) -> list[tuple[float, str]]:
+    """教授在这篇讲道里，什么时候念到哪一节。
+
+    他自己报的节号靠不住：（五）1 的 2:15 他说「我再念一下，然後我特別來看十九
+    節那一段」——那是预告，接着他从十七节念起。照着报节号走，2:24 会显示十九节，
+    而他正在念「乃是我在天上的父指示你的」，十七节。
+
+    他念的经文本身靠得住。把每一节的原文切成八个字的窗口，在逐字稿里找。窗口短
+    到经得起他改字（和合本「屬血肉」他念成「屬血氣」），长到不会撞车。
+
+    没命中的节就是他没逐字念（复述或跳过），由主张给的那一节兜底。
+    """
+
+    text = "".join(
+        STRIKETHROUGH.sub("", str(segment.get("text") or ""))
+        for segment in (sermon.get("segments") or [])
+    )
+    anchors = _timeline(sermon)
+    if not anchors or not text:
+        return []
+    # 去标点之后再比，同时记住每个字在原文里的位置——时间是按原文的字数插值的。
+    keep = [i for i, char in enumerate(text) if not PUNCTUATION.match(char)]
+    flat = "".join(text[i] for i in keep)
+
+    # 一句话在几节里都出现时，它认不出他在念哪一节。
+    #
+    # 「法利賽人和撒都該人」在太16 的第 1、6、11、12 节里都有；靠它定位，4:22
+    # 他明明在讲第一节的定冠詞，幻灯却跳到第六节。只留在这一段里唯一的窗口。
+    owner: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for slug, verse_text in verses.items():
+        stripped = PUNCTUATION.sub("", verse_text)
+        for start in range(0, max(1, len(stripped) - READING_WINDOW + 1), 2):
+            window = stripped[start : start + READING_WINDOW]
+            if len(window) < READING_WINDOW:
+                break
+            if owner.setdefault(window, slug) != slug:
+                ambiguous.add(window)
+
+    found: dict[float, str] = {}
+    for window, slug in owner.items():
+        if window in ambiguous:
+            continue
+        at = flat.find(window)
+        while at >= 0:
+            moment = _at(anchors, keep[at])
+            if moment is not None:
+                found.setdefault(moment, slug)
+            at = flat.find(window, at + 1)
+    return sorted(found.items())
+
+
 def judgement_during(
-    spans: list[tuple[float, float, str]], stretches: list[tuple[float, float, str]]
+    spans: list[tuple[float, float, str]],
+    stretches: list[tuple[float, float, str]],
+    verses: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """教授在这几段里先后立的判断，按时间排。
 
@@ -391,6 +533,10 @@ def judgement_during(
 
     所以按块算主导：每半分钟看这一块里哪个判断占的时间最多，再把撑不满 90 秒的
     并进邻居。剩下的换法就是他真的转了话题。
+
+    `verses` 把每个判断配上它讲的那一节——主张自己的 `scripture_refs` 就写着，
+    「彼得認信耶穌是基督、永生神的兒子」是太16:16，「相較於別人如何評價耶穌」是
+    太16:13-15。幻灯上摆哪一节由它决定。
     """
 
     if not spans:
@@ -439,7 +585,8 @@ def judgement_during(
             # 它当标题就错了。
             if until - run[0] < MIN_JUDGEMENT_SECONDS:
                 continue
-            out.append({"at": run[0], "judgement": run[1]})
+            out.append({"at": run[0], "judgement": run[1],
+                        "scripture": (verses or {}).get(run[1], "")})
         # 每一段都得有自己的抬头。
         #
         # 90 秒那条线会把短段的抬头全滤掉：（四）3 的 2:05–3:03 和 35:27–36:12
@@ -451,7 +598,21 @@ def judgement_during(
         if len(out) == kept:
             judgement = dominant(begin, finish)
             if judgement and (not out or out[-1]["judgement"] != judgement):
-                out.append({"at": begin, "judgement": judgement})
+                out.append({"at": begin, "judgement": judgement,
+                            "scripture": (verses or {}).get(judgement, "")})
+    # 每个判断能听多久。
+    #
+    # 判断不再只是幻灯上的抬头，它同时是读者的收听单位——一段一个判断，点它开始
+    # 播。所以每条要报出自己有多长，读者才看得出「这一条听 3 分钟还是 13 分钟」。
+    #
+    # 算的是**能播的**秒数，不是首尾相减：一个判断可以横跨两段录音，中间隔着教
+    # 授岔去讲别的，那段不播，也就不该计进去。
+    for index, mark in enumerate(out):
+        until = out[index + 1]["at"] if index + 1 < len(out) else float("inf")
+        mark["seconds"] = sum(
+            max(0.0, min(finish, until) - max(begin, mark["at"]))
+            for begin, finish, _ in stretches
+        )
     return out
 
 
@@ -462,6 +623,27 @@ def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: i
     `馬太福音16:28-17:2`、`馬可福音8:38（聽眾口述為「馬可福音九章最後一節」）`、
     `啟示錄（未指明章節）`。认经文交给 `api.scripture`。
     """
+
+    # 引用太多处的，是在跨经文作综合，不是在解这一段。
+    #
+    # 「父神的宣告揭示雙重身分：詩2的受膏君王，與賽42神所喜悅的受苦僕人」引了 11
+    # 处——诗2:7、赛42:1、太3:16-17、太17:1-5、可9:2-7、路9:28-35、彼后1:16-18、
+    # 徒13:33……只有一处是太16:21-23。它讲的是登山变像，太16:21-23 是它引来对照
+    # 的。可「任一处命中就算」把它收进了 16:21-23，于是那一页上出现了两段讲登山
+    # 变像的录音。另一条「太16:28…應驗於登山變像」同样，引 7 处，混进了 16:24-27。
+    #
+    # 门槛量出来的：这四段命中的 226 条主张里，163 条只引 1 处，42 条引 2 处，18
+    # 条引 3 处，然后断层——5 处 1 条、7 处 1 条、11 处 1 条。5 处那条是对的（「福
+    # 音書中的彼得宣認、榮進耶路撒冷、大祭司審問……」，引的是四福音里同一件事的平
+    # 行记载），7 处和 11 处那两条是错的。
+    #
+    # 这条线只有三个样本撑着，边界不硬。真正的修法在抽取那边——那 11 处引用里
+    # 太17:5 和赛42:1 各出现两次，像是多轮抽取合并出来的。
+    if len({slug for ref in (claim.get("scripture_refs") or [])
+            for slug in reference_slugs(
+                ref if isinstance(ref, str) else json.dumps(ref, ensure_ascii=False)
+            )}) >= 6:
+        return False
 
     for reference in claim.get("scripture_refs") or []:
         text = (
@@ -495,8 +677,49 @@ def in_passage(claim: dict[str, Any], book: str, chapter: int, low: int, high: i
     return False
 
 
-def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") -> dict[str, Any]:
+def claim_verse(claim: dict[str, Any], book: str, chapter: int, low: int, high: int) -> str:
+    """这条主张讲的是哪一节，截到本段范围内。
+
+    幻灯上摆哪一节由它决定。铺整段不行——16:13-23 有十一节，380 个字是一堵墙，
+    而且每张幻灯长得都一样。跟着「他此刻念到哪一节」走也不行：他到 2:18 还一节
+    都没念，而那时候讲的是「彼得認信耶穌是基督、永生神的兒子」——太16:16。
+
+    主张自己就写着。「彼得認信」是太16:16，「相較於別人如何評價耶穌」是
+    太16:13-15，「耶穌禁止門徒立即公開祂是基督」是太16:20-23。
+
+    取落在本段里最窄的那一处：一条主张常引好几处，`mat-16-19` 比 `mat-16-16-23`
+    更说得清他此刻在讲什么。截到本段是因为 `mat-16-16-23` 在 16:13-23 页上还有
+    八节，摆出来又是一堵墙。
+    """
+
+    best: tuple[int, str] | None = None
+    for reference in claim.get("scripture_refs") or []:
+        text = (
+            reference
+            if isinstance(reference, str)
+            else json.dumps(reference, ensure_ascii=False)
+        )
+        for slug in reference_slugs(text):
+            parts = slug.split("-")
+            if len(parts) < 3 or parts[0] != book or parts[1] != str(chapter):
+                continue
+            start = max(int(parts[2]), low)
+            end = min(int(parts[3]) if len(parts) > 3 else int(parts[2]), high)
+            if start > end:
+                continue
+            width = end - start
+            if best is None or width < best[0]:
+                tail = f"-{end}" if end != start else ""
+                best = (width, f"{book}-{chapter}-{start}{tail}")
+    return best[1] if best else f"{book}-{chapter}-{low}"
+
+
+def build_index(store: Any, data_base_dir: Path, passage: str = "mat-16-13-20") -> dict[str, Any]:
     """一段经文底下，教授在哪几篇讲道里讲过、各讲了哪几段。
+
+    `passage` 是 `api.scripture` 的经文 slug（`mat-16-13-20`），书卷、章、节全从
+    它读出来——原来书名写死成 `"mat"`，章节另用一个正则拆，于是这一层只能服务马
+    太福音的一页。同一个 slug 也是页面的地址和幻灯要取的那段经文，三处一个写法。
 
     `store` 只需要一个 `list_records(collection)`，所以既能接 PostgresKnowledgeStore，
     也能在测试里塞一个字典。
@@ -511,10 +734,12 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     documents = by_id("source_documents", "source_id")
     sermons = Sermons(data_base_dir)
 
-    chapter_text, _, verse_text = scripture.partition(":")
-    chapter = int(chapter_text)
-    verses = [int(n) for n in re.findall(r"\d+", verse_text)] or [1, 999]
-    low, high = verses[0], verses[-1]
+    reference = parse_reference(passage)
+    book = str(reference["slug"])
+    chapter = int(reference["chapter"])
+    low, high = int(reference["start"]), int(reference["end"])
+    # 这一段每一节的经文，用来在逐字稿里找他念到哪一节。
+    passage_verses = verse_texts(data_base_dir, book, chapter, low, high)
 
     def spans_of(claim_id: str, label: str) -> dict[str, list[tuple[float, float, str]]]:
         """这条主张的录音，按讲道分开，每段记上它是哪句话。"""
@@ -554,12 +779,15 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
     # 什么。观点是把五篇里的同一件事归成一条，那是文章层要的东西，不是听原声的
     # 人要的。
     by_sermon: dict[str, dict[str, Any]] = {}
+    # 每个判断讲的是哪一节。主张自己的 `scripture_refs` 就写着，截到本段范围内。
+    verses: dict[str, str] = {}
     for claim_id, claim in claims.items():
-        if not in_passage(claim, "mat", chapter, low, high):
+        if not in_passage(claim, book, chapter, low, high):
             continue
         statement = str(claim.get("statement") or "").strip()
         if not statement:
             continue
+        verses.setdefault(statement, claim_verse(claim, book, chapter, low, high))
         for source_id, spans in spans_of(claim_id, statement).items():
             by_sermon.setdefault(source_id, {"spans": []})["spans"].extend(spans)
 
@@ -576,17 +804,134 @@ def build_index(store: Any, data_base_dir: Path, scripture: str = "16:18-19") ->
             "media_kind": sermon["media_kind"],
             "media_url": sermon["media_url"],
             "stretches": [{"start": a, "end": b} for a, b, _ in merged],
-            "judgements": judgement_during(slot["spans"], merged),
+            "judgements": judgement_during(slot["spans"], merged, verses),
             "spoken": spoken_during(merged, sermon),
+            # 他什么时候念到哪一节。报节号是预告，念出来才算数。
+            "readings": [
+                {"at": at, "scripture": slug}
+                for at, slug in verse_readings(sermon, passage_verses)
+                if any(begin <= at < finish for begin, finish, _ in merged)
+            ],
             "glosses": glosses_during(merged, sermon),
             "seconds": sum(b - a for a, b, _ in merged),
         })
     sermons_out.sort(key=lambda row: -row["seconds"])
 
     return {
-        "schema_version": "wang_original_audio_index_v2",
-        "scripture": scripture,
-        # 幻灯上的那一节。一段经文一个入口，所以整页只有这一处经文。
-        "reference": f"mat-{scripture.replace(':', '-')}" if ":" in scripture else "",
+        "schema_version": "wang_original_audio_index_v3",
+        # 一段经文一个入口，所以整页只有这一处经文——页面标题、幻灯要取的经文、
+        # 页面地址，用的都是这一个 slug。
+        "passage": passage,
+        "label": format_chinese_reference(passage),
+        "title": PASSAGE_TITLES.get(passage, ""),
         "sermons": sermons_out,
     }
+
+
+#: 有原声页面的经文段落。
+#:
+#: 跟文章层的单元走，不跟数据走。量过太 16 章 27 个切点，数的是「有多少条主张
+#: 的经文范围跨过这一刀」：9｜10 有 20 条（全章最不能切，他讲「你們還不明白嗎」
+#: 的连贯论证），21｜22 有 17 条，20｜21 有 15 条，12｜13 只有 1 条。纯按数据切
+#: 会得到 16:1-12 / 16:13-23 / 16:24-27 三段，而文章层切在 20｜21。
+#:
+#: 骑跨不等于切断：那 14 条主张会在 16:13-20 和 16:21-23 两页上各出现一次，而不
+#: 去重本来就是这一层的规则（同一件事他在几篇里各讲一遍，删掉就是删掉他的论
+#: 证）。14 条重复换全站一致——落地页上文章和原声并排显示，范围对不齐会被读者当
+#: 成 bug。
+#:
+#: 但 20｜21 是全章第三糟的一刀，文章重写若要重划边界，这里最该重新考虑，而且两
+#: 边要一起动。证据记在 #36。
+#:
+#: 16:28 不做：那 24 条主张引的是 `馬太福音16:28-17:2`、`馬可福音9:1-2`、`路加
+#: 福音9:28`、`彼得後書1:16-18`，全指向登山变像，跨章，归 #20。
+#:
+#: 读者看到的写法（`太16:1–12`）跟文章卡片上的一样，两列并排才对得齐；那是编辑
+#: 决定，不是从 slug 推出来的，所以写在这里。
+#: 马太16章分成哪几段。
+#:
+#: 一度跟文章层的单元走（16:13-20 / 16:21-23），为的是落地页上文章和原声并排时
+#: 范围对齐。读者报的一处错推翻了它：16:13-20 那一页上，（四）4 的 30:05 顶着
+#: 「彼得雖認識耶穌是基督、彌賽亞，卻對彌賽亞的性質與使命抱有錯誤觀念」，而那
+#: 一刻他念的是「彼得就拉著祂，勸祂說：主啊，萬不可如此」——太16:22。幻灯自己
+#: 角上那行小字写着「他此刻在念 馬太福音 16:21」。
+#:
+#: 这正是当初量出来的：20｜21 骑跨 15 条主张，是全章第三糟的切点。彼得认信
+#: （v16）→ 吩咐不可对人说（v20）→ 从此指示必须受害（v21）→ 彼得劝阻被责备
+#: （v22-23）是一段连续的教导，切在中间，材料必然掉到错的一边。查下来三条落错
+#: 边：两条本属 21-23 的挂在 13-20，一条本属 v20 的挂在 21-23。
+#:
+#: 合成一页全部消失，而且 87 分钟比分开的 87+16 还少——少掉的正是骑跨造成的重
+#: 复。21 个 topic 当目录，一屏文字，找什么点一下就到。
+#:
+#: 三个切点是量出来的，切断的主张数：12｜13 一条，23｜24 零条，27｜28 零条。全
+#: 章最不能切的是 9｜10（20 条）。
+#:
+#: 代价是落地页上「文章 太16:13–20」与「原聲 太16:13–23」范围不一致。边界证据
+#: 记在 #36（16:21-23 的修订卡），文章重写时两边应一起动。
+#:
+#: 16:28 不在这里：跨章，归 #20（16:28–17:8 登山变像）。
+#: 每段的标题。
+#:
+#: 这是这一页唯一由人写的字——其余全是教授的原话和圣经经文。用词取自逐字稿里他
+#: 自己的分段小标题，不另造说法：
+#:
+#:   16:1-12   「小信」的真正含義 · 防備錯誤教導的「酵」
+#:   16:13-23  教會的磐石根基 · 權柄的對象：不只彼得，更是教會
+#:             彌賽亞的真諦：從身份認同到使命認知
+#:   16:24-27  何謂「捨己」？ · 何謂「背起十字架」？
+PASSAGE_TITLES: dict[str, str] = {
+    "mat-16-1-12": "求神蹟的試探，與防備法利賽人的酵",
+    "mat-16-13-23": "認信、磐石與天國的鑰匙，到第一次預言受難",
+    "mat-16-24-27": "捨己、背十字架，與人子按行為的報應",
+}
+
+PASSAGES: tuple[tuple[str, str], ...] = (
+    ("mat-16-1-12", "太16:1–12"),
+    ("mat-16-13-23", "太16:13–23"),
+    ("mat-16-24-27", "太16:24–27"),
+)
+
+#: 原声页面的地址。文库落地页按这个拼链接。
+PASSAGE_URL_PREFIX = "/resources/wang-repository/audio"
+
+
+def passage_summaries(store: Any, data_base_dir: Path) -> list[dict[str, Any]]:
+    """每一段有多少可听的、分成几个判断——文库落地页上那一排。
+
+    落地页自己写着「每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解」，而从
+    那里通不到任何原声。这个列表就是兑现那一句。
+
+    经卷和章按文章那边的写法给（`Matt` / `馬太福音` / 16），落地页才能把原声和
+    文章排进同一章底下。16:21-23 和 16:24-27 只有原声没有文章——原声可以先于文
+    章上线。
+
+    现读现算，四段合起来不到一秒。缓存会在观点层改动之后继续端出旧的数字，而这
+    一排给的正是「有多少可听」。
+    """
+
+    out: list[dict[str, Any]] = []
+    for slug, label in PASSAGES:
+        index = build_index(store, data_base_dir, slug)
+        if not index["sermons"]:
+            continue
+        reference = parse_reference(slug)
+        out.append({
+            "passage": slug,
+            "label": label,
+            "title": PASSAGE_TITLES.get(slug, ""),
+            "scripture": {
+                "book": reference["osis_book"],
+                "book_label": BOOK_SLUG_TO_NAME.get(str(reference["slug"]), label),
+                "chapter": reference["chapter"],
+                "verse_start": reference["start"],
+                "end_chapter": reference["chapter"],
+                "verse_end": reference["end"],
+                "display": label,
+            },
+            "sermons": len(index["sermons"]),
+            "seconds": sum(row["seconds"] for row in index["sermons"]),
+            "topics": sum(len(row["judgements"]) for row in index["sermons"]),
+            "href": f"{PASSAGE_URL_PREFIX}/{slug}",
+        })
+    return out

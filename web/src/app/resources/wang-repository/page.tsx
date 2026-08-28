@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type RepositoryView = "bible" | "topic";
+/** 看的是哪一种内容。
+ *
+ * 跟 `RepositoryView` 是两回事：聖經和主題是**分类的轴**，綜合文章和教授原聲是
+ * **内容的种类**。同一段经文两样都有，各占一个 tab，不上下堆着。
+ */
+type RepositoryKind = "article" | "audio";
 
 type ScriptureReference = {
   book: string;
@@ -27,6 +33,18 @@ type PublicArticleSummary = {
 type BibleChapterGroup = {
   chapter: number;
   articles: PublicArticleSummary[];
+};
+
+/** 一段有原声的经文。 */
+type AudioPassage = {
+  passage: string;
+  label: string;
+  scripture: ScriptureReference;
+  sermons: number;
+  seconds: number;
+  topics: number;
+  href: string;
+  title: string;
 };
 
 type BibleBookGroup = {
@@ -95,14 +113,48 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
   return (
     <Link
       href={article.href}
-      className="group block rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber-700"
+      className="group flex flex-wrap items-baseline gap-x-4 gap-y-1 px-5 py-3.5 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
     >
-      <span className="text-sm font-bold text-amber-800">{article.passage}</span>
-      <h4 className="mt-2 text-lg font-bold leading-7 text-stone-950 group-hover:text-amber-900">
+      <span className="font-mono text-sm font-semibold text-amber-800">{article.passage}</span>
+      <span className="flex-1 font-semibold text-stone-900 group-hover:text-amber-900">
         {article.title}
-      </h4>
-      <span className="mt-3 inline-block text-sm font-semibold text-stone-500 group-hover:text-amber-800">
-        閱讀文章 <span aria-hidden="true">→</span>
+      </span>
+      <span className="text-sm text-stone-500 group-hover:text-amber-800">
+        閱讀 <span aria-hidden="true">→</span>
+      </span>
+    </Link>
+  );
+}
+
+/** 一章底下的一组内容——綜合文章或教授原聲。
+ *
+ * 两组同一个形状。它们的信息结构一样：经节、标题、一行说明。差别由上面的标签
+ * 说清楚，不必再靠形状区分。
+ *
+ * 用行不用卡：一章将来会有更多篇文章、更多段原声，行排得下，卡片一章六个就开
+ * 始抢戏。
+ */
+function Rows({ children }: { children: React.ReactNode }) {
+  return (
+    <ul className="mt-2 flex flex-col divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+      {children}
+    </ul>
+  );
+}
+
+/** 一段可听的原声。 */
+function AudioLink({ passage }: { passage: AudioPassage }) {
+  return (
+    <Link
+      href={passage.href}
+      className="group flex flex-wrap items-baseline gap-x-4 gap-y-1 px-5 py-3.5 hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700"
+    >
+      <span className="font-mono text-sm font-semibold text-amber-800">{passage.label}</span>
+      <span className="flex-1 font-semibold text-stone-900 group-hover:text-amber-900">
+        {passage.title || passage.label}
+      </span>
+      <span className="text-sm text-stone-500">
+        {passage.sermons} 篇 · {Math.round(passage.seconds / 60)} 分 · {passage.topics} 個講題
       </span>
     </Link>
   );
@@ -110,7 +162,9 @@ function ArticleLink({ article }: { article: PublicArticleSummary }) {
 
 export default function WangRepositoryPage() {
   const [view, setView] = useState<RepositoryView>("bible");
+  const [kind, setKind] = useState<RepositoryKind>("article");
   const [articles, setArticles] = useState<PublicArticleSummary[]>([]);
+  const [audio, setAudio] = useState<AudioPassage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -130,65 +184,149 @@ export default function WangRepositoryPage() {
     return () => controller.abort();
   }, []);
 
-  const bibleBooks = useMemo(() => groupArticlesByBible(articles), [articles]);
+  // 原声单独取一次。它跟文章是两个来源——有的段落只有原声还没有文章，原声可以
+  // 先于文章上线。取不到就当没有，落地页照常显示文章，不该因为原声挂了而整页
+  // 报错。
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/public/original-audio/passages", { cache: "no-store", signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { passages: [] }))
+      .then((payload) => setAudio(payload.passages ?? []))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  // 章节树按当前看的内容建。
+  //
+  // 原来只从文章建，于是只有原声还没有文章的段落（太16:21-23、16:24-27）整章都
+  // 不出现——而原声可以先于文章上线，正是这一层要显示的东西。
+  const bibleBooks = useMemo(
+    () =>
+      kind === "article"
+        ? groupArticlesByBible(articles)
+        : groupArticlesByBible(
+            audio.map((passage) => ({
+              slug: passage.passage,
+              title: passage.title || passage.label,
+              passage: passage.label,
+              scripture: passage.scripture,
+              topics: [],
+              href: passage.href,
+            })),
+          ),
+    [articles, audio, kind],
+  );
+  const audioByChapter = useMemo(() => {
+    const map = new Map<string, AudioPassage[]>();
+    for (const passage of audio) {
+      const key = `${passage.scripture.book}-${passage.scripture.chapter}`;
+      map.set(key, [...(map.get(key) ?? []), passage]);
+    }
+    return map;
+  }, [audio]);
   const topicGroups = useMemo(() => groupArticlesByTopic(articles), [articles]);
 
   return (
     <main className="min-h-screen bg-stone-50">
       <div className="mx-auto max-w-5xl px-5 py-12 sm:px-8 sm:py-16">
-        <p className="text-sm font-semibold tracking-wide text-amber-800">達拉斯聖道教會文獻整理計畫</p>
-        <h1 className="mt-2 font-serif text-4xl font-bold leading-tight text-stone-950 sm:text-5xl">
+        <h1 className="font-serif text-4xl font-bold leading-tight text-stone-950 sm:text-5xl">
           王守仁教授聖經講論文庫
         </h1>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-stone-600">
-          按聖經經卷、章節或講論主題尋找正式發布的釋經文章。每篇文章都可完整閱讀，也可隨時切換聆聽相關原聲講解。
+        <p className="mt-4 max-w-2xl text-lg leading-8 text-stone-600">
+          教授講道的原聲，與從中整理出的釋經和專題文章
         </p>
 
-        <nav className="mt-8 flex flex-wrap gap-3" aria-label="文庫探索方式">
-          <button
-            type="button"
-            aria-pressed={view === "bible"}
-            onClick={() => setView("bible")}
-            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "bible" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
-          >
-            聖經目錄
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === "topic"}
-            onClick={() => setView("topic")}
-            className={`rounded-full px-5 py-2.5 font-semibold transition ${view === "topic" ? "bg-stone-900 text-white" : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"}`}
-          >
-            主題目錄
-          </button>
-          <Link href="/resources/qa" className="rounded-full bg-white px-5 py-2.5 font-semibold text-stone-700 shadow-sm hover:bg-stone-100">
-            信仰問答
-          </Link>
+        {/* 先問「讀還是聽」，再問「怎麼排」。
+         *
+         * 读者进来要答三个问题：读还是听、怎么排、哪段经文。原来把「哪个目录」
+         * 做成实心药丸摆在最上，把「读还是听」做成最轻的下划线摆在下面——最常
+         * 切的那个做得最轻，两排控件叠着又看不出关系。
+         *
+         * 「信仰問答」原来混在两个「目录」旁边，长得一模一样，读者会当成第三种
+         * 目录；它其实是去别的页面，挪到下面单独放。
+         */}
+        <nav className="mt-8 flex flex-wrap gap-3" aria-label="內容種類">
+          {([
+            ["article", "綜合文章"],
+            ["audio", "教授原聲"],
+          ] as const).map(([value, text]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={kind === value}
+              onClick={() => setKind(value)}
+              className={`rounded-full px-5 py-2.5 font-semibold transition ${
+                kind === value
+                  ? "bg-stone-900 text-white"
+                  : "bg-white text-stone-700 shadow-sm hover:bg-stone-100"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </nav>
+
+        <nav className="mt-4 flex flex-wrap items-baseline gap-5" aria-label="排列方式">
+          <span className="text-sm text-stone-500">排列方式</span>
+          {([
+            ["bible", "按經卷章節"],
+            ["topic", "按講論主題"],
+          ] as const).map(([value, text]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={view === value}
+              onClick={() => setView(value)}
+              className={`text-sm font-semibold underline-offset-4 transition ${
+                view === value
+                  ? "text-amber-900 underline decoration-amber-700 decoration-2"
+                  : "text-stone-500 hover:text-stone-800"
+              }`}
+            >
+              {text}
+            </button>
+          ))}
         </nav>
 
         {loading ? (
           <p className="py-16 text-stone-600" role="status">正在讀取文章目錄…</p>
         ) : error ? (
           <div className="mt-12 rounded-2xl border border-red-200 bg-red-50 p-6 text-red-900" role="alert">{error}</div>
-        ) : articles.length === 0 ? (
+        ) : (kind === "article" ? articles.length : audio.length) === 0 ? (
           <div className="mt-12 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
-            目前尚無正式發布的文章。
+            {kind === "article" ? "目前尚無正式發布的文章。" : "目前尚無可聽的原聲。"}
           </div>
         ) : view === "bible" ? (
           <div className="mt-12 space-y-14">
             {bibleBooks.map((book) => (
               <section key={book.book} aria-labelledby={`book-${book.book}`}>
-                <p className="text-sm font-bold uppercase tracking-[0.16em] text-amber-800">{book.book}</p>
-                <h2 id={`book-${book.book}`} className="mt-1 border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950">
+                <h2 id={`book-${book.book}`} className="border-b border-stone-300 pb-4 font-serif text-3xl font-bold text-stone-950">
                   {book.bookLabel}
                 </h2>
                 <div className="mt-7 space-y-9">
                   {book.chapters.map((chapter) => (
                     <section key={`${book.book}-${chapter.chapter}`} aria-labelledby={`${book.book}-${chapter.chapter}`}>
-                      <h3 id={`${book.book}-${chapter.chapter}`} className="text-xl font-bold text-stone-700">第 {chapter.chapter} 章</h3>
-                      <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                        {chapter.articles.map((article) => <ArticleLink key={article.slug} article={article} />)}
-                      </div>
+                      <h3 id={`${book.book}-${chapter.chapter}`} className="text-lg font-bold text-stone-700">
+                        第 {chapter.chapter} 章
+                      </h3>
+                      {/* 落地页开头写着「每篇文章都可完整閱讀，也可隨時切換聆聽
+                          相關原聲講解」，在这之前从这里通不到任何原声。有的段落
+                          只有原声还没有文章——原声可以先于文章上线。 */}
+                      <Rows>
+                        {kind === "article"
+                          ? chapter.articles.map((article) => (
+                              <li key={article.slug}>
+                                <ArticleLink article={article} />
+                              </li>
+                            ))
+                          : (audioByChapter.get(`${book.book}-${chapter.chapter}`) ?? []).map(
+                              (passage) => (
+                                <li key={passage.passage}>
+                                  <AudioLink passage={passage} />
+                                </li>
+                              ),
+                            )}
+                      </Rows>
                     </section>
                   ))}
                 </div>
@@ -200,9 +338,13 @@ export default function WangRepositoryPage() {
             {topicGroups.map(([topic, topicArticles]) => (
               <section key={topic} aria-labelledby={`topic-${topic}`}>
                 <h2 id={`topic-${topic}`} className="border-b border-stone-300 pb-3 font-serif text-2xl font-bold text-stone-950">{topic}</h2>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  {topicArticles.map((article) => <ArticleLink key={article.slug} article={article} />)}
-                </div>
+                <Rows>
+                  {topicArticles.map((article) => (
+                    <li key={article.slug}>
+                      <ArticleLink article={article} />
+                    </li>
+                  ))}
+                </Rows>
               </section>
             ))}
           </div>
@@ -211,6 +353,12 @@ export default function WangRepositoryPage() {
             已發布文章尚未設定公開主題。
           </div>
         )}
+        <p className="mt-14 border-t border-stone-200 pt-6 text-sm text-stone-500">
+          找不到想問的？
+          <Link href="/resources/qa" className="ml-2 font-semibold text-amber-800 hover:text-amber-900">
+            信仰問答 <span aria-hidden="true">→</span>
+          </Link>
+        </p>
       </div>
     </main>
   );

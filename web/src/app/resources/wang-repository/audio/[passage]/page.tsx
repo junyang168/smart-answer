@@ -1,15 +1,17 @@
 "use client";
 
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import ScriptureSlide, { type Gloss } from "./ScriptureSlide";
+import ScriptureSlide, { type Gloss } from "../ScriptureSlide";
 
 /**
  * 教授的原声，按经文重排。
  *
  * 名义上是马太福音释经，实际讲到一处经文时常跳去讲别的题目，讲完再跳回来。现
- * 场听是自然的，事后按经文找就不是。这一页把他讲太16:18-19 的话按经文聚起来
- * ——一个字都不新增，价值在次序。
+ * 场听是自然的，事后按经文找就不是。这一页把他讲某一段经文的话聚起来——一个字
+ * 都不新增，价值在次序。
  *
  * 三条规则，都是从材料量出来的：
  *
@@ -30,7 +32,7 @@ type Stretch = { start: number; end: number };
 /** 教授念到经文的时刻。只在幻灯角上标一行小字，主经文不跟着换。 */
 type Spoken = { at: number; scripture: string; label: string };
 /** 他立起一个判断的时刻。幻灯的标题跟着这个走。 */
-type Judgement = { at: number; judgement: string };
+type Judgement = { at: number; judgement: string; seconds: number; scripture: string };
 type Sermon = {
   source_id: string;
   transcript_id: string;
@@ -40,6 +42,8 @@ type Sermon = {
   stretches: Stretch[];
   judgements: Judgement[];
   spoken: Spoken[];
+  /** 他念到某一节的时刻。念出来的比报出来的准。 */
+  readings: { at: number; scripture: string }[];
   glosses: Gloss[];
   seconds: number;
 };
@@ -63,6 +67,87 @@ function judgementAt(sermon: Sermon, seconds: number) {
     held = mark.judgement;
   }
   return held;
+}
+
+/** 幻灯上该摆哪一节。
+ *
+ * 不是整段。16:13-23 有十一节，铺出来 380 个字是一堵墙，而且每张幻灯长得都一
+ * 样，因为整页共用同一段经文。
+ *
+ * 也不是「他此刻念到哪一节」——他到 2:18 还一节都没念出来，而那时候讲的是「彼
+ * 得認信耶穌是基督、永生神的兒子」，太16:16；退回段首会摆成太16:13。
+ *
+ * 是这条 topic 自己讲的那一节。它是一条主张，主张的 `scripture_refs` 就写着：
+ * 「彼得認信」是太16:16，「相較於別人如何評價耶穌」是太16:13-15，「耶穌禁止門
+ * 徒立即公開祂是基督」是太16:20-23。经文跟着他讲到哪里换，跟标题同步。
+ */
+/** 幻灯上一次最多摆几节。
+ *
+ * 三十四个 topic 里二十四个只有一节，五个三节，两个四节——够读。剩三个的主张
+ * 引用本身就宽（16:6-12、16:16-23、16:13-21），摆出来又是一堵墙。
+ */
+const MOST_VERSES = 4;
+
+function verseAt(sermon: Sermon, seconds: number, passage: string) {
+  let slug = sermon.judgements[0]?.scripture || passage;
+  let since = 0;
+  for (const mark of sermon.judgements) {
+    if (mark.at > seconds) break;
+    if (mark.scripture) {
+      slug = mark.scripture;
+      since = mark.at;
+    }
+  }
+
+  // 这条 topic 开始之后他念到的那一节，盖过主张给的那一节。
+  //
+  // 一条 topic 两分钟，他在里面是会往前走的：topic 是「彼得認信耶穌是基督、永
+  // 生神的兒子」，主张说太16:16，没错——可他念完十六节就接着念十七、十八、十九
+  // 节，而幻灯停在十六节。
+  //
+  // 他念的和他报的，按时间合起来用。
+  //
+  // 报的常常是预告：2:15 他说「我再念一下，然後我特別來看十九節那一段」，接着
+  // 从十七节念起。只听报的，2:24 会显示十九节，而他正念着「乃是我在天上的父指
+  // 示你的」，十七节。
+  //
+  // 但报的不能丢：28:47 他说「二十二節，彼得就拉著祂，勸祂說：主啊，萬不可如
+  // 此」——那一句他是复述不是照念，逐字比对认不出来。
+  //
+  // 按时间排，后来的盖过先前的：2:15 报十九节，2:17 起念十七节，盖回来了。
+  const [inBook, inChapter] = passage.split("-");
+  const said = [
+    ...sermon.spoken.map((m) => ({ at: m.at, scripture: m.scripture })),
+    ...sermon.readings,
+  ]
+    .filter((m) => {
+      const parts = m.scripture.split("-");
+      return parts[0] === inBook && parts[1] === inChapter;
+    })
+    .sort((a, b) => a.at - b.at);
+  for (const mark of said) {
+    if (mark.at > seconds) break;
+    if (mark.at >= since) slug = mark.scripture;
+  }
+  const [book, chapter, from, to] = slug.split("-");
+  const [start, end] = [Number(from), Number(to ?? from)];
+  if (end - start + 1 <= MOST_VERSES) return slug;
+
+  // 引用太宽时，用他此刻念到的那一节收窄。
+  //
+  // 「彼得雖認識耶穌是基督，卻不認識彌賽亞受苦」引的是太16:16-23，八节；而
+  // 24:05 他念到十六章二十节，26:55 讲的正是二十一、二十二节。从他念的那一节
+  // 起摆四节，比铺八节准，也比截头四节准——截头会摆成 16:16-19，他早讲过了。
+  let named = start;
+  for (const mark of sermon.spoken) {
+    if (mark.at > seconds) break;
+    const parts = mark.scripture.split("-");
+    if (parts[0] !== book || parts[1] !== chapter) continue;
+    const verse = Number(parts[2]);
+    if (verse >= start && verse <= end) named = verse;
+  }
+  const stop = Math.min(named + MOST_VERSES - 1, end);
+  return `${book}-${chapter}-${named}` + (stop !== named ? `-${stop}` : "");
 }
 
 /** `mat-16-19` 落在 `mat-16-18-19` 里面吗。 */
@@ -105,7 +190,9 @@ const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60))
 const minutes = (s: number) => `${Math.round(s / 60)} 分`;
 
 export default function OriginalAudioPage() {
-  const [reference, setReference] = useState("");
+  const passage = String(useParams()?.passage ?? "");
+  const [label, setLabel] = useState("");
+  const [title, setTitle] = useState("");
   const [sermons, setSermons] = useState<Sermon[] | null>(null);
   const [error, setError] = useState("");
   const [playing, setPlaying] = useState<{ sermon: Sermon; index: number } | null>(null);
@@ -117,19 +204,45 @@ export default function OriginalAudioPage() {
   useEffect(() => {
     (async () => {
       try {
-        const response = await fetch("/api/public/original-audio", { cache: "no-store" });
+        const response = await fetch(`/api/public/original-audio/${passage}`, {
+          cache: "no-store",
+        });
+        if (response.status === 404) throw new Error("這段經文還沒有原聲頁面。");
         if (!response.ok) throw new Error(`服務回傳 ${response.status}`);
         const data = await response.json();
-        setReference(data.reference ?? "");
+        setLabel(data.label ?? "");
+        setTitle(data.title ?? "");
         setSermons(data.sermons ?? []);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "讀不到");
       }
     })();
-  }, []);
+  }, [passage]);
 
   // 一篇讲道里的几段接着播：放完一段自动跳到下一段的起点。跳过的地方教授在讲
   // 别的，所以时间轴上会看到断口——看得见就够了，不必打断听。
+  /** 从某一刻开始播，不管它落在哪一段。
+   *
+   * topic 的起点未必是某一段的起点——一段里常有两三个 topic。点 topic 要跳到他
+   * 说那句话的地方，不是跳到那一段的开头。
+   */
+  function playFrom(sermon: Sermon, seconds: number) {
+    const index = Math.max(
+      0,
+      sermon.stretches.findIndex((stretch) => seconds < stretch.end),
+    );
+    setPlaying({ sermon, index });
+    setPaused(false);
+    setAt(seconds);
+    window.setTimeout(() => {
+      const element = media.current;
+      if (element) {
+        element.currentTime = seconds;
+        void element.play();
+      }
+    }, 0);
+  }
+
   function play(sermon: Sermon, index = 0) {
     setPlaying({ sermon, index });
     setPaused(false);
@@ -177,22 +290,44 @@ export default function OriginalAudioPage() {
     }
   }
 
-  if (error) return <p className="px-1 py-10 text-sm text-rose-700">{error}</p>;
-  if (!sermons) return <p className="px-1 py-10 text-sm text-slate-400">讀取中…</p>;
+  if (error)
+    return (
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-rose-800">{error}</p>
+      </main>
+    );
+  if (!sermons)
+    return (
+      <main className="min-h-screen bg-stone-50">
+        <p className="mx-auto max-w-4xl px-5 py-16 text-stone-600" role="status">
+          正在讀取…
+        </p>
+      </main>
+    );
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-10">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-          王教授講太 16:18-19
-        </h1>
-        <p className="text-sm leading-relaxed text-slate-600">
-          他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
-          每一遍的理由都不一樣，所以不合併。
-        </p>
-      </header>
+    <main className="min-h-screen bg-stone-50">
+      <div className="mx-auto flex max-w-4xl flex-col gap-8 px-5 py-12 sm:px-8 sm:py-16">
+        <header className="flex flex-col gap-3">
+          {/* 回得去。原来这一页是个断头路——从文库进来之后没有任何路标，只能靠
+              浏览器的后退键。 */}
+          <Link
+            href="/resources/wang-repository"
+            className="w-fit text-sm font-semibold text-amber-800 hover:text-amber-900"
+          >
+            <span aria-hidden="true">←</span> 王守仁教授聖經講論文庫
+          </Link>
+          <p className="text-sm font-bold text-amber-800">教授原聲 · {label}</p>
+          <h1 className="font-serif text-3xl font-bold leading-tight text-stone-950 sm:text-4xl">
+            {title || label}
+          </h1>
+          <p className="max-w-3xl text-lg leading-8 text-stone-600">
+            他在 {sermons.length} 篇講道裡講過這段經文。點一篇，聽他自己講——不是我們寫的字，是他的原話。
+            每一遍的理由都不一樣，所以不合併。
+          </p>
+        </header>
 
-      <ul className="flex flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+        <ul className="flex flex-col divide-y divide-stone-200 overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
         {sermons.map((sermon) => {
           const open = playing?.sermon.source_id === sermon.source_id;
           const seconds = open ? at : (sermon.stretches[0]?.start ?? 0);
@@ -221,10 +356,10 @@ export default function OriginalAudioPage() {
                       面的不放——那些本来就有得看。 */}
                   {sermon.media_kind === "audio" && (
                     <ScriptureSlide
-                      slug={reference}
+                      slug={verseAt(sermon, seconds, passage)}
                       title={judgementAt(sermon, seconds)}
                       glosses={glossesUpTo(sermon, seconds)}
-                      cited={citedAt(sermon, seconds, reference)}
+                      cited={citedAt(sermon, seconds, passage)}
                     />
                   )}
                   {sermon.media_kind === "video" ? (
@@ -270,12 +405,46 @@ export default function OriginalAudioPage() {
                       ))}
                     </div>
                   )}
+
+                  {/* 他在这一篇里讲的几件事，各从第几分钟起。
+                      一篇讲道二十五分钟，一整条时间轴上找不到东西；他自己立的
+                      判断就是目录。点一条跳到他说那句话的地方，之后照常往下
+                      播，不断——播放的连续区间和读者的入口是两件事。 */}
+                  <ul className="flex flex-col divide-y divide-slate-200/70 border-t border-slate-200 pt-1">
+                    {sermon.judgements.map((mark) => {
+                      const here = judgementAt(sermon, seconds) === mark.judgement;
+                      return (
+                        <li key={mark.at}>
+                          <button
+                            type="button"
+                            onClick={() => playFrom(sermon, mark.at)}
+                            className="flex w-full items-baseline gap-3 py-2 text-left hover:bg-white"
+                          >
+                            <span
+                              className={`font-mono text-[0.7rem] ${here ? "text-indigo-600" : "text-slate-400"}`}
+                            >
+                              {clock(mark.at)}
+                            </span>
+                            <span
+                              className={`flex-1 text-[0.8rem] leading-snug ${here ? "font-semibold text-slate-900" : "text-slate-600"}`}
+                            >
+                              {mark.judgement}
+                            </span>
+                            <span className="font-mono text-[0.7rem] text-slate-400">
+                              {minutes(mark.seconds)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
               )}
             </li>
           );
         })}
-      </ul>
+        </ul>
+      </div>
     </main>
   );
 }
