@@ -128,7 +128,7 @@ def _source_fragment_read_model(
     return result
 
 
-def _paragraph_sources(
+def _claim_sources(
     provenance: dict[str, Any],
     knowledge: dict[str, Any],
     sermon_cache: dict[str, dict[str, Any]],
@@ -168,6 +168,10 @@ def _paragraph_sources(
                     continue
                 item = _source_fragment_read_model(fragment, source, sermon_cache)
                 if item:
+                    item["mapping_kind"] = "claim_evidence"
+                    item["route_revision_id"] = None
+                    item["route_label"] = None
+                    item["route_steps"] = []
                     seen.add(fragment_id)
                     group_key = (
                         fragment.get("source_id"),
@@ -187,6 +191,211 @@ def _paragraph_sources(
     return result
 
 
+def _merge_media_range(
+    target: dict[str, Any], source: dict[str, Any]
+) -> None:
+    target_media = target.get("media")
+    source_media = source.get("media")
+    if not isinstance(target_media, dict) or not isinstance(source_media, dict):
+        return
+    starts = [
+        value
+        for value in (target_media.get("start_seconds"), source_media.get("start_seconds"))
+        if isinstance(value, (int, float))
+    ]
+    ends = [
+        value
+        for value in (target_media.get("end_seconds"), source_media.get("end_seconds"))
+        if isinstance(value, (int, float))
+    ]
+    target_media["start_seconds"] = min(starts) if starts else None
+    target_media["end_seconds"] = max(ends) if ends else None
+
+
+def _route_sources(
+    provenance: dict[str, Any],
+    packet: dict[str, Any],
+    route_revision_ids: list[str],
+    sermon_cache: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Resolve reader evidence through approved route attestations.
+
+    Claim evidence says which assertions a paragraph uses, but it does not say
+    which source-local argument establishes the paragraph's inference.  The
+    route attestation does: its step bindings select the exact fragments for
+    each premise, qualification and conclusion.  Only routes assigned to the
+    paragraph's approved section (or explicitly named by provenance) are
+    eligible, so a Claim shared by another section cannot pull in a competing
+    argument path.
+    """
+
+    claim_ids = {str(value) for value in provenance.get("claim_ids") or []}
+    if not claim_ids or not route_revision_ids:
+        return []
+    knowledge = packet.get("knowledge") or {}
+    fragments = {
+        str(item.get("fragment_id") or ""): item
+        for item in knowledge.get("source_fragments", [])
+    }
+    documents = {
+        str(item.get("source_id") or ""): item
+        for item in knowledge.get("source_documents", [])
+    }
+    claims = {
+        str(item.get("claim_id") or ""): item
+        for item in knowledge.get("claims", [])
+    }
+    declared_evidence_step_ids = {
+        str(step_id)
+        for claim_id in claim_ids
+        for step_id in (claims.get(claim_id) or {}).get("evidence_step_ids") or []
+    }
+    routes = {
+        str(item.get("revision", {}).get("argument_route_revision_id") or ""): item
+        for item in packet.get("argument_routes") or []
+    }
+    viewpoints = {
+        str(item.get("revision", {}).get("viewpoint_revision_id") or ""): (
+            item.get("revision") or {}
+        )
+        for item in packet.get("viewpoints") or []
+    }
+    result: list[dict[str, Any]] = []
+    for route_revision_id in route_revision_ids:
+        route = routes.get(route_revision_id)
+        if not route:
+            continue
+        revision = route.get("revision") or {}
+        nodes = {
+            str(item.get("route_step_key") or ""): item
+            for item in revision.get("ordered_inference_nodes") or []
+        }
+        for attestation in route.get("attestations") or []:
+            attested_claim_ids = {
+                str(value) for value in attestation.get("claim_ids") or []
+            }
+            if not (claim_ids & attested_claim_ids):
+                continue
+            source = documents.get(str(attestation.get("source_id") or ""))
+            if not source:
+                continue
+            card: dict[str, Any] | None = None
+            route_steps: list[dict[str, Any]] = []
+            for binding in attestation.get("step_bindings") or []:
+                binding_evidence_step_ids = {
+                    str(value) for value in binding.get("evidence_step_ids") or []
+                }
+                if (
+                    binding_evidence_step_ids
+                    and not (binding_evidence_step_ids & declared_evidence_step_ids)
+                ):
+                    continue
+                step_key = str(binding.get("route_step_key") or "")
+                step_excerpts: list[str] = []
+                step_fragment_ids: list[str] = []
+                for fragment_id_value in binding.get("source_fragment_ids") or []:
+                    fragment_id = str(fragment_id_value)
+                    fragment = fragments.get(fragment_id)
+                    if not fragment:
+                        continue
+                    fragment_source = documents.get(str(fragment.get("source_id") or ""))
+                    if not fragment_source:
+                        continue
+                    item = _source_fragment_read_model(
+                        fragment,
+                        fragment_source,
+                        sermon_cache,
+                    )
+                    if not item:
+                        continue
+                    item_excerpts = list(item["excerpts"])
+                    if card is None:
+                        card = item
+                        card["excerpts"] = []
+                        card["fragment_ids"] = []
+                    else:
+                        _merge_media_range(card, item)
+                    if fragment_id not in card["fragment_ids"]:
+                        card["fragment_ids"].append(fragment_id)
+                    for excerpt in item_excerpts:
+                        if excerpt not in card["excerpts"]:
+                            card["excerpts"].append(excerpt)
+                        if excerpt not in step_excerpts:
+                            step_excerpts.append(excerpt)
+                    if fragment_id not in step_fragment_ids:
+                        step_fragment_ids.append(fragment_id)
+                if step_excerpts:
+                    node = nodes.get(step_key) or {}
+                    conclusion_viewpoint = viewpoints.get(
+                        str(node.get("conclusion_viewpoint_revision_id") or "")
+                    ) or {}
+                    route_steps.append(
+                        {
+                            "route_step_key": step_key,
+                            "role": str(node.get("role") or "support"),
+                            "proposition": str(
+                                node.get("normalized_proposition")
+                                or conclusion_viewpoint.get("core_proposition")
+                                or "本路线的结论"
+                            ),
+                            "fragment_ids": step_fragment_ids,
+                            "excerpts": step_excerpts,
+                        }
+                    )
+            if card and route_steps:
+                card["mapping_kind"] = "argument_route_attestation"
+                card["route_revision_id"] = route_revision_id
+                card["route_label"] = str(revision.get("route_label") or "本段论证")
+                card["route_steps"] = route_steps
+                result.append(card)
+    return result
+
+
+def _section_route_ranges(
+    markdown: str, packet: dict[str, Any]
+) -> list[tuple[int, int, list[str]]]:
+    sections = list((packet.get("editorial_decisions") or {}).get("sections") or [])
+    starts: list[tuple[int, list[str]]] = []
+    for section in sections:
+        heading = str(section.get("heading") or "").strip()
+        offset = markdown.find(f"## {heading}") if heading else -1
+        if offset >= 0:
+            starts.append(
+                (
+                    offset,
+                    [
+                        str(value)
+                        for value in section.get("argument_route_revision_ids") or []
+                    ],
+                )
+            )
+    return [
+        (start, starts[index + 1][0] if index + 1 < len(starts) else len(markdown), routes)
+        for index, (start, routes) in enumerate(starts)
+    ]
+
+
+def _paragraph_sources(
+    provenance: dict[str, Any],
+    packet: dict[str, Any],
+    section_route_ids: list[str],
+    sermon_cache: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    explicit_route_ids = [
+        str(value)
+        for value in provenance.get("argument_route_revision_ids") or []
+    ]
+    routed = _route_sources(
+        provenance,
+        packet,
+        explicit_route_ids or section_route_ids,
+        sermon_cache,
+    )
+    if routed:
+        return routed
+    return _claim_sources(provenance, packet.get("knowledge") or {}, sermon_cache)
+
+
 def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> int | None:
     segment = markdown[comment_end:next_comment]
     content_match = re.search(r"\S", segment)
@@ -203,7 +412,7 @@ def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> i
 
 def _annotated_reader_markdown(
     markdown: str,
-    knowledge: dict[str, Any],
+    packet: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
     """Attach hidden-source controls without changing the manuscript's prose."""
 
@@ -211,6 +420,7 @@ def _annotated_reader_markdown(
     insertions: list[tuple[int, str]] = []
     annotations: list[dict[str, Any]] = []
     sermon_cache: dict[str, dict[str, Any]] = {}
+    route_ranges = _section_route_ranges(markdown, packet)
     for index, match in enumerate(matches):
         try:
             provenance = json.loads(match.group(1))
@@ -218,7 +428,20 @@ def _annotated_reader_markdown(
             continue
         if not isinstance(provenance, dict):
             continue
-        sources = _paragraph_sources(provenance, knowledge, sermon_cache)
+        section_route_ids = next(
+            (
+                route_ids
+                for start, end, route_ids in route_ranges
+                if start <= match.start() < end
+            ),
+            [],
+        )
+        sources = _paragraph_sources(
+            provenance,
+            packet,
+            section_route_ids,
+            sermon_cache,
+        )
         if not sources:
             continue
         next_comment = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
@@ -324,7 +547,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         if knowledge:
             result["markdown"], result["source_annotations"] = _annotated_reader_markdown(
                 manuscript,
-                knowledge,
+                packet,
             )
         else:
             result["markdown"] = _reader_markdown(manuscript)

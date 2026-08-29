@@ -448,6 +448,24 @@ def validate_topic_author_result(
         _require(bool(anchor) and anchor in manuscript, "section output anchor not found")
 
     provenance_claims: set[str] = set()
+    section_route_ranges: list[tuple[int, int, set[str]]] = []
+    for index, brief_section in enumerate(brief_sections):
+        start = manuscript.find(f"## {brief_section['heading']}")
+        end = (
+            manuscript.find(f"## {brief_sections[index + 1]['heading']}")
+            if index + 1 < len(brief_sections)
+            else len(manuscript)
+        )
+        section_route_ranges.append(
+            (
+                start,
+                end,
+                {
+                    str(value)
+                    for value in brief_section.get("argument_route_revision_ids") or []
+                },
+            )
+        )
     for paragraph in extract_provenance_paragraphs(manuscript):
         provenance = paragraph["provenance"]
         if not isinstance(provenance, dict):
@@ -459,6 +477,35 @@ def validate_topic_author_result(
             unknown = set(claim_ids) - set(claims_by_id)
             _require(not unknown, f"provenance cites unknown Claims: {sorted(unknown)}")
             provenance_claims.update(claim_ids)
+            route_ids = [
+                str(value)
+                for value in provenance.get("argument_route_revision_ids") or []
+            ]
+            _require(
+                len(route_ids) == len(set(route_ids)),
+                "paragraph provenance has duplicate ArgumentRoute revisions",
+            )
+            unknown_routes = set(route_ids) - set(routes_by_revision)
+            _require(
+                not unknown_routes,
+                f"provenance cites unknown ArgumentRoutes: {sorted(unknown_routes)}",
+            )
+            paragraph_offset = int(paragraph.get("comment_offset") or 0)
+            section_routes = next(
+                (
+                    allowed
+                    for start, end, allowed in section_route_ranges
+                    if start <= paragraph_offset < end
+                ),
+                None,
+            )
+            if route_ids and section_routes is not None:
+                outside_section = set(route_ids) - section_routes
+                _require(
+                    not outside_section,
+                    "paragraph provenance cites ArgumentRoutes outside its section: "
+                    f"{sorted(outside_section)}",
+                )
     _require(
         provenance_claims <= all_ledger_claims,
         "paragraph provenance cites Claims absent from the section ledger",

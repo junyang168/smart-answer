@@ -184,3 +184,111 @@ def test_paragraph_without_verifiable_fragments_has_no_empty_source_control(
     assert result["source_annotations"] == []
     assert "review-source-evidence" not in result["markdown"]
     assert manuscript.read_text(encoding="utf-8").endswith("正文。")
+
+
+def test_section_argument_route_selects_step_bound_fragments_instead_of_all_claim_evidence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manuscript, _, packet = _fixture(tmp_path, monkeypatch)
+    manuscript.write_text(
+        '# 标题\n\n## 教皇推论\n\n'
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL-POPE"]} -->\n'
+        '不能由这段经文推出彼得是第一任教皇。',
+        encoding="utf-8",
+    )
+    payload = json.loads(packet.read_text(encoding="utf-8"))
+    result = payload["result"]
+    result["editorial_decisions"] = {
+        "sections": [
+            {
+                "heading": "教皇推论",
+                "argument_route_revision_ids": ["ARR-POPE"],
+            }
+        ]
+    }
+    result["knowledge"]["claims"].append(
+        {
+            "claim_id": "CL-POPE",
+            "evidence_step_ids": ["ES-UNRELATED", "ES-POPE"],
+        }
+    )
+    result["knowledge"]["evidence_steps"].extend(
+        [
+            {
+                "evidence_step_id": "ES-UNRELATED",
+                "source_fragment_ids": ["FR-UNRELATED"],
+            },
+            {
+                "evidence_step_id": "ES-POPE",
+                "source_fragment_ids": ["FR-POPE"],
+            },
+        ]
+    )
+    result["knowledge"]["source_fragments"].extend(
+        [
+            {
+                "fragment_id": "FR-UNRELATED",
+                "source_id": "SRC-1",
+                "media_time": 10,
+                "media_end_time": 20,
+                "verbatim_excerpt": "彼得受到责备。",
+            },
+            {
+                "fragment_id": "FR-POPE",
+                "source_id": "SRC-1",
+                "media_time": 30,
+                "media_end_time": 40,
+                "verbatim_excerpt": "说彼得是第一任教皇，其实没有这回事。",
+            },
+        ]
+    )
+    result["argument_routes"] = [
+        {
+            "revision": {
+                "argument_route_revision_id": "ARR-POPE",
+                "route_label": "由经文论证反驳首任教皇说",
+                "ordered_inference_nodes": [
+                    {
+                        "route_step_key": "C1",
+                        "role": "conclusion",
+                        "normalized_proposition": "不能推出彼得是第一任教皇。",
+                    }
+                ],
+            },
+            "attestations": [
+                {
+                    "source_id": "SRC-1",
+                    "claim_ids": ["CL-POPE"],
+                    "step_bindings": [
+                        {
+                            "route_step_key": "C1",
+                            "source_fragment_ids": ["FR-POPE"],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    _write_json(packet, payload)
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    manifest["authoring_packet_file_sha256"] = hashlib.sha256(packet.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    source = review["source_annotations"][0]["sources"][0]
+    assert source["mapping_kind"] == "argument_route_attestation"
+    assert source["route_revision_id"] == "ARR-POPE"
+    assert source["route_label"] == "由经文论证反驳首任教皇说"
+    assert source["excerpts"] == ["说彼得是第一任教皇，其实没有这回事。"]
+    assert source["route_steps"] == [
+        {
+            "route_step_key": "C1",
+            "role": "conclusion",
+            "proposition": "不能推出彼得是第一任教皇。",
+            "fragment_ids": ["FR-POPE"],
+            "excerpts": ["说彼得是第一任教皇，其实没有这回事。"],
+        }
+    ]

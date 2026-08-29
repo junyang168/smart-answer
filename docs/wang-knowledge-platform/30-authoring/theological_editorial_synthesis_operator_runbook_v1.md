@@ -39,6 +39,8 @@ backend/.venv/bin/python -m backend.pipeline.theological_topic_authoring_runner 
 
 Author 只能按 brief 写作。每个实质段落带 provenance，runner 逐段 grounding。仅 `unsupported_assertion` 可进入受约束 Grounding Revision；transport 或 schema failure 不得当作内容修订。修后重新检查全文，终态必须为 `draft_grounded`。
 
+段落 provenance 的 Claim IDs 负责断言覆盖；凡段落展开或收束论证，还须列出本段实际采用的 `argument_route_revision_ids`。路线必须属于当前 brief section。后台来源对照优先沿该 route 的 source-local attestation 与 step bindings 展示逐字片段，并逐步标明前提、限定和结论；只有不使用路线的简单陈述才从 Claim Evidence 回退。不得从一个 Claim 的全部 Evidence Step 猜测文章采用了哪条论证。
+
 相同 generation fingerprint 会读取现有 envelope，不重复调用模型。输入 SHA、prompt、schema、model 或 generation 参数改变时形成新 generation；旧文件移入 `generations/`，不得手改正文恢复。
 
 ## 四、质量审核、审计与发布

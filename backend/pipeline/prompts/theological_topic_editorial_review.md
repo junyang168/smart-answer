@@ -16,4 +16,6 @@
 
 provenance 的方向也要逐段检查。教授原有的一阶陈述与编辑的未决披露若放在同一段并统一标成 `editorial_synthesis`，或统一标成 `professor`，都模糊了来源边界；必须拆段分别归属。凡 finding 的 required_change 要求拆分 attribution，不得标 nonblocking 后自动发布。
 
+逐段核对 provenance 的 `argument_route_revision_ids`。凡段落在作“前提／观察—推论—结论”的论证，必须绑定 brief 当前 section 实际采用的 route；不能只列 Claim IDs，让来源预览从 Claim 的全部 Evidence Step 猜论证。路线不属于当前 section、段落用了路线却留空、或一段把两条不同来源路线悄悄拼成一个推论，均须 blocking。
+
 finding 必须可执行、绑定 manuscript 中逐字存在的 anchor；`section_id` 必须逐字取自 `author_section_ledger`，不得自造 `INTRO`、`CONCLUSION` 等 ID。H1 后、第一个 H2 前的导言 finding 归到 ledger 第一节，最后一个 H2 内的全文结尾 finding 归到 ledger 最后一节。低于 minimum、hard failure 或必须修改的问题必须 blocking=true。不要重做抽取，不引用外部神学，不直接改稿。输出只有严格 JSON。

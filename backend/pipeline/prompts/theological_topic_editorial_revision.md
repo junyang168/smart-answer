@@ -12,6 +12,8 @@
 
 修订后逐段复核 provenance。若后一节按 `depends_on_section_ids` 复述前节已经建立的具体主张，必须把支持该复述的前节 Claim ID 加入该段 provenance，并同步加入当前节 `claim_ids_used`；不能让读者文字已经跨节承接，metadata 却仍只列当前节原有 Claim。只可使用 authoring packet 内真实存在、且来自当前节或其依赖链的 Claim。
 
+若段落展开或收束一条论证，修订后的 provenance 还必须列出本段实际使用的 `argument_route_revision_ids`；只能使用当前 section brief ledger 中的路线。不得用增加 Claim IDs 代替 route 绑定，也不得让来源预览从一个 Claim 的全部 Evidence Step 猜本段采用哪条论证。
+
 同一 prose 段落若同时包含教授原有的一阶陈述与编辑的未决披露，必须拆成两个 provenance 段：前者标 `professor`，后者标 `editorial_synthesis`。不得为了少一个 comment 把两种 attribution 合并。
 
 若 finding 指出 embedded objection 只写了异议名称，必须在原指定 footnote／inline note 内补回 route objection node 的实际内容再回应，保持简短且不得升格为 H2。
