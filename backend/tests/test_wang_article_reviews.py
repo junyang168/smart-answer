@@ -405,3 +405,129 @@ def test_route_conclusion_does_not_substitute_viewpoint_editorial_wording() -> N
     assert sources[0]["route_steps"][0]["excerpts"] == [
         "或者是信仰，或者是所传的真理。"
     ]
+
+
+def test_route_projection_keeps_claim_evidence_for_an_unrepresented_premise(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manuscript, _, packet = _fixture(tmp_path, monkeypatch)
+    manuscript.write_text(
+        '# 标题\n\n## 教皇推论\n\n'
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL-1","CL-POPE"]} -->\n'
+        '彼得受到责备，因此不能推出彼得是第一任教皇。',
+        encoding="utf-8",
+    )
+    payload = json.loads(packet.read_text(encoding="utf-8"))
+    result = payload["result"]
+    result["editorial_decisions"] = {
+        "sections": [{"heading": "教皇推论", "argument_route_revision_ids": ["ARR-POPE"]}]
+    }
+    result["knowledge"]["claims"].append(
+        {"claim_id": "CL-POPE", "evidence_step_ids": ["ES-POPE"]}
+    )
+    result["knowledge"]["evidence_steps"].append(
+        {"evidence_step_id": "ES-POPE", "source_fragment_ids": ["FR-POPE"]}
+    )
+    result["knowledge"]["source_fragments"].append(
+        {
+            "fragment_id": "FR-POPE",
+            "source_id": "SRC-1",
+            "verbatim_excerpt": "彼得不是第一任教皇。",
+        }
+    )
+    result["argument_routes"] = [
+        {
+            "revision": {
+                "argument_route_revision_id": "ARR-POPE",
+                "route_label": "首任教皇推论",
+                "ordered_inference_nodes": [
+                    {"route_step_key": "C1", "role": "conclusion"}
+                ],
+            },
+            "attestations": [
+                {
+                    "source_id": "SRC-1",
+                    "claim_ids": ["CL-POPE"],
+                    "step_bindings": [
+                        {
+                            "route_step_key": "C1",
+                            "evidence_step_ids": ["ES-POPE"],
+                            "source_fragment_ids": ["FR-POPE"],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    _write_json(packet, payload)
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    manifest["authoring_packet_file_sha256"] = hashlib.sha256(packet.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    sources = review["source_annotations"][0]["sources"]
+    assert sources[0]["mapping_kind"] == "argument_route_attestation"
+    assert all(source["mapping_kind"] == "claim_evidence" for source in sources[1:])
+    assert any("CL-1" in source["claim_ids"] for source in sources[1:])
+    assert review["source_projection_audit"]["passed"] is True
+
+
+def test_route_cannot_hide_a_direct_quote_without_an_exact_original(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manuscript, _, packet = _fixture(tmp_path, monkeypatch)
+    manuscript.write_text(
+        '# 标题\n\n## 引文\n\n'
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL-1"]} -->\n'
+        '> 「原稿没有这句话。」',
+        encoding="utf-8",
+    )
+    payload = json.loads(packet.read_text(encoding="utf-8"))
+    result = payload["result"]
+    result["editorial_decisions"] = {
+        "sections": [{"heading": "引文", "argument_route_revision_ids": ["ARR-1"]}]
+    }
+    result["argument_routes"] = [
+        {
+            "revision": {
+                "argument_route_revision_id": "ARR-1",
+                "route_label": "测试路线",
+                "ordered_inference_nodes": [
+                    {"route_step_key": "P1", "role": "premise"}
+                ],
+            },
+            "attestations": [
+                {
+                    "source_id": "SRC-1",
+                    "claim_ids": ["CL-1"],
+                    "step_bindings": [
+                        {
+                            "route_step_key": "P1",
+                            "evidence_step_ids": ["ES-1"],
+                            "source_fragment_ids": ["FR-1"],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    _write_json(packet, payload)
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    manifest["authoring_packet_file_sha256"] = hashlib.sha256(packet.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    assert review["source_projection_audit"]["passed"] is False
+    assert review["source_projection_audit"]["findings"] == [
+        {
+            "code": "direct_quote_without_exact_source",
+            "paragraph_id": "p1",
+            "message": "本段逐字引文没有命中原稿中的精确文本。",
+        }
+    ]

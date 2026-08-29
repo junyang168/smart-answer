@@ -156,7 +156,7 @@ def _valid_result():
 
 ## Positive heading
 
-<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"]} -->
+<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"],\"evidence_step_ids\":[\"EV-1\"],\"argument_route_revision_ids\":[]} -->
 Positive proposition in prose.
 """,
         "sections": [
@@ -195,13 +195,33 @@ def test_paragraph_route_provenance_must_stay_inside_its_brief_section():
     )
     result = _valid_result()
     result["manuscript_markdown"] = result["manuscript_markdown"].replace(
-        '"claim_ids":["CL-1"]',
-        '"claim_ids":["CL-1"],"argument_route_revision_ids":["ARR-OTHER"]',
+        '"argument_route_revision_ids":[]',
+        '"argument_route_revision_ids":["ARR-OTHER"]',
     )
 
     with pytest.raises(
         TheologicalEditorialContractError,
         match="unknown ArgumentRoutes",
+    ):
+        validate_topic_author_result(result, authoring_packet=packet)
+
+
+def test_substantive_paragraph_requires_explicit_evidence_step_provenance():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        ',"evidence_step_ids":["EV-1"]', ""
+    )
+
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="requires evidence_step_ids",
     ):
         validate_topic_author_result(result, authoring_packet=packet)
 

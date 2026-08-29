@@ -387,6 +387,10 @@ def validate_topic_author_result(
         str(item["claim_id"]): item
         for item in authoring_packet["knowledge"]["claims"]
     }
+    evidence_steps_by_id = {
+        str(item["evidence_step_id"]): item
+        for item in authoring_packet["knowledge"]["evidence_steps"]
+    }
     focal_by_revision = {
         str(item["revision"]["viewpoint_revision_id"]): item
         for item in authoring_packet["viewpoints"]
@@ -477,6 +481,34 @@ def validate_topic_author_result(
             unknown = set(claim_ids) - set(claims_by_id)
             _require(not unknown, f"provenance cites unknown Claims: {sorted(unknown)}")
             provenance_claims.update(claim_ids)
+            evidence_step_ids = [
+                str(value)
+                for value in provenance.get("evidence_step_ids") or []
+            ]
+            _require(
+                bool(evidence_step_ids),
+                "substantive provenance requires evidence_step_ids",
+            )
+            _require(
+                len(evidence_step_ids) == len(set(evidence_step_ids)),
+                "paragraph provenance has duplicate EvidenceSteps",
+            )
+            unknown_steps = set(evidence_step_ids) - set(evidence_steps_by_id)
+            _require(
+                not unknown_steps,
+                f"provenance cites unknown EvidenceSteps: {sorted(unknown_steps)}",
+            )
+            allowed_steps = {
+                str(step_id)
+                for claim_id in claim_ids
+                for step_id in claims_by_id[claim_id].get("evidence_step_ids") or []
+            }
+            outside_claims = set(evidence_step_ids) - allowed_steps
+            _require(
+                not outside_claims,
+                "paragraph provenance cites EvidenceSteps outside its Claims: "
+                f"{sorted(outside_claims)}",
+            )
             route_ids = [
                 str(value)
                 for value in provenance.get("argument_route_revision_ids") or []
