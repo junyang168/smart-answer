@@ -79,9 +79,17 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
           <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{source.route_label}</p>
           <p className="mt-1 text-xs leading-5 text-indigo-700">论证步骤是编辑归纳；棕色引文是教授原文。</p>
         </div>
+      ) : source.mapping_kind === "original_exact_quote" ? (
+        <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs font-semibold leading-5 text-emerald-800">
+          逐字引文核对：下面的文字直接命中 SHA 绑定的原稿。
+        </p>
+      ) : source.mapping_kind === "source_original_context" ? (
+        <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3 text-xs font-semibold leading-5 text-sky-800">
+          原稿上下文：补充本段问题或叙事前提所在的原文。
+        </p>
       ) : (
         <p className="mt-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3 text-xs leading-5 text-stone-600">
-          本段只作引述或背景交代，下面按 Claim 显示原文，没有把它当作一条论证路线。
+          补充原文：本段使用了这项引文或叙事证据；它补足 ArgumentRoute，没有被改写成另一条论证路线。
         </p>
       )}
       {source.route_steps.length > 0 ? (

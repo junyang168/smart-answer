@@ -24,6 +24,24 @@ export type TopicEssayReviewSummary = {
 export type TopicEssayReview = TopicEssayReviewSummary & {
   markdown: string;
   source_annotations: ReviewSourceAnnotation[];
+  source_projection_audit: ReviewSourceProjectionAudit;
+};
+
+export type ReviewSourceProjectionFinding = {
+  code: string;
+  paragraph_id: string;
+  message: string;
+};
+
+export type ReviewSourceProjectionAudit = {
+  schema_version: "wang_article_source_projection_audit.v1";
+  manuscript_sha256: string;
+  authoring_packet_sha256: string;
+  paragraphs_checked: number;
+  paragraphs_with_sources: number;
+  direct_quotes_checked: number;
+  findings: ReviewSourceProjectionFinding[];
+  passed: boolean;
 };
 
 export type ReviewSourceMedia = {
@@ -40,7 +58,13 @@ export type ReviewSourceFragment = {
   excerpts: string[];
   full_source_url: string | null;
   media: ReviewSourceMedia | null;
-  mapping_kind: "argument_route_attestation" | "claim_evidence";
+  mapping_kind:
+    | "argument_route_attestation"
+    | "claim_evidence"
+    | "original_exact_quote"
+    | "source_original_context";
+  claim_ids: string[];
+  evidence_step_ids: string[];
   route_revision_id: string | null;
   route_label: string | null;
   route_steps: ReviewRouteStep[];

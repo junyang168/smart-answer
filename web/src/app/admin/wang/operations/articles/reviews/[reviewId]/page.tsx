@@ -66,6 +66,27 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
             );
           })}
         </div>
+        <div className={`mt-4 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
+          review.source_projection_audit.passed
+            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+            : "border-rose-200 bg-rose-50 text-rose-900"
+        }`}>
+          {review.source_projection_audit.passed ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          <span className="font-bold">
+            来源一致性{review.source_projection_audit.passed ? "已通过" : "未通过"}
+          </span>
+          <span>
+            {review.source_projection_audit.paragraphs_with_sources}/{review.source_projection_audit.paragraphs_checked} 段有来源，
+            {review.source_projection_audit.direct_quotes_checked} 处逐字引文已核对
+          </span>
+          {!review.source_projection_audit.passed ? (
+            <span>· {review.source_projection_audit.findings.length} 项需要处理</span>
+          ) : null}
+        </div>
       </section>
 
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[16rem_minmax(0,1fr)]">

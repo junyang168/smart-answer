@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
+from opencc import OpenCC
 
 from backend.api.config import WANG_STAGING_DIR
 from backend.api.canonical_repository.service import CanonicalRepositoryService
@@ -29,6 +31,8 @@ REVIEW_MANIFEST_ROOT = WANG_STAGING_DIR / "topic-essay-reviews"
 PROVENANCE_COMMENT_RE = re.compile(r"<!--\s*provenance:\s*(\{.*?\})\s*-->", re.S)
 FOOTNOTE_DEFINITION_RE = re.compile(r"^\[\^[^\]]+\]:")
 SOURCE_MARKER_PREFIX = "#review-source-evidence-"
+_TO_SIMPLIFIED = OpenCC("t2s")
+_LEGACY_EVIDENCE_OVERLAP_MINIMUM = 0.08
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -134,6 +138,8 @@ def _claim_sources(
     sermon_cache: dict[str, dict[str, Any]],
     *,
     paragraph_markdown: str = "",
+    evidence_step_ids: set[str] | None = None,
+    exclude_fragment_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     claims = {str(item.get("claim_id") or ""): item for item in knowledge.get("claims", [])}
     steps = {
@@ -150,17 +156,29 @@ def _claim_sources(
     }
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
+    by_fragment_id: dict[str, dict[str, Any]] = {}
     grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    excluded = exclude_fragment_ids or set()
     for claim_id in provenance.get("claim_ids") or []:
         claim = claims.get(str(claim_id))
         if not claim:
             continue
         for step_id in claim.get("evidence_step_ids") or []:
+            if evidence_step_ids is not None and str(step_id) not in evidence_step_ids:
+                continue
             step = steps.get(str(step_id))
             if not step:
                 continue
             for fragment_id in _fragment_ids(step):
+                if fragment_id in excluded:
+                    continue
                 if fragment_id in seen:
+                    existing_fragment = by_fragment_id.get(fragment_id)
+                    if existing_fragment:
+                        if str(claim_id) not in existing_fragment["claim_ids"]:
+                            existing_fragment["claim_ids"].append(str(claim_id))
+                        if str(step_id) not in existing_fragment["evidence_step_ids"]:
+                            existing_fragment["evidence_step_ids"].append(str(step_id))
                     continue
                 fragment = fragments.get(fragment_id)
                 if not fragment:
@@ -171,6 +189,8 @@ def _claim_sources(
                 item = _source_fragment_read_model(fragment, source, sermon_cache)
                 if item:
                     item["mapping_kind"] = "claim_evidence"
+                    item["claim_ids"] = [str(claim_id)]
+                    item["evidence_step_ids"] = [str(step_id)]
                     item["route_revision_id"] = None
                     item["route_label"] = None
                     item["route_steps"] = []
@@ -183,13 +203,19 @@ def _claim_sources(
                     )
                     existing = grouped.get(group_key)
                     if existing:
+                        if str(claim_id) not in existing["claim_ids"]:
+                            existing["claim_ids"].append(str(claim_id))
+                        if str(step_id) not in existing["evidence_step_ids"]:
+                            existing["evidence_step_ids"].append(str(step_id))
                         existing["fragment_ids"].append(fragment_id)
                         for excerpt in item["excerpts"]:
                             if excerpt not in existing["excerpts"]:
                                 existing["excerpts"].append(excerpt)
+                        by_fragment_id[fragment_id] = existing
                     else:
                         grouped[group_key] = item
                         result.append(item)
+                        by_fragment_id[fragment_id] = item
     quoted = _quoted_paragraph_text(paragraph_markdown)
     if quoted:
         matching: list[dict[str, Any]] = []
@@ -220,7 +246,9 @@ def _claim_sources(
 
 
 def _normalized_quote_text(value: str) -> str:
-    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
+    return re.sub(
+        r"[\W_]+", "", _TO_SIMPLIFIED.convert(value), flags=re.UNICODE
+    ).casefold()
 
 
 def _quoted_paragraph_text(paragraph_markdown: str) -> str | None:
@@ -247,6 +275,269 @@ def _contains_normalized_quote(excerpt: str, quoted: str) -> bool:
     return bool(quoted_text) and (
         quoted_text in excerpt_text or excerpt_text in quoted_text
     )
+
+
+def _semantic_tokens(value: str) -> set[str]:
+    simplified = _TO_SIMPLIFIED.convert(value).casefold()
+    chinese = "".join(re.findall(r"[\u3400-\u9fff]", simplified))
+    return {
+        chinese[index : index + 2]
+        for index in range(max(0, len(chinese) - 1))
+    } | set(re.findall(r"[a-z0-9]{2,}", simplified))
+
+
+def _semantic_overlap(left: str, right: str) -> float:
+    left_tokens = _semantic_tokens(left)
+    right_tokens = _semantic_tokens(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / math.sqrt(
+        len(left_tokens) * len(right_tokens)
+    )
+
+
+def _semantic_overlap_count(left: str, right: str) -> int:
+    return len(_semantic_tokens(left) & _semantic_tokens(right))
+
+
+def _selected_supplemental_step_ids(
+    provenance: dict[str, Any],
+    knowledge: dict[str, Any],
+    paragraph_markdown: str,
+    represented_step_ids: set[str],
+    represented_claim_ids: set[str],
+) -> set[str]:
+    """Select Claim evidence that the route projection did not carry.
+
+    New manuscripts declare their exact EvidenceSteps in provenance.  Older
+    manuscripts cannot be rewritten without invalidating their publication
+    SHA, so their compatibility path ranks only the unrepresented steps by
+    overlap with the paragraph.  At least one step is kept for every cited
+    Claim that no route attestation represents; this prevents a compound
+    paragraph from silently losing one of its premises.
+    """
+
+    claims = {
+        str(item.get("claim_id") or ""): item
+        for item in knowledge.get("claims", [])
+    }
+    steps = {
+        str(item.get("evidence_step_id") or ""): item
+        for item in knowledge.get("evidence_steps", [])
+    }
+    fragments = {
+        str(item.get("fragment_id") or ""): item
+        for item in knowledge.get("source_fragments", [])
+    }
+    explicit = {
+        str(value) for value in provenance.get("evidence_step_ids") or []
+    }
+    if explicit:
+        return explicit - represented_step_ids
+
+    selected: set[str] = set()
+    footnote = bool(
+        paragraph_markdown.splitlines()
+        and FOOTNOTE_DEFINITION_RE.match(paragraph_markdown.splitlines()[0].strip())
+    )
+    for claim_id_value in provenance.get("claim_ids") or []:
+        claim_id = str(claim_id_value)
+        claim = claims.get(claim_id) or {}
+        ranked: list[tuple[float, int, str]] = []
+        for step_id_value in claim.get("evidence_step_ids") or []:
+            step_id = str(step_id_value)
+            if step_id in represented_step_ids:
+                continue
+            step = steps.get(step_id) or {}
+            comparison = " ".join(
+                [
+                    str(step.get("statement") or ""),
+                    *[
+                        str((fragments.get(fragment_id) or {}).get("verbatim_excerpt") or "")
+                        for fragment_id in _fragment_ids(step)
+                    ],
+                ]
+            )
+            ranked.append(
+                (
+                    _semantic_overlap(paragraph_markdown, comparison),
+                    _semantic_overlap_count(paragraph_markdown, comparison),
+                    step_id,
+                )
+            )
+        if claim_id not in represented_claim_ids or footnote:
+            matching = sorted(
+                (
+                    item
+                    for item in ranked
+                    if item[0] >= _LEGACY_EVIDENCE_OVERLAP_MINIMUM
+                    and item[1] >= 2
+                ),
+                reverse=True,
+            )[:2]
+            selected.update(step_id for _, _, step_id in matching)
+            if claim_id not in represented_claim_ids and not matching and ranked:
+                selected.add(max(ranked)[2])
+    return selected
+
+
+def _source_ids_for_claims(
+    provenance: dict[str, Any], knowledge: dict[str, Any]
+) -> set[str]:
+    claims = {
+        str(item.get("claim_id") or ""): item
+        for item in knowledge.get("claims", [])
+    }
+    steps = {
+        str(item.get("evidence_step_id") or ""): item
+        for item in knowledge.get("evidence_steps", [])
+    }
+    fragments = {
+        str(item.get("fragment_id") or ""): item
+        for item in knowledge.get("source_fragments", [])
+    }
+    return {
+        str(fragment.get("source_id") or "")
+        for claim_id in provenance.get("claim_ids") or []
+        for step_id in (claims.get(str(claim_id)) or {}).get("evidence_step_ids") or []
+        for fragment_id in _fragment_ids(steps.get(str(step_id)) or {})
+        if (fragment := fragments.get(fragment_id))
+    }
+
+
+def _timestamp_seconds(value: str) -> float | None:
+    match = re.search(r"\[(\d{2}):(\d{2}):(\d{2})\]", value)
+    if not match:
+        return None
+    hours, minutes, seconds = (int(part) for part in match.groups())
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+def _original_source_card(
+    *,
+    original: dict[str, Any],
+    document: dict[str, Any],
+    excerpt: str,
+    mapping_kind: str,
+    claim_ids: list[str],
+    sermon_cache: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    source_type = str(document.get("source_type") or original.get("source_type") or "")
+    if source_type not in {"sermon_transcript", "notes_manuscript"}:
+        return None
+    synthetic_id = "ORIGINAL-" + hashlib.sha256(
+        f"{original.get('source_id')}\0{excerpt}".encode("utf-8")
+    ).hexdigest()[:16]
+    card: dict[str, Any] = {
+        "fragment_ids": [synthetic_id],
+        "source_type": source_type,
+        "title": str(document.get("title") or original.get("title") or "来源材料"),
+        "excerpts": [excerpt.strip()],
+        "full_source_url": None,
+        "media": None,
+        "mapping_kind": mapping_kind,
+        "claim_ids": list(dict.fromkeys(claim_ids)),
+        "evidence_step_ids": [],
+        "route_revision_id": None,
+        "route_label": None,
+        "route_steps": [],
+    }
+    if source_type == "notes_manuscript":
+        card["full_source_url"] = _safe_resource_url(document.get("source_url"))
+        return card
+    transcript_id = str(document.get("transcript_id") or original.get("transcript_id") or "")
+    if not transcript_id:
+        return None
+    sermon = sermon_cache.get(transcript_id)
+    if sermon is None:
+        catalog = CanonicalRepositoryService._sermon_catalog_record(transcript_id)
+        media = CanonicalRepositoryService._sermon_media(transcript_id, {}, catalog)
+        sermon = {
+            "full_source_url": f"/resources/sermons/{quote(transcript_id, safe='')}",
+            "media": media.model_dump(mode="json"),
+        }
+        sermon_cache[transcript_id] = sermon
+    start_seconds = _timestamp_seconds(excerpt)
+    card["full_source_url"] = sermon["full_source_url"]
+    card["media"] = {
+        **sermon["media"],
+        "start_seconds": start_seconds,
+        "end_seconds": None,
+    }
+    return card
+
+
+def _original_source_support(
+    provenance: dict[str, Any],
+    knowledge: dict[str, Any],
+    paragraph_markdown: str,
+    sermon_cache: dict[str, dict[str, Any]],
+    *,
+    exact_quote: str | None = None,
+) -> list[dict[str, Any]]:
+    originals_payload = knowledge.get("source_originals") or {}
+    originals = {
+        str(item.get("source_id") or ""): item
+        for item in originals_payload.get("originals", [])
+    }
+    documents = {
+        str(item.get("source_id") or ""): item
+        for item in knowledge.get("source_documents", [])
+    }
+    candidates: list[tuple[float, str, dict[str, Any], str]] = []
+    for source_id in _source_ids_for_claims(provenance, knowledge):
+        original = originals.get(source_id)
+        if not original:
+            continue
+        for block in re.split(r"(?=\[\d{2}:\d{2}:\d{2}\])", str(original.get("content") or "")):
+            block = block.strip()
+            if not block:
+                continue
+            if exact_quote and not _contains_normalized_quote(block, exact_quote):
+                continue
+            score = 1.0 if exact_quote else _semantic_overlap(paragraph_markdown, block)
+            candidates.append((score, source_id, original, block))
+    if not candidates:
+        return []
+    score, source_id, original, block = max(candidates, key=lambda item: item[0])
+    if not exact_quote and score < 0.05:
+        return []
+    sentences = [
+        value.strip()
+        for value in re.split(r"(?<=[。！？!?])", block)
+        if value.strip()
+    ]
+    if exact_quote:
+        quoted_spans = [
+            value
+            for value in re.findall(r"「[^」]{1,800}」", block)
+            if _contains_normalized_quote(value, exact_quote)
+        ]
+        matching = [
+            sentence
+            for sentence in sentences
+            if _contains_normalized_quote(sentence, exact_quote)
+        ]
+        excerpt = quoted_spans[0] if quoted_spans else matching[0] if matching else block[:800]
+        mapping_kind = "original_exact_quote"
+    else:
+        ranked = [(_semantic_overlap(paragraph_markdown, sentence), index) for index, sentence in enumerate(sentences)]
+        best_index = max(ranked)[1] if ranked else 0
+        start = max(0, best_index - 1)
+        excerpt = "".join(sentences[start : best_index + 2])[:800]
+        mapping_kind = "source_original_context"
+    card = _original_source_card(
+        original=original,
+        document=documents.get(source_id) or original,
+        excerpt=excerpt,
+        mapping_kind=mapping_kind,
+        # Context snippets prove wording and local setup. Claim coverage is
+        # credited only to route attestations or EvidenceSteps, never to a
+        # broad transcript window that merely happens to be nearby.
+        claim_ids=[],
+        sermon_cache=sermon_cache,
+    )
+    return [card] if card else []
 
 
 def _merge_media_range(
@@ -303,11 +594,15 @@ def _route_sources(
         str(item.get("claim_id") or ""): item
         for item in knowledge.get("claims", [])
     }
-    declared_evidence_step_ids = {
+    claim_evidence_step_ids = {
         str(step_id)
         for claim_id in claim_ids
         for step_id in (claims.get(claim_id) or {}).get("evidence_step_ids") or []
     }
+    explicit_evidence_step_ids = {
+        str(value) for value in provenance.get("evidence_step_ids") or []
+    }
+    declared_evidence_step_ids = explicit_evidence_step_ids or claim_evidence_step_ids
     routes = {
         str(item.get("revision", {}).get("argument_route_revision_id") or ""): item
         for item in packet.get("argument_routes") or []
@@ -398,6 +693,15 @@ def _route_sources(
                     )
             if card and route_steps:
                 card["mapping_kind"] = "argument_route_attestation"
+                card["claim_ids"] = sorted(claim_ids & attested_claim_ids)
+                card["evidence_step_ids"] = list(
+                    dict.fromkeys(
+                        str(value)
+                        for binding in attestation.get("step_bindings") or []
+                        for value in binding.get("evidence_step_ids") or []
+                        if str(value) in declared_evidence_step_ids
+                    )
+                )
                 card["route_revision_id"] = route_revision_id
                 card["route_label"] = str(revision.get("route_label") or "本段论证")
                 card["route_steps"] = route_steps
@@ -414,6 +718,12 @@ def _route_sources(
                 for excerpt in card["excerpts"]:
                     if excerpt not in existing["excerpts"]:
                         existing["excerpts"].append(excerpt)
+                for claim_id in card["claim_ids"]:
+                    if claim_id not in existing["claim_ids"]:
+                        existing["claim_ids"].append(claim_id)
+                for step_id in card["evidence_step_ids"]:
+                    if step_id not in existing["evidence_step_ids"]:
+                        existing["evidence_step_ids"].append(step_id)
                 existing_steps = {
                     str(step["route_step_key"]): step
                     for step in existing["route_steps"]
@@ -476,14 +786,102 @@ def _paragraph_sources(
         explicit_route_ids or section_route_ids,
         sermon_cache,
     )
-    if routed:
-        return routed
-    return _claim_sources(
-        provenance,
-        packet.get("knowledge") or {},
-        sermon_cache,
-        paragraph_markdown=paragraph_markdown,
-    )
+    knowledge = packet.get("knowledge") or {}
+    if not routed:
+        sources = _claim_sources(
+            provenance,
+            knowledge,
+            sermon_cache,
+            paragraph_markdown=paragraph_markdown,
+        )
+    else:
+        represented_fragments = {
+            str(value)
+            for source in routed
+            for value in source.get("fragment_ids") or []
+        }
+        represented_steps = {
+            str(value)
+            for source in routed
+            for value in source.get("evidence_step_ids") or []
+        }
+        represented_claims = {
+            str(value)
+            for source in routed
+            for value in source.get("claim_ids") or []
+        }
+        supplemental_steps = (
+            set()
+            if _quoted_paragraph_text(paragraph_markdown)
+            else _selected_supplemental_step_ids(
+                provenance,
+                knowledge,
+                paragraph_markdown,
+                represented_steps,
+                represented_claims,
+            )
+        )
+        sources = [
+            *routed,
+            *_claim_sources(
+                provenance,
+                knowledge,
+                sermon_cache,
+                paragraph_markdown=paragraph_markdown,
+                evidence_step_ids=supplemental_steps,
+                exclude_fragment_ids=represented_fragments,
+            ),
+        ]
+
+    quoted = _quoted_paragraph_text(paragraph_markdown)
+    if quoted:
+        represented_fragments = {
+            str(value)
+            for source in sources
+            for value in source.get("fragment_ids") or []
+        }
+        exact_claim_sources = [
+            source
+            for source in _claim_sources(
+                provenance,
+                knowledge,
+                sermon_cache,
+                paragraph_markdown=paragraph_markdown,
+                exclude_fragment_ids=represented_fragments,
+            )
+            if any(_contains_normalized_quote(excerpt, quoted) for excerpt in source["excerpts"])
+        ]
+        sources.extend(exact_claim_sources)
+        if not any(
+            _contains_normalized_quote(excerpt, quoted)
+            for source in sources
+            for excerpt in source.get("excerpts") or []
+        ):
+            sources.extend(
+                _original_source_support(
+                    provenance,
+                    knowledge,
+                    paragraph_markdown,
+                    sermon_cache,
+                    exact_quote=quoted,
+                )
+            )
+    elif paragraph_markdown.rstrip().endswith(("：", ":")) and "问" in _TO_SIMPLIFIED.convert(
+        paragraph_markdown
+    ):
+        # These short paragraphs introduce a quotation in the next governed
+        # block.  Their contextual question or narrative premise often lives
+        # in the transcript segment around the Claim, not in the route's
+        # compressed step fragments.
+        sources.extend(
+            _original_source_support(
+                provenance,
+                knowledge,
+                paragraph_markdown,
+                sermon_cache,
+            )
+        )
+    return sources
 
 
 def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> int | None:
@@ -500,15 +898,110 @@ def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> i
     return comment_end + relative_end
 
 
+def _source_projection_audit(
+    *,
+    manuscript_sha256: str,
+    packet_sha256: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    quote_count = 0
+    for row in rows:
+        paragraph_id = str(row["paragraph_id"])
+        sources = list(row.get("sources") or [])
+        if not sources:
+            findings.append(
+                {
+                    "code": "missing_source_projection",
+                    "paragraph_id": paragraph_id,
+                    "message": "本段没有可核验的来源投影。",
+                }
+            )
+            continue
+        projected_claims = {
+            str(value)
+            for source in sources
+            for value in source.get("claim_ids") or []
+        }
+        missing_claims = set(row.get("claim_ids") or []) - projected_claims
+        if missing_claims:
+            findings.append(
+                {
+                    "code": "claim_not_projected",
+                    "paragraph_id": paragraph_id,
+                    "claim_ids": sorted(missing_claims),
+                    "message": "本段声明的 Claim 没有全部出现在可见来源中。",
+                }
+            )
+        declared_steps = set(row.get("evidence_step_ids") or [])
+        projected_steps = {
+            str(value)
+            for source in sources
+            for value in source.get("evidence_step_ids") or []
+        }
+        missing_steps = declared_steps - projected_steps
+        if missing_steps:
+            findings.append(
+                {
+                    "code": "evidence_step_not_projected",
+                    "paragraph_id": paragraph_id,
+                    "evidence_step_ids": sorted(missing_steps),
+                    "message": "本段声明的 EvidenceStep 没有全部出现在可见来源中。",
+                }
+            )
+        declared_routes = set(row.get("argument_route_revision_ids") or [])
+        projected_routes = {
+            str(source.get("route_revision_id") or "")
+            for source in sources
+            if source.get("route_revision_id")
+        }
+        missing_routes = declared_routes - projected_routes
+        if missing_routes:
+            findings.append(
+                {
+                    "code": "argument_route_not_projected",
+                    "paragraph_id": paragraph_id,
+                    "argument_route_revision_ids": sorted(missing_routes),
+                    "message": "本段声明的 ArgumentRoute 没有全部出现在可见来源中。",
+                }
+            )
+        quoted = row.get("quoted_text")
+        if quoted:
+            quote_count += 1
+            if not any(
+                _contains_normalized_quote(excerpt, str(quoted))
+                for source in sources
+                for excerpt in source.get("excerpts") or []
+            ):
+                findings.append(
+                    {
+                        "code": "direct_quote_without_exact_source",
+                        "paragraph_id": paragraph_id,
+                        "message": "本段逐字引文没有命中原稿中的精确文本。",
+                    }
+                )
+    return {
+        "schema_version": "wang_article_source_projection_audit.v1",
+        "manuscript_sha256": manuscript_sha256,
+        "authoring_packet_sha256": packet_sha256,
+        "paragraphs_checked": len(rows),
+        "paragraphs_with_sources": sum(bool(row.get("sources")) for row in rows),
+        "direct_quotes_checked": quote_count,
+        "findings": findings,
+        "passed": not findings,
+    }
+
+
 def _annotated_reader_markdown(
     markdown: str,
     packet: dict[str, Any],
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """Attach hidden-source controls without changing the manuscript's prose."""
 
     matches = list(PROVENANCE_COMMENT_RE.finditer(markdown))
     insertions: list[tuple[int, str]] = []
     annotations: list[dict[str, Any]] = []
+    audit_rows: list[dict[str, Any]] = []
     sermon_cache: dict[str, dict[str, Any]] = {}
     route_ranges = _section_route_ranges(markdown, packet)
     for index, match in enumerate(matches):
@@ -538,10 +1031,39 @@ def _annotated_reader_markdown(
             sermon_cache,
             paragraph_markdown=paragraph_markdown,
         )
+        paragraph_id = f"p{len(audit_rows) + 1}"
+        explicit_routes = [
+            str(value)
+            for value in provenance.get("argument_route_revision_ids") or []
+        ]
+        audit_rows.append(
+            {
+                "paragraph_id": paragraph_id,
+                "paragraph_sha256": hashlib.sha256(
+                    paragraph_markdown.encode("utf-8")
+                ).hexdigest(),
+                "claim_ids": [
+                    str(value) for value in provenance.get("claim_ids") or []
+                ],
+                "evidence_step_ids": [
+                    str(value)
+                    for value in provenance.get("evidence_step_ids") or []
+                ],
+                "argument_route_revision_ids": explicit_routes,
+                "quoted_text": _quoted_paragraph_text(paragraph_markdown),
+                "sources": sources,
+            }
+        )
         if not sources:
             continue
-        annotation_id = f"p{len(annotations) + 1}"
-        annotations.append({"annotation_id": annotation_id, "sources": sources})
+        annotation_id = paragraph_id
+        annotations.append(
+            {
+                "annotation_id": annotation_id,
+                "paragraph_sha256": audit_rows[-1]["paragraph_sha256"],
+                "sources": sources,
+            }
+        )
         footnote = FOOTNOTE_DEFINITION_RE.match(
             paragraph_markdown.splitlines()[0].strip()
         )
@@ -555,7 +1077,12 @@ def _annotated_reader_markdown(
     for position, marker in reversed(insertions):
         annotated = annotated[:position] + marker + annotated[position:]
     annotated = PROVENANCE_COMMENT_RE.sub("", annotated)
-    return annotated.strip(), annotations
+    audit = _source_projection_audit(
+        manuscript_sha256=hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+        packet_sha256=str(packet.get("packet_sha256") or ""),
+        rows=audit_rows,
+    )
+    return annotated.strip(), annotations, audit
 
 
 def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
@@ -643,13 +1170,30 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         manuscript = manuscript_path.read_text(encoding="utf-8")
         knowledge = packet.get("knowledge") if isinstance(packet.get("knowledge"), dict) else {}
         if knowledge:
-            result["markdown"], result["source_annotations"] = _annotated_reader_markdown(
-                manuscript,
-                packet,
-            )
+            (
+                result["markdown"],
+                result["source_annotations"],
+                result["source_projection_audit"],
+            ) = _annotated_reader_markdown(manuscript, packet)
         else:
             result["markdown"] = _reader_markdown(manuscript)
             result["source_annotations"] = []
+            result["source_projection_audit"] = {
+                "schema_version": "wang_article_source_projection_audit.v1",
+                "manuscript_sha256": current_manuscript_sha,
+                "authoring_packet_sha256": "",
+                "paragraphs_checked": 0,
+                "paragraphs_with_sources": 0,
+                "direct_quotes_checked": 0,
+                "findings": [
+                    {
+                        "code": "missing_authoring_knowledge",
+                        "paragraph_id": "",
+                        "message": "稿件没有可用于来源核验的 authoring knowledge。",
+                    }
+                ],
+                "passed": False,
+            }
     return result
 
 
