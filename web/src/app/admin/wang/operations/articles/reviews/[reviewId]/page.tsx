@@ -62,10 +62,6 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
             );
           })}
         </div>
-        <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs sm:grid-cols-2">
-          <div><dt className="font-bold text-slate-500">Manuscript SHA</dt><dd className="mt-1 break-all font-mono text-slate-700">{review.manuscript_sha256}</dd></div>
-          <div><dt className="font-bold text-slate-500">Brief SHA</dt><dd className="mt-1 break-all font-mono text-slate-700">{review.brief_sha256}</dd></div>
-        </dl>
       </section>
 
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[16rem_minmax(0,1fr)]">
