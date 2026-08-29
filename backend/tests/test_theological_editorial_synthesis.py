@@ -5,6 +5,7 @@ import pytest
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.theological_editorial_composition_runner import _review_packet
+from backend.pipeline.theological_editorial_recomposition_runner import _as_brief_finding
 from backend.pipeline.theological_editorial_synthesis import (
     TheologicalEditorialContractError,
     build_scoped_source_originals,
@@ -231,7 +232,7 @@ def _compile(records=None):
 
 def _candidate(packet):
     return {
-        "schema_version": "wang_theological_editorial_brief_candidate_v1",
+        "schema_version": "wang_theological_editorial_brief_candidate_v2",
         "evidence_packet_sha256": packet["evidence_packet_sha256"],
         "status": "ready",
         "summary": "A positive-centred structure with a later boundary.",
@@ -245,8 +246,22 @@ def _candidate(packet):
                 "heading": "正面答案",
                 "article_function": "positive_exposition",
                 "reader_function": "Explain the centre and positive identification.",
+                "governing_question": "What is the church founded upon?",
+                "section_conclusion": "The section gives the positive foundation.",
+                "depends_on_section_ids": [],
                 "viewpoint_revision_ids": ["CVR-CENTRAL", "CVR-POSITIVE"],
                 "argument_route_revision_ids": ["ARR-1", "ARR-2"],
+                "argument_route_uses": [
+                    {
+                        "argument_route_revision_id": "ARR-1",
+                        "role": "primary_support",
+                    },
+                    {
+                        "argument_route_revision_id": "ARR-2",
+                        "role": "corroboration",
+                    },
+                ],
+                "embedded_materials": [],
                 "required_qualifications": [],
                 "prohibited_functions": ["lead_with_opponent"],
             },
@@ -255,8 +270,18 @@ def _candidate(packet):
                 "heading": "不是彼得本人",
                 "article_function": "negative_boundary",
                 "reader_function": "Prevent a specific misunderstanding after the answer.",
+                "governing_question": "Why is Peter himself not the rock?",
+                "section_conclusion": "Peter himself is excluded as the rock.",
+                "depends_on_section_ids": ["SEC-POSITIVE"],
                 "viewpoint_revision_ids": ["CVR-NEGATIVE"],
                 "argument_route_revision_ids": ["ARR-3"],
+                "argument_route_uses": [
+                    {
+                        "argument_route_revision_id": "ARR-3",
+                        "role": "primary_support",
+                    }
+                ],
+                "embedded_materials": [],
                 "required_qualifications": [],
                 "prohibited_functions": ["replace_positive_center"],
             },
@@ -281,6 +306,15 @@ def _candidate(packet):
                 "reason": "",
             },
         ],
+        "editorial_constraint_coverage": [
+            {
+                "constraint_id": item["constraint_id"],
+                "status": "satisfied",
+                "implementation_paths": ["/sections/1"],
+                "explanation": "The binding editorial constraint is implemented.",
+            }
+            for item in packet["scope"].get("editorial_constraints") or []
+        ],
         "unresolved_items": ["Positive identifications are not fully unified."],
         "stop_reasons": [],
     }
@@ -292,6 +326,48 @@ def test_editorial_scope_is_sha_bound():
     scope["reader_question"] = "changed"
     with pytest.raises(TheologicalEditorialContractError, match="SHA mismatch"):
         validate_editorial_scope(scope)
+
+
+def test_binding_footnote_constraint_is_machine_verified_in_the_brief():
+    scope = make_editorial_scope(
+        scope_id="TES-M16-FOOTNOTE",
+        working_title="教会的根基",
+        reader_question="教会建立在什么根基上？",
+        passage_refs=["太16:18"],
+        structure_revision_id="VSR-FOUNDATION-1",
+        publication_profile_id="PP-theological-topic-essay-v1",
+        editorial_constraints=[
+            {
+                "constraint_id": "EC-FOOTNOTE",
+                "constraint_type": "material_placement",
+                "target_record_ids": ["ARR-2"],
+                "required_value": "footnote",
+                "instruction": "Keep the secondary objection in a footnote.",
+                "rationale": "It must not interrupt the main argument.",
+                "feedback_artifact_sha256": "a" * 64,
+            }
+        ],
+    )
+    packet = compile_theological_evidence_packet(
+        scope=scope,
+        records=_records(),
+        source_original_reader=_source_reader,
+    )
+    candidate = _candidate(packet)
+    candidate["sections"][0]["embedded_materials"] = [
+        {
+            "embedded_material_id": "EM-FOOTNOTE",
+            "presentation_mode": "footnote",
+            "reader_function": "Answer the objection without interrupting the section.",
+            "viewpoint_revision_ids": ["CVR-POSITIVE"],
+            "argument_route_revision_ids": ["ARR-2"],
+            "required_qualifications": [],
+        }
+    ]
+    validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+    candidate["sections"][0]["embedded_materials"] = []
+    with pytest.raises(TheologicalEditorialContractError, match="footnote"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
 
 
 def test_evidence_compiler_follows_the_complete_structure():
@@ -353,6 +429,38 @@ def test_composition_reviewer_receives_the_same_complete_originals():
     assert review_packet["source_originals"] == evidence["source_originals"]
 
 
+def test_final_composition_review_receives_deterministic_diff_and_change_scope():
+    evidence = _compile()
+    candidate = _candidate(evidence)
+    revised = deepcopy(candidate)
+    revised["sections"][1]["reader_function"] = "Keep the objection in a note."
+    review = {
+        "findings": [
+            {
+                "finding_id": "BRF-1",
+                "authorized_change_paths": ["/sections/1/reader_function"],
+            }
+        ]
+    }
+    packet = _review_packet(
+        evidence_packet=evidence,
+        candidate=revised,
+        revision_context={
+            "baseline_candidate": candidate,
+            "baseline_review": review,
+            "finding_dispositions": [],
+            "collateral_changes": [],
+            "revision_sha256": "a" * 64,
+        },
+    )
+    assert packet["revision_context"]["deterministic_changed_fields"] == [
+        "/sections/1/reader_function"
+    ]
+    assert packet["revision_context"]["authorized_change_paths_by_finding"] == {
+        "BRF-1": ["/sections/1/reader_function"]
+    }
+
+
 def test_evidence_compiler_rejects_a_stale_structure_revision():
     records = _records()
     records["viewpoint_structures"][0]["current_revision_id"] = "VSR-NEW"
@@ -389,7 +497,39 @@ def test_route_must_stay_with_its_conclusion():
     candidate = _candidate(packet)
     candidate["sections"][0]["argument_route_revision_ids"] = ["ARR-1", "ARR-3"]
     candidate["sections"][1]["argument_route_revision_ids"] = ["ARR-2"]
+    candidate["sections"][0]["argument_route_uses"] = [
+        {
+            "argument_route_revision_id": "ARR-1",
+            "role": "primary_support",
+        },
+        {
+            "argument_route_revision_id": "ARR-3",
+            "role": "corroboration",
+        },
+    ]
+    candidate["sections"][1]["argument_route_uses"] = [
+        {
+            "argument_route_revision_id": "ARR-2",
+            "role": "primary_support",
+        }
+    ]
     with pytest.raises(TheologicalEditorialContractError, match="conclusion"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+def test_section_dependencies_must_form_the_declared_article_progression():
+    packet = _compile()
+    candidate = _candidate(packet)
+    candidate["sections"][0]["depends_on_section_ids"] = ["SEC-BOUNDARY"]
+    with pytest.raises(TheologicalEditorialContractError, match="earlier section"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+def test_route_uses_must_preserve_primary_and_supporting_roles():
+    packet = _compile()
+    candidate = _candidate(packet)
+    candidate["sections"][1]["argument_route_uses"][0]["role"] = "corroboration"
+    with pytest.raises(TheologicalEditorialContractError, match="primary_support"):
         validate_editorial_brief_candidate(candidate, evidence_packet=packet)
 
 
@@ -412,13 +552,26 @@ def test_only_sha_bound_passing_review_compiles_approved_brief():
     candidate = _candidate(packet)
     validate_editorial_brief_candidate(candidate, evidence_packet=packet)
     review = {
-        "schema_version": "wang_theological_editorial_brief_review_v1",
+        "schema_version": "wang_theological_editorial_brief_review_v3",
         "scope_confirmation": (
             "editorial_structure_and_material_no_theological_judgment"
         ),
         "brief_candidate_sha256": sha256_json(candidate),
         "decision": "pass",
         "summary": "The brief is supported and keeps the positive centre.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "The boundary depends on the positive answer.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "The heading and route roles preserve the section logic.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
         "findings": [],
     }
     validate_brief_review(review, candidate=candidate)
@@ -436,13 +589,26 @@ def test_passing_review_cannot_hide_findings():
     packet = _compile()
     candidate = _candidate(packet)
     review = {
-        "schema_version": "wang_theological_editorial_brief_review_v1",
+        "schema_version": "wang_theological_editorial_brief_review_v3",
         "scope_confirmation": (
             "editorial_structure_and_material_no_theological_judgment"
         ),
         "brief_candidate_sha256": sha256_json(candidate),
         "decision": "pass",
         "summary": "Contradictory pass.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "Claimed coherent.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "Claimed aligned.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
         "findings": [
             {
                 "finding_id": "BRF-1",
@@ -452,6 +618,7 @@ def test_passing_review_cannot_hide_findings():
                 "record_ids": ["CVR-POSITIVE"],
                 "explanation": "The positive centre is absent.",
                 "recommended_action": "Restore it.",
+                "authorized_change_paths": ["/article_title"],
             }
         ],
     }
@@ -459,17 +626,121 @@ def test_passing_review_cannot_hide_findings():
         validate_brief_review(review, candidate=candidate)
 
 
+def test_passing_review_must_explicitly_reject_a_flattened_section_heading():
+    packet = _compile()
+    candidate = _candidate(packet)
+    candidate["sections"][1]["heading"] = (
+        "Petrus与Petra指向谁？彼得为何随即受责备？"
+    )
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "pass",
+        "summary": "The route inventory is complete.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "Claimed coherent.",
+        "section_assessments": [
+            {
+                "section_id": "SEC-POSITIVE",
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "Aligned.",
+            },
+            {
+                "section_id": "SEC-BOUNDARY",
+                "heading_frames_governing_question": False,
+                "heading_is_consistent_with_section_conclusion": False,
+                "route_roles_form_hierarchy": False,
+                "explanation": "The heading lists two evidence items instead of the governing question.",
+            },
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [],
+    }
+    with pytest.raises(TheologicalEditorialContractError, match="structural assessment"):
+        validate_brief_review(review, candidate=candidate)
+
+
+def test_approved_brief_compiler_cannot_bypass_structural_review_validation():
+    packet = _compile()
+    candidate = _candidate(packet)
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "pass",
+        "summary": "The candidate is structurally coherent.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "Each later section uses an earlier conclusion.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "The section has one governing question and a route hierarchy.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [],
+    }
+    review["section_assessments"][0]["route_roles_form_hierarchy"] = False
+
+    with pytest.raises(TheologicalEditorialContractError, match="structural assessment"):
+        compile_approved_editorial_brief(
+            candidate=candidate,
+            evidence_packet=packet,
+            review=review,
+        )
+
+
+def test_downstream_composition_finding_rejects_an_unknown_section():
+    packet = _compile()
+    candidate = _candidate(packet)
+    finding = {
+        "finding_id": "F-UNKNOWN-SECTION",
+        "dimension_id": "argument_route_integrity",
+        "section_id": "SEC-DOES-NOT-EXIST",
+        "severity": "major",
+        "problem": "The brief locks the prose into a flat route list.",
+        "required_change": "Restore a governing question and route hierarchy.",
+    }
+
+    with pytest.raises(ValueError, match="unknown section"):
+        _as_brief_finding(finding, candidate=candidate)
+
+
 def test_brief_revision_must_dispose_every_finding_and_bind_both_shas():
     packet = _compile()
     candidate = _candidate(packet)
     review = {
-        "schema_version": "wang_theological_editorial_brief_review_v1",
+        "schema_version": "wang_theological_editorial_brief_review_v3",
         "scope_confirmation": (
             "editorial_structure_and_material_no_theological_judgment"
         ),
         "brief_candidate_sha256": sha256_json(candidate),
         "decision": "changes_required",
         "summary": "Keep the boundary out of the title.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "Only the title needs repair.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "The section structure remains sound.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
         "findings": [
             {
                 "finding_id": "BRF-1",
@@ -479,23 +750,25 @@ def test_brief_revision_must_dispose_every_finding_and_bind_both_shas():
                 "record_ids": ["CVR-NEGATIVE"],
                 "explanation": "The title leads with the rejection.",
                 "recommended_action": "Lead with the positive answer.",
+                "authorized_change_paths": ["/article_title"],
             }
         ],
     }
     revised_candidate = deepcopy(candidate)
     revised_candidate["article_title"] = "教会的根基：正面答案与必要边界"
     revision = {
-        "schema_version": "wang_theological_editorial_brief_revision_v1",
+        "schema_version": "wang_theological_editorial_brief_revision_v3",
         "baseline_candidate_sha256": sha256_json(candidate),
         "baseline_review_sha256": sha256_json(review),
         "finding_dispositions": [
             {
                 "finding_id": "BRF-1",
                 "resolution": "resolved",
-                "changed_fields": ["article_title"],
+                "changed_fields": ["/article_title"],
                 "explanation": "The title now leads with the positive centre.",
             }
         ],
+        "collateral_changes": [],
         "revised_candidate": revised_candidate,
     }
     validate_brief_revision(
@@ -512,3 +785,142 @@ def test_brief_revision_must_dispose_every_finding_and_bind_both_shas():
             review=review,
             evidence_packet=packet,
         )
+
+
+def test_brief_revision_rejects_an_unreported_heading_regression():
+    packet = _compile()
+    candidate = _candidate(packet)
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "changes_required",
+        "summary": "Move a secondary objection into a note.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "The original progression is sound.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "The original section is coherent.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [
+            {
+                "finding_id": "BRF-ARAMAIC",
+                "code": "argument_hierarchy_flattened",
+                "severity": "high",
+                "blocking": True,
+                "record_ids": ["SEC-BOUNDARY"],
+                "explanation": "A secondary objection interrupts the primary argument.",
+                "recommended_action": "Move it into a note without changing the heading.",
+                "authorized_change_paths": [
+                    "/sections/1/reader_function",
+                    "/sections/1/required_qualifications",
+                ],
+            }
+        ],
+    }
+    revised_candidate = deepcopy(candidate)
+    revised_candidate["sections"][1]["reader_function"] = (
+        "Keep the secondary objection in a note."
+    )
+    revised_candidate["sections"][1]["heading"] = (
+        "Petrus与Petra指向谁？彼得为何随即受责备？"
+    )
+    revision = {
+        "schema_version": "wang_theological_editorial_brief_revision_v3",
+        "baseline_candidate_sha256": sha256_json(candidate),
+        "baseline_review_sha256": sha256_json(review),
+        "finding_dispositions": [
+            {
+                "finding_id": "BRF-ARAMAIC",
+                "resolution": "resolved",
+                "changed_fields": ["/sections/1/reader_function"],
+                "explanation": "The objection is now assigned to a note.",
+            }
+        ],
+        "collateral_changes": [],
+        "revised_candidate": revised_candidate,
+    }
+    with pytest.raises(TheologicalEditorialContractError, match="unreported changed fields"):
+        validate_brief_revision(
+            revision,
+            candidate=candidate,
+            review=review,
+            evidence_packet=packet,
+        )
+
+
+def test_explicit_section_object_authorization_covers_its_changed_children():
+    packet = _compile()
+    candidate = _candidate(packet)
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "changes_required",
+        "summary": "The whole boundary section must be reframed.",
+        "article_progression_coherent": False,
+        "article_progression_explanation": "The boundary section needs a linked repair.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": section["section_id"]
+                != "SEC-BOUNDARY",
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "The boundary heading needs repair."
+                if section["section_id"] == "SEC-BOUNDARY"
+                else "Aligned.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [
+            {
+                "finding_id": "BRF-SECTION",
+                "code": "heading_governing_question_mismatch",
+                "severity": "high",
+                "blocking": True,
+                "record_ids": ["SEC-BOUNDARY"],
+                "explanation": "The section needs linked field changes.",
+                "recommended_action": "Reframe the section without changing scope.",
+                "authorized_change_paths": ["/sections/1"],
+            }
+        ],
+    }
+    revised_candidate = deepcopy(candidate)
+    revised_candidate["sections"][1]["heading"] = "为什么磐石不是彼得本人？"
+    revised_candidate["sections"][1]["reader_function"] = (
+        "Answer one governing question with ordered evidence."
+    )
+    revision = {
+        "schema_version": "wang_theological_editorial_brief_revision_v3",
+        "baseline_candidate_sha256": sha256_json(candidate),
+        "baseline_review_sha256": sha256_json(review),
+        "finding_dispositions": [
+            {
+                "finding_id": "BRF-SECTION",
+                "resolution": "resolved",
+                "changed_fields": ["/sections/1"],
+                "explanation": "The linked section fields were repaired together.",
+            }
+        ],
+        "collateral_changes": [],
+        "revised_candidate": revised_candidate,
+    }
+    validate_brief_revision(
+        revision,
+        candidate=candidate,
+        review=review,
+        evidence_packet=packet,
+    )

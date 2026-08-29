@@ -20,6 +20,7 @@ from backend.pipeline.theological_topic_authoring import (
     validate_topic_author_result,
 )
 from backend.pipeline.theological_topic_quality_runner import (
+    HARD_FAILURE_DIMENSIONS,
     build_topic_presentation_package,
     program_audit,
 )
@@ -217,6 +218,33 @@ def test_topic_author_requires_exact_heading_order():
         validate_topic_author_result(result, authoring_packet=packet)
 
 
+@pytest.mark.parametrize(
+    "reader_prose",
+    [
+        "教授接着提出另一种说法。",
+        "正面答案须按原稿的‘或者’保留。",
+        "正面答案可以并列表述为两种说法。",
+        "正面的答案需要沿着经文继续追问。",
+    ],
+)
+def test_topic_author_rejects_professor_analysis_voice_in_reader_prose(reader_prose):
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        "Positive proposition in prose.",
+        reader_prose,
+    )
+    result["sections"][0]["output_anchor"] = reader_prose
+    with pytest.raises(TheologicalEditorialContractError, match="forbidden reader-prose"):
+        validate_topic_author_result(result, authoring_packet=packet)
+
+
 def test_topic_author_requires_a_member_claim_for_each_viewpoint():
     evidence, brief, publication, quality = _inputs()
     evidence["claims"].append({"claim_id": "CL-OTHER", "statement": "Other", "evidence_step_ids": []})
@@ -399,6 +427,34 @@ def test_meta_analysis_hard_failure_rejects_even_with_perfect_scores():
     outcome = validate_topic_editorial_review(review, review_packet=review_packet)
     assert outcome["passed"] is False
     assert outcome["total_score"] == 100
+    assert outcome["hard_failures"] == [failure_id]
+
+
+def test_flattened_article_hierarchy_is_an_independent_hard_failure():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    failure_id = "article_argument_hierarchy_flattened"
+    assert failure_id in quality["hard_failures"]
+    assert HARD_FAILURE_DIMENSIONS[failure_id] == {
+        "positive_thesis_and_structural_fidelity",
+        "argument_route_integrity",
+        "reader_memory_center",
+    }
+    review = _review_for(
+        packet,
+        review_packet["manuscript_sha256"],
+        hard_failure_id=failure_id,
+    )
+    outcome = validate_topic_editorial_review(review, review_packet=review_packet)
+    assert outcome["passed"] is False
     assert outcome["hard_failures"] == [failure_id]
 
 

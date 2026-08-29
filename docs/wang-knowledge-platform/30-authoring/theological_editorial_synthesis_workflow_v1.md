@@ -109,11 +109,18 @@ flowchart LR
 - 每个 focal viewpoint 的 revision、结构角色、归属类别、是否进入正文，以及进入正文时承担的 section；
 - 每条选中 `ArgumentRoute` 的 revision、source-local attestations 和文章功能；
 - `unresolved_items`、不可升级的模态、不可静默调和的张力；
-- ordered sections，每节的读者功能、观点、路线、必要限定和禁止承担的功能；
+- ordered sections，每节的统摄问题、阶段结论、所依赖的前节、读者功能、观点、路线、必要限定和禁止承担的功能；
+- 每条路线在该节承担的是主证、旁证、限定、异议回应还是应用；
 - `route_out`，列出所有不进入正文的相关材料及理由；
 - 导言、标题和结论如何共同承载正面中心。
 
+人类编辑已经批准的写作提纲、材料位置和文章形态必须进入 SHA-bound `EditorialScope`，不能只留在聊天记录、一次 review finding 或 staging 旁边的反馈文件。Brief 逐项声明这些约束如何落实，Composition Reviewer 逐项独立判断；任何一项未满足都不能批准。能机械判断的约束由程序先判，例如正文 H2 数量、禁止独立 introduction section，以及指定 viewpoint／route 必须作为 footnote 或 inline note；模型不得用“整体方向一致”替代这些检查。
+
 Structure 中的每个 focal viewpoint 必须恰好落入正文 section 或 `route_out`。任何静默遗漏使 brief 无效。`central_claim` 与至少一项适用的 `positive_identification` 必须进入正文；`negative_boundary` 不得成为 reader takeaway；`application` 不得先于其依赖的正面释经；`tension_side` 和 `qualification` 不得被改写为无条件断言。
+
+各节不能只是材料容器。第一节没有前置依赖；此后每节必须声明它承接的前节，使整篇形成可检查的递进。每个使用路线的 section 至少有一条主证；旁证、限定、异议回应和应用不得在 heading 中被摊成与统摄问题同等级的并列题目。Composition Reviewer 必须逐节明确判断 heading 是否与统摄问题、阶段结论一致，路线功能是否保持主次，并单独判断整篇递进是否成立；这些判断有一项不成立，就不能批准 brief。
+
+指定为 footnote 或 inline note 的材料仍完整进入所在 section 的 viewpoint／route ledger，并保留来源、模态和限定；它同时记录在该节的 embedded material ledger，route 在文章层只能承担旁证、限定或异议回应，不得成为主证，也不得另建 H2。这样“放进注释”改变的是呈现分量，不是把教授讲过的内容删掉。
 
 ## 八、材料充分性
 
@@ -135,7 +142,7 @@ POC 的直接输入上限为全部原稿合计 120,000 字符；“教会的根�
 
 ## 九、写作与审核
 
-Author 必须先写正面中心，再使用反方材料限定误读。标题、导言、主要小节和结论应让普通读者能够回答“教授主张什么、为什么”。教授花在批驳上的讲授时长不自动决定文章篇幅。
+Author 必须让正面中心成为全文主线与读者最后的记忆中心。通常先写正面中心，再使用反方材料限定误读；若 SHA-bound 人类 approved outline 明确用一项争议或否定边界发动经文问题，则以该约束为序，入口须迅速进入经文检验，后文仍须完整建立正面答案。标题、导言、主要小节和结论应让普通读者能够回答“教授主张什么、为什么”。教授花在批驳上的讲授时长不自动决定文章篇幅。
 
 Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位具体证据。Composition 与 Editorial Review 也使用同一份完整原稿包，不能只根据 CVP、route summary 或 brief 判断忠实度。
 
@@ -143,9 +150,13 @@ Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位�
 
 初稿仍只调用一次 Independent Editorial Review。每轮 Revision 后恰好调用一次 Final Delta Review；同一 delta 响应返回下一轮 finding。不得增加 Score-Gap Review，也不得把修订稿重新送去全文初审。
 
+Final Delta Review 以 changed paragraphs 为审核范围，但 packet 同时携带修订后全文作为位置上下文。全文只用于确认改动段落的真实相邻关系、provenance 边界、标题层级和文章实际结尾，不授权重审未改段落。Paragraph diff 会省略文字未变但位置仍在插入段之后的收束段；Reviewer 不得从 diff 的 insert／delete 顺序推断最后一句。
+
 若 Reader-prose Review 发现问题被 brief 锁定（例如 approved heading 本身静默统一未决关系），Author 不得绕过 brief 修改。流程产生 `composition_change_required`，将 finding 转为 Composition Review finding，正式修订 brief，经过一次 Final Composition Review 后重新生成文章。实跑证明这不是异常边角：golden case 的第一版 brief 就在下游被发现把“信仰告白”与“所领受并传下的真理”合成一个小标题。
 
-Writing quality profile 必须把以下情况列为 hard failure：稿件虽有来源，但负面批驳、争论对象或错误观点取代了 brief 所声明的正面中心。Reviewer 应检查标题、导言、小标题和结论是否共同回答 reader question；不能只在一般 `argument_organization` 说明中顺带提及。
+Composition finding 必须明确列出允许修改的 candidate 字段。Revision 后由程序计算 baseline 与 revised candidate 的真实 JSON diff：每个变动字段必须属于某项 finding 的授权范围，或被逐项申报为有理由且关联到具体 finding 的连带修改；申报但没有真实变化、真实变化却未申报，都会在 Final Composition Review 前失败。Final Composition Reviewer 还要看到 baseline、真实 diff、授权范围与连带修改，并复查 heading、统摄问题、阶段结论、路线主次和整篇递进，不能只确认旧 finding 表面上已消失。
+
+Writing quality profile 必须把以下情况列为 hard failure：稿件虽有来源，但负面批驳、争论对象或错误观点取代了 brief 所声明的正面中心；或者真实的 source-local 路线虽然都出现了，却被写成没有统摄问题、没有证据主次和阶段结论的平面清单。Reviewer 应检查标题、导言、小标题和结论是否共同回答 reader question，并区分“跨来源拼接路线”与“路线真实但文章层级被压平”这两种失败；不能只在一般 `argument_organization` 说明中顺带提及。
 
 ## 十、可重复性
 
@@ -158,6 +169,8 @@ Writing quality profile 必须把以下情况列为 hard failure：稿件虽有�
 - 所有停止状态可由机器读取和解释；
 - reader-visible prose 只能由正式 Author／Revision 阶段产生，流程外不得手改；
 - 换主题时只更换 `EditorialScope` 与权威内容，不改通用代码或 prompt。
+
+同一主题经过人类编辑决定后再生成，也不能只依赖模型“记得上次谈过什么”。决定一旦批准，就加入该 scope 的版本化 constraints，并绑定原 feedback artifact SHA；scope SHA 因此改变，后续每次生成都会收到并审核同一要求。聊天上下文可以帮助讨论，不能充当运行时契约。
 
 Operator runbook 必须说明如何选择 scope、运行、恢复、查看停止状态、处理 composition change，以及如何确认没有使用主题专用 patch。
 

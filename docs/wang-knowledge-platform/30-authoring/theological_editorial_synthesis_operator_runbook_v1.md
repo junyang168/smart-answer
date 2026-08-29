@@ -9,6 +9,8 @@
 
 新主题只新增一个 `backend/config/editorial_scopes/*.json`。编辑填写读者问题、经文范围、当前已审核 `ViewpointStructure` revision 与 publication profile；问题框架注明为教会编辑判断，不冒充教授原话。不要为新主题改通用 prompt 或 schema。
 
+若人类编辑已经批准本篇的论证顺序、正文部分数量或某项材料只能作为 footnote／inline note，必须把决定写入 scope 的 `editorial_constraints`，并绑定原 feedback artifact SHA。不能只把反馈文件放在 staging 目录里：模型不会自行遍历该目录，下次生成也没有义务记得聊天。Runner 会机械检查 section count、被禁止的 article function 和 embedded material placement；Composition Reviewer 还须逐项审核 approved outline 等需要判断的约束。
+
 母本是优先来源，不是目录权威。目录由审核过的 structure 与 `TheologicalEditorialBrief` 决定。若 structure 尚未覆盖读者问题，先补权威知识记录，不要让 Composition 猜。
 
 本流程直接从 Registry 编译 `TheologicalEvidencePacket`，不使用 `ViewpointKnowledgeProjection`。EvidencePacket 包含当前 scope 选中的 revision、source-local route、Claim、Evidence、来源片段，以及每份入选逐字稿与母本的完整原文，并以 dependency manifest 和 source-original manifest 绑定。片段用于定位，不能代替 Composition、Author 或 Reviewer 阅读完整原稿。
@@ -47,7 +49,7 @@ backend/.venv/bin/python -m backend.pipeline.theological_topic_quality_runner \
   --output-dir "$RUN_ROOT/quality-v1"
 ```
 
-初稿只做一次 Independent Editorial Review。每轮 Revision 恰好做一次 Final Delta Review；delta 在同一响应返回下一轮 finding。评分只按每个 dimension 的 minimum 判断，总分只展示、不决定通过。任何 hard failure 直接失败。
+初稿只做一次 Independent Editorial Review。每轮 Revision 恰好做一次 Final Delta Review；delta 在同一响应返回下一轮 finding。Delta packet 包含 changed paragraphs，并附修订后全文作为位置上下文；Reviewer 只能用全文确认改动段的相邻关系、归属、标题层级和实际结尾，不得借此重做全文初审。只看 paragraph diff 会漏掉位于插入段之后、但文字本身未变化的收束段，因此不得从 diff 顺序推断文章最后一句。评分只按每个 dimension 的 minimum 判断，总分只展示、不决定通过。任何 hard failure 直接失败。
 
 若 finding 要改变 locked heading、section function 或未决关系，停止 Author 修订，回到 Composition：
 

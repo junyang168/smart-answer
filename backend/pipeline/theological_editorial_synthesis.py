@@ -42,6 +42,13 @@ ARTICLE_FUNCTIONS = frozenset({
     "application",
     "conclusion",
 })
+ARGUMENT_ROUTE_ROLES = frozenset({
+    "primary_support",
+    "corroboration",
+    "qualification",
+    "objection_response",
+    "application",
+})
 STOP_STATUSES = frozenset({
     "insufficient_material",
     "unresolved_structure",
@@ -68,6 +75,66 @@ def _unique(values: Sequence[str], field: str) -> list[str]:
     result = [str(value) for value in values]
     _require(len(result) == len(set(result)), f"{field} must be unique")
     return result
+
+
+def _json_pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def brief_candidate_changed_paths(
+    before: Mapping[str, Any], after: Mapping[str, Any]
+) -> list[str]:
+    """Return deterministic field-level JSON pointers for a brief revision.
+
+    Arrays of records are compared by index because section order is itself part
+    of the editorial contract. Scalar arrays are treated as one field so a model
+    can authorize a qualification or route-ledger edit without predicting item
+    offsets inside that field.
+    """
+
+    changed: set[str] = set()
+
+    def walk(left: Any, right: Any, path: str) -> None:
+        if isinstance(left, Mapping) and isinstance(right, Mapping):
+            for key in sorted(set(left) | set(right)):
+                child = f"{path}/{_json_pointer_token(str(key))}"
+                if key not in left or key not in right:
+                    changed.add(child)
+                else:
+                    walk(left[key], right[key], child)
+            return
+        if isinstance(left, list) and isinstance(right, list):
+            if (
+                len(left) == len(right)
+                and all(isinstance(item, Mapping) for item in left)
+                and all(isinstance(item, Mapping) for item in right)
+            ):
+                for index, (left_item, right_item) in enumerate(
+                    zip(left, right, strict=True)
+                ):
+                    walk(left_item, right_item, f"{path}/{index}")
+            elif left != right:
+                changed.add(path or "/")
+            return
+        if left != right:
+            changed.add(path or "/")
+
+    walk(before, after, "")
+    return sorted(changed)
+
+
+def _validate_change_path(value: Any, field: str) -> str:
+    path = _nonempty(value, field)
+    _require(path.startswith("/") and path != "/", f"{field} must be a JSON pointer")
+    return path
+
+
+def _change_path_covers(reported_path: str, actual_path: str) -> bool:
+    """A reported object/array path authorizes its deterministic descendants."""
+
+    return actual_path == reported_path or actual_path.startswith(
+        f"{reported_path.rstrip('/')}/"
+    )
 
 
 def _record_id(collection: str, record: Mapping[str, Any]) -> str:
@@ -315,11 +382,12 @@ def make_editorial_scope(
     structure_revision_id: str,
     publication_profile_id: str,
     explicit_exclusions: Sequence[Mapping[str, str]] = (),
+    editorial_constraints: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Create the immutable human/editor-owned entry contract."""
 
     payload = {
-        "schema_version": "wang_theological_editorial_scope_v1",
+        "schema_version": "wang_theological_editorial_scope_v2",
         "scope_id": _nonempty(scope_id, "scope_id"),
         "product_kind": "theological_topic_essay",
         "working_title": _nonempty(working_title, "working_title"),
@@ -341,6 +409,34 @@ def make_editorial_scope(
             ],
             key=lambda item: item["record_id"],
         ),
+        "editorial_constraints": [
+            {
+                "constraint_id": _nonempty(
+                    item.get("constraint_id"), "editorial constraint id"
+                ),
+                "constraint_type": _nonempty(
+                    item.get("constraint_type"), "editorial constraint type"
+                ),
+                "target_record_ids": _unique(
+                    list(item.get("target_record_ids") or []),
+                    "editorial constraint target record ids",
+                ),
+                "required_value": _nonempty(
+                    item.get("required_value"), "editorial constraint required value"
+                ),
+                "instruction": _nonempty(
+                    item.get("instruction"), "editorial constraint instruction"
+                ),
+                "rationale": _nonempty(
+                    item.get("rationale"), "editorial constraint rationale"
+                ),
+                "feedback_artifact_sha256": _nonempty(
+                    item.get("feedback_artifact_sha256"),
+                    "editorial constraint feedback artifact SHA",
+                ),
+            }
+            for item in editorial_constraints
+        ],
         "editorial_attribution": "church_editor",
         "not_professor_words": True,
     }
@@ -350,7 +446,11 @@ def make_editorial_scope(
 
 def validate_editorial_scope(scope: Mapping[str, Any]) -> None:
     _require(
-        scope.get("schema_version") == "wang_theological_editorial_scope_v1",
+        scope.get("schema_version")
+        in {
+            "wang_theological_editorial_scope_v1",
+            "wang_theological_editorial_scope_v2",
+        },
         "unsupported editorial scope schema",
     )
     _require(
@@ -371,6 +471,57 @@ def validate_editorial_scope(scope: Mapping[str, Any]) -> None:
         and scope.get("not_professor_words") is True,
         "scope must identify its questions and framing as editorial",
     )
+    constraints = list(scope.get("editorial_constraints") or [])
+    if scope.get("schema_version") == "wang_theological_editorial_scope_v2":
+        constraint_ids = _unique(
+            [str(item.get("constraint_id") or "") for item in constraints],
+            "editorial constraint ids",
+        )
+        _require(
+            len(constraint_ids) == len(constraints),
+            "editorial constraints must have IDs",
+        )
+        for item in constraints:
+            constraint_id = str(item["constraint_id"])
+            constraint_type = str(item.get("constraint_type") or "")
+            _require(
+                constraint_type
+                in {
+                    "material_placement",
+                    "section_count",
+                    "prohibited_article_function",
+                    "approved_outline",
+                },
+                f"{constraint_id}: unsupported editorial constraint type",
+            )
+            _unique(
+                item.get("target_record_ids") or [],
+                f"{constraint_id} target record ids",
+            )
+            for field in (
+                "required_value",
+                "instruction",
+                "rationale",
+                "feedback_artifact_sha256",
+            ):
+                _nonempty(item.get(field), f"{constraint_id}.{field}")
+            if constraint_type == "material_placement":
+                _require(
+                    bool(item.get("target_record_ids"))
+                    and item.get("required_value") in {"footnote", "inline_note"},
+                    f"{constraint_id}: material placement needs records and note mode",
+                )
+            elif constraint_type == "section_count":
+                _require(
+                    str(item.get("required_value") or "").isdigit()
+                    and int(item["required_value"]) > 0,
+                    f"{constraint_id}: section count must be a positive integer",
+                )
+            elif constraint_type == "prohibited_article_function":
+                _require(
+                    item.get("required_value") in ARTICLE_FUNCTIONS,
+                    f"{constraint_id}: unknown prohibited article function",
+                )
     stated = str(scope.get("scope_sha256") or "")
     body = {key: value for key, value in scope.items() if key != "scope_sha256"}
     _require(stated == sha256_json(body), "editorial scope SHA mismatch")
@@ -774,7 +925,7 @@ def validate_editorial_brief_candidate(
     validate_theological_evidence_packet(evidence_packet)
     _require(
         candidate.get("schema_version")
-        == "wang_theological_editorial_brief_candidate_v1",
+        == "wang_theological_editorial_brief_candidate_v2",
         "unsupported theological editorial brief candidate schema",
     )
     _require(
@@ -807,15 +958,100 @@ def validate_editorial_brief_candidate(
         [str(item.get("section_id") or "") for item in sections], "section ids"
     )
     section_by_id = {str(item["section_id"]): item for item in sections}
+    embedded_materials: list[Mapping[str, Any]] = []
     for index, section in enumerate(sections, start=1):
         _nonempty(section.get("heading"), f"sections[{index}].heading")
         _nonempty(section.get("reader_function"), f"sections[{index}].reader_function")
+        _nonempty(
+            section.get("governing_question"),
+            f"sections[{index}].governing_question",
+        )
+        _nonempty(
+            section.get("section_conclusion"),
+            f"sections[{index}].section_conclusion",
+        )
         _require(
             section.get("article_function") in ARTICLE_FUNCTIONS,
             f"section {section.get('section_id')}: invalid article function",
         )
         _unique(section.get("viewpoint_revision_ids") or [], "section viewpoints")
-        _unique(section.get("argument_route_revision_ids") or [], "section routes")
+        route_ids = _unique(
+            section.get("argument_route_revision_ids") or [], "section routes"
+        )
+        route_uses = list(section.get("argument_route_uses") or [])
+        route_use_ids = _unique(
+            [str(item.get("argument_route_revision_id") or "") for item in route_uses],
+            "section route uses",
+        )
+        _require(
+            route_use_ids == route_ids,
+            f"section {section.get('section_id')}: route uses must match route ledger in order",
+        )
+        for route_use in route_uses:
+            _require(
+                route_use.get("role") in ARGUMENT_ROUTE_ROLES,
+                f"section {section.get('section_id')}: invalid route role",
+            )
+        if route_uses:
+            _require(
+                any(item.get("role") == "primary_support" for item in route_uses),
+                f"section {section.get('section_id')}: routes need primary_support",
+            )
+        route_role_by_id = {
+            str(item["argument_route_revision_id"]): str(item["role"])
+            for item in route_uses
+        }
+        for material in section.get("embedded_materials") or []:
+            embedded_materials.append(material)
+            _nonempty(
+                material.get("embedded_material_id"),
+                f"section {section.get('section_id')} embedded material id",
+            )
+            _nonempty(
+                material.get("reader_function"),
+                f"section {section.get('section_id')} embedded reader function",
+            )
+            _require(
+                material.get("presentation_mode") in {"footnote", "inline_note"},
+                f"section {section.get('section_id')}: invalid embedded presentation mode",
+            )
+            embedded_viewpoints = set(material.get("viewpoint_revision_ids") or [])
+            embedded_routes = set(material.get("argument_route_revision_ids") or [])
+            _require(
+                embedded_viewpoints <= set(section.get("viewpoint_revision_ids") or []),
+                f"section {section.get('section_id')}: embedded viewpoints must belong to the section",
+            )
+            _require(
+                embedded_routes <= set(route_ids),
+                f"section {section.get('section_id')}: embedded routes must belong to the section",
+            )
+            _require(
+                all(
+                    route_role_by_id[route_id]
+                    in {"qualification", "objection_response", "corroboration"}
+                    for route_id in embedded_routes
+                ),
+                f"section {section.get('section_id')}: embedded routes cannot be primary support or application",
+            )
+
+        dependencies = _unique(
+            section.get("depends_on_section_ids") or [], "section dependencies"
+        )
+        earlier_ids = set(section_ids[: index - 1])
+        _require(
+            set(dependencies) <= earlier_ids,
+            f"section {section.get('section_id')}: dependencies must name an earlier section",
+        )
+        if index == 1:
+            _require(
+                not dependencies,
+                f"section {section.get('section_id')}: first section cannot depend on another section",
+            )
+        else:
+            _require(
+                bool(dependencies),
+                f"section {section.get('section_id')}: later section must depend on an earlier section",
+            )
 
     if status != "ready":
         _require(
@@ -825,6 +1061,10 @@ def validate_editorial_brief_candidate(
         return
 
     _require(bool(sections), "ready brief requires sections")
+    _unique(
+        [str(item.get("embedded_material_id") or "") for item in embedded_materials],
+        "embedded material ids",
+    )
     _nonempty(candidate.get("article_title"), "article_title")
     _nonempty(candidate.get("reader_takeaway"), "reader_takeaway")
     _require(
@@ -832,6 +1072,60 @@ def validate_editorial_brief_candidate(
         "reader takeaway must be explicitly attributed to editorial synthesis",
     )
     _require(not candidate.get("stop_reasons"), "ready brief cannot have stop reasons")
+
+    constraints = list(evidence_packet.get("scope", {}).get("editorial_constraints") or [])
+    constraint_ids = [str(item["constraint_id"]) for item in constraints]
+    constraint_coverage = list(candidate.get("editorial_constraint_coverage") or [])
+    received_constraint_ids = _unique(
+        [str(item.get("constraint_id") or "") for item in constraint_coverage],
+        "brief editorial constraint coverage",
+    )
+    _require(
+        received_constraint_ids == constraint_ids,
+        "brief must dispose every binding editorial constraint in order",
+    )
+    for item in constraint_coverage:
+        _nonempty(item.get("explanation"), "editorial constraint explanation")
+        paths = [
+            _nonempty(value, "editorial constraint implementation reference")
+            for value in item.get("implementation_paths") or []
+        ]
+        _unique(paths, "editorial constraint implementation paths")
+        _require(
+            item.get("status") == "satisfied" and bool(paths),
+            f"{item.get('constraint_id')}: ready brief must satisfy the editorial constraint",
+        )
+
+    embedded_by_mode: dict[str, set[str]] = defaultdict(set)
+    for material in embedded_materials:
+        embedded_by_mode[str(material["presentation_mode"])].update(
+            str(value) for value in material.get("viewpoint_revision_ids") or []
+        )
+        embedded_by_mode[str(material["presentation_mode"])].update(
+            str(value) for value in material.get("argument_route_revision_ids") or []
+        )
+    for constraint in constraints:
+        constraint_id = str(constraint["constraint_id"])
+        constraint_type = str(constraint["constraint_type"])
+        required_value = str(constraint["required_value"])
+        if constraint_type == "material_placement":
+            missing = set(constraint.get("target_record_ids") or []) - embedded_by_mode[
+                required_value
+            ]
+            _require(
+                not missing,
+                f"{constraint_id}: required {required_value} material is missing: {sorted(missing)}",
+            )
+        elif constraint_type == "section_count":
+            _require(
+                len(sections) == int(required_value),
+                f"{constraint_id}: ready brief violates required section count",
+            )
+        elif constraint_type == "prohibited_article_function":
+            _require(
+                all(section.get("article_function") != required_value for section in sections),
+                f"{constraint_id}: ready brief uses prohibited article function",
+            )
 
     included: set[str] = set()
     routed_out: set[str] = set()
@@ -937,21 +1231,12 @@ def compile_approved_editorial_brief(
     review: Mapping[str, Any],
 ) -> dict[str, Any]:
     validate_editorial_brief_candidate(candidate, evidence_packet=evidence_packet)
+    validate_brief_review(review, candidate=candidate)
     _require(candidate.get("status") == "ready", "only a ready candidate can pass")
-    _require(
-        review.get("schema_version")
-        == "wang_theological_editorial_brief_review_v1",
-        "unsupported editorial brief review schema",
-    )
     _require(review.get("decision") == "pass", "editorial brief review did not pass")
-    _require(not review.get("findings"), "passing brief review cannot contain findings")
     candidate_sha = sha256_json(dict(candidate))
-    _require(
-        review.get("brief_candidate_sha256") == candidate_sha,
-        "brief review belongs to another candidate",
-    )
     payload = {
-        "schema_version": "wang_theological_editorial_brief_v1",
+        "schema_version": "wang_theological_editorial_brief_v2",
         "scope_sha256": evidence_packet["scope"]["scope_sha256"],
         "evidence_packet_sha256": evidence_packet["evidence_packet_sha256"],
         "brief_candidate_sha256": candidate_sha,
@@ -963,7 +1248,7 @@ def compile_approved_editorial_brief(
 
 
 BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
-    "name": "wang_theological_editorial_brief_candidate_v1",
+    "name": "wang_theological_editorial_brief_candidate_v2",
     "strict": True,
     "schema": {
         "type": "object",
@@ -971,7 +1256,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
         "properties": {
             "schema_version": {
                 "type": "string",
-                "enum": ["wang_theological_editorial_brief_candidate_v1"],
+                "enum": ["wang_theological_editorial_brief_candidate_v2"],
             },
             "evidence_packet_sha256": {"type": "string"},
             "status": {
@@ -1002,6 +1287,12 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                             "enum": sorted(ARTICLE_FUNCTIONS),
                         },
                         "reader_function": {"type": "string"},
+                        "governing_question": {"type": "string"},
+                        "section_conclusion": {"type": "string"},
+                        "depends_on_section_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                         "viewpoint_revision_ids": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -1009,6 +1300,59 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                         "argument_route_revision_ids": {
                             "type": "array",
                             "items": {"type": "string"},
+                        },
+                        "argument_route_uses": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "argument_route_revision_id": {"type": "string"},
+                                    "role": {
+                                        "type": "string",
+                                        "enum": sorted(ARGUMENT_ROUTE_ROLES),
+                                    },
+                                },
+                                "required": [
+                                    "argument_route_revision_id",
+                                    "role",
+                                ],
+                            },
+                        },
+                        "embedded_materials": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "embedded_material_id": {"type": "string"},
+                                    "presentation_mode": {
+                                        "type": "string",
+                                        "enum": ["footnote", "inline_note"],
+                                    },
+                                    "reader_function": {"type": "string"},
+                                    "viewpoint_revision_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "argument_route_revision_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                    "required_qualifications": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                },
+                                "required": [
+                                    "embedded_material_id",
+                                    "presentation_mode",
+                                    "reader_function",
+                                    "viewpoint_revision_ids",
+                                    "argument_route_revision_ids",
+                                    "required_qualifications",
+                                ],
+                            },
                         },
                         "required_qualifications": {
                             "type": "array",
@@ -1024,8 +1368,13 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                         "heading",
                         "article_function",
                         "reader_function",
+                        "governing_question",
+                        "section_conclusion",
+                        "depends_on_section_ids",
                         "viewpoint_revision_ids",
                         "argument_route_revision_ids",
+                        "argument_route_uses",
+                        "embedded_materials",
                         "required_qualifications",
                         "prohibited_functions",
                     ],
@@ -1050,6 +1399,31 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                         "disposition",
                         "section_id",
                         "reason",
+                    ],
+                },
+            },
+            "editorial_constraint_coverage": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "constraint_id": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["satisfied", "cannot_satisfy"],
+                        },
+                        "implementation_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "explanation": {"type": "string"},
+                    },
+                    "required": [
+                        "constraint_id",
+                        "status",
+                        "implementation_paths",
+                        "explanation",
                     ],
                 },
             },
@@ -1083,6 +1457,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
             "reader_takeaway_viewpoint_revision_ids",
             "sections",
             "viewpoint_coverage",
+            "editorial_constraint_coverage",
             "unresolved_items",
             "stop_reasons",
         ],
@@ -1091,7 +1466,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
 
 
 BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
-    "name": "wang_theological_editorial_brief_review_v1",
+    "name": "wang_theological_editorial_brief_review_v3",
     "strict": True,
     "schema": {
         "type": "object",
@@ -1099,7 +1474,7 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
         "properties": {
             "schema_version": {
                 "type": "string",
-                "enum": ["wang_theological_editorial_brief_review_v1"],
+                "enum": ["wang_theological_editorial_brief_review_v3"],
             },
             "scope_confirmation": {
                 "type": "string",
@@ -1111,6 +1486,42 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
                 "enum": ["pass", "changes_required", *sorted(STOP_STATUSES)],
             },
             "summary": {"type": "string"},
+            "article_progression_coherent": {"type": "boolean"},
+            "article_progression_explanation": {"type": "string"},
+            "section_assessments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "section_id": {"type": "string"},
+                        "heading_frames_governing_question": {"type": "boolean"},
+                        "heading_is_consistent_with_section_conclusion": {"type": "boolean"},
+                        "route_roles_form_hierarchy": {"type": "boolean"},
+                        "explanation": {"type": "string"},
+                    },
+                    "required": [
+                        "section_id",
+                        "heading_frames_governing_question",
+                        "heading_is_consistent_with_section_conclusion",
+                        "route_roles_form_hierarchy",
+                        "explanation",
+                    ],
+                },
+            },
+            "editorial_constraint_assessments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "constraint_id": {"type": "string"},
+                        "satisfied": {"type": "boolean"},
+                        "explanation": {"type": "string"},
+                    },
+                    "required": ["constraint_id", "satisfied", "explanation"],
+                },
+            },
             "findings": {
                 "type": "array",
                 "items": {
@@ -1125,6 +1536,9 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
                                 "negative_material_displaces_center",
                                 "unsupported_editorial_bridge",
                                 "argument_route_not_source_local",
+                                "argument_hierarchy_flattened",
+                                "heading_governing_question_mismatch",
+                                "section_progression_broken",
                                 "modality_or_scope_upgraded",
                                 "unresolved_item_silently_harmonized",
                                 "focal_viewpoint_omitted",
@@ -1144,6 +1558,10 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
                         },
                         "explanation": {"type": "string"},
                         "recommended_action": {"type": "string"},
+                        "authorized_change_paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
                     "required": [
                         "finding_id",
@@ -1153,6 +1571,7 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
                         "record_ids",
                         "explanation",
                         "recommended_action",
+                        "authorized_change_paths",
                     ],
                 },
             },
@@ -1163,6 +1582,10 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
             "brief_candidate_sha256",
             "decision",
             "summary",
+            "article_progression_coherent",
+            "article_progression_explanation",
+            "section_assessments",
+            "editorial_constraint_assessments",
             "findings",
         ],
     },
@@ -1170,7 +1593,7 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
 
 
 BRIEF_REVISION_SCHEMA: dict[str, Any] = {
-    "name": "wang_theological_editorial_brief_revision_v1",
+    "name": "wang_theological_editorial_brief_revision_v3",
     "strict": True,
     "schema": {
         "type": "object",
@@ -1178,7 +1601,7 @@ BRIEF_REVISION_SCHEMA: dict[str, Any] = {
         "properties": {
             "schema_version": {
                 "type": "string",
-                "enum": ["wang_theological_editorial_brief_revision_v1"],
+                "enum": ["wang_theological_editorial_brief_revision_v3"],
             },
             "baseline_candidate_sha256": {"type": "string"},
             "baseline_review_sha256": {"type": "string"},
@@ -1207,6 +1630,26 @@ BRIEF_REVISION_SCHEMA: dict[str, Any] = {
                     ],
                 },
             },
+            "collateral_changes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "field_path": {"type": "string"},
+                        "related_finding_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "explanation": {"type": "string"},
+                    },
+                    "required": [
+                        "field_path",
+                        "related_finding_ids",
+                        "explanation",
+                    ],
+                },
+            },
             "revised_candidate": BRIEF_CANDIDATE_SCHEMA["schema"],
         },
         "required": [
@@ -1214,6 +1657,7 @@ BRIEF_REVISION_SCHEMA: dict[str, Any] = {
             "baseline_candidate_sha256",
             "baseline_review_sha256",
             "finding_dispositions",
+            "collateral_changes",
             "revised_candidate",
         ],
     },
@@ -1225,7 +1669,7 @@ def validate_brief_review(
 ) -> None:
     _require(
         review.get("schema_version")
-        == "wang_theological_editorial_brief_review_v1",
+        == "wang_theological_editorial_brief_review_v3",
         "unsupported editorial brief review schema",
     )
     _require(
@@ -1239,9 +1683,58 @@ def validate_brief_review(
     )
     decision = str(review.get("decision") or "")
     findings = list(review.get("findings") or [])
+    _nonempty(
+        review.get("article_progression_explanation"),
+        "article progression explanation",
+    )
+    candidate_section_ids = [
+        str(item["section_id"]) for item in candidate.get("sections") or []
+    ]
+    assessments = list(review.get("section_assessments") or [])
+    assessment_ids = _unique(
+        [str(item.get("section_id") or "") for item in assessments],
+        "brief review section assessments",
+    )
+    _require(
+        assessment_ids == candidate_section_ids,
+        "brief review must assess every candidate section in order",
+    )
+    for item in assessments:
+        _nonempty(item.get("explanation"), "section assessment explanation")
+    expected_constraint_ids = [
+        str(item["constraint_id"])
+        for item in candidate.get("editorial_constraint_coverage") or []
+    ]
+    constraint_assessments = list(
+        review.get("editorial_constraint_assessments") or []
+    )
+    received_constraint_ids = _unique(
+        [str(item.get("constraint_id") or "") for item in constraint_assessments],
+        "brief review editorial constraint assessments",
+    )
+    _require(
+        received_constraint_ids == expected_constraint_ids,
+        "brief review must assess every binding editorial constraint in order",
+    )
+    for item in constraint_assessments:
+        _nonempty(item.get("explanation"), "editorial constraint assessment explanation")
     if decision == "pass":
         _require(candidate.get("status") == "ready", "non-ready candidate cannot pass")
         _require(not findings, "passing review cannot contain findings")
+        _require(
+            review.get("article_progression_coherent") is True
+            and all(
+                item.get("heading_frames_governing_question") is True
+                and item.get("heading_is_consistent_with_section_conclusion") is True
+                and item.get("route_roles_form_hierarchy") is True
+                for item in assessments
+            ),
+            "passing review cannot contain a failed structural assessment",
+        )
+        _require(
+            all(item.get("satisfied") is True for item in constraint_assessments),
+            "passing review cannot fail a binding editorial constraint",
+        )
     else:
         _require(bool(findings), "non-passing brief review needs findings")
         _require(
@@ -1250,6 +1743,20 @@ def validate_brief_review(
         )
     finding_ids = [str(item.get("finding_id") or "") for item in findings]
     _unique(finding_ids, "brief review finding ids")
+    for finding in findings:
+        paths = [
+            _validate_change_path(
+                value,
+                f"{finding.get('finding_id')}.authorized_change_paths",
+            )
+            for value in finding.get("authorized_change_paths") or []
+        ]
+        _unique(paths, f"{finding.get('finding_id')} authorized change paths")
+        if decision == "changes_required" and finding.get("blocking") is True:
+            _require(
+                bool(paths),
+                f"{finding.get('finding_id')}: change finding needs authorized paths",
+            )
 
 
 def validate_brief_revision(
@@ -1261,7 +1768,7 @@ def validate_brief_revision(
 ) -> None:
     _require(
         revision.get("schema_version")
-        == "wang_theological_editorial_brief_revision_v1",
+        == "wang_theological_editorial_brief_revision_v3",
         "unsupported editorial brief revision schema",
     )
     _require(
@@ -1272,7 +1779,9 @@ def validate_brief_revision(
         revision.get("baseline_review_sha256") == sha256_json(dict(review)),
         "brief revision belongs to another review",
     )
+    validate_brief_review(review, candidate=candidate)
     findings = list(review.get("findings") or [])
+    findings_by_id = {str(item["finding_id"]): item for item in findings}
     expected_ids = {str(item["finding_id"]) for item in findings}
     dispositions = list(revision.get("finding_dispositions") or [])
     received_ids = _unique(
@@ -1285,13 +1794,81 @@ def validate_brief_revision(
     )
     for item in dispositions:
         _nonempty(item.get("explanation"), "finding disposition explanation")
+        changed_fields = [
+            _validate_change_path(
+                value,
+                f"{item.get('finding_id')}.changed_fields",
+            )
+            for value in item.get("changed_fields") or []
+        ]
+        _unique(changed_fields, f"{item.get('finding_id')} changed fields")
+        authorized = set(
+            findings_by_id[str(item["finding_id"])].get("authorized_change_paths")
+            or []
+        )
+        _require(
+            all(
+                any(_change_path_covers(scope, path) for scope in authorized)
+                for path in changed_fields
+            ),
+            f"{item.get('finding_id')}: changed field was not authorized",
+        )
         if item.get("resolution") == "resolved":
             _require(
-                bool(item.get("changed_fields")),
+                bool(changed_fields),
                 f"{item.get('finding_id')}: resolved disposition needs changed_fields",
             )
+    collateral = list(revision.get("collateral_changes") or [])
+    collateral_paths = _unique(
+        [
+            _validate_change_path(item.get("field_path"), "collateral change field_path")
+            for item in collateral
+        ],
+        "collateral change paths",
+    )
+    for item in collateral:
+        related = _unique(
+            [str(value) for value in item.get("related_finding_ids") or []],
+            "collateral related finding ids",
+        )
+        _require(
+            bool(related) and set(related) <= expected_ids,
+            "collateral change must name related review findings",
+        )
+        _nonempty(item.get("explanation"), "collateral change explanation")
     revised = revision.get("revised_candidate") or {}
     validate_editorial_brief_candidate(revised, evidence_packet=evidence_packet)
+    actual_changed_fields = set(brief_candidate_changed_paths(candidate, revised))
+    disposition_changed_fields = {
+        str(path)
+        for item in dispositions
+        for path in item.get("changed_fields") or []
+    }
+    reported_changed_fields = disposition_changed_fields | set(collateral_paths)
+    unreported = {
+        path
+        for path in actual_changed_fields
+        if not any(
+            _change_path_covers(reported, path)
+            for reported in reported_changed_fields
+        )
+    }
+    _require(
+        not unreported,
+        f"brief revision has unreported changed fields: {sorted(unreported)}",
+    )
+    non_changes = {
+        path
+        for path in reported_changed_fields
+        if not any(
+            _change_path_covers(path, actual)
+            for actual in actual_changed_fields
+        )
+    }
+    _require(
+        not non_changes,
+        f"brief revision reports unchanged fields: {sorted(non_changes)}",
+    )
     if any(item.get("resolution") == "cannot_resolve" for item in dispositions):
         _require(
             revised.get("status") == "human_editor_required",

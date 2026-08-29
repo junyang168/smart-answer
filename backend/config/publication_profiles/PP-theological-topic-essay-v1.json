@@ -1,7 +1,7 @@
 {
   "schema_version": "wang-publication-profile.v1",
   "profile_id": "PP-theological-topic-essay-v1",
-  "revision": 1,
+  "revision": 2,
   "product_type": "theological_topic_essay",
   "primary_axis": "reader_question",
   "authorship": "church_editorial_board",
@@ -19,7 +19,8 @@
     "editorial_synthesis_must_not_be_attributed_as_professor_words": true
   },
   "structure_policy": {
-    "positive_thesis_precedes_negative_boundary": true,
+    "positive_thesis_is_reader_memory_center": true,
+    "binding_scope_outline_may_use_a_negative_boundary_as_the_question_entry": true,
     "negative_material_cannot_carry_reader_takeaway": true,
     "qualifications_and_unresolved_items_are_mandatory": true,
     "brief_headings_and_order_are_binding": true

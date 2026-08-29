@@ -53,6 +53,8 @@ HARD_FAILURE_DIMENSIONS = {
     "unsupported_editorial_synthesis_attributed_to_professor": {"source_and_exegesis", "editorial_voice_restraint"},
     "material_tension_or_unresolved_relation_silently_harmonized": {"theological_tension_and_attribution"},
     "negative_material_displaces_positive_thesis": {"positive_thesis_and_structural_fidelity", "reader_memory_center"},
+    "meta_analysis_displaces_first_order_argument": {"positive_thesis_and_structural_fidelity", "editorial_voice_restraint", "general_reader_readability"},
+    "article_argument_hierarchy_flattened": {"positive_thesis_and_structural_fidelity", "argument_route_integrity", "reader_memory_center"},
     "source_local_argument_routes_spliced": {"argument_route_integrity"},
     "exegetical_observation_inference_conclusion_chain_missing": {"argument_route_integrity"},
 }
@@ -526,6 +528,14 @@ def run_quality(
             "schema_version": "wang_theological_topic_final_delta_review_packet_v1",
             "baseline_manuscript_sha256": baseline_sha,
             "reviewed_manuscript_sha256": sha256_text(revised_manuscript),
+            # A paragraph diff cannot prove document position. An unchanged
+            # positive closing paragraph disappears from the diff when the
+            # paragraph immediately before it is replaced, which once made a
+            # delta reviewer falsely conclude that the inserted editorial
+            # disclosure was the final paragraph. Keep the review scoped to
+            # changed paragraphs, but give it the revised manuscript so it can
+            # verify heading, adjacency, attribution, and the actual ending.
+            "revised_manuscript_markdown": revised_manuscript,
             "baseline_review": current_review,
             "accepted_findings": blocking,
             "finding_dispositions": revision["finding_dispositions"],

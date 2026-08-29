@@ -24,6 +24,7 @@ from backend.pipeline.theological_editorial_synthesis import (
     BRIEF_CANDIDATE_SCHEMA,
     BRIEF_REVISION_SCHEMA,
     BRIEF_REVIEW_SCHEMA,
+    brief_candidate_changed_paths,
     compile_approved_editorial_brief,
     compile_theological_evidence_packet,
     validate_brief_review,
@@ -124,7 +125,7 @@ def _review_packet(
     """Give the reviewer the scoped evidence and complete originals, not the corpus."""
 
     packet = {
-        "schema_version": "wang_theological_editorial_brief_review_packet_v1",
+        "schema_version": "wang_theological_editorial_brief_review_packet_v2",
         "scope": evidence_packet["scope"],
         "structure": {
             "structure_revision_id": evidence_packet["structure"]["revision"][
@@ -201,7 +202,18 @@ def _review_packet(
         },
     }
     if revision_context is not None:
-        packet["revision_context"] = dict(revision_context)
+        context = dict(revision_context)
+        baseline_candidate = context["baseline_candidate"]
+        baseline_review = context["baseline_review"]
+        context["deterministic_changed_fields"] = brief_candidate_changed_paths(
+            baseline_candidate,
+            candidate,
+        )
+        context["authorized_change_paths_by_finding"] = {
+            str(item["finding_id"]): list(item.get("authorized_change_paths") or [])
+            for item in baseline_review.get("findings") or []
+        }
+        packet["revision_context"] = context
     return packet
 
 
@@ -287,7 +299,7 @@ def run_composition(
 
     candidate, candidate_cached = _run_cached_stage(
         path=output_dir / "theological-editorial-brief-candidate.json",
-        schema_version="wang_theological_editorial_brief_candidate_envelope_v1",
+        schema_version="wang_theological_editorial_brief_candidate_envelope_v2",
         fingerprint=composition_fingerprint,
         producer={
             "role": "composition_agent",
@@ -369,7 +381,7 @@ def run_composition(
 
     review, review_cached = _run_cached_stage(
         path=output_dir / "theological-editorial-brief-review.json",
-        schema_version="wang_theological_editorial_brief_review_envelope_v1",
+        schema_version="wang_theological_editorial_brief_review_envelope_v3",
         fingerprint=review_fingerprint,
         producer={
             "role": "independent_composition_reviewer",
@@ -454,7 +466,7 @@ def run_composition(
 
         revision, revision_cached = _run_cached_stage(
             path=output_dir / "theological-editorial-brief-revision.json",
-            schema_version="wang_theological_editorial_brief_revision_envelope_v1",
+            schema_version="wang_theological_editorial_brief_revision_envelope_v3",
             fingerprint=revision_fingerprint,
             producer={
                 "role": "composition_revision_agent",
@@ -497,6 +509,7 @@ def run_composition(
                 "baseline_candidate": candidate,
                 "baseline_review": review,
                 "finding_dispositions": revision["finding_dispositions"],
+                "collateral_changes": revision["collateral_changes"],
                 "revision_sha256": sha256_json(revision),
             },
         )
@@ -504,7 +517,7 @@ def run_composition(
             output_dir / "theological-editorial-brief-final-review-packet.json",
             {
                 "schema_version": (
-                    "wang_theological_editorial_brief_final_review_packet_envelope_v1"
+                    "wang_theological_editorial_brief_final_review_packet_envelope_v2"
                 ),
                 "generation": {
                     "fingerprint": sha256_json(final_packet),
@@ -559,7 +572,7 @@ def run_composition(
         final_review, final_review_cached = _run_cached_stage(
             path=output_dir / "theological-editorial-brief-final-review.json",
             schema_version=(
-                "wang_theological_editorial_brief_final_review_envelope_v1"
+                "wang_theological_editorial_brief_final_review_envelope_v3"
             ),
             fingerprint=final_fingerprint,
             producer={
@@ -600,7 +613,7 @@ def run_composition(
     _write_json(
         output_dir / "theological-editorial-brief.json",
         {
-            "schema_version": "wang_theological_editorial_brief_envelope_v1",
+            "schema_version": "wang_theological_editorial_brief_envelope_v2",
             "generation": {
                 "fingerprint": brief["brief_sha256"],
                 "generated_at": _utcnow(),

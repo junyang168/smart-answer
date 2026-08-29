@@ -30,13 +30,65 @@ def _result(path: Path) -> dict[str, Any]:
     return dict(value.get("result") or value)
 
 
-def _as_brief_finding(item: dict[str, Any]) -> dict[str, Any]:
+def _as_brief_finding(
+    item: dict[str, Any], *, candidate: dict[str, Any]
+) -> dict[str, Any]:
     dimension = str(item["dimension_id"])
+    section_id = str(item.get("section_id") or "")
+    section_index = next(
+        (
+            index
+            for index, section in enumerate(candidate.get("sections") or [])
+            if str(section.get("section_id") or "") == section_id
+        ),
+        None,
+    )
+    if section_index is None:
+        raise ValueError(
+            f"downstream finding {item.get('finding_id')} names unknown section "
+            f"{section_id!r}"
+        )
+    section_prefix = f"/sections/{section_index}" if section_index is not None else ""
     code = {
         "argument_route_integrity": "argument_route_not_source_local",
         "positive_thesis_and_structural_fidelity": "unresolved_item_silently_harmonized",
         "reader_memory_center": "unresolved_item_silently_harmonized",
     }.get(dimension, "other")
+    authorized_by_dimension = {
+        "argument_route_integrity": [
+            f"{section_prefix}/reader_function",
+            f"{section_prefix}/governing_question",
+            f"{section_prefix}/section_conclusion",
+            f"{section_prefix}/argument_route_revision_ids",
+            f"{section_prefix}/argument_route_uses",
+        ],
+        "positive_thesis_and_structural_fidelity": [
+            "/article_title",
+            "/reader_takeaway",
+            "/reader_takeaway_viewpoint_revision_ids",
+            f"{section_prefix}/heading",
+            f"{section_prefix}/reader_function",
+            f"{section_prefix}/governing_question",
+            f"{section_prefix}/section_conclusion",
+            f"{section_prefix}/depends_on_section_ids",
+        ],
+        "reader_memory_center": [
+            "/article_title",
+            "/reader_takeaway",
+            f"{section_prefix}/heading",
+            f"{section_prefix}/governing_question",
+            f"{section_prefix}/section_conclusion",
+        ],
+    }
+    authorized = authorized_by_dimension.get(
+        dimension,
+        [
+            f"{section_prefix}/heading",
+            f"{section_prefix}/reader_function",
+            f"{section_prefix}/required_qualifications",
+            f"{section_prefix}/prohibited_functions",
+        ],
+    )
     return {
         "finding_id": f"DOWNSTREAM-{item['finding_id']}",
         "code": code,
@@ -45,6 +97,7 @@ def _as_brief_finding(item: dict[str, Any]) -> dict[str, Any]:
         "record_ids": [str(item.get("section_id") or "")],
         "explanation": str(item["problem"]),
         "recommended_action": str(item["required_change"]),
+        "authorized_change_paths": authorized,
     }
 
 
@@ -62,12 +115,48 @@ def run_recomposition(
     if not blocking:
         raise ValueError("downstream review contains no blocking findings")
     review = {
-        "schema_version": "wang_theological_editorial_brief_review_v1",
+        "schema_version": "wang_theological_editorial_brief_review_v3",
         "scope_confirmation": "editorial_structure_and_material_no_theological_judgment",
         "brief_candidate_sha256": sha256_json(candidate),
         "decision": "changes_required",
         "summary": "Reader-prose review found defects that are locked in the approved brief; reopen Composition rather than bypassing the brief in Author revision.",
-        "findings": [_as_brief_finding(item) for item in blocking],
+        "article_progression_coherent": False,
+        "article_progression_explanation": "Downstream reader-prose review found a defect locked into the approved article structure.",
+        "section_assessments": [
+            {
+                "section_id": str(section["section_id"]),
+                "heading_frames_governing_question": not any(
+                    str(item.get("section_id") or "") == str(section["section_id"])
+                    for item in blocking
+                ),
+                "heading_is_consistent_with_section_conclusion": not any(
+                    str(item.get("section_id") or "") == str(section["section_id"])
+                    for item in blocking
+                ),
+                "route_roles_form_hierarchy": not any(
+                    str(item.get("section_id") or "") == str(section["section_id"])
+                    for item in blocking
+                ),
+                "explanation": "Downstream finding requires this section to be reopened."
+                if any(
+                    str(item.get("section_id") or "") == str(section["section_id"])
+                    for item in blocking
+                )
+                else "No downstream structural finding targets this section.",
+            }
+            for section in candidate.get("sections") or []
+        ],
+        "editorial_constraint_assessments": [
+            {
+                "constraint_id": str(item["constraint_id"]),
+                "satisfied": True,
+                "explanation": "No downstream finding explicitly reopens this binding editorial constraint.",
+            }
+            for item in candidate.get("editorial_constraint_coverage") or []
+        ],
+        "findings": [
+            _as_brief_finding(item, candidate=candidate) for item in blocking
+        ],
     }
     validate_brief_review(review, candidate=candidate)
     _write_json(output_dir / "downstream-composition-review.json", review)
@@ -89,7 +178,7 @@ def run_recomposition(
         return value
     revision, revision_cached = _run_cached_stage(
         path=output_dir / "theological-editorial-brief-revision.json",
-        schema_version="wang_theological_editorial_brief_revision_envelope_v1",
+        schema_version="wang_theological_editorial_brief_revision_envelope_v3",
         fingerprint=fingerprint,
         producer={"role": "downstream_composition_revision", "provider": getattr(composition_client, "backend", "api"), "model": composition_client.model},
         generate=generate_revision, force=force,
@@ -97,7 +186,7 @@ def run_recomposition(
     revised_candidate = revision["revised_candidate"]
     final_packet = _review_packet(
         evidence_packet=evidence, candidate=revised_candidate,
-        revision_context={"baseline_candidate": candidate, "baseline_review": review, "finding_dispositions": revision["finding_dispositions"], "revision_sha256": sha256_json(revision)},
+        revision_context={"baseline_candidate": candidate, "baseline_review": review, "finding_dispositions": revision["finding_dispositions"], "collateral_changes": revision["collateral_changes"], "revision_sha256": sha256_json(revision)},
     )
     _write_json(output_dir / "theological-editorial-brief-final-review-packet.json", final_packet)
     final_prompt = FINAL_REVIEW_PROMPT.read_text(encoding="utf-8")
@@ -113,7 +202,7 @@ def run_recomposition(
         return value
     final_review, final_cached = _run_cached_stage(
         path=output_dir / "theological-editorial-brief-final-review.json",
-        schema_version="wang_theological_editorial_brief_final_review_envelope_v1",
+        schema_version="wang_theological_editorial_brief_final_review_envelope_v3",
         fingerprint=final_fp,
         producer={"role": "independent_final_composition_reviewer", "provider": getattr(review_client, "backend", "api"), "model": review_client.model},
         generate=generate_final, force=force,

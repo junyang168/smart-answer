@@ -16,6 +16,30 @@ from backend.pipeline.theological_editorial_synthesis import (
 
 AUTHOR_STATUSES = frozenset({"drafted", "composition_change_required"})
 TOPIC_REVIEW_SCOPE = "theological_topic_essay_quality"
+FORBIDDEN_TOPIC_READER_PHRASES = (
+    "教授",
+    "解释链",
+    "解释路径",
+    "论证链",
+    "观点识别",
+    "近距语境",
+    "独立检验",
+    "另一项检验",
+    "证据管理",
+    "现有材料",
+    "经文材料",
+    "有限结论",
+    "要正面理解",
+    "进一步考察",
+    "接下来需要说明",
+    "读者最终应当记住",
+    "本文要使人看见",
+    "焦点应当回到",
+    "根基的焦点",
+    "正面答案须按",
+    "正面答案可以并列表述",
+    "正面的答案需要",
+)
 
 
 TOPIC_AUTHOR_SCHEMA: dict[str, Any] = {
@@ -268,7 +292,10 @@ def build_topic_authoring_packet(
     validate_theological_evidence_packet(evidence_packet)
     _require(
         approved_brief.get("schema_version")
-        == "wang_theological_editorial_brief_v1",
+        in {
+            "wang_theological_editorial_brief_v1",
+            "wang_theological_editorial_brief_v2",
+        },
         "unsupported approved brief schema",
     )
     _require(
@@ -332,6 +359,14 @@ def validate_topic_author_result(
 
     manuscript = str(result.get("manuscript_markdown") or "")
     _require(bool(manuscript.strip()), "drafted result requires manuscript Markdown")
+    reader_text = topic_reader_text(manuscript)
+    forbidden = [
+        phrase for phrase in FORBIDDEN_TOPIC_READER_PHRASES if phrase in reader_text
+    ]
+    _require(
+        not forbidden,
+        f"forbidden reader-prose phrases: {forbidden}",
+    )
     decisions = authoring_packet["editorial_decisions"]
     title = str(decisions["article_title"])
     _require(
@@ -554,6 +589,7 @@ def build_topic_editorial_review_packet(
         ],
         "source_fragments": authoring_packet["knowledge"]["source_fragments"],
         "source_originals": authoring_packet["knowledge"]["source_originals"],
+        "editorial_scope": authoring_packet["scope"],
         "scope": {
             "include": ["writing_quality", "structural_fidelity", "route_integrity", "source_fidelity"],
             "exclude": ["theological_correctness", "external_commentary", "program_audit"],

@@ -6,7 +6,7 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-28 (America/Chicago)
+Updated: 2026-08-29 (America/Chicago)
 
 ## Project boundary
 
@@ -32,10 +32,12 @@ Issue #266 established a separate theological editorial synthesis workflow. It d
 
 Two topic essays completed the full workflow and were automatically published to the Wang repository on 2026-08-28 without a production deployment:
 
-- `TES-matthew-16-18-church-foundation-v1`, final manuscript SHA `0d17a88daaaa0bf972cbc533d4b40dc5875e136b15450831afbe48e88917dfe4`;
+- `TES-matthew-16-18-church-foundation-v1`, current final manuscript SHA `ba317e75aa05364a70c6351150da88e7ba6169d2255cccd3781b602d80ac7aff`;
 - `TES-matthew-16-18-gates-not-prevail-v1`, final manuscript SHA `b599e72f8e7b9d06f84315a5108cdeeee4192b1e7ee0ec089d3edddfd8bcc4c8`.
 
 Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. The workflow definition, operator commands, POC record and non-destructive three-article gap report are under this directory with the `theological_editorial_synthesis_` prefix.
+
+The 2026-08-29 golden-case recalibration is the current review target. Its SHA-bound scope now carries the human-approved four-section outline, no-introduction-H2 rule and Aramaic-footnote placement. Composition brief SHA `1773fa3394f5d50bb0bc8b18253804de35d0e298f2f0154043202ebaae23c564` restores one governing question per heading and distinguishes primary support, corroboration, qualification and objection response. Author and review gates now preserve the source's 「或者」 at every summary, keep professor assertions separate from editorial unresolved disclosures, require an embedded objection's actual node rather than its label, and reject observer-language reader prose. Final Delta Review receives the revised full manuscript only as positional context for its declared paragraph diff; without that context it once falsely treated the last inserted paragraph as the article ending while an unchanged positive closing paragraph still followed it. Admin preview `church-foundation-poc-v14` is registered against `quality-v12`, with sources hidden by default and the source switch verified against transcript, Audio and manuscript links.
 
 The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
 
