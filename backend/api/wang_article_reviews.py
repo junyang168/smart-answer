@@ -239,15 +239,28 @@ def _annotated_reader_markdown(
 
 def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
     status = str(workflow.get("status") or "unknown")
-    grounding = "passed" if status == "draft_grounded" else "not_run"
+    published = status == "workflow_published"
+    grounding = "passed" if status == "draft_grounded" or published else "not_run"
     if status == "grounding_gate_failed":
         grounding = "failed"
     return [
         {"id": "author", "label": "Author 初稿", "state": "complete"},
         {"id": "grounding", "label": "Grounding", "state": grounding},
-        {"id": "editorial_review", "label": "Editorial Review", "state": "not_run"},
-        {"id": "program_audit", "label": "Program Audit", "state": "not_run"},
-        {"id": "publication", "label": "正式出版", "state": "not_run"},
+        {
+            "id": "editorial_review",
+            "label": "Editorial Review",
+            "state": "passed" if published else "not_run",
+        },
+        {
+            "id": "program_audit",
+            "label": "Program Audit",
+            "state": "passed" if published else "not_run",
+        },
+        {
+            "id": "publication",
+            "label": "正式出版",
+            "state": "passed" if published else "not_run",
+        },
     ]
 
 

@@ -121,6 +121,18 @@ def test_internal_review_is_sha_bound_and_not_a_publication(tmp_path: Path, monk
     assert "publication_decision" not in result
 
 
+def test_published_workflow_reports_every_completed_stage() -> None:
+    checks = wang_article_reviews._stage_checks({"status": "workflow_published"})
+
+    assert [item["state"] for item in checks] == [
+        "complete",
+        "passed",
+        "passed",
+        "passed",
+        "passed",
+    ]
+
+
 def test_changed_manuscript_invalidates_review_preview(tmp_path: Path, monkeypatch) -> None:
     manuscript, _, _ = _fixture(tmp_path, monkeypatch)
     manuscript.write_text(manuscript.read_text(encoding="utf-8") + "\n改变。", encoding="utf-8")

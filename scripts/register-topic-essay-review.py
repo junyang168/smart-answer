@@ -41,6 +41,16 @@ def main() -> int:
     parser.add_argument("--passage", required=True)
     parser.add_argument("--authoring-dir", type=Path, required=True)
     parser.add_argument("--composition-dir", type=Path, required=True)
+    parser.add_argument(
+        "--manuscript",
+        type=Path,
+        help="Reader manuscript to register; defaults to authoring-dir/draft.md",
+    )
+    parser.add_argument(
+        "--workflow-status",
+        type=Path,
+        help="Workflow status bound to the manuscript; defaults to authoring-dir/workflow-status.json",
+    )
     args = parser.parse_args()
 
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", args.review_id):
@@ -50,8 +60,16 @@ def main() -> int:
     if not data_base:
         raise SystemExit("DATA_BASE_DIR is required")
     staging = Path(data_base).expanduser().resolve() / "wang-knowledge-platform" / "staging"
-    manuscript = args.authoring_dir.resolve() / "draft.md"
-    workflow = args.authoring_dir.resolve() / "workflow-status.json"
+    manuscript = (
+        args.manuscript.resolve()
+        if args.manuscript
+        else args.authoring_dir.resolve() / "draft.md"
+    )
+    workflow = (
+        args.workflow_status.resolve()
+        if args.workflow_status
+        else args.authoring_dir.resolve() / "workflow-status.json"
+    )
     packet = args.authoring_dir.resolve() / "topic-authoring-packet.json"
     brief_path = args.composition_dir.resolve() / "theological-editorial-brief.json"
     for path in (manuscript, workflow, packet, brief_path):
