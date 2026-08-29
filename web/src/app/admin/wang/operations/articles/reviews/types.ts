@@ -23,6 +23,28 @@ export type TopicEssayReviewSummary = {
 
 export type TopicEssayReview = TopicEssayReviewSummary & {
   markdown: string;
+  source_annotations: ReviewSourceAnnotation[];
+};
+
+export type ReviewSourceMedia = {
+  kind: "audio" | "video";
+  url: string;
+  start_seconds: number | null;
+  end_seconds: number | null;
+};
+
+export type ReviewSourceFragment = {
+  fragment_ids: string[];
+  source_type: "sermon_transcript" | "notes_manuscript";
+  title: string;
+  excerpts: string[];
+  full_source_url: string | null;
+  media: ReviewSourceMedia | null;
+};
+
+export type ReviewSourceAnnotation = {
+  annotation_id: string;
+  sources: ReviewSourceFragment[];
 };
 
 export type TopicEssayReviewList = {
