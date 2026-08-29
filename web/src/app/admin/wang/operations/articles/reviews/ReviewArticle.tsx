@@ -8,7 +8,7 @@ import { slugifyHeadingAnchor } from "@/app/components/full-article/heading-anch
 import { SourceEvidenceDisclosure } from "./SourceEvidenceDisclosure";
 import type { ReviewSourceAnnotation } from "./types";
 
-type Footnote = { id: string; markdown: string };
+type Footnote = { id: string; markdown: string; sourceAnnotationId: string | null };
 
 function nodeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -41,7 +41,14 @@ function prepareFootnotes(markdown: string): { body: string; footnotes: Footnote
     .filter((line) => {
       const match = line.match(/^\[\^([^\]]+)\]:\s*(.+)$/);
       if (!match) return true;
-      footnotes.push({ id: match[1], markdown: match[2] });
+      const sourceMatch = match[2].match(
+        /\s*\[查看本注来源\]\(#review-source-evidence-(p\d+)\)\s*$/,
+      );
+      footnotes.push({
+        id: match[1],
+        markdown: sourceMatch ? match[2].slice(0, sourceMatch.index).trimEnd() : match[2],
+        sourceAnnotationId: sourceMatch?.[1] ?? null,
+      });
       return false;
     })
     .join("\n")
@@ -118,8 +125,13 @@ export function ReviewArticle({
             {footnotes.map((footnote) => (
               <li key={footnote.id} id={`review-footnote-${footnote.id}`} className="flex scroll-mt-32 items-start gap-2">
                 <span className="font-bold text-stone-900">{footnote.id}.</span>
-                <div className="prose prose-stone max-w-none text-sm leading-7 prose-p:m-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{footnote.markdown}</ReactMarkdown>
+                <div className="min-w-0 flex-1">
+                  <div className="prose prose-stone max-w-none text-sm leading-7 prose-p:m-0">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{footnote.markdown}</ReactMarkdown>
+                  </div>
+                  {showSources && footnote.sourceAnnotationId && annotations.has(footnote.sourceAnnotationId) ? (
+                    <SourceEvidenceDisclosure sources={annotations.get(footnote.sourceAnnotationId)!} />
+                  ) : null}
                 </div>
               </li>
             ))}

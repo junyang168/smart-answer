@@ -49,7 +49,7 @@ export type ReviewSourceFragment = {
 export type ReviewRouteStep = {
   route_step_key: string;
   role: string;
-  proposition: string;
+  proposition: string | null;
   fragment_ids: string[];
   excerpts: string[];
 };

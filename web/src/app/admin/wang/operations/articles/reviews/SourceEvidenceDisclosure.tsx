@@ -75,16 +75,23 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
       <p className="mt-2 text-sm font-bold leading-6 text-stone-900">{source.title}</p>
       {source.mapping_kind === "argument_route_attestation" && source.route_label ? (
         <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
-          <p className="text-xs font-black tracking-[0.08em] text-indigo-800">本段采用的论证</p>
+          <p className="text-xs font-black tracking-[0.08em] text-indigo-800">本段采用的论证路线</p>
           <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{source.route_label}</p>
+          <p className="mt-1 text-xs leading-5 text-indigo-700">论证步骤是编辑归纳；棕色引文是教授原文。</p>
         </div>
-      ) : null}
+      ) : (
+        <p className="mt-3 rounded-xl border border-stone-200 bg-stone-50/70 p-3 text-xs leading-5 text-stone-600">
+          本段只作引述或背景交代，下面按 Claim 显示原文，没有把它当作一条论证路线。
+        </p>
+      )}
       {source.route_steps.length > 0 ? (
         <ol className="mt-3 space-y-3">
           {source.route_steps.map((step) => (
             <li key={`${source.route_revision_id}:${step.route_step_key}`} className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
               <p className="text-xs font-bold text-stone-500">{step.role === "conclusion" ? "结论" : "论证步骤"} · {step.route_step_key}</p>
-              <p className="mt-1 text-sm font-semibold leading-6 text-stone-900">{step.proposition}</p>
+              {step.proposition ? (
+                <p className="mt-1 text-sm font-semibold leading-6 text-stone-900">{step.proposition}</p>
+              ) : null}
               <blockquote className="mt-2 border-l-2 border-amber-700 pl-3 text-sm leading-7 text-stone-700">
                 {step.excerpts.map((excerpt) => <p key={excerpt} className="mt-2 first:mt-0">{excerpt}</p>)}
               </blockquote>

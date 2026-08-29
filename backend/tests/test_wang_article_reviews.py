@@ -186,6 +186,48 @@ def test_paragraph_without_verifiable_fragments_has_no_empty_source_control(
     assert manuscript.read_text(encoding="utf-8").endswith("正文。")
 
 
+def test_claim_fallback_for_block_quote_selects_only_the_matching_fragment(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manuscript, _, packet = _fixture(tmp_path, monkeypatch)
+    manuscript.write_text(
+        '# 标题\n\n<!-- provenance: {"attribution":"professor","claim_ids":["CL-1"]} -->\n'
+        '> 「教授逐字稿原句。」',
+        encoding="utf-8",
+    )
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    sources = review["source_annotations"][0]["sources"]
+    assert [source["fragment_ids"] for source in sources] == [["FR-1"]]
+
+
+def test_footnote_keeps_its_own_source_annotation(tmp_path: Path, monkeypatch) -> None:
+    manuscript, _, packet = _fixture(tmp_path, monkeypatch)
+    manuscript.write_text(
+        '# 标题\n\n正文。[^1]\n\n'
+        '<!-- provenance: {"attribution":"professor","claim_ids":["CL-1"]} -->\n'
+        '[^1]: 脚注中的来源判断。',
+        encoding="utf-8",
+    )
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    assert len(review["source_annotations"]) == 1
+    assert (
+        "[^1]: 脚注中的来源判断。 [查看本注来源](#review-source-evidence-p1)"
+        in review["markdown"]
+    )
+
+
 def test_section_argument_route_selects_step_bound_fragments_instead_of_all_claim_evidence(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -269,6 +311,9 @@ def test_section_argument_route_selects_step_bound_fragments_instead_of_all_clai
             ],
         }
     ]
+    result["argument_routes"][0]["attestations"].append(
+        dict(result["argument_routes"][0]["attestations"][0])
+    )
     _write_json(packet, payload)
     manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -278,6 +323,7 @@ def test_section_argument_route_selects_step_bound_fragments_instead_of_all_clai
 
     review = wang_article_reviews.article_review("church-foundation-v1")
 
+    assert len(review["source_annotations"][0]["sources"]) == 1
     source = review["source_annotations"][0]["sources"][0]
     assert source["mapping_kind"] == "argument_route_attestation"
     assert source["route_revision_id"] == "ARR-POPE"
@@ -291,4 +337,71 @@ def test_section_argument_route_selects_step_bound_fragments_instead_of_all_clai
             "fragment_ids": ["FR-POPE"],
             "excerpts": ["说彼得是第一任教皇，其实没有这回事。"],
         }
+    ]
+
+
+def test_route_conclusion_does_not_substitute_viewpoint_editorial_wording() -> None:
+    packet = {
+        "knowledge": {
+            "claims": [{"claim_id": "CL-1", "evidence_step_ids": ["ES-1"]}],
+            "source_fragments": [
+                {
+                    "fragment_id": "FR-1",
+                    "source_id": "NOTES-1",
+                    "verbatim_excerpt": "或者是信仰，或者是所传的真理。",
+                }
+            ],
+            "source_documents": [
+                {
+                    "source_id": "NOTES-1",
+                    "source_type": "notes_manuscript",
+                    "title": "母本",
+                }
+            ],
+        },
+        "viewpoints": [
+            {
+                "revision": {
+                    "viewpoint_revision_id": "CVR-1",
+                    "core_proposition": "信仰也就是所传的真理。",
+                }
+            }
+        ],
+        "argument_routes": [
+            {
+                "revision": {
+                    "argument_route_revision_id": "ARR-1",
+                    "route_label": "两种解释",
+                    "ordered_inference_nodes": [
+                        {
+                            "route_step_key": "C1",
+                            "role": "conclusion",
+                            "conclusion_viewpoint_revision_id": "CVR-1",
+                        }
+                    ],
+                },
+                "attestations": [
+                    {
+                        "source_id": "NOTES-1",
+                        "claim_ids": ["CL-1"],
+                        "step_bindings": [
+                            {
+                                "route_step_key": "C1",
+                                "evidence_step_ids": ["ES-1"],
+                                "source_fragment_ids": ["FR-1"],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    sources = wang_article_reviews._route_sources(
+        {"claim_ids": ["CL-1"]}, packet, ["ARR-1"], {}
+    )
+
+    assert sources[0]["route_steps"][0]["proposition"] is None
+    assert sources[0]["route_steps"][0]["excerpts"] == [
+        "或者是信仰，或者是所传的真理。"
     ]

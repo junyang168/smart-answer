@@ -132,6 +132,8 @@ def _claim_sources(
     provenance: dict[str, Any],
     knowledge: dict[str, Any],
     sermon_cache: dict[str, dict[str, Any]],
+    *,
+    paragraph_markdown: str = "",
 ) -> list[dict[str, Any]]:
     claims = {str(item.get("claim_id") or ""): item for item in knowledge.get("claims", [])}
     steps = {
@@ -188,7 +190,63 @@ def _claim_sources(
                     else:
                         grouped[group_key] = item
                         result.append(item)
+    quoted = _quoted_paragraph_text(paragraph_markdown)
+    if quoted:
+        matching: list[dict[str, Any]] = []
+        for item in result:
+            matching_fragment_ids = [
+                fragment_id
+                for fragment_id in item["fragment_ids"]
+                if _contains_normalized_quote(
+                    str((fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""),
+                    quoted,
+                )
+            ]
+            if not matching_fragment_ids:
+                continue
+            selected = dict(item)
+            selected["fragment_ids"] = matching_fragment_ids
+            selected["excerpts"] = list(
+                dict.fromkeys(
+                    str(fragments[fragment_id].get("verbatim_excerpt") or "").strip()
+                    for fragment_id in matching_fragment_ids
+                    if str(fragments[fragment_id].get("verbatim_excerpt") or "").strip()
+                )
+            )
+            matching.append(selected)
+        if matching:
+            return matching
     return result
+
+
+def _normalized_quote_text(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
+
+
+def _quoted_paragraph_text(paragraph_markdown: str) -> str | None:
+    """Return the text of a substantive Markdown block quote, if present.
+
+    A quotation paragraph is a source-local statement, not an invitation to
+    display every EvidenceStep owned by its Claim.  Exact quote selection keeps
+    the Claim fallback honest while route-bearing argument paragraphs continue
+    to resolve through ArgumentRoute attestations.
+    """
+
+    lines = [
+        re.sub(r"^\s*>\s?", "", line).strip()
+        for line in paragraph_markdown.splitlines()
+        if re.match(r"^\s*>", line)
+    ]
+    value = " ".join(line for line in lines if line).strip()
+    return value if len(_normalized_quote_text(value)) >= 6 else None
+
+
+def _contains_normalized_quote(excerpt: str, quoted: str) -> bool:
+    excerpt_text = _normalized_quote_text(excerpt)
+    quoted_text = _normalized_quote_text(quoted)
+    return bool(quoted_text) and (
+        quoted_text in excerpt_text or excerpt_text in quoted_text
+    )
 
 
 def _merge_media_range(
@@ -254,13 +312,8 @@ def _route_sources(
         str(item.get("revision", {}).get("argument_route_revision_id") or ""): item
         for item in packet.get("argument_routes") or []
     }
-    viewpoints = {
-        str(item.get("revision", {}).get("viewpoint_revision_id") or ""): (
-            item.get("revision") or {}
-        )
-        for item in packet.get("viewpoints") or []
-    }
     result: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for route_revision_id in route_revision_ids:
         route = routes.get(route_revision_id)
         if not route:
@@ -326,17 +379,18 @@ def _route_sources(
                         step_fragment_ids.append(fragment_id)
                 if step_excerpts:
                     node = nodes.get(step_key) or {}
-                    conclusion_viewpoint = viewpoints.get(
-                        str(node.get("conclusion_viewpoint_revision_id") or "")
-                    ) or {}
                     route_steps.append(
                         {
                             "route_step_key": step_key,
                             "role": str(node.get("role") or "support"),
-                            "proposition": str(
-                                node.get("normalized_proposition")
-                                or conclusion_viewpoint.get("core_proposition")
-                                or "本路线的结论"
+                            # Conclusion nodes deliberately have no normalized
+                            # proposition: their conclusion_ref points to a CVP.
+                            # Do not substitute that CVP's editorial wording for
+                            # the source-local route step shown to a reviewer.
+                            "proposition": (
+                                str(node.get("normalized_proposition"))
+                                if node.get("normalized_proposition")
+                                else None
                             ),
                             "fragment_ids": step_fragment_ids,
                             "excerpts": step_excerpts,
@@ -347,7 +401,36 @@ def _route_sources(
                 card["route_revision_id"] = route_revision_id
                 card["route_label"] = str(revision.get("route_label") or "本段论证")
                 card["route_steps"] = route_steps
-                result.append(card)
+                group_key = (route_revision_id, str(attestation.get("source_id") or ""))
+                existing = grouped.get(group_key)
+                if existing is None:
+                    grouped[group_key] = card
+                    result.append(card)
+                    continue
+                _merge_media_range(existing, card)
+                for fragment_id in card["fragment_ids"]:
+                    if fragment_id not in existing["fragment_ids"]:
+                        existing["fragment_ids"].append(fragment_id)
+                for excerpt in card["excerpts"]:
+                    if excerpt not in existing["excerpts"]:
+                        existing["excerpts"].append(excerpt)
+                existing_steps = {
+                    str(step["route_step_key"]): step
+                    for step in existing["route_steps"]
+                }
+                for step in card["route_steps"]:
+                    step_key = str(step["route_step_key"])
+                    existing_step = existing_steps.get(step_key)
+                    if existing_step is None:
+                        existing["route_steps"].append(step)
+                        existing_steps[step_key] = step
+                        continue
+                    for fragment_id in step["fragment_ids"]:
+                        if fragment_id not in existing_step["fragment_ids"]:
+                            existing_step["fragment_ids"].append(fragment_id)
+                    for excerpt in step["excerpts"]:
+                        if excerpt not in existing_step["excerpts"]:
+                            existing_step["excerpts"].append(excerpt)
     return result
 
 
@@ -380,6 +463,8 @@ def _paragraph_sources(
     packet: dict[str, Any],
     section_route_ids: list[str],
     sermon_cache: dict[str, dict[str, Any]],
+    *,
+    paragraph_markdown: str = "",
 ) -> list[dict[str, Any]]:
     explicit_route_ids = [
         str(value)
@@ -393,7 +478,12 @@ def _paragraph_sources(
     )
     if routed:
         return routed
-    return _claim_sources(provenance, packet.get("knowledge") or {}, sermon_cache)
+    return _claim_sources(
+        provenance,
+        packet.get("knowledge") or {},
+        sermon_cache,
+        paragraph_markdown=paragraph_markdown,
+    )
 
 
 def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> int | None:
@@ -403,7 +493,7 @@ def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> i
         return None
     body_start = content_match.start()
     first_line = segment[body_start:].splitlines()[0].strip()
-    if FOOTNOTE_DEFINITION_RE.match(first_line) or re.match(r"^#{1,6}\s+", first_line):
+    if re.match(r"^#{1,6}\s+", first_line):
         return None
     separator = re.search(r"\r?\n[ \t]*\r?\n", segment[body_start:])
     relative_end = body_start + (separator.start() if separator else len(segment[body_start:]))
@@ -428,6 +518,11 @@ def _annotated_reader_markdown(
             continue
         if not isinstance(provenance, dict):
             continue
+        next_comment = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        block_end = _governed_block_end(markdown, match.end(), next_comment)
+        if block_end is None:
+            continue
+        paragraph_markdown = markdown[match.end():block_end].strip()
         section_route_ids = next(
             (
                 route_ids
@@ -441,18 +536,21 @@ def _annotated_reader_markdown(
             packet,
             section_route_ids,
             sermon_cache,
+            paragraph_markdown=paragraph_markdown,
         )
         if not sources:
             continue
-        next_comment = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
-        block_end = _governed_block_end(markdown, match.end(), next_comment)
-        if block_end is None:
-            continue
         annotation_id = f"p{len(annotations) + 1}"
         annotations.append({"annotation_id": annotation_id, "sources": sources})
-        insertions.append(
-            (block_end, f"\n\n[查看本段来源]({SOURCE_MARKER_PREFIX}{annotation_id})")
+        footnote = FOOTNOTE_DEFINITION_RE.match(
+            paragraph_markdown.splitlines()[0].strip()
         )
+        marker = (
+            f" [查看本注来源]({SOURCE_MARKER_PREFIX}{annotation_id})"
+            if footnote
+            else f"\n\n[查看本段来源]({SOURCE_MARKER_PREFIX}{annotation_id})"
+        )
+        insertions.append((block_end, marker))
     annotated = markdown
     for position, marker in reversed(insertions):
         annotated = annotated[:position] + marker + annotated[position:]
