@@ -76,6 +76,8 @@ def main() -> int:
         "workflow_status_relative_path": _relative_to_staging(workflow, staging),
         "workflow_status_sha256": _sha256(workflow),
         "workflow_status": workflow_result.get("status"),
+        "authoring_packet_relative_path": _relative_to_staging(packet, staging),
+        "authoring_packet_file_sha256": _sha256(packet),
         "authoring_packet_sha256": packet_result.get("packet_sha256"),
         "brief_sha256": brief_result.get("brief_sha256"),
         "publication_decision": None,

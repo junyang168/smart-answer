@@ -83,7 +83,7 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
         </aside>
 
         <article className="min-w-0 rounded-[2rem] bg-[#fffdf9] px-6 py-9 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:px-10 sm:py-12 lg:px-14">
-          <ReviewArticle markdown={review.markdown} />
+          <ReviewArticle markdown={review.markdown} sourceAnnotations={review.source_annotations} />
         </article>
       </div>
     </main>

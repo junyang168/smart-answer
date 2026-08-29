@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { slugifyHeadingAnchor } from "@/app/components/full-article/heading-anchor";
+import { SourceEvidenceDisclosure } from "./SourceEvidenceDisclosure";
+import type { ReviewSourceAnnotation } from "./types";
 
 type Footnote = { id: string; markdown: string };
 
@@ -12,6 +14,21 @@ function nodeText(node: ReactNode): string {
     return nodeText((node as { props?: { children?: ReactNode } }).props?.children);
   }
   return "";
+}
+
+function nodeHref(node: ReactNode): string | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const href = nodeHref(child);
+      if (href) return href;
+    }
+  }
+  if (node && typeof node === "object" && "props" in node) {
+    const props = (node as { props?: { href?: unknown; children?: ReactNode } }).props;
+    if (typeof props?.href === "string") return props.href;
+    return nodeHref(props?.children);
+  }
+  return null;
 }
 
 function prepareFootnotes(markdown: string): { body: string; footnotes: Footnote[] } {
@@ -29,15 +46,28 @@ function prepareFootnotes(markdown: string): { body: string; footnotes: Footnote
   return { body, footnotes };
 }
 
-export function ReviewArticle({ markdown }: { markdown: string }) {
+export function ReviewArticle({
+  markdown,
+  sourceAnnotations,
+}: {
+  markdown: string;
+  sourceAnnotations: ReviewSourceAnnotation[];
+}) {
   const withoutTitle = markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
   const { body, footnotes } = prepareFootnotes(withoutTitle);
+  const annotations = new Map(sourceAnnotations.map((item) => [item.annotation_id, item.sources]));
   return (
     <>
       <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:scroll-mt-32 prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-2xl prose-p:text-[1.05rem] prose-p:leading-8 prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-li:leading-8 sm:prose-p:text-[1.1rem]">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
+            p: ({ children }) => {
+              const href = nodeHref(children);
+              const match = href?.match(/^#review-source-evidence-(p\d+)$/);
+              const sources = match ? annotations.get(match[1]) : null;
+              return sources ? <SourceEvidenceDisclosure sources={sources} /> : <p>{children}</p>;
+            },
             h2: ({ children }) => {
               const title = nodeText(children).trim();
               return <h2 id={slugifyHeadingAnchor(title)}>{children}</h2>;
