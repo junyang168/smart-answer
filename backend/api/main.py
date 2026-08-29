@@ -39,6 +39,7 @@ from .public_wang_articles import router as public_wang_articles_router
 from .matthew_exposition_progress import router as matthew_exposition_progress_router
 from .wang_operations import router as wang_operations_router
 from .wang_articles import router as wang_articles_router
+from .wang_article_reviews import router as wang_article_reviews_router
 from .viewpoint_admin import router as viewpoint_admin_router
 
 app = FastAPI()
@@ -83,6 +84,7 @@ app.include_router(public_wang_articles_router)
 app.include_router(matthew_exposition_progress_router)
 app.include_router(wang_operations_router)
 app.include_router(wang_articles_router)
+app.include_router(wang_article_reviews_router)
 app.include_router(viewpoint_admin_router)
 
 
