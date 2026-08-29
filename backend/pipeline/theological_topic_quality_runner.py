@@ -218,7 +218,8 @@ def program_audit(
     editorial_review: Mapping[str, Any], editorial_outcome: Mapping[str, Any],
     presentation_package: Mapping[str, Any],
 ) -> dict[str, Any]:
-    errors: list[dict[str, str]] = []
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     manuscript = str(author_result["manuscript_markdown"])
     manuscript_sha = sha256_text(manuscript)
     try:
@@ -306,13 +307,39 @@ def program_audit(
             errors.append({"code": "missing_presentation_section", "message": str(section["section_id"])})
             continue
         if not decision["source_presentations"]:
-            errors.append({"code": "section_without_audio_presentation", "message": str(section["section_id"])})
+            section_source_types: set[str] = set()
+            for claim_id in section["claim_ids_used"]:
+                claim = claims.get(str(claim_id)) or {}
+                for evidence_id in claim.get("evidence_step_ids") or []:
+                    step = steps.get(str(evidence_id)) or {}
+                    fragment_ids = list(step.get("source_fragment_ids") or [])
+                    if step.get("source_fragment_id") and step["source_fragment_id"] not in fragment_ids:
+                        fragment_ids.append(step["source_fragment_id"])
+                    for fragment_id in fragment_ids:
+                        fragment = fragments.get(str(fragment_id)) or {}
+                        source = sources.get(str(fragment.get("source_id") or "")) or {}
+                        if source.get("source_type"):
+                            section_source_types.add(str(source["source_type"]))
+            finding = {
+                "message": str(section["section_id"]),
+                "source_types": sorted(section_source_types),
+            }
+            if "sermon_transcript" in section_source_types:
+                errors.append({
+                    "code": "section_without_audio_presentation",
+                    **finding,
+                })
+            else:
+                warnings.append({
+                    "code": "section_has_text_source_only_no_audio",
+                    **finding,
+                })
     return {
         "schema_version": "wang_theological_topic_program_audit_v1",
         "status": "pass" if not errors else "fail",
-        "summary": {"error_total": len(errors), "warning_total": 0},
+        "summary": {"error_total": len(errors), "warning_total": len(warnings)},
         "errors": errors,
-        "warnings": [],
+        "warnings": warnings,
         "fingerprint": {
             "draft_sha256": manuscript_sha,
             "authoring_packet_sha256": packet["packet_sha256"],

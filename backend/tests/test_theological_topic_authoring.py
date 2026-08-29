@@ -19,6 +19,7 @@ from backend.pipeline.theological_topic_authoring import (
 )
 from backend.pipeline.theological_topic_quality_runner import (
     build_topic_presentation_package,
+    program_audit,
 )
 
 
@@ -80,6 +81,7 @@ def _inputs():
     decisions = {
         "status": "ready",
         "article_title": "Positive title",
+        "viewpoint_coverage": [],
         "sections": [
             {
                 "section_id": "SEC-1",
@@ -271,20 +273,20 @@ def test_grounding_revision_is_bound_and_disposes_every_finding():
         )
 
 
-def _review_for(packet, manuscript_sha, *, negative_center_failure=False):
+def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
     quality = packet["quality_profile"]
     hard = []
     for failure_id in quality["hard_failures"]:
-        failed = negative_center_failure and failure_id == "negative_material_displaces_positive_thesis"
+        failed = failure_id == hard_failure_id
         hard.append({"failure_id": failure_id, "failed": failed, "evidence": "Checked against title, opening, headings, and conclusion."})
     findings = []
-    if negative_center_failure:
+    if hard_failure_id:
         findings.append({
-            "finding_id": "F-NEG", "dimension_id": "positive_thesis_and_structural_fidelity",
+            "finding_id": "F-HARD", "dimension_id": "positive_thesis_and_structural_fidelity",
             "section_id": "SEC-1", "severity": "major", "blocking": True,
             "manuscript_anchor": "Positive proposition in prose.",
-            "problem": "The negative rebuttal displaces the approved positive thesis.",
-            "required_change": "Restore the positive thesis as the memory center.",
+            "problem": f"Hard failure: {hard_failure_id}.",
+            "required_change": "Restore the approved reader-facing argument.",
         })
     return {
         "schema_version": "wang_theological_topic_editorial_review_v1",
@@ -309,12 +311,38 @@ def test_negative_material_hard_failure_rejects_even_with_perfect_scores():
     review_packet = build_topic_editorial_review_packet(
         authoring_packet=packet, author_result=_valid_result()
     )
-    review = _review_for(packet, review_packet["manuscript_sha256"], negative_center_failure=True)
+    review = _review_for(
+        packet,
+        review_packet["manuscript_sha256"],
+        hard_failure_id="negative_material_displaces_positive_thesis",
+    )
     outcome = validate_topic_editorial_review(review, review_packet=review_packet)
     assert outcome["passed"] is False
     assert outcome["total_score"] == 100
     assert outcome["total_score_decides_nothing"] is True
     assert outcome["hard_failures"] == ["negative_material_displaces_positive_thesis"]
+
+
+def test_meta_analysis_hard_failure_rejects_even_with_perfect_scores():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence, approved_brief=brief,
+        publication_profile=publication, quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    failure_id = "meta_analysis_displaces_first_order_argument"
+    assert failure_id in quality["hard_failures"]
+    review = _review_for(
+        packet,
+        review_packet["manuscript_sha256"],
+        hard_failure_id=failure_id,
+    )
+    outcome = validate_topic_editorial_review(review, review_packet=review_packet)
+    assert outcome["passed"] is False
+    assert outcome["total_score"] == 100
+    assert outcome["hard_failures"] == [failure_id]
 
 
 def test_delta_can_return_next_round_finding_in_new_dimension():
@@ -378,4 +406,46 @@ def test_presentation_package_uses_the_same_claim_evidence_audio_chain():
     assert decision["source_presentations"] == [{
         "source_id": "SRC-1", "start_seconds": 12.0, "end_seconds": 34.0,
         "claim_ids": ["CL-1"], "fragment_ids": ["FR-1"],
+    }]
+
+
+def test_program_audit_discloses_notes_only_section_without_inventing_audio():
+    evidence, brief, publication, quality = _inputs()
+    evidence["source_documents"][0].update(source_type="notes_manuscript")
+    evidence["evidence_packet_sha256"] = sha256_json(
+        {key: value for key, value in evidence.items() if key != "evidence_packet_sha256"}
+    )
+    brief["evidence_packet_sha256"] = evidence["evidence_packet_sha256"]
+    brief["brief_sha256"] = sha256_json(
+        {key: value for key, value in brief.items() if key != "brief_sha256"}
+    )
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence, approved_brief=brief,
+        publication_profile=publication, quality_profile=quality,
+    )
+    author_result = _valid_result()
+    manuscript_sha = sha256_text(author_result["manuscript_markdown"])
+    review = _review_for(packet, manuscript_sha)
+    outcome = validate_topic_editorial_review(
+        review,
+        review_packet=build_topic_editorial_review_packet(
+            authoring_packet=packet, author_result=author_result
+        ),
+    )
+    audit = program_audit(
+        packet=packet,
+        author_result=author_result,
+        grounding={"passed": True, "manuscript_sha256": manuscript_sha},
+        editorial_review=review,
+        editorial_outcome=outcome,
+        presentation_package=build_topic_presentation_package(
+            packet=packet, author_result=author_result
+        ),
+    )
+    assert audit["status"] == "pass"
+    assert audit["summary"] == {"error_total": 0, "warning_total": 1}
+    assert audit["warnings"] == [{
+        "code": "section_has_text_source_only_no_audio",
+        "message": "SEC-1",
+        "source_types": ["notes_manuscript"],
     }]

@@ -133,6 +133,8 @@ Composition Review 在写作前回答“现有材料能不能忠实回答 reader
 
 Author 必须先写正面中心，再使用反方材料限定误读。标题、导言、主要小节和结论应让普通读者能够回答“教授主张什么、为什么”。教授花在批驳上的讲授时长不自动决定文章篇幅。
 
+文章必须采用第一层的释经论证视角：以经文问题、观察、推理和结论推进，让读者跟着教授的论证走；不得以“教授有几种看法”“现有材料如何分类”作为全文骨架。导言可以一次交代文章整理的是王教授的讲论，未决关系也必须在真正影响结论处披露；但反复使用“教授认为／指出／判断”“一种／另一种识别”“现有材料”来组织标题和段落，会把文章写成思想分析或审核报告，应作为 hard failure 退回 Composition，而不是只在 Revision 中替换措辞。
+
 初稿仍只调用一次 Independent Editorial Review。每轮 Revision 后恰好调用一次 Final Delta Review；同一 delta 响应返回下一轮 finding。不得增加 Score-Gap Review，也不得把修订稿重新送去全文初审。
 
 若 Reader-prose Review 发现问题被 brief 锁定（例如 approved heading 本身静默统一未决关系），Author 不得绕过 brief 修改。流程产生 `composition_change_required`，将 finding 转为 Composition Review finding，正式修订 brief，经过一次 Final Composition Review 后重新生成文章。实跑证明这不是异常边角：golden case 的第一版 brief 就在下游被发现把“信仰告白”与“所领受并传下的真理”合成一个小标题。
