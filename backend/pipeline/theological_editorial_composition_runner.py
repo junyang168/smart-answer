@@ -121,7 +121,7 @@ def _review_packet(
     candidate: Mapping[str, Any],
     revision_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Give the reviewer structure and sufficiency facts, not the whole corpus."""
+    """Give the reviewer the scoped evidence and complete originals, not the corpus."""
 
     packet = {
         "schema_version": "wang_theological_editorial_brief_review_packet_v1",
@@ -178,6 +178,8 @@ def _review_packet(
             }
             for item in evidence_packet.get("argument_routes", [])
         ],
+        "source_fragments": evidence_packet.get("source_fragments", []),
+        "source_originals": evidence_packet["source_originals"],
         "relations": evidence_packet.get("relations", []),
         "compiler_findings": evidence_packet.get("compiler_findings", []),
         "candidate": candidate,

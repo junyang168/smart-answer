@@ -532,6 +532,8 @@ def run_quality(
             "changed_paragraphs": changes,
             "affected_dimensions": [item for item in quality_profile["dimensions"] if item["id"] in affected],
             "affected_hard_failure_ids": affected_hard,
+            "source_fragments": packet["knowledge"]["source_fragments"],
+            "source_originals": packet["knowledge"]["source_originals"],
         }
         _write_json(
             output_dir / f"final-delta-review-packet-{revision_number:02d}.json",

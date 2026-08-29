@@ -11,7 +11,9 @@
 
 母本是优先来源，不是目录权威。目录由审核过的 structure 与 `TheologicalEditorialBrief` 决定。若 structure 尚未覆盖读者问题，先补权威知识记录，不要让 Composition 猜。
 
-本流程直接从 Registry 编译 `TheologicalEvidencePacket`，不使用 `ViewpointKnowledgeProjection`。EvidencePacket 只包含当前 scope 选中的 revision、source-local route、Claim、Evidence 与来源片段，并以 dependency manifest 绑定。
+本流程直接从 Registry 编译 `TheologicalEvidencePacket`，不使用 `ViewpointKnowledgeProjection`。EvidencePacket 包含当前 scope 选中的 revision、source-local route、Claim、Evidence、来源片段，以及每份入选逐字稿与母本的完整原文，并以 dependency manifest 和 source-original manifest 绑定。片段用于定位，不能代替 Composition、Author 或 Reviewer 阅读完整原稿。
+
+编译时会逐份读取 `source_path` 并验证 `source_sha256`。缺文件、SHA 不符、原稿为空或总字符数超过直接输入上限时，runner 在模型调用前停止；绝不能截短原稿后继续。当前 POC 上限为 120,000 字符，超限状态表示需要实现并验证完整覆盖的批次读取，不表示可以改用摘要或片段。
 
 ## 二、编译并审核 brief
 

@@ -1,10 +1,13 @@
+import hashlib
 from copy import deepcopy
 
 import pytest
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.pipeline.theological_editorial_composition_runner import _review_packet
 from backend.pipeline.theological_editorial_synthesis import (
     TheologicalEditorialContractError,
+    build_scoped_source_originals,
     compile_approved_editorial_brief,
     compile_theological_evidence_packet,
     make_editorial_scope,
@@ -13,6 +16,22 @@ from backend.pipeline.theological_editorial_synthesis import (
     validate_editorial_brief_candidate,
     validate_editorial_scope,
 )
+
+
+def _original_content(source_id):
+    return f"Complete original source text for {source_id}."
+
+
+def _source_reader(source):
+    return {
+        "original_file_sha256": source["source_sha256"],
+        "content_format": (
+            "markdown"
+            if source["source_type"] == "notes_manuscript"
+            else "timestamped_transcript"
+        ),
+        "content": _original_content(source["source_id"]),
+    }
 
 
 def _records():
@@ -179,6 +198,12 @@ def _records():
             {
                 "source_id": source_id,
                 "title": f"Source {index}",
+                "source_type": (
+                    "notes_manuscript" if index == 3 else "sermon_transcript"
+                ),
+                "source_sha256": hashlib.sha256(
+                    _original_content(source_id).encode("utf-8")
+                ).hexdigest(),
                 "revision": 1,
             }
         )
@@ -193,6 +218,14 @@ def _scope():
         passage_refs=["太16:18"],
         structure_revision_id="VSR-FOUNDATION-1",
         publication_profile_id="PP-theological-topic-essay-v1",
+    )
+
+
+def _compile(records=None):
+    return compile_theological_evidence_packet(
+        scope=_scope(),
+        records=records or _records(),
+        source_original_reader=_source_reader,
     )
 
 
@@ -262,7 +295,7 @@ def test_editorial_scope_is_sha_bound():
 
 
 def test_evidence_compiler_follows_the_complete_structure():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     assert packet["compiler_readiness"] == "ready_for_composition"
     assert {
         item["revision"]["viewpoint_revision_id"]
@@ -274,15 +307,61 @@ def test_evidence_compiler_follows_the_complete_structure():
     )
 
 
+def test_evidence_packet_contains_every_complete_scoped_original():
+    packet = _compile()
+    originals = packet["source_originals"]
+    assert originals["source_ids"] == ["SRC-1", "SRC-2", "SRC-3"]
+    assert originals["coverage"] == {
+        "source_count": 3,
+        "sermon_transcript_count": 2,
+        "notes_manuscript_count": 1,
+        "total_character_count": sum(
+            len(_original_content(f"SRC-{index}")) for index in range(1, 4)
+        ),
+        "direct_context_limit_characters": 120_000,
+        "delivery_mode": "complete_originals_in_context",
+        "overflow_policy": "stop_before_generation_pending_batched_reading",
+        "truncation_allowed": False,
+    }
+    assert [item["content"] for item in originals["originals"]] == [
+        _original_content("SRC-1"),
+        _original_content("SRC-2"),
+        _original_content("SRC-3"),
+    ]
+
+
+def test_complete_originals_fail_closed_instead_of_truncating():
+    records = _records()
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="batched source reading is required",
+    ):
+        build_scoped_source_originals(
+            records["source_documents"],
+            reader=_source_reader,
+            max_total_characters=10,
+        )
+
+
+def test_composition_reviewer_receives_the_same_complete_originals():
+    evidence = _compile()
+    review_packet = _review_packet(
+        evidence_packet=evidence,
+        candidate=_candidate(evidence),
+    )
+    assert review_packet["source_fragments"] == evidence["source_fragments"]
+    assert review_packet["source_originals"] == evidence["source_originals"]
+
+
 def test_evidence_compiler_rejects_a_stale_structure_revision():
     records = _records()
     records["viewpoint_structures"][0]["current_revision_id"] = "VSR-NEW"
     with pytest.raises(TheologicalEditorialContractError, match="active/current"):
-        compile_theological_evidence_packet(scope=_scope(), records=records)
+        _compile(records)
 
 
 def test_ready_brief_cannot_silently_omit_a_focal_viewpoint():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     candidate["viewpoint_coverage"] = candidate["viewpoint_coverage"][:-1]
     with pytest.raises(TheologicalEditorialContractError, match="every focal"):
@@ -290,7 +369,7 @@ def test_ready_brief_cannot_silently_omit_a_focal_viewpoint():
 
 
 def test_negative_boundary_cannot_carry_the_reader_takeaway():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     candidate["reader_takeaway_viewpoint_revision_ids"] = ["CVR-NEGATIVE"]
     with pytest.raises(TheologicalEditorialContractError, match="negative boundary"):
@@ -298,7 +377,7 @@ def test_negative_boundary_cannot_carry_the_reader_takeaway():
 
 
 def test_ready_brief_preserves_structure_unresolved_items():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     candidate["unresolved_items"] = []
     with pytest.raises(TheologicalEditorialContractError, match="unresolved"):
@@ -306,7 +385,7 @@ def test_ready_brief_preserves_structure_unresolved_items():
 
 
 def test_route_must_stay_with_its_conclusion():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     candidate["sections"][0]["argument_route_revision_ids"] = ["ARR-1", "ARR-3"]
     candidate["sections"][1]["argument_route_revision_ids"] = ["ARR-2"]
@@ -315,7 +394,7 @@ def test_route_must_stay_with_its_conclusion():
 
 
 def test_non_ready_brief_requires_machine_readable_stop_reason():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     candidate.update(
         status="insufficient_material",
@@ -329,7 +408,7 @@ def test_non_ready_brief_requires_machine_readable_stop_reason():
 
 
 def test_only_sha_bound_passing_review_compiles_approved_brief():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     validate_editorial_brief_candidate(candidate, evidence_packet=packet)
     review = {
@@ -354,7 +433,7 @@ def test_only_sha_bound_passing_review_compiles_approved_brief():
 
 
 def test_passing_review_cannot_hide_findings():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     review = {
         "schema_version": "wang_theological_editorial_brief_review_v1",
@@ -381,7 +460,7 @@ def test_passing_review_cannot_hide_findings():
 
 
 def test_brief_revision_must_dispose_every_finding_and_bind_both_shas():
-    packet = compile_theological_evidence_packet(scope=_scope(), records=_records())
+    packet = _compile()
     candidate = _candidate(packet)
     review = {
         "schema_version": "wang_theological_editorial_brief_review_v1",

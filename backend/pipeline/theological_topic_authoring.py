@@ -298,6 +298,7 @@ def build_topic_authoring_packet(
             "evidence_steps": evidence_packet["evidence_steps"],
             "source_fragments": evidence_packet["source_fragments"],
             "source_documents": evidence_packet["source_documents"],
+            "source_originals": evidence_packet["source_originals"],
         },
         "viewpoints": evidence_packet["focal_viewpoints"],
         "argument_routes": evidence_packet["argument_routes"],
@@ -551,6 +552,8 @@ def build_topic_editorial_review_packet(
             }
             for item in authoring_packet["knowledge"]["claims"]
         ],
+        "source_fragments": authoring_packet["knowledge"]["source_fragments"],
+        "source_originals": authoring_packet["knowledge"]["source_originals"],
         "scope": {
             "include": ["writing_quality", "structural_fidelity", "route_integrity", "source_fidelity"],
             "exclude": ["theological_correctness", "external_commentary", "program_audit"],

@@ -63,7 +63,7 @@ POC 的交付物是一条可重复执行的流程。“教会的根基”只是�
 每次运行依次产生以下 artifact：
 
 1. `EditorialScope`：读者问题、产品类型、主题／经文范围、所选 structure revision 和明确排除项；
-2. `TheologicalEvidencePacket`：所选 structure、CVP revision、source-local `ArgumentRoute`、Claim、Evidence 与来源片段的最小只读切片；它是本产品自己的输入契约，不依赖 `ViewpointKnowledgeProjection`；
+2. `TheologicalEvidencePacket`：所选 structure、CVP revision、source-local `ArgumentRoute`、Claim、Evidence、来源片段，以及 scope 内每份逐字稿与母本的完整原文；它是本产品自己的输入契约，不依赖 `ViewpointKnowledgeProjection`；
 3. `TheologicalEditorialBriefCandidate`：Composition Agent 的结构化编辑方案；
 4. `TheologicalEditorialBriefReview`：独立审核结果及正式材料充分性判断；
 5. `TheologicalEditorialBrief`：只含已通过或经共识修订的有效说明书；
@@ -129,9 +129,15 @@ Composition Review 在写作前回答“现有材料能不能忠实回答 reader
 
 材料不足时不调用 Author。`insufficient_material` 可以是成功的研究终态：它证明流程没有把缺口变成散文。
 
+Claim、Evidence、`ArgumentRoute` 与来源片段是查找材料的索引，不代替神学编辑阅读原稿。Composition Agent、Composition Reviewer、Author Agent 与 Editorial Reviewer 都必须收到 scope 内每份完整逐字稿和完整母本。Evidence Compiler 逐份校验原文件 SHA，记录来源类型、字符数、正文 SHA 与完整覆盖 manifest；缺少、改变或静默截断任何一份原稿时，必须在模型调用前停止。
+
+POC 的直接输入上限为全部原稿合计 120,000 字符；“教会的根基”实际六份原稿共 83,084 字符，可以完整送入。超过上限不得自动退化为只看片段，而应停止在 `batched source reading required`。后续批次读取实现必须证明每个来源从头到尾都被覆盖，并把批次边界与原稿 SHA 绑定，全部覆盖后才可进入 Composition 或 Author。
+
 ## 九、写作与审核
 
 Author 必须先写正面中心，再使用反方材料限定误读。标题、导言、主要小节和结论应让普通读者能够回答“教授主张什么、为什么”。教授花在批驳上的讲授时长不自动决定文章篇幅。
+
+Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位具体证据。Composition 与 Editorial Review 也使用同一份完整原稿包，不能只根据 CVP、route summary 或 brief 判断忠实度。
 
 文章必须采用第一层的释经论证视角：以经文问题、观察、推理和结论推进，让读者跟着教授的论证走；不得以“教授有几种看法”“现有材料如何分类”作为全文骨架。导言可以一次交代文章整理的是王教授的讲论，未决关系也必须在真正影响结论处披露；但反复使用“教授认为／指出／判断”“一种／另一种识别”“现有材料”来组织标题和段落，会把文章写成思想分析或审核报告，应作为 hard failure 退回 Composition，而不是只在 Revision 中替换措辞。
 

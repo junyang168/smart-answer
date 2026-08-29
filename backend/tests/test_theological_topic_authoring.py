@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 from backend.pipeline.theological_editorial_synthesis import (
     TheologicalEditorialContractError,
+    build_scoped_source_originals,
 )
 from backend.pipeline.theological_topic_authoring import (
     build_topic_editorial_review_packet,
@@ -24,6 +26,36 @@ from backend.pipeline.theological_topic_quality_runner import (
 
 
 ROOT = Path(__file__).parents[2]
+
+
+def _source_content(source_id):
+    return f"Complete source original for {source_id}."
+
+
+def _source_reader(source):
+    return {
+        "original_file_sha256": source["source_sha256"],
+        "content_format": (
+            "markdown"
+            if source["source_type"] == "notes_manuscript"
+            else "timestamped_transcript"
+        ),
+        "content": _source_content(source["source_id"]),
+    }
+
+
+def _refresh_source_originals(evidence):
+    source_shas = {}
+    for source in evidence["source_documents"]:
+        source["source_sha256"] = hashlib.sha256(
+            _source_content(source["source_id"]).encode("utf-8")
+        ).hexdigest()
+        source_shas[source["source_id"]] = source["source_sha256"]
+    for fragment in evidence["source_fragments"]:
+        fragment["source_sha256"] = source_shas[fragment["source_id"]]
+    evidence["source_originals"] = build_scoped_source_originals(
+        evidence["source_documents"], reader=_source_reader
+    )
 
 
 def _inputs():
@@ -70,13 +102,20 @@ def _inputs():
         "claims": [{"claim_id": "CL-1", "statement": "Claim", "evidence_step_ids": ["EV-1"]}],
         "evidence_steps": [{"evidence_step_id": "EV-1", "source_fragment_ids": ["FR-1"]}],
         "source_fragments": [{"fragment_id": "FR-1", "source_id": "SRC-1", "verbatim_excerpt": "Excerpt"}],
-        "source_documents": [{"source_id": "SRC-1"}],
+        "source_documents": [
+            {
+                "source_id": "SRC-1",
+                "title": "Source 1",
+                "source_type": "sermon_transcript",
+            }
+        ],
         "relations": [],
         "compiler_findings": [],
         "compiler_readiness": "ready_for_composition",
         "dependency_manifest": dependencies,
         "dependency_manifest_sha256": sha256_json(dependencies),
     }
+    _refresh_source_originals(evidence)
     evidence["evidence_packet_sha256"] = sha256_json(evidence)
     decisions = {
         "status": "ready",
@@ -142,6 +181,24 @@ def test_topic_author_packet_and_ledger_bind_the_approved_brief():
     )
     validate_topic_author_result(_valid_result(), authoring_packet=packet)
     assert packet["input_bindings"]["brief_sha256"] == brief["brief_sha256"]
+    assert packet["knowledge"]["source_originals"] == evidence["source_originals"]
+
+
+def test_editorial_reviewer_receives_the_same_complete_originals():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    assert review_packet["source_originals"] == evidence["source_originals"]
+    assert review_packet["source_originals"]["originals"][0]["content"] == (
+        _source_content("SRC-1")
+    )
 
 
 def test_topic_author_requires_exact_heading_order():
@@ -381,10 +438,11 @@ def test_presentation_package_uses_the_same_claim_evidence_audio_chain():
     evidence["source_documents"][0].update(
         source_type="sermon_transcript",
         transcript_id="SERMON-1",
-        source_sha256="source-sha",
     )
+    _refresh_source_originals(evidence)
+    source_sha = evidence["source_documents"][0]["source_sha256"]
     evidence["source_fragments"][0].update(
-        source_sha256="source-sha", media_time=12.0, media_end_time=34.0
+        source_sha256=source_sha, media_time=12.0, media_end_time=34.0
     )
     evidence["claims"][0]["scripture_refs"] = ["Matt.16.18"]
     evidence["evidence_packet_sha256"] = sha256_json(
@@ -412,6 +470,7 @@ def test_presentation_package_uses_the_same_claim_evidence_audio_chain():
 def test_program_audit_discloses_notes_only_section_without_inventing_audio():
     evidence, brief, publication, quality = _inputs()
     evidence["source_documents"][0].update(source_type="notes_manuscript")
+    _refresh_source_originals(evidence)
     evidence["evidence_packet_sha256"] = sha256_json(
         {key: value for key, value in evidence.items() if key != "evidence_packet_sha256"}
     )

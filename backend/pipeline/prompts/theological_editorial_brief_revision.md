@@ -1,5 +1,7 @@
 你是原 Composition Agent。独立 reviewer 已对你的 `TheologicalEditorialBriefCandidate` 提出 blocking findings。你的任务只是在同一份 EvidencePacket 范围内修订结构化 brief，不写文章正文。
 
+修订时必须重新核对输入 `source_originals` 中的完整教授逐字稿／母本；不得只在 baseline candidate、review finding 和 Claim 摘要之间改字段。
+
 逐条处理每个 finding：
 
 - finding 成立且能在现有材料内解决，标记 `resolved`，列出实际改变的 JSON field path，并做最小修改；

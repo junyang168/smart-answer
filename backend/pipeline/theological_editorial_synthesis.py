@@ -8,8 +8,11 @@ positive position from the professor's rejection of another position.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
-from typing import Any, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
 
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
@@ -84,6 +87,223 @@ def _record_id(collection: str, record: Mapping[str, Any]) -> str:
         "source_documents": "source_id",
     }
     return str(record[fields[collection]])
+
+
+SourceOriginalReader = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+MAX_DIRECT_SOURCE_ORIGINAL_CHARACTERS = 120_000
+
+
+def _filesystem_source_original(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Read one complete scoped original and turn it into model-readable text."""
+
+    source_id = _nonempty(source.get("source_id"), "source_id")
+    source_type = _nonempty(source.get("source_type"), f"{source_id}.source_type")
+    _require(
+        source_type in {"sermon_transcript", "notes_manuscript"},
+        f"unsupported theological source type: {source_type}",
+    )
+    path = Path(_nonempty(source.get("source_path"), f"{source_id}.source_path"))
+    _require(path.is_file(), f"scoped source original is missing: {source_id}")
+    raw = path.read_bytes()
+    file_sha256 = hashlib.sha256(raw).hexdigest()
+    _require(
+        file_sha256 == str(source.get("source_sha256") or ""),
+        f"scoped source original SHA mismatch: {source_id}",
+    )
+    if source_type == "notes_manuscript":
+        content = raw.decode("utf-8")
+        content_format = "markdown"
+    else:
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TheologicalEditorialContractError(
+                f"scoped sermon transcript is unreadable: {source_id}"
+            ) from exc
+        script = payload.get("script") if isinstance(payload, dict) else payload
+        _require(
+            isinstance(script, list) and bool(script),
+            f"sermon transcript has no script: {source_id}",
+        )
+        lines: list[str] = []
+        for segment in script:
+            if not isinstance(segment, dict):
+                continue
+            text = str(segment.get("text") or "").strip()
+            if not text:
+                continue
+            timeline = str(segment.get("start_timeline") or "").strip()
+            if not timeline and isinstance(segment.get("start_time"), (int, float)):
+                seconds = max(0, int(segment["start_time"]))
+                timeline = f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+            if not timeline and segment.get("index") is not None:
+                end_index = segment.get("end_index")
+                timeline = (
+                    f"{segment['index']}-{end_index}"
+                    if end_index is not None
+                    else str(segment["index"])
+                )
+            lines.append(f"[{timeline}] {text}" if timeline else text)
+        content = "\n\n".join(lines)
+        content_format = "timestamped_transcript"
+    _require(bool(content.strip()), f"scoped source original is empty: {source_id}")
+    return {
+        "original_file_sha256": file_sha256,
+        "content_format": content_format,
+        "content": content,
+    }
+
+
+def build_scoped_source_originals(
+    sources: Sequence[Mapping[str, Any]],
+    *,
+    reader: SourceOriginalReader | None = None,
+    max_total_characters: int = MAX_DIRECT_SOURCE_ORIGINAL_CHARACTERS,
+) -> dict[str, Any]:
+    """Compile every complete scoped transcript/manuscript for runtime roles."""
+
+    _require(bool(sources), "theological synthesis requires scoped source originals")
+    source_ids = _unique(
+        [_nonempty(item.get("source_id"), "source_id") for item in sources],
+        "source original ids",
+    )
+    read = reader or _filesystem_source_original
+    originals: list[dict[str, Any]] = []
+    for source in sorted(sources, key=lambda item: str(item["source_id"])):
+        source_id = str(source["source_id"])
+        source_type = _nonempty(source.get("source_type"), f"{source_id}.source_type")
+        _require(
+            source_type in {"sermon_transcript", "notes_manuscript"},
+            f"unsupported theological source type: {source_type}",
+        )
+        loaded = dict(read(source))
+        content = _nonempty(loaded.get("content"), f"{source_id}.content")
+        original_file_sha256 = _nonempty(
+            loaded.get("original_file_sha256"), f"{source_id}.original_file_sha256"
+        )
+        _require(
+            original_file_sha256 == str(source.get("source_sha256") or ""),
+            f"scoped source original SHA mismatch: {source_id}",
+        )
+        originals.append(
+            {
+                "source_id": source_id,
+                "source_type": source_type,
+                "title": str(
+                    source.get("title") or source.get("transcript_id") or source_id
+                ),
+                "transcript_id": source.get("transcript_id"),
+                "source_version_sha256": original_file_sha256,
+                "content_format": _nonempty(
+                    loaded.get("content_format"), f"{source_id}.content_format"
+                ),
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "character_count": len(content),
+                "content": content,
+            }
+        )
+    manifest = [
+        {key: value for key, value in item.items() if key != "content"}
+        for item in originals
+    ]
+    total_character_count = sum(int(item["character_count"]) for item in originals)
+    _require(
+        total_character_count <= max_total_characters,
+        "complete scoped originals exceed the direct context limit; "
+        "batched source reading is required before generation",
+    )
+    packet = {
+        "schema_version": "wang_scoped_source_originals_v1",
+        "source_ids": sorted(source_ids),
+        "source_types": sorted({str(item["source_type"]) for item in originals}),
+        "coverage": {
+            "source_count": len(originals),
+            "sermon_transcript_count": sum(
+                item["source_type"] == "sermon_transcript" for item in originals
+            ),
+            "notes_manuscript_count": sum(
+                item["source_type"] == "notes_manuscript" for item in originals
+            ),
+            "total_character_count": total_character_count,
+            "direct_context_limit_characters": max_total_characters,
+            "delivery_mode": "complete_originals_in_context",
+            "overflow_policy": "stop_before_generation_pending_batched_reading",
+            "truncation_allowed": False,
+        },
+        "originals": originals,
+        "manifest": manifest,
+        "manifest_sha256": sha256_json(manifest),
+    }
+    packet["source_originals_sha256"] = sha256_json(packet)
+    return packet
+
+
+def validate_scoped_source_originals(
+    packet: Mapping[str, Any],
+    *,
+    source_documents: Sequence[Mapping[str, Any]],
+) -> None:
+    _require(
+        packet.get("schema_version") == "wang_scoped_source_originals_v1",
+        "unsupported scoped source originals schema",
+    )
+    originals = list(packet.get("originals") or [])
+    manifest = list(packet.get("manifest") or [])
+    coverage = dict(packet.get("coverage") or {})
+    expected_ids = sorted(str(item["source_id"]) for item in source_documents)
+    received_ids = [str(item.get("source_id") or "") for item in originals]
+    _require(
+        received_ids == sorted(received_ids) and received_ids == expected_ids,
+        "scoped source originals must cover every source document exactly once",
+    )
+    documents = {str(item["source_id"]): item for item in source_documents}
+    for item in originals:
+        source_id = str(item["source_id"])
+        content = _nonempty(item.get("content"), f"{source_id}.content")
+        _require(
+            item.get("source_type") == documents[source_id].get("source_type"),
+            f"scoped source original type mismatch: {source_id}",
+        )
+        _require(
+            item.get("source_version_sha256")
+            == documents[source_id].get("source_sha256"),
+            f"scoped source original version mismatch: {source_id}",
+        )
+        _require(
+            item.get("content_sha256")
+            == hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            f"scoped source original content SHA mismatch: {source_id}",
+        )
+    expected_manifest = [
+        {key: value for key, value in item.items() if key != "content"}
+        for item in originals
+    ]
+    _require(manifest == expected_manifest, "scoped source original manifest mismatch")
+    _require(
+        coverage.get("source_count") == len(originals)
+        and coverage.get("sermon_transcript_count")
+        == sum(item.get("source_type") == "sermon_transcript" for item in originals)
+        and coverage.get("notes_manuscript_count")
+        == sum(item.get("source_type") == "notes_manuscript" for item in originals)
+        and coverage.get("total_character_count")
+        == sum(int(item.get("character_count") or 0) for item in originals)
+        and coverage.get("delivery_mode") == "complete_originals_in_context"
+        and coverage.get("truncation_allowed") is False,
+        "scoped source original coverage mismatch",
+    )
+    _require(
+        packet.get("manifest_sha256") == sha256_json(manifest),
+        "source original manifest SHA mismatch",
+    )
+    body = {
+        key: value
+        for key, value in packet.items()
+        if key != "source_originals_sha256"
+    }
+    _require(
+        packet.get("source_originals_sha256") == sha256_json(body),
+        "scoped source originals SHA mismatch",
+    )
 
 
 def make_editorial_scope(
@@ -179,6 +399,7 @@ def compile_theological_evidence_packet(
     *,
     scope: Mapping[str, Any],
     records: Mapping[str, Sequence[Mapping[str, Any]]],
+    source_original_reader: SourceOriginalReader | None = None,
 ) -> dict[str, Any]:
     """Compile the exact reviewed graph one Composition Agent may inspect.
 
@@ -503,6 +724,10 @@ def compile_theological_evidence_packet(
         "evidence_steps": evidence,
         "source_fragments": fragments,
         "source_documents": sources,
+        "source_originals": build_scoped_source_originals(
+            sources,
+            reader=source_original_reader,
+        ),
         "relations": relations,
         "compiler_findings": findings,
         "compiler_readiness": (
@@ -523,6 +748,10 @@ def validate_theological_evidence_packet(packet: Mapping[str, Any]) -> None:
         "unsupported theological evidence packet schema",
     )
     validate_editorial_scope(packet.get("scope") or {})
+    validate_scoped_source_originals(
+        packet.get("source_originals") or {},
+        source_documents=packet.get("source_documents") or [],
+    )
     dependencies = list(packet.get("dependency_manifest") or [])
     _require(
         packet.get("dependency_manifest_sha256") == sha256_json(dependencies),
