@@ -1,0 +1,68 @@
+import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { slugifyHeadingAnchor } from "@/app/components/full-article/heading-anchor";
+
+type Footnote = { id: string; markdown: string };
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return nodeText((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+function prepareFootnotes(markdown: string): { body: string; footnotes: Footnote[] } {
+  const footnotes: Footnote[] = [];
+  const body = markdown
+    .split("\n")
+    .filter((line) => {
+      const match = line.match(/^\[\^([^\]]+)\]:\s*(.+)$/);
+      if (!match) return true;
+      footnotes.push({ id: match[1], markdown: match[2] });
+      return false;
+    })
+    .join("\n")
+    .replace(/\[\^([^\]]+)\]/g, (_match, id: string) => `[${id}](#review-footnote-${id})`);
+  return { body, footnotes };
+}
+
+export function ReviewArticle({ markdown }: { markdown: string }) {
+  const withoutTitle = markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
+  const { body, footnotes } = prepareFootnotes(withoutTitle);
+  return (
+    <>
+      <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:scroll-mt-32 prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-2xl prose-p:text-[1.05rem] prose-p:leading-8 prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-li:leading-8 sm:prose-p:text-[1.1rem]">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            h2: ({ children }) => {
+              const title = nodeText(children).trim();
+              return <h2 id={slugifyHeadingAnchor(title)}>{children}</h2>;
+            },
+            a: ({ href, children }) => (
+              <a href={href} className="font-semibold text-amber-900 underline-offset-4 hover:underline">{children}</a>
+            ),
+          }}
+        >{body}</ReactMarkdown>
+      </div>
+      {footnotes.length > 0 && (
+        <aside aria-label="文章注释" className="mt-14 border-t border-stone-200 pt-7">
+          <p className="text-xs font-bold tracking-[0.14em] text-stone-500">注释</p>
+          <ol className="mt-4 space-y-4 text-sm leading-7 text-stone-600">
+            {footnotes.map((footnote) => (
+              <li key={footnote.id} id={`review-footnote-${footnote.id}`} className="flex scroll-mt-32 items-start gap-2">
+                <span className="font-bold text-stone-900">{footnote.id}.</span>
+                <div className="prose prose-stone max-w-none text-sm leading-7 prose-p:m-0">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{footnote.markdown}</ReactMarkdown>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </aside>
+      )}
+    </>
+  );
+}
