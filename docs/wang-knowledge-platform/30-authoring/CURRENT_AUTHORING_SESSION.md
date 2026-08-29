@@ -6,7 +6,7 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-23 (America/Chicago)
+Updated: 2026-08-29 (America/Chicago)
 
 ## Project boundary
 
@@ -25,6 +25,21 @@ The first active exegesis CanonicalViewpoint is now end-to-end master data: `CV-
   Replanning came first, and it mattered: composition review routed `DK-72483dc200ad-CL025` (the rebuke is aimed at the direction of Peter's thinking, not merely at his act of restraint) into `CD-M16-003-03`, where it had never been placed. The 2026-08-15 publication scored 90 without it, by elaborating the same point unsourced — that run has no grounding report at all, because it predates the gate. A higher score against no grounding check is not a better article, and this pair is the cleanest evidence of it on the platform.
 
   The reviewed draft is `410b06786193a2d069730f4a7d5018ef33ff3af25ccbc51cad8df1492cf31469`. What publishes differs from it by one footnote phrase — 「材料中的」 removed, on the user's instruction, because 「材料」 is this project's internal word for the knowledge layer and means nothing to a reader. The edit is recorded as `post_review_edit` in `publication-editorial-review.json`, which carries both SHAs. Author, revision, grounding-repair and editorial-review prompts now all carry the rule, since a rule only one agent knows gets revised back out.
+
+## Theological topic essay POC
+
+Issue #266 established a separate theological editorial synthesis workflow. It does not replace the three passage exposition articles and does not use `ViewpointKnowledgeProjection`. Its scope-bound `TheologicalEvidencePacket` is compiled directly from the approved Structure, CVP, source-local ArgumentRoute, Claim, Evidence and source records.
+
+Two topic essays completed the full workflow and were automatically published to the Wang repository on 2026-08-28 without a production deployment:
+
+- `TES-matthew-16-18-church-foundation-v1`, current final manuscript SHA `ba317e75aa05364a70c6351150da88e7ba6169d2255cccd3781b602d80ac7aff`;
+- `TES-matthew-16-18-gates-not-prevail-v1`, final manuscript SHA `b599e72f8e7b9d06f84315a5108cdeeee4192b1e7ee0ec089d3edddfd8bcc4c8`.
+
+Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. The workflow definition, operator commands, POC record and non-destructive three-article gap report are under this directory with the `theological_editorial_synthesis_` prefix.
+
+The 2026-08-29 golden-case recalibration is the current review target. Its SHA-bound scope now carries the human-approved four-section outline, no-introduction-H2 rule and Aramaic-footnote placement. Composition brief SHA `1773fa3394f5d50bb0bc8b18253804de35d0e298f2f0154043202ebaae23c564` restores one governing question per heading and distinguishes primary support, corroboration, qualification and objection response. Author and review gates now preserve the source's 「或者」 at every summary, keep professor assertions separate from editorial unresolved disclosures, require an embedded objection's actual node rather than its label, and reject observer-language reader prose. Final Delta Review receives the revised full manuscript only as positional context for its declared paragraph diff; without that context it once falsely treated the last inserted paragraph as the article ending while an unchanged positive closing paragraph still followed it. Admin preview `church-foundation-poc-v14` is registered against `quality-v12`, with sources hidden by default and the source switch verified against transcript, Audio and manuscript links.
+
+The admin source preview now resolves inferential paragraphs through the approved section `ArgumentRoute` and its source-local attestation step bindings. Claim provenance remains the assertion-coverage ledger and the fallback for non-route statements; it no longer expands every Claim Evidence Step as though that collection identified the argument actually used. Route cards show the route label, ordered step role, normalized proposition and the exact fragments bound to that step. Author provenance may explicitly name `argument_route_revision_ids`; the validator rejects route revisions outside the paragraph's brief section. This change fixed the first-pope paragraph, whose Claim expansion placed a long “Peter is not the rock” source before the direct transcript statement that the first-pope inference “没有这回事”.
 
 The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
 

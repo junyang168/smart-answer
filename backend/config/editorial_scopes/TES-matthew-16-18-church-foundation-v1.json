@@ -1,0 +1,60 @@
+{
+  "schema_version": "wang_theological_editorial_scope_v2",
+  "scope_id": "TES-matthew-16-18-church-foundation-v1",
+  "product_kind": "theological_topic_essay",
+  "working_title": "教会的根基",
+  "reader_question": "教授认为教会建立在什么根基上，他怎样从太16:18及相关经文形成这个判断？",
+  "passage_refs": [
+    "太16:18",
+    "弗2:20"
+  ],
+  "structure_revision_id": "VSR-030fd260fcea505c048d",
+  "publication_profile_id": "PP-theological-topic-essay-v1",
+  "explicit_exclusions": [],
+  "editorial_constraints": [
+    {
+      "constraint_id": "EC-HUMAN-ARGUMENT-ORDER-01",
+      "constraint_type": "approved_outline",
+      "target_record_ids": [],
+      "required_value": "以天主教‘磐石就是彼得’及首任教皇推论自然提出问题；用Petrus／Petra形式差异与彼得随后受责备排除彼得本人，亚兰文异议只作简短脚注；随后转向彼得的认信及所领受并传下的真理；再用弗2:20补充使徒和先知的根基、基督为房角石与‘更可能指向基督’的有限判断；末段回到首任教皇说，不扩大为对罗马天主教整体的评价。",
+      "instruction": "严格继承人类编辑已批准的读者论证顺序，不得以通用的‘正面材料先行’偏好重新排序。",
+      "rationale": "这个入口忠于讲授的实际发动方式，并让后面的经文检验回答一个自然出现的问题。",
+      "feedback_artifact_sha256": "af53efd52d37d07cd4b6111a74045497327ca5257315fe00b025ed176f022e08"
+    },
+    {
+      "constraint_id": "EC-HUMAN-ARTICLE-SHAPE-01",
+      "constraint_type": "section_count",
+      "target_record_ids": [],
+      "required_value": "4",
+      "instruction": "正文恰好四个H2；多个 viewpoint 与 source-local route 服务同一读者小节，不得一项材料一个标题。",
+      "rationale": "独立导言和过多相邻H2会把连续文章重新写成写作提纲。",
+      "feedback_artifact_sha256": "b374be8c6111e964ab239751565aa2d9cb8427346fc19a6acbc4b318a0a116b0"
+    },
+    {
+      "constraint_id": "EC-HUMAN-NO-INTRO-H2-01",
+      "constraint_type": "prohibited_article_function",
+      "target_record_ids": [],
+      "required_value": "introduction",
+      "instruction": "导言留在H1之后自然提出问题，不建立独立 introduction section。",
+      "rationale": "导言成为独立H2会增加提纲感，并把真实论证推迟。",
+      "feedback_artifact_sha256": "b374be8c6111e964ab239751565aa2d9cb8427346fc19a6acbc4b318a0a116b0"
+    },
+    {
+      "constraint_id": "EC-HUMAN-ARAMAIC-FOOTNOTE-01",
+      "constraint_type": "material_placement",
+      "target_record_ids": [
+        "CVR-d29f2bb06d7ef9292cb5",
+        "CVR-1e84b30d2d858c48c865",
+        "ARR-6aaa9e3d7e1781ede03d",
+        "ARR-01d1e2e8fcee7780d6e5"
+      ],
+      "required_value": "footnote",
+      "instruction": "取消亚兰文异议的独立主节，把两项观点、两条路线、模态和方法边界完整保留为Petrus／Petra论证旁的一则简短脚注。",
+      "rationale": "这是必要回应，但不是文章主论证；独立展开会打断从经文检验到正面答案的推进。",
+      "feedback_artifact_sha256": "4151d03f4114818a1a45873d903f04f6fb592d751cf5534721beb406d374bd06"
+    }
+  ],
+  "editorial_attribution": "church_editor",
+  "not_professor_words": true,
+  "scope_sha256": "74bb3fc1fcae4b8c695013a27caa272324c4dfbc5121d1ce740043f3043a4fb8"
+}

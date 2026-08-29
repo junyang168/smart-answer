@@ -128,10 +128,12 @@ def _source_fragment_read_model(
     return result
 
 
-def _paragraph_sources(
+def _claim_sources(
     provenance: dict[str, Any],
     knowledge: dict[str, Any],
     sermon_cache: dict[str, dict[str, Any]],
+    *,
+    paragraph_markdown: str = "",
 ) -> list[dict[str, Any]]:
     claims = {str(item.get("claim_id") or ""): item for item in knowledge.get("claims", [])}
     steps = {
@@ -168,6 +170,10 @@ def _paragraph_sources(
                     continue
                 item = _source_fragment_read_model(fragment, source, sermon_cache)
                 if item:
+                    item["mapping_kind"] = "claim_evidence"
+                    item["route_revision_id"] = None
+                    item["route_label"] = None
+                    item["route_steps"] = []
                     seen.add(fragment_id)
                     group_key = (
                         fragment.get("source_id"),
@@ -184,7 +190,300 @@ def _paragraph_sources(
                     else:
                         grouped[group_key] = item
                         result.append(item)
+    quoted = _quoted_paragraph_text(paragraph_markdown)
+    if quoted:
+        matching: list[dict[str, Any]] = []
+        for item in result:
+            matching_fragment_ids = [
+                fragment_id
+                for fragment_id in item["fragment_ids"]
+                if _contains_normalized_quote(
+                    str((fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""),
+                    quoted,
+                )
+            ]
+            if not matching_fragment_ids:
+                continue
+            selected = dict(item)
+            selected["fragment_ids"] = matching_fragment_ids
+            selected["excerpts"] = list(
+                dict.fromkeys(
+                    str(fragments[fragment_id].get("verbatim_excerpt") or "").strip()
+                    for fragment_id in matching_fragment_ids
+                    if str(fragments[fragment_id].get("verbatim_excerpt") or "").strip()
+                )
+            )
+            matching.append(selected)
+        if matching:
+            return matching
     return result
+
+
+def _normalized_quote_text(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
+
+
+def _quoted_paragraph_text(paragraph_markdown: str) -> str | None:
+    """Return the text of a substantive Markdown block quote, if present.
+
+    A quotation paragraph is a source-local statement, not an invitation to
+    display every EvidenceStep owned by its Claim.  Exact quote selection keeps
+    the Claim fallback honest while route-bearing argument paragraphs continue
+    to resolve through ArgumentRoute attestations.
+    """
+
+    lines = [
+        re.sub(r"^\s*>\s?", "", line).strip()
+        for line in paragraph_markdown.splitlines()
+        if re.match(r"^\s*>", line)
+    ]
+    value = " ".join(line for line in lines if line).strip()
+    return value if len(_normalized_quote_text(value)) >= 6 else None
+
+
+def _contains_normalized_quote(excerpt: str, quoted: str) -> bool:
+    excerpt_text = _normalized_quote_text(excerpt)
+    quoted_text = _normalized_quote_text(quoted)
+    return bool(quoted_text) and (
+        quoted_text in excerpt_text or excerpt_text in quoted_text
+    )
+
+
+def _merge_media_range(
+    target: dict[str, Any], source: dict[str, Any]
+) -> None:
+    target_media = target.get("media")
+    source_media = source.get("media")
+    if not isinstance(target_media, dict) or not isinstance(source_media, dict):
+        return
+    starts = [
+        value
+        for value in (target_media.get("start_seconds"), source_media.get("start_seconds"))
+        if isinstance(value, (int, float))
+    ]
+    ends = [
+        value
+        for value in (target_media.get("end_seconds"), source_media.get("end_seconds"))
+        if isinstance(value, (int, float))
+    ]
+    target_media["start_seconds"] = min(starts) if starts else None
+    target_media["end_seconds"] = max(ends) if ends else None
+
+
+def _route_sources(
+    provenance: dict[str, Any],
+    packet: dict[str, Any],
+    route_revision_ids: list[str],
+    sermon_cache: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Resolve reader evidence through approved route attestations.
+
+    Claim evidence says which assertions a paragraph uses, but it does not say
+    which source-local argument establishes the paragraph's inference.  The
+    route attestation does: its step bindings select the exact fragments for
+    each premise, qualification and conclusion.  Only routes assigned to the
+    paragraph's approved section (or explicitly named by provenance) are
+    eligible, so a Claim shared by another section cannot pull in a competing
+    argument path.
+    """
+
+    claim_ids = {str(value) for value in provenance.get("claim_ids") or []}
+    if not claim_ids or not route_revision_ids:
+        return []
+    knowledge = packet.get("knowledge") or {}
+    fragments = {
+        str(item.get("fragment_id") or ""): item
+        for item in knowledge.get("source_fragments", [])
+    }
+    documents = {
+        str(item.get("source_id") or ""): item
+        for item in knowledge.get("source_documents", [])
+    }
+    claims = {
+        str(item.get("claim_id") or ""): item
+        for item in knowledge.get("claims", [])
+    }
+    declared_evidence_step_ids = {
+        str(step_id)
+        for claim_id in claim_ids
+        for step_id in (claims.get(claim_id) or {}).get("evidence_step_ids") or []
+    }
+    routes = {
+        str(item.get("revision", {}).get("argument_route_revision_id") or ""): item
+        for item in packet.get("argument_routes") or []
+    }
+    result: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for route_revision_id in route_revision_ids:
+        route = routes.get(route_revision_id)
+        if not route:
+            continue
+        revision = route.get("revision") or {}
+        nodes = {
+            str(item.get("route_step_key") or ""): item
+            for item in revision.get("ordered_inference_nodes") or []
+        }
+        for attestation in route.get("attestations") or []:
+            attested_claim_ids = {
+                str(value) for value in attestation.get("claim_ids") or []
+            }
+            if not (claim_ids & attested_claim_ids):
+                continue
+            source = documents.get(str(attestation.get("source_id") or ""))
+            if not source:
+                continue
+            card: dict[str, Any] | None = None
+            route_steps: list[dict[str, Any]] = []
+            for binding in attestation.get("step_bindings") or []:
+                binding_evidence_step_ids = {
+                    str(value) for value in binding.get("evidence_step_ids") or []
+                }
+                if (
+                    binding_evidence_step_ids
+                    and not (binding_evidence_step_ids & declared_evidence_step_ids)
+                ):
+                    continue
+                step_key = str(binding.get("route_step_key") or "")
+                step_excerpts: list[str] = []
+                step_fragment_ids: list[str] = []
+                for fragment_id_value in binding.get("source_fragment_ids") or []:
+                    fragment_id = str(fragment_id_value)
+                    fragment = fragments.get(fragment_id)
+                    if not fragment:
+                        continue
+                    fragment_source = documents.get(str(fragment.get("source_id") or ""))
+                    if not fragment_source:
+                        continue
+                    item = _source_fragment_read_model(
+                        fragment,
+                        fragment_source,
+                        sermon_cache,
+                    )
+                    if not item:
+                        continue
+                    item_excerpts = list(item["excerpts"])
+                    if card is None:
+                        card = item
+                        card["excerpts"] = []
+                        card["fragment_ids"] = []
+                    else:
+                        _merge_media_range(card, item)
+                    if fragment_id not in card["fragment_ids"]:
+                        card["fragment_ids"].append(fragment_id)
+                    for excerpt in item_excerpts:
+                        if excerpt not in card["excerpts"]:
+                            card["excerpts"].append(excerpt)
+                        if excerpt not in step_excerpts:
+                            step_excerpts.append(excerpt)
+                    if fragment_id not in step_fragment_ids:
+                        step_fragment_ids.append(fragment_id)
+                if step_excerpts:
+                    node = nodes.get(step_key) or {}
+                    route_steps.append(
+                        {
+                            "route_step_key": step_key,
+                            "role": str(node.get("role") or "support"),
+                            # Conclusion nodes deliberately have no normalized
+                            # proposition: their conclusion_ref points to a CVP.
+                            # Do not substitute that CVP's editorial wording for
+                            # the source-local route step shown to a reviewer.
+                            "proposition": (
+                                str(node.get("normalized_proposition"))
+                                if node.get("normalized_proposition")
+                                else None
+                            ),
+                            "fragment_ids": step_fragment_ids,
+                            "excerpts": step_excerpts,
+                        }
+                    )
+            if card and route_steps:
+                card["mapping_kind"] = "argument_route_attestation"
+                card["route_revision_id"] = route_revision_id
+                card["route_label"] = str(revision.get("route_label") or "本段论证")
+                card["route_steps"] = route_steps
+                group_key = (route_revision_id, str(attestation.get("source_id") or ""))
+                existing = grouped.get(group_key)
+                if existing is None:
+                    grouped[group_key] = card
+                    result.append(card)
+                    continue
+                _merge_media_range(existing, card)
+                for fragment_id in card["fragment_ids"]:
+                    if fragment_id not in existing["fragment_ids"]:
+                        existing["fragment_ids"].append(fragment_id)
+                for excerpt in card["excerpts"]:
+                    if excerpt not in existing["excerpts"]:
+                        existing["excerpts"].append(excerpt)
+                existing_steps = {
+                    str(step["route_step_key"]): step
+                    for step in existing["route_steps"]
+                }
+                for step in card["route_steps"]:
+                    step_key = str(step["route_step_key"])
+                    existing_step = existing_steps.get(step_key)
+                    if existing_step is None:
+                        existing["route_steps"].append(step)
+                        existing_steps[step_key] = step
+                        continue
+                    for fragment_id in step["fragment_ids"]:
+                        if fragment_id not in existing_step["fragment_ids"]:
+                            existing_step["fragment_ids"].append(fragment_id)
+                    for excerpt in step["excerpts"]:
+                        if excerpt not in existing_step["excerpts"]:
+                            existing_step["excerpts"].append(excerpt)
+    return result
+
+
+def _section_route_ranges(
+    markdown: str, packet: dict[str, Any]
+) -> list[tuple[int, int, list[str]]]:
+    sections = list((packet.get("editorial_decisions") or {}).get("sections") or [])
+    starts: list[tuple[int, list[str]]] = []
+    for section in sections:
+        heading = str(section.get("heading") or "").strip()
+        offset = markdown.find(f"## {heading}") if heading else -1
+        if offset >= 0:
+            starts.append(
+                (
+                    offset,
+                    [
+                        str(value)
+                        for value in section.get("argument_route_revision_ids") or []
+                    ],
+                )
+            )
+    return [
+        (start, starts[index + 1][0] if index + 1 < len(starts) else len(markdown), routes)
+        for index, (start, routes) in enumerate(starts)
+    ]
+
+
+def _paragraph_sources(
+    provenance: dict[str, Any],
+    packet: dict[str, Any],
+    section_route_ids: list[str],
+    sermon_cache: dict[str, dict[str, Any]],
+    *,
+    paragraph_markdown: str = "",
+) -> list[dict[str, Any]]:
+    explicit_route_ids = [
+        str(value)
+        for value in provenance.get("argument_route_revision_ids") or []
+    ]
+    routed = _route_sources(
+        provenance,
+        packet,
+        explicit_route_ids or section_route_ids,
+        sermon_cache,
+    )
+    if routed:
+        return routed
+    return _claim_sources(
+        provenance,
+        packet.get("knowledge") or {},
+        sermon_cache,
+        paragraph_markdown=paragraph_markdown,
+    )
 
 
 def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> int | None:
@@ -194,7 +493,7 @@ def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> i
         return None
     body_start = content_match.start()
     first_line = segment[body_start:].splitlines()[0].strip()
-    if FOOTNOTE_DEFINITION_RE.match(first_line) or re.match(r"^#{1,6}\s+", first_line):
+    if re.match(r"^#{1,6}\s+", first_line):
         return None
     separator = re.search(r"\r?\n[ \t]*\r?\n", segment[body_start:])
     relative_end = body_start + (separator.start() if separator else len(segment[body_start:]))
@@ -203,7 +502,7 @@ def _governed_block_end(markdown: str, comment_end: int, next_comment: int) -> i
 
 def _annotated_reader_markdown(
     markdown: str,
-    knowledge: dict[str, Any],
+    packet: dict[str, Any],
 ) -> tuple[str, list[dict[str, Any]]]:
     """Attach hidden-source controls without changing the manuscript's prose."""
 
@@ -211,6 +510,7 @@ def _annotated_reader_markdown(
     insertions: list[tuple[int, str]] = []
     annotations: list[dict[str, Any]] = []
     sermon_cache: dict[str, dict[str, Any]] = {}
+    route_ranges = _section_route_ranges(markdown, packet)
     for index, match in enumerate(matches):
         try:
             provenance = json.loads(match.group(1))
@@ -218,18 +518,39 @@ def _annotated_reader_markdown(
             continue
         if not isinstance(provenance, dict):
             continue
-        sources = _paragraph_sources(provenance, knowledge, sermon_cache)
-        if not sources:
-            continue
         next_comment = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
         block_end = _governed_block_end(markdown, match.end(), next_comment)
         if block_end is None:
             continue
+        paragraph_markdown = markdown[match.end():block_end].strip()
+        section_route_ids = next(
+            (
+                route_ids
+                for start, end, route_ids in route_ranges
+                if start <= match.start() < end
+            ),
+            [],
+        )
+        sources = _paragraph_sources(
+            provenance,
+            packet,
+            section_route_ids,
+            sermon_cache,
+            paragraph_markdown=paragraph_markdown,
+        )
+        if not sources:
+            continue
         annotation_id = f"p{len(annotations) + 1}"
         annotations.append({"annotation_id": annotation_id, "sources": sources})
-        insertions.append(
-            (block_end, f"\n\n[查看本段来源]({SOURCE_MARKER_PREFIX}{annotation_id})")
+        footnote = FOOTNOTE_DEFINITION_RE.match(
+            paragraph_markdown.splitlines()[0].strip()
         )
+        marker = (
+            f" [查看本注来源]({SOURCE_MARKER_PREFIX}{annotation_id})"
+            if footnote
+            else f"\n\n[查看本段来源]({SOURCE_MARKER_PREFIX}{annotation_id})"
+        )
+        insertions.append((block_end, marker))
     annotated = markdown
     for position, marker in reversed(insertions):
         annotated = annotated[:position] + marker + annotated[position:]
@@ -239,15 +560,28 @@ def _annotated_reader_markdown(
 
 def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
     status = str(workflow.get("status") or "unknown")
-    grounding = "passed" if status == "draft_grounded" else "not_run"
+    published = status == "workflow_published"
+    grounding = "passed" if status == "draft_grounded" or published else "not_run"
     if status == "grounding_gate_failed":
         grounding = "failed"
     return [
         {"id": "author", "label": "Author 初稿", "state": "complete"},
         {"id": "grounding", "label": "Grounding", "state": grounding},
-        {"id": "editorial_review", "label": "Editorial Review", "state": "not_run"},
-        {"id": "program_audit", "label": "Program Audit", "state": "not_run"},
-        {"id": "publication", "label": "正式出版", "state": "not_run"},
+        {
+            "id": "editorial_review",
+            "label": "Editorial Review",
+            "state": "passed" if published else "not_run",
+        },
+        {
+            "id": "program_audit",
+            "label": "Program Audit",
+            "state": "passed" if published else "not_run",
+        },
+        {
+            "id": "publication",
+            "label": "正式出版",
+            "state": "passed" if published else "not_run",
+        },
     ]
 
 
@@ -311,7 +645,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         if knowledge:
             result["markdown"], result["source_annotations"] = _annotated_reader_markdown(
                 manuscript,
-                knowledge,
+                packet,
             )
         else:
             result["markdown"] = _reader_markdown(manuscript)

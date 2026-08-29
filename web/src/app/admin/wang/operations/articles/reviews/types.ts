@@ -40,6 +40,18 @@ export type ReviewSourceFragment = {
   excerpts: string[];
   full_source_url: string | null;
   media: ReviewSourceMedia | null;
+  mapping_kind: "argument_route_attestation" | "claim_evidence";
+  route_revision_id: string | null;
+  route_label: string | null;
+  route_steps: ReviewRouteStep[];
+};
+
+export type ReviewRouteStep = {
+  route_step_key: string;
+  role: string;
+  proposition: string | null;
+  fragment_ids: string[];
+  excerpts: string[];
 };
 
 export type ReviewSourceAnnotation = {
