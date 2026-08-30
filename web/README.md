@@ -31,7 +31,7 @@
     * Smart-Answer UI Service: http://localhost:3000(NextJS)
     * Smart-Answer Service: localhost:60000 (FastAPI)
     * NgInx Proxy:
-        Smart Answer UI: https://holylogos.servehttp.com => http://localhost:3000
+        Smart Answer UI: https://dallas-hlc.org => Cloudflare Tunnel => nginx => http://localhost:3000
         /get-answer => localhost:60000
     * pm2 install: sudo npm install pm2@latest -g
     * pm2 start: pm2 start npm --name smart_answer  -- run start -- -p 3000
@@ -41,5 +41,4 @@
     Proxy: See above
     DNS: NoIP - log in as dallas.holy.logos@gmail.com
     DDUP: https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client-on-ubuntu
-
 
