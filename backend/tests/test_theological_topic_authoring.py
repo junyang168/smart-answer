@@ -1120,3 +1120,92 @@ def test_program_audit_discloses_notes_only_section_without_inventing_audio():
         "message": "SEC-1",
         "source_types": ["notes_manuscript"],
     }]
+
+
+def _texture_paragraph(anchors, *, claim_ids="[]", steps="[]", routes="[]"):
+    import json as _json
+
+    return (
+        '<!-- provenance: {"attribution":"professor",'
+        f'"claim_ids":{claim_ids},"evidence_step_ids":{steps},'
+        f'"argument_route_revision_ids":{routes},'
+        f'"texture_anchors":{_json.dumps(anchors, ensure_ascii=False)}}} -->\n'
+        "Narrative texture in prose.\n"
+    )
+
+
+def _result_with_texture(anchors, **kwargs):
+    result = _valid_result()
+    result["manuscript_markdown"] += "\n" + _texture_paragraph(anchors, **kwargs)
+    return result
+
+
+def test_texture_only_paragraph_needs_no_claims_but_must_anchor_verbatim():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence, approved_brief=brief,
+        publication_profile=publication, quality_profile=quality,
+    )
+    validate_topic_author_result(
+        _result_with_texture([{"source_id": "SRC-1", "excerpt": "source original for SRC-1"}]),
+        authoring_packet=packet,
+    )
+
+    with pytest.raises(TheologicalEditorialContractError, match="not found verbatim"):
+        validate_topic_author_result(
+            _result_with_texture(
+                [{"source_id": "SRC-1", "excerpt": "words the professor never said"}]
+            ),
+            authoring_packet=packet,
+        )
+
+    with pytest.raises(TheologicalEditorialContractError, match="unknown source original"):
+        validate_topic_author_result(
+            _result_with_texture(
+                [{"source_id": "SRC-9", "excerpt": "source original for SRC-1"}]
+            ),
+            authoring_packet=packet,
+        )
+
+    with pytest.raises(TheologicalEditorialContractError, match="too short"):
+        validate_topic_author_result(
+            _result_with_texture([{"source_id": "SRC-1", "excerpt": "source o"}]),
+            authoring_packet=packet,
+        )
+
+    with pytest.raises(TheologicalEditorialContractError, match="duplicate texture anchors"):
+        validate_topic_author_result(
+            _result_with_texture(
+                [
+                    {"source_id": "SRC-1", "excerpt": "source original for SRC-1"},
+                    {"source_id": "SRC-1", "excerpt": "source original for SRC-1"},
+                ]
+            ),
+            authoring_packet=packet,
+        )
+
+
+def test_texture_carries_teaching_not_arguments():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence, approved_brief=brief,
+        publication_profile=publication, quality_profile=quality,
+    )
+    anchors = [{"source_id": "SRC-1", "excerpt": "source original for SRC-1"}]
+
+    with pytest.raises(TheologicalEditorialContractError, match="cannot cite EvidenceSteps"):
+        validate_topic_author_result(
+            _result_with_texture(anchors, steps='["EV-1"]'), authoring_packet=packet
+        )
+
+    with pytest.raises(TheologicalEditorialContractError, match="cannot execute ArgumentRoutes"):
+        validate_topic_author_result(
+            _result_with_texture(anchors, routes='["ARR-1"]'), authoring_packet=packet
+        )
+
+    with pytest.raises(
+        TheologicalEditorialContractError, match="claim_ids or texture_anchors"
+    ):
+        validate_topic_author_result(
+            _result_with_texture([]), authoring_packet=packet
+        )

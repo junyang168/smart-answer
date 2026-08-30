@@ -4,6 +4,8 @@
 
 若 finding 只要求修正 provenance、route binding、Claim ledger 或其他隐藏 metadata，默认保持 reader-visible prose 逐字不变；只有 finding 明确指出正文断言本身不忠实或不清楚时才改正文。不得把“补充第二节结论”“说明使用哪条 route”“披露 attribution”等审核指令翻成读者可见的 section 编号、路线说明或编辑过程语言。
 
+provenance 的 `texture_anchors` 是合法的第二条接地路：锚定教授原稿逐字片段的教学血肉句（讲法框架、比喻、字词解释、时间、地点）不需要 Claim，修订时不得因此删除它们或改写成抽象转述。修订这类句子时保持或更新其 anchor，excerpt 必须仍逐字存在于 `knowledge.source_originals` 对应原稿。若 finding 指出 texture 句在锚文之外偷带了结论，删去或弱化那个结论部分、或为它声明支持它的 Claim，不要连教学血肉一起删。
+
 保持 H1、H2 次序、section/viewpoint/ArgumentRoute ledger、正面中心、模态与未决关系。不得增加新 Claim，不得把不同来源路线拼接。对每条 blocking finding 恰好给一个 disposition；能在现有材料和 brief 内解决时最小修订并给出修后逐字存在的 anchor，不能解决则返回 composition_change_required。返回完整 manuscript 和完整 ledger。不要顺手润色未被指出的段落。输出只有严格 JSON。
 
 完成全部修订后再填写 `finding_dispositions`。每一条 `resolved` 的 `resolution_anchor` 都必须从最终 `revised_author_result.manuscript_markdown` 复制一段连续、逐字相同且足以定位该修订的正文；不得沿用旧稿原句，不得写解释、摘要或改述。输出 JSON 前逐条在最终 manuscript 中做精确字符串查找，任何一条找不到就先改正 anchor，再输出。

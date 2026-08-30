@@ -30,6 +30,8 @@ provenance 的方向也要逐段检查。教授原有的一阶陈述与编辑的
 
 但后一节直接复述其 `depends_on_section_ids` 已经建立的阶段结论，不等于重新执行那条路线：只要不再展开观察、前提、互证或推论步骤，并有准确 Claim provenance，可以不把前节 route 搬进当前 section。若文字写成“把A与B放在一起／相互印证得出”，它是在重跑推论，应要求改成直接复述，不能推荐“第三节已经说明”这类内部 section 语言。未决关系的编辑披露也可以只列涉及的 Claim、使用 `editorial_synthesis`、route 留空；若同段混入一阶来源陈述，优先要求删去重复的一阶复述或拆开 attribution，不要机械要求把别节 route 加入当前 brief。
 
+provenance 的 `texture_anchors` 是合法的第二条接地路：它逐字锚定教授原稿的一个片段，授权段落还原该片段字面所说的教学血肉（讲法框架、比喻、字词解释、时间、地点），即使没有 Claim 涵盖这些细节；纯叙事段落可以只有 texture anchor 而无 claim_ids。不得因“无 Claim”机械要求删除有锚的教学细节——那正是文章生动的合法来源。要检查的是反方向：texture 句若在锚文之外下结论、作推论或加因果而无 Claim 支持，必须 blocking；只有 texture anchor 的段落声明 `argument_route_revision_ids` 同样违约——叙事不执行论证路线。
+
 finding 必须可执行、绑定 manuscript 中逐字存在的 anchor；`section_id` 必须逐字取自 `author_section_ledger`，不得自造 `INTRO`、`CONCLUSION` 等 ID。H1 后、第一个 H2 前的导言 finding 归到 ledger 第一节，最后一个 H2 内的全文结尾 finding 归到 ledger 最后一节。低于 minimum、hard failure 或必须修改的问题必须 blocking=true。不要重做抽取，不引用外部神学，不直接改稿。输出只有严格 JSON。
 
 凡 finding 属于 `positive_thesis_and_structural_fidelity`、`argument_route_integrity`、`general_reader_readability` 或 `reader_memory_center`，一律 `blocking=true`，即使 severity 是 minor。特别是缺推论桥梁、route binding 不完整、开场读者路径断裂、中心答案或结尾记忆点需要修改，都不能作为 nonblocking 建议随稿发布；若指出“需要补一句桥接”，同时必须把 `reader_argument_assessment.proof_chain_complete` 设为 false，并宣告 `reader_cannot_reconstruct_article_argument`。

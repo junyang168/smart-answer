@@ -635,3 +635,88 @@ def test_a_claim_carries_its_own_editorial_instruction():
         "statement": "保留完整推理，不要壓成一句結論。",
     }
 
+
+
+# ---- texture anchors ----
+
+
+def _texture_knowledge():
+    knowledge = _knowledge()
+    knowledge["source_originals"] = {
+        "originals": [
+            {
+                "source_id": "SRC-1",
+                "content": (
+                    "第一功課是什麼？你要先知道耶穌就是基督。"
+                    "可是門徒通過第一課的考試，耶穌開始教他們第二課。"
+                ),
+            }
+        ]
+    }
+    return knowledge
+
+
+def test_texture_anchor_material_licenses_the_anchored_excerpt():
+    anchors = [
+        {"source_id": "SRC-1", "excerpt": "門徒通過第一課的考試，耶穌開始教他們第二課"}
+    ]
+    packet = build_grounding_packet(
+        "門徒通過第一課的考試。", [], _texture_knowledge(), texture_anchors=anchors
+    )
+    entries = [
+        item for item in packet["material"] if item.get("kind") == "texture_anchor"
+    ]
+    assert entries == [
+        {
+            "kind": "texture_anchor",
+            "attribution": "professor_source_verbatim",
+            "source_id": "SRC-1",
+            "source_excerpt": "門徒通過第一課的考試，耶穌開始教他們第二課",
+        }
+    ]
+
+
+def test_texture_anchor_must_be_verbatim_in_its_source_original():
+    with pytest.raises(GroundingCheckError, match="not verbatim"):
+        build_grounding_packet(
+            "段落。",
+            [],
+            _texture_knowledge(),
+            texture_anchors=[{"source_id": "SRC-1", "excerpt": "教授沒有說過的句子在此"}],
+        )
+    with pytest.raises(GroundingCheckError, match="outside this packet"):
+        build_grounding_packet(
+            "段落。",
+            [],
+            _texture_knowledge(),
+            texture_anchors=[{"source_id": "SRC-9", "excerpt": "門徒通過第一課的考試"}],
+        )
+
+
+def test_manuscript_check_reads_a_texture_only_paragraph_instead_of_skipping_it():
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":[],'
+        '"texture_anchors":[{"source_id":"SRC-1",'
+        '"excerpt":"門徒通過第一課的考試，耶穌開始教他們第二課"}]} -->\n'
+        "門徒通過第一課的考試，耶穌開始教第二課。\n"
+    )
+    client = FakeClient([_grounded_result()])
+    report = check_manuscript_grounding(markdown, _texture_knowledge(), client=client)
+    assert report["paragraphs_checked"] == 1
+    assert report["paragraphs_skipped"] == 0
+    assert report["passed"] is True
+    assert client.calls == 1
+
+
+def test_a_fabricated_texture_anchor_becomes_a_finding_not_a_pass():
+    markdown = (
+        '<!-- provenance: {"attribution":"professor","claim_ids":[],'
+        '"texture_anchors":[{"source_id":"SRC-1","excerpt":"逐字稿裡不存在的錨文"}]} -->\n'
+        "段落。\n"
+    )
+    client = FakeClient([])
+    report = check_manuscript_grounding(markdown, _texture_knowledge(), client=client)
+    assert report["passed"] is False
+    assert report["findings"][0]["code"] == "grounding_check_failed"
+    assert "not verbatim" in report["findings"][0]["error"]
+    assert client.calls == 0

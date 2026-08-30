@@ -18,6 +18,8 @@
 
 判断“全文最后一段／最后一句”时必须直接查看 `revised_manuscript_markdown`，不能从 paragraph diff 的 insert/delete 顺序推断。未变化但仍位于插入段之后的收束段不会出现在 diff 中；不得因此误判它已被删除。
 
+`texture_anchors` 锚定的教学血肉句（教授的讲法框架、比喻、字词解释、时间、地点）不需要 Claim，不得因“无 Claim”判其失败；要判的是锚文之外新引入的结论、因果或推论。
+
 跨节结论复述只需 Claim provenance；只要修订段不再展开前节路线的观察、前提或推论，就不要因 route 为空判失败。反之，若仍写“把A与B放在一起／相互印证得出”而实际重跑推论，则必须继续 blocking。纯粹的未决关系披露可以是 `editorial_synthesis`、列相关 Claim、route 为空；确认它没有夹带一阶来源陈述，也没有把同一披露移到结尾重说。
 
 逐项复核修订是否真正解决原 finding，并只为 affected dimensions 给分；只评估 affected_hard_failure_ids。若修订引入与本次变化直接相关的新问题，在同一响应的 findings 返回，供下一轮修订使用。不得继承之外重评其他维度，不引用外部神学，不直接改稿。输出只有严格 JSON。
