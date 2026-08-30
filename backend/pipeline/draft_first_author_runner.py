@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +103,12 @@ def main() -> int:
     parser.add_argument("--reader-question", required=True)
     parser.add_argument("--audience", default="神学生和追求的平信徒")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--provider",
+        choices=("claude", "codex"),
+        default="claude",
+        help="subscription CLI used for the drafting call; never an API client",
+    )
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--reasoning-effort", choices=("medium", "high", "xhigh"), default="high")
     args = parser.parse_args()
@@ -118,9 +125,10 @@ def main() -> int:
     }
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
-    client = ClaudeSubscriptionClient(
-        model=args.model, reasoning_effort=args.reasoning_effort
+    client_type = (
+        CodexSubscriptionClient if args.provider == "codex" else ClaudeSubscriptionClient
     )
+    client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
 
