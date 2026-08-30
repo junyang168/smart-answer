@@ -19,8 +19,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from opencc import OpenCC
 
-from backend.api.config import WANG_STAGING_DIR
+from backend.api.config import DATA_BASE_PATH, WANG_STAGING_DIR
 from backend.api.canonical_repository.service import CanonicalRepositoryService
+from backend.pipeline.excerpt_audio_alignment import (
+    align_transcript_excerpt,
+    project_excerpt_timings,
+)
 
 
 router = APIRouter(prefix="/admin/wang/article-reviews", tags=["wang-admin"])
@@ -121,13 +125,44 @@ def _source_fragment_read_model(
             "media": media.model_dump(mode="json"),
         }
         sermon_cache[transcript_id] = sermon
-    start_seconds = fragment.get("media_time")
-    end_seconds = fragment.get("media_end_time")
+    timing = fragment.get("excerpt_timing") or {}
+    excerpt_start = fragment.get("excerpt_media_time")
+    excerpt_end = fragment.get("excerpt_media_end_time")
+    has_excerpt_timing = isinstance(excerpt_start, (int, float)) and isinstance(
+        excerpt_end, (int, float)
+    )
+    paragraph_start = fragment.get("media_time")
+    paragraph_end = fragment.get("media_end_time")
+    start_seconds = (
+        max(0.0, float(excerpt_start) - 2.0)
+        if has_excerpt_timing
+        else paragraph_start
+    )
+    end_seconds = float(excerpt_end) + 2.0 if has_excerpt_timing else paragraph_end
     result["full_source_url"] = sermon["full_source_url"]
     result["media"] = {
         **sermon["media"],
+        "fragment_ids": [fragment_id],
         "start_seconds": float(start_seconds) if isinstance(start_seconds, (int, float)) else None,
         "end_seconds": float(end_seconds) if isinstance(end_seconds, (int, float)) else None,
+        "excerpt_start_seconds": float(excerpt_start) if has_excerpt_timing else None,
+        "excerpt_end_seconds": float(excerpt_end) if has_excerpt_timing else None,
+        "paragraph_start_seconds": (
+            float(paragraph_start) if isinstance(paragraph_start, (int, float)) else None
+        ),
+        "paragraph_end_seconds": (
+            float(paragraph_end) if isinstance(paragraph_end, (int, float)) else None
+        ),
+        "timing_status": str(timing.get("status") or "paragraph_fallback"),
+        "timing_method": str(timing.get("method") or "paragraph_start"),
+        "timing_match_ratio": (
+            float(timing["match_ratio"])
+            if isinstance(timing.get("match_ratio"), (int, float))
+            else None
+        ),
+        "reviewed_text_differs_from_raw": timing.get("reviewed_text_differs_from_raw"),
+        "lineage_window_expanded": bool(timing.get("lineage_window_expanded")),
+        "timing_alignment_sha256": timing.get("alignment_sha256"),
     }
     return result
 
@@ -458,11 +493,47 @@ def _original_source_card(
         }
         sermon_cache[transcript_id] = sermon
     start_seconds = _timestamp_seconds(excerpt)
+    configured = Path(str(document.get("source_path") or ""))
+    published_path = (
+        configured
+        if configured.is_file()
+        else DATA_BASE_PATH / "script_published" / f"{transcript_id}.json"
+    )
+    timing = align_transcript_excerpt(
+        excerpt=excerpt,
+        source=document,
+        published_path=published_path,
+        raw_path=DATA_BASE_PATH / "script" / f"{transcript_id}.json",
+    )
+    excerpt_start = timing.get("excerpt_start_time")
+    excerpt_end = timing.get("excerpt_end_time")
+    has_excerpt_timing = isinstance(excerpt_start, (int, float)) and isinstance(
+        excerpt_end, (int, float)
+    )
+    if has_excerpt_timing:
+        start_seconds = max(0.0, float(excerpt_start) - 2.0)
     card["full_source_url"] = sermon["full_source_url"]
     card["media"] = {
         **sermon["media"],
+        "fragment_ids": [synthetic_id],
         "start_seconds": start_seconds,
-        "end_seconds": None,
+        "end_seconds": float(excerpt_end) + 2.0 if has_excerpt_timing else None,
+        "excerpt_start_seconds": float(excerpt_start) if has_excerpt_timing else None,
+        "excerpt_end_seconds": float(excerpt_end) if has_excerpt_timing else None,
+        "paragraph_start_seconds": None,
+        "paragraph_end_seconds": None,
+        "timing_status": str(timing.get("status") or "paragraph_fallback"),
+        "timing_method": str(timing.get("method") or "paragraph_start"),
+        "timing_match_ratio": (
+            float(timing["match_ratio"])
+            if isinstance(timing.get("match_ratio"), (int, float))
+            else None
+        ),
+        "reviewed_text_differs_from_raw": timing.get(
+            "reviewed_text_differs_from_raw"
+        ),
+        "lineage_window_expanded": bool(timing.get("lineage_window_expanded")),
+        "timing_alignment_sha256": timing.get("alignment_sha256"),
     }
     return card
 
@@ -561,6 +632,29 @@ def _merge_media_range(
     target_media["end_seconds"] = max(ends) if ends else None
 
 
+def _append_media_clip(clips: list[dict[str, Any]], media: Any) -> None:
+    if not isinstance(media, dict):
+        return
+    key = (
+        media.get("url"),
+        media.get("start_seconds"),
+        media.get("end_seconds"),
+        media.get("timing_alignment_sha256"),
+    )
+    if any(
+        (
+            item.get("url"),
+            item.get("start_seconds"),
+            item.get("end_seconds"),
+            item.get("timing_alignment_sha256"),
+        )
+        == key
+        for item in clips
+    ):
+        return
+    clips.append(dict(media))
+
+
 def _route_sources(
     provenance: dict[str, Any],
     packet: dict[str, Any],
@@ -641,6 +735,7 @@ def _route_sources(
                 step_key = str(binding.get("route_step_key") or "")
                 step_excerpts: list[str] = []
                 step_fragment_ids: list[str] = []
+                step_media_clips: list[dict[str, Any]] = []
                 for fragment_id_value in binding.get("source_fragment_ids") or []:
                     fragment_id = str(fragment_id_value)
                     fragment = fragments.get(fragment_id)
@@ -657,6 +752,7 @@ def _route_sources(
                     if not item:
                         continue
                     item_excerpts = list(item["excerpts"])
+                    _append_media_clip(step_media_clips, item.get("media"))
                     if card is None:
                         card = item
                         card["excerpts"] = []
@@ -689,6 +785,7 @@ def _route_sources(
                             ),
                             "fragment_ids": step_fragment_ids,
                             "excerpts": step_excerpts,
+                            "media_clips": step_media_clips,
                         }
                     )
             if card and route_steps:
@@ -705,6 +802,10 @@ def _route_sources(
                 card["route_revision_id"] = route_revision_id
                 card["route_label"] = str(revision.get("route_label") or "本段论证")
                 card["route_steps"] = route_steps
+                # A route may contain non-contiguous evidence.  Its steps own
+                # their clips; a card-level min/max range would replay all of
+                # the unrelated material between them.
+                card["media"] = None
                 group_key = (route_revision_id, str(attestation.get("source_id") or ""))
                 existing = grouped.get(group_key)
                 if existing is None:
@@ -741,6 +842,8 @@ def _route_sources(
                     for excerpt in step["excerpts"]:
                         if excerpt not in existing_step["excerpts"]:
                             existing_step["excerpts"].append(excerpt)
+                    for media in step.get("media_clips") or []:
+                        _append_media_clip(existing_step.setdefault("media_clips", []), media)
     return result
 
 
@@ -992,10 +1095,90 @@ def _source_projection_audit(
     }
 
 
+def _source_playback_audit(
+    *,
+    manuscript_sha256: str,
+    packet_sha256: str,
+    annotations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    clips: list[tuple[str, dict[str, Any], list[str]]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for annotation in annotations:
+        paragraph_id = str(annotation.get("annotation_id") or "")
+        for source in annotation.get("sources") or []:
+            if source.get("source_type") != "sermon_transcript":
+                continue
+            rows = [
+                media
+                for step in source.get("route_steps") or []
+                for media in step.get("media_clips") or []
+            ]
+            if not rows and isinstance(source.get("media"), dict):
+                rows = [source["media"]]
+            for media in rows:
+                key = (
+                    media.get("url"),
+                    media.get("start_seconds"),
+                    media.get("end_seconds"),
+                    media.get("timing_alignment_sha256"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                fragment_ids = list(
+                    media.get("fragment_ids") or source.get("fragment_ids") or []
+                )
+                clips.append((paragraph_id, media, fragment_ids))
+    for paragraph_id, media, fragment_ids in clips:
+        status = str(media.get("timing_status") or "paragraph_fallback")
+        if status not in {"exact", "estimated"}:
+            findings.append(
+                {
+                    "code": "excerpt_audio_alignment_unresolved",
+                    "severity": "error",
+                    "paragraph_id": paragraph_id,
+                    "fragment_ids": fragment_ids,
+                    "message": (
+                        "本段录音只能从整段开头播放，尚未定位到具体引文。"
+                    ),
+                }
+            )
+        if media.get("reviewed_text_differs_from_raw") is True:
+            findings.append(
+                {
+                    "code": "reviewed_text_differs_from_raw_transcript",
+                    "severity": "warning",
+                    "paragraph_id": paragraph_id,
+                    "fragment_ids": fragment_ids,
+                    "message": (
+                        "校订文字与原始带时间转录不完全一致；"
+                        "录音位置已对齐，但文字需要复核。"
+                    ),
+                }
+            )
+    return {
+        "schema_version": "wang_article_source_playback_audit.v1",
+        "manuscript_sha256": manuscript_sha256,
+        "authoring_packet_sha256": packet_sha256,
+        "clips_checked": len(clips),
+        "exact_clips": sum(media.get("timing_status") == "exact" for _, media, _ in clips),
+        "estimated_clips": sum(
+            media.get("timing_status") == "estimated" for _, media, _ in clips
+        ),
+        "paragraph_fallback_clips": sum(
+            media.get("timing_status") not in {"exact", "estimated"}
+            for _, media, _ in clips
+        ),
+        "findings": findings,
+        "passed": not any(item["severity"] == "error" for item in findings),
+    }
+
+
 def _annotated_reader_markdown(
     markdown: str,
     packet: dict[str, Any],
-) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[str, list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Attach hidden-source controls without changing the manuscript's prose."""
 
     matches = list(PROVENANCE_COMMENT_RE.finditer(markdown))
@@ -1082,7 +1265,12 @@ def _annotated_reader_markdown(
         packet_sha256=str(packet.get("packet_sha256") or ""),
         rows=audit_rows,
     )
-    return annotated.strip(), annotations, audit
+    playback_audit = _source_playback_audit(
+        manuscript_sha256=hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+        packet_sha256=str(packet.get("packet_sha256") or ""),
+        annotations=annotations,
+    )
+    return annotated.strip(), annotations, audit, playback_audit
 
 
 def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
@@ -1170,10 +1358,15 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         manuscript = manuscript_path.read_text(encoding="utf-8")
         knowledge = packet.get("knowledge") if isinstance(packet.get("knowledge"), dict) else {}
         if knowledge:
+            packet = dict(packet)
+            packet["knowledge"] = project_excerpt_timings(
+                knowledge, data_base_path=DATA_BASE_PATH
+            )
             (
                 result["markdown"],
                 result["source_annotations"],
                 result["source_projection_audit"],
+                result["source_playback_audit"],
             ) = _annotated_reader_markdown(manuscript, packet)
         else:
             result["markdown"] = _reader_markdown(manuscript)
@@ -1192,6 +1385,17 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
                         "message": "稿件没有可用于来源核验的 authoring knowledge。",
                     }
                 ],
+                "passed": False,
+            }
+            result["source_playback_audit"] = {
+                "schema_version": "wang_article_source_playback_audit.v1",
+                "manuscript_sha256": current_manuscript_sha,
+                "authoring_packet_sha256": "",
+                "clips_checked": 0,
+                "exact_clips": 0,
+                "estimated_clips": 0,
+                "paragraph_fallback_clips": 0,
+                "findings": [],
                 "passed": False,
             }
     return result

@@ -25,6 +25,7 @@ export type TopicEssayReview = TopicEssayReviewSummary & {
   markdown: string;
   source_annotations: ReviewSourceAnnotation[];
   source_projection_audit: ReviewSourceProjectionAudit;
+  source_playback_audit: ReviewSourcePlaybackAudit;
 };
 
 export type ReviewSourceProjectionFinding = {
@@ -44,11 +45,41 @@ export type ReviewSourceProjectionAudit = {
   passed: boolean;
 };
 
+export type ReviewSourcePlaybackFinding = {
+  code: string;
+  severity: "error" | "warning";
+  paragraph_id: string;
+  fragment_ids: string[];
+  message: string;
+};
+
+export type ReviewSourcePlaybackAudit = {
+  schema_version: "wang_article_source_playback_audit.v1";
+  manuscript_sha256: string;
+  authoring_packet_sha256: string;
+  clips_checked: number;
+  exact_clips: number;
+  estimated_clips: number;
+  paragraph_fallback_clips: number;
+  findings: ReviewSourcePlaybackFinding[];
+  passed: boolean;
+};
+
 export type ReviewSourceMedia = {
   kind: "audio" | "video";
   url: string;
   start_seconds: number | null;
   end_seconds: number | null;
+  excerpt_start_seconds: number | null;
+  excerpt_end_seconds: number | null;
+  paragraph_start_seconds: number | null;
+  paragraph_end_seconds: number | null;
+  timing_status: "exact" | "estimated" | "unresolved" | "paragraph_fallback";
+  timing_method: string;
+  timing_match_ratio: number | null;
+  reviewed_text_differs_from_raw: boolean | null;
+  lineage_window_expanded: boolean;
+  timing_alignment_sha256: string | null;
 };
 
 export type ReviewSourceFragment = {
@@ -76,6 +107,7 @@ export type ReviewRouteStep = {
   proposition: string | null;
   fragment_ids: string[];
   excerpts: string[];
+  media_clips: ReviewSourceMedia[];
 };
 
 export type ReviewSourceAnnotation = {

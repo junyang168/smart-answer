@@ -87,6 +87,28 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
             <span>· {review.source_projection_audit.findings.length} 项需要处理</span>
           ) : null}
         </div>
+        <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
+          review.source_playback_audit.passed
+            ? "border-sky-200 bg-sky-50 text-sky-950"
+            : "border-rose-200 bg-rose-50 text-rose-900"
+        }`}>
+          {review.source_playback_audit.passed ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          <span className="font-bold">
+            引文录音定位{review.source_playback_audit.passed ? "已通过" : "未通过"}
+          </span>
+          <span>
+            {review.source_playback_audit.exact_clips} 段精确匹配，
+            {review.source_playback_audit.estimated_clips} 段顺序对齐，
+            {review.source_playback_audit.paragraph_fallback_clips} 段仍从大段开头播放
+          </span>
+          {review.source_playback_audit.findings.length > 0 ? (
+            <span>· {review.source_playback_audit.findings.length} 项文字或时间提示</span>
+          ) : null}
+        </div>
       </section>
 
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[16rem_minmax(0,1fr)]">
