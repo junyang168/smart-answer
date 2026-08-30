@@ -132,6 +132,7 @@ def build_paragraph_material(
     knowledge: dict[str, Any],
     instructions_by_claim: dict[str, str] | None = None,
     declared_claim_ids: list[str] | None = None,
+    texture_anchors: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return the claim/evidence/source material a paragraph is allowed to use.
 
@@ -213,7 +214,54 @@ def build_paragraph_material(
                 "statement": instruction,
             }
         material.append(entry)
+    # A texture anchor licenses what its verbatim excerpt literally says --
+    # the professor's own framing, word study, timing, or setting -- without
+    # requiring a Claim to exist for it. Claims carry the article's
+    # conclusions; these carry how the professor taught them. The anchor was
+    # already verified verbatim against the scoped source original by the
+    # author-contract validator, and `_verify_texture_anchors` re-checks it
+    # here so a revision cannot smuggle in an invented excerpt.
+    for anchor in texture_anchors or []:
+        material.append(
+            {
+                "kind": "texture_anchor",
+                "attribution": "professor_source_verbatim",
+                "source_id": anchor.get("source_id"),
+                "source_excerpt": anchor.get("excerpt"),
+            }
+        )
     return material
+
+
+def _verify_texture_anchors(
+    texture_anchors: list[dict[str, Any]] | None, knowledge: dict[str, Any]
+) -> None:
+    """Reject any texture anchor whose excerpt is not verbatim in its source.
+
+    The author-contract validator already enforces this, but grounding also
+    runs on revision output between contract validations, so the gate cannot
+    trust a declaration it has not checked itself.
+    """
+
+    if not texture_anchors:
+        return
+    originals = (knowledge.get("source_originals") or {}).get("originals") or []
+    content_by_source = {
+        str(item.get("source_id") or ""): str(item.get("content") or "")
+        for item in originals
+    }
+    for anchor in texture_anchors:
+        source_id = str(anchor.get("source_id") or "")
+        excerpt = str(anchor.get("excerpt") or "")
+        content = content_by_source.get(source_id)
+        if content is None:
+            raise GroundingCheckError(
+                f"texture anchor cites a source original outside this packet: {source_id or '<empty>'}"
+            )
+        if not excerpt or excerpt not in content:
+            raise GroundingCheckError(
+                f"texture anchor excerpt is not verbatim in {source_id}"
+            )
 
 
 def cited_transcript_segments(
@@ -278,13 +326,16 @@ def build_grounding_packet(
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
     declared_claim_ids: list[str] | None = None,
+    texture_anchors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     declared = declared_claim_ids if declared_claim_ids is not None else claim_ids
+    _verify_texture_anchors(texture_anchors, knowledge)
     packet = {
         "schema_version": "matthew-exposition-grounding-packet.v1",
         "paragraph_text": paragraph_text,
         "material": build_paragraph_material(
-            claim_ids, knowledge, instructions_by_claim, declared_claim_ids=declared
+            claim_ids, knowledge, instructions_by_claim, declared_claim_ids=declared,
+            texture_anchors=texture_anchors,
         ),
     }
     # Carried once per segment rather than repeated under every claim that
@@ -349,11 +400,12 @@ def check_paragraph_grounding(
     instructions_by_claim: dict[str, str] | None = None,
     transcript_texts: dict[str, dict[str, str]] | None = None,
     declared_claim_ids: list[str] | None = None,
+    texture_anchors: list[dict[str, Any]] | None = None,
     cache_dir: Path | None = None,
 ) -> dict[str, Any]:
     packet = build_grounding_packet(
         paragraph_text, claim_ids, knowledge, instructions_by_claim, transcript_texts,
-        declared_claim_ids=declared_claim_ids,
+        declared_claim_ids=declared_claim_ids, texture_anchors=texture_anchors,
     )
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
     payload = canonical_json(packet)
@@ -444,7 +496,16 @@ def check_manuscript_grounding(
             continue
         attribution = provenance.get("attribution")
         declared = provenance.get("claim_ids") or []
-        if attribution not in checked_attributions or not declared:
+        # A paragraph anchored only to source texture has no claims, but it is
+        # still asserting prose: skipping it would leave its sentences the one
+        # kind of reader text no gate ever reads. It is checked against its
+        # anchored excerpts (plus its section's claim scope) like any other.
+        texture_anchors = [
+            anchor
+            for anchor in provenance.get("texture_anchors") or []
+            if isinstance(anchor, dict)
+        ]
+        if attribution not in checked_attributions or not (declared or texture_anchors):
             skipped += 1
             continue
         # The paragraph's own declaration stays the audit record; grounding
@@ -458,6 +519,7 @@ def check_manuscript_grounding(
                 instructions_by_claim=instructions_by_claim,
                 transcript_texts=transcript_texts,
                 declared_claim_ids=list(dict.fromkeys(declared)),
+                texture_anchors=texture_anchors,
                 cache_dir=cache_dir,
             )
         except (GroundingCheckError, ValueError, RuntimeError) as exc:

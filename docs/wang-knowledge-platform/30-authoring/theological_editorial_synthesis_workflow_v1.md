@@ -155,6 +155,8 @@ Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位�
 
 结尾也是独立的质量对象。Brief 必须用 `conclusion_contract` 先锁定确定回答，再按直接回答、补充经文和带限定的推论安排正面材料的作用层级；它不能把几项材料压成平面 inventory。未决关系只在正文最相关的一处披露，结尾不重复；应用边界放在最终答案之前或注释中。Author 的最后一句必须由契约列出的 Claim 支持，并直接回答开头的问题，不能落在 section 复盘、编辑过程或否定边界。
 
+接地按句子做的事分两条路。下结论的句子——释经判断、推论、神学主张——必须回到该段声明的 Claim，一如既往。还原教授怎么教的句子——讲法框架、比喻、字词解释、事件时间、地点背景——可以改由 provenance 的 `texture_anchors` 支持：每项锚定 scoped source original 的一个逐字片段（至少 10 字），程序在 Author 交稿与每次 Grounding 时都逐字核对。材料里有教授自己的具体讲法时优先采用并锚定，不得因无对应 Claim 而改写成抽象转述。texture 只承载教学血肉：锚文之外的结论、因果与动机仍须 Claim 支持；纯叙事段落可以没有 claim_ids，但不得声明 Evidence Step 或 ArgumentRoute。
+
 段落 provenance 分开记录 Claim 与 `ArgumentRoute`：Claim 回答本段声明了哪些教授主张，route revision 回答这些主张在本段组成哪一条实际论证。后台来源预览对论证段落必须沿 section 批准的 source-local route attestation 和 step bindings 取片段，按前提、限定、异议回应与结论显示；不得把 Claim 背后的全部 Evidence Step 按来源合并后冒充本段论证。没有使用路线的经文引述或简单陈述才回退到 Claim Evidence。
 
 文章必须采用第一层的释经论证视角：以经文问题、观察、推理和结论推进，让读者跟着教授的论证走；不得以“教授有几种看法”“现有材料如何分类”作为全文骨架。导言可以一次交代文章整理的是王教授的讲论，未决关系也必须在真正影响结论处披露；但反复使用“教授认为／指出／判断”“一种／另一种识别”“现有材料”来组织标题和段落，会把文章写成思想分析或审核报告，应作为 hard failure 退回 Composition，而不是只在 Revision 中替换措辞。

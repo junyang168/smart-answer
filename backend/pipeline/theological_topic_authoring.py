@@ -41,6 +41,11 @@ FORBIDDEN_TOPIC_READER_PHRASES = (
     "正面的答案需要",
 )
 
+#: A texture anchor's excerpt must be long enough to identify one passage of
+#: the source it cites; a two-character excerpt matches half the corpus and
+#: verifies nothing.
+TEXTURE_ANCHOR_MIN_CHARS = 10
+
 
 CONCLUSION_ASSESSMENT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -564,6 +569,13 @@ def validate_topic_author_result(
                 ledger_claims_by_section[str(brief_section["section_id"])],
             )
         )
+    originals_by_source_id = {
+        str(item.get("source_id") or ""): item
+        for item in (
+            authoring_packet["knowledge"].get("source_originals") or {}
+        ).get("originals")
+        or []
+    }
     for paragraph in extract_provenance_paragraphs(manuscript):
         provenance = paragraph["provenance"]
         if not isinstance(provenance, dict):
@@ -571,7 +583,44 @@ def validate_topic_author_result(
         attribution = provenance.get("attribution")
         claim_ids = [str(value) for value in provenance.get("claim_ids") or []]
         if attribution in {"professor", "editorial_synthesis"}:
-            _require(bool(claim_ids), "substantive provenance requires claim_ids")
+            # Two grounding paths, matching what a sentence does. A sentence
+            # that draws a conclusion resolves to Claims, as before. A
+            # sentence that reproduces how the professor taught -- his
+            # framings, word studies, timings, settings -- may instead anchor
+            # the source passage verbatim: demanding a Claim for "門徒通過
+            # 第一課的考試" forced the author into abstract paraphrase, since
+            # texture is exactly what claim extraction leaves behind.
+            texture_anchors = provenance.get("texture_anchors") or []
+            _require(
+                bool(claim_ids) or bool(texture_anchors),
+                "substantive provenance requires claim_ids or texture_anchors",
+            )
+            anchor_keys: list[tuple[str, str]] = []
+            for anchor in texture_anchors:
+                _require(
+                    isinstance(anchor, dict),
+                    "texture anchor must be an object with source_id and excerpt",
+                )
+                source_id = str(anchor.get("source_id") or "")
+                excerpt = str(anchor.get("excerpt") or "")
+                original = originals_by_source_id.get(source_id)
+                _require(
+                    original is not None,
+                    f"texture anchor cites unknown source original: {source_id or '<empty>'}",
+                )
+                _require(
+                    len(excerpt) >= TEXTURE_ANCHOR_MIN_CHARS,
+                    "texture anchor excerpt is too short to identify its source passage",
+                )
+                _require(
+                    excerpt in str(original.get("content") or ""),
+                    f"texture anchor excerpt not found verbatim in {source_id}",
+                )
+                anchor_keys.append((source_id, excerpt))
+            _require(
+                len(anchor_keys) == len(set(anchor_keys)),
+                "paragraph provenance has duplicate texture anchors",
+            )
             unknown = set(claim_ids) - set(claims_by_id)
             _require(not unknown, f"provenance cites unknown Claims: {sorted(unknown)}")
             provenance_claims.update(claim_ids)
@@ -580,8 +629,12 @@ def validate_topic_author_result(
                 for value in provenance.get("evidence_step_ids") or []
             ]
             _require(
-                bool(evidence_step_ids),
+                bool(evidence_step_ids) or not claim_ids,
                 "substantive provenance requires evidence_step_ids",
+            )
+            _require(
+                bool(claim_ids) or not evidence_step_ids,
+                "texture-only provenance cannot cite EvidenceSteps",
             )
             _require(
                 len(evidence_step_ids) == len(set(evidence_step_ids)),
@@ -607,6 +660,13 @@ def validate_topic_author_result(
                 str(value)
                 for value in provenance.get("argument_route_revision_ids") or []
             ]
+            # Texture carries how the professor taught, never an argument: a
+            # paragraph doing inference must declare the Claims that license
+            # its conclusion, and only then may it also bind a route.
+            _require(
+                bool(claim_ids) or not route_ids,
+                "texture-only provenance cannot execute ArgumentRoutes",
+            )
             _require(
                 len(route_ids) == len(set(route_ids)),
                 "paragraph provenance has duplicate ArgumentRoute revisions",

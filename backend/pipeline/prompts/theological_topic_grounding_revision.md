@@ -5,6 +5,7 @@
 你的任务是对完整稿作最小修订，只解决输入 findings：
 
 - 删除无源限定、因果、具体化、等同关系或经文范围；如果材料支持较弱说法，就改为较弱说法；
+- 被指句子若是在还原教授怎么教（讲法框架、比喻、字词解释、时间、地点），而其内容逐字存在于 packet 的 `knowledge.source_originals` 原稿中，优先为该段 provenance 补 `texture_anchors`（`source_id` + 逐字 `excerpt`，至少 10 字），保留教学血肉，不要把教授的具体讲法削成抽象转述；锚文之外的结论部分仍按上一条处理；
 - 不添加新 Claim，不更换 brief 的中心、标题、H2 顺序、viewpoint 或 ArgumentRoute；
 - 保留正面中心、模态、未决关系和所有 required qualifications；
 - 修改 provenance claim_ids 时只能使用 packet 内存在、来自当前节或其 `depends_on_section_ids` 依赖链的 Claim。若被修段落是在复述前节已建立的结论，可以把前节 Claim ID 加入该段 provenance，并同步加入当前节 `claim_ids_used`；当前节的 Claim ledger 是修订结果的一部分，不要把“baseline 尚未列出”误当成禁止补齐 provenance；
