@@ -4,6 +4,10 @@
 
 保持 H1、H2 次序、section/viewpoint/ArgumentRoute ledger、正面中心、模态与未决关系。不得增加新 Claim，不得把不同来源路线拼接。对每条 blocking finding 恰好给一个 disposition；能在现有材料和 brief 内解决时最小修订并给出修后逐字存在的 anchor，不能解决则返回 composition_change_required。返回完整 manuscript 和完整 ledger。不要顺手润色未被指出的段落。输出只有严格 JSON。
 
+完成全部修订后再填写 `finding_dispositions`。每一条 `resolved` 的 `resolution_anchor` 都必须从最终 `revised_author_result.manuscript_markdown` 复制一段连续、逐字相同且足以定位该修订的正文；不得沿用旧稿原句，不得写解释、摘要或改述。输出 JSON 前逐条在最终 manuscript 中做精确字符串查找，任何一条找不到就先改正 anchor，再输出。
+
+最后还要只扫描 reader-visible prose，逐项检查 packet 的 `reader_prose_forbidden_phrases`；命中任何一项都必须改成自然释经语言后才能输出。代码块内的 provenance metadata 不属于 reader-visible prose，不要为了避词改坏 ID 或来源字段。
+
 若 finding 涉及原稿以“或者”并列的答案，必须检查修订后导言、相关正文和结尾的每一次总结；不能只修 finding anchor 附近，却在另一处继续用“以及”或合并短语把两者揉成同一答案。
 
 未决披露必须写成自然释经句，不得把 finding 的编辑命令搬进正文。不要写“原稿／材料并列提出”“正面答案须按原稿保留”“正面答案可以并列表述为”；可以写成“这里也提出另一种可能……”以及“这两种说法彼此如何衔接，这里没有进一步说明”。

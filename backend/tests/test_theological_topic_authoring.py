@@ -121,6 +121,14 @@ def _inputs():
     decisions = {
         "status": "ready",
         "article_title": "Positive title",
+        "opening_contract": {
+            "opening_position": "State the interpretation under examination.",
+            "why_it_requires_examination": "The conclusion depends on the text.",
+            "governing_question": "What is the claim?",
+            "first_section_id": "SEC-1",
+            "first_evidence_path": "Enter the first section's textual evidence.",
+            "answer_preview_policy": "orientation_only_no_answer_inventory",
+        },
         "viewpoint_coverage": [],
         "sections": [
             {
@@ -154,6 +162,9 @@ def _valid_result():
         "status": "drafted",
         "manuscript_markdown": """# Positive title
 
+<!-- provenance: {\"attribution\":\"editorial_synthesis\",\"claim_ids\":[\"CL-1\"],\"evidence_step_ids\":[\"EV-1\"],\"argument_route_revision_ids\":[]} -->
+An interpretation makes a claim. What is the claim?
+
 ## Positive heading
 
 <!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\"],\"evidence_step_ids\":[\"EV-1\"],\"argument_route_revision_ids\":[]} -->
@@ -183,6 +194,46 @@ def test_topic_author_packet_and_ledger_bind_the_approved_brief():
     validate_topic_author_result(_valid_result(), authoring_packet=packet)
     assert packet["input_bindings"]["brief_sha256"] == brief["brief_sha256"]
     assert packet["knowledge"]["source_originals"] == evidence["source_originals"]
+
+
+def test_topic_author_rejects_an_opening_with_competing_questions():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        "An interpretation makes a claim. What is the claim?",
+        (
+            "An interpretation makes a claim. However, why does the text use two terms? "
+            "Is the answer a person, a confession, or received truth?"
+        ),
+    )
+    with pytest.raises(TheologicalEditorialContractError, match="one governing question"):
+        validate_topic_author_result(result, authoring_packet=packet)
+
+
+def test_topic_author_rejects_a_different_single_opening_question():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        "What is the claim?",
+        "Why does this matter?",
+    )
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="approved governing question exactly",
+    ):
+        validate_topic_author_result(result, authoring_packet=packet)
 
 
 def test_paragraph_route_provenance_must_stay_inside_its_brief_section():
@@ -241,6 +292,12 @@ def test_editorial_reviewer_receives_the_same_complete_originals():
     assert review_packet["source_originals"]["originals"][0]["content"] == (
         _source_content("SRC-1")
     )
+    assert review_packet["opening_reader_prose"] == (
+        "An interpretation makes a claim. What is the claim?"
+    )
+    assert review_packet["opening_contract"] == brief["editorial_decisions"][
+        "opening_contract"
+    ]
 
 
 def test_topic_author_requires_exact_heading_order():
@@ -263,6 +320,7 @@ def test_topic_author_requires_exact_heading_order():
     "reader_prose",
     [
         "教授接着提出另一种说法。",
+        "近距语境提供另一项印证。",
         "正面答案须按原稿的‘或者’保留。",
         "正面答案可以并列表述为两种说法。",
         "正面的答案需要沿着经文继续追问。",
@@ -407,25 +465,65 @@ def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
         hard.append({"failure_id": failure_id, "failed": failed, "evidence": "Checked against title, opening, headings, and conclusion."})
     findings = []
     if hard_failure_id:
+        opening_failure = hard_failure_id == "opening_reader_path_broken"
         findings.append({
-            "finding_id": "F-HARD", "dimension_id": "positive_thesis_and_structural_fidelity",
+            "finding_id": "F-HARD", "dimension_id": (
+                "general_reader_readability"
+                if opening_failure
+                else "positive_thesis_and_structural_fidelity"
+            ),
             "section_id": "SEC-1", "severity": "major", "blocking": True,
-            "manuscript_anchor": "Positive proposition in prose.",
+            "manuscript_anchor": (
+                "An interpretation makes a claim."
+                if opening_failure
+                else "Positive proposition in prose."
+            ),
             "problem": f"Hard failure: {hard_failure_id}.",
             "required_change": "Restore the approved reader-facing argument.",
         })
+    opening_anchor = "An interpretation makes a claim."
     return {
         "schema_version": "wang_theological_topic_editorial_review_v1",
         "reviewed_manuscript_sha256": manuscript_sha,
         "scope_confirmation": "theological_topic_essay_quality",
         "summary": "Independent review.",
         "dimension_scores": [
-            {"dimension_id": item["id"], "score": item["weight"], "evidence": "Evidence."}
+            {
+                "dimension_id": item["id"],
+                "score": item["weight"],
+                "evidence": (
+                    f"The opening begins: {opening_anchor}"
+                    if item["id"] == "general_reader_readability"
+                    else "Evidence."
+                ),
+            }
             for item in quality["dimensions"]
         ],
         "hard_failure_assessments": hard,
         "findings": findings,
     }
+
+
+def test_passing_review_must_cite_the_opening_in_readability_evidence():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    review = _review_for(packet, review_packet["manuscript_sha256"])
+    readability = next(
+        item
+        for item in review["dimension_scores"]
+        if item["dimension_id"] == "general_reader_readability"
+    )
+    readability["evidence"] = "The middle sections are clear."
+    with pytest.raises(TheologicalEditorialContractError, match="cite the opening"):
+        validate_topic_editorial_review(review, review_packet=review_packet)
 
 
 def test_negative_material_hard_failure_rejects_even_with_perfect_scores():
@@ -447,6 +545,32 @@ def test_negative_material_hard_failure_rejects_even_with_perfect_scores():
     assert outcome["total_score"] == 100
     assert outcome["total_score_decides_nothing"] is True
     assert outcome["hard_failures"] == ["negative_material_displaces_positive_thesis"]
+
+
+def test_opening_reader_path_hard_failure_requires_an_opening_anchored_finding():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    failure_id = "opening_reader_path_broken"
+    assert HARD_FAILURE_DIMENSIONS[failure_id] == {
+        "positive_thesis_and_structural_fidelity",
+        "general_reader_readability",
+    }
+    review = _review_for(
+        packet,
+        review_packet["manuscript_sha256"],
+        hard_failure_id=failure_id,
+    )
+    outcome = validate_topic_editorial_review(review, review_packet=review_packet)
+    assert outcome["passed"] is False
+    assert outcome["hard_failures"] == [failure_id]
 
 
 def test_meta_analysis_hard_failure_rejects_even_with_perfect_scores():

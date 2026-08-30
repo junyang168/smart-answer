@@ -24,6 +24,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     sha256_text,
 )
 from backend.pipeline.theological_topic_authoring import (
+    FORBIDDEN_TOPIC_READER_PHRASES,
     TOPIC_EDITORIAL_REVIEW_SCHEMA,
     TOPIC_EDITORIAL_REVISION_SCHEMA,
     TOPIC_FINAL_DELTA_REVIEW_SCHEMA,
@@ -54,6 +55,7 @@ HARD_FAILURE_DIMENSIONS = {
     "material_tension_or_unresolved_relation_silently_harmonized": {"theological_tension_and_attribution"},
     "negative_material_displaces_positive_thesis": {"positive_thesis_and_structural_fidelity", "reader_memory_center"},
     "meta_analysis_displaces_first_order_argument": {"positive_thesis_and_structural_fidelity", "editorial_voice_restraint", "general_reader_readability"},
+    "opening_reader_path_broken": {"positive_thesis_and_structural_fidelity", "general_reader_readability"},
     "article_argument_hierarchy_flattened": {"positive_thesis_and_structural_fidelity", "argument_route_integrity", "reader_memory_center"},
     "source_local_argument_routes_spliced": {"argument_route_integrity"},
     "exegetical_observation_inference_conclusion_chain_missing": {"argument_route_integrity"},
@@ -418,6 +420,9 @@ def run_quality(
             "baseline_author_result": baseline_result,
             "baseline_manuscript_sha256": baseline_sha,
             "blocking_findings": blocking,
+            "reader_prose_forbidden_phrases": list(
+                FORBIDDEN_TOPIC_READER_PHRASES
+            ),
         })
         revision_number = revision_count + 1
         _write_json(
@@ -429,13 +434,28 @@ def run_quality(
             },
         )
         revision_fp = generation_fingerprint(
-            inputs={"packet_sha256": packet["packet_sha256"], "baseline_manuscript_sha256": baseline_sha, "findings_sha256": sha256_json(blocking), "backend": getattr(revision_client, "backend", "api")},
+            inputs={"revision_payload_sha256": sha256_text(revision_payload), "backend": getattr(revision_client, "backend", "api")},
             prompt_text=revision_prompt, schema=TOPIC_EDITORIAL_REVISION_SCHEMA,
             model=revision_client.model, reasoning=getattr(revision_client, "reasoning_effort", "unknown"),
         )
         def generate_revision() -> dict[str, Any]:
             value = revision_client.generate_json(revision_prompt, revision_payload, TOPIC_EDITORIAL_REVISION_SCHEMA)
-            validate_topic_editorial_revision(value, baseline_manuscript_sha256=baseline_sha, findings=blocking, authoring_packet=packet)
+            try:
+                validate_topic_editorial_revision(value, baseline_manuscript_sha256=baseline_sha, findings=blocking, authoring_packet=packet)
+            except Exception as exc:
+                rejected = output_dir / "rejected-generations"
+                rejected.mkdir(parents=True, exist_ok=True)
+                _write_json(
+                    rejected / f"editorial-revision-{revision_number:02d}.{sha256_json(value)[:16]}.json",
+                    {
+                        "schema_version": "wang_theological_topic_rejected_generation_v1",
+                        "stage": "editorial_revision",
+                        "packet_sha256": sha256_text(revision_payload),
+                        "validation_error": f"{type(exc).__name__}: {exc}",
+                        "result": value,
+                    },
+                )
+                raise
             return value
         revision, cached = _run_cached_stage(
             path=output_dir / f"editorial-revision-{revision_number:02d}.json",

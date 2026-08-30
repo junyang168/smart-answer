@@ -9,6 +9,7 @@ EditorialScope 中的 `editorial_constraints` 是已经由人类编辑决定并�
 请判断：
 
 1. candidate 是否真正回答 reader question，而不是按来源或讲授次序堆砌；
+1a. `opening_contract` 是否形成一条普通读者可以跟随的路径：先准确交代受检验的解释或经文问题，再说明为什么必须检验，只提出一个统摄问题，并直接进入第一节的首项经文证据。`opening_contract.governing_question` 与第一节 `governing_question` 是同一项契约，必须逐字相同且合计只有一个问号；“先看什么证据”写在 `first_evidence_path`，不得再塞成第二个问句。不要把“列出全部可能答案”误当成完整；开场提前枚举答案和未决关系会使读者在论证开始前失去主线，应以 `section_progression_broken` 或 `other` 返回 blocking finding。若 finding 要改这一统摄问题，`authorized_change_paths` 必须同时包含 `/opening_contract/governing_question` 与 `/sections/0/governing_question`，两处不可单独授权。
 2. 正面主张是否成为标题、takeaway 和主要 sections 的中心；
 3. 负面批驳、错误观点或争论对象是否挤占正面中心；
 4. 每个 focal viewpoint 是否诚实进入正文或 route_out；

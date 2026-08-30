@@ -237,6 +237,18 @@ def _candidate(packet):
         "status": "ready",
         "summary": "A positive-centred structure with a later boundary.",
         "article_title": "教会建立在什么根基上",
+        "opening_contract": {
+            "opening_position": "Introduce the interpretation being examined.",
+            "why_it_requires_examination": (
+                "Its downstream conclusion depends on what the rock denotes."
+            ),
+            "governing_question": "What is the church founded upon?",
+            "first_section_id": "SEC-POSITIVE",
+            "first_evidence_path": (
+                "Move directly from the question to the first section's textual evidence."
+            ),
+            "answer_preview_policy": "orientation_only_no_answer_inventory",
+        },
         "reader_takeaway": "文章先呈现正面根基，再说明彼得本人不是根基。",
         "reader_takeaway_attribution": "editorial_synthesis",
         "reader_takeaway_viewpoint_revision_ids": ["CVR-POSITIVE"],
@@ -490,6 +502,76 @@ def test_ready_brief_preserves_structure_unresolved_items():
     candidate["unresolved_items"] = []
     with pytest.raises(TheologicalEditorialContractError, match="unresolved"):
         validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+def test_ready_brief_requires_an_opening_contract_bound_to_the_first_section():
+    packet = _compile()
+    candidate = _candidate(packet)
+    candidate.pop("opening_contract")
+    with pytest.raises(TheologicalEditorialContractError, match="opening contract"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["opening_contract"]["first_section_id"] = "SEC-BOUNDARY"
+    with pytest.raises(TheologicalEditorialContractError, match="first section"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["opening_contract"]["governing_question"] = "A different question?"
+    with pytest.raises(TheologicalEditorialContractError, match="governing question"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["opening_contract"]["governing_question"] = (
+        "What is the foundation? Which evidence establishes it?"
+    )
+    candidate["sections"][0]["governing_question"] = candidate[
+        "opening_contract"
+    ]["governing_question"]
+    with pytest.raises(TheologicalEditorialContractError, match="one governing question"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+def test_brief_review_must_authorize_the_paired_opening_question_fields():
+    packet = _compile()
+    candidate = _candidate(packet)
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "changes_required",
+        "summary": "The first governing question needs revision.",
+        "article_progression_coherent": False,
+        "article_progression_explanation": "The opening and first section diverge.",
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": section["section_id"]
+                != "SEC-POSITIVE",
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "Checked.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [
+            {
+                "finding_id": "BRF-OPENING",
+                "code": "heading_governing_question_mismatch",
+                "severity": "high",
+                "blocking": True,
+                "record_ids": ["SEC-POSITIVE"],
+                "explanation": "The question needs revision.",
+                "recommended_action": "Revise the paired question.",
+                "authorized_change_paths": ["/sections/0/governing_question"],
+            }
+        ],
+    }
+    with pytest.raises(TheologicalEditorialContractError, match="authorized together"):
+        validate_brief_review(review, candidate=candidate)
 
 
 def test_route_must_stay_with_its_conclusion():

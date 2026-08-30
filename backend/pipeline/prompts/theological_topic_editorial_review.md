@@ -4,6 +4,10 @@
 
 逐项按 quality_profile 的 weight 评分；每一项都必须单独达到 minimum，总分不决定通过。逐项判断全部 hard failure。特别检查：标题、导言、小标题、结论是否让普通读者先记住教授的正面主张与理由；负面批驳即使有来源，也不得取代正面中心。检查不同来源的 ArgumentRoute 是否仍分别呈现，没有拼成教授未讲过的超级路线；检查模态、张力和未决关系没有被编辑调和。
 
+输入把 H1 与第一个 H2 之间的文字另行放在 `opening_reader_prose`，并给出 brief 的 `opening_contract`。必须先单独审这一段，再读正文。逐句核对：第一项立场或经文问题是否准确；下一句是否真正说明为什么需要检验；全文是否只有一个统摄问题；问题是否自然进入 `first_evidence_path`；是否在论证开始前枚举了多个候选答案。逐一解释“然而／但是／可是／不过／因此／所以／因而／由此”的真实语义关系，不能只评价句子短不短。
+
+`general_reader_readability.evidence` 必须逐字引用 `opening_evidence_anchors` 中至少一句，再说明首段读者路径；只引用正文中段，不算检查过导言。若开场存在无根据的转折、问题没有由前句发动、出现两个竞争问题、或答案清单先于论证，宣告 `opening_reader_path_broken`，把 `general_reader_readability` 或 `positive_thesis_and_structural_fidelity` 降到最低线以下，并返回一个 anchor 位于 `opening_reader_prose` 的 blocking finding。不得因正文中段清楚而放过。
+
 逐次检查原稿和 brief 中的“或者”、并列答案与未决关系在导言、正文阶段结论和全文结尾的每一次转述。文章不能先承认“或者”，随后又用“以及”“所认信、所领受和所传递的真理”“同一根基”等合并句把两个答案重新揉成一个；这种局部调和必须产生 blocking finding，并判定 `material_tension_or_unresolved_relation_silently_harmonized`，不能因为别处有一次未决披露就放过。
 
 还要单独检查文章是否真正以经文观察、推理与结论向前推进。若标题、导言、小标题或多数段落主要在枚举、分类、评论“教授有几种看法”，读起来像教授思想分析或审核报告，而不是让读者跟着教授的论证走，必须判定 `meta_analysis_displaces_first_order_argument` hard failure。必要的归属说明和一次诚实的未决披露不构成失败；失败在于观察者语言成为全文组织原则。

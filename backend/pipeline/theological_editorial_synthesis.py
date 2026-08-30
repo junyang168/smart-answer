@@ -1061,6 +1061,36 @@ def validate_editorial_brief_candidate(
         return
 
     _require(bool(sections), "ready brief requires sections")
+    opening_contract = candidate.get("opening_contract") or {}
+    _require(bool(opening_contract), "ready brief requires an opening contract")
+    for field in (
+        "opening_position",
+        "why_it_requires_examination",
+        "governing_question",
+        "first_section_id",
+        "first_evidence_path",
+    ):
+        _nonempty(opening_contract.get(field), f"opening contract {field}")
+    _require(
+        opening_contract.get("answer_preview_policy")
+        == "orientation_only_no_answer_inventory",
+        "opening contract must defer the full answer inventory",
+    )
+    first_section = sections[0]
+    _require(
+        opening_contract.get("first_section_id") == first_section.get("section_id"),
+        "opening contract must enter the first section",
+    )
+    _require(
+        opening_contract.get("governing_question")
+        == first_section.get("governing_question"),
+        "opening contract governing question must match the first section",
+    )
+    opening_question = str(opening_contract["governing_question"])
+    _require(
+        opening_question.count("?") + opening_question.count("？") == 1,
+        "opening contract must contain one governing question",
+    )
     _unique(
         [str(item.get("embedded_material_id") or "") for item in embedded_materials],
         "embedded material ids",
@@ -1265,6 +1295,29 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
             },
             "summary": {"type": "string"},
             "article_title": {"type": "string"},
+            "opening_contract": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "opening_position": {"type": "string"},
+                    "why_it_requires_examination": {"type": "string"},
+                    "governing_question": {"type": "string"},
+                    "first_section_id": {"type": "string"},
+                    "first_evidence_path": {"type": "string"},
+                    "answer_preview_policy": {
+                        "type": "string",
+                        "enum": ["orientation_only_no_answer_inventory"],
+                    },
+                },
+                "required": [
+                    "opening_position",
+                    "why_it_requires_examination",
+                    "governing_question",
+                    "first_section_id",
+                    "first_evidence_path",
+                    "answer_preview_policy",
+                ],
+            },
             "reader_takeaway": {"type": "string"},
             "reader_takeaway_attribution": {
                 "type": "string",
@@ -1452,6 +1505,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
             "status",
             "summary",
             "article_title",
+            "opening_contract",
             "reader_takeaway",
             "reader_takeaway_attribution",
             "reader_takeaway_viewpoint_revision_ids",
@@ -1752,6 +1806,15 @@ def validate_brief_review(
             for value in finding.get("authorized_change_paths") or []
         ]
         _unique(paths, f"{finding.get('finding_id')} authorized change paths")
+        paired_opening_paths = {
+            "/opening_contract/governing_question",
+            "/sections/0/governing_question",
+        }
+        if paired_opening_paths & set(paths):
+            _require(
+                paired_opening_paths <= set(paths),
+                "opening and first-section governing question changes must be authorized together",
+            )
         if decision == "changes_required" and finding.get("blocking") is True:
             _require(
                 bool(paths),

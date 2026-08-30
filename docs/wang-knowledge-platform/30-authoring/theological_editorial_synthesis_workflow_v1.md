@@ -3,7 +3,7 @@
 > **读者**：神学编辑、Solution architect、Developer
 > **类型**：流程
 > **状态**：当前
-> **与代码对齐**：2026-08-28
+> **与代码对齐**：2026-08-30
 > **权威范围**：从审核过的教授材料形成神学编辑综合文章时，编辑判断、运行阶段、artifact 边界、停止状态与验收条件。
 
 ## 目录
@@ -105,6 +105,7 @@ flowchart LR
 
 - `reader_question`：文章要回答的一个主要问题；
 - `reader_takeaway`：编辑预计读者读完能复述的正面中心，明确标记为编辑综合；
+- `opening_contract`：开场先介绍什么解释或经文问题、为什么需要检验、唯一统摄问题、进入哪一节及首先展开什么经文证据；它规定读者路径，不代写开场白；
 - 所选 `structure_revision_id` 及其内容 SHA；
 - 每个 focal viewpoint 的 revision、结构角色、归属类别、是否进入正文，以及进入正文时承担的 section；
 - 每条选中 `ArgumentRoute` 的 revision、source-local attestations 和文章功能；
@@ -146,6 +147,8 @@ Author 必须让正面中心成为全文主线与读者最后的记忆中心。�
 
 Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位具体证据。Composition 与 Editorial Review 也使用同一份完整原稿包，不能只根据 CVP、route summary 或 brief 判断忠实度。
 
+开场是独立的质量对象。Brief 必须用 `opening_contract` 建立“受检验的解释或经文问题—为什么需要检验—一个统摄问题—首项经文证据”的路径；Author 必须逐字使用获批的统摄问题，不得用多个连续问句或候选答案清单替代这条路径。导言中的“然而、但是、因此、所以”等连接词必须表达真实的转折或因果，不能只承担换题作用。
+
 段落 provenance 分开记录 Claim 与 `ArgumentRoute`：Claim 回答本段声明了哪些教授主张，route revision 回答这些主张在本段组成哪一条实际论证。后台来源预览对论证段落必须沿 section 批准的 source-local route attestation 和 step bindings 取片段，按前提、限定、异议回应与结论显示；不得把 Claim 背后的全部 Evidence Step 按来源合并后冒充本段论证。没有使用路线的经文引述或简单陈述才回退到 Claim Evidence。
 
 文章必须采用第一层的释经论证视角：以经文问题、观察、推理和结论推进，让读者跟着教授的论证走；不得以“教授有几种看法”“现有材料如何分类”作为全文骨架。导言可以一次交代文章整理的是王教授的讲论，未决关系也必须在真正影响结论处披露；但反复使用“教授认为／指出／判断”“一种／另一种识别”“现有材料”来组织标题和段落，会把文章写成思想分析或审核报告，应作为 hard failure 退回 Composition，而不是只在 Revision 中替换措辞。
@@ -159,6 +162,8 @@ Final Delta Review 以 changed paragraphs 为审核范围，但 packet 同时携
 Composition finding 必须明确列出允许修改的 candidate 字段。Revision 后由程序计算 baseline 与 revised candidate 的真实 JSON diff：每个变动字段必须属于某项 finding 的授权范围，或被逐项申报为有理由且关联到具体 finding 的连带修改；申报但没有真实变化、真实变化却未申报，都会在 Final Composition Review 前失败。Final Composition Reviewer 还要看到 baseline、真实 diff、授权范围与连带修改，并复查 heading、统摄问题、阶段结论、路线主次和整篇递进，不能只确认旧 finding 表面上已消失。
 
 Writing quality profile 必须把以下情况列为 hard failure：稿件虽有来源，但负面批驳、争论对象或错误观点取代了 brief 所声明的正面中心；或者真实的 source-local 路线虽然都出现了，却被写成没有统摄问题、没有证据主次和阶段结论的平面清单。Reviewer 应检查标题、导言、小标题和结论是否共同回答 reader question，并区分“跨来源拼接路线”与“路线真实但文章层级被压平”这两种失败；不能只在一般 `argument_organization` 说明中顺带提及。
+
+Independent Editorial Review packet 另行提取 H1 与第一个 H2 之间的 reader prose，并附 Brief 的 `opening_contract`。Reviewer 必须先审核这段文字，且 `general_reader_readability` 的 evidence 至少逐字引用其中一句；只引用正文中段不能为导言背书。无根据的转折、没有被前句发动的问题、两个竞争问题或先于论证的答案清单，构成 `opening_reader_path_broken` hard failure，并须产生锚定在导言的 blocking finding。初审一旦漏掉未改动的导言，Delta Review 按范围继承便无法补救，因此这项责任不能下放到修订轮次。
 
 ## 十、可重复性
 

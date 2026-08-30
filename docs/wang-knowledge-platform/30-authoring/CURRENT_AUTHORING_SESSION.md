@@ -6,7 +6,7 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-29 (America/Chicago)
+Updated: 2026-08-30 (America/Chicago)
 
 ## Project boundary
 
@@ -32,12 +32,14 @@ Issue #266 established a separate theological editorial synthesis workflow. It d
 
 Two topic essays completed the full workflow and were automatically published to the Wang repository on 2026-08-28 without a production deployment:
 
-- `TES-matthew-16-18-church-foundation-v1`, current final manuscript SHA `ba317e75aa05364a70c6351150da88e7ba6169d2255cccd3781b602d80ac7aff`;
+- `TES-matthew-16-18-church-foundation-v1`, current final manuscript SHA `6bf4c4f2cb520f958d0945b1c726ea79e889b5645b3ba17fb2a29197d47f770e` after the 2026-08-30 #278 rerun;
 - `TES-matthew-16-18-gates-not-prevail-v1`, final manuscript SHA `b599e72f8e7b9d06f84315a5108cdeeee4192b1e7ee0ec089d3edddfd8bcc4c8`.
 
 Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. The workflow definition, operator commands, POC record and non-destructive three-article gap report are under this directory with the `theological_editorial_synthesis_` prefix.
 
 The 2026-08-29 golden-case recalibration is the current review target. Its SHA-bound scope now carries the human-approved four-section outline, no-introduction-H2 rule and Aramaic-footnote placement. Composition brief SHA `1773fa3394f5d50bb0bc8b18253804de35d0e298f2f0154043202ebaae23c564` restores one governing question per heading and distinguishes primary support, corroboration, qualification and objection response. Author and review gates now preserve the source's 「或者」 at every summary, keep professor assertions separate from editorial unresolved disclosures, require an embedded objection's actual node rather than its label, and reject observer-language reader prose. Final Delta Review receives the revised full manuscript only as positional context for its declared paragraph diff; without that context it once falsely treated the last inserted paragraph as the article ending while an unchanged positive closing paragraph still followed it. Admin preview `church-foundation-poc-v14` is registered against `quality-v12`, with sources hidden by default and the source switch verified against transcript, Audio and manuscript links.
+
+Issue #278 corrected a systematic opening-review blind spot exposed by the 2026-08-30 rerun. A Ready Brief now carries a locked `opening_contract`: the position under examination, why it requires examination, exactly one governing question, and the first evidence path. Author output must use that approved question verbatim. Independent Editorial Review receives the complete H1-to-first-H2 opening separately, and its readability evidence must quote an exact opening sentence; a broken opening also requires an opening-anchored blocking finding. The real rerun reused its one valid Independent Review, completed one valid Revision and one Final Delta Review, passed Program Audit with zero errors, and republished `TES-matthew-16-18-church-foundation-v1` with manuscript SHA `6bf4c4f2cb520f958d0945b1c726ea79e889b5645b3ba17fb2a29197d47f770e`. The accepted opening now proceeds from the disputed first-pope interpretation, to why the foundation question requires examination, to one governing question, and then directly into the Petrus／petra evidence. Delta Review retained one non-blocking concision finding: the final section repeats the unresolved 「或者」 disclosure and refers to an unnumbered “第二节”; the quality profile permits that minor defect, so it is recorded rather than silently described as absent.
 
 The admin source preview now resolves inferential paragraphs through the approved section `ArgumentRoute` and its source-local attestation step bindings. Claim provenance remains the assertion-coverage ledger and the fallback for non-route statements; it no longer expands every Claim Evidence Step as though that collection identified the argument actually used. Route cards show the route label, ordered step role, normalized proposition and the exact fragments bound to that step. Author provenance may explicitly name `argument_route_revision_ids`; the validator rejects route revisions outside the paragraph's brief section. This change fixed the first-pope paragraph, whose Claim expansion placed a long “Peter is not the rock” source before the direct transcript statement that the first-pope inference “没有这回事”.
 

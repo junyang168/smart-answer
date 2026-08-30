@@ -368,6 +368,19 @@ def validate_topic_author_result(
         f"forbidden reader-prose phrases: {forbidden}",
     )
     decisions = authoring_packet["editorial_decisions"]
+    opening = topic_opening_reader_prose(manuscript)
+    _require(bool(opening), "manuscript requires reader-visible opening prose")
+    _require(
+        opening.count("?") + opening.count("？") == 1,
+        "opening must contain exactly one governing question",
+    )
+    governing_question = str(
+        decisions["opening_contract"]["governing_question"]
+    ).strip()
+    _require(
+        governing_question in opening,
+        "opening must use the approved governing question exactly",
+    )
     title = str(decisions["article_title"])
     _require(
         manuscript.lstrip().startswith(f"# {title}"),
@@ -552,6 +565,27 @@ def topic_reader_text(markdown: str) -> str:
     return re.sub(r"<!--.*?-->", "", markdown, flags=re.DOTALL)
 
 
+def topic_opening_reader_prose(markdown: str) -> str:
+    """Return the reader-visible prose between the H1 and first H2."""
+
+    h1 = re.search(r"(?m)^# .+$", markdown)
+    if h1 is None:
+        return ""
+    first_h2 = re.search(r"(?m)^## .+$", markdown[h1.end() :])
+    end = h1.end() + first_h2.start() if first_h2 is not None else len(markdown)
+    return topic_reader_text(markdown[h1.end() : end]).strip()
+
+
+def topic_opening_evidence_anchors(opening: str) -> list[str]:
+    """Split opening prose into exact sentences a review must quote."""
+
+    return [
+        value.strip()
+        for value in re.findall(r"[^。！？.!?]+[。！？.!?]", opening)
+        if value.strip()
+    ]
+
+
 def editorial_instructions_by_claim(
     *, authoring_packet: Mapping[str, Any], author_result: Mapping[str, Any]
 ) -> dict[str, str]:
@@ -638,10 +672,16 @@ def build_topic_editorial_review_packet(
 ) -> dict[str, Any]:
     validate_topic_author_result(author_result, authoring_packet=authoring_packet)
     manuscript = str(author_result["manuscript_markdown"])
+    opening = topic_opening_reader_prose(manuscript)
     packet = {
         "schema_version": "wang_theological_topic_editorial_review_packet_v1",
         "manuscript_sha256": sha256_text(manuscript),
         "manuscript_markdown": manuscript,
+        "opening_reader_prose": opening,
+        "opening_evidence_anchors": topic_opening_evidence_anchors(opening),
+        "opening_contract": authoring_packet["editorial_decisions"][
+            "opening_contract"
+        ],
         "editorial_decisions": authoring_packet["editorial_decisions"],
         "author_section_ledger": author_result["sections"],
         "quality_profile": authoring_packet["quality_profile"],
@@ -715,6 +755,17 @@ def validate_topic_editorial_review(
     weights = {str(item["id"]): int(item["weight"]) for item in profile["dimensions"]}
     for item in review["dimension_scores"]:
         _require(0 <= int(item["score"]) <= weights[str(item["dimension_id"])], "review score outside dimension weight")
+    readability = next(
+        item
+        for item in review["dimension_scores"]
+        if item["dimension_id"] == "general_reader_readability"
+    )
+    opening_anchors = list(review_packet.get("opening_evidence_anchors") or [])
+    _require(bool(opening_anchors), "review packet has no opening evidence anchors")
+    _require(
+        any(anchor in str(readability.get("evidence") or "") for anchor in opening_anchors),
+        "general-reader readability evidence must cite the opening",
+    )
     hard_ids = [str(value) for value in profile["hard_failures"]]
     received_hard = [str(item["failure_id"]) for item in review["hard_failure_assessments"]]
     _require(len(received_hard) == len(set(received_hard)) and set(received_hard) == set(hard_ids), "review must assess every hard failure exactly once")
@@ -729,6 +780,29 @@ def validate_topic_editorial_review(
         _require(item["dimension_id"] in dimension_ids, "finding uses unknown dimension")
         _require(item["section_id"] in section_ids, "finding uses unknown section")
         _require(bool(item["manuscript_anchor"]) and item["manuscript_anchor"] in manuscript, "finding anchor not found")
+    opening_failed = next(
+        (
+            bool(item["failed"])
+            for item in review["hard_failure_assessments"]
+            if item["failure_id"] == "opening_reader_path_broken"
+        ),
+        False,
+    )
+    if opening_failed:
+        opening = str(review_packet["opening_reader_prose"])
+        _require(
+            any(
+                item["blocking"]
+                and item["dimension_id"]
+                in {
+                    "general_reader_readability",
+                    "positive_thesis_and_structural_fidelity",
+                }
+                and str(item["manuscript_anchor"]) in opening
+                for item in review["findings"]
+            ),
+            "broken opening requires a blocking finding anchored in the opening",
+        )
     return evaluate_topic_editorial_review(review, quality_profile=profile)
 
 

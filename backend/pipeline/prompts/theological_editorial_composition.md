@@ -13,6 +13,7 @@
 必须遵守：
 
 1. `reader_question` 是文章唯一主要问题；标题、takeaway 与 sections 必须共同回答它。
+1a. `opening_contract` 不是开场白正文，而是开场的功能契约。必须逐项写清：准备先介绍哪一项受检验的解释或经文问题（`opening_position`）、为什么它需要检验（`why_it_requires_examination`）、唯一统摄问题（`governing_question`）、开场进入哪个第一节（`first_section_id`），以及该节首先展开什么经文证据（`first_evidence_path`）。`governing_question` 必须与第一节逐字相同，而且整项只能有一个问号；不要把“是否成立”和“证据怎样支持”写成两个连续问题，证据去向已经由 `first_evidence_path` 承担。`first_section_id` 必须是第一节；`answer_preview_policy` 固定为 `orientation_only_no_answer_inventory`，因为开场只给阅读方向，不得提前罗列全文所有候选答案和未决关系。
 2. `reader_takeaway` 是编辑对文章中心的归纳，必须标记 `editorial_synthesis`，不得冒充教授原话。
 3. `ViewpointStructure` 中每个 focal viewpoint 必须在 `viewpoint_coverage` 恰好出现一次：进入某个 section，或以具体理由 `route_out`。不得静默遗漏。
 4. 每个 `central_claim` 必须进入正文；至少一个 `positive_identification` 必须进入正文。`negative_boundary` 不得承担 takeaway。

@@ -3,7 +3,7 @@
 > **读者**：教会编辑、Operator、Developer
 > **类型**：操作手册
 > **状态**：当前
-> **与代码对齐**：2026-08-28
+> **与代码对齐**：2026-08-30
 
 ## 一、先决定 scope
 
@@ -12,6 +12,8 @@
 若人类编辑已经批准本篇的论证顺序、正文部分数量或某项材料只能作为 footnote／inline note，必须把决定写入 scope 的 `editorial_constraints`，并绑定原 feedback artifact SHA。不能只把反馈文件放在 staging 目录里：模型不会自行遍历该目录，下次生成也没有义务记得聊天。Runner 会机械检查 section count、被禁止的 article function 和 embedded material placement；Composition Reviewer 还须逐项审核 approved outline 等需要判断的约束。
 
 母本是优先来源，不是目录权威。目录由审核过的 structure 与 `TheologicalEditorialBrief` 决定。若 structure 尚未覆盖读者问题，先补权威知识记录，不要让 Composition 猜。
+
+批准 Brief 前同时检查 `opening_contract`：它必须只提出一个统摄问题，并写清受检验的解释或经文问题为什么需要检验、随后进入哪个第一节及哪项经文证据。Author 可以自行组织其余开场措辞，但必须逐字使用批准的统摄问题。缺少这项契约，或把全文答案与未决关系提前列成开场清单，Brief 不能进入 Author。
 
 本流程直接从 Registry 编译 `TheologicalEvidencePacket`，不使用 `ViewpointKnowledgeProjection`。EvidencePacket 包含当前 scope 选中的 revision、source-local route、Claim、Evidence、来源片段，以及每份入选逐字稿与母本的完整原文，并以 dependency manifest 和 source-original manifest 绑定。片段用于定位，不能代替 Composition、Author 或 Reviewer 阅读完整原稿。
 
@@ -52,6 +54,10 @@ backend/.venv/bin/python -m backend.pipeline.theological_topic_quality_runner \
 ```
 
 初稿只做一次 Independent Editorial Review。每轮 Revision 恰好做一次 Final Delta Review；delta 在同一响应返回下一轮 finding。Delta packet 包含 changed paragraphs，并附修订后全文作为位置上下文；Reviewer 只能用全文确认改动段的相邻关系、归属、标题层级和实际结尾，不得借此重做全文初审。只看 paragraph diff 会漏掉位于插入段之后、但文字本身未变化的收束段，因此不得从 diff 顺序推断文章最后一句。评分只按每个 dimension 的 minimum 判断，总分只展示、不决定通过。任何 hard failure 直接失败。
+
+初审 packet 还会单列 `opening_reader_prose` 与逐字 `opening_evidence_anchors`。检查 `general_reader_readability` 时必须看到 Reviewer 的 evidence 引用其中至少一句；若 evidence 只谈正文中段，schema 验证直接失败。`opening_reader_path_broken` 必须带一个锚定在导言、归入可读性或正面结构维度的 blocking finding。
+
+Revision 输出前须从最终 manuscript 逐字复制每条 resolved finding 的 `resolution_anchor`，并扫描 packet 声明的 reader-prose 禁用词。语义校验不通过时，runner fail closed，并把完整无效输出和错误写入 `rejected-generations/`；不得删改失败稿后冒充有效 generation，也不得因此重跑 Independent Review。
 
 若 finding 要改变 locked heading、section function 或未决关系，停止 Author 修订，回到 Composition：
 
