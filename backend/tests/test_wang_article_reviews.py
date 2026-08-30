@@ -121,6 +121,81 @@ def test_internal_review_is_sha_bound_and_not_a_publication(tmp_path: Path, monk
     assert "publication_decision" not in result
 
 
+def test_review_projects_excerpt_level_audio_from_raw_timed_transcript(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _, _, packet = _fixture(tmp_path, monkeypatch)
+    data = tmp_path / "data"
+    published_path = data / "script_published" / "讲道一.json"
+    raw_path = data / "script" / "讲道一.json"
+    _write_json(
+        published_path,
+        {
+            "script": [
+                {
+                    "index": 100,
+                    "start_index": 100,
+                    "end_index": 101,
+                    "start_time": 50,
+                    "end_time": 82,
+                    "text": "前面是别的内容。教授逐字稿原句。",
+                }
+            ]
+        },
+    )
+    _write_json(
+        raw_path,
+        {
+            "entries": [
+                {
+                    "index": 100,
+                    "start_ms": 50000,
+                    "end_ms": 65000,
+                    "text": "前面是别的内容。",
+                },
+                {
+                    "index": 101,
+                    "start_ms": 65000,
+                    "end_ms": 82000,
+                    "text": "教授逐字稿原句。",
+                },
+            ]
+        },
+    )
+    payload = json.loads(packet.read_text(encoding="utf-8"))
+    knowledge = payload["result"]["knowledge"]
+    knowledge["source_documents"][0]["source_path"] = str(published_path)
+    knowledge["source_documents"][0]["source_sha256"] = hashlib.sha256(
+        published_path.read_bytes()
+    ).hexdigest()
+    knowledge["source_fragments"][0].update(
+        {
+            "paragraph_key": "S0001",
+            "source_segment_index": 100,
+            "media_time": 50,
+            "media_end_time": 82,
+        }
+    )
+    _write_json(packet, payload)
+    manifest_path = packet.parents[3] / "topic-essay-reviews" / "church-foundation-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["authoring_packet_file_sha256"] = hashlib.sha256(packet.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+    monkeypatch.setattr(wang_article_reviews, "DATA_BASE_PATH", data)
+
+    review = wang_article_reviews.article_review("church-foundation-v1")
+
+    media = review["source_annotations"][0]["sources"][0]["media"]
+    assert media["paragraph_start_seconds"] == 50
+    assert media["excerpt_start_seconds"] == 65
+    assert media["start_seconds"] == 63
+    assert media["end_seconds"] == 84
+    assert media["timing_status"] == "exact"
+    assert review["source_playback_audit"]["passed"] is True
+    assert review["source_playback_audit"]["exact_clips"] == 1
+    assert review["source_playback_audit"]["paragraph_fallback_clips"] == 0
+
+
 def test_published_workflow_reports_every_completed_stage() -> None:
     checks = wang_article_reviews._stage_checks({"status": "workflow_published"})
 
@@ -329,15 +404,17 @@ def test_section_argument_route_selects_step_bound_fragments_instead_of_all_clai
     assert source["route_revision_id"] == "ARR-POPE"
     assert source["route_label"] == "由经文论证反驳首任教皇说"
     assert source["excerpts"] == ["说彼得是第一任教皇，其实没有这回事。"]
-    assert source["route_steps"] == [
-        {
-            "route_step_key": "C1",
-            "role": "conclusion",
-            "proposition": "不能推出彼得是第一任教皇。",
-            "fragment_ids": ["FR-POPE"],
-            "excerpts": ["说彼得是第一任教皇，其实没有这回事。"],
-        }
-    ]
+    assert len(source["route_steps"]) == 1
+    step = source["route_steps"][0]
+    assert step["route_step_key"] == "C1"
+    assert step["role"] == "conclusion"
+    assert step["proposition"] == "不能推出彼得是第一任教皇。"
+    assert step["fragment_ids"] == ["FR-POPE"]
+    assert step["excerpts"] == ["说彼得是第一任教皇，其实没有这回事。"]
+    assert len(step["media_clips"]) == 1
+    assert step["media_clips"][0]["start_seconds"] == 30
+    assert step["media_clips"][0]["timing_status"] == "unresolved"
+    assert source["media"] is None
 
 
 def test_route_conclusion_does_not_substitute_viewpoint_editorial_wording() -> None:
@@ -405,6 +482,95 @@ def test_route_conclusion_does_not_substitute_viewpoint_editorial_wording() -> N
     assert sources[0]["route_steps"][0]["excerpts"] == [
         "或者是信仰，或者是所传的真理。"
     ]
+
+
+def test_non_contiguous_route_steps_keep_separate_audio_clips() -> None:
+    packet = {
+        "knowledge": {
+            "claims": [{"claim_id": "CL-1", "evidence_step_ids": ["ES-1", "ES-2"]}],
+            "source_fragments": [
+                {
+                    "fragment_id": "FR-1",
+                    "source_id": "SRC-1",
+                    "verbatim_excerpt": "第一项证据。",
+                    "media_time": 10,
+                    "media_end_time": 20,
+                    "excerpt_media_time": 12,
+                    "excerpt_media_end_time": 16,
+                    "excerpt_timing": {
+                        "status": "exact",
+                        "method": "normalized_exact",
+                        "match_ratio": 1,
+                        "reviewed_text_differs_from_raw": False,
+                        "alignment_sha256": "a" * 64,
+                    },
+                },
+                {
+                    "fragment_id": "FR-2",
+                    "source_id": "SRC-1",
+                    "verbatim_excerpt": "很久以后才讲第二项证据。",
+                    "media_time": 100,
+                    "media_end_time": 120,
+                    "excerpt_media_time": 108,
+                    "excerpt_media_end_time": 114,
+                    "excerpt_timing": {
+                        "status": "exact",
+                        "method": "normalized_exact",
+                        "match_ratio": 1,
+                        "reviewed_text_differs_from_raw": False,
+                        "alignment_sha256": "b" * 64,
+                    },
+                },
+            ],
+            "source_documents": [
+                {
+                    "source_id": "SRC-1",
+                    "source_type": "sermon_transcript",
+                    "title": "讲道",
+                    "transcript_id": "讲道",
+                }
+            ],
+        },
+        "argument_routes": [
+            {
+                "revision": {
+                    "argument_route_revision_id": "ARR-1",
+                    "route_label": "分散在讲道两处的论证",
+                    "ordered_inference_nodes": [
+                        {"route_step_key": "P1", "role": "premise"},
+                        {"route_step_key": "C1", "role": "conclusion"},
+                    ],
+                },
+                "attestations": [
+                    {
+                        "source_id": "SRC-1",
+                        "claim_ids": ["CL-1"],
+                        "step_bindings": [
+                            {
+                                "route_step_key": "P1",
+                                "evidence_step_ids": ["ES-1"],
+                                "source_fragment_ids": ["FR-1"],
+                            },
+                            {
+                                "route_step_key": "C1",
+                                "evidence_step_ids": ["ES-2"],
+                                "source_fragment_ids": ["FR-2"],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    sources = wang_article_reviews._route_sources(
+        {"claim_ids": ["CL-1"]}, packet, ["ARR-1"], {}
+    )
+
+    assert sources[0]["media"] is None
+    steps = sources[0]["route_steps"]
+    assert [step["media_clips"][0]["start_seconds"] for step in steps] == [10, 106]
+    assert [step["media_clips"][0]["end_seconds"] for step in steps] == [18, 116]
 
 
 def test_route_projection_keeps_claim_evidence_for_an_unrepresented_premise(

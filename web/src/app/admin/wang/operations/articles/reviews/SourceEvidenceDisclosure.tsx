@@ -32,12 +32,37 @@ function SourceMediaPlayer({ media }: { media: ReviewSourceMedia }) {
   const stopAtEnd = (element: HTMLMediaElement) => {
     if (end !== null && end > 0 && element.currentTime >= end) element.pause();
   };
-  const label = start === null ? "原讲道录音" : `从 ${formatTime(start)} 播放`;
+  const label = start === null
+    ? "原讲道录音"
+    : media.timing_status === "exact"
+      ? `从 ${formatTime(start)} 播放`
+      : media.timing_status === "estimated"
+        ? `约从 ${formatTime(start)} 播放`
+        : `从所在段落 ${formatTime(start)} 播放`;
   return (
     <span className="mt-4 block rounded-xl border border-amber-200 bg-amber-50/70 p-3">
       <span className="mb-2 flex items-center gap-2 text-xs font-bold text-amber-950">
         <FileAudio className="h-4 w-4" />{label}
       </span>
+      {media.timing_status === "estimated" ? (
+        <span className="mb-2 block text-[11px] leading-5 text-amber-800">
+          依据校订稿与原始带时间逐字稿的唯一顺序匹配定位。
+        </span>
+      ) : media.timing_status !== "exact" && start !== null ? (
+        <span className="mb-2 block text-[11px] font-semibold leading-5 text-red-700">
+          尚未定位到引文本身；当前时间只是所在大段的开头。
+        </span>
+      ) : null}
+      {media.reviewed_text_differs_from_raw ? (
+        <span className="mb-2 block text-[11px] font-semibold leading-5 text-red-700">
+          校订文字与原始带时间转录不完全一致，需要复核文字。
+        </span>
+      ) : null}
+      {media.lineage_window_expanded ? (
+        <span className="mb-2 block text-[11px] font-semibold leading-5 text-red-700">
+          已发布段落记录的原始行范围不完整；本时间点由相邻原始行恢复。
+        </span>
+      ) : null}
       {media.kind === "audio" ? (
         <audio
           controls
@@ -103,6 +128,12 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
               <blockquote className="mt-2 border-l-2 border-amber-700 pl-3 text-sm leading-7 text-stone-700">
                 {step.excerpts.map((excerpt) => <p key={excerpt} className="mt-2 first:mt-0">{excerpt}</p>)}
               </blockquote>
+              {step.media_clips.map((media, index) => (
+                <SourceMediaPlayer
+                  key={`${step.route_step_key}:${media.timing_alignment_sha256 ?? media.start_seconds}:${index}`}
+                  media={media}
+                />
+              ))}
             </li>
           ))}
         </ol>
@@ -111,7 +142,7 @@ function SourceCard({ source }: { source: ReviewSourceFragment }) {
           {source.excerpts.map((excerpt) => <p key={excerpt} className="mt-2 first:mt-0">{excerpt}</p>)}
         </blockquote>
       )}
-      {source.media ? <SourceMediaPlayer media={source.media} /> : null}
+      {source.route_steps.length === 0 && source.media ? <SourceMediaPlayer media={source.media} /> : null}
       {source.full_source_url ? (
         <a
           href={source.full_source_url}
