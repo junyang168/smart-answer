@@ -42,6 +42,28 @@ FORBIDDEN_TOPIC_READER_PHRASES = (
 )
 
 
+CONCLUSION_ASSESSMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "evidence_anchor": {"type": "string"},
+        "reader_answer_in_one_sentence": {"type": "string"},
+        "answers_reader_question": {"type": "boolean"},
+        "editorial_process_displaces_answer": {"type": "boolean"},
+        "positive_claims_follow_contract": {"type": "boolean"},
+        "unresolved_disclosure_repeated": {"type": "boolean"},
+    },
+    "required": [
+        "evidence_anchor",
+        "reader_answer_in_one_sentence",
+        "answers_reader_question",
+        "editorial_process_displaces_answer",
+        "positive_claims_follow_contract",
+        "unresolved_disclosure_repeated",
+    ],
+}
+
+
 TOPIC_AUTHOR_SCHEMA: dict[str, Any] = {
     "name": "wang_theological_topic_author_result_v1",
     "strict": True,
@@ -216,11 +238,13 @@ TOPIC_EDITORIAL_REVIEW_SCHEMA: dict[str, Any] = {
                     "required": ["failure_id", "failed", "evidence"],
                 },
             },
+            "conclusion_assessment": CONCLUSION_ASSESSMENT_SCHEMA,
             "findings": {"type": "array", "items": _review_finding_schema()},
         },
         "required": [
             "schema_version", "reviewed_manuscript_sha256", "scope_confirmation",
-            "summary", "dimension_scores", "hard_failure_assessments", "findings",
+            "summary", "dimension_scores", "hard_failure_assessments",
+            "conclusion_assessment", "findings",
         ],
     },
 }
@@ -266,12 +290,14 @@ TOPIC_FINAL_DELTA_REVIEW_SCHEMA: dict[str, Any] = {
             "summary": {"type": "string"},
             "dimension_scores": TOPIC_EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["dimension_scores"],
             "hard_failure_assessments": TOPIC_EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["hard_failure_assessments"],
+            "conclusion_assessment": CONCLUSION_ASSESSMENT_SCHEMA,
             "finding_dispositions": TOPIC_EDITORIAL_REVISION_SCHEMA["schema"]["properties"]["finding_dispositions"],
             "findings": {"type": "array", "items": _review_finding_schema()},
         },
         "required": [
             "schema_version", "baseline_manuscript_sha256", "reviewed_manuscript_sha256",
-            "summary", "dimension_scores", "hard_failure_assessments", "finding_dispositions", "findings",
+            "summary", "dimension_scores", "hard_failure_assessments",
+            "conclusion_assessment", "finding_dispositions", "findings",
         ],
     },
 }
@@ -378,8 +404,8 @@ def validate_topic_author_result(
         decisions["opening_contract"]["governing_question"]
     ).strip()
     _require(
-        governing_question in opening,
-        "opening must use the approved governing question exactly",
+        governing_question in topic_opening_evidence_anchors(opening),
+        "opening must use the approved governing question exactly as a complete sentence",
     )
     title = str(decisions["article_title"])
     _require(
@@ -413,6 +439,7 @@ def validate_topic_author_result(
         for item in authoring_packet["argument_routes"]
     }
     all_ledger_claims: set[str] = set()
+    ledger_claims_by_section: dict[str, set[str]] = {}
     for brief_section, ledger_section in zip(brief_sections, ledger, strict=True):
         heading = f"## {brief_section['heading']}"
         heading_offset = manuscript.find(heading)
@@ -431,6 +458,9 @@ def validate_topic_author_result(
         unknown_claims = set(claim_ids) - set(claims_by_id)
         _require(not unknown_claims, f"unknown Claim IDs: {sorted(unknown_claims)}")
         all_ledger_claims.update(claim_ids)
+        ledger_claims_by_section[str(brief_section["section_id"])] = set(
+            claim_ids
+        )
 
         expected_viewpoints = set(brief_section["viewpoint_revision_ids"])
         used_viewpoints = set(
@@ -464,8 +494,25 @@ def validate_topic_author_result(
         anchor = str(ledger_section.get("output_anchor") or "")
         _require(bool(anchor) and anchor in manuscript, "section output anchor not found")
 
+    conclusion_contract = decisions["conclusion_contract"]
+    required_conclusion_claims = {
+        str(value)
+        for value in conclusion_contract.get("closing_source_claim_ids") or []
+    }
+    final_section_claims = {
+        str(value) for value in ledger[-1].get("claim_ids_used") or []
+    }
+    _require(
+        required_conclusion_claims <= final_section_claims,
+        "final section ledger omits closing Claims required by the conclusion contract",
+    )
+    _require(
+        bool(topic_conclusion_reader_prose(manuscript)),
+        "manuscript requires reader-visible conclusion prose",
+    )
+
     provenance_claims: set[str] = set()
-    section_route_ranges: list[tuple[int, int, set[str]]] = []
+    section_ranges: list[tuple[int, int, set[str], set[str]]] = []
     for index, brief_section in enumerate(brief_sections):
         start = manuscript.find(f"## {brief_section['heading']}")
         end = (
@@ -473,7 +520,7 @@ def validate_topic_author_result(
             if index + 1 < len(brief_sections)
             else len(manuscript)
         )
-        section_route_ranges.append(
+        section_ranges.append(
             (
                 start,
                 end,
@@ -481,6 +528,7 @@ def validate_topic_author_result(
                     str(value)
                     for value in brief_section.get("argument_route_revision_ids") or []
                 },
+                ledger_claims_by_section[str(brief_section["section_id"])],
             )
         )
     for paragraph in extract_provenance_paragraphs(manuscript):
@@ -536,15 +584,23 @@ def validate_topic_author_result(
                 f"provenance cites unknown ArgumentRoutes: {sorted(unknown_routes)}",
             )
             paragraph_offset = int(paragraph.get("comment_offset") or 0)
-            section_routes = next(
+            section_context = next(
                 (
-                    allowed
-                    for start, end, allowed in section_route_ranges
+                    (allowed_routes, allowed_claims)
+                    for start, end, allowed_routes, allowed_claims in section_ranges
                     if start <= paragraph_offset < end
                 ),
                 None,
             )
-            if route_ids and section_routes is not None:
+            if section_context is not None:
+                section_routes, section_claims = section_context
+                outside_claims = set(claim_ids) - section_claims
+                _require(
+                    not outside_claims,
+                    "paragraph provenance cites Claims outside its section ledger: "
+                    f"{sorted(outside_claims)}",
+                )
+            if route_ids and section_context is not None:
                 outside_section = set(route_ids) - section_routes
                 _require(
                     not outside_section,
@@ -584,6 +640,36 @@ def topic_opening_evidence_anchors(opening: str) -> list[str]:
         for value in re.findall(r"[^。！？.!?]+[。！？.!?]", opening)
         if value.strip()
     ]
+
+
+def topic_conclusion_reader_prose(markdown: str) -> str:
+    """Return the reader-visible prose under the final H2."""
+
+    headings = list(re.finditer(r"(?m)^## .+$", markdown))
+    if not headings:
+        return ""
+    return topic_reader_text(markdown[headings[-1].end() :]).strip()
+
+
+def topic_conclusion_evidence_anchors(conclusion: str) -> list[str]:
+    """Split conclusion prose into exact sentences a review must quote."""
+
+    return [
+        value.strip()
+        for value in re.findall(r"[^。！？.!?]+[。！？.!?]", conclusion)
+        if value.strip()
+    ]
+
+
+def conclusion_assessment_broken(assessment: Mapping[str, Any]) -> bool:
+    """Return whether the structured conclusion check declares a reader failure."""
+
+    return (
+        not bool(assessment.get("answers_reader_question"))
+        or bool(assessment.get("editorial_process_displaces_answer"))
+        or not bool(assessment.get("positive_claims_follow_contract"))
+        or bool(assessment.get("unresolved_disclosure_repeated"))
+    )
 
 
 def editorial_instructions_by_claim(
@@ -673,6 +759,7 @@ def build_topic_editorial_review_packet(
     validate_topic_author_result(author_result, authoring_packet=authoring_packet)
     manuscript = str(author_result["manuscript_markdown"])
     opening = topic_opening_reader_prose(manuscript)
+    conclusion = topic_conclusion_reader_prose(manuscript)
     packet = {
         "schema_version": "wang_theological_topic_editorial_review_packet_v1",
         "manuscript_sha256": sha256_text(manuscript),
@@ -681,6 +768,13 @@ def build_topic_editorial_review_packet(
         "opening_evidence_anchors": topic_opening_evidence_anchors(opening),
         "opening_contract": authoring_packet["editorial_decisions"][
             "opening_contract"
+        ],
+        "conclusion_reader_prose": conclusion,
+        "conclusion_evidence_anchors": topic_conclusion_evidence_anchors(
+            conclusion
+        ),
+        "conclusion_contract": authoring_packet["editorial_decisions"][
+            "conclusion_contract"
         ],
         "editorial_decisions": authoring_packet["editorial_decisions"],
         "author_section_ledger": author_result["sections"],
@@ -766,6 +860,25 @@ def validate_topic_editorial_review(
         any(anchor in str(readability.get("evidence") or "") for anchor in opening_anchors),
         "general-reader readability evidence must cite the opening",
     )
+    memory = next(
+        item
+        for item in review["dimension_scores"]
+        if item["dimension_id"] == "reader_memory_center"
+    )
+    conclusion_anchors = list(
+        review_packet.get("conclusion_evidence_anchors") or []
+    )
+    _require(
+        bool(conclusion_anchors),
+        "review packet has no conclusion evidence anchors",
+    )
+    _require(
+        any(
+            anchor in str(memory.get("evidence") or "")
+            for anchor in conclusion_anchors
+        ),
+        "reader-memory evidence must cite the conclusion",
+    )
     hard_ids = [str(value) for value in profile["hard_failures"]]
     received_hard = [str(item["failure_id"]) for item in review["hard_failure_assessments"]]
     _require(len(received_hard) == len(set(received_hard)) and set(received_hard) == set(hard_ids), "review must assess every hard failure exactly once")
@@ -802,6 +915,49 @@ def validate_topic_editorial_review(
                 for item in review["findings"]
             ),
             "broken opening requires a blocking finding anchored in the opening",
+        )
+    conclusion = str(review_packet["conclusion_reader_prose"])
+    conclusion_assessment = review["conclusion_assessment"]
+    conclusion_anchor = str(conclusion_assessment["evidence_anchor"]).strip()
+    _require(
+        bool(conclusion_anchor) and conclusion_anchor in conclusion,
+        "conclusion assessment anchor not found in the conclusion",
+    )
+    reader_answer = str(
+        conclusion_assessment["reader_answer_in_one_sentence"]
+    ).strip()
+    _require(
+        bool(reader_answer) and "\n" not in reader_answer,
+        "conclusion assessment requires a one-line reader answer",
+    )
+    conclusion_broken = conclusion_assessment_broken(conclusion_assessment)
+    declared_conclusion_broken = next(
+        (
+            bool(item["failed"])
+            for item in review["hard_failure_assessments"]
+            if item["failure_id"] == "conclusion_reader_answer_broken"
+        ),
+        False,
+    )
+    _require(
+        declared_conclusion_broken == conclusion_broken,
+        "conclusion hard-failure assessment contradicts conclusion assessment",
+    )
+    if conclusion_broken:
+        _require(
+            any(
+                item["blocking"]
+                and item["dimension_id"]
+                in {
+                    "positive_thesis_and_structural_fidelity",
+                    "general_reader_readability",
+                    "editorial_voice_restraint",
+                    "reader_memory_center",
+                }
+                and str(item["manuscript_anchor"]) in conclusion
+                for item in review["findings"]
+            ),
+            "broken conclusion requires a blocking finding anchored in the conclusion",
         )
     return evaluate_topic_editorial_review(review, quality_profile=profile)
 
@@ -855,3 +1011,42 @@ def validate_topic_final_delta_review(
         # than being silently discarded or forcing another full review.
         _require(item["dimension_id"] in configured_dimensions, "delta finding uses unknown dimension")
         _require(bool(item["manuscript_anchor"]) and item["manuscript_anchor"] in revised_manuscript, "delta finding anchor not found")
+    conclusion = topic_conclusion_reader_prose(revised_manuscript)
+    assessment = review["conclusion_assessment"]
+    conclusion_anchor = str(assessment["evidence_anchor"]).strip()
+    _require(
+        bool(conclusion_anchor) and conclusion_anchor in conclusion,
+        "delta conclusion assessment anchor not found in the conclusion",
+    )
+    reader_answer = str(assessment["reader_answer_in_one_sentence"]).strip()
+    _require(
+        bool(reader_answer) and "\n" not in reader_answer,
+        "delta conclusion assessment requires a one-line reader answer",
+    )
+    conclusion_broken = conclusion_assessment_broken(assessment)
+    if "conclusion_reader_answer_broken" in affected_hard_failure_ids:
+        declared_broken = next(
+            bool(item["failed"])
+            for item in review["hard_failure_assessments"]
+            if item["failure_id"] == "conclusion_reader_answer_broken"
+        )
+        _require(
+            declared_broken == conclusion_broken,
+            "delta conclusion hard-failure assessment contradicts conclusion assessment",
+        )
+    if conclusion_broken:
+        _require(
+            any(
+                item["blocking"]
+                and item["dimension_id"]
+                in {
+                    "positive_thesis_and_structural_fidelity",
+                    "general_reader_readability",
+                    "editorial_voice_restraint",
+                    "reader_memory_center",
+                }
+                and str(item["manuscript_anchor"]) in conclusion
+                for item in review["findings"]
+            ),
+            "broken delta conclusion requires a blocking finding anchored in the conclusion",
+        )

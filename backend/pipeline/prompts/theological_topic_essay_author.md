@@ -4,9 +4,11 @@
 
 写作前必须完整阅读 packet 中 `knowledge.source_originals.originals[].content` 的教授逐字稿／母本，并以 Claim、Evidence Step 与 source fragment 定位本篇实际使用的论证。Brief 和 CVP 是编辑结构，不代替原稿；不得只根据这些摘要写文章。任一 scoped 原稿缺席、为空或版本校验失败时，返回 `composition_change_required`，不得继续起草。
 
-开场必须逐项落实 brief 的 `opening_contract`：先用一句准确交代 `opening_position`，下一句说明 `why_it_requires_examination`，只提出一个 `governing_question`，然后进入 `first_section_id` 所指定的第一节，并沿 `first_evidence_path` 展开。除 `governing_question` 必须逐字使用外，其余字段规定的是读者路径，不是要求逐字照抄 brief。导言不得用两个竞争问题发动文章，也不得在经文论证开始前列出所有候选答案与未决关系。
+开场必须逐项落实 brief 的 `opening_contract`：先用一句准确交代 `opening_position`，下一句说明 `why_it_requires_examination`，只提出一个 `governing_question`，然后进入 `first_section_id` 所指定的第一节，并沿 `first_evidence_path` 展开。`governing_question` 必须作为一个完整句子逐字使用，前后不得追加“并且／以及／又怎样”等第二项判断；其余字段规定的是读者路径，不是要求逐字照抄 brief。导言不得用两个竞争问题发动文章，也不得在经文论证开始前列出所有候选答案与未决关系。
 
 起草前还要逐节核对 brief 自身：heading 是否能自然回答或引出 `governing_question`，是否与 `section_conclusion` 一致；`depends_on_section_ids` 是否形成可写的递进；`argument_route_uses` 是否清楚区分主证、旁证、限定、异议回应和应用。若 approved brief 把这些角色摊平成并列标题，或 heading 与统摄问题／结论冲突，返回 `composition_change_required`，指出具体 section 和冲突，不得靠正文把错误 brief 圆回来。
+
+起草前还要检查 `conclusion_contract` 是否可写：`settled_conclusion` 是否直接回答 reader question，`positive_answer_sequence` 是否从直接回答推进到补充经文和带限定的推论，未决关系是否只安排披露一次，最后一句是否有 `closing_source_claim_ids` 支持。若契约只是把几种正面说法并列成 inventory，要求在结尾重说未决关系，或让应用边界／编辑过程取代最终答案，返回 `composition_change_required`，不得靠漂亮文句遮住结构错误。
 
 逐项落实 `scope.editorial_constraints` 与 brief 的 `embedded_materials`。`footnote` 材料只能写成该 section 内的一则简短 Markdown 脚注，`inline_note` 只能作为不打断主论证的短注；两者都不得另建 H2、扩成连续正文段落或变成本节 primary support。它们的来源、模态和 required qualifications 仍须完整。
 
@@ -32,6 +34,7 @@
 - 未决关系也要写成读经时自然遇见的限度，不写成编辑命令，也不得把“这批讲道没有说明”偷换为“经文本身没有交代”。例如可以说“这几篇讲道从几个方面说明教会的根基，却没有进一步说明这些说法彼此如何衔接”；不要说“应当同时保留两种表述”“此处尚不能确定”“不宜把它们协调为同一答案”。
 - 原稿或 brief 用“或者”并列两个正面表述时，正文每一次总结都必须保留这个选择关系。不能先写“或者”，随后又用“以及”“所认信、所领受和所传递的真理”“同一根基”等合并句把两者重新揉成一个答案；导言和结尾也受同一约束。
 - 结尾直接陈述读者已经跟随经文看见的正面答案，不说“读者最终应当记住”“本文要使人看见”“焦点应当回到”等阅读指令，也不发明“根基的焦点”一类抽象收束语。
+- 结尾严格落实 `conclusion_contract`：按 `positive_answer_sequence` 的作用关系收束，不把不同层级摊成“还有三种说法”的清单；`application_boundary` 若需出现，放在最终回答之前。不要写“第二节已经说明”“前文分别讨论”“这里没有进一步说明”等内部复盘。最后一句必须用 `closing_source_claim_ids` 支持，直接回答开头的问题。
 
 不可违反：
 
@@ -47,9 +50,10 @@
 6. 每个段落的断言都必须能回到该段 `claim_ids` 的 Claim、Evidence 与 source excerpt。不要补材料没有的心理、因果、调和、背景或一般原则。
 7. 不在读者文字中出现 CVP、Claim、ArgumentRoute、manifest、coverage、packet、母本、补充讲道、来源层级等生产语言。
 8. 可以短引教授原句，但引号内必须逐字出现在 source excerpts；不确定就转述，不要伪造引文。
-9. 导言要直接提出 reader question，只给出足以引导阅读的正面回答轮廓，不枚举全部结论与未决关系，也不写“正面的答案需要沿着经文继续追问”一类阅读指令。结尾回到已经建立的正面 reader takeaway；一般不重复已经说明的未决关系，但若结尾再次并列几种答案，就必须紧接着保留它们的关系未明，不能让最后一句重新制造合并印象。用自然读经语言表达，例如“这两种说法彼此如何衔接，这里没有进一步说明”；不要写“原稿／材料并列提出”“正面答案须按／可以并列表述”等编辑指令。未决披露之后还要用来源支持的一阶释经结论自然收束，不能让全文最后一句只剩编辑对关系未决的说明；不要为了结尾添加没有来源的通用应用。
+9. 导言要直接提出 reader question，只给出足以引导阅读的正面回答轮廓，不枚举全部结论与未决关系，也不写“正面的答案需要沿着经文继续追问”一类阅读指令。未决关系只按 `conclusion_contract.unresolved_relation_policy` 在最相关的正文位置披露一次；结尾绝不重复。结尾按契约回到已经建立的正面答案，不能让全文最后一句只剩编辑对关系未决、文章结构或材料范围的说明；不要为了结尾添加没有来源的通用应用。
 9a. H1 与第一个 H2 之间必须有读者可见的导言，而且导言恰好只有一个问号；这个问句必须逐字等于 `opening_contract.governing_question`。多个连续问句、一个问句内用“还是……或者……”预列全文答案，以及先问措辞问题又另问神学答案，都会把一个统摄问题拆成竞争问题，必须在输出前重写。
 10. 正文后返回 section ledger。每个 brief section 恰好一项；列出该节实际使用的全部 Claim、CVP revision 和 ArgumentRoute revision，以及稿件中可逐字定位的 output anchor。
+10a. Claim ledger 必须逐 section 对账，不是全文合计。某个 Claim 即使已在前一节 ledger 出现，只要后一节再次使用，仍必须进入后一节的 `claim_ids_used`。最后一个 H2 之后的全部结尾段落都属于最后一节；Markdown 分隔线 `---` 不会新建 section。结尾 provenance 使用的每个 Claim，尤其 `conclusion_contract.closing_source_claim_ids`，都必须进入最后一节 ledger。
 
 输出前先在内部检查 reader-visible Markdown（隐藏 provenance 不计）。除 brief 锁定标题中已有的字样外，正文不得出现以下表达；若出现，先改成直接、自然的释经散文再输出：
 

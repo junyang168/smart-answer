@@ -249,6 +249,39 @@ def _candidate(packet):
             ),
             "answer_preview_policy": "orientation_only_no_answer_inventory",
         },
+        "conclusion_contract": {
+            "settled_conclusion": "The church rests on the positive foundation.",
+            "settled_conclusion_claim_ids": ["CL-3"],
+            "positive_answer_sequence": [
+                {
+                    "role": "direct_answer",
+                    "summary": "The church rests on the positive foundation.",
+                    "claim_ids": ["CL-2"],
+                    "modality": "asserted",
+                },
+                {
+                    "role": "qualified_inference",
+                    "summary": "The foundation more likely points to Christ.",
+                    "claim_ids": ["CL-1"],
+                    "modality": "qualified",
+                },
+            ],
+            "unresolved_relation_policy": {
+                "disclosure_required": True,
+                "summary": "The positive identifications are not fully unified.",
+                "disclose_in_section_id": "SEC-POSITIVE",
+                "max_reader_visible_disclosures": 1,
+                "repeat_in_conclusion": False,
+            },
+            "application_boundary": "This judgment applies only to the stated claim.",
+            "application_boundary_placement": "before_final_reader_answer",
+            "closing_function": "Answer the reader question with ordered positive claims.",
+            "closing_source_claim_ids": ["CL-2", "CL-1"],
+            "prohibited_closing_moves": [
+                "Do not restate section numbers or editorial handling instructions.",
+                "Do not turn complete coverage into a flat answer inventory.",
+            ],
+        },
         "reader_takeaway": "文章先呈现正面根基，再说明彼得本人不是根基。",
         "reader_takeaway_attribution": "editorial_synthesis",
         "reader_takeaway_viewpoint_revision_ids": ["CVR-POSITIVE"],
@@ -529,6 +562,76 @@ def test_ready_brief_requires_an_opening_contract_bound_to_the_first_section():
         "opening_contract"
     ]["governing_question"]
     with pytest.raises(TheologicalEditorialContractError, match="one governing question"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["opening_contract"]["governing_question"] = (
+        "What is the church founded upon, and what follows from it?"
+    )
+    candidate["sections"][0]["governing_question"] = candidate[
+        "opening_contract"
+    ]["governing_question"]
+    with pytest.raises(TheologicalEditorialContractError, match="second task"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+def test_ready_brief_requires_an_ordered_conclusion_contract():
+    packet = _compile()
+    candidate = _candidate(packet)
+    candidate.pop("conclusion_contract")
+    with pytest.raises(TheologicalEditorialContractError, match="conclusion contract"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["conclusion_contract"]["positive_answer_sequence"][1]["role"] = (
+        "direct_answer"
+    )
+    with pytest.raises(TheologicalEditorialContractError, match="answer roles"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["conclusion_contract"]["closing_source_claim_ids"] = ["CL-UNKNOWN"]
+    with pytest.raises(TheologicalEditorialContractError, match="unknown closing Claims"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+    candidate = _candidate(packet)
+    candidate["conclusion_contract"]["unresolved_relation_policy"][
+        "repeat_in_conclusion"
+    ] = True
+    with pytest.raises(TheologicalEditorialContractError, match="not repeat"):
+        validate_editorial_brief_candidate(candidate, evidence_packet=packet)
+
+
+@pytest.mark.parametrize(
+    ("field_path", "value", "message"),
+    [
+        (
+            ("settled_conclusion",),
+            "材料并列另说教会建立在真理上。",
+            "natural reader-facing answer",
+        ),
+        (
+            ("positive_answer_sequence", 0, "summary"),
+            "The reader should remember the positive answer.",
+            "reader-facing prose",
+        ),
+        (
+            ("application_boundary",),
+            "材料只否定这一项解释。",
+            "application boundary",
+        ),
+    ],
+)
+def test_conclusion_contract_rejects_editorial_process_as_reader_answer(
+    field_path, value, message
+):
+    packet = _compile()
+    candidate = _candidate(packet)
+    target = candidate["conclusion_contract"]
+    for part in field_path[:-1]:
+        target = target[part]
+    target[field_path[-1]] = value
+    with pytest.raises(TheologicalEditorialContractError, match=message):
         validate_editorial_brief_candidate(candidate, evidence_packet=packet)
 
 

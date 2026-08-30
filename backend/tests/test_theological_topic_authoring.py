@@ -117,7 +117,13 @@ def _inputs():
         "dependency_manifest_sha256": sha256_json(dependencies),
     }
     _refresh_source_originals(evidence)
-    evidence["evidence_packet_sha256"] = sha256_json(evidence)
+    evidence["evidence_packet_sha256"] = sha256_json(
+        {
+            key: value
+            for key, value in evidence.items()
+            if key != "evidence_packet_sha256"
+        }
+    )
     decisions = {
         "status": "ready",
         "article_title": "Positive title",
@@ -128,6 +134,32 @@ def _inputs():
             "first_section_id": "SEC-1",
             "first_evidence_path": "Enter the first section's textual evidence.",
             "answer_preview_policy": "orientation_only_no_answer_inventory",
+        },
+        "conclusion_contract": {
+            "settled_conclusion": "The positive claim is established.",
+            "settled_conclusion_claim_ids": ["CL-1"],
+            "positive_answer_sequence": [
+                {
+                    "role": "direct_answer",
+                    "summary": "State the positive proposition.",
+                    "claim_ids": ["CL-1"],
+                    "modality": "asserted",
+                }
+            ],
+            "unresolved_relation_policy": {
+                "disclosure_required": False,
+                "summary": "",
+                "disclose_in_section_id": "",
+                "max_reader_visible_disclosures": 0,
+                "repeat_in_conclusion": False,
+            },
+            "application_boundary": "",
+            "application_boundary_placement": "not_applicable",
+            "closing_function": "Answer the reader question directly.",
+            "closing_source_claim_ids": ["CL-1"],
+            "prohibited_closing_moves": [
+                "Do not replace the answer with editorial process language."
+            ],
         },
         "viewpoint_coverage": [],
         "sections": [
@@ -196,6 +228,43 @@ def test_topic_author_packet_and_ledger_bind_the_approved_brief():
     assert packet["knowledge"]["source_originals"] == evidence["source_originals"]
 
 
+def test_final_section_requires_closing_claims_but_not_every_settled_claim():
+    evidence, brief, publication, quality = _inputs()
+    evidence["claims"].append(
+        {"claim_id": "CL-SETTLED", "statement": "Established earlier", "evidence_step_ids": []}
+    )
+    evidence["evidence_packet_sha256"] = sha256_json(
+        {
+            key: value
+            for key, value in evidence.items()
+            if key != "evidence_packet_sha256"
+        }
+    )
+    brief["evidence_packet_sha256"] = evidence["evidence_packet_sha256"]
+    brief["editorial_decisions"]["conclusion_contract"][
+        "settled_conclusion_claim_ids"
+    ] = ["CL-SETTLED"]
+    brief["brief_sha256"] = sha256_json(
+        {key: value for key, value in brief.items() if key != "brief_sha256"}
+    )
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    validate_topic_author_result(_valid_result(), authoring_packet=packet)
+
+    packet["editorial_decisions"]["conclusion_contract"][
+        "closing_source_claim_ids"
+    ] = ["CL-SETTLED"]
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="omits closing Claims",
+    ):
+        validate_topic_author_result(_valid_result(), authoring_packet=packet)
+
+
 def test_topic_author_rejects_an_opening_with_competing_questions():
     evidence, brief, publication, quality = _inputs()
     packet = build_topic_authoring_packet(
@@ -232,6 +301,26 @@ def test_topic_author_rejects_a_different_single_opening_question():
     with pytest.raises(
         TheologicalEditorialContractError,
         match="approved governing question exactly",
+    ):
+        validate_topic_author_result(result, authoring_packet=packet)
+
+
+def test_topic_author_rejects_an_extra_clause_inside_the_approved_question():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        "What is the claim?",
+        "What is the claim, and what follows from it?",
+    )
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="approved governing question exactly as a complete sentence",
     ):
         validate_topic_author_result(result, authoring_packet=packet)
 
@@ -277,6 +366,67 @@ def test_substantive_paragraph_requires_explicit_evidence_step_provenance():
         validate_topic_author_result(result, authoring_packet=packet)
 
 
+def test_paragraph_claim_provenance_must_be_in_its_own_section_ledger():
+    evidence, brief, publication, quality = _inputs()
+    evidence["claims"].append(
+        {
+            "claim_id": "CL-OTHER",
+            "statement": "A claim established in another section.",
+            "evidence_step_ids": ["EV-1"],
+        }
+    )
+    evidence["evidence_packet_sha256"] = sha256_json(
+        {
+            key: value
+            for key, value in evidence.items()
+            if key != "evidence_packet_sha256"
+        }
+    )
+    brief["evidence_packet_sha256"] = evidence["evidence_packet_sha256"]
+    brief["editorial_decisions"]["sections"].append(
+        {
+            "section_id": "SEC-2",
+            "heading": "Second heading",
+            "viewpoint_revision_ids": ["CVR-1"],
+            "argument_route_revision_ids": ["ARR-1"],
+        }
+    )
+    brief["brief_sha256"] = sha256_json(
+        {key: value for key, value in brief.items() if key != "brief_sha256"}
+    )
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    result = _valid_result()
+    result["manuscript_markdown"] = result["manuscript_markdown"].replace(
+        "Positive proposition in prose.",
+        """Positive proposition in prose.
+
+## Second heading
+
+<!-- provenance: {\"attribution\":\"professor\",\"claim_ids\":[\"CL-1\",\"CL-OTHER\"],\"evidence_step_ids\":[\"EV-1\"],\"argument_route_revision_ids\":[\"ARR-1\"]} -->
+Second proposition in prose.""",
+    )
+    result["sections"][0]["claim_ids_used"].append("CL-OTHER")
+    result["sections"].append(
+        {
+            "section_id": "SEC-2",
+            "claim_ids_used": ["CL-1"],
+            "viewpoint_revision_ids_used": ["CVR-1"],
+            "argument_route_revision_ids_used": ["ARR-1"],
+            "output_anchor": "Second proposition in prose.",
+        }
+    )
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="Claims outside its section ledger",
+    ):
+        validate_topic_author_result(result, authoring_packet=packet)
+
+
 def test_editorial_reviewer_receives_the_same_complete_originals():
     evidence, brief, publication, quality = _inputs()
     packet = build_topic_authoring_packet(
@@ -297,6 +447,12 @@ def test_editorial_reviewer_receives_the_same_complete_originals():
     )
     assert review_packet["opening_contract"] == brief["editorial_decisions"][
         "opening_contract"
+    ]
+    assert review_packet["conclusion_reader_prose"] == (
+        "Positive proposition in prose."
+    )
+    assert review_packet["conclusion_contract"] == brief["editorial_decisions"][
+        "conclusion_contract"
     ]
 
 
@@ -466,10 +622,13 @@ def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
     findings = []
     if hard_failure_id:
         opening_failure = hard_failure_id == "opening_reader_path_broken"
+        conclusion_failure = hard_failure_id == "conclusion_reader_answer_broken"
         findings.append({
             "finding_id": "F-HARD", "dimension_id": (
                 "general_reader_readability"
                 if opening_failure
+                else "reader_memory_center"
+                if conclusion_failure
                 else "positive_thesis_and_structural_fidelity"
             ),
             "section_id": "SEC-1", "severity": "major", "blocking": True,
@@ -477,11 +636,14 @@ def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
                 "An interpretation makes a claim."
                 if opening_failure
                 else "Positive proposition in prose."
+                if conclusion_failure
+                else "Positive proposition in prose."
             ),
             "problem": f"Hard failure: {hard_failure_id}.",
             "required_change": "Restore the approved reader-facing argument.",
         })
     opening_anchor = "An interpretation makes a claim."
+    conclusion_anchor = "Positive proposition in prose."
     return {
         "schema_version": "wang_theological_topic_editorial_review_v1",
         "reviewed_manuscript_sha256": manuscript_sha,
@@ -494,12 +656,28 @@ def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
                 "evidence": (
                     f"The opening begins: {opening_anchor}"
                     if item["id"] == "general_reader_readability"
+                    else f"The conclusion states: {conclusion_anchor}"
+                    if item["id"] == "reader_memory_center"
                     else "Evidence."
                 ),
             }
             for item in quality["dimensions"]
         ],
         "hard_failure_assessments": hard,
+        "conclusion_assessment": {
+            "evidence_anchor": conclusion_anchor,
+            "reader_answer_in_one_sentence": "The positive proposition is the answer.",
+            "answers_reader_question": not (
+                hard_failure_id == "conclusion_reader_answer_broken"
+            ),
+            "editorial_process_displaces_answer": (
+                hard_failure_id == "conclusion_reader_answer_broken"
+            ),
+            "positive_claims_follow_contract": not (
+                hard_failure_id == "conclusion_reader_answer_broken"
+            ),
+            "unresolved_disclosure_repeated": False,
+        },
         "findings": findings,
     }
 
@@ -573,6 +751,56 @@ def test_opening_reader_path_hard_failure_requires_an_opening_anchored_finding()
     assert outcome["hard_failures"] == [failure_id]
 
 
+def test_conclusion_reader_answer_hard_failure_requires_a_conclusion_finding():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    failure_id = "conclusion_reader_answer_broken"
+    assert HARD_FAILURE_DIMENSIONS[failure_id] == {
+        "positive_thesis_and_structural_fidelity",
+        "general_reader_readability",
+        "editorial_voice_restraint",
+        "reader_memory_center",
+    }
+    review = _review_for(
+        packet,
+        review_packet["manuscript_sha256"],
+        hard_failure_id=failure_id,
+    )
+    outcome = validate_topic_editorial_review(review, review_packet=review_packet)
+    assert outcome["passed"] is False
+    assert outcome["hard_failures"] == [failure_id]
+
+
+def test_passing_review_must_cite_the_conclusion_in_memory_evidence():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    review = _review_for(packet, review_packet["manuscript_sha256"])
+    memory = next(
+        item
+        for item in review["dimension_scores"]
+        if item["dimension_id"] == "reader_memory_center"
+    )
+    memory["evidence"] = "The middle sections cover all claims."
+    with pytest.raises(TheologicalEditorialContractError, match="cite the conclusion"):
+        validate_topic_editorial_review(review, review_packet=review_packet)
+
+
 def test_meta_analysis_hard_failure_rejects_even_with_perfect_scores():
     evidence, brief, publication, quality = _inputs()
     packet = build_topic_authoring_packet(
@@ -638,6 +866,14 @@ def test_delta_can_return_next_round_finding_in_new_dimension():
         "summary": "The direct finding is resolved; a changed paragraph exposed another issue.",
         "dimension_scores": [{"dimension_id": "approved_written_style", "score": 9, "evidence": "Improved."}],
         "hard_failure_assessments": [],
+        "conclusion_assessment": {
+            "evidence_anchor": "Positive proposition in prose.",
+            "reader_answer_in_one_sentence": "The positive proposition is the answer.",
+            "answers_reader_question": True,
+            "editorial_process_displaces_answer": False,
+            "positive_claims_follow_contract": True,
+            "unresolved_disclosure_repeated": False,
+        },
         "finding_dispositions": [{"finding_id": "F-1", "resolution": "resolved", "resolution_anchor": "Positive proposition in prose.", "explanation": "Resolved."}],
         "findings": [{
             "finding_id": "F-2", "dimension_id": "general_reader_readability",

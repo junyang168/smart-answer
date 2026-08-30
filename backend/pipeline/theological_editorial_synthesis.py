@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -49,6 +50,39 @@ ARGUMENT_ROUTE_ROLES = frozenset({
     "objection_response",
     "application",
 })
+CONCLUSION_ANSWER_ROLES = (
+    "direct_answer",
+    "supplementary_scripture",
+    "qualified_inference",
+)
+CONCLUSION_READER_META_PHRASES = (
+    "材料",
+    "教授",
+    "并列",
+    "另说",
+    "未决关系",
+    "编辑",
+    "section",
+    "Section",
+    "Claim",
+    "reader",
+    "Reader",
+)
+OPENING_COMPOUND_QUESTION_MARKERS = (
+    "，并",
+    "并足以",
+    "，以及",
+    "以及",
+    "又如何",
+    "又怎样",
+    "，且",
+    "同时",
+    "还是",
+    "或者",
+    ", and",
+    " and what",
+    " or whether",
+)
 STOP_STATUSES = frozenset({
     "insufficient_material",
     "unresolved_structure",
@@ -1091,6 +1125,169 @@ def validate_editorial_brief_candidate(
         opening_question.count("?") + opening_question.count("？") == 1,
         "opening contract must contain one governing question",
     )
+    compound_markers = [
+        marker
+        for marker in OPENING_COMPOUND_QUESTION_MARKERS
+        if marker in opening_question
+    ]
+    _require(
+        not compound_markers,
+        "opening contract governing question cannot combine a second task",
+    )
+    conclusion_contract = candidate.get("conclusion_contract") or {}
+    _require(bool(conclusion_contract), "ready brief requires a conclusion contract")
+    _nonempty(
+        conclusion_contract.get("settled_conclusion"),
+        "conclusion contract settled conclusion",
+    )
+    settled_conclusion = str(conclusion_contract["settled_conclusion"])
+    settled_meta = [
+        phrase
+        for phrase in CONCLUSION_READER_META_PHRASES
+        if phrase in settled_conclusion
+    ]
+    _require(
+        not settled_meta
+        and not re.search(r"第[一二三四五六七八九十\d]+节", settled_conclusion),
+        "settled conclusion must be a natural reader-facing answer, not editorial process language",
+    )
+    _nonempty(
+        conclusion_contract.get("closing_function"),
+        "conclusion contract closing function",
+    )
+    known_claim_ids = {
+        str(item["claim_id"]) for item in evidence_packet.get("claims") or []
+    }
+    settled_claim_ids = _unique(
+        conclusion_contract.get("settled_conclusion_claim_ids") or [],
+        "settled conclusion Claims",
+    )
+    _require(bool(settled_claim_ids), "settled conclusion requires Claims")
+    unknown_settled = set(settled_claim_ids) - known_claim_ids
+    _require(
+        not unknown_settled,
+        f"conclusion contract cites unknown settled Claims: {sorted(unknown_settled)}",
+    )
+    answer_sequence = list(
+        conclusion_contract.get("positive_answer_sequence") or []
+    )
+    _require(bool(answer_sequence), "conclusion contract needs positive answers")
+    answer_roles = _unique(
+        [str(item.get("role") or "") for item in answer_sequence],
+        "conclusion answer roles",
+    )
+    _require(
+        all(role in CONCLUSION_ANSWER_ROLES for role in answer_roles),
+        "conclusion contract uses an unknown answer role",
+    )
+    role_order = {role: index for index, role in enumerate(CONCLUSION_ANSWER_ROLES)}
+    _require(
+        [role_order[role] for role in answer_roles]
+        == sorted(role_order[role] for role in answer_roles),
+        "conclusion answer roles must follow direct, supplementary, qualified order",
+    )
+    sequenced_claim_ids: set[str] = set()
+    for item in answer_sequence:
+        _nonempty(item.get("summary"), "conclusion positive answer summary")
+        answer_summary = str(item["summary"])
+        answer_meta = [
+            phrase
+            for phrase in CONCLUSION_READER_META_PHRASES
+            if phrase in answer_summary
+        ]
+        _require(
+            not answer_meta
+            and not re.search(r"第[一二三四五六七八九十\d]+节", answer_summary),
+            "conclusion positive answer must use reader-facing prose, not editorial process language",
+        )
+        _nonempty(item.get("modality"), "conclusion positive answer modality")
+        claim_ids = _unique(
+            item.get("claim_ids") or [],
+            f"conclusion {item.get('role')} Claims",
+        )
+        _require(bool(claim_ids), f"conclusion {item.get('role')} needs Claims")
+        unknown = set(claim_ids) - known_claim_ids
+        _require(
+            not unknown,
+            f"conclusion contract cites unknown answer Claims: {sorted(unknown)}",
+        )
+        sequenced_claim_ids.update(claim_ids)
+    unresolved_policy = conclusion_contract.get("unresolved_relation_policy") or {}
+    disclosure_required = bool(unresolved_policy.get("disclosure_required"))
+    _require(
+        unresolved_policy.get("repeat_in_conclusion") is False,
+        "unresolved disclosure must not repeat in the conclusion",
+    )
+    if disclosure_required:
+        _nonempty(
+            unresolved_policy.get("summary"),
+            "conclusion unresolved relation summary",
+        )
+        _require(
+            unresolved_policy.get("disclose_in_section_id") in section_by_id,
+            "unresolved disclosure must name a brief section",
+        )
+        _require(
+            unresolved_policy.get("max_reader_visible_disclosures") == 1,
+            "unresolved relation must have one reader-visible disclosure",
+        )
+    else:
+        _require(
+            not unresolved_policy.get("disclose_in_section_id")
+            and unresolved_policy.get("max_reader_visible_disclosures") == 0,
+            "absent unresolved relation cannot reserve a disclosure",
+        )
+    boundary_placement = conclusion_contract.get(
+        "application_boundary_placement"
+    )
+    _require(
+        boundary_placement
+        in {
+            "before_final_reader_answer",
+            "footnote_or_editorial_note",
+            "not_applicable",
+        },
+        "invalid application boundary placement",
+    )
+    if boundary_placement == "not_applicable":
+        _require(
+            not str(conclusion_contract.get("application_boundary") or "").strip(),
+            "not-applicable conclusion boundary must be empty",
+        )
+    else:
+        _nonempty(
+            conclusion_contract.get("application_boundary"),
+            "conclusion application boundary",
+        )
+        boundary = str(conclusion_contract["application_boundary"])
+        boundary_meta = [
+            phrase
+            for phrase in CONCLUSION_READER_META_PHRASES
+            if phrase in boundary
+        ]
+        _require(
+            not boundary_meta
+            and not re.search(r"第[一二三四五六七八九十\d]+节", boundary),
+            "conclusion application boundary must use reader-facing prose",
+        )
+    closing_claim_ids = _unique(
+        conclusion_contract.get("closing_source_claim_ids") or [],
+        "conclusion closing Claims",
+    )
+    unknown_closing = set(closing_claim_ids) - known_claim_ids
+    _require(
+        not unknown_closing,
+        f"conclusion contract cites unknown closing Claims: {sorted(unknown_closing)}",
+    )
+    _require(
+        bool(closing_claim_ids) and set(closing_claim_ids) <= sequenced_claim_ids,
+        "closing Claims must come from the ordered positive answers",
+    )
+    prohibited_closing = _unique(
+        conclusion_contract.get("prohibited_closing_moves") or [],
+        "prohibited closing moves",
+    )
+    _require(bool(prohibited_closing), "conclusion contract needs prohibited moves")
     _unique(
         [str(item.get("embedded_material_id") or "") for item in embedded_materials],
         "embedded material ids",
@@ -1318,6 +1515,92 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                     "answer_preview_policy",
                 ],
             },
+            "conclusion_contract": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "settled_conclusion": {"type": "string"},
+                    "settled_conclusion_claim_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "positive_answer_sequence": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "role": {
+                                    "type": "string",
+                                    "enum": list(CONCLUSION_ANSWER_ROLES),
+                                },
+                                "summary": {"type": "string"},
+                                "claim_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "modality": {"type": "string"},
+                            },
+                            "required": [
+                                "role",
+                                "summary",
+                                "claim_ids",
+                                "modality",
+                            ],
+                        },
+                    },
+                    "unresolved_relation_policy": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "disclosure_required": {"type": "boolean"},
+                            "summary": {"type": "string"},
+                            "disclose_in_section_id": {"type": "string"},
+                            "max_reader_visible_disclosures": {"type": "integer"},
+                            "repeat_in_conclusion": {
+                                "type": "boolean",
+                                "enum": [False],
+                            },
+                        },
+                        "required": [
+                            "disclosure_required",
+                            "summary",
+                            "disclose_in_section_id",
+                            "max_reader_visible_disclosures",
+                            "repeat_in_conclusion",
+                        ],
+                    },
+                    "application_boundary": {"type": "string"},
+                    "application_boundary_placement": {
+                        "type": "string",
+                        "enum": [
+                            "before_final_reader_answer",
+                            "footnote_or_editorial_note",
+                            "not_applicable",
+                        ],
+                    },
+                    "closing_function": {"type": "string"},
+                    "closing_source_claim_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "prohibited_closing_moves": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "settled_conclusion",
+                    "settled_conclusion_claim_ids",
+                    "positive_answer_sequence",
+                    "unresolved_relation_policy",
+                    "application_boundary",
+                    "application_boundary_placement",
+                    "closing_function",
+                    "closing_source_claim_ids",
+                    "prohibited_closing_moves",
+                ],
+            },
             "reader_takeaway": {"type": "string"},
             "reader_takeaway_attribution": {
                 "type": "string",
@@ -1506,6 +1789,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
             "summary",
             "article_title",
             "opening_contract",
+            "conclusion_contract",
             "reader_takeaway",
             "reader_takeaway_attribution",
             "reader_takeaway_viewpoint_revision_ids",

@@ -8,6 +8,10 @@
 
 `general_reader_readability.evidence` 必须逐字引用 `opening_evidence_anchors` 中至少一句，再说明首段读者路径；只引用正文中段，不算检查过导言。若开场存在无根据的转折、问题没有由前句发动、出现两个竞争问题、或答案清单先于论证，宣告 `opening_reader_path_broken`，把 `general_reader_readability` 或 `positive_thesis_and_structural_fidelity` 降到最低线以下，并返回一个 anchor 位于 `opening_reader_prose` 的 blocking finding。不得因正文中段清楚而放过。
 
+输入也把最后一个 H2 下的文字另行放在 `conclusion_reader_prose`，并给出 `conclusion_contract`。必须单独审完整结尾。`conclusion_assessment.evidence_anchor` 要逐字取自结尾；`reader_answer_in_one_sentence` 要用一句普通话复述读者读完最后一段会得到什么答案，不能照抄 brief 或写编辑评价。检查结尾是否直接回答开头问题，正面主张是否按契约的作用层级收束，编辑过程是否挤走答案，以及未决关系是否被重复披露。`reader_memory_center.evidence` 必须逐字引用 `conclusion_evidence_anchors` 中至少一句。
+
+只要结尾不能让目标读者用一句话说出作者的正面答案，或结尾落在“第二节／前文／材料没有说明”一类编辑复盘，或把正面材料摊成清单，或重说已经披露的未决关系，就宣告 `conclusion_reader_answer_broken`，相应降低 `positive_thesis_and_structural_fidelity`、`general_reader_readability`、`editorial_voice_restraint` 或 `reader_memory_center`，并返回 anchor 位于 `conclusion_reader_prose` 的 blocking finding。不能把这类问题标成 nonblocking 后放行。
+
 逐次检查原稿和 brief 中的“或者”、并列答案与未决关系在导言、正文阶段结论和全文结尾的每一次转述。文章不能先承认“或者”，随后又用“以及”“所认信、所领受和所传递的真理”“同一根基”等合并句把两个答案重新揉成一个；这种局部调和必须产生 blocking finding，并判定 `material_tension_or_unresolved_relation_silently_harmonized`，不能因为别处有一次未决披露就放过。
 
 还要单独检查文章是否真正以经文观察、推理与结论向前推进。若标题、导言、小标题或多数段落主要在枚举、分类、评论“教授有几种看法”，读起来像教授思想分析或审核报告，而不是让读者跟着教授的论证走，必须判定 `meta_analysis_displaces_first_order_argument` hard failure。必要的归属说明和一次诚实的未决披露不构成失败；失败在于观察者语言成为全文组织原则。
@@ -21,5 +25,7 @@
 provenance 的方向也要逐段检查。教授原有的一阶陈述与编辑的未决披露若放在同一段并统一标成 `editorial_synthesis`，或统一标成 `professor`，都模糊了来源边界；必须拆段分别归属。凡 finding 的 required_change 要求拆分 attribution，不得标 nonblocking 后自动发布。
 
 逐段核对 provenance 的 `argument_route_revision_ids`。凡段落在作“前提／观察—推论—结论”的论证，必须绑定 brief 当前 section 实际采用的 route；不能只列 Claim IDs，让来源预览从 Claim 的全部 Evidence Step 猜论证。路线不属于当前 section、段落用了路线却留空、或一段把两条不同来源路线悄悄拼成一个推论，均须 blocking。
+
+但后一节直接复述其 `depends_on_section_ids` 已经建立的阶段结论，不等于重新执行那条路线：只要不再展开观察、前提、互证或推论步骤，并有准确 Claim provenance，可以不把前节 route 搬进当前 section。若文字写成“把A与B放在一起／相互印证得出”，它是在重跑推论，应要求改成直接复述，不能推荐“第三节已经说明”这类内部 section 语言。未决关系的编辑披露也可以只列涉及的 Claim、使用 `editorial_synthesis`、route 留空；若同段混入一阶来源陈述，优先要求删去重复的一阶复述或拆开 attribution，不要机械要求把别节 route 加入当前 brief。
 
 finding 必须可执行、绑定 manuscript 中逐字存在的 anchor；`section_id` 必须逐字取自 `author_section_ledger`，不得自造 `INTRO`、`CONCLUSION` 等 ID。H1 后、第一个 H2 前的导言 finding 归到 ledger 第一节，最后一个 H2 内的全文结尾 finding 归到 ledger 最后一节。低于 minimum、hard failure 或必须修改的问题必须 blocking=true。不要重做抽取，不引用外部神学，不直接改稿。输出只有严格 JSON。

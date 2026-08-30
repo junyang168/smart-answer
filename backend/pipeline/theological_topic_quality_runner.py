@@ -30,6 +30,8 @@ from backend.pipeline.theological_topic_authoring import (
     TOPIC_FINAL_DELTA_REVIEW_SCHEMA,
     TOPIC_GROUNDING_REVISION_SCHEMA,
     build_topic_editorial_review_packet,
+    topic_conclusion_evidence_anchors,
+    topic_conclusion_reader_prose,
     editorial_instructions_by_claim,
     evaluate_topic_editorial_review,
     validate_topic_author_result,
@@ -56,6 +58,12 @@ HARD_FAILURE_DIMENSIONS = {
     "negative_material_displaces_positive_thesis": {"positive_thesis_and_structural_fidelity", "reader_memory_center"},
     "meta_analysis_displaces_first_order_argument": {"positive_thesis_and_structural_fidelity", "editorial_voice_restraint", "general_reader_readability"},
     "opening_reader_path_broken": {"positive_thesis_and_structural_fidelity", "general_reader_readability"},
+    "conclusion_reader_answer_broken": {
+        "positive_thesis_and_structural_fidelity",
+        "general_reader_readability",
+        "editorial_voice_restraint",
+        "reader_memory_center",
+    },
     "article_argument_hierarchy_flattened": {"positive_thesis_and_structural_fidelity", "argument_route_integrity", "reader_memory_center"},
     "source_local_argument_routes_spliced": {"argument_route_integrity"},
     "exegetical_observation_inference_conclusion_chain_missing": {"argument_route_integrity"},
@@ -132,6 +140,7 @@ def _merge_delta(
         "summary": delta["summary"],
         "dimension_scores": [scores[str(item["id"])] for item in quality_profile["dimensions"]],
         "hard_failure_assessments": [hard[str(item)] for item in quality_profile["hard_failures"]],
+        "conclusion_assessment": delta["conclusion_assessment"],
         "findings": delta["findings"],
         "score_provenance": {
             "rescored_dimensions": affected_dimensions,
@@ -556,6 +565,15 @@ def run_quality(
             # changed paragraphs, but give it the revised manuscript so it can
             # verify heading, adjacency, attribution, and the actual ending.
             "revised_manuscript_markdown": revised_manuscript,
+            "conclusion_reader_prose": topic_conclusion_reader_prose(
+                revised_manuscript
+            ),
+            "conclusion_evidence_anchors": topic_conclusion_evidence_anchors(
+                topic_conclusion_reader_prose(revised_manuscript)
+            ),
+            "conclusion_contract": packet["editorial_decisions"][
+                "conclusion_contract"
+            ],
             "baseline_review": current_review,
             "accepted_findings": blocking,
             "finding_dispositions": revision["finding_dispositions"],
