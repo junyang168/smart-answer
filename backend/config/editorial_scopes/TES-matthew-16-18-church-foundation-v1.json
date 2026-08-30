@@ -13,22 +13,22 @@
   "explicit_exclusions": [],
   "editorial_constraints": [
     {
-      "constraint_id": "EC-HUMAN-ARGUMENT-ORDER-01",
+      "constraint_id": "EC-HUMAN-ARGUMENT-ORDER-02",
       "constraint_type": "approved_outline",
       "target_record_ids": [],
-      "required_value": "以天主教‘磐石就是彼得’及首任教皇推论自然提出问题；用Petrus／Petra形式差异与彼得随后受责备排除彼得本人，亚兰文异议只作简短脚注；随后转向彼得的认信及所领受并传下的真理；再用弗2:20补充使徒和先知的根基、基督为房角石与‘更可能指向基督’的有限判断；末段回到首任教皇说，不扩大为对罗马天主教整体的评价。",
-      "instruction": "严格继承人类编辑已批准的读者论证顺序，不得以通用的‘正面材料先行’偏好重新排序。",
-      "rationale": "这个入口忠于讲授的实际发动方式，并让后面的经文检验回答一个自然出现的问题。",
-      "feedback_artifact_sha256": "af53efd52d37d07cd4b6111a74045497327ca5257315fe00b025ed176f022e08"
+      "required_value": "以天主教‘磐石就是彼得’及首任教皇推论自然提出问题；第一部分用Petrus／Petra形式差异作主证、彼得随后受责备作旁证，亚兰文异议只作脚注；第二部分集中回答磐石若不是彼得本人究竟是什么，并把彼得的认信及他所领受、传下的真理之间有来源支持的推理写足；第三部分说明弗2:20如何补充或限定，只写来源实际建立的关系；首任教皇推论作为应用回到结尾，不再设独立H2。",
+      "instruction": "严格继承人类编辑已批准的三步读者论证；在Brief阶段先证明中心答案和三至五步证明链可成立，不能成立时停止，不得让Author用重复结论补洞。",
+      "rationale": "旧四节结构让应用成为重复全文的独立小节，也没有解决多项正面表述之间的读者关系。",
+      "feedback_artifact_sha256": "3a791e02e13728b99e18cf3271f068cd36972cea7bea707d6628b1dbc8f12b94"
     },
     {
-      "constraint_id": "EC-HUMAN-ARTICLE-SHAPE-01",
+      "constraint_id": "EC-HUMAN-ARTICLE-SHAPE-02",
       "constraint_type": "section_count",
       "target_record_ids": [],
-      "required_value": "4",
-      "instruction": "正文恰好四个H2；多个 viewpoint 与 source-local route 服务同一读者小节，不得一项材料一个标题。",
-      "rationale": "独立导言和过多相邻H2会把连续文章重新写成写作提纲。",
-      "feedback_artifact_sha256": "b374be8c6111e964ab239751565aa2d9cb8427346fc19a6acbc4b318a0a116b0"
+      "required_value": "3",
+      "instruction": "正文恰好三个H2；首任教皇推论只能作为开场入口与结尾应用，不能成为重复全文的独立H2。",
+      "rationale": "三个部分分别承担排除彼得本人、建立正面答案及用弗2:20补充限定，形成一条可复述的读者论证。",
+      "feedback_artifact_sha256": "3a791e02e13728b99e18cf3271f068cd36972cea7bea707d6628b1dbc8f12b94"
     },
     {
       "constraint_id": "EC-HUMAN-NO-INTRO-H2-01",
@@ -56,5 +56,5 @@
   ],
   "editorial_attribution": "church_editor",
   "not_professor_words": true,
-  "scope_sha256": "74bb3fc1fcae4b8c695013a27caa272324c4dfbc5121d1ce740043f3043a4fb8"
+  "scope_sha256": "05eab9f536c44b4da8476eea40fff1eee86458c6881ca57925818fc7bbb17e72"
 }

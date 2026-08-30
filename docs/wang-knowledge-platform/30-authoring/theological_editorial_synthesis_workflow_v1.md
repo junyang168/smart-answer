@@ -3,7 +3,7 @@
 > **读者**：神学编辑、Solution architect、Developer
 > **类型**：流程
 > **状态**：当前
-> **与代码对齐**：2026-08-28
+> **与代码对齐**：2026-08-30
 > **权威范围**：从审核过的教授材料形成神学编辑综合文章时，编辑判断、运行阶段、artifact 边界、停止状态与验收条件。
 
 ## 目录
@@ -105,6 +105,9 @@ flowchart LR
 
 - `reader_question`：文章要回答的一个主要问题；
 - `reader_takeaway`：编辑预计读者读完能复述的正面中心，明确标记为编辑综合；
+- `opening_contract`：开场先介绍什么解释或经文问题、为什么需要检验、唯一统摄问题、进入哪一节及首先展开什么经文证据；它规定读者路径，不代写开场白；
+- `reader_argument_contract`：一个中心答案、三至五步 proof chain、每步的依赖 section／Claim／ArgumentRoute，以及每项正面表述与中心答案的关系；关系只能是来源明确、编辑重述、带限定推论或未决，不得用相近措辞代替关系判断；
+- `conclusion_contract`：确定回答及其 Claim、正面材料的作用次序、未决关系唯一披露位置、应用边界位置、结尾功能与支撑最后一句的 Claim；它规定读者最后得到什么答案，不代写结尾；
 - 所选 `structure_revision_id` 及其内容 SHA；
 - 每个 focal viewpoint 的 revision、结构角色、归属类别、是否进入正文，以及进入正文时承担的 section；
 - 每条选中 `ArgumentRoute` 的 revision、source-local attestations 和文章功能；
@@ -134,6 +137,8 @@ Composition Review 在写作前回答“现有材料能不能忠实回答 reader
 - 未决关系是否被保留，且不妨碍 reader question 获得诚实的部分回答；
 - route-out 是否覆盖已知但不适合本篇的批驳、应用、重复材料和旁支。
 
+Composition 必须先给 scope 内每项重要正面表述分类，再决定文章形态。若两项表述都可能承担中心答案，而原稿没有说明它们是同义、层级、并列还是选择关系，不能把它们放进一篇文章后交给 Author 自行解释；`reader_argument_contract.shape_decision` 必须停止、拆篇或缩窄问题。缩窄后，被 scope 明确排除的记录继续保留在 route-out 与审计元数据中，但不能仅因全题存在未决关系就强迫 Author 在正文重新列出这些记录。
+
 材料不足时不调用 Author。`insufficient_material` 可以是成功的研究终态：它证明流程没有把缺口变成散文。
 
 Claim、Evidence、`ArgumentRoute` 与来源片段是查找材料的索引，不代替神学编辑阅读原稿。Composition Agent、Composition Reviewer、Author Agent 与 Editorial Reviewer 都必须收到 scope 内每份完整逐字稿和完整母本。Evidence Compiler 逐份校验原文件 SHA，记录来源类型、字符数、正文 SHA 与完整覆盖 manifest；缺少、改变或静默截断任何一份原稿时，必须在模型调用前停止。
@@ -145,6 +150,10 @@ POC 的直接输入上限为全部原稿合计 120,000 字符；“教会的根�
 Author 必须让正面中心成为全文主线与读者最后的记忆中心。通常先写正面中心，再使用反方材料限定误读；若 SHA-bound 人类 approved outline 明确用一项争议或否定边界发动经文问题，则以该约束为序，入口须迅速进入经文检验，后文仍须完整建立正面答案。标题、导言、主要小节和结论应让普通读者能够回答“教授主张什么、为什么”。教授花在批驳上的讲授时长不自动决定文章篇幅。
 
 Author 写作前必须读完整逐字稿和母本；来源片段只帮助定位具体证据。Composition 与 Editorial Review 也使用同一份完整原稿包，不能只根据 CVP、route summary 或 brief 判断忠实度。
+
+开场是独立的质量对象。Brief 必须用 `opening_contract` 建立“受检验的解释或经文问题—为什么需要检验—一个统摄问题—首项经文证据”的路径；Author 必须逐字使用获批的统摄问题，不得用多个连续问句或候选答案清单替代这条路径。导言中的“然而、但是、因此、所以”等连接词必须表达真实的转折或因果，不能只承担换题作用。
+
+结尾也是独立的质量对象。Brief 必须用 `conclusion_contract` 先锁定确定回答，再按直接回答、补充经文和带限定的推论安排正面材料的作用层级；它不能把几项材料压成平面 inventory。未决关系只在正文最相关的一处披露，结尾不重复；应用边界放在最终答案之前或注释中。Author 的最后一句必须由契约列出的 Claim 支持，并直接回答开头的问题，不能落在 section 复盘、编辑过程或否定边界。
 
 段落 provenance 分开记录 Claim 与 `ArgumentRoute`：Claim 回答本段声明了哪些教授主张，route revision 回答这些主张在本段组成哪一条实际论证。后台来源预览对论证段落必须沿 section 批准的 source-local route attestation 和 step bindings 取片段，按前提、限定、异议回应与结论显示；不得把 Claim 背后的全部 Evidence Step 按来源合并后冒充本段论证。没有使用路线的经文引述或简单陈述才回退到 Claim Evidence。
 
@@ -159,6 +168,12 @@ Final Delta Review 以 changed paragraphs 为审核范围，但 packet 同时携
 Composition finding 必须明确列出允许修改的 candidate 字段。Revision 后由程序计算 baseline 与 revised candidate 的真实 JSON diff：每个变动字段必须属于某项 finding 的授权范围，或被逐项申报为有理由且关联到具体 finding 的连带修改；申报但没有真实变化、真实变化却未申报，都会在 Final Composition Review 前失败。Final Composition Reviewer 还要看到 baseline、真实 diff、授权范围与连带修改，并复查 heading、统摄问题、阶段结论、路线主次和整篇递进，不能只确认旧 finding 表面上已消失。
 
 Writing quality profile 必须把以下情况列为 hard failure：稿件虽有来源，但负面批驳、争论对象或错误观点取代了 brief 所声明的正面中心；或者真实的 source-local 路线虽然都出现了，却被写成没有统摄问题、没有证据主次和阶段结论的平面清单。Reviewer 应检查标题、导言、小标题和结论是否共同回答 reader question，并区分“跨来源拼接路线”与“路线真实但文章层级被压平”这两种失败；不能只在一般 `argument_organization` 说明中顺带提及。
+
+Independent Editorial Review packet 另行提取 H1 与第一个 H2 之间的 reader prose，并附 Brief 的 `opening_contract`。Reviewer 必须先审核这段文字，且 `general_reader_readability` 的 evidence 至少逐字引用其中一句；只引用正文中段不能为导言背书。无根据的转折、没有被前句发动的问题、两个竞争问题或先于论证的答案清单，构成 `opening_reader_path_broken` hard failure，并须产生锚定在导言的 blocking finding。初审一旦漏掉未改动的导言，Delta Review 按范围继承便无法补救，因此这项责任不能下放到修订轮次。
+
+同一 packet 另行提取最后一个 H2 下的 reader prose，并附 `conclusion_contract`。Reviewer 必须逐字引用结尾、用一句普通话复述读者最终得到的答案，并分别判断答案是否直接、编辑过程是否挤走答案、正面主张是否按契约推进、未决披露是否重复。结构化判断与 `conclusion_reader_answer_broken` hard failure 不一致时，review 无效；任一结尾失败都必须有锚定在结尾的 blocking finding。Final Delta Review 每轮重新读取完整结尾，防止 Revision 在修正 attribution、route 或其他 metadata 时把内部指令写进 reader prose，或新引入重复、平面清单和负面落点。
+
+Reviewer 还须只按稿件本身重建“一句话问题—一句话答案—三至五步证明链”，至少逐字引用三个不同位置，再与完整原稿核对。缺推论桥梁、竞争答案或读者无法复述时，不得因为末句清楚或每段有来源而放行。`positive_thesis_and_structural_fidelity`、`argument_route_integrity`、`general_reader_readability` 与 `reader_memory_center` 中的任何 finding 都是 blocking；核心论证缺口不能标成 minor／nonblocking 后留待人工发现。
 
 ## 十、可重复性
 

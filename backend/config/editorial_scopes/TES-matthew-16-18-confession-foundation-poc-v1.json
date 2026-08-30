@@ -1,0 +1,72 @@
+{
+  "schema_version": "wang_theological_editorial_scope_v2",
+  "scope_id": "TES-matthew-16-18-confession-foundation-poc-v1",
+  "product_kind": "theological_topic_essay",
+  "working_title": "彼得的认信与教会的根基",
+  "reader_question": "彼得的认信怎样帮助我们理解太16:18的‘这磐石’？",
+  "passage_refs": [
+    "太16:16-23"
+  ],
+  "structure_revision_id": "VSR-030fd260fcea505c048d",
+  "publication_profile_id": "PP-theological-topic-essay-v1",
+  "explicit_exclusions": [
+    {
+      "record_id": "DK-3d012c24a542-P03-CL008",
+      "reason": "‘彼得领受并传下的真理’与认信的精确关系未获来源说明，留给拆分后的独立研究。"
+    },
+    {
+      "record_id": "CVR-3a3c06d56c6d5e9da29f",
+      "reason": "弗2:20中使徒和先知的群体建造图景属于拆分后的第二篇。"
+    },
+    {
+      "record_id": "CVR-4e9005ce894c1c963350",
+      "reason": "‘更可能指向基督本人’与认信的关系未获来源说明，属于拆分后的第二篇。"
+    }
+  ],
+  "editorial_constraints": [
+    {
+      "constraint_id": "EC-HUMAN-CONFESSION-OUTLINE-01",
+      "constraint_type": "approved_outline",
+      "target_record_ids": [],
+      "required_value": "以天主教把磐石解释为彼得本人及首任教皇推论自然提出问题；第一部分用Petrus／Petra形式差异作主证、彼得随后受责备作旁证，亚兰文异议只作脚注；第二部分集中展开太16:16中彼得对耶稣是基督、是神儿子的认信如何成为教会根基的正面回答；首任教皇推论只在结尾作为应用，不再设独立H2。",
+      "instruction": "只写当前拆分范围内能够形成单一中心答案的论证；不得把被排除的所传真理、弗2:20或基督本人推论重新带回正文。",
+      "rationale": "完整原稿没有提供足够关系把四项正面表述组织成一个无竞争答案，先验证最明确的认信路线能否写成完整文章。",
+      "feedback_artifact_sha256": "3a791e02e13728b99e18cf3271f068cd36972cea7bea707d6628b1dbc8f12b94"
+    },
+    {
+      "constraint_id": "EC-HUMAN-CONFESSION-SHAPE-01",
+      "constraint_type": "section_count",
+      "target_record_ids": [],
+      "required_value": "2",
+      "instruction": "正文恰好两个H2，分别完成排除彼得本人和建立认信的正面答案。",
+      "rationale": "应用不再重复成为独立小节，全文保持一条可复述的证明链。",
+      "feedback_artifact_sha256": "3a791e02e13728b99e18cf3271f068cd36972cea7bea707d6628b1dbc8f12b94"
+    },
+    {
+      "constraint_id": "EC-HUMAN-CONFESSION-NO-INTRO-H2-01",
+      "constraint_type": "prohibited_article_function",
+      "target_record_ids": [],
+      "required_value": "introduction",
+      "instruction": "导言留在H1之后自然提出问题，不建立独立 introduction section。",
+      "rationale": "避免把真实释经论证推迟并重新写成提纲。",
+      "feedback_artifact_sha256": "3a791e02e13728b99e18cf3271f068cd36972cea7bea707d6628b1dbc8f12b94"
+    },
+    {
+      "constraint_id": "EC-HUMAN-CONFESSION-ARAMAIC-FOOTNOTE-01",
+      "constraint_type": "material_placement",
+      "target_record_ids": [
+        "CVR-d29f2bb06d7ef9292cb5",
+        "CVR-1e84b30d2d858c48c865",
+        "ARR-6aaa9e3d7e1781ede03d",
+        "ARR-01d1e2e8fcee7780d6e5"
+      ],
+      "required_value": "footnote",
+      "instruction": "亚兰文异议只作为Petrus／Petra论证旁的一则简短脚注，并完整保留模态和方法边界。",
+      "rationale": "这是必要回应但不是中心论证。",
+      "feedback_artifact_sha256": "4151d03f4114818a1a45873d903f04f6fb592d751cf5534721beb406d374bd06"
+    }
+  ],
+  "editorial_attribution": "church_editor",
+  "not_professor_words": true,
+  "scope_sha256": "374bf3e2fa67159c4c90ed40eff2fe388da71f97d9172cbd3d922aecb18df759"
+}

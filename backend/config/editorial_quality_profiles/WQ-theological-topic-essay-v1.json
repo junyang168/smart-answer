@@ -1,7 +1,7 @@
 {
   "schema_version": "editorial-writing-quality-profile.v1",
   "profile_id": "WQ-theological-topic-essay-v1",
-  "revision": 3,
+  "revision": 5,
   "title": "神学编辑综合文章写作质量",
   "dimensions": [
     {"id": "source_and_exegesis", "weight": 15, "minimum": 12},
@@ -20,6 +20,9 @@
     "material_tension_or_unresolved_relation_silently_harmonized",
     "negative_material_displaces_positive_thesis",
     "meta_analysis_displaces_first_order_argument",
+    "opening_reader_path_broken",
+    "conclusion_reader_answer_broken",
+    "reader_cannot_reconstruct_article_argument",
     "article_argument_hierarchy_flattened",
     "source_local_argument_routes_spliced",
     "exegetical_observation_inference_conclusion_chain_missing"

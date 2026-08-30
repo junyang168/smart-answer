@@ -149,8 +149,11 @@ that way. `.github/pull_request_template.md` carries the rule.
 | 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
 
-nginx: `holylogos.servehttp.com:443` and `:80` route `/` to port 3000;
-`:8888` routes `/` to 3003.
+Cloudflare Tunnel publishes `https://dallas-hlc.org` (and
+`https://www.dallas-hlc.org`) to nginx on port 80; nginx routes `/` to port
+3000. The old `holylogos.servehttp.com` hostname is not the production URL and
+its certificate expired on 2026-03-03. `:8888` routes `/` to 3003 only on the
+local machine.
 
 `smart_answer.service` is in a restart loop (#76): it detaches from launchd
 (PPID 1), launchd respawns it, the new instance fails on `address already in

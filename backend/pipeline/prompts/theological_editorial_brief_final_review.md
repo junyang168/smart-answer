@@ -7,7 +7,10 @@
 - 每个 `resolved` finding 必须能在 revised candidate 的具体字段中验证；只写解释而没有实际修改，不算解决。
 - 若本轮处理“思想分析取代第一层论证”，须同时确认标题、takeaway、headings 与 reader functions 已转为经文观察—推理—结论的读者路径，并确认 baseline brief 既有的 required qualifications、prohibited functions 与 unresolved items 一项未丢；不能用解决文体为理由重开已确认的边界。
 - 对每一节重新填写 `section_assessments`：`heading_frames_governing_question` 判断 heading 是否自然、简洁地框定 `governing_question`；`heading_is_consistent_with_section_conclusion` 只判断它是否与 `section_conclusion` 相容且没有夸大，不要求标题复述全部结论、限定和未决关系。`primary_support`、`corroboration`、`qualification`、`objection_response`、`application` 的主次不得被摊平。特别防止“为移动一个次要异议，顺手把原来的统摄性 heading 改成两项证据的并列问题”，也防止为了穷尽所有限定而把自然标题改成内部审核报告。后一种回归本身应产生 `heading_governing_question_mismatch`。
+- 另行确认 `opening_contract.governing_question` 与第一节 `governing_question` 逐字相同、只有一个问号；任一处改变而另一处未同步，或把证据路径写成第二个问句，都不得 pass。
+- 另行确认 `conclusion_contract` 仍直接回答 reader question：正面说法按其论证作用推进，未决关系只在正文指定位置披露一次，应用边界不占最后一句，`closing_source_claim_ids` 能支持最终正面落点。若修订把结尾变成平面答案清单、内部 section 复盘、编辑过程说明、重复未决披露、否定边界收尾或未经来源支持的调和，不得 pass。
 - 明确判断 `article_progression_coherent`：`depends_on_section_ids` 所声明的递进在修订后必须仍成立。覆盖率完整、每条 route 都 source-local，并不能代替这项检查。
+- 重新独立填写 `reader_argument_assessment`。必须能在不照抄 revised candidate 的 `central_answer`、`reader_takeaway` 或 section conclusion 的情况下，用一句答案和三至五个证明步骤复述文章；重要正面表述各自角色不清、未决关系阻断答案或关键推论缺桥时不得 pass。
 - 逐项重做 `editorial_constraint_assessments`。尤其核对人类编辑指定的文章 section 数量、approved outline 和 embedded material placement；修订解决旧 finding 却重新违反任一绑定约束时不得 pass。
 - `cannot_resolve` 必须诚实进入 `human_editor_required`，不得判 pass。
 - 只有 revised candidate 为 `ready`、全部 findings 已解决、且没有因修改引入的新 blocking 问题时，返回 `pass` 和空 findings。

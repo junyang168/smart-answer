@@ -13,6 +13,11 @@
 必须遵守：
 
 1. `reader_question` 是文章唯一主要问题；标题、takeaway 与 sections 必须共同回答它。
+1a. `opening_contract` 不是开场白正文，而是开场的功能契约。必须逐项写清：准备先介绍哪一项受检验的解释或经文问题（`opening_position`）、为什么它需要检验（`why_it_requires_examination`）、唯一统摄问题（`governing_question`）、开场进入哪个第一节（`first_section_id`），以及该节首先展开什么经文证据（`first_evidence_path`）。`governing_question` 必须与第一节逐字相同，而且整项只能有一个问号；同一个问号前也不得用“并足以／以及／又如何／又怎样／且／同时／还是／或者”连接第二项判断。不要把“是否成立”和“证据怎样支持”写成两个连续问题，证据去向已经由 `first_evidence_path` 承担。`first_section_id` 必须是第一节；`answer_preview_policy` 固定为 `orientation_only_no_answer_inventory`，因为开场只给阅读方向，不得提前罗列全文所有候选答案和未决关系。
+1b. `conclusion_contract` 不是结尾正文，而是整篇最后怎样回答读者的功能契约。先写 `settled_conclusion` 及其 Claim IDs，再把正面材料按实际作用排成 `positive_answer_sequence`：直接回答用 `direct_answer`，补充经文用 `supplementary_scripture`，带有限定的推论用 `qualified_inference`；角色按此先后且不可重复。`settled_conclusion`、每项 sequence 的 `summary` 和 `application_boundary` 必须本身就是可直接写给读者看的自然释经句，不得出现“材料／教授／并列／另说／未决关系／编辑／section／Claim／reader／第几节”等生产或观察者语言；需要保留两个正面答案时，直接使用来源中的“或者”，不要写“材料并列另说”。不要把几项不同作用的主张压成一个平面清单。若存在未决关系，只能在 `unresolved_relation_policy.disclose_in_section_id` 指定的一处披露一次，`repeat_in_conclusion` 必须为 false；结尾不能再次评论材料如何整理。应用边界放在最终答案之前，或放在脚注／编辑说明中，不能占据最后一句。`closing_source_claim_ids` 必须让最后一句回到来源支持的正面回答；`prohibited_closing_moves` 要明确禁止内部 section 编号、编辑过程、重复未决披露、负面边界收尾和把不同答案调和成一个答案。
+1c. 在写 sections 前先建立 `reader_argument_contract`。用一句自然语言写 `central_answer`，并列出三至五个可由目标读者复述的 `proof_chain` 步骤；每一步只能依赖前面已经建立的步骤，并绑定实际 Claim、所在 section 与该步真正采用的 source-local route。证明链必须覆盖全部正文 section，至少有一步承担 `positive_answer`。随后把正文会出现的每一种重要正面表述填入 `positive_formulations`，说明它是中心答案、重述、群体建造图景、带限定推论还是尚未解决的另一表述；`relationship_status` 只能依据完整原稿判断为来源明确、清楚披露的编辑编排或未决。不能用相近词义代替来源关系查证。
+
+如果目标读者无法从这三至五步得到一个中心答案，或“认信／真理／使徒和先知／基督”等正面表述形成竞争答案而来源没有足够关系把它们组织起来，`unresolved_relation_impact` 必须是 `blocks_central_answer`，并把 `shape_decision` 设为 `narrow_scope` 或 `split_article`；candidate 不得报 `ready`。只有关系不阻断中心答案且 `shape_decision=proceed` 时才可进入 Author。
 2. `reader_takeaway` 是编辑对文章中心的归纳，必须标记 `editorial_synthesis`，不得冒充教授原话。
 3. `ViewpointStructure` 中每个 focal viewpoint 必须在 `viewpoint_coverage` 恰好出现一次：进入某个 section，或以具体理由 `route_out`。不得静默遗漏。
 4. 每个 `central_claim` 必须进入正文；至少一个 `positive_identification` 必须进入正文。`negative_boundary` 不得承担 takeaway。

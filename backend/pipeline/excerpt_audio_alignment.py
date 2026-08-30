@@ -30,6 +30,8 @@ SCHEMA_VERSION = "wang_excerpt_audio_alignment.v1"
 # search into evidence.
 MIN_SEQUENCE_MATCH_RATIO = 0.65
 MAX_LINEAGE_RECOVERY_ROWS = 12
+MIN_CONTEXT_BOUNDARY_MATCH = 8
+MAX_CONTEXT_BOUNDARY_GAP = 24
 _TO_SIMPLIFIED = OpenCC("t2s")
 _PARAGRAPH_KEY = re.compile(r"^S(\d+)$")
 
@@ -90,9 +92,9 @@ def _seconds(entry: dict[str, Any], edge: str) -> float | None:
 
 
 def _published_segment(
-    published: dict[str, Any], fragment: dict[str, Any]
+    published: dict[str, Any] | list[Any], fragment: dict[str, Any]
 ) -> dict[str, Any] | None:
-    script = published.get("script") or []
+    script = published if isinstance(published, list) else published.get("script") or []
     key = str(fragment.get("paragraph_key") or "")
     match = _PARAGRAPH_KEY.match(key)
     if match:
@@ -184,6 +186,78 @@ def _sequence_span(
     return raw_span_start, raw_span_end, ratio
 
 
+def _context_bounded_span(
+    published_text: str,
+    excerpt: str,
+    raw_text: str,
+) -> tuple[int, int, float] | None:
+    """Bound a badly transcribed excerpt by strong matches on both sides.
+
+    A short quotation can be almost wholly mistranscribed while the surrounding
+    sentences align exactly.  We accept that case only inside the already bound
+    published paragraph, with long, nearby matches on both sides and a small raw
+    gap.  This never performs a corpus-wide fuzzy search.
+    """
+
+    published_normalized = _normalized(published_text)
+    excerpt_normalized = _normalized(excerpt)
+    occurrences = _all_occurrences(published_normalized, excerpt_normalized)
+    if len(occurrences) != 1 or not excerpt_normalized:
+        return None
+    excerpt_start = occurrences[0]
+    excerpt_end = excerpt_start + len(excerpt_normalized)
+    blocks = difflib.SequenceMatcher(
+        None, published_normalized, raw_text, autojunk=False
+    ).get_matching_blocks()
+    left = [
+        (published_start, raw_start, size)
+        for published_start, raw_start, size in blocks
+        if size >= MIN_CONTEXT_BOUNDARY_MATCH
+        and published_start + size <= excerpt_start
+        and excerpt_start - (published_start + size) <= MAX_CONTEXT_BOUNDARY_GAP
+    ]
+    right = [
+        (
+            published_start,
+            raw_start,
+            size,
+            raw_start
+            if published_start >= excerpt_end
+            else raw_start + excerpt_end - published_start,
+        )
+        for published_start, raw_start, size in blocks
+        if (
+            (
+                size >= MIN_CONTEXT_BOUNDARY_MATCH
+                and published_start >= excerpt_end
+                and published_start - excerpt_end <= MAX_CONTEXT_BOUNDARY_GAP
+            )
+            or (
+                published_start < excerpt_end < published_start + size
+                and published_start + size - excerpt_end
+                >= MIN_CONTEXT_BOUNDARY_MATCH
+            )
+        )
+    ]
+    if not left or not right:
+        return None
+    left_published, left_raw, left_size = max(
+        left, key=lambda item: item[0] + item[2]
+    )
+    right_published, right_raw, _, raw_end = min(
+        right, key=lambda item: item[0]
+    )
+    raw_start = left_raw + left_size
+    if raw_end <= raw_start or raw_end - raw_start > max(
+        80, len(excerpt_normalized) * 4
+    ):
+        return None
+    direct = _sequence_span(published_text, excerpt, raw_text)
+    ratio = direct[2] if direct is not None else 0.0
+    del left_published, right_published, right_raw
+    return raw_start, raw_end, ratio
+
+
 def align_excerpt(
     *,
     fragment: dict[str, Any],
@@ -223,7 +297,7 @@ def align_excerpt(
     if expected_sha and expected_sha != published_sha:
         base["reason"] = "published transcript SHA does not match SourceDocument"
         return base
-    if not isinstance(published, dict) or not isinstance(raw, dict):
+    if not isinstance(published, (dict, list)) or not isinstance(raw, dict):
         base["reason"] = "transcript shape cannot provide paragraph lineage"
         return base
     segment = _published_segment(published, fragment)
@@ -267,6 +341,21 @@ def align_excerpt(
                 raw_start,
                 raw_end,
                 "sequence_aligned",
+                ratio,
+                recovery_rows > 0,
+            )
+            break
+        bounded = _context_bounded_span(
+            str(segment.get("text") or ""), excerpt, raw_normalized
+        )
+        if bounded is not None:
+            raw_start, raw_end, ratio = bounded
+            aligned_result = (
+                candidate_entries,
+                entry_map,
+                raw_start,
+                raw_end,
+                "context_bounded",
                 ratio,
                 recovery_rows > 0,
             )
@@ -327,9 +416,10 @@ def align_transcript_excerpt(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         published = {}
     excerpt_normalized = _normalized(excerpt)
+    script = published if isinstance(published, list) else published.get("script") or []
     candidates = [
         row
-        for row in (published.get("script") or [])
+        for row in script
         if isinstance(row, dict)
         and excerpt_normalized
         and excerpt_normalized in _normalized(str(row.get("text") or ""))
