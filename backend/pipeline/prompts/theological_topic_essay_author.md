@@ -10,6 +10,8 @@
 
 起草前还要检查 `conclusion_contract` 是否可写：`settled_conclusion` 是否直接回答 reader question，`positive_answer_sequence` 是否从直接回答推进到补充经文和带限定的推论，未决关系是否只安排披露一次，最后一句是否有 `closing_source_claim_ids` 支持。若契约只是把几种正面说法并列成 inventory，要求在结尾重说未决关系，或让应用边界／编辑过程取代最终答案，返回 `composition_change_required`，不得靠漂亮文句遮住结构错误。
 
+先用自己的话复述 `reader_argument_contract` 的一个中心答案与三至五步证明链，再开始写作。正文每一节必须完成分配给它的证明步骤；不能把 `proof_chain.proposition` 原样当作段落提纲贴入正文，而要展开经文观察、必要的推论理由和阶段结论。`positive_formulations` 中每项只能承担获批角色；若写作时发现它们仍表现为竞争答案、关键推论没有来源支持的中间桥梁，或目标读者无法复述，返回 `composition_change_required`，不得用重复结论或“讲道没有说明”勉强收束。
+
 逐项落实 `scope.editorial_constraints` 与 brief 的 `embedded_materials`。`footnote` 材料只能写成该 section 内的一则简短 Markdown 脚注，`inline_note` 只能作为不打断主论证的短注；两者都不得另建 H2、扩成连续正文段落或变成本节 primary support。它们的来源、模态和 required qualifications 仍须完整。
 
 读者可见的叙述姿态：
@@ -52,7 +54,7 @@
 8. 可以短引教授原句，但引号内必须逐字出现在 source excerpts；不确定就转述，不要伪造引文。
 9. 导言要直接提出 reader question，只给出足以引导阅读的正面回答轮廓，不枚举全部结论与未决关系，也不写“正面的答案需要沿着经文继续追问”一类阅读指令。未决关系只按 `conclusion_contract.unresolved_relation_policy` 在最相关的正文位置披露一次；结尾绝不重复。结尾按契约回到已经建立的正面答案，不能让全文最后一句只剩编辑对关系未决、文章结构或材料范围的说明；不要为了结尾添加没有来源的通用应用。
 9a. H1 与第一个 H2 之间必须有读者可见的导言，而且导言恰好只有一个问号；这个问句必须逐字等于 `opening_contract.governing_question`。多个连续问句、一个问句内用“还是……或者……”预列全文答案，以及先问措辞问题又另问神学答案，都会把一个统摄问题拆成竞争问题，必须在输出前重写。
-10. 正文后返回 section ledger。每个 brief section 恰好一项；列出该节实际使用的全部 Claim、CVP revision 和 ArgumentRoute revision，以及稿件中可逐字定位的 output anchor。
+10. 正文后返回 section ledger。每个 brief section 恰好一项；列出该节实际使用的全部 Claim、CVP revision 和 ArgumentRoute revision，以及稿件中可逐字定位的 output anchor。`output_anchor` 必须从最终 `manuscript_markdown` 原样复制一个完整、连续的正文句子，连同冒号、分号、引号和句末标点逐字一致；不要凭记忆缩写、改标点或只写句意。输出前逐项检查 `output_anchor` 是 `manuscript_markdown` 的精确子串。
 10a. Claim ledger 必须逐 section 对账，不是全文合计。某个 Claim 即使已在前一节 ledger 出现，只要后一节再次使用，仍必须进入后一节的 `claim_ids_used`。最后一个 H2 之后的全部结尾段落都属于最后一节；Markdown 分隔线 `---` 不会新建 section。结尾 provenance 使用的每个 Claim，尤其 `conclusion_contract.closing_source_claim_ids`，都必须进入最后一节 ledger。
 
 输出前先在内部检查 reader-visible Markdown（隐藏 provenance 不计）。除 brief 锁定标题中已有的字样外，正文不得出现以下表达；若出现，先改成直接、自然的释经散文再输出：

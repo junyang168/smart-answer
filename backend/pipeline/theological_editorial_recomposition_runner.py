@@ -101,6 +101,49 @@ def _as_brief_finding(
     }
 
 
+def _as_author_brief_finding(
+    item: dict[str, Any], *, candidate: dict[str, Any]
+) -> dict[str, Any]:
+    """Turn a formal Author composition handoff into a bounded brief finding."""
+
+    affected = {str(value) for value in item.get("affected_record_ids") or []}
+    section_index = next(
+        (
+            index
+            for index, section in enumerate(candidate.get("sections") or [])
+            if str(section.get("section_id") or "") in affected
+        ),
+        None,
+    )
+    if section_index is None:
+        raise ValueError(
+            f"author composition request {item.get('request_id')} names no brief section"
+        )
+    section_prefix = f"/sections/{section_index}"
+    return {
+        "finding_id": f"AUTHOR-{item['request_id']}",
+        "code": "reader_argument_not_reconstructable",
+        "severity": "high",
+        "blocking": True,
+        "record_ids": sorted(affected),
+        "explanation": str(item["reason"]),
+        "recommended_action": (
+            "Resolve the locked contradiction in Composition without asking Author to "
+            "violate scope or provenance. When the obligation concerns records that the "
+            "scope explicitly routes out, keep those records in audit metadata but remove "
+            "the reader-visible disclosure obligation and its section qualification. Do "
+            "not add excluded Claims, viewpoints, or routes to prose unless the scope is "
+            "formally changed. Author's proposed change was: "
+            + str(item["proposed_change"])
+        ),
+        "authorized_change_paths": [
+            "/conclusion_contract/unresolved_relation_policy",
+            f"{section_prefix}/required_qualifications",
+            f"{section_prefix}/prohibited_functions",
+        ],
+    }
+
+
 def run_recomposition(
     *, composition_dir: Path, downstream_review_path: Path, output_dir: Path,
     composition_client: Any, review_client: Any, force: bool = False,
@@ -111,9 +154,38 @@ def run_recomposition(
     validate_theological_evidence_packet(evidence)
     candidate = dict(approved["editorial_decisions"])
     downstream = _result(downstream_review_path)
-    blocking = [dict(item) for item in downstream["findings"] if item["blocking"]]
+    if "findings" in downstream:
+        blocking = [dict(item) for item in downstream["findings"] if item["blocking"]]
+        converted_findings = [
+            _as_brief_finding(item, candidate=candidate) for item in blocking
+        ]
+        affected_section_ids = {
+            str(item.get("section_id") or "") for item in blocking
+        }
+    else:
+        requests = [
+            dict(item) for item in downstream.get("composition_change_requests") or []
+        ]
+        blocking = requests
+        converted_findings = [
+            _as_author_brief_finding(item, candidate=candidate) for item in requests
+        ]
+        affected_section_ids = {
+            str(section["section_id"])
+            for section in candidate.get("sections") or []
+            if str(section["section_id"])
+            in {
+                str(record_id)
+                for request in requests
+                for record_id in request.get("affected_record_ids") or []
+            }
+        }
     if not blocking:
-        raise ValueError("downstream review contains no blocking findings")
+        raise ValueError("downstream artifact contains no blocking composition finding")
+    baseline_chain = [
+        str(item.get("proposition") or "")
+        for item in candidate.get("reader_argument_contract", {}).get("proof_chain") or []
+    ]
     review = {
         "schema_version": "wang_theological_editorial_brief_review_v3",
         "scope_confirmation": "editorial_structure_and_material_no_theological_judgment",
@@ -122,26 +194,36 @@ def run_recomposition(
         "summary": "Reader-prose review found defects that are locked in the approved brief; reopen Composition rather than bypassing the brief in Author revision.",
         "article_progression_coherent": False,
         "article_progression_explanation": "Downstream reader-prose review found a defect locked into the approved article structure.",
+        "reader_argument_assessment": {
+            "reconstructed_question": str(
+                candidate.get("opening_contract", {}).get("governing_question") or ""
+            ),
+            "reconstructed_answer": str(
+                candidate.get("reader_argument_contract", {}).get("central_answer") or ""
+            ),
+            "reconstructed_proof_chain": baseline_chain,
+            "single_central_answer": False,
+            "proof_chain_complete": False,
+            "positive_formulations_distinguished": False,
+            "unresolved_relations_do_not_block_answer": False,
+            "target_reader_can_restate": False,
+            "confusion_points": [
+                "Downstream writing exposed a contradiction locked in the approved brief."
+            ],
+        },
         "section_assessments": [
             {
                 "section_id": str(section["section_id"]),
-                "heading_frames_governing_question": not any(
-                    str(item.get("section_id") or "") == str(section["section_id"])
-                    for item in blocking
-                ),
-                "heading_is_consistent_with_section_conclusion": not any(
-                    str(item.get("section_id") or "") == str(section["section_id"])
-                    for item in blocking
-                ),
-                "route_roles_form_hierarchy": not any(
-                    str(item.get("section_id") or "") == str(section["section_id"])
-                    for item in blocking
-                ),
-                "explanation": "Downstream finding requires this section to be reopened."
-                if any(
-                    str(item.get("section_id") or "") == str(section["section_id"])
-                    for item in blocking
+                "heading_frames_governing_question": str(section["section_id"])
+                not in affected_section_ids,
+                "heading_is_consistent_with_section_conclusion": str(
+                    section["section_id"]
                 )
+                not in affected_section_ids,
+                "route_roles_form_hierarchy": str(section["section_id"])
+                not in affected_section_ids,
+                "explanation": "Downstream finding requires this section to be reopened."
+                if str(section["section_id"]) in affected_section_ids
                 else "No downstream structural finding targets this section.",
             }
             for section in candidate.get("sections") or []
@@ -154,9 +236,7 @@ def run_recomposition(
             }
             for item in candidate.get("editorial_constraint_coverage") or []
         ],
-        "findings": [
-            _as_brief_finding(item, candidate=candidate) for item in blocking
-        ],
+        "findings": converted_findings,
     }
     validate_brief_review(review, candidate=candidate)
     _write_json(output_dir / "downstream-composition-review.json", review)

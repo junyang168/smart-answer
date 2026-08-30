@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -16,6 +17,7 @@ from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.editorial_draft_repository import publish_editorial_draft
+from backend.pipeline.excerpt_audio_alignment import project_excerpt_timings
 from backend.pipeline.manuscript_grounding_check import check_manuscript_grounding, extract_provenance_paragraphs
 from backend.pipeline.matthew_exposition_authoring import (
     canonical_json,
@@ -62,6 +64,12 @@ HARD_FAILURE_DIMENSIONS = {
         "positive_thesis_and_structural_fidelity",
         "general_reader_readability",
         "editorial_voice_restraint",
+        "reader_memory_center",
+    },
+    "reader_cannot_reconstruct_article_argument": {
+        "positive_thesis_and_structural_fidelity",
+        "argument_route_integrity",
+        "general_reader_readability",
         "reader_memory_center",
     },
     "article_argument_hierarchy_flattened": {"positive_thesis_and_structural_fidelity", "argument_route_integrity", "reader_memory_center"},
@@ -141,6 +149,7 @@ def _merge_delta(
         "dimension_scores": [scores[str(item["id"])] for item in quality_profile["dimensions"]],
         "hard_failure_assessments": [hard[str(item)] for item in quality_profile["hard_failures"]],
         "conclusion_assessment": delta["conclusion_assessment"],
+        "reader_argument_assessment": delta["reader_argument_assessment"],
         "findings": delta["findings"],
         "score_provenance": {
             "rescored_dimensions": affected_dimensions,
@@ -189,21 +198,31 @@ def build_topic_presentation_package(
                     source = sources.get(str(fragment["source_id"]))
                     if not source or source.get("source_type") != "sermon_transcript":
                         continue
-                    start = fragment.get("media_time")
-                    end = fragment.get("media_end_time")
+                    start = fragment.get("excerpt_media_time")
+                    end = fragment.get("excerpt_media_end_time")
+                    if not isinstance(start, (int, float)) or not isinstance(
+                        end, (int, float)
+                    ):
+                        start = fragment.get("media_time")
+                        end = fragment.get("media_end_time")
                     if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
                         continue
                     key = (str(source["source_id"]), float(start), float(end))
                     if key in seen:
                         continue
                     seen.add(key)
-                    presentations.append({
+                    presentation = {
                         "source_id": source["source_id"],
                         "start_seconds": start,
                         "end_seconds": end,
                         "claim_ids": [claim_id],
                         "fragment_ids": [fragment_id],
-                    })
+                    }
+                    if fragment.get("excerpt_timing") is not None:
+                        presentation["timing_projection"] = fragment[
+                            "excerpt_timing"
+                        ]
+                    presentations.append(presentation)
         decisions.append({
             "decision_id": section["section_id"],
             "section_title": next(
@@ -306,10 +325,17 @@ def program_audit(
                     continue
                 if fragment.get("source_sha256") != source.get("source_sha256"):
                     errors.append({"code": "source_fragment_sha_mismatch", "message": str(fragment_id)})
+                media_start = fragment.get("excerpt_media_time")
+                media_end = fragment.get("excerpt_media_end_time")
+                if not isinstance(media_start, (int, float)) or not isinstance(
+                    media_end, (int, float)
+                ):
+                    media_start = fragment.get("media_time")
+                    media_end = fragment.get("media_end_time")
                 if source.get("source_type") == "sermon_transcript" and (
-                    not isinstance(fragment.get("media_time"), (int, float))
-                    or not isinstance(fragment.get("media_end_time"), (int, float))
-                    or fragment["media_end_time"] <= fragment["media_time"]
+                    not isinstance(media_start, (int, float))
+                    or not isinstance(media_end, (int, float))
+                    or media_end <= media_start
                 ):
                     errors.append({"code": "sermon_fragment_missing_audio_anchor", "message": str(fragment_id)})
     plan = presentation_package["product_plans"][0]
@@ -377,7 +403,8 @@ def program_audit(
 
 def run_quality(
     *, authoring_dir: Path, output_dir: Path, reviewer_client: Any,
-    revision_client: Any, repository_root: Path | None = None, force: bool = False,
+    revision_client: Any, repository_root: Path | None = None,
+    data_base_path: Path | None = None, force: bool = False,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     packet = _read_result(authoring_dir / "topic-authoring-packet.json")
@@ -396,7 +423,22 @@ def run_quality(
         value = reviewer_client.generate_json(
             review_prompt, canonical_json(review_packet), TOPIC_EDITORIAL_REVIEW_SCHEMA
         )
-        validate_topic_editorial_review(value, review_packet=review_packet)
+        try:
+            validate_topic_editorial_review(value, review_packet=review_packet)
+        except Exception as exc:
+            rejected = output_dir / "rejected-generations"
+            rejected.mkdir(parents=True, exist_ok=True)
+            _write_json(
+                rejected / f"editorial-review.{sha256_json(value)[:16]}.json",
+                {
+                    "schema_version": "wang_theological_topic_rejected_generation_v1",
+                    "stage": "independent_editorial_review",
+                    "packet_sha256": review_packet["packet_sha256"],
+                    "validation_error": f"{type(exc).__name__}: {exc}",
+                    "result": value,
+                },
+            )
+            raise
         return value
 
     review, review_cached = _run_cached_stage(
@@ -630,12 +672,20 @@ def run_quality(
     manuscript = str(author_result["manuscript_markdown"])
     (output_dir / "final.md").write_text(manuscript, encoding="utf-8")
     final_review = {**current_review, "reviewed_manuscript_sha256": sha256_text(manuscript)}
+    presentation_packet = packet
+    if data_base_path is not None:
+        presentation_packet = {
+            **packet,
+            "knowledge": project_excerpt_timings(
+                dict(packet["knowledge"]), data_base_path=data_base_path
+            ),
+        }
     presentation_package = build_topic_presentation_package(
-        packet=packet, author_result=author_result
+        packet=presentation_packet, author_result=author_result
     )
     _write_json(output_dir / "presentation-package.json", presentation_package)
     audit = program_audit(
-        packet=packet, author_result=author_result, grounding=grounding,
+        packet=presentation_packet, author_result=author_result, grounding=grounding,
         editorial_review=final_review, editorial_outcome=current_outcome,
         presentation_package=presentation_package,
     )
@@ -728,7 +778,9 @@ def main() -> int:
         authoring_dir=args.authoring_dir, output_dir=args.output_dir,
         reviewer_client=ClaudeSubscriptionClient(model=args.reviewer_model, reasoning_effort="high", timeout_seconds=args.timeout_seconds),
         revision_client=CodexSubscriptionClient(model=args.revision_model, reasoning_effort="high", timeout_seconds=args.timeout_seconds),
-        repository_root=repository, force=args.force,
+        repository_root=repository,
+        data_base_path=Path(os.environ["DATA_BASE_DIR"]),
+        force=args.force,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "workflow_published" else 2

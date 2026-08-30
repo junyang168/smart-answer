@@ -161,6 +161,14 @@ def _inputs():
                 "Do not replace the answer with editorial process language."
             ],
         },
+        "reader_argument_contract": {
+            "central_answer": "The positive claim is established.",
+            "central_answer_claim_ids": ["CL-1"],
+            "proof_chain": [],
+            "positive_formulations": [],
+            "unresolved_relation_impact": "does_not_block_central_answer",
+            "shape_decision": "proceed",
+        },
         "viewpoint_coverage": [],
         "sections": [
             {
@@ -678,6 +686,34 @@ def _review_for(packet, manuscript_sha, *, hard_failure_id=None):
             ),
             "unresolved_disclosure_repeated": False,
         },
+        "reader_argument_assessment": {
+            "evidence_anchors": [
+                "Positive title",
+                opening_anchor,
+                conclusion_anchor,
+            ],
+            "reconstructed_question": "What is the claim?",
+            "reconstructed_answer": "The positive proposition is the answer.",
+            "reconstructed_proof_chain": [
+                "The interpretation raises the question.",
+                "The source supplies the proposition.",
+                "The proposition answers the question.",
+            ],
+            "single_central_answer": True,
+            "proof_chain_complete": not (
+                hard_failure_id == "reader_cannot_reconstruct_article_argument"
+            ),
+            "positive_formulations_distinguished": True,
+            "unresolved_relations_do_not_block_answer": True,
+            "target_reader_can_restate": not (
+                hard_failure_id == "reader_cannot_reconstruct_article_argument"
+            ),
+            "confusion_points": (
+                ["The proof chain is incomplete."]
+                if hard_failure_id == "reader_cannot_reconstruct_article_argument"
+                else []
+            ),
+        },
         "findings": findings,
     }
 
@@ -701,6 +737,37 @@ def test_passing_review_must_cite_the_opening_in_readability_evidence():
     )
     readability["evidence"] = "The middle sections are clear."
     with pytest.raises(TheologicalEditorialContractError, match="cite the opening"):
+        validate_topic_editorial_review(review, review_packet=review_packet)
+
+
+def test_core_argument_finding_cannot_be_nonblocking():
+    evidence, brief, publication, quality = _inputs()
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=_valid_result()
+    )
+    review = _review_for(packet, review_packet["manuscript_sha256"])
+    review["findings"] = [
+        {
+            "finding_id": "F-BRIDGE",
+            "dimension_id": "general_reader_readability",
+            "section_id": "SEC-1",
+            "severity": "minor",
+            "blocking": False,
+            "manuscript_anchor": "Positive proposition in prose.",
+            "problem": "The conclusion skips a reasoning bridge.",
+            "required_change": "Add the missing bridge.",
+        }
+    ]
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="core argument finding must be blocking",
+    ):
         validate_topic_editorial_review(review, review_packet=review_packet)
 
 
@@ -874,6 +941,26 @@ def test_delta_can_return_next_round_finding_in_new_dimension():
             "positive_claims_follow_contract": True,
             "unresolved_disclosure_repeated": False,
         },
+        "reader_argument_assessment": {
+            "evidence_anchors": [
+                "Positive title",
+                "An interpretation makes a claim.",
+                "Positive proposition in prose.",
+            ],
+            "reconstructed_question": "What is the claim?",
+            "reconstructed_answer": "The positive proposition is the answer.",
+            "reconstructed_proof_chain": [
+                "The interpretation raises the question.",
+                "The source supplies the proposition.",
+                "The proposition answers the question.",
+            ],
+            "single_central_answer": True,
+            "proof_chain_complete": True,
+            "positive_formulations_distinguished": True,
+            "unresolved_relations_do_not_block_answer": True,
+            "target_reader_can_restate": True,
+            "confusion_points": [],
+        },
         "finding_dispositions": [{"finding_id": "F-1", "resolution": "resolved", "resolution_anchor": "Positive proposition in prose.", "explanation": "Resolved."}],
         "findings": [{
             "finding_id": "F-2", "dimension_id": "general_reader_readability",
@@ -922,6 +1009,74 @@ def test_presentation_package_uses_the_same_claim_evidence_audio_chain():
         "source_id": "SRC-1", "start_seconds": 12.0, "end_seconds": 34.0,
         "claim_ids": ["CL-1"], "fragment_ids": ["FR-1"],
     }]
+
+
+def test_program_audit_accepts_sha_bound_excerpt_timing_projection():
+    evidence, brief, publication, quality = _inputs()
+    evidence["source_documents"][0].update(
+        source_type="sermon_transcript",
+        transcript_id="SERMON-1",
+    )
+    _refresh_source_originals(evidence)
+    source_sha = evidence["source_documents"][0]["source_sha256"]
+    evidence["source_fragments"][0].update(
+        source_sha256=source_sha,
+        media_time=None,
+        media_end_time=None,
+        excerpt_media_time=42.0,
+        excerpt_media_end_time=49.0,
+        excerpt_timing={
+            "schema_version": "wang_excerpt_audio_alignment.v1",
+            "status": "estimated",
+            "alignment_sha256": "a" * 64,
+        },
+    )
+    evidence["evidence_packet_sha256"] = sha256_json(
+        {
+            key: value
+            for key, value in evidence.items()
+            if key != "evidence_packet_sha256"
+        }
+    )
+    brief["evidence_packet_sha256"] = evidence["evidence_packet_sha256"]
+    brief["brief_sha256"] = sha256_json(
+        {key: value for key, value in brief.items() if key != "brief_sha256"}
+    )
+    packet = build_topic_authoring_packet(
+        evidence_packet=evidence,
+        approved_brief=brief,
+        publication_profile=publication,
+        quality_profile=quality,
+    )
+    author_result = _valid_result()
+    manuscript_sha = sha256_text(author_result["manuscript_markdown"])
+    review_packet = build_topic_editorial_review_packet(
+        authoring_packet=packet, author_result=author_result
+    )
+    review = _review_for(packet, manuscript_sha)
+    outcome = validate_topic_editorial_review(
+        review, review_packet=review_packet
+    )
+    presentation = build_topic_presentation_package(
+        packet=packet, author_result=author_result
+    )
+
+    audit = program_audit(
+        packet=packet,
+        author_result=author_result,
+        grounding={"passed": True, "manuscript_sha256": manuscript_sha},
+        editorial_review=review,
+        editorial_outcome=outcome,
+        presentation_package=presentation,
+    )
+
+    assert audit["status"] == "pass"
+    assert audit["summary"]["error_total"] == 0
+    item = presentation["product_plans"][0]["decisions"][0][
+        "source_presentations"
+    ][0]
+    assert (item["start_seconds"], item["end_seconds"]) == (42.0, 49.0)
+    assert item["timing_projection"]["alignment_sha256"] == "a" * 64
 
 
 def test_program_audit_discloses_notes_only_section_without_inventing_audio():

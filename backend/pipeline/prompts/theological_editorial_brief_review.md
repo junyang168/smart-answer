@@ -24,6 +24,8 @@ EditorialScope 中的 `editorial_constraints` 是已经由人类编辑决定并�
 11. 检查 `depends_on_section_ids` 是否形成真实递进：后一节使用前一节已经建立的结论，而不是仅按材料或关键词相邻。把多个独立证据列在一个标题里，不等于建立了论证层级。
 12. 检查 `embedded_materials`：被指定为 footnote／inline note 的材料是否仍完整保留 viewpoint、route、模态与限定，却没有重新长成独立 H2 或正文主证；section 数量和禁止的 article function 是否符合 scope 的机械约束。
 
+在参考 candidate 自己对文章的解释之前，先按 sections、Claim、route 与完整原稿独立填写 `reader_argument_assessment`：用一句话重建读者问题，用一句话重建文章答案，再用三至五句话重建证明链。不要照抄 `reader_takeaway`、`central_answer` 或 section conclusion。分别判断：是否只有一个中心答案；证明链的观察、推论与结论是否完整；重要正面表述是否各有清楚且来源允许的角色；未决关系是否实际阻断答案；神学生与有追求的平信徒是否能据此复述。凡出现“每项都有来源，但不知道彼此是什么关系”、两个以上竞争答案、关键结论只是宣布而没有中间理由，或结尾只能重复答案清单时，列入 `confusion_points`，不得 pass，并返回 `reader_argument_not_reconstructable` finding。现有 `depends_on_section_ids` 正确不能替代这个测试。
+
 不要因为资料很多就判定可写，也不要因为存在 unresolved item 就一律停止。关键是：文章能否给出一个诚实、有限、来源支持的回答，并清楚告诉读者尚不能统一什么。
 
 `pass` 只在 candidate 为 `ready` 且没有 finding 时使用。其他 decision 必须返回至少一个 blocking finding。若问题可由 Composition 修改解决，使用 `changes_required`；若缺的是材料，使用 `insufficient_material`；若结构关系未决并阻断主问题，使用 `unresolved_structure`；必须由人作新的编辑选择时使用 `human_editor_required`。

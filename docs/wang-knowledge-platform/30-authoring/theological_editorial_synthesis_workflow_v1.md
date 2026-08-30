@@ -106,6 +106,7 @@ flowchart LR
 - `reader_question`：文章要回答的一个主要问题；
 - `reader_takeaway`：编辑预计读者读完能复述的正面中心，明确标记为编辑综合；
 - `opening_contract`：开场先介绍什么解释或经文问题、为什么需要检验、唯一统摄问题、进入哪一节及首先展开什么经文证据；它规定读者路径，不代写开场白；
+- `reader_argument_contract`：一个中心答案、三至五步 proof chain、每步的依赖 section／Claim／ArgumentRoute，以及每项正面表述与中心答案的关系；关系只能是来源明确、编辑重述、带限定推论或未决，不得用相近措辞代替关系判断；
 - `conclusion_contract`：确定回答及其 Claim、正面材料的作用次序、未决关系唯一披露位置、应用边界位置、结尾功能与支撑最后一句的 Claim；它规定读者最后得到什么答案，不代写结尾；
 - 所选 `structure_revision_id` 及其内容 SHA；
 - 每个 focal viewpoint 的 revision、结构角色、归属类别、是否进入正文，以及进入正文时承担的 section；
@@ -135,6 +136,8 @@ Composition Review 在写作前回答“现有材料能不能忠实回答 reader
 - 若无完整路线，brief 是否诚实降级为有限陈述，而不是由编辑补桥；
 - 未决关系是否被保留，且不妨碍 reader question 获得诚实的部分回答；
 - route-out 是否覆盖已知但不适合本篇的批驳、应用、重复材料和旁支。
+
+Composition 必须先给 scope 内每项重要正面表述分类，再决定文章形态。若两项表述都可能承担中心答案，而原稿没有说明它们是同义、层级、并列还是选择关系，不能把它们放进一篇文章后交给 Author 自行解释；`reader_argument_contract.shape_decision` 必须停止、拆篇或缩窄问题。缩窄后，被 scope 明确排除的记录继续保留在 route-out 与审计元数据中，但不能仅因全题存在未决关系就强迫 Author 在正文重新列出这些记录。
 
 材料不足时不调用 Author。`insufficient_material` 可以是成功的研究终态：它证明流程没有把缺口变成散文。
 
@@ -169,6 +172,8 @@ Writing quality profile 必须把以下情况列为 hard failure：稿件虽有�
 Independent Editorial Review packet 另行提取 H1 与第一个 H2 之间的 reader prose，并附 Brief 的 `opening_contract`。Reviewer 必须先审核这段文字，且 `general_reader_readability` 的 evidence 至少逐字引用其中一句；只引用正文中段不能为导言背书。无根据的转折、没有被前句发动的问题、两个竞争问题或先于论证的答案清单，构成 `opening_reader_path_broken` hard failure，并须产生锚定在导言的 blocking finding。初审一旦漏掉未改动的导言，Delta Review 按范围继承便无法补救，因此这项责任不能下放到修订轮次。
 
 同一 packet 另行提取最后一个 H2 下的 reader prose，并附 `conclusion_contract`。Reviewer 必须逐字引用结尾、用一句普通话复述读者最终得到的答案，并分别判断答案是否直接、编辑过程是否挤走答案、正面主张是否按契约推进、未决披露是否重复。结构化判断与 `conclusion_reader_answer_broken` hard failure 不一致时，review 无效；任一结尾失败都必须有锚定在结尾的 blocking finding。Final Delta Review 每轮重新读取完整结尾，防止 Revision 在修正 attribution、route 或其他 metadata 时把内部指令写进 reader prose，或新引入重复、平面清单和负面落点。
+
+Reviewer 还须只按稿件本身重建“一句话问题—一句话答案—三至五步证明链”，至少逐字引用三个不同位置，再与完整原稿核对。缺推论桥梁、竞争答案或读者无法复述时，不得因为末句清楚或每段有来源而放行。`positive_thesis_and_structural_fidelity`、`argument_route_integrity`、`general_reader_readability` 与 `reader_memory_center` 中的任何 finding 都是 blocking；核心论证缺口不能标成 minor／nonblocking 后留待人工发现。
 
 ## 十、可重复性
 

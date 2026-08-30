@@ -55,6 +55,26 @@ CONCLUSION_ANSWER_ROLES = (
     "supplementary_scripture",
     "qualified_inference",
 )
+READER_ARGUMENT_STEP_ROLES = frozenset({
+    "textual_observation",
+    "inference_warrant",
+    "intermediate_conclusion",
+    "positive_answer",
+    "supplementary_qualification",
+    "application",
+})
+POSITIVE_FORMULATION_ROLES = frozenset({
+    "central_answer",
+    "restatement",
+    "supporting_corporate_image",
+    "qualified_inference",
+    "unresolved_alternative",
+})
+POSITIVE_RELATION_STATUSES = frozenset({
+    "source_explicit",
+    "editorial_synthesis_disclosed",
+    "unresolved",
+})
 CONCLUSION_READER_META_PHRASES = (
     "材料",
     "教授",
@@ -1288,6 +1308,128 @@ def validate_editorial_brief_candidate(
         "prohibited closing moves",
     )
     _require(bool(prohibited_closing), "conclusion contract needs prohibited moves")
+
+    argument_contract = candidate.get("reader_argument_contract") or {}
+    _require(bool(argument_contract), "ready brief requires a reader argument contract")
+    _nonempty(argument_contract.get("central_answer"), "reader argument central answer")
+    central_claim_ids = _unique(
+        argument_contract.get("central_answer_claim_ids") or [],
+        "reader argument central answer Claims",
+    )
+    _require(bool(central_claim_ids), "reader argument central answer requires Claims")
+    unknown_central = set(central_claim_ids) - known_claim_ids
+    _require(
+        not unknown_central,
+        f"reader argument cites unknown central Claims: {sorted(unknown_central)}",
+    )
+    _require(
+        argument_contract.get("shape_decision") == "proceed",
+        "a ready brief must have a proceed reader-argument shape decision",
+    )
+    _require(
+        argument_contract.get("unresolved_relation_impact")
+        in {"does_not_block_central_answer", "narrows_central_answer"},
+        "a ready brief cannot leave a relation that blocks the central answer",
+    )
+    proof_chain = list(argument_contract.get("proof_chain") or [])
+    _require(
+        3 <= len(proof_chain) <= 5,
+        "reader argument proof chain must contain three to five steps",
+    )
+    proof_step_ids = _unique(
+        [str(item.get("step_id") or "") for item in proof_chain],
+        "reader argument proof step ids",
+    )
+    seen_proof_ids: set[str] = set()
+    proof_sections: set[str] = set()
+    route_by_revision = {
+        str(item["revision"]["argument_route_revision_id"]): item
+        for item in evidence_packet.get("argument_routes") or []
+    }
+    for item in proof_chain:
+        step_id = _nonempty(item.get("step_id"), "reader argument proof step id")
+        section_id = _nonempty(
+            item.get("section_id"), f"reader argument {step_id} section"
+        )
+        _require(section_id in section_by_id, f"reader argument {step_id}: unknown section")
+        proof_sections.add(section_id)
+        _nonempty(item.get("proposition"), f"reader argument {step_id} proposition")
+        _require(
+            item.get("step_role") in READER_ARGUMENT_STEP_ROLES,
+            f"reader argument {step_id}: invalid step role",
+        )
+        dependencies = _unique(
+            item.get("depends_on_step_ids") or [],
+            f"reader argument {step_id} dependencies",
+        )
+        _require(
+            set(dependencies) <= seen_proof_ids,
+            f"reader argument {step_id}: dependencies must name earlier proof steps",
+        )
+        claim_ids = _unique(
+            item.get("claim_ids") or [], f"reader argument {step_id} Claims"
+        )
+        _require(bool(claim_ids), f"reader argument {step_id} needs Claims")
+        unknown = set(claim_ids) - known_claim_ids
+        _require(
+            not unknown,
+            f"reader argument {step_id} cites unknown Claims: {sorted(unknown)}",
+        )
+        route_ids = _unique(
+            item.get("argument_route_revision_ids") or [],
+            f"reader argument {step_id} routes",
+        )
+        _require(
+            set(route_ids) <= set(section_by_id[section_id].get("argument_route_revision_ids") or []),
+            f"reader argument {step_id}: routes must belong to its section",
+        )
+        _require(
+            set(route_ids) <= set(route_by_revision),
+            f"reader argument {step_id}: unknown routes",
+        )
+        seen_proof_ids.add(step_id)
+    _require(
+        proof_sections == set(section_by_id),
+        "reader argument proof chain must account for every article section",
+    )
+    _require(
+        any(item.get("step_role") == "positive_answer" for item in proof_chain),
+        "reader argument proof chain needs a positive-answer step",
+    )
+    formulations = list(argument_contract.get("positive_formulations") or [])
+    _require(bool(formulations), "reader argument must classify positive formulations")
+    formulation_labels = _unique(
+        [str(item.get("label") or "") for item in formulations],
+        "reader argument formulation labels",
+    )
+    for item in formulations:
+        label = _nonempty(item.get("label"), "reader argument formulation label")
+        _require(
+            item.get("role") in POSITIVE_FORMULATION_ROLES,
+            f"reader argument formulation {label}: invalid role",
+        )
+        _require(
+            item.get("relationship_status") in POSITIVE_RELATION_STATUSES,
+            f"reader argument formulation {label}: invalid relationship status",
+        )
+        _nonempty(
+            item.get("relationship_to_central_answer"),
+            f"reader argument formulation {label} relationship",
+        )
+        claim_ids = _unique(
+            item.get("claim_ids") or [],
+            f"reader argument formulation {label} Claims",
+        )
+        _require(bool(claim_ids), f"reader argument formulation {label} needs Claims")
+        unknown = set(claim_ids) - known_claim_ids
+        _require(
+            not unknown,
+            f"reader argument formulation {label} cites unknown Claims: {sorted(unknown)}",
+        )
+    _require(
+        any(item.get("role") == "central_answer" for item in formulations),
+        "reader argument formulations need one central answer",
+    )
     _unique(
         [str(item.get("embedded_material_id") or "") for item in embedded_materials],
         "embedded material ids",
@@ -1601,6 +1743,89 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
                     "prohibited_closing_moves",
                 ],
             },
+            "reader_argument_contract": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "central_answer": {"type": "string"},
+                    "central_answer_claim_ids": {
+                        "type": "array", "items": {"type": "string"}
+                    },
+                    "proof_chain": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "step_id": {"type": "string"},
+                                "section_id": {"type": "string"},
+                                "proposition": {"type": "string"},
+                                "step_role": {
+                                    "type": "string",
+                                    "enum": sorted(READER_ARGUMENT_STEP_ROLES),
+                                },
+                                "depends_on_step_ids": {
+                                    "type": "array", "items": {"type": "string"}
+                                },
+                                "claim_ids": {
+                                    "type": "array", "items": {"type": "string"}
+                                },
+                                "argument_route_revision_ids": {
+                                    "type": "array", "items": {"type": "string"}
+                                },
+                            },
+                            "required": [
+                                "step_id", "section_id", "proposition", "step_role",
+                                "depends_on_step_ids", "claim_ids",
+                                "argument_route_revision_ids",
+                            ],
+                        },
+                    },
+                    "positive_formulations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "label": {"type": "string"},
+                                "role": {
+                                    "type": "string",
+                                    "enum": sorted(POSITIVE_FORMULATION_ROLES),
+                                },
+                                "relationship_to_central_answer": {"type": "string"},
+                                "relationship_status": {
+                                    "type": "string",
+                                    "enum": sorted(POSITIVE_RELATION_STATUSES),
+                                },
+                                "claim_ids": {
+                                    "type": "array", "items": {"type": "string"}
+                                },
+                            },
+                            "required": [
+                                "label", "role", "relationship_to_central_answer",
+                                "relationship_status", "claim_ids",
+                            ],
+                        },
+                    },
+                    "unresolved_relation_impact": {
+                        "type": "string",
+                        "enum": [
+                            "does_not_block_central_answer",
+                            "narrows_central_answer",
+                            "blocks_central_answer",
+                        ],
+                    },
+                    "shape_decision": {
+                        "type": "string",
+                        "enum": ["proceed", "narrow_scope", "split_article"],
+                    },
+                },
+                "required": [
+                    "central_answer", "central_answer_claim_ids", "proof_chain",
+                    "positive_formulations", "unresolved_relation_impact",
+                    "shape_decision",
+                ],
+            },
             "reader_takeaway": {"type": "string"},
             "reader_takeaway_attribution": {
                 "type": "string",
@@ -1790,6 +2015,7 @@ BRIEF_CANDIDATE_SCHEMA: dict[str, Any] = {
             "article_title",
             "opening_contract",
             "conclusion_contract",
+            "reader_argument_contract",
             "reader_takeaway",
             "reader_takeaway_attribution",
             "reader_takeaway_viewpoint_revision_ids",
@@ -1826,6 +2052,32 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
             "summary": {"type": "string"},
             "article_progression_coherent": {"type": "boolean"},
             "article_progression_explanation": {"type": "string"},
+            "reader_argument_assessment": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "reconstructed_question": {"type": "string"},
+                    "reconstructed_answer": {"type": "string"},
+                    "reconstructed_proof_chain": {
+                        "type": "array", "items": {"type": "string"}
+                    },
+                    "single_central_answer": {"type": "boolean"},
+                    "proof_chain_complete": {"type": "boolean"},
+                    "positive_formulations_distinguished": {"type": "boolean"},
+                    "unresolved_relations_do_not_block_answer": {"type": "boolean"},
+                    "target_reader_can_restate": {"type": "boolean"},
+                    "confusion_points": {
+                        "type": "array", "items": {"type": "string"}
+                    },
+                },
+                "required": [
+                    "reconstructed_question", "reconstructed_answer",
+                    "reconstructed_proof_chain", "single_central_answer",
+                    "proof_chain_complete", "positive_formulations_distinguished",
+                    "unresolved_relations_do_not_block_answer",
+                    "target_reader_can_restate", "confusion_points",
+                ],
+            },
             "section_assessments": {
                 "type": "array",
                 "items": {
@@ -1877,6 +2129,7 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
                                 "argument_hierarchy_flattened",
                                 "heading_governing_question_mismatch",
                                 "section_progression_broken",
+                                "reader_argument_not_reconstructable",
                                 "modality_or_scope_upgraded",
                                 "unresolved_item_silently_harmonized",
                                 "focal_viewpoint_omitted",
@@ -1922,6 +2175,7 @@ BRIEF_REVIEW_SCHEMA: dict[str, Any] = {
             "summary",
             "article_progression_coherent",
             "article_progression_explanation",
+            "reader_argument_assessment",
             "section_assessments",
             "editorial_constraint_assessments",
             "findings",
@@ -2025,6 +2279,27 @@ def validate_brief_review(
         review.get("article_progression_explanation"),
         "article progression explanation",
     )
+    argument_assessment = review.get("reader_argument_assessment") or {}
+    _nonempty(
+        argument_assessment.get("reconstructed_question"),
+        "reader argument reconstructed question",
+    )
+    _nonempty(
+        argument_assessment.get("reconstructed_answer"),
+        "reader argument reconstructed answer",
+    )
+    reconstructed_chain = [
+        _nonempty(item, "reader argument reconstructed proof step")
+        for item in argument_assessment.get("reconstructed_proof_chain") or []
+    ]
+    _require(
+        3 <= len(reconstructed_chain) <= 5,
+        "reader argument review must reconstruct three to five proof steps",
+    )
+    confusion_points = [
+        _nonempty(item, "reader argument confusion point")
+        for item in argument_assessment.get("confusion_points") or []
+    ]
     candidate_section_ids = [
         str(item["section_id"]) for item in candidate.get("sections") or []
     ]
@@ -2072,6 +2347,16 @@ def validate_brief_review(
         _require(
             all(item.get("satisfied") is True for item in constraint_assessments),
             "passing review cannot fail a binding editorial constraint",
+        )
+        _require(
+            argument_assessment.get("single_central_answer") is True
+            and argument_assessment.get("proof_chain_complete") is True
+            and argument_assessment.get("positive_formulations_distinguished") is True
+            and argument_assessment.get("unresolved_relations_do_not_block_answer")
+            is True
+            and argument_assessment.get("target_reader_can_restate") is True
+            and not confusion_points,
+            "passing review requires a reconstructable reader argument",
         )
     else:
         _require(bool(findings), "non-passing brief review needs findings")

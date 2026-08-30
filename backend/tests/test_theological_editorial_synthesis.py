@@ -282,6 +282,57 @@ def _candidate(packet):
                 "Do not turn complete coverage into a flat answer inventory.",
             ],
         },
+        "reader_argument_contract": {
+            "central_answer": "The church rests on the positive foundation.",
+            "central_answer_claim_ids": ["CL-2"],
+            "proof_chain": [
+                {
+                    "step_id": "P1",
+                    "section_id": "SEC-POSITIVE",
+                    "proposition": "The source states the positive foundation.",
+                    "step_role": "textual_observation",
+                    "depends_on_step_ids": [],
+                    "claim_ids": ["CL-2"],
+                    "argument_route_revision_ids": ["ARR-2"],
+                },
+                {
+                    "step_id": "P2",
+                    "section_id": "SEC-POSITIVE",
+                    "proposition": "That foundation supplies the article answer.",
+                    "step_role": "positive_answer",
+                    "depends_on_step_ids": ["P1"],
+                    "claim_ids": ["CL-2"],
+                    "argument_route_revision_ids": ["ARR-2"],
+                },
+                {
+                    "step_id": "P3",
+                    "section_id": "SEC-BOUNDARY",
+                    "proposition": "The negative boundary excludes Peter himself.",
+                    "step_role": "supplementary_qualification",
+                    "depends_on_step_ids": ["P2"],
+                    "claim_ids": ["CL-3"],
+                    "argument_route_revision_ids": ["ARR-3"],
+                },
+            ],
+            "positive_formulations": [
+                {
+                    "label": "positive foundation",
+                    "role": "central_answer",
+                    "relationship_to_central_answer": "This is the central answer.",
+                    "relationship_status": "source_explicit",
+                    "claim_ids": ["CL-2"],
+                },
+                {
+                    "label": "more likely Christ",
+                    "role": "qualified_inference",
+                    "relationship_to_central_answer": "This qualifies the referent.",
+                    "relationship_status": "unresolved",
+                    "claim_ids": ["CL-1"],
+                },
+            ],
+            "unresolved_relation_impact": "narrows_central_answer",
+            "shape_decision": "proceed",
+        },
         "reader_takeaway": "文章先呈现正面根基，再说明彼得本人不是根基。",
         "reader_takeaway_attribution": "editorial_synthesis",
         "reader_takeaway_viewpoint_revision_ids": ["CVR-POSITIVE"],
@@ -363,6 +414,26 @@ def _candidate(packet):
         "unresolved_items": ["Positive identifications are not fully unified."],
         "stop_reasons": [],
     }
+
+
+def _reader_argument_assessment(**overrides):
+    value = {
+        "reconstructed_question": "What is the church founded upon?",
+        "reconstructed_answer": "The church rests on the positive foundation.",
+        "reconstructed_proof_chain": [
+            "The source identifies the foundation.",
+            "That identification supplies the positive answer.",
+            "The boundary excludes Peter himself.",
+        ],
+        "single_central_answer": True,
+        "proof_chain_complete": True,
+        "positive_formulations_distinguished": True,
+        "unresolved_relations_do_not_block_answer": True,
+        "target_reader_can_restate": True,
+        "confusion_points": [],
+    }
+    value.update(overrides)
+    return value
 
 
 def test_editorial_scope_is_sha_bound():
@@ -648,6 +719,7 @@ def test_brief_review_must_authorize_the_paired_opening_question_fields():
         "summary": "The first governing question needs revision.",
         "article_progression_coherent": False,
         "article_progression_explanation": "The opening and first section diverge.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -698,7 +770,10 @@ def test_route_must_stay_with_its_conclusion():
             "role": "primary_support",
         }
     ]
-    with pytest.raises(TheologicalEditorialContractError, match="conclusion"):
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="routes must belong|conclusion",
+    ):
         validate_editorial_brief_candidate(candidate, evidence_packet=packet)
 
 
@@ -746,6 +821,7 @@ def test_only_sha_bound_passing_review_compiles_approved_brief():
         "summary": "The brief is supported and keeps the positive centre.",
         "article_progression_coherent": True,
         "article_progression_explanation": "The boundary depends on the positive answer.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -783,6 +859,7 @@ def test_passing_review_cannot_hide_findings():
         "summary": "Contradictory pass.",
         "article_progression_coherent": True,
         "article_progression_explanation": "Claimed coherent.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -811,6 +888,44 @@ def test_passing_review_cannot_hide_findings():
         validate_brief_review(review, candidate=candidate)
 
 
+def test_passing_review_requires_a_reconstructable_reader_argument():
+    packet = _compile()
+    candidate = _candidate(packet)
+    review = {
+        "schema_version": "wang_theological_editorial_brief_review_v3",
+        "scope_confirmation": (
+            "editorial_structure_and_material_no_theological_judgment"
+        ),
+        "brief_candidate_sha256": sha256_json(candidate),
+        "decision": "pass",
+        "summary": "Every item is covered, but the answers still compete.",
+        "article_progression_coherent": True,
+        "article_progression_explanation": "The section dependencies are valid.",
+        "reader_argument_assessment": _reader_argument_assessment(
+            positive_formulations_distinguished=False,
+            target_reader_can_restate=False,
+            confusion_points=["The positive formulations compete."],
+        ),
+        "section_assessments": [
+            {
+                "section_id": section["section_id"],
+                "heading_frames_governing_question": True,
+                "heading_is_consistent_with_section_conclusion": True,
+                "route_roles_form_hierarchy": True,
+                "explanation": "Locally coherent.",
+            }
+            for section in candidate["sections"]
+        ],
+        "editorial_constraint_assessments": [],
+        "findings": [],
+    }
+    with pytest.raises(
+        TheologicalEditorialContractError,
+        match="reconstructable reader argument",
+    ):
+        validate_brief_review(review, candidate=candidate)
+
+
 def test_passing_review_must_explicitly_reject_a_flattened_section_heading():
     packet = _compile()
     candidate = _candidate(packet)
@@ -827,6 +942,7 @@ def test_passing_review_must_explicitly_reject_a_flattened_section_heading():
         "summary": "The route inventory is complete.",
         "article_progression_coherent": True,
         "article_progression_explanation": "Claimed coherent.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": "SEC-POSITIVE",
@@ -863,6 +979,7 @@ def test_approved_brief_compiler_cannot_bypass_structural_review_validation():
         "summary": "The candidate is structurally coherent.",
         "article_progression_coherent": True,
         "article_progression_explanation": "Each later section uses an earlier conclusion.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -915,6 +1032,7 @@ def test_brief_revision_must_dispose_every_finding_and_bind_both_shas():
         "summary": "Keep the boundary out of the title.",
         "article_progression_coherent": True,
         "article_progression_explanation": "Only the title needs repair.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -985,6 +1103,7 @@ def test_brief_revision_rejects_an_unreported_heading_regression():
         "summary": "Move a secondary objection into a note.",
         "article_progression_coherent": True,
         "article_progression_explanation": "The original progression is sound.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],
@@ -1056,6 +1175,7 @@ def test_explicit_section_object_authorization_covers_its_changed_children():
         "summary": "The whole boundary section must be reframed.",
         "article_progression_coherent": False,
         "article_progression_explanation": "The boundary section needs a linked repair.",
+        "reader_argument_assessment": _reader_argument_assessment(),
         "section_assessments": [
             {
                 "section_id": section["section_id"],

@@ -4,6 +4,8 @@
 
 无论旧 finding 是否直接写着“结尾”，都必须从 `revised_manuscript_markdown` 读取最后一个 H2 下的完整 `conclusion_reader_prose`，填写 `conclusion_assessment`。逐字给出 evidence anchor，并用一句普通话复述读者最终得到的答案。若修订新引入 section 编号／前文复盘、编辑过程说明、平面答案清单、重复未决披露、负面边界收尾，或没有按 `conclusion_contract` 留下来源支持的正面答案，必须在同一响应返回 blocking finding；`conclusion_reader_answer_broken` 在 affected hard failures 中时，structured assessment 与 hard-failure 结论必须一致。
 
+每轮也必须从修订后全文重新填写 `reader_argument_assessment`，但只判断本轮变化是否解决或破坏“一个问题—一个中心答案—三至五步证明链”。不要照抄 baseline review 或 brief；至少引用全文三个不同位置。若修改后仍有竞争答案、缺失推论桥梁、正面表述角色不明或未决关系阻断答案，必须在同一响应保留／新增 blocking finding；`reader_cannot_reconstruct_article_argument` 在 affected hard failures 中时，结构化判断必须与 hard-failure assessment 一致。
+
 凡变更涉及来源忠实、释经陈述、限定或归属，必须直接与输入中的完整教授逐字稿／母本及逐字片段核对；Claim 和 baseline review 不能替代原稿。
 
 若 baseline finding 涉及“或者”、并列答案或未决关系，必须检查 changed paragraphs 涵盖的每一次相关总结是否都保留选择关系；不能因为一处改回“或者”，就放过另一处仍用“以及”或合并短语偷偷调和。残留或新引入的调和必须在同一响应中返回 finding。
@@ -19,3 +21,5 @@
 跨节结论复述只需 Claim provenance；只要修订段不再展开前节路线的观察、前提或推论，就不要因 route 为空判失败。反之，若仍写“把A与B放在一起／相互印证得出”而实际重跑推论，则必须继续 blocking。纯粹的未决关系披露可以是 `editorial_synthesis`、列相关 Claim、route 为空；确认它没有夹带一阶来源陈述，也没有把同一披露移到结尾重说。
 
 逐项复核修订是否真正解决原 finding，并只为 affected dimensions 给分；只评估 affected_hard_failure_ids。若修订引入与本次变化直接相关的新问题，在同一响应的 findings 返回，供下一轮修订使用。不得继承之外重评其他维度，不引用外部神学，不直接改稿。输出只有严格 JSON。
+
+本轮新增 finding 若属于 `positive_thesis_and_structural_fidelity`、`argument_route_integrity`、`general_reader_readability` 或 `reader_memory_center`，一律 `blocking=true`，即使 severity 是 minor；缺推论桥梁、route binding 不完整或结尾记忆点退化不得作为 nonblocking 建议放行。

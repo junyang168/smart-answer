@@ -64,6 +64,33 @@ CONCLUSION_ASSESSMENT_SCHEMA: dict[str, Any] = {
 }
 
 
+READER_ARGUMENT_ASSESSMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "evidence_anchors": {"type": "array", "items": {"type": "string"}},
+        "reconstructed_question": {"type": "string"},
+        "reconstructed_answer": {"type": "string"},
+        "reconstructed_proof_chain": {
+            "type": "array", "items": {"type": "string"}
+        },
+        "single_central_answer": {"type": "boolean"},
+        "proof_chain_complete": {"type": "boolean"},
+        "positive_formulations_distinguished": {"type": "boolean"},
+        "unresolved_relations_do_not_block_answer": {"type": "boolean"},
+        "target_reader_can_restate": {"type": "boolean"},
+        "confusion_points": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "evidence_anchors", "reconstructed_question", "reconstructed_answer",
+        "reconstructed_proof_chain", "single_central_answer",
+        "proof_chain_complete", "positive_formulations_distinguished",
+        "unresolved_relations_do_not_block_answer", "target_reader_can_restate",
+        "confusion_points",
+    ],
+}
+
+
 TOPIC_AUTHOR_SCHEMA: dict[str, Any] = {
     "name": "wang_theological_topic_author_result_v1",
     "strict": True,
@@ -239,12 +266,13 @@ TOPIC_EDITORIAL_REVIEW_SCHEMA: dict[str, Any] = {
                 },
             },
             "conclusion_assessment": CONCLUSION_ASSESSMENT_SCHEMA,
+            "reader_argument_assessment": READER_ARGUMENT_ASSESSMENT_SCHEMA,
             "findings": {"type": "array", "items": _review_finding_schema()},
         },
         "required": [
             "schema_version", "reviewed_manuscript_sha256", "scope_confirmation",
             "summary", "dimension_scores", "hard_failure_assessments",
-            "conclusion_assessment", "findings",
+            "conclusion_assessment", "reader_argument_assessment", "findings",
         ],
     },
 }
@@ -291,13 +319,15 @@ TOPIC_FINAL_DELTA_REVIEW_SCHEMA: dict[str, Any] = {
             "dimension_scores": TOPIC_EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["dimension_scores"],
             "hard_failure_assessments": TOPIC_EDITORIAL_REVIEW_SCHEMA["schema"]["properties"]["hard_failure_assessments"],
             "conclusion_assessment": CONCLUSION_ASSESSMENT_SCHEMA,
+            "reader_argument_assessment": READER_ARGUMENT_ASSESSMENT_SCHEMA,
             "finding_dispositions": TOPIC_EDITORIAL_REVISION_SCHEMA["schema"]["properties"]["finding_dispositions"],
             "findings": {"type": "array", "items": _review_finding_schema()},
         },
         "required": [
             "schema_version", "baseline_manuscript_sha256", "reviewed_manuscript_sha256",
             "summary", "dimension_scores", "hard_failure_assessments",
-            "conclusion_assessment", "finding_dispositions", "findings",
+            "conclusion_assessment", "reader_argument_assessment",
+            "finding_dispositions", "findings",
         ],
     },
 }
@@ -492,7 +522,10 @@ def validate_topic_author_result(
                 "has no member Claim in the authored section",
             )
         anchor = str(ledger_section.get("output_anchor") or "")
-        _require(bool(anchor) and anchor in manuscript, "section output anchor not found")
+        _require(
+            bool(anchor) and anchor in manuscript,
+            f"{brief_section['section_id']}: section output anchor not found",
+        )
 
     conclusion_contract = decisions["conclusion_contract"]
     required_conclusion_claims = {
@@ -672,6 +705,46 @@ def conclusion_assessment_broken(assessment: Mapping[str, Any]) -> bool:
     )
 
 
+def reader_argument_assessment_broken(assessment: Mapping[str, Any]) -> bool:
+    """Return whether the article cannot be reconstructed as one argument."""
+
+    return (
+        not bool(assessment.get("single_central_answer"))
+        or not bool(assessment.get("proof_chain_complete"))
+        or not bool(assessment.get("positive_formulations_distinguished"))
+        or not bool(assessment.get("unresolved_relations_do_not_block_answer"))
+        or not bool(assessment.get("target_reader_can_restate"))
+        or bool(assessment.get("confusion_points"))
+    )
+
+
+def _validate_reader_argument_assessment(
+    assessment: Mapping[str, Any], *, manuscript: str, prefix: str
+) -> bool:
+    anchors = [str(value).strip() for value in assessment.get("evidence_anchors") or []]
+    _require(
+        len(anchors) >= 3
+        and len(anchors) == len(set(anchors))
+        and all(anchor and anchor in manuscript for anchor in anchors),
+        f"{prefix} reader argument assessment needs three distinct manuscript anchors",
+    )
+    for field in ("reconstructed_question", "reconstructed_answer"):
+        value = str(assessment.get(field) or "").strip()
+        _require(
+            bool(value) and "\n" not in value,
+            f"{prefix} reader argument {field} must be one line",
+        )
+    chain = [
+        str(value).strip()
+        for value in assessment.get("reconstructed_proof_chain") or []
+    ]
+    _require(
+        3 <= len(chain) <= 5 and all(chain),
+        f"{prefix} reader argument must reconstruct three to five proof steps",
+    )
+    return reader_argument_assessment_broken(assessment)
+
+
 def editorial_instructions_by_claim(
     *, authoring_packet: Mapping[str, Any], author_result: Mapping[str, Any]
 ) -> dict[str, str]:
@@ -837,6 +910,23 @@ def evaluate_topic_editorial_review(
     }
 
 
+CORE_ARGUMENT_FINDING_DIMENSIONS = {
+    "positive_thesis_and_structural_fidelity",
+    "argument_route_integrity",
+    "general_reader_readability",
+    "reader_memory_center",
+}
+
+
+def _validate_core_argument_findings(findings: list[Mapping[str, Any]]) -> None:
+    for item in findings:
+        if str(item.get("dimension_id") or "") in CORE_ARGUMENT_FINDING_DIMENSIONS:
+            _require(
+                bool(item.get("blocking")),
+                "core argument finding must be blocking",
+            )
+
+
 def validate_topic_editorial_review(
     review: Mapping[str, Any], *, review_packet: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -893,6 +983,7 @@ def validate_topic_editorial_review(
         _require(item["dimension_id"] in dimension_ids, "finding uses unknown dimension")
         _require(item["section_id"] in section_ids, "finding uses unknown section")
         _require(bool(item["manuscript_anchor"]) and item["manuscript_anchor"] in manuscript, "finding anchor not found")
+    _validate_core_argument_findings(list(review["findings"]))
     opening_failed = next(
         (
             bool(item["failed"])
@@ -959,6 +1050,39 @@ def validate_topic_editorial_review(
             ),
             "broken conclusion requires a blocking finding anchored in the conclusion",
         )
+    argument_broken = _validate_reader_argument_assessment(
+        review["reader_argument_assessment"],
+        manuscript=manuscript,
+        prefix="initial",
+    )
+    declared_argument_broken = next(
+        (
+            bool(item["failed"])
+            for item in review["hard_failure_assessments"]
+            if item["failure_id"] == "reader_cannot_reconstruct_article_argument"
+        ),
+        False,
+    )
+    _require(
+        declared_argument_broken == argument_broken,
+        "reader-argument hard failure contradicts reconstruction",
+    )
+    if argument_broken:
+        _require(
+            any(
+                item["blocking"]
+                and item["dimension_id"]
+                in {
+                    "positive_thesis_and_structural_fidelity",
+                    "argument_route_integrity",
+                    "general_reader_readability",
+                    "reader_memory_center",
+                }
+                and str(item["manuscript_anchor"]) in manuscript
+                for item in review["findings"]
+            ),
+            "unreconstructable reader argument requires a blocking finding",
+        )
     return evaluate_topic_editorial_review(review, quality_profile=profile)
 
 
@@ -1011,6 +1135,7 @@ def validate_topic_final_delta_review(
         # than being silently discarded or forcing another full review.
         _require(item["dimension_id"] in configured_dimensions, "delta finding uses unknown dimension")
         _require(bool(item["manuscript_anchor"]) and item["manuscript_anchor"] in revised_manuscript, "delta finding anchor not found")
+    _validate_core_argument_findings(list(review["findings"]))
     conclusion = topic_conclusion_reader_prose(revised_manuscript)
     assessment = review["conclusion_assessment"]
     conclusion_anchor = str(assessment["evidence_anchor"]).strip()
@@ -1049,4 +1174,28 @@ def validate_topic_final_delta_review(
                 for item in review["findings"]
             ),
             "broken delta conclusion requires a blocking finding anchored in the conclusion",
+        )
+    argument_broken = _validate_reader_argument_assessment(
+        review["reader_argument_assessment"],
+        manuscript=revised_manuscript,
+        prefix="delta",
+    )
+    if "reader_cannot_reconstruct_article_argument" in affected_hard_failure_ids:
+        declared_argument_broken = next(
+            bool(item["failed"])
+            for item in review["hard_failure_assessments"]
+            if item["failure_id"] == "reader_cannot_reconstruct_article_argument"
+        )
+        _require(
+            declared_argument_broken == argument_broken,
+            "delta reader-argument hard failure contradicts reconstruction",
+        )
+    if argument_broken:
+        _require(
+            any(
+                item["blocking"]
+                and str(item["manuscript_anchor"]) in revised_manuscript
+                for item in review["findings"]
+            ),
+            "broken delta reader argument requires a blocking finding",
         )

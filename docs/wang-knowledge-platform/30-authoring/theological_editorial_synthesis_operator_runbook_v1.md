@@ -17,6 +17,8 @@
 
 还要检查 `conclusion_contract`。它必须分别写明：读者最后得到的确定回答、该回答使用的 Claim、正面材料按“直接回答—补充经文—有限推论”形成的实际层级、未决关系唯一的披露位置、应用边界的位置，以及支撑最后一句的 Claim。未决关系不得在结尾重复；section 编号、编辑处理过程、平面答案清单、负面边界或未经来源支持的调和都不能成为最后落点。缺少这个契约，Brief 不能进入 Author。
 
+同时检查 `reader_argument_contract`。必须有一个中心答案和三至五步 proof chain，每步声明依赖、section、Claim 与 ArgumentRoute；每项重要正面表述都要说明与中心答案的关系。若关系未决并会产生竞争答案，正常终态是 `unresolved_structure`，由编辑拆篇或缩窄 scope，不是要求 Author 把几项答案写得“都对”。
+
 本流程直接从 Registry 编译 `TheologicalEvidencePacket`，不使用 `ViewpointKnowledgeProjection`。EvidencePacket 包含当前 scope 选中的 revision、source-local route、Claim、Evidence、来源片段，以及每份入选逐字稿与母本的完整原文，并以 dependency manifest 和 source-original manifest 绑定。片段用于定位，不能代替 Composition、Author 或 Reviewer 阅读完整原稿。
 
 编译时会逐份读取 `source_path` 并验证 `source_sha256`。缺文件、SHA 不符、原稿为空或总字符数超过直接输入上限时，runner 在模型调用前停止；绝不能截短原稿后继续。当前 POC 上限为 120,000 字符，超限状态表示需要实现并验证完整覆盖的批次读取，不表示可以改用摘要或片段。
@@ -63,6 +65,8 @@ backend/.venv/bin/python -m backend.pipeline.theological_topic_quality_runner \
 
 初审 packet 同时单列最后一个 H2 下的 `conclusion_reader_prose`、逐字 `conclusion_evidence_anchors` 与批准的 `conclusion_contract`。Reviewer 必须引用结尾原句，并用一句普通话复述读者最终得到的答案。这个结构化判断与 `conclusion_reader_answer_broken` hard failure 必须一致；结尾若由编辑过程取代答案、把正面层级摊成清单、重复未决披露或没有来源支持的正面落点，必须返回结尾锚定的 blocking finding。Final Delta Review 每轮都重新读取完整结尾；provenance／route-only 修订不得顺手改 reader prose，也不得把内部修订指令写进正文。
 
+Reviewer 必须先不看 Brief 的答案，用稿件三个以上逐字 anchor 重建一个问题、一个答案和三至五步证明链。凡属正面结构、ArgumentRoute、普通读者可读性或读者记忆中心的 finding 一律 blocking；若 required change 是补推论桥梁，`proof_chain_complete` 必须为 false，并宣告对应 hard failure。不能让“Reviewer 看见了但标成 nonblocking”成为自动发布路径。
+
 Revision 输出前须从最终 manuscript 逐字复制每条 resolved finding 的 `resolution_anchor`，并扫描 packet 声明的 reader-prose 禁用词。语义校验不通过时，runner fail closed，并把完整无效输出和错误写入 `rejected-generations/`；不得删改失败稿后冒充有效 generation，也不得因此重跑 Independent Review。
 
 若 finding 要改变 locked heading、section function 或未决关系，停止 Author 修订，回到 Composition：
@@ -76,7 +80,7 @@ backend/.venv/bin/python -m backend.pipeline.theological_editorial_recomposition
 
 然后用 `composition-v2` 建立新的 authoring 与 quality 目录。不要覆盖 v1。
 
-质量通过后，Program Audit 确认 manuscript、grounding、review、scope、evidence、brief、profile、Viewpoint revision 与 ArgumentRoute revision 的绑定，并逐项验证已用 Claim 能走到 Evidence、SourceFragment、绑定相同 source SHA 的 SourceDocument；讲道来源还必须有有效的音频起止时间。Runner 由同一链编译 section-level presentation package，供 reader page 显示对应音频。零 error 才生成 `automated-publication-decision.v1` 并复制到 Wang repository。决定明确写 `human_approval: false`。发布不是部署，本流程不运行 `scripts/deploy.sh`。
+质量通过后，Program Audit 确认 manuscript、grounding、review、scope、evidence、brief、profile、Viewpoint revision 与 ArgumentRoute revision 的绑定，并逐项验证已用 Claim 能走到 Evidence、SourceFragment、绑定相同 source SHA 的 SourceDocument；讲道来源还必须有有效的音频起止时间。若 reviewed transcript 是保留 raw index lineage 的段落数组，runner 可从同 SHA 的 reviewed paragraph 与 raw timed transcript 生成只读、SHA-bound excerpt timing；正文逐字稿和 SourceFragment 不因此改写。直接文字因 ASR 错听而无法对齐时，只允许在同一 paragraph 内由前后强匹配唯一夹定的小范围 `context_bounded` 估算，并公开标记 estimated。Runner 由同一链编译 section-level presentation package，供 reader page 显示对应音频。零 error 才生成 `automated-publication-decision.v1` 并复制到 Wang repository。决定明确写 `human_approval: false`。发布不是部署，本流程不运行 `scripts/deploy.sh`。
 
 ## 五、看停止状态
 

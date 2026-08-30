@@ -243,6 +243,119 @@ def test_projection_preserves_paragraph_timing_and_adds_sha_bound_excerpt_timing
     ).hexdigest()
 
 
+def test_reviewed_array_transcript_uses_raw_index_lineage(tmp_path: Path) -> None:
+    published = tmp_path / "script_review" / "讲道二.json"
+    raw = tmp_path / "script" / "讲道二.json"
+    published_sha = _write(
+        published,
+        [
+            {
+                "index": 277,
+                "end_index": 279,
+                "text": "彼得先承认耶稣是神的儿子，随后耶稣说要把教会建在这磐石上。",
+            }
+        ],
+    )
+    _write(
+        raw,
+        {
+            "entries": [
+                {
+                    "index": 277,
+                    "start_ms": 718_000,
+                    "end_ms": 722_000,
+                    "text": "彼得先承认耶稣是神的儿子",
+                },
+                {
+                    "index": 278,
+                    "start_ms": 722_000,
+                    "end_ms": 728_000,
+                    "text": "随后耶稣说要把教会建在这磐石上",
+                },
+            ]
+        },
+    )
+
+    timing = align_excerpt(
+        fragment={
+            "paragraph_key": "S0001",
+            "source_segment_index": 277,
+            "verbatim_excerpt": "随后耶稣说要把教会建在这磐石上",
+        },
+        source={"source_sha256": published_sha},
+        published_path=published,
+        raw_path=raw,
+    )
+
+    assert timing["status"] == "exact"
+    assert (timing["excerpt_start_time"], timing["excerpt_end_time"]) == (
+        722.0,
+        728.0,
+    )
+    assert (timing["raw_start_index"], timing["raw_end_index"]) == (278, 278)
+
+
+def test_bad_asr_quote_is_bounded_by_strong_adjacent_context(tmp_path: Path) -> None:
+    published = tmp_path / "script_review" / "讲道三.json"
+    raw = tmp_path / "script" / "讲道三.json"
+    published_sha = _write(
+        published,
+        [
+            {
+                "index": 294,
+                "end_index": 296,
+                "text": (
+                    "那个时候彼得告诉耶稣，你不要去钉十架。耶稣怎么反应？"
+                    "对彼得讲：撒但，你退我后边去吧！很多人那段经文不念、不看。"
+                ),
+            }
+        ],
+    )
+    _write(
+        raw,
+        {
+            "entries": [
+                {
+                    "index": 294,
+                    "start_ms": 862_000,
+                    "end_ms": 869_000,
+                    "text": "那个时候彼得告诉耶稣 你不要去钉十架",
+                },
+                {
+                    "index": 295,
+                    "start_ms": 869_000,
+                    "end_ms": 875_000,
+                    "text": "耶稣怎么代表 彼得讲 撒旦 你让我去吧",
+                },
+                {
+                    "index": 296,
+                    "start_ms": 875_000,
+                    "end_ms": 883_000,
+                    "text": "很多人那段经文不念 不看",
+                },
+            ]
+        },
+    )
+
+    timing = align_excerpt(
+        fragment={
+            "source_segment_index": 294,
+            "verbatim_excerpt": "对彼得讲：撒但，你退我后边去吧！",
+        },
+        source={"source_sha256": published_sha},
+        published_path=published,
+        raw_path=raw,
+    )
+
+    assert timing["status"] == "estimated"
+    assert timing["method"] == "context_bounded"
+    assert (timing["raw_start_index"], timing["raw_end_index"]) == (295, 295)
+    assert (timing["excerpt_start_time"], timing["excerpt_end_time"]) == (
+        869.0,
+        875.0,
+    )
+
+
 def test_source_sha_mismatch_never_claims_precise_alignment(tmp_path: Path) -> None:
     published, raw, _ = _sources(tmp_path)
     timing = align_excerpt(

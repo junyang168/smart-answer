@@ -10,6 +10,7 @@
 - 另行确认 `opening_contract.governing_question` 与第一节 `governing_question` 逐字相同、只有一个问号；任一处改变而另一处未同步，或把证据路径写成第二个问句，都不得 pass。
 - 另行确认 `conclusion_contract` 仍直接回答 reader question：正面说法按其论证作用推进，未决关系只在正文指定位置披露一次，应用边界不占最后一句，`closing_source_claim_ids` 能支持最终正面落点。若修订把结尾变成平面答案清单、内部 section 复盘、编辑过程说明、重复未决披露、否定边界收尾或未经来源支持的调和，不得 pass。
 - 明确判断 `article_progression_coherent`：`depends_on_section_ids` 所声明的递进在修订后必须仍成立。覆盖率完整、每条 route 都 source-local，并不能代替这项检查。
+- 重新独立填写 `reader_argument_assessment`。必须能在不照抄 revised candidate 的 `central_answer`、`reader_takeaway` 或 section conclusion 的情况下，用一句答案和三至五个证明步骤复述文章；重要正面表述各自角色不清、未决关系阻断答案或关键推论缺桥时不得 pass。
 - 逐项重做 `editorial_constraint_assessments`。尤其核对人类编辑指定的文章 section 数量、approved outline 和 embedded material placement；修订解决旧 finding 却重新违反任一绑定约束时不得 pass。
 - `cannot_resolve` 必须诚实进入 `human_editor_required`，不得判 pass。
 - 只有 revised candidate 为 `ready`、全部 findings 已解决、且没有因修改引入的新 blocking 问题时，返回 `pass` 和空 findings。
