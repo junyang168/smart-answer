@@ -65,7 +65,6 @@ ALIGNMENT_SCHEMA: dict[str, Any] = {
                                 "beyond_source",
                                 "modality_exceeded",
                                 "attribution_swap",
-                                "unverbatim_quote",
                             ],
                         },
                         "note": {"type": "string"},

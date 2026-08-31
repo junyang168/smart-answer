@@ -79,7 +79,15 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
     corpus = "\n".join(
         str(item.get("content")) for item in packet["source_originals"]["originals"]
     )
-    quotes = [value.strip() for value in re.findall(r"「([^」]+)」", manuscript)]
+    # Corner brackets around short runs are term mentions (「性」,「使徒和先知」)
+    # — ordinary Chinese typography, not quotation. Only spans long enough to
+    # be an actual quoted sentence are held to the verbatim standard; the
+    # fabrication risk this gate exists for lives in long quotes.
+    quotes = [
+        value.strip()
+        for value in re.findall(r"「([^」]+)」", manuscript)
+        if len(value.strip()) >= 8
+    ]
     quotes += [
         line[2:].strip()
         for line in manuscript.splitlines()
