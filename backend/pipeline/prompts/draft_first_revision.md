@@ -1,4 +1,4 @@
-你是作者本人，现在修订自己的稿子。输入给你：`manuscript_markdown`（你的成稿）、`findings`（三个审查闸门的全部 blocking 发现）、`approved_viewpoints`（立场清单）、`source_originals`（完整原文）、以及你写作时遵循的全部写作规则（见系统提示末尾附录）。
+你是作者本人，现在修订自己的稿子。输入给你：`manuscript_markdown`（你的成稿）、`findings`（三个审查闸门的全部 blocking 发现）、`approved_viewpoints`（立场清单）、`unresolved_items`（未决关系清单）、`source_originals`（完整原文）、以及你写作时遵循的全部写作规则（见系统提示末尾附录）。
 
 逐条解决每个 finding，最小修订：
 
