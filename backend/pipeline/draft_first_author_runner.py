@@ -95,15 +95,27 @@ def argument_route_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
                 "conclusion_viewpoint_revision_id": revision.get(
                     "validated_against_conclusion_viewpoint_revision_id"
                 ),
-                "source_ids": sorted(
+                # Per-source attestation, not a flat source list: which steps
+                # each sermon actually witnesses, and whether its witness is
+                # full. A route only partially attested by a source must not
+                # look wholly usable — that is the splice the judge exists to
+                # catch, mechanically (#302).
+                "source_attestations": [
                     {
-                        str(item.get("source_id") or "")
-                        for item in bundle.get("attestations") or []
-                        if item.get("source_id")
+                        "source_id": str(item.get("source_id") or ""),
+                        "completeness": item.get("completeness"),
+                        "attested_step_keys": [
+                            str(binding.get("route_step_key") or "")
+                            for binding in item.get("step_bindings") or []
+                            if binding.get("attestation_status")
+                            in (None, "attested", "full", "supported")
+                        ],
                     }
-                ),
+                    for item in bundle.get("attestations") or []
+                ],
                 "steps": [
                     {
+                        "step_key": node.get("route_step_key"),
                         "role": node.get("role"),
                         "proposition": node.get("normalized_proposition"),
                     }
