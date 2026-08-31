@@ -46,7 +46,7 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 删掉一个 candidate，`structures` 里指着它的 focal 就悬空了，整个 proposal 校验不过。用 `structure_patches` 处理：
 
-- 用 `structure_index`（原 proposal `structures` 数组的下标）定位，`action: upsert` 重出整个 structure，`action: delete` 删掉它；
+- 用 `structure_index`（原 proposal `structures` 数组的下标）定位，`action: upsert` 重出整个 structure，`action: delete` 删掉它；复核员要求把一个 structure 拆成两个时，新增的那个用「数组长度」作为 `structure_index`（即追加在末尾），其 focal 必须全部来自被更正 structure 原有的 focal——追加不是引入新材料的入口；
 - 只允许改 focal 里含有本次 accepted finding 所触及观点的那个 structure；
 - 必须重出整个 structure，而不是只删一个 focal —— `central_synthesis` 要由剩下的 focal 蕴含。少了一个观点还留着原来的综合，就是在断言一个本批已经不持有的观点。若剩下的 focal 撑不起原来的中心，改写 `central_synthesis`，或把撑不住的部分写进 `unresolved_items`，不要硬留。
 

@@ -2578,11 +2578,48 @@ def apply_reconsideration_patches(
         for item in reconsideration.structure_dispositions
         if item.disposition == "accepted"
     }
+    # The focal endpoints of structures under accepted correction: the material
+    # a split is allowed to redistribute. A reviewer mandating "break this
+    # structure in two" needs a patch whose target index did not exist when the
+    # proposal was written, so an index past the end is an append -- refused
+    # unless every focal of the appended structure comes out of a structure
+    # under accepted correction or is itself under an accepted component
+    # finding. CVB-wkp315-lane-repair-p2-004 forced this: the reviewer's two
+    # sanctioned fixes were both unwritable, one using role values the schema
+    # does not define and the other needing exactly this append.
+    accepted_structure_focal: set[tuple[str, str]] = {
+        endpoint
+        for index in accepted_structures
+        if index < len(proposal.structures)
+        for endpoint in (focal.endpoint() for focal in proposal.structures[index].focal)
+    }
     structure_replacements: dict[int, dict[str, Any] | None] = {}
+    structure_appends: list[tuple[int, dict[str, Any]]] = []
     for patch in reconsideration.structure_patches:
         if patch.structure_index >= len(proposal.structures):
-            findings.append(
-                f"structures#{patch.structure_index}: patch target does not exist"
+            if patch.action == "delete":
+                findings.append(
+                    f"structures#{patch.structure_index}: patch target does not exist"
+                )
+                continue
+            assert patch.structure is not None
+            confined = all(
+                (kind, key) in accepted_structure_focal
+                or (
+                    key in affected_candidate_keys
+                    if kind == "new"
+                    else key in affected_revision_ids
+                )
+                for kind, key in (focal.endpoint() for focal in patch.structure.focal)
+            )
+            if not confined:
+                findings.append(
+                    f"structures#{patch.structure_index}: "
+                    "appended structure is not confined to reviewer findings"
+                )
+                continue
+            structure_appends.append(
+                (patch.structure_index, patch.structure.model_dump(mode="json"))
             )
             continue
         original = proposal.structures[patch.structure_index]
@@ -2603,7 +2640,7 @@ def apply_reconsideration_patches(
         structure_replacements.get(index, item)
         for index, item in enumerate(payload["structures"])
         if structure_replacements.get(index, item) is not None
-    ]
+    ] + [structure for _, structure in sorted(structure_appends)]
 
     # `reject` had no legal answer. Only `correct` counted as a finding, so a
     # disposition answering a rejection was refused as answering nothing --
