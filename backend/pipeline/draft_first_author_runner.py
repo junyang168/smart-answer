@@ -195,6 +195,7 @@ def main() -> int:
         "audience": args.audience,
         "approved_viewpoints": viewpoint_charter(packet),
         "unresolved_items": structure_unresolved_items(packet),
+        "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
     }
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
