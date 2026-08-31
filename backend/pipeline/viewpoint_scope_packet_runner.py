@@ -43,9 +43,10 @@ from backend.api.canonical_repository.viewpoint_claim_repin import (
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     IdentitySourceEligibilityArtifact,
 )
+from backend.pipeline.viewpoint_scope_selection import select_scope_claims
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v3"
+SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v4"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -205,7 +206,16 @@ def build_scope_packet(
     if not coverage_snapshot_id:
         raise ValueError("Claim manifest is not bound to a coverage snapshot")
 
-    in_scope = scope_claim_ids(scope, passage_unit_ids)
+    store = PostgresKnowledgeStore(database_url)
+    scope_selection = select_scope_claims(
+        scope=scope,
+        passage_unit_ids=passage_unit_ids,
+        claim_relations=store.list_records("claim_relations"),
+        viewpoint_claim_links=store.list_records("viewpoint_claim_links"),
+        argument_routes=store.list_records("argument_routes"),
+        route_attestations=store.list_records("argument_route_attestations"),
+    )
+    in_scope = scope_selection["selected_claim_ids"]
     if not in_scope:
         raise ValueError("scope selects no core Claims")
 
@@ -217,7 +227,6 @@ def build_scope_packet(
     }
     exceptions = {row.claim_id: row for row in source_attestation.exceptions}
 
-    store = PostgresKnowledgeStore(database_url)
     claims = {
         row.claim_id: row
         for row in (
@@ -340,6 +349,7 @@ def build_scope_packet(
         "claim_manifest_sha256": manifest_sha,
         "coverage_snapshot_id": coverage_snapshot_id,
         "source_attestation_artifact_sha256": source_attestation.artifact_sha256,
+        "scope_selection": scope_selection,
         "claims": [item.model_dump(mode="json") for item in review_claims],
         "registry_context": registry_context(
             store.list_records("canonical_viewpoints"),
@@ -356,6 +366,14 @@ def build_scope_packet(
         "advanced_review_pins": advanced_review_pins,
         "statistics": {
             "scope_claim_count": len(in_scope),
+            "scope_seed_claim_count": len(scope_selection["seed_claim_ids"]),
+            "scope_dependency_addition_count": len(
+                scope_selection["dependency_additions"]
+            ),
+            "scope_route_addition_count": len(scope_selection["route_additions"]),
+            "scope_orphan_context_claim_count": len(
+                scope_selection["orphan_context_claim_ids"]
+            ),
             "resolvable_claim_count": len(review_claims),
             "blocked_claim_count": len(blocked),
             "advanced_review_pin_count": len(advanced_review_pins),

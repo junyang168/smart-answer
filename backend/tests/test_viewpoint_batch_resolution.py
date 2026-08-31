@@ -1425,6 +1425,237 @@ def test_scope_selects_core_claims_without_a_target_proposition():
     assert scope_claim_ids(scope, ["16:19"]) == ["C2", "C4"]
     # No unit filter means the whole core lane; the context lane never enters.
     assert scope_claim_ids(scope, []) == ["C1", "C2", "C4"]
+def test_scope_dependency_closure_restores_cross_scripture_argument():
+    from backend.pipeline.viewpoint_scope_selection import select_scope_claims
+
+    scope = {
+        "claims": [
+            {
+                "claim_id": "CL009",
+                "source_id": "notes:16",
+                "lane": "core",
+                "passage_unit_ids": ["16:13-18"],
+            },
+            {
+                "claim_id": "CL007",
+                "source_id": "notes:16",
+                "lane": "source_context_candidate",
+                "passage_unit_ids": [],
+            },
+            {
+                "claim_id": "CL008",
+                "source_id": "notes:16",
+                "lane": "source_context_candidate",
+                "passage_unit_ids": [],
+            },
+            {
+                "claim_id": "UNRELATED",
+                "source_id": "notes:16",
+                "lane": "source_context_candidate",
+                "passage_unit_ids": [],
+            },
+        ]
+    }
+    relations = [
+        {
+            "claim_relation_id": "CR-007-008",
+            "from_id": "CL007",
+            "to_id": "CL008",
+            "relation_type": "supports",
+            "review_status": "candidate",
+        },
+        {
+            "claim_relation_id": "CR-008-009",
+            "from_id": "CL008",
+            "to_id": "CL009",
+            "relation_type": "supports",
+            "review_status": "candidate",
+        },
+    ]
+
+    result = select_scope_claims(
+        scope=scope,
+        passage_unit_ids=["16:13-18"],
+        claim_relations=relations,
+    )
+
+    assert result["seed_claim_ids"] == ["CL009"]
+    assert result["selected_claim_ids"] == ["CL007", "CL008", "CL009"]
+    assert [row["claim_id"] for row in result["dependency_additions"]] == [
+        "CL007",
+        "CL008",
+    ]
+    assert {row["claim_id"]: row["admission_round"] for row in result["dependency_additions"]} == {
+        "CL007": 2,
+        "CL008": 1,
+    }
+    assert result["dependency_additions"][0]["dependency_path_claim_ids"] == [
+        "CL007",
+        "CL008",
+        "CL009",
+    ]
+    assert result["dependency_additions"][0]["dependency_path_relation_ids"] == [
+        "CR-007-008",
+        "CR-008-009",
+    ]
+    assert result["orphan_context_claim_ids"] == ["UNRELATED"]
+    assert result["dangling_dependencies"] == []
+
+
+def test_scope_dependency_closure_is_source_local_cycle_safe_and_stable():
+    from backend.pipeline.viewpoint_scope_selection import select_scope_claims
+
+    claims = [
+        {"claim_id": "CORE", "source_id": "S1", "lane": "core", "passage_unit_ids": ["16:13-18"]},
+        {"claim_id": "LOCAL", "source_id": "S1", "lane": "source_context_candidate", "passage_unit_ids": []},
+        {"claim_id": "OTHER-SOURCE", "source_id": "S2", "lane": "source_context_candidate", "passage_unit_ids": []},
+    ]
+    relations = [
+        {"claim_relation_id": "CR1", "from_id": "LOCAL", "to_id": "CORE", "relation_type": "supports"},
+        {"claim_relation_id": "CR2", "from_id": "CORE", "to_id": "LOCAL", "relation_type": "qualifies"},
+        {"claim_relation_id": "CR3", "from_id": "OTHER-SOURCE", "to_id": "CORE", "relation_type": "supports"},
+    ]
+
+    forward = select_scope_claims(
+        scope={"claims": claims},
+        passage_unit_ids=["16:13-18"],
+        claim_relations=relations,
+    )
+    reversed_input = select_scope_claims(
+        scope={"claims": list(reversed(claims))},
+        passage_unit_ids=["16:13-18"],
+        claim_relations=list(reversed(relations)),
+    )
+
+    assert forward == reversed_input
+    assert forward["selected_claim_ids"] == ["CORE", "LOCAL"]
+    assert forward["orphan_context_claim_ids"] == ["OTHER-SOURCE"]
+
+
+def test_scope_route_edges_admit_reviewed_attestation_claims():
+    from backend.pipeline.viewpoint_scope_selection import select_scope_claims
+
+    scope = {
+        "claims": [
+            {"claim_id": "CORE", "source_id": "S1", "lane": "core", "passage_unit_ids": ["16:13-18"]},
+            {"claim_id": "ROUTE-CLAIM", "source_id": "S2", "lane": "source_context_candidate", "passage_unit_ids": []},
+        ]
+    }
+    result = select_scope_claims(
+        scope=scope,
+        passage_unit_ids=["16:13-18"],
+        viewpoint_claim_links=[
+            {
+                "claim_id": "CORE",
+                "viewpoint_id": "CV-1",
+                "effective_state": "active",
+                "review_status": "system_approved",
+            }
+        ],
+        argument_routes=[
+            {
+                "argument_route_id": "AR-1",
+                "conclusion_viewpoint_id": "CV-1",
+                "route_status": "active",
+                "review_status": "system_approved",
+            }
+        ],
+        route_attestations=[
+            {
+                "argument_route_attestation_id": "ARA-1",
+                "argument_route_id": "AR-1",
+                "claim_ids": ["ROUTE-CLAIM"],
+                "effective_state": "active",
+                "review_status": "system_approved",
+            }
+        ],
+    )
+
+    assert result["selected_claim_ids"] == ["CORE", "ROUTE-CLAIM"]
+    assert result["route_additions"] == [
+        {
+            "claim_id": "ROUTE-CLAIM",
+            "admission_round": 1,
+            "inherited_passage_unit_ids": ["16:13-18"],
+            "argument_route_id": "AR-1",
+            "argument_route_attestation_id": "ARA-1",
+            "conclusion_viewpoint_id": "CV-1",
+        }
+    ]
+
+
+def test_scope_coverage_audit_is_sha_bound_and_read_only():
+    from backend.pipeline.viewpoint_scope_coverage_audit_runner import (
+        build_scope_coverage_audit,
+    )
+
+    scope = {
+        "schema_version": "wang_matthew16_viewpoint_pilot_scope_v1",
+        "passage_units": ["16:13-18"],
+        "claims": [
+            {"claim_id": "CORE", "source_id": "S1", "lane": "core", "passage_unit_ids": ["16:13-18"]},
+            {"claim_id": "EPH", "source_id": "S1", "lane": "source_context_candidate", "passage_unit_ids": [], "statement": "弗2:20支持太16", "scripture_refs": ["弗2:20"]},
+        ],
+    }
+    scope["artifact_sha256"] = sha256_json(scope)
+
+    report = build_scope_coverage_audit(
+        scope=scope,
+        claim_relations=[
+            {"claim_relation_id": "CR1", "from_id": "EPH", "to_id": "CORE", "relation_type": "supports"}
+        ],
+        viewpoint_claim_links=[],
+        argument_routes=[],
+        route_attestations=[],
+    )
+
+    assert report["statistics"] == {
+        "passage_unit_count": 1,
+        "scope_claim_count": 2,
+        "seed_assignment_count": 1,
+        "dependency_addition_count": 1,
+        "route_addition_count": 0,
+        "dangling_dependency_count": 0,
+    }
+    assert report["passage_units"][0]["additions"][0]["claim_id"] == "EPH"
+    assert report["model_calls_executed"] == 0
+    assert report["master_data_mutations"] == 0
+    assert report["apply_allowed"] is False
+    assert report["artifact_sha256"] == sha256_json(
+        {key: value for key, value in report.items() if key != "artifact_sha256"}
+    )
+
+    master_rows = [
+        {
+            "claim_relation_id": "CR1",
+            "from_id": "EPH",
+            "to_id": "CORE",
+            "relation_type": "supports",
+        },
+        {
+            "claim_relation_id": "UNUSED",
+            "from_id": "MISSING-1",
+            "to_id": "MISSING-2",
+            "relation_type": "supports",
+        },
+    ]
+    ordered = build_scope_coverage_audit(
+        scope=scope,
+        claim_relations=master_rows,
+        viewpoint_claim_links=[],
+        argument_routes=[],
+        route_attestations=[],
+    )
+    reversed_input = build_scope_coverage_audit(
+        scope=scope,
+        claim_relations=list(reversed(master_rows)),
+        viewpoint_claim_links=[],
+        argument_routes=[],
+        route_attestations=[],
+    )
+    assert ordered == reversed_input
+
+
 
 
 def test_registry_context_carries_boundaries_not_member_sets():
