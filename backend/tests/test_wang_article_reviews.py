@@ -811,3 +811,63 @@ def test_draft_first_tampered_binding_fails_the_audit():
     )
     assert annotations == []
     assert projection["passed"] is False
+
+
+def test_draft_first_route_view_enriches_the_first_card():
+    from backend.api.wang_article_reviews import _draft_first_annotated_markdown
+    from backend.pipeline.draft_first_source_binding import reader_paragraphs
+
+    packet = {
+        **_binding_packet(),
+        "source_fragments": [
+            {"fragment_id": "FR-1", "source_id": "SRC-N", "verbatim_excerpt": "詞形差異的原話在此處完整出現。"}
+        ],
+        "argument_routes": [
+            {
+                "revision": {
+                    "argument_route_revision_id": "ARR-9",
+                    "route_label": "詞形路線",
+                    "ordered_inference_nodes": [
+                        {"route_step_key": "P1", "role": "observation",
+                         "normalized_proposition": "詞形有差異。"}
+                    ],
+                },
+                "attestations": [
+                    {"source_id": "SRC-N",
+                     "step_bindings": [{"route_step_key": "P1", "source_fragment_ids": ["FR-1"]}]}
+                ],
+            }
+        ],
+    }
+    markdown = "# T\n\n第一段講三重職分。\n"
+    paragraphs = reader_paragraphs(markdown)
+    bindings_record = {
+        "bindings": [
+            {
+                "paragraph_index": 0,
+                "paragraph_sha256": paragraphs[0]["paragraph_sha256"],
+                "route_revision_id": "ARR-9",
+                "spans": [{"source_id": "SRC-N", "excerpt": "耶穌同時擁有先知、祭司、君王三重受膏職分"}],
+            }
+        ]
+    }
+    _, annotations, projection, _ = _draft_first_annotated_markdown(markdown, bindings_record, packet)
+    card = annotations[0]["sources"][0]
+    assert card["route_label"] == "詞形路線"
+    assert card["route_steps"][0]["proposition"] == "詞形有差異。"
+    assert card["route_steps"][0]["excerpts"] == ["詞形差異的原話在此處完整出現。"]
+    assert projection["passed"] is True
+
+
+def test_binding_verification_drops_unknown_routes():
+    from backend.pipeline.draft_first_source_binding import reader_paragraphs, verify_bindings
+
+    markdown = "# T\n\n第一段講三重職分。\n"
+    paragraphs = reader_paragraphs(markdown)
+    result = verify_bindings(
+        {"bindings": [{"paragraph_index": 0, "route_revision_id": "ARR-NOPE", "spans": []}]},
+        paragraphs=paragraphs,
+        packet={**_binding_packet(), "argument_routes": []},
+    )
+    assert result["bindings"][0]["route_revision_id"] is None
+    assert [f["code"] for f in result["findings"]] == ["unknown_route"]

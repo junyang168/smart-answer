@@ -10,4 +10,6 @@
 - 纯过渡句、或内容在原文中确实没有直接对应的段落，给空数组——**不要硬凑**，绑错比不绑更糟；
 - 不判断段落写得对不对（另有闸门），只回答"这段内容教授在哪里讲过"。
 
-输出只有严格 JSON：`bindings` 数组，每项 `{paragraph_index, spans: [{source_id, excerpt}]}`，段落序号必须与输入一一对应、不重不漏。
+另给你 `argument_routes`（已批准的论证路线：步骤与结论）。段落在**展开某条论证**（走它的观察—推理—结论）时，标注该路线的 `route_revision_id`；纯叙事、背景或引经段落填 null。只标真正走了路线的段落，不硬贴。
+
+输出只有严格 JSON：`bindings` 数组，每项 `{paragraph_index, route_revision_id, spans: [{source_id, excerpt}]}`，段落序号必须与输入一一对应、不重不漏。
