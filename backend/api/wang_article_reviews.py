@@ -1273,6 +1273,33 @@ def _annotated_reader_markdown(
     return annotated.strip(), annotations, audit, playback_audit
 
 
+def _draft_first_stage_checks(run_record: dict[str, Any]) -> list[dict[str, str]]:
+    """Stage chips for a draft-first run: three gates and the revision loop.
+
+    The briefed pipeline's stage names (Grounding, Program Audit) do not
+    exist here; showing them as 未运行 misread a passed run as an unstarted
+    one on the very first card an owner opened.
+    """
+
+    status = str(run_record.get("status") or "unknown")
+    passed = status == "review_passed"
+    rounds = list(run_record.get("rounds") or [])
+    revisions = max(0, len(rounds) - 1)
+    gate_state = "passed" if passed else "failed"
+    return [
+        {"id": "author", "label": "Author 起草", "state": "complete"},
+        {"id": "alignment", "label": "对齐闸门", "state": gate_state},
+        {"id": "blind_read", "label": "盲读闸门", "state": gate_state},
+        {"id": "editorial_review", "label": "独立编审", "state": gate_state},
+        {
+            "id": "revision",
+            "label": f"修订 {revisions} 轮",
+            "state": "complete" if passed else "failed",
+        },
+        {"id": "publication", "label": "正式出版", "state": "not_run"},
+    ]
+
+
 def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
     status = str(workflow.get("status") or "unknown")
     published = status == "workflow_published"
@@ -1505,7 +1532,11 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         "brief_sha256": str(manifest.get("brief_sha256") or ""),
         "authoring_packet_sha256": str(manifest.get("authoring_packet_sha256") or ""),
         "workflow_status": str(workflow.get("status") or "unknown"),
-        "stage_checks": _stage_checks(workflow),
+        "stage_checks": (
+            _draft_first_stage_checks(workflow)
+            if variant == "draft_first"
+            else _stage_checks(workflow)
+        ),
         "href": f"/admin/wang/operations/articles/reviews/{review_id}",
     }
     if include_markdown:
